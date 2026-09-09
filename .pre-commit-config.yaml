@@ -1,0 +1,35 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: local
+    hooks:
+      - id: vocabulary
+        name: one term per concept (CONTEXT.md)
+        entry: .venv/bin/python scripts/check_vocabulary.py
+        language: system
+        pass_filenames: false
+      - id: tested
+        name: every public definition is named by a test
+        entry: .venv/bin/python scripts/check_tested.py
+        language: system
+        pass_filenames: false
+      - id: io-budget
+        name: every request path declares an I/O budget
+        entry: .venv/bin/python scripts/io_budget.py --assert
+        language: system
+        pass_filenames: false

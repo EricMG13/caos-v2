@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_FILE_PATHS\"; R=\"${CLAUDE_PROJECT_DIR:-.}/.venv/bin/ruff\"; [ -x \"$R\" ] || R=ruff; case \"$f\" in *.py) \"$R\" format \"$f\" >/dev/null 2>&1; \"$R\" check --fix \"$f\" >/dev/null 2>&1;; *.ts|*.tsx|*.css) (cd \"$(dirname \"$f\")\" && npx --no-install prettier --write \"$f\" >/dev/null 2>&1);; esac; exit 0"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "c=\"$CLAUDE_TOOL_INPUT_command\"; case \"$c\" in *\"push --force\"*|*\"push -f \"*) echo 'refused: force push' >&2; exit 2;; *\"--no-verify\"*) echo 'refused: --no-verify bypasses the gates in docs/AI_CODE_QUALITY.md' >&2; exit 2;; *\"pip install\"*) case \"$c\" in *\"--require-hashes\"*) exit 0;; *) echo 'refused: install from the hashed lock only' >&2; exit 2;; esac;; *printenv*|*'$OPENROUTER'*) echo 'refused: credentials are read by the process, never printed (docs/DECISIONS.md 16)' >&2; exit 2;; *\".env\"*) case \"$c\" in *\".env.example\"*) exit 0;; *) echo 'refused: .env is read by the process, never by a command (docs/DECISIONS.md 16)' >&2; exit 2;; esac;; esac; exit 0"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/*.pem)",
+      "Read(./**/secrets/**)"
+    ]
+  }
+}

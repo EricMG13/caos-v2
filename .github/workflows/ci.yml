@@ -1,0 +1,102 @@
+# Jobs arrive with the phase whose code they can actually scan. A job that
+# passes because it found nothing is the failure mode docs/AI_CODE_QUALITY.md
+# section 4 exists to prevent, so none is scaffolded ahead of its subject:
+#   postgres  (two-connection races) ...... Phase 1
+#   sonarqube (CI analysis with coverage) . Phase 1 (docs/DECISIONS.md 15)
+#   provider  (one live OpenRouter call) .. Phase 5 (docs/DECISIONS.md 16)
+#   image     (Trivy) ..................... the phase that adds the Dockerfile
+#   frontend  (lint, tsc, a11y) ........... Phase 9
+name: ci
+on:
+  push:
+  pull_request:
+    # Declared, not defaulted: a draft pull request produced no run under the
+    # default set, and marking it ready would not have started one.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# One run per ref. A push that supersedes a running check cancels it, so the
+# check on a branch is always the check of its head, never of a stale one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: {python-version: "3.14"}
+      - run: pip install --require-hashes -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python scripts/check_vocabulary.py
+      - run: python scripts/check_tested.py
+
+  types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: {python-version: "3.14"}
+      - run: pip install --require-hashes -r requirements-dev.txt
+      - run: mypy scripts tests server
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: {python-version: "3.14"}
+      - run: pip install --require-hashes -r requirements-dev.txt
+      - run: pytest
+      - run: python scripts/io_budget.py --assert
+
+  security:
+    # Python pinned deliberately. bandit 1.7.10 reaches for ast.Constant.s,
+    # which newer interpreters do not provide: under 3.14 it skips every file
+    # and exits 0. See docs/AI_CODE_QUALITY.md section 4.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # gitleaks-action lists a pull request's commits; the default token cannot.
+    permissions: {contents: read, pull-requests: read}
+    steps:
+      # gitleaks scans a commit range; a depth-1 clone has no range to scan.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: {python-version: "3.12"}
+      - run: pip install --require-hashes -r requirements-security.txt
+      # `|| true` so the floor check, not bandit's exit code, is the verdict:
+      # a report that parsed nothing must fail even when it found nothing.
+      - run: bandit -r scripts server -f json -o bandit.json || true
+      - run: python scripts/scan_floors.py bandit.json --min-files 1 --no-parse-errors
+      - run: bandit -r scripts server
+      - run: |
+          pip-audit --require-hashes -r requirements.txt \
+                    -r requirements-dev.txt -r requirements-security.txt
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The scan result is the gate; the uploaded artifact is not. Uploading
+          # needs `actions: write`, which this job has no other use for.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  size:
+    # AI PRs carry ~1.7x the issues of human PRs, and density rises with size.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: {fetch-depth: 0}
+      - run: |
+          n=$(git diff --numstat origin/${{ github.base_ref }}...HEAD -- . \
+              ':!*.lock' ':!requirements*.txt' ':!**/vendor/**' ':!docs/**' \
+              ':!package-lock.json' ':!frontend/fixtures/**' \
+              | awk '{s+=$1+$2} END {print s+0}')
+          echo "changed lines: $n"
+          [ "$n" -le 800 ] || { echo "PR too large; split it (docs/AI_CODE_QUALITY.md)"; exit 1; }
