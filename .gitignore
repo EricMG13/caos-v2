@@ -6,7 +6,7 @@ frontend/out/
 frontend/.next/
 .dev-data/
 *.xlsx
-!tests/fixtures/**/*.xlsx
+!vendor/**/*.xlsx
 .DS_Store
 .env
 bandit.json

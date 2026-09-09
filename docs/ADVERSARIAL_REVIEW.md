@@ -89,6 +89,11 @@ is broken.
 
 ### W2. The authoritative bundle cannot be checked from this checkout
 
+**Resolved 2026-09-10** — `docs/DECISIONS.md` §13: the bundle is vendored at
+`vendor/deploy-v/` with its build id, the manifest's digest and its acquisition
+recorded; `tests/test_bundle_pin.py` verifies every byte and every catalog fact
+the specification rests on.
+
 **Location:** [System §3](SYSTEM_SPEC.md#3-methodology-boundary),
 [Model Builder introduction](MODEL_BUILDER_SPEC.md).
 **Personas:** New Hire.
