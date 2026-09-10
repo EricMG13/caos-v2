@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections.abc import Mapping
@@ -41,6 +42,30 @@ def cobertura_metrics(report: str) -> Mapping[str, object]:
     entity expansion (bandit B314) for one attribute of one element.
     """
     return {"metrics": {name: {} for name in MEASURED.findall(report)}}
+
+
+def report_within(path: Path, base: Path) -> Path:
+    """`path` resolved, provided it lies under `base`; refused otherwise.
+
+    `report` is the one argument that reaches the filesystem, so nothing
+    stopped `scan_floors.py ../../etc/passwd` reading a file outside the
+    tree. A scanner report is a build output of the tree being scanned, so
+    it is read only from under the directory the gate ran in.
+
+    `os.path.realpath` and `startswith` rather than `Path.resolve` and
+    `is_relative_to`: this is the documented sanitizer shape for the rule
+    that flags this (bandit path-traversal, SonarPython S8707-class).
+    """
+    resolved = os.path.realpath(path)
+    root = os.path.realpath(base)
+    # The separator is load-bearing: "/base-secret/x" starts with "/base".
+    if not resolved.startswith(root + os.sep):
+        message = (
+            f"{path} is outside {base}; a scanner report is read only from "
+            "under the directory the gate was invoked in"
+        )
+        raise ValueError(message)
+    return Path(resolved)
 
 
 def _parse_errors(report: Mapping[str, object]) -> list[object]:
@@ -140,7 +165,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    text = args.report.read_text(encoding="utf-8")
+    try:
+        report_path = report_within(args.report, Path.cwd())
+    except ValueError as refusal:
+        parser.error(str(refusal))
+    text = report_path.read_text(encoding="utf-8")
     report = cobertura_metrics(text) if args.cobertura else json.loads(text)
     claims = None
     if args.cover:
