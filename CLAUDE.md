@@ -142,6 +142,23 @@ system this size means nobody looked.
   (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
   route, which `docs/REBUILD_PLAN.md` places in Phase 6.
 
+**Phase 4.**
+
+- **The frontier's ready nodes run in order, not concurrently.**
+  `docs/REBUILD_PLAN.md` Phase 4 and `SYSTEM_SPEC.md` §4 both write the loop as
+  `await gather(*(run_node(n) for n in ready))`. This build runs them one after
+  another. Nothing about correctness depends on the difference — the frontier is
+  recomputed from the store on every pass either way, and Phase 4's exit tests
+  are about recovery and reservations rather than parallelism — but a wide
+  frontier takes as long as the sum of its nodes instead of the longest one.
+  *Upgrade:* the phase that makes the provider call real (Phase 5) is where the
+  latency starts to matter and where an async store connection has to arrive
+  anyway; the loop's shape does not change, only the `for` becomes a `gather`.
+- **The reservation estimate is the caller's number.** `run_route` takes one
+  `estimate` and reserves it for every node. A real estimate is per module and
+  comes from the model's price and the prompt's size (`docs/DECISIONS.md` §16).
+  *Upgrade:* Phase 5, with the provider that knows both.
+
 **Phase 2.**
 
 - **A quote matches whole tokens exactly.** `matched_text` is split on
