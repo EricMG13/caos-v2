@@ -68,7 +68,8 @@ CREATE TABLE run_events (
     PRIMARY KEY (run_id, seq),
     CONSTRAINT run_events_seq_is_positive CHECK (seq > 0),
     CONSTRAINT run_events_name_is_known CHECK (
-        name IN ('ROUTE_PINNED', 'ATTEMPT_STARTED', 'RUN_COMPLETE', 'RUN_FAILED')
+        name IN ('ROUTE_PINNED', 'ATTEMPT_STARTED', 'ATTEMPT_ACCEPTED',
+                 'RUN_COMPLETE', 'RUN_FAILED')
     )
 );
 
