@@ -7,7 +7,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -31,6 +31,24 @@ _UNSET = "CAOS_TEST_POSTGRES_URL is unset: no database to run the store suite ag
 def _url_for(database: str) -> str:
     parts = urlsplit(POSTGRES_URL or "")
     return urlunsplit(parts._replace(path=f"/{database}"))
+
+
+@pytest.fixture
+def case(empty_database: str) -> Iterator[tuple[object, UUID]]:
+    """An open case on a committed connection, with the schema applied.
+
+    Typed loosely here so this module does not import the store at collection
+    time; the suites that use it annotate the connection as `StoreConnection`.
+    """
+    from server.boundary_text import BoundaryText
+    from server.store import apply_schema, connect
+    from server.store.runs import create_case
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Acme 2026 refinancing"))
+        conn.commit()
+        yield conn, case_id
 
 
 @pytest.fixture
