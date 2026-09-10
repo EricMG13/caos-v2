@@ -215,3 +215,35 @@ def test_tracked_python_fails_closed_on_an_unreadable_path(tmp_path: Path) -> No
             tracked.tracked_python(tmp_path)
     finally:
         locked.chmod(0o755)
+
+
+def test_the_image_floor_refuses_a_scan_that_examined_nothing(tmp_path: Path) -> None:
+    """An image report with no Results is the same failure as a bandit report
+    with no metrics: it ran, exited zero, and looked at nothing."""
+    report = tmp_path / "trivy.json"
+    report.write_text(json.dumps({"Results": []}), encoding="utf-8")
+
+    result = _run("scan_floors.py", str(report), "--trivy")
+
+    assert result.returncode != 0
+    assert "scanned nothing" in result.stdout + result.stderr
+
+
+def test_the_image_floor_accepts_a_scan_with_targets(tmp_path: Path) -> None:
+    report = tmp_path / "trivy.json"
+    report.write_text(
+        json.dumps(
+            {"Results": [{"Target": "caos:ci (debian 13)", "Vulnerabilities": []}]}
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run("scan_floors.py", str(report), "--trivy")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scanned_targets_ignores_a_result_with_no_target() -> None:
+    report: dict[str, object] = {"Results": [{"Class": "lang-pkgs"}, {"Target": "app"}]}
+
+    assert scan_floors.scanned_targets(report) == ["app"]
