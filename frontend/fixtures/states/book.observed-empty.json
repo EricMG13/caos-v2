@@ -1,0 +1,172 @@
+{
+  "chrome": {
+    "subject": null,
+    "ribbon": {
+      "chips": [
+        {
+          "label": "BOOK · 0 CREDITS",
+          "tone": "neutral"
+        },
+        {
+          "label": "BUILD a43cb903",
+          "tone": "neutral"
+        },
+        {
+          "label": "ACCEPTED ONLY",
+          "tone": "ok"
+        }
+      ],
+      "execution": "IDLE",
+      "persistence": "SAVED 14:30Z",
+      "approval": "UNRATIFIED",
+      "actions": [
+        {
+          "label": "Compare",
+          "primary": true,
+          "refusal": {
+            "code": "NO_CASES_COMPARED",
+            "clears": "two to four credits with an accepted snapshot are selected"
+          }
+        },
+        {
+          "label": "Save view",
+          "primary": false,
+          "refusal": null
+        }
+      ]
+    },
+    "brief": {
+      "change": "No credit in the book carries an accepted snapshot.",
+      "impact": "Nothing to filter, group or compare.",
+      "action": "Open a case in Directory and accept a run before reading the book.",
+      "evidence": "Observed at 2026-09-09T14:30:00Z · nothing is inferred from silence.",
+      "headline": "0 CREDITS"
+    },
+    "tabs": [
+      {
+        "id": "table",
+        "label": "Book",
+        "cp": null
+      },
+      {
+        "id": "compare",
+        "label": "Compare",
+        "cp": null
+      }
+    ],
+    "verdict": {
+      "severity": "IDLE",
+      "conclusion": "No conclusion: the book holds no accepted snapshot.",
+      "blocked_on": "an accepted snapshot"
+    },
+    "rail": [
+      {
+        "section": "directory",
+        "count": 4,
+        "state": "4 CASES · 1 INTAKE OPEN"
+      },
+      {
+        "section": "upload",
+        "count": 6,
+        "state": "SET-v4 · 6 ADMITTED"
+      },
+      {
+        "section": "analysis",
+        "count": 32,
+        "state": "snp_cvna_q2_2026 · 32 ACCEPTED"
+      },
+      {
+        "section": "book",
+        "count": 0,
+        "state": "0 CREDITS · NONE COMPARED"
+      },
+      {
+        "section": "run",
+        "count": 32,
+        "state": "run_2642 · ACTIVE · CP-6 OF 32"
+      },
+      {
+        "section": "model",
+        "count": null,
+        "state": "CP-CF · ACCEPTED"
+      },
+      {
+        "section": "report",
+        "count": 4,
+        "state": "rev_4 · DRAFT · FREEZE REFUSED"
+      },
+      {
+        "section": "committee",
+        "count": null,
+        "state": "rev_3 · FROZEN · NOT FILED"
+      },
+      {
+        "section": "admin",
+        "count": null,
+        "state": "UNAVAILABLE"
+      }
+    ],
+    "rail_local": {
+      "title": "Facets",
+      "items": []
+    },
+    "served_role": {
+      "role": "Analyst",
+      "standing": "APPROVER"
+    }
+  },
+  "body": {
+    "facets": [],
+    "grouping": {
+      "keys": ["sector", "rating", "pathway", "vintage", "sponsor"],
+      "active": "sector"
+    },
+    "columns": [
+      {
+        "key": "net_leverage",
+        "label": "Net lev."
+      },
+      {
+        "key": "gross_leverage",
+        "label": "Gross lev."
+      },
+      {
+        "key": "adj_ebitda",
+        "label": "Adj. EBITDA"
+      },
+      {
+        "key": "fcf",
+        "label": "FCF"
+      },
+      {
+        "key": "liquidity",
+        "label": "Liquidity"
+      },
+      {
+        "key": "interest_cov",
+        "label": "Int. cov."
+      }
+    ],
+    "rows": [],
+    "compare": {
+      "basis": {
+        "period": "LTM Q2-26",
+        "scenario": "BASE",
+        "accepted_only": true
+      },
+      "metrics": [
+        "net_leverage",
+        "gross_leverage",
+        "adj_ebitda",
+        "fcf",
+        "liquidity",
+        "interest_cov"
+      ],
+      "cases": []
+    },
+    "saved_views": [],
+    "passports": {}
+  },
+  "observed_at": "2026-09-09T14:30:00Z",
+  "observed_empty": true
+}

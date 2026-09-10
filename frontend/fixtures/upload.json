@@ -1,0 +1,191 @@
+{
+  "chrome": {
+    "subject": { "case_id": "CASE-2026-CVNA01", "issuer": "Carvana Co. (NYSE: CVNA)" },
+    "ribbon": {
+      "chips": [
+        { "label": "FULL_CREDIT_32", "tone": "acc" },
+        { "label": "BUILD a43cb903", "tone": "neutral" },
+        { "label": "SET-v4 · PINNED", "tone": "ok" },
+        { "label": "1 WITHDRAWN · 1 RESTATED", "tone": "warn" }
+      ],
+      "execution": "RUNNING · CP-6",
+      "persistence": "SAVED 14:30Z",
+      "approval": "UNRATIFIED",
+      "actions": [
+        {
+          "label": "Admit pack",
+          "primary": true,
+          "refusal": { "code": "NO_FILES_SELECTED", "clears": "at least one file is selected" }
+        },
+        {
+          "label": "Pin set",
+          "primary": false,
+          "refusal": { "code": "SET_ALREADY_PINNED", "clears": "a set other than SET-v4 is chosen" }
+        }
+      ]
+    },
+    "brief": {
+      "change": "D-06 withdrawn 09:41Z · Adjusted EBITDA Q2 2026 restated between D-05 and D-03 · SET-v4 is unchanged",
+      "impact": "Runs pinned to SET-v4 keep reading SET-v4 — a withdrawn source refuses at use, so run_2642 reads five of six",
+      "action": "Pin SET-v5 to drop D-06, then re-run what depended on it; both EBITDA readings stand until a set chooses",
+      "evidence": "D-05 p.1 ¶3 · $769M and D-03 p.4 ¶2 · $773M · the restatement is not merged",
+      "headline": "1.2x NET LEV"
+    },
+    "tabs": [
+      { "id": "pack", "label": "Source pack", "cp": "6" },
+      { "id": "withdrawals", "label": "Withdrawals", "cp": "1" }
+    ],
+    "verdict": {
+      "severity": "SUCCESS",
+      "conclusion": "SET-v4 is pinned with six admitted sources; D-06 is withdrawn and refuses at use; the Adjusted EBITDA restatement stands as two readings",
+      "blocked_on": null
+    },
+    "rail": [
+      { "section": "directory", "count": 4, "state": "4 CASES · 1 INTAKE OPEN" },
+      { "section": "upload", "count": 6, "state": "SET-v4 · 6 ADMITTED" },
+      { "section": "analysis", "count": 32, "state": "snp_cvna_q2_2026 · 32 ACCEPTED" },
+      { "section": "book", "count": 4, "state": "4 CREDITS · 2 COMPARED" },
+      { "section": "run", "count": 32, "state": "run_2642 · ACTIVE · CP-6 OF 32" },
+      { "section": "model", "count": null, "state": "CP-CF · ACCEPTED" },
+      { "section": "report", "count": 4, "state": "rev_4 · DRAFT · FREEZE REFUSED" },
+      { "section": "committee", "count": null, "state": "rev_3 · FROZEN · NOT FILED" },
+      { "section": "admin", "count": null, "state": "UNAVAILABLE" }
+    ],
+    "rail_local": {
+      "title": "Set versions",
+      "items": [
+        { "label": "SET-v4 · pinned", "meta": "6 · run_2642", "on": true },
+        { "label": "SET-v3", "meta": "5 · run_2641", "on": false },
+        { "label": "SET-v2", "meta": "3", "on": false },
+        { "label": "SET-v1", "meta": "2", "on": false }
+      ]
+    },
+    "served_role": { "role": "Analyst", "standing": "APPROVER" }
+  },
+  "body": {
+    "pinned_set": "SET-v4",
+    "set_versions": [
+      { "version": "SET-v4", "sources": 6, "pinned_at": "2026-09-09T11:02:00Z", "pinned": true },
+      { "version": "SET-v3", "sources": 5, "pinned_at": "2026-07-29T16:20:00Z", "pinned": false },
+      { "version": "SET-v2", "sources": 3, "pinned_at": "2026-03-10T12:15:00Z", "pinned": false },
+      { "version": "SET-v1", "sources": 2, "pinned_at": "2026-02-18T16:04:00Z", "pinned": false }
+    ],
+    "sources": [
+      {
+        "source_id": "D-01",
+        "label": "D-01 · 10-K FY2025",
+        "file_name": "CVNA_10K_Annual_Report_FY2025.htm",
+        "family": "SEC_10K_ANNUAL_REPORT",
+        "grade": "A",
+        "disposition": "ADMITTED",
+        "pages": 148,
+        "sha256": "0b582ff0c768f09ab1d75724a56c52ae1a1847074f43dd36183884a8fcdd30df",
+        "set_versions": ["SET-v1", "SET-v2", "SET-v3", "SET-v4"],
+        "withdrawn_at": null,
+        "withdrawal_checked_at": "2026-09-09T14:30:00Z"
+      },
+      {
+        "source_id": "D-02",
+        "label": "D-02 · 10-Q Q2 2026",
+        "file_name": "CVNA_10Q_Quarterly_Report_Q2_2026.htm",
+        "family": "SEC_10Q_QUARTERLY_REPORT",
+        "grade": "A",
+        "disposition": "ADMITTED",
+        "pages": 82,
+        "sha256": "8d36a602b39984bae8c201b8c2b53b014cd04a98c1bd75f68a59046747c8ef70",
+        "set_versions": ["SET-v3", "SET-v4"],
+        "withdrawn_at": null,
+        "withdrawal_checked_at": "2026-09-09T14:30:00Z"
+      },
+      {
+        "source_id": "D-03",
+        "label": "D-03 · 8-K Earnings Release",
+        "file_name": "CVNA_8K_Q2_2026_Earnings_Release.htm",
+        "family": "EARNINGS_RELEASE_8K",
+        "grade": "B",
+        "disposition": "ADMITTED",
+        "pages": 14,
+        "sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+        "set_versions": ["SET-v4"],
+        "withdrawn_at": null,
+        "withdrawal_checked_at": "2026-09-09T14:30:00Z"
+      },
+      {
+        "source_id": "D-04",
+        "label": "D-04 · 8-K Senior Secured Notes Indenture",
+        "file_name": "CVNA_8K_Senior_Secured_Notes_Indenture_Closing.htm",
+        "family": "LEGAL_INDENTURE_8K",
+        "grade": "A",
+        "disposition": "ADMITTED",
+        "pages": 212,
+        "sha256": "1f6636a4396b5e3bea32983827804914273a02a8fafdeda29b3f79a32b3a2162",
+        "set_versions": ["SET-v1", "SET-v2", "SET-v3", "SET-v4"],
+        "withdrawn_at": null,
+        "withdrawal_checked_at": "2026-09-09T14:30:00Z"
+      },
+      {
+        "source_id": "D-05",
+        "label": "D-05 · Q2 2026 Shareholder Letter",
+        "file_name": "CVNA_Q2_2026_Shareholder_Letter_NonGAAP_EBITDA.htm",
+        "family": "SHAREHOLDER_LETTER_NONGAAP",
+        "grade": "B",
+        "disposition": "ADMITTED",
+        "pages": 36,
+        "sha256": "d7d81c81a40ad4d7bdbb26189f6b1fc8b7e57b447b62208e4b7b71037f905cef",
+        "set_versions": ["SET-v3", "SET-v4"],
+        "withdrawn_at": null,
+        "withdrawal_checked_at": "2026-09-09T14:30:00Z"
+      },
+      {
+        "source_id": "D-06",
+        "label": "D-06 · 8-K Ally Floor-Plan Amendment",
+        "file_name": "CVNA_8K_Ally_FloorPlan_Credit_Agreement_Amendment.htm",
+        "family": "CREDIT_AGREEMENT_AMENDMENT_8K",
+        "grade": "C",
+        "disposition": "WITHDRAWN",
+        "pages": 8,
+        "sha256": "4f5e6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+        "set_versions": ["SET-v2", "SET-v3", "SET-v4"],
+        "withdrawn_at": "2026-09-09T09:41:00Z",
+        "withdrawal_checked_at": "2026-09-09T14:30:00Z"
+      }
+    ],
+    "restatements": [
+      {
+        "item": "Adjusted EBITDA · Q2 2026",
+        "readings": [
+          {
+            "source_label": "D-05 · Q2 2026 Shareholder Letter",
+            "value": "$769M",
+            "citation": {
+              "chip": "D-05 p.1 ¶3",
+              "document_sha256": "d7d81c81a40ad4d7bdbb26189f6b1fc8b7e57b447b62208e4b7b71037f905cef",
+              "source_label": "D-05 · Q2 2026 Shareholder Letter",
+              "page": 1,
+              "bboxes": [[0.08, 0.31, 0.84, 0.07]],
+              "matched_text": "Retail units sold totaled 197,325, an increase of 38%; Revenue totaled $7.376 billion, an increase of 52%; Non-GAAP Total GPU was $7,125; Net income totaled $513 million; Adjusted EBITDA totaled $769 million.",
+              "observed_at": "2026-09-09T14:30:00Z",
+              "render_url": null
+            }
+          },
+          {
+            "source_label": "D-03 · 8-K Earnings Release",
+            "value": "$773M",
+            "citation": {
+              "chip": "D-03 p.4 ¶2",
+              "document_sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+              "source_label": "D-03 · 8-K Earnings Release",
+              "page": 4,
+              "bboxes": [[0.08, 0.44, 0.84, 0.05]],
+              "matched_text": "Adjusted EBITDA of $773 million for the quarter, before the $4 million gain on extinguishment of debt.",
+              "observed_at": "2026-09-09T14:30:00Z",
+              "render_url": null
+            }
+          }
+        ],
+        "divergence": "+$4M · 0.5% · D-03 keeps a $4M gain on extinguishment of debt that D-05's non-GAAP reconciliation strips out"
+      }
+    ]
+  },
+  "observed_at": "2026-09-09T14:30:00Z"
+}

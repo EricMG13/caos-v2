@@ -1,0 +1,124 @@
+{
+  "chrome": {
+    "subject": null,
+    "ribbon": {
+      "chips": [
+        {
+          "label": "0 CASES",
+          "tone": "neutral"
+        },
+        {
+          "label": "BUILD a43cb903",
+          "tone": "neutral"
+        },
+        {
+          "label": "STORE · READY",
+          "tone": "ok"
+        }
+      ],
+      "execution": "IDLE",
+      "persistence": "SAVED 14:30Z",
+      "approval": "UNRATIFIED",
+      "actions": [
+        {
+          "label": "Open case",
+          "primary": true,
+          "refusal": null
+        },
+        {
+          "label": "Admit pack",
+          "primary": false,
+          "refusal": null
+        }
+      ]
+    },
+    "brief": {
+      "change": "Nothing · no case is registered in this deployment",
+      "impact": "The register is empty by observation, not by inference",
+      "action": "Drop documents on the Intake tab to create the first case",
+      "evidence": "observed at 2026-09-09 14:30Z · an empty register from the store, not a guess",
+      "headline": "0 CASES"
+    },
+    "tabs": [
+      {
+        "id": "register",
+        "label": "Register",
+        "cp": null
+      },
+      {
+        "id": "intake",
+        "label": "Intake",
+        "cp": null
+      }
+    ],
+    "verdict": {
+      "severity": "IDLE",
+      "conclusion": "No case is registered and no intake is open",
+      "blocked_on": null
+    },
+    "rail": [
+      {
+        "section": "directory",
+        "count": 0,
+        "state": "0 CASES · 0 INTAKES"
+      },
+      {
+        "section": "upload",
+        "count": null,
+        "state": "NO SET PINNED"
+      },
+      {
+        "section": "analysis",
+        "count": null,
+        "state": "NO ACCEPTED ARTIFACT"
+      },
+      {
+        "section": "book",
+        "count": 0,
+        "state": "0 CREDITS"
+      },
+      {
+        "section": "run",
+        "count": null,
+        "state": "NO RUN YET"
+      },
+      {
+        "section": "model",
+        "count": null,
+        "state": "CP-CF NOT RUN"
+      },
+      {
+        "section": "report",
+        "count": null,
+        "state": "NO REVISION YET"
+      },
+      {
+        "section": "committee",
+        "count": null,
+        "state": "NO DELIVERABLE YET"
+      },
+      {
+        "section": "admin",
+        "count": null,
+        "state": "UNAVAILABLE"
+      }
+    ],
+    "rail_local": null,
+    "served_role": {
+      "role": "Analyst",
+      "standing": "APPROVER"
+    }
+  },
+  "body": {
+    "search": "",
+    "filter": {
+      "label": "State",
+      "options": [],
+      "active": null
+    },
+    "cases": [],
+    "intake": null
+  },
+  "observed_at": "2026-09-09T14:30:00Z",
+  "observed_empty": true
+}
