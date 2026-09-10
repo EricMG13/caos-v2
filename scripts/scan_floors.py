@@ -11,12 +11,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from tracked import tracked_python
+
+# Cobertura carries `filename` on `<class>` and on no other element, so this is
+# the set of files the report measured.
+MEASURED = re.compile(r'\bfilename="([^"]*)"')
 
 
 def covered_files(report: Mapping[str, object]) -> list[str]:
@@ -25,6 +30,17 @@ def covered_files(report: Mapping[str, object]) -> list[str]:
     if not isinstance(metrics, dict):
         return []
     return [name for name in metrics if name != "_totals"]
+
+
+def cobertura_metrics(report: str) -> Mapping[str, object]:
+    """A Cobertura coverage report normalised to the shape the floors already read.
+
+    A coverage report is a scanner report and falls through the same floor: one
+    that measured nothing is a report SonarQube imports as a number rather than
+    as an error. Read as text rather than parsed -- `xml.etree` is vulnerable to
+    entity expansion (bandit B314) for one attribute of one element.
+    """
+    return {"metrics": {name: {} for name in MEASURED.findall(report)}}
 
 
 def _parse_errors(report: Mapping[str, object]) -> list[object]:
@@ -117,9 +133,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--repo", type=Path, default=Path(__file__).resolve().parents[1]
     )
+    parser.add_argument(
+        "--cobertura",
+        action="store_true",
+        help="read a Cobertura coverage report rather than a bandit JSON one",
+    )
     args = parser.parse_args(argv)
 
-    report = json.loads(args.report.read_text(encoding="utf-8"))
+    text = args.report.read_text(encoding="utf-8")
+    report = cobertura_metrics(text) if args.cobertura else json.loads(text)
     claims = None
     if args.cover:
         repo = args.repo.resolve()

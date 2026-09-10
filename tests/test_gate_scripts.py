@@ -64,6 +64,42 @@ def test_scan_floor_accepts_a_report_that_covered_a_file(tmp_path: Path) -> None
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_scan_floor_refuses_a_cobertura_report_that_covered_no_files(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "coverage.xml"
+    report.write_text("<coverage></coverage>", encoding="utf-8")
+    result = _run("scan_floors.py", str(report), "--cobertura")
+    assert result.returncode != 0
+    assert "0 files" in result.stdout + result.stderr
+
+
+def test_scan_floor_accepts_a_cobertura_report_that_covered_a_file(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "coverage.xml"
+    report.write_text(
+        "<coverage><packages><package><classes>"
+        '<class filename="server/api.py"></class>'
+        "</classes></package></packages></coverage>",
+        encoding="utf-8",
+    )
+    result = _run("scan_floors.py", str(report), "--cobertura")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_cobertura_metrics_reads_every_filename_attribute() -> None:
+    report = (
+        "<coverage><packages><package><classes>"
+        '<class filename="a.py"></class><class filename="b.py"></class>'
+        "</classes></package></packages></coverage>"
+    )
+    assert scan_floors.covered_files(scan_floors.cobertura_metrics(report)) == [
+        "a.py",
+        "b.py",
+    ]
+
+
 def test_io_budget_passes_while_no_request_paths_exist(tmp_path: Path) -> None:
     result = _run("io_budget.py", "--assert", "--root", str(tmp_path))
     assert result.returncode == 0, result.stdout + result.stderr
