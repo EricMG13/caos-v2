@@ -369,3 +369,39 @@ caches.
 predecessor's Next.js (`docs/DECISIONS.md` §12): a static export has no server
 to trust, and one process is the deployment shape (`SYSTEM_SPEC.md` §11).
 Exact pins because a floating range is a dependency change nobody recorded.
+
+## 2026-09-10 §20 — The store is psycopg 3 over hand-written SQL, and its schema is applied rather than migrated
+
+`psycopg[binary]==3.2.12`, the first entry in `requirements.in` and the only
+runtime dependency Phase 1 adds. `requirements-dev.in` now ends with
+`-r requirements.in`, because a suite that exercises the store needs what the
+runtime installs. No ORM and no migration framework.
+
+`server/store/schema.sql` is the declared schema and carries no `IF NOT EXISTS`.
+`apply_schema` takes a transaction-scoped advisory lock, applies the whole file
+against a database nothing has applied a schema to, and records the SHA-256 of
+the text it applied in a `store_schema` bookkeeping row. A database built from a
+different declared schema is refused — `STORE_SCHEMA_DRIFT`, the code alone,
+never a schema body — rather than reconciled.
+
+The suite runs against a real PostgreSQL named by `CAOS_TEST_POSTGRES_URL`,
+taking a database of its own per test and dropping it after. Absent the
+variable it skips with its reason; `CAOS_REQUIRE_POSTGRES=1` turns that skip
+into a failure, which is what the `test` CI job sets against a digest-pinned
+`postgres:17-alpine` service (§11: a job arrives with the code it scans).
+
+Correction in place, per §12's adopted process rule: `CLAUDE.md`'s "where things
+live" listed `storage/`. `SYSTEM_SPEC.md` §2 names `server/store/schema.sql`
+explicitly and is the specific statement, so the contract's line is corrected to
+`server/store/` rather than a second location being created to satisfy it.
+
+**Reason.** The transactional rules Phase 1 exists to honour are written in SQL
+terms — the run row lock that orders `run_events.seq`, the conditional update
+whose zero rows mean no event (`SYSTEM_SPEC.md` §2) — and hiding exactly those
+is what an ORM is for. The binary wheel keeps a build toolchain out of the
+image. Drift is refused rather than migrated because `IF NOT EXISTS` over an
+older database succeeds statement by statement while leaving the missing column
+unmentioned until the first write to it, which is the one failure applying a
+schema at startup exists to catch. This repository has never deployed, so there
+is no data a migration would have to carry; the day there is, that is the entry
+which overrides this one.
