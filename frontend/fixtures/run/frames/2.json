@@ -1,0 +1,1114 @@
+{
+  "chrome": {
+    "subject": {
+      "case_id": "CASE-2026-CVNA01",
+      "issuer": "Carvana Co. (NYSE: CVNA)"
+    },
+    "ribbon": {
+      "chips": [
+        {
+          "label": "FULL_CREDIT_32",
+          "tone": "acc"
+        },
+        {
+          "label": "BUILD a43cb903",
+          "tone": "neutral"
+        },
+        {
+          "label": "SET-v4 · PINNED",
+          "tone": "ok"
+        },
+        {
+          "label": "ROUTE PINNED · dc2d…9f5b",
+          "tone": "ok"
+        }
+      ],
+      "execution": "RUNNING · CP-6",
+      "persistence": "SAVED 14:30Z",
+      "approval": "UNRATIFIED",
+      "actions": [
+        {
+          "label": "Accept run",
+          "primary": true,
+          "refusal": {
+            "code": "RUN_NOT_TERMINAL",
+            "clears": "the run is terminal — no node RUNNABLE and no attempt in flight; CP-6 is still running"
+          }
+        },
+        {
+          "label": "Events",
+          "primary": false,
+          "refusal": null
+        }
+      ]
+    },
+    "brief": {
+      "change": "CP-6 attempt 2 recorded gen_8f21c0 · charge 0.44 · envelope validating · 25 of 32 complete",
+      "impact": "CP-6A and CP-7 wait on CP-6 (REQUIRED) · budget 2.85 charged of 6.00",
+      "action": "Nothing to approve · accept when the run is terminal",
+      "evidence": "SET-v4 pinned · 6 sources · 2 withdrawal checks passed live · D-04 p.68 ¶2 anchored",
+      "headline": "1.2x NET LEV"
+    },
+    "tabs": [
+      {
+        "id": "route",
+        "label": "Route",
+        "cp": "32 NODES · 51 EDGES"
+      },
+      {
+        "id": "plan",
+        "label": "Plan",
+        "cp": "PINNED"
+      }
+    ],
+    "verdict": {
+      "severity": "RUNNING",
+      "conclusion": "CP-6 attempt 2 recorded · citations verifying against SET-v4 · frontier CP-6",
+      "blocked_on": "CP-6 accept"
+    },
+    "rail": [
+      {
+        "section": "directory",
+        "count": 4,
+        "state": "4 CASES · 1 INTAKE OPEN"
+      },
+      {
+        "section": "upload",
+        "count": 6,
+        "state": "SET-v4 · 6 ADMITTED"
+      },
+      {
+        "section": "analysis",
+        "count": 32,
+        "state": "snp_cvna_q2_2026 · 32 ACCEPTED"
+      },
+      {
+        "section": "book",
+        "count": 4,
+        "state": "4 CREDITS · 2 COMPARED"
+      },
+      {
+        "section": "run",
+        "count": 32,
+        "state": "run_2642 · ACTIVE · CP-6 OF 32"
+      },
+      {
+        "section": "model",
+        "count": null,
+        "state": "CP-CF · ACCEPTED"
+      },
+      {
+        "section": "report",
+        "count": 4,
+        "state": "rev_4 · DRAFT · FREEZE REFUSED"
+      },
+      {
+        "section": "committee",
+        "count": null,
+        "state": "rev_3 · FROZEN · NOT FILED"
+      },
+      {
+        "section": "admin",
+        "count": null,
+        "state": "UNAVAILABLE"
+      }
+    ],
+    "rail_local": {
+      "title": "Frontier · now",
+      "items": [
+        {
+          "label": "CP-6 Debate",
+          "meta": "RUNNABLE · RUNNING · ATTEMPT 2",
+          "on": true
+        },
+        {
+          "label": "CP-1C Peer benchmark",
+          "meta": "RESTRICTED · LIMITATION CARRIED",
+          "on": false
+        }
+      ]
+    },
+    "served_role": {
+      "role": "Analyst",
+      "standing": "APPROVER"
+    }
+  },
+  "body": {
+    "run_id": "run_2642",
+    "build_id": "a43cb903",
+    "profile": "FULL_CREDIT_32",
+    "stages": [
+      {
+        "n": 0,
+        "label": "Stage 0 · preparation"
+      },
+      {
+        "n": 1,
+        "label": "Stage 1 · foundation"
+      },
+      {
+        "n": 2,
+        "label": "Stage 2 · synthesis"
+      },
+      {
+        "n": 3,
+        "label": "Stage 3 · structure and covenants"
+      },
+      {
+        "n": 4,
+        "label": "Stage 4 · QA"
+      },
+      {
+        "n": 5,
+        "label": "Stage 5 · debate and deliverable"
+      },
+      {
+        "n": 100,
+        "label": "Stage 100 · host extension"
+      }
+    ],
+    "nodes": [
+      {
+        "node_id": "rn-cp-0",
+        "module_id": "CP-0",
+        "name": "Source readiness",
+        "stage": 0,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "SET-v4 · 6 sources admitted · digests verified · attempt 1 accepted · art_ff6a",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "8ac2141405531474fb8d98a48c4f54ce6b70ed72b55084f3d0398c58b1e2d042",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1",
+        "module_id": "CP-1",
+        "name": "Canonical data",
+        "stage": 1,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-0 accepted · attempt 1 · art_34ef",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "ad6b8bbeee1dc89fa4d60a127fb5272f8709fd0d88dcd9759e21d6d07693111a",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1a",
+        "module_id": "CP-1A",
+        "name": "Perimeter and debt hierarchy",
+        "stage": 1,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 accepted · attempt 1 · art_f57e",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "98987512f1a5c31fb75bbf82c2c1478781fc362f13083237b9deadb6280b1aa5",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1b",
+        "module_id": "CP-1B",
+        "name": "Unit economics and GPU bridge",
+        "stage": 1,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 accepted · attempt 1 · art_ad9c",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "bd51540dbeb4418004f9172ba47cb170568a638461d808310aa17aa8efccf189",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1c",
+        "module_id": "CP-1C",
+        "name": "Peer benchmark",
+        "stage": 1,
+        "state": "RESTRICTED",
+        "running": false,
+        "reason": "OPTIONAL CP-1 · source READY_WITH_LIMITATIONS · runs with its limitation carried forward",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "b06728329d347e2fedbf29b01ca824d1b4a1a5fcdb390ff3186dfba93cd5bd23",
+        "limitation": "Peer set limited to KMX, AN and LAD: two comparables' Q2 2026 10-Qs are not in SET-v4. The GPU spread is carried forward as RESTRICTED, not as a complete benchmark."
+      },
+      {
+        "node_id": "rn-cp-1d",
+        "module_id": "CP-1D",
+        "name": "Earnings quality",
+        "stage": 1,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 · REQUIRED CP-1B accepted · attempt 1 · art_7d3f",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "f2e0efea010e12200659b714478b40708c141826fdcf955bf8feb36fe00123b9",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2",
+        "module_id": "CP-2",
+        "name": "Credit synthesis",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 · REQUIRED CP-1D · ADVISORY CP-1C accepted · CP-1C limitation carried · attempt 1 · art_db5c",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "47b49e60ab78eabd0659513d4e96ec47eb46bb9697283ac0915503c2cda4af42",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2a",
+        "module_id": "CP-2A",
+        "name": "Stress pathway",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1B accepted · attempt 1 · art_d7be",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "e3fc856950c94b9e3cfd655d58b5373fa9fd2db3263a53c1556e98dfb2246f0f",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2b",
+        "module_id": "CP-2B",
+        "name": "Liquidity bridge",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 accepted · attempt 1 · art_c496",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "749d74763daa06ce9e3978daa8127b071ab2b2187ba54d64818b90dafc110809",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2c",
+        "module_id": "CP-2C",
+        "name": "Working capital",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 · ADVISORY CP-1B accepted · attempt 1 · art_7153",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "05efdcd73d3a4d5d500882abfc66279a8c7b25bf8d9a1cf19e9d179e38511283",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2d",
+        "module_id": "CP-2D",
+        "name": "Capital allocation",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1A accepted · attempt 1 · art_c4e7",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "ff436c9a2d161a9569625b094db86673a5d5a402d7443940f530735e5c294229",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2e",
+        "module_id": "CP-2E",
+        "name": "Refinancing profile",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1A accepted · attempt 1 · art_6cae",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "de10ce0fa1160e26fed85d0bdf7d8e22df1285f4f623e001061f3679efab8a2b",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2f",
+        "module_id": "CP-2F",
+        "name": "Sponsor and governance",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "OPTIONAL CP-1 accepted · attempt 1 · art_67a3",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "fa7ae4f6cf0d19cd5963c52e072a663a5f025d3e5dffeb5b01669ff8489628d8",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2g",
+        "module_id": "CP-2G",
+        "name": "Forward drivers",
+        "stage": 2,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-2 · REQUIRED CP-2A accepted · attempt 1 · art_7137",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "925507698a0f6268542ad32fbaf5b3e7193621d26d354c0c7401370336c0b28c",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3",
+        "module_id": "CP-3",
+        "name": "Relative value",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-2 · ADVISORY CP-1C accepted · CP-1C limitation carried · attempt 1 · art_ae95",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "95781fbd74addf1df8b63ca180f334ac4f3d44811fb773e8fa71cf22c8936715",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3a",
+        "module_id": "CP-3A",
+        "name": "Capital structure",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1A · REQUIRED CP-2D accepted · attempt 1 · art_9124",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "99cb47f1492820fac3b263d146ce85f1bb04c0238e592c29c620edf96a1badcc",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3b",
+        "module_id": "CP-3B",
+        "name": "Recovery waterfall",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-3A accepted · attempt 1 · art_c945",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "e3b68f9fc8e7e248ac40c6c26692ac1e017e5eede7c69ed2b00b80065e31c148",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3c",
+        "module_id": "CP-3C",
+        "name": "Priority claims",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-3A accepted · attempt 1 · art_666e",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "3013017cfc89a7f9c209886bf2870b87899a5327fb8ee230e9b0cb35617f976d",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4",
+        "module_id": "CP-4",
+        "name": "Covenants",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1A accepted · attempt 1 · art_639d",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "5775b243dad6c4cebb99b23b9da1b54c575d7fc1eb75037d64e864d224c151d5",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4a",
+        "module_id": "CP-4A",
+        "name": "Restricted payments",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-4 accepted · attempt 1 · art_2096",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "a61790dca09755e4b33a90351c526a45f531872161d0470cda35e49067f66bec",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4b",
+        "module_id": "CP-4B",
+        "name": "Change of control",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-4 accepted · attempt 1 · art_3bb7",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "85812dab7071316e06ee7ff616a457ef3a1a8455ba5b198eef02d6c21be24534",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4c",
+        "module_id": "CP-4C",
+        "name": "Covenant headroom",
+        "stage": 3,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-4 · REQUIRED CP-2G accepted · attempt 1 · art_1c61",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "1dbb7022528ddc9db59ff0b8f2fd0befae24fa0756d3ac9e0128c6f2fe56fbad",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-5",
+        "module_id": "CP-5",
+        "name": "Evidence trace validator",
+        "stage": 4,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-2 · REQUIRED CP-3 · REQUIRED CP-4 · REQUIRED CP-4C accepted · attempt 1 · art_a97b",
+        "is_gate": true,
+        "extension": false,
+        "artifact_sha256": "0bfe6ad4a61b016273638de034080ea16103daf3f9a6b280ad561159e3305681",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-5a",
+        "module_id": "CP-5A",
+        "name": "Citation anchoring",
+        "stage": 4,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-2 · REQUIRED CP-3B · OPTIONAL CP-2F accepted · attempt 1 · art_a79b",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "ffb83c0bbe1887c4776879fb59f6256fda2932ec416c1b15addee989b3a262f5",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-5b",
+        "module_id": "CP-5B",
+        "name": "Lineage",
+        "stage": 4,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-2G · REQUIRED CP-3A accepted · attempt 1 · art_de53",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": "b154b15dde56c5a362b1f718a1af4262eee5997b68f171708e460260fa26ac05",
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-6",
+        "module_id": "CP-6",
+        "name": "Debate",
+        "stage": 5,
+        "state": "RUNNABLE",
+        "running": true,
+        "reason": "QA_GATE CP-5 open · attempt 2 recorded gen_8f21c0 · envelope validating",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-6a",
+        "module_id": "CP-6A",
+        "name": "Chair memo",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-6 · waits CP-6 accepted (REQUIRED edge; CP-6 RUNNABLE, attempt in flight)",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-7",
+        "module_id": "CP-7",
+        "name": "Monitoring triggers",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-6, REQUIRED CP-4C · waits CP-6 accepted (REQUIRED edge; CP-6 RUNNABLE, attempt in flight)",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-7a",
+        "module_id": "CP-7A",
+        "name": "Rating rationale",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-6A · behind CP-6 on the REQUIRED chain",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-8",
+        "module_id": "CP-8",
+        "name": "Deliverable assembly",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-7, REQUIRED CP-7A · behind CP-6 on the REQUIRED chain",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-8a",
+        "module_id": "CP-8A",
+        "name": "Distribution pack",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-8 · behind CP-6 on the REQUIRED chain",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-cf",
+        "module_id": "CP-CF",
+        "name": "Cash flow engine",
+        "stage": 100,
+        "state": "COMPLETE",
+        "running": false,
+        "reason": "REQUIRED CP-1 · REQUIRED CP-2G · REQUIRED CP-4 accepted · attempt 1 · art_ce00",
+        "is_gate": false,
+        "extension": true,
+        "artifact_sha256": "7287b142a61bb753fc03b99c51c14ee5f8e98c2651e82e9eee587eabe17207ea",
+        "limitation": null
+      }
+    ],
+    "edges": [
+      {
+        "from": "CP-0",
+        "to": "CP-1",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1C",
+        "type": "OPTIONAL"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1D",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1B",
+        "to": "CP-1D",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1D",
+        "to": "CP-2",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1C",
+        "to": "CP-2",
+        "type": "ADVISORY"
+      },
+      {
+        "from": "CP-1B",
+        "to": "CP-2A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1B",
+        "to": "CP-2C",
+        "type": "ADVISORY"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-2D",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-2E",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2F",
+        "type": "OPTIONAL"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-2G",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2A",
+        "to": "CP-2G",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-3",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1C",
+        "to": "CP-3",
+        "type": "ADVISORY"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-3A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2D",
+        "to": "CP-3A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3A",
+        "to": "CP-3B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3A",
+        "to": "CP-3C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-4",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-4A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-4B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-4C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2G",
+        "to": "CP-4C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4C",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-5A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3B",
+        "to": "CP-5A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2F",
+        "to": "CP-5A",
+        "type": "OPTIONAL"
+      },
+      {
+        "from": "CP-2G",
+        "to": "CP-5B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3A",
+        "to": "CP-5B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-5",
+        "to": "CP-6",
+        "type": "QA_GATE"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-6",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3",
+        "to": "CP-6",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-6",
+        "to": "CP-6A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-6",
+        "to": "CP-7",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4C",
+        "to": "CP-7",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-6A",
+        "to": "CP-7A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-7",
+        "to": "CP-8",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-7A",
+        "to": "CP-8",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-8",
+        "to": "CP-8A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-CF",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2G",
+        "to": "CP-CF",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-CF",
+        "type": "REQUIRED"
+      }
+    ],
+    "selected": "CP-6",
+    "attempts": {
+      "CP-0": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:05:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.40",
+          "generation_id": "gen_ff6aa1"
+        }
+      ],
+      "CP-1": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:06:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.40",
+          "generation_id": "gen_34efa2"
+        }
+      ],
+      "CP-1A": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:07:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_f57e00"
+        }
+      ],
+      "CP-1B": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:08:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_ad9c44"
+        }
+      ],
+      "CP-1C": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:09:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_7f88b1"
+        }
+      ],
+      "CP-1D": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:10:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_7d3f79"
+        }
+      ],
+      "CP-2": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:11:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.40",
+          "generation_id": "gen_db5c77"
+        }
+      ],
+      "CP-2A": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:12:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_d7be5f"
+        }
+      ],
+      "CP-2B": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:13:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_c49619"
+        }
+      ],
+      "CP-2C": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:14:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_715362"
+        }
+      ],
+      "CP-2D": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:15:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_c4e7ee"
+        }
+      ],
+      "CP-2E": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:16:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_6cae2a"
+        }
+      ],
+      "CP-2F": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:17:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_67a3ce"
+        }
+      ],
+      "CP-2G": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:18:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_7137c6"
+        }
+      ],
+      "CP-3": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:19:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.40",
+          "generation_id": "gen_ae9576"
+        }
+      ],
+      "CP-3A": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:20:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_91247e"
+        }
+      ],
+      "CP-3B": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:21:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_c94526"
+        }
+      ],
+      "CP-3C": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:22:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_666ec6"
+        }
+      ],
+      "CP-4": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:23:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.40",
+          "generation_id": "gen_639d89"
+        }
+      ],
+      "CP-4A": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:24:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_209645"
+        }
+      ],
+      "CP-4B": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:25:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_3bb748"
+        }
+      ],
+      "CP-4C": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:26:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_1c612f"
+        }
+      ],
+      "CP-5": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:27:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.40",
+          "generation_id": "gen_a97bcc"
+        }
+      ],
+      "CP-5A": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:28:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_a79bc8"
+        }
+      ],
+      "CP-5B": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:29:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_de5384"
+        }
+      ],
+      "CP-CF": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T13:36:00Z",
+          "state": "ACCEPTED",
+          "charge": "0.12",
+          "generation_id": "gen_ce0006"
+        }
+      ],
+      "CP-6": [
+        {
+          "n": 1,
+          "started_at": "2026-09-09T14:31:10Z",
+          "state": "REFUSED",
+          "charge": "0.31",
+          "generation_id": "gen_1d4e77"
+        },
+        {
+          "n": 2,
+          "started_at": "2026-09-09T14:33:52Z",
+          "state": "INDETERMINATE",
+          "charge": "0.44",
+          "generation_id": "gen_8f21c0"
+        }
+      ]
+    },
+    "gate": {
+      "state": "PINNED",
+      "route_digest": "sha256:dc2d9bd6d76d4beb3242a766ea48307de0854836b8eca1208bfa471796cd9f5b",
+      "input_fingerprint": "fp_5a1c · SET-v4 · build a43cb903",
+      "approve": {
+        "code": "PLAN_ALREADY_PINNED",
+        "clears": "a new run is compiled — the pinned route of run_2642 is immutable and replays from the same pins"
+      },
+      "reserved": "provider budget · 2.41 charged of 6.00 ceiling"
+    },
+    "accept": {
+      "code": "RUN_NOT_TERMINAL",
+      "clears": "the run is terminal — no node RUNNABLE and no attempt in flight; CP-6 is still running"
+    }
+  },
+  "observed_at": "2026-09-09T14:30:00Z"
+}

@@ -1,0 +1,234 @@
+{
+  "chrome": {
+    "subject": null,
+    "ribbon": {
+      "chips": [
+        {
+          "label": "4 CASES",
+          "tone": "acc"
+        },
+        {
+          "label": "BUILD a43cb903",
+          "tone": "neutral"
+        },
+        {
+          "label": "1 INTAKE OPEN",
+          "tone": "warn"
+        }
+      ],
+      "execution": "IDLE",
+      "persistence": "SAVED 14:30Z",
+      "approval": "UNRATIFIED",
+      "actions": [
+        {
+          "label": "Open case",
+          "primary": true,
+          "refusal": null
+        },
+        {
+          "label": "Admit pack",
+          "primary": false,
+          "refusal": null
+        }
+      ]
+    },
+    "brief": {
+      "change": "Intake int_7f31 of the Q2 2026 pack for Carvana Co. finished 11:02Z · its run run_2643 is open for review",
+      "impact": "Nothing is accepted — a completed intake opens for review, never on your behalf; five of six suggestions are uncommitted",
+      "action": "Open Carvana Co. (NYSE: CVNA) and commit or correct the suggestions on the Intake tab",
+      "evidence": "3 files admitted as one pack · every suggestion cites the page it was read from · D-05 p.1 ¶3 for the periods",
+      "headline": "4 CASES"
+    },
+    "tabs": [
+      {
+        "id": "register",
+        "label": "Register",
+        "cp": null
+      },
+      {
+        "id": "intake",
+        "label": "Intake",
+        "cp": "1 OPEN"
+      }
+    ],
+    "verdict": {
+      "severity": "SUCCESS",
+      "conclusion": "Four cases are registered and one intake is open for review; nothing in it is committed",
+      "blocked_on": null
+    },
+    "rail": [
+      {
+        "section": "directory",
+        "count": 4,
+        "state": "4 CASES · 1 INTAKE OPEN"
+      },
+      {
+        "section": "upload",
+        "count": 6,
+        "state": "SET-v4 · 6 ADMITTED"
+      },
+      {
+        "section": "analysis",
+        "count": 32,
+        "state": "snp_cvna_q2_2026 · 32 ACCEPTED"
+      },
+      {
+        "section": "book",
+        "count": 4,
+        "state": "4 CREDITS · 2 COMPARED"
+      },
+      {
+        "section": "run",
+        "count": 32,
+        "state": "run_2642 · ACTIVE · CP-6 OF 32"
+      },
+      {
+        "section": "model",
+        "count": null,
+        "state": "CP-CF · ACCEPTED"
+      },
+      {
+        "section": "report",
+        "count": 4,
+        "state": "rev_4 · DRAFT · FREEZE REFUSED"
+      },
+      {
+        "section": "committee",
+        "count": null,
+        "state": "rev_3 · FROZEN · NOT FILED"
+      },
+      {
+        "section": "admin",
+        "count": null,
+        "state": "UNAVAILABLE"
+      }
+    ],
+    "rail_local": null,
+    "served_role": {
+      "role": "Analyst",
+      "standing": "APPROVER"
+    }
+  },
+  "body": {
+    "search": "",
+    "filter": {
+      "label": "State",
+      "options": ["COMPLETE", "RESTRICTED", "BLOCKED"],
+      "active": null
+    },
+    "cases": [
+      {
+        "case_id": "CASE-2026-CVNA01",
+        "issuer": "Carvana Co. (NYSE: CVNA)",
+        "sector": "Automotive Retail & Digital E-Commerce",
+        "rating": "B3 / B-",
+        "pathway": "FULL_CREDIT_32",
+        "snapshot": "snp_cvna_q2_2026",
+        "state": "COMPLETE",
+        "severity": "SUCCESS",
+        "net_leverage": "1.2x",
+        "updated_at": "2026-09-09T14:30:00Z",
+        "standing": "APPROVER"
+      },
+      {
+        "case_id": "CASE-2026-HTZ02",
+        "issuer": "Hertz Global Holdings, Inc. (NASDAQ: HTZ)",
+        "sector": "Car Rental & Fleet Leasing",
+        "rating": "B2 / B",
+        "pathway": "FULL_CREDIT_32",
+        "snapshot": "snp_htz_q2_2026",
+        "state": "RESTRICTED",
+        "severity": "WARNING",
+        "net_leverage": "5.9x",
+        "updated_at": "2026-09-08T17:15:00Z",
+        "standing": "READER"
+      },
+      {
+        "case_id": "CASE-2026-CHTR03",
+        "issuer": "Charter Communications, Inc. (NASDAQ: CHTR)",
+        "sector": "Telecommunications & Cable Broadband",
+        "rating": "Ba1 / BB+",
+        "pathway": "LITE_CREDIT_22",
+        "snapshot": "snp_chtr_q2_2026",
+        "state": "COMPLETE",
+        "severity": "SUCCESS",
+        "net_leverage": "4.4x",
+        "updated_at": "2026-09-07T14:30:00Z",
+        "standing": "WRITER"
+      },
+      {
+        "case_id": "CASE-2026-FLYYQ04",
+        "issuer": "Spirit Airlines, Inc. (OTC: FLYYQ)",
+        "sector": "Commercial Airlines & Passenger Transport",
+        "rating": "D / Default",
+        "pathway": "FULL_CREDIT_32",
+        "snapshot": "snp_flyyq_q2_2026",
+        "state": "BLOCKED",
+        "severity": "CRITICAL",
+        "net_leverage": "12.4x",
+        "updated_at": "2026-09-09T08:20:00Z",
+        "standing": "READER"
+      }
+    ],
+    "intake": {
+      "case_id": "CASE-2026-CVNA01",
+      "files": [
+        {
+          "name": "CVNA_10Q_Quarterly_Report_Q2_2026.htm",
+          "bytes": 1840542,
+          "sha256": "8d36a602b39984bae8c201b8c2b53b014cd04a98c1bd75f68a59046747c8ef70"
+        },
+        {
+          "name": "CVNA_8K_Q2_2026_Earnings_Release.htm",
+          "bytes": 69988,
+          "sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0"
+        },
+        {
+          "name": "CVNA_Q2_2026_Shareholder_Letter_NonGAAP_EBITDA.htm",
+          "bytes": 537275,
+          "sha256": "d7d81c81a40ad4d7bdbb26189f6b1fc8b7e57b447b62208e4b7b71037f905cef"
+        }
+      ],
+      "suggestions": [
+        {
+          "key": "issuer",
+          "value": "Carvana Co. (NYSE: CVNA) · CASE-2026-CVNA01",
+          "why": "Proposed “Carvana Co.” from the 10-Q cover, D-02 p.1; you resolved it to the registered case rather than a new one.",
+          "committed": true
+        },
+        {
+          "key": "label",
+          "value": "Q2 2026 earnings update",
+          "why": "Read from the release heading, D-03 p.1 ¶1 — not from the file names.",
+          "committed": false
+        },
+        {
+          "key": "document_types",
+          "value": "10-Q · 8-K earnings release · shareholder letter",
+          "why": "One type per file; every file classified, none guessed twice.",
+          "committed": false
+        },
+        {
+          "key": "periods",
+          "value": "Q2 2026 · LTM Jun-2026 · FY2025 comparatives",
+          "why": "From the statement headers, D-02 p.3 and D-05 p.1 ¶3, not the file names.",
+          "committed": false
+        },
+        {
+          "key": "dispositions",
+          "value": "3 relevant · 0 excluded",
+          "why": "An excluded source would state why and stay in the pack.",
+          "committed": false
+        },
+        {
+          "key": "route",
+          "value": "FULL_CREDIT_32 · unchanged",
+          "why": "Selection is a pinned input, not something the resolver decides. Committing pins it; the plan gate in Run still asks.",
+          "committed": false
+        }
+      ],
+      "run_id": "run_2643"
+    }
+  },
+  "observed_at": "2026-09-09T14:30:00Z"
+}

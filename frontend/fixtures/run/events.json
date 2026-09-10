@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "type": "node_state_changed"
+  },
+  {
+    "id": 2,
+    "type": "attempt_recorded"
+  },
+  {
+    "id": 3,
+    "type": "node_state_changed"
+  },
+  {
+    "id": 4,
+    "type": "run_terminal"
+  }
+]

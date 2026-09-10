@@ -1,0 +1,852 @@
+{
+  "chrome": {
+    "subject": {
+      "case_id": "CASE-2026-CVNA01",
+      "issuer": "Carvana Co. (NYSE: CVNA)"
+    },
+    "ribbon": {
+      "chips": [
+        {
+          "label": "FULL_CREDIT_32",
+          "tone": "acc"
+        },
+        {
+          "label": "BUILD a43cb903",
+          "tone": "neutral"
+        },
+        {
+          "label": "SET-v4 · PIN PENDING",
+          "tone": "neutral"
+        },
+        {
+          "label": "ROUTE RESOLVED · NOT PINNED",
+          "tone": "warn"
+        }
+      ],
+      "execution": "IDLE",
+      "persistence": "SAVED 14:30Z",
+      "approval": "PLAN PENDING",
+      "actions": [
+        {
+          "label": "Approve plan",
+          "primary": true,
+          "refusal": null
+        },
+        {
+          "label": "Compare with run_2641",
+          "primary": false,
+          "refusal": null
+        }
+      ]
+    },
+    "brief": {
+      "change": "Route resolved for FULL_CREDIT_32 · 32 nodes · 51 typed edges · 0 CONDITIONAL · CP-CF appended at stage 100",
+      "impact": "Approval pins the route and SET-v4 in one transaction · execution reads only the pin",
+      "action": "Approve — binds preview digest dc2d…9f5b and input fingerprint fp_5a1c",
+      "evidence": "SET-v4 · 6 sources · 5 READY · 1 READY_WITH_LIMITATIONS (D-06)",
+      "headline": "1.2x NET LEV"
+    },
+    "tabs": [
+      {
+        "id": "plan",
+        "label": "Plan",
+        "cp": "RESOLVED"
+      },
+      {
+        "id": "route",
+        "label": "Route",
+        "cp": "32 NODES · PREVIEW"
+      }
+    ],
+    "verdict": {
+      "severity": "WARNING",
+      "conclusion": "Parked on a host predicate — the plan is not approved · no provider call is reserved until it is · the frontier would be CP-0",
+      "blocked_on": "plan approval"
+    },
+    "rail": [
+      {
+        "section": "directory",
+        "count": 4,
+        "state": "4 CASES · 1 INTAKE OPEN"
+      },
+      {
+        "section": "upload",
+        "count": 6,
+        "state": "SET-v4 · 6 ADMITTED"
+      },
+      {
+        "section": "analysis",
+        "count": 32,
+        "state": "snp_cvna_q2_2026 · 32 ACCEPTED"
+      },
+      {
+        "section": "book",
+        "count": 4,
+        "state": "4 CREDITS · 2 COMPARED"
+      },
+      {
+        "section": "run",
+        "count": 32,
+        "state": "run_2642 · ACTIVE · CP-6 OF 32"
+      },
+      {
+        "section": "model",
+        "count": null,
+        "state": "CP-CF · ACCEPTED"
+      },
+      {
+        "section": "report",
+        "count": 4,
+        "state": "rev_4 · DRAFT · FREEZE REFUSED"
+      },
+      {
+        "section": "committee",
+        "count": null,
+        "state": "rev_3 · FROZEN · NOT FILED"
+      },
+      {
+        "section": "admin",
+        "count": null,
+        "state": "UNAVAILABLE"
+      }
+    ],
+    "rail_local": {
+      "title": "Frontier · on approval",
+      "items": [
+        {
+          "label": "CP-0 Source readiness",
+          "meta": "RUNNABLE",
+          "on": true
+        }
+      ]
+    },
+    "served_role": {
+      "role": "Analyst",
+      "standing": "APPROVER"
+    }
+  },
+  "body": {
+    "run_id": "run_2642",
+    "build_id": "a43cb903",
+    "profile": "FULL_CREDIT_32",
+    "stages": [
+      {
+        "n": 0,
+        "label": "Stage 0 · preparation"
+      },
+      {
+        "n": 1,
+        "label": "Stage 1 · foundation"
+      },
+      {
+        "n": 2,
+        "label": "Stage 2 · synthesis"
+      },
+      {
+        "n": 3,
+        "label": "Stage 3 · structure and covenants"
+      },
+      {
+        "n": 4,
+        "label": "Stage 4 · QA"
+      },
+      {
+        "n": 5,
+        "label": "Stage 5 · debate and deliverable"
+      },
+      {
+        "n": 100,
+        "label": "Stage 100 · host extension"
+      }
+    ],
+    "nodes": [
+      {
+        "node_id": "rn-cp-0",
+        "module_id": "CP-0",
+        "name": "Source readiness",
+        "stage": 0,
+        "state": "RUNNABLE",
+        "running": false,
+        "reason": "no edges in · frontier on approval",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1",
+        "module_id": "CP-1",
+        "name": "Canonical data",
+        "stage": 1,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-0",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1a",
+        "module_id": "CP-1A",
+        "name": "Perimeter and debt hierarchy",
+        "stage": 1,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1b",
+        "module_id": "CP-1B",
+        "name": "Unit economics and GPU bridge",
+        "stage": 1,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1c",
+        "module_id": "CP-1C",
+        "name": "Peer benchmark",
+        "stage": 1,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "OPTIONAL CP-1 · soft edge hardens on readiness · will run RESTRICTED (source READY_WITH_LIMITATIONS)",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-1d",
+        "module_id": "CP-1D",
+        "name": "Earnings quality",
+        "stage": 1,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1 · REQUIRED CP-1B",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2",
+        "module_id": "CP-2",
+        "name": "Credit synthesis",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1 · REQUIRED CP-1D · ADVISORY CP-1C · soft edge hardens on readiness",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2a",
+        "module_id": "CP-2A",
+        "name": "Stress pathway",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1B",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2b",
+        "module_id": "CP-2B",
+        "name": "Liquidity bridge",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2c",
+        "module_id": "CP-2C",
+        "name": "Working capital",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1 · ADVISORY CP-1B · soft edge hardens on readiness",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2d",
+        "module_id": "CP-2D",
+        "name": "Capital allocation",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2e",
+        "module_id": "CP-2E",
+        "name": "Refinancing profile",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2f",
+        "module_id": "CP-2F",
+        "name": "Sponsor and governance",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "OPTIONAL CP-1 · soft edge hardens on readiness",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-2g",
+        "module_id": "CP-2G",
+        "name": "Forward drivers",
+        "stage": 2,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-2 · REQUIRED CP-2A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3",
+        "module_id": "CP-3",
+        "name": "Relative value",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-2 · ADVISORY CP-1C · soft edge hardens on readiness",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3a",
+        "module_id": "CP-3A",
+        "name": "Capital structure",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1A · REQUIRED CP-2D",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3b",
+        "module_id": "CP-3B",
+        "name": "Recovery waterfall",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-3A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-3c",
+        "module_id": "CP-3C",
+        "name": "Priority claims",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-3A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4",
+        "module_id": "CP-4",
+        "name": "Covenants",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4a",
+        "module_id": "CP-4A",
+        "name": "Restricted payments",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-4",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4b",
+        "module_id": "CP-4B",
+        "name": "Change of control",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-4",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-4c",
+        "module_id": "CP-4C",
+        "name": "Covenant headroom",
+        "stage": 3,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-4 · REQUIRED CP-2G",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-5",
+        "module_id": "CP-5",
+        "name": "Evidence trace validator",
+        "stage": 4,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-2 · REQUIRED CP-3 · REQUIRED CP-4 · REQUIRED CP-4C",
+        "is_gate": true,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-5a",
+        "module_id": "CP-5A",
+        "name": "Citation anchoring",
+        "stage": 4,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-2 · REQUIRED CP-3B · OPTIONAL CP-2F · soft edge hardens on readiness",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-5b",
+        "module_id": "CP-5B",
+        "name": "Lineage",
+        "stage": 4,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-2G · REQUIRED CP-3A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-6",
+        "module_id": "CP-6",
+        "name": "Debate",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "QA_GATE CP-5 · REQUIRED CP-2 · REQUIRED CP-3",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-6a",
+        "module_id": "CP-6A",
+        "name": "Chair memo",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-6",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-7",
+        "module_id": "CP-7",
+        "name": "Monitoring triggers",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-6 · REQUIRED CP-4C",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-7a",
+        "module_id": "CP-7A",
+        "name": "Rating rationale",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-6A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-8",
+        "module_id": "CP-8",
+        "name": "Deliverable assembly",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-7 · REQUIRED CP-7A",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-8a",
+        "module_id": "CP-8A",
+        "name": "Distribution pack",
+        "stage": 5,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-8",
+        "is_gate": false,
+        "extension": false,
+        "artifact_sha256": null,
+        "limitation": null
+      },
+      {
+        "node_id": "rn-cp-cf",
+        "module_id": "CP-CF",
+        "name": "Cash flow engine",
+        "stage": 100,
+        "state": "BLOCKED",
+        "running": false,
+        "reason": "REQUIRED CP-1 · REQUIRED CP-2G · REQUIRED CP-4",
+        "is_gate": false,
+        "extension": true,
+        "artifact_sha256": null,
+        "limitation": null
+      }
+    ],
+    "edges": [
+      {
+        "from": "CP-0",
+        "to": "CP-1",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1C",
+        "type": "OPTIONAL"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-1D",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1B",
+        "to": "CP-1D",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1D",
+        "to": "CP-2",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1C",
+        "to": "CP-2",
+        "type": "ADVISORY"
+      },
+      {
+        "from": "CP-1B",
+        "to": "CP-2A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1B",
+        "to": "CP-2C",
+        "type": "ADVISORY"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-2D",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-2E",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-2F",
+        "type": "OPTIONAL"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-2G",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2A",
+        "to": "CP-2G",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-3",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1C",
+        "to": "CP-3",
+        "type": "ADVISORY"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-3A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2D",
+        "to": "CP-3A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3A",
+        "to": "CP-3B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3A",
+        "to": "CP-3C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1A",
+        "to": "CP-4",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-4A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-4B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-4C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2G",
+        "to": "CP-4C",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4C",
+        "to": "CP-5",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-5A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3B",
+        "to": "CP-5A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2F",
+        "to": "CP-5A",
+        "type": "OPTIONAL"
+      },
+      {
+        "from": "CP-2G",
+        "to": "CP-5B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3A",
+        "to": "CP-5B",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-5",
+        "to": "CP-6",
+        "type": "QA_GATE"
+      },
+      {
+        "from": "CP-2",
+        "to": "CP-6",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-3",
+        "to": "CP-6",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-6",
+        "to": "CP-6A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-6",
+        "to": "CP-7",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4C",
+        "to": "CP-7",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-6A",
+        "to": "CP-7A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-7",
+        "to": "CP-8",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-7A",
+        "to": "CP-8",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-8",
+        "to": "CP-8A",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-1",
+        "to": "CP-CF",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-2G",
+        "to": "CP-CF",
+        "type": "REQUIRED"
+      },
+      {
+        "from": "CP-4",
+        "to": "CP-CF",
+        "type": "REQUIRED"
+      }
+    ],
+    "selected": "CP-0",
+    "attempts": {},
+    "gate": {
+      "state": "RESOLVED_NOT_PINNED",
+      "route_digest": "sha256:dc2d9bd6d76d4beb3242a766ea48307de0854836b8eca1208bfa471796cd9f5b",
+      "input_fingerprint": "fp_5a1c · SET-v4 · build a43cb903",
+      "approve": null,
+      "reserved": null
+    },
+    "accept": {
+      "code": "RUN_NOT_TERMINAL",
+      "clears": "the plan is approved, the route pinned and every node terminal"
+    }
+  },
+  "observed_at": "2026-09-09T14:30:00Z"
+}

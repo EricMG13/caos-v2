@@ -1,0 +1,1687 @@
+{
+  "chrome": {
+    "subject": null,
+    "ribbon": {
+      "chips": [
+        {
+          "label": "BOOK · 4 CREDITS",
+          "tone": "acc"
+        },
+        {
+          "label": "BUILD a43cb903",
+          "tone": "neutral"
+        },
+        {
+          "label": "ACCEPTED ONLY",
+          "tone": "ok"
+        },
+        {
+          "label": "1 DEFINITION DEVIATION",
+          "tone": "warn"
+        },
+        {
+          "label": "1 STALE",
+          "tone": "warn"
+        }
+      ],
+      "execution": "IDLE",
+      "persistence": "SAVED 14:30Z",
+      "approval": "UNRATIFIED",
+      "actions": [
+        {
+          "label": "Compare",
+          "primary": true,
+          "refusal": null
+        },
+        {
+          "label": "Save view",
+          "primary": false,
+          "refusal": null
+        }
+      ]
+    },
+    "brief": {
+      "change": "Q2 2026 prints admitted for Carvana, Hertz and Charter; Spirit's evidence is 118 days old.",
+      "impact": "Carvana compressed to 1.2x net leverage; Charter holds its 4.0x–4.5x band on its own definition, 4.6x on the house standard.",
+      "action": "Compare Carvana against Charter on LTM Q2-26 · BASE · accepted only; read Hertz apart while CP-3C is restricted.",
+      "evidence": "One accepted snapshot pinned per credit, each named · 24 passports · 1 deviation · 1 stale.",
+      "headline": "2 COMPARED"
+    },
+    "tabs": [
+      {
+        "id": "table",
+        "label": "Book",
+        "cp": null
+      },
+      {
+        "id": "compare",
+        "label": "Compare",
+        "cp": null
+      }
+    ],
+    "verdict": {
+      "severity": "SUCCESS",
+      "conclusion": "Carvana and Charter compared on one stated basis; Charter's leverage deviates from the house definition by 0.2x — marked, not hidden.",
+      "blocked_on": null
+    },
+    "rail": [
+      {
+        "section": "directory",
+        "count": 4,
+        "state": "4 CASES · 1 INTAKE OPEN"
+      },
+      {
+        "section": "upload",
+        "count": 6,
+        "state": "SET-v4 · 6 ADMITTED"
+      },
+      {
+        "section": "analysis",
+        "count": 32,
+        "state": "snp_cvna_q2_2026 · 32 ACCEPTED"
+      },
+      {
+        "section": "book",
+        "count": 4,
+        "state": "4 CREDITS · 2 COMPARED"
+      },
+      {
+        "section": "run",
+        "count": 32,
+        "state": "run_2642 · ACTIVE · CP-6 OF 32"
+      },
+      {
+        "section": "model",
+        "count": null,
+        "state": "CP-CF · ACCEPTED"
+      },
+      {
+        "section": "report",
+        "count": 4,
+        "state": "rev_4 · DRAFT · FREEZE REFUSED"
+      },
+      {
+        "section": "committee",
+        "count": null,
+        "state": "rev_3 · FROZEN · NOT FILED"
+      },
+      {
+        "section": "admin",
+        "count": null,
+        "state": "UNAVAILABLE"
+      }
+    ],
+    "rail_local": {
+      "title": "Facets",
+      "items": [
+        {
+          "label": "Status",
+          "meta": "3 OF 3",
+          "on": true
+        },
+        {
+          "label": "Net leverage",
+          "meta": "4 BANDS",
+          "on": true
+        },
+        {
+          "label": "Freshness",
+          "meta": "1 STALE",
+          "on": true
+        },
+        {
+          "label": "Definition",
+          "meta": "1 DEVIATES",
+          "on": true
+        }
+      ]
+    },
+    "served_role": {
+      "role": "Analyst",
+      "standing": "APPROVER"
+    }
+  },
+  "body": {
+    "facets": [
+      {
+        "key": "status",
+        "label": "Status",
+        "options": [
+          {
+            "value": "COMPLETE",
+            "count": 2,
+            "on": true
+          },
+          {
+            "value": "RESTRICTED",
+            "count": 1,
+            "on": true
+          },
+          {
+            "value": "BLOCKED",
+            "count": 1,
+            "on": true
+          }
+        ]
+      },
+      {
+        "key": "leverage_band",
+        "label": "Net leverage",
+        "options": [
+          {
+            "value": "≤ 2.0x",
+            "count": 1,
+            "on": true
+          },
+          {
+            "value": "2.0x – 5.0x",
+            "count": 1,
+            "on": true
+          },
+          {
+            "value": "5.0x – 8.0x",
+            "count": 1,
+            "on": true
+          },
+          {
+            "value": "> 8.0x",
+            "count": 1,
+            "on": true
+          }
+        ]
+      },
+      {
+        "key": "freshness",
+        "label": "Evidence freshness",
+        "options": [
+          {
+            "value": "Current",
+            "count": 3,
+            "on": true
+          },
+          {
+            "value": "Stale",
+            "count": 1,
+            "on": true
+          }
+        ]
+      },
+      {
+        "key": "definition_set",
+        "label": "Definition set",
+        "options": [
+          {
+            "value": "House standard",
+            "count": 3,
+            "on": true
+          },
+          {
+            "value": "Deviates",
+            "count": 1,
+            "on": true
+          }
+        ]
+      }
+    ],
+    "grouping": {
+      "keys": ["sector", "rating", "pathway", "vintage", "sponsor"],
+      "active": "sector"
+    },
+    "columns": [
+      {
+        "key": "net_leverage",
+        "label": "Net lev."
+      },
+      {
+        "key": "gross_leverage",
+        "label": "Gross lev."
+      },
+      {
+        "key": "adj_ebitda",
+        "label": "Adj. EBITDA"
+      },
+      {
+        "key": "fcf",
+        "label": "FCF"
+      },
+      {
+        "key": "liquidity",
+        "label": "Liquidity"
+      },
+      {
+        "key": "interest_cov",
+        "label": "Int. cov."
+      }
+    ],
+    "rows": [
+      {
+        "case_id": "CASE-2026-CVNA01",
+        "issuer": "Carvana Co. (NYSE: CVNA)",
+        "group": "Automotive retail",
+        "snapshot": "snp_cvna_q2_2026",
+        "freshness": {
+          "state": "current",
+          "date": "2026-07-29"
+        },
+        "attributes": {
+          "sector": "Automotive retail",
+          "rating": "B3 / B-",
+          "pathway": "FULL_CREDIT_32",
+          "vintage": "2023 senior secured exchange",
+          "sponsor": "Public · Garcia family voting control",
+          "leverage_band": "≤ 2.0x",
+          "status": "COMPLETE",
+          "freshness": "Current",
+          "definition_set": "House standard"
+        },
+        "cells": {
+          "net_leverage": {
+            "value": "1.2x",
+            "passport_id": "cvna.net_leverage",
+            "deviation": null,
+            "stale": false
+          },
+          "gross_leverage": {
+            "value": "2.5x",
+            "passport_id": "cvna.gross_leverage",
+            "deviation": null,
+            "stale": false
+          },
+          "adj_ebitda": {
+            "value": "$2,294M",
+            "passport_id": "cvna.adj_ebitda",
+            "deviation": null,
+            "stale": false
+          },
+          "fcf": {
+            "value": "$793M",
+            "passport_id": "cvna.fcf",
+            "deviation": null,
+            "stale": false
+          },
+          "liquidity": {
+            "value": "$4,072M",
+            "passport_id": "cvna.liquidity",
+            "deviation": null,
+            "stale": false
+          },
+          "interest_cov": {
+            "value": "3.15x",
+            "passport_id": "cvna.interest_cov",
+            "deviation": null,
+            "stale": false
+          }
+        }
+      },
+      {
+        "case_id": "CASE-2026-HTZ02",
+        "issuer": "Hertz Global Holdings, Inc. (NASDAQ: HTZ)",
+        "group": "Car rental",
+        "snapshot": "snp_htz_q2_2026",
+        "freshness": {
+          "state": "current",
+          "date": "2026-08-07"
+        },
+        "attributes": {
+          "sector": "Car rental",
+          "rating": "B2 / B",
+          "pathway": "FULL_CREDIT_32",
+          "vintage": "2021 plan-of-reorganisation exit",
+          "sponsor": "Knighthead / Certares",
+          "leverage_band": "5.0x – 8.0x",
+          "status": "RESTRICTED",
+          "freshness": "Current",
+          "definition_set": "House standard"
+        },
+        "cells": {
+          "net_leverage": {
+            "value": "5.9x",
+            "passport_id": "htz.net_leverage",
+            "deviation": null,
+            "stale": false
+          },
+          "gross_leverage": {
+            "value": "6.4x",
+            "passport_id": "htz.gross_leverage",
+            "deviation": null,
+            "stale": false
+          },
+          "adj_ebitda": {
+            "value": "$1,410M",
+            "passport_id": "htz.adj_ebitda",
+            "deviation": null,
+            "stale": false
+          },
+          "fcf": {
+            "value": "−$210M",
+            "passport_id": "htz.fcf",
+            "deviation": null,
+            "stale": false
+          },
+          "liquidity": {
+            "value": "$1,140M",
+            "passport_id": "htz.liquidity",
+            "deviation": null,
+            "stale": false
+          },
+          "interest_cov": {
+            "value": "1.4x",
+            "passport_id": "htz.interest_cov",
+            "deviation": null,
+            "stale": false
+          }
+        }
+      },
+      {
+        "case_id": "CASE-2026-CHTR03",
+        "issuer": "Charter Communications, Inc. (NASDAQ: CHTR)",
+        "group": "Cable broadband",
+        "snapshot": "snp_chtr_q2_2026",
+        "freshness": {
+          "state": "current",
+          "date": "2026-07-25"
+        },
+        "attributes": {
+          "sector": "Cable broadband",
+          "rating": "Ba1 / BB+",
+          "pathway": "LITE_CREDIT_22",
+          "vintage": "2020 senior notes stack",
+          "sponsor": "Advance / Newhouse",
+          "leverage_band": "2.0x – 5.0x",
+          "status": "COMPLETE",
+          "freshness": "Current",
+          "definition_set": "Deviates"
+        },
+        "cells": {
+          "net_leverage": {
+            "value": "4.4x",
+            "passport_id": "chtr.net_leverage",
+            "deviation": "0.2x",
+            "stale": false
+          },
+          "gross_leverage": {
+            "value": "4.5x",
+            "passport_id": "chtr.gross_leverage",
+            "deviation": "0.2x",
+            "stale": false
+          },
+          "adj_ebitda": {
+            "value": "$22,640M",
+            "passport_id": "chtr.adj_ebitda",
+            "deviation": null,
+            "stale": false
+          },
+          "fcf": {
+            "value": "$3,540M",
+            "passport_id": "chtr.fcf",
+            "deviation": null,
+            "stale": false
+          },
+          "liquidity": {
+            "value": "$3,820M",
+            "passport_id": "chtr.liquidity",
+            "deviation": null,
+            "stale": false
+          },
+          "interest_cov": {
+            "value": "4.3x",
+            "passport_id": "chtr.interest_cov",
+            "deviation": null,
+            "stale": false
+          }
+        }
+      },
+      {
+        "case_id": "CASE-2026-FLYYQ04",
+        "issuer": "Spirit Airlines, Inc. (OTC: FLYYQ)",
+        "group": "Airlines",
+        "snapshot": "snp_flyyq_q2_2026",
+        "freshness": {
+          "state": "stale",
+          "date": "2026-05-14"
+        },
+        "attributes": {
+          "sector": "Airlines",
+          "rating": "D / Default",
+          "pathway": "FULL_CREDIT_32",
+          "vintage": "2020 / 2023 loyalty notes stack",
+          "sponsor": "Debtor-in-possession · ad hoc bondholder group",
+          "leverage_band": "> 8.0x",
+          "status": "BLOCKED",
+          "freshness": "Stale",
+          "definition_set": "House standard"
+        },
+        "cells": {
+          "net_leverage": {
+            "value": "12.4x",
+            "passport_id": "flyyq.net_leverage",
+            "deviation": null,
+            "stale": true
+          },
+          "gross_leverage": {
+            "value": "13.1x",
+            "passport_id": "flyyq.gross_leverage",
+            "deviation": null,
+            "stale": true
+          },
+          "adj_ebitda": {
+            "value": "$310M",
+            "passport_id": "flyyq.adj_ebitda",
+            "deviation": null,
+            "stale": true
+          },
+          "fcf": {
+            "value": "−$420M",
+            "passport_id": "flyyq.fcf",
+            "deviation": null,
+            "stale": true
+          },
+          "liquidity": {
+            "value": "$280M",
+            "passport_id": "flyyq.liquidity",
+            "deviation": null,
+            "stale": true
+          },
+          "interest_cov": {
+            "value": "0.3x",
+            "passport_id": "flyyq.interest_cov",
+            "deviation": null,
+            "stale": true
+          }
+        }
+      }
+    ],
+    "compare": {
+      "basis": {
+        "period": "LTM Q2-26",
+        "scenario": "BASE",
+        "accepted_only": true
+      },
+      "metrics": [
+        "net_leverage",
+        "gross_leverage",
+        "adj_ebitda",
+        "fcf",
+        "liquidity",
+        "interest_cov"
+      ],
+      "cases": [
+        {
+          "case_id": "CASE-2026-CVNA01",
+          "issuer": "Carvana Co. (NYSE: CVNA)",
+          "snapshot": "snp_cvna_q2_2026",
+          "cells": {
+            "net_leverage": {
+              "value": "1.2x",
+              "passport_id": "cvna.net_leverage",
+              "deviation": null,
+              "stale": false
+            },
+            "gross_leverage": {
+              "value": "2.5x",
+              "passport_id": "cvna.gross_leverage",
+              "deviation": null,
+              "stale": false
+            },
+            "adj_ebitda": {
+              "value": "$2,294M",
+              "passport_id": "cvna.adj_ebitda",
+              "deviation": null,
+              "stale": false
+            },
+            "fcf": {
+              "value": "$793M",
+              "passport_id": "cvna.fcf",
+              "deviation": null,
+              "stale": false
+            },
+            "liquidity": {
+              "value": "$4,072M",
+              "passport_id": "cvna.liquidity",
+              "deviation": null,
+              "stale": false
+            },
+            "interest_cov": {
+              "value": "3.15x",
+              "passport_id": "cvna.interest_cov",
+              "deviation": null,
+              "stale": false
+            }
+          }
+        },
+        {
+          "case_id": "CASE-2026-CHTR03",
+          "issuer": "Charter Communications, Inc. (NASDAQ: CHTR)",
+          "snapshot": "snp_chtr_q2_2026",
+          "cells": {
+            "net_leverage": {
+              "value": "4.4x",
+              "passport_id": "chtr.net_leverage",
+              "deviation": "0.2x",
+              "stale": false
+            },
+            "gross_leverage": {
+              "value": "4.5x",
+              "passport_id": "chtr.gross_leverage",
+              "deviation": "0.2x",
+              "stale": false
+            },
+            "adj_ebitda": {
+              "value": "$22,640M",
+              "passport_id": "chtr.adj_ebitda",
+              "deviation": null,
+              "stale": false
+            },
+            "fcf": {
+              "value": "$3,540M",
+              "passport_id": "chtr.fcf",
+              "deviation": null,
+              "stale": false
+            },
+            "liquidity": {
+              "value": "$3,820M",
+              "passport_id": "chtr.liquidity",
+              "deviation": null,
+              "stale": false
+            },
+            "interest_cov": {
+              "value": "4.3x",
+              "passport_id": "chtr.interest_cov",
+              "deviation": null,
+              "stale": false
+            }
+          }
+        }
+      ]
+    },
+    "saved_views": [
+      {
+        "name": "Committee prep",
+        "scope": "WORKSPACE"
+      },
+      {
+        "name": "Stale first",
+        "scope": "ANALYST PROFILE"
+      },
+      {
+        "name": "Auto retail only",
+        "scope": "THIS BROWSER"
+      }
+    ],
+    "passports": {
+      "cvna.net_leverage": {
+        "label": "Carvana · Net lev.",
+        "value": "1.2x",
+        "unit": "x",
+        "definition": "Total debt less unrestricted cash, over LTM Adjusted EBITDA · house standard (the credit agreement's covenant definition).",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-29 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2641 · CP-1 attempt 1",
+        "snapshot": "snp_cvna_q2_2026 · accepted · build a43cb903",
+        "method": "net_leverage · host calculator · Decimal · verified",
+        "derivation": "(TOTAL_DEBT 4,976 + FINANCE_LEASES 375 − CASH 2,630) / LTM_ADJ_EBITDA 2,294 = 1.19x → 1.2x",
+        "citations": [
+          {
+            "chip": "D-04 p.68 ¶2",
+            "document_sha256": "8d36a602b39984bae8c201b8c2b53b014cd04a98c1bd75f68a59046747c8ef70",
+            "source_label": "D-04 · 8-K Senior Secured Notes Indenture",
+            "page": 68,
+            "bboxes": [[0.085, 0.41, 0.83, 0.06]],
+            "matched_text": "“Consolidated Net Leverage Ratio” means the ratio of Consolidated Total Indebtedness less Unrestricted Cash to Consolidated Cash Flow for the most recently ended four fiscal quarters.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": "/api/pages/D-04-p68.svg"
+          },
+          {
+            "chip": "D-01 p.50 ¶2",
+            "document_sha256": "0b582ff0c768f09ab1d75724a56c52ae1a1847074f43dd36183884a8fcdd30df",
+            "source_label": "D-01 · Form 10-K FY2025",
+            "page": 50,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Total debt: $4,976 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-02 p.18 ¶2",
+            "document_sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+            "source_label": "D-02 · Form 10-Q Q2 2026",
+            "page": 18,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Total cash and cash equivalents were $2,630 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality and Adjusted EBITDA audit",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Indentures and covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-6 · Committee debate on run_2642",
+            "module_id": "CP-6",
+            "state": "RUNNING"
+          },
+          {
+            "title": "rev_3 · Committee deliverable",
+            "module_id": "CP-MEMO",
+            "state": "FROZEN · NOT FILED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "cvna.gross_leverage": {
+        "label": "Carvana · Gross lev.",
+        "value": "2.5x",
+        "unit": "x",
+        "definition": "Total debt over LTM Adjusted EBITDA · house standard.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-29 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2641 · CP-1 attempt 1",
+        "snapshot": "snp_cvna_q2_2026 · accepted · build a43cb903",
+        "method": "gross_leverage · host calculator · Decimal · verified",
+        "derivation": "(TOTAL_DEBT 4,976 + FINANCE_LEASES 375 + FLOOR_PLAN 58 + ABS 859) / LTM_ADJ_EBITDA 2,294 = 2.5x",
+        "citations": [
+          {
+            "chip": "D-01 p.50 ¶2",
+            "document_sha256": "0b582ff0c768f09ab1d75724a56c52ae1a1847074f43dd36183884a8fcdd30df",
+            "source_label": "D-01 · Form 10-K FY2025",
+            "page": 50,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Total debt: $4,976 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-05 p.1 ¶3",
+            "document_sha256": "d7d81c81a40ad4d7bdbb26189f6b1fc8b7e57b447b62208e4b7b71037f905cef",
+            "source_label": "D-05 · Q2 2026 shareholder letter",
+            "page": 1,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Adjusted EBITDA totaled $769 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality and Adjusted EBITDA audit",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Indentures and covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-6 · Committee debate on run_2642",
+            "module_id": "CP-6",
+            "state": "RUNNING"
+          },
+          {
+            "title": "rev_3 · Committee deliverable",
+            "module_id": "CP-MEMO",
+            "state": "FROZEN · NOT FILED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "cvna.adj_ebitda": {
+        "label": "Carvana · Adj. EBITDA",
+        "value": "$2,294M",
+        "unit": "$M",
+        "definition": "LTM Adjusted EBITDA on the company's non-GAAP definition, benchmarked to the governing indenture.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-29 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2641 · CP-1 attempt 1",
+        "snapshot": "snp_cvna_q2_2026 · accepted · build a43cb903",
+        "method": "adj_ebitda · host calculator · Decimal · verified",
+        "derivation": "Q3_25 475 + Q4_25 430 + Q1_26 620 + Q2_26 769 = 2,294",
+        "citations": [
+          {
+            "chip": "D-05 p.1 ¶3",
+            "document_sha256": "d7d81c81a40ad4d7bdbb26189f6b1fc8b7e57b447b62208e4b7b71037f905cef",
+            "source_label": "D-05 · Q2 2026 shareholder letter",
+            "page": 1,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Adjusted EBITDA totaled $769 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-04 p.68 ¶2",
+            "document_sha256": "8d36a602b39984bae8c201b8c2b53b014cd04a98c1bd75f68a59046747c8ef70",
+            "source_label": "D-04 · 8-K Senior Secured Notes Indenture",
+            "page": 68,
+            "bboxes": [[0.085, 0.41, 0.83, 0.06]],
+            "matched_text": "Consolidated Cash Flow excludes uncontracted cost savings in excess of 15.0%.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": "/api/pages/D-04-p68.svg"
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality and Adjusted EBITDA audit",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Indentures and covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-6 · Committee debate on run_2642",
+            "module_id": "CP-6",
+            "state": "RUNNING"
+          },
+          {
+            "title": "rev_3 · Committee deliverable",
+            "module_id": "CP-MEMO",
+            "state": "FROZEN · NOT FILED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "cvna.fcf": {
+        "label": "Carvana · FCF",
+        "value": "$793M",
+        "unit": "$M",
+        "definition": "Net cash from operating activities less purchases of property and equipment, LTM.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-29 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2641 · CP-1 attempt 1",
+        "snapshot": "snp_cvna_q2_2026 · accepted · build a43cb903",
+        "method": "fcf · host calculator · Decimal · verified",
+        "derivation": "CFO 977 − CAPEX 184 = 793",
+        "citations": [
+          {
+            "chip": "D-02 p.8 ¶1",
+            "document_sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+            "source_label": "D-02 · Form 10-Q Q2 2026",
+            "page": 8,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Net cash provided by operating activities was $977 million for the twelve months ended June 30, 2026.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-02 p.8 ¶2",
+            "document_sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+            "source_label": "D-02 · Form 10-Q Q2 2026",
+            "page": 8,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Purchases of property and equipment were $184 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality and Adjusted EBITDA audit",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Indentures and covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-6 · Committee debate on run_2642",
+            "module_id": "CP-6",
+            "state": "RUNNING"
+          },
+          {
+            "title": "rev_3 · Committee deliverable",
+            "module_id": "CP-MEMO",
+            "state": "FROZEN · NOT FILED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "cvna.liquidity": {
+        "label": "Carvana · Liquidity",
+        "value": "$4,072M",
+        "unit": "$M",
+        "definition": "Unrestricted cash plus undrawn committed facility capacity at period end.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-29 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2641 · CP-1 attempt 1",
+        "snapshot": "snp_cvna_q2_2026 · accepted · build a43cb903",
+        "method": "liquidity · host calculator · Decimal · verified",
+        "derivation": "CASH 2,630 + FLOOR_PLAN_HEADROOM 1,442 = 4,072",
+        "citations": [
+          {
+            "chip": "D-02 p.18 ¶2",
+            "document_sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+            "source_label": "D-02 · Form 10-Q Q2 2026",
+            "page": 18,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Available borrowing capacity under the Floor Plan Facility was $1,442 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-06 p.1 ¶3",
+            "document_sha256": "1f6636a4396b5e3bea32983827804914273a02a8fafdeda29b3f79a32b3a2162",
+            "source_label": "D-06 · 8-K Ally floor-plan amendment",
+            "page": 1,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Renew the line of credit at $1.5 billion until April 30, 2027.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality and Adjusted EBITDA audit",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Indentures and covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-6 · Committee debate on run_2642",
+            "module_id": "CP-6",
+            "state": "RUNNING"
+          },
+          {
+            "title": "rev_3 · Committee deliverable",
+            "module_id": "CP-MEMO",
+            "state": "FROZEN · NOT FILED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "cvna.interest_cov": {
+        "label": "Carvana · Int. cov.",
+        "value": "3.15x",
+        "unit": "x",
+        "definition": "LTM Adjusted EBITDA over LTM cash interest paid.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-29 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2641 · CP-1 attempt 1",
+        "snapshot": "snp_cvna_q2_2026 · accepted · build a43cb903",
+        "method": "interest_cov · host calculator · Decimal · verified",
+        "derivation": "LTM_ADJ_EBITDA 2,294 / CASH_INTEREST 729 = 3.15x",
+        "citations": [
+          {
+            "chip": "D-02 p.9 ¶4",
+            "document_sha256": "af42744d1543530c24b3189989a819dab19b0495b3c1827cb623e1e05a774bf0",
+            "source_label": "D-02 · Form 10-Q Q2 2026",
+            "page": 9,
+            "bboxes": [[0.085, 0.48, 0.83, 0.05]],
+            "matched_text": "Cash paid for interest, net of amounts capitalised, was $729 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-05 p.1 ¶3",
+            "document_sha256": "d7d81c81a40ad4d7bdbb26189f6b1fc8b7e57b447b62208e4b7b71037f905cef",
+            "source_label": "D-05 · Q2 2026 shareholder letter",
+            "page": 1,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Adjusted EBITDA totaled $769 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality and Adjusted EBITDA audit",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Indentures and covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-6 · Committee debate on run_2642",
+            "module_id": "CP-6",
+            "state": "RUNNING"
+          },
+          {
+            "title": "rev_3 · Committee deliverable",
+            "module_id": "CP-MEMO",
+            "state": "FROZEN · NOT FILED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "htz.net_leverage": {
+        "label": "Hertz · Net lev.",
+        "value": "5.9x",
+        "unit": "x",
+        "definition": "Total debt less unrestricted cash, over LTM Adjusted EBITDA · house standard (the credit agreement's covenant definition).",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-08-07 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2588 · CP-1 attempt 1",
+        "snapshot": "snp_htz_q2_2026 · accepted · build a43cb903",
+        "method": "net_leverage · host calculator · Decimal · verified",
+        "derivation": "(CORPORATE_DEBT 9,020 − CASH 700) / LTM_ADJ_CORP_EBITDA 1,410 = 5.9x",
+        "citations": [
+          {
+            "chip": "D-02 p.41 ¶3",
+            "document_sha256": "5743921df428915a06af58f3bc24ae136e1246eae140b481707b4fc3782fda98",
+            "source_label": "D-02 · Hertz Form 10-Q Q2 2026",
+            "page": 41,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Corporate net leverage of 5.9x, calculated as corporate debt less unrestricted cash over adjusted corporate EBITDA.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-01 p.88 ¶1",
+            "document_sha256": "18f7ed79e7d508ab7074fadedc09445b249f24796d85e186a0182ad92fa31beb",
+            "source_label": "D-01 · Hertz Form 10-K FY2025",
+            "page": 88,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Corporate debt of $9,020 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-3C · Fleet collateral quality (RESTRICTED · ABS borrowing base not in SET-v2)",
+            "module_id": "CP-3C",
+            "state": "ACCEPTED WITH LIMITATION"
+          },
+          {
+            "title": "CP-4 · Corporate facility covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "htz.gross_leverage": {
+        "label": "Hertz · Gross lev.",
+        "value": "6.4x",
+        "unit": "x",
+        "definition": "Total debt over LTM Adjusted EBITDA · house standard.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-08-07 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2588 · CP-1 attempt 1",
+        "snapshot": "snp_htz_q2_2026 · accepted · build a43cb903",
+        "method": "gross_leverage · host calculator · Decimal · verified",
+        "derivation": "CORPORATE_DEBT 9,020 / LTM_ADJ_CORP_EBITDA 1,410 = 6.4x",
+        "citations": [
+          {
+            "chip": "D-01 p.88 ¶1",
+            "document_sha256": "18f7ed79e7d508ab7074fadedc09445b249f24796d85e186a0182ad92fa31beb",
+            "source_label": "D-01 · Hertz Form 10-K FY2025",
+            "page": 88,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Corporate debt of $9,020 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-3C · Fleet collateral quality (RESTRICTED · ABS borrowing base not in SET-v2)",
+            "module_id": "CP-3C",
+            "state": "ACCEPTED WITH LIMITATION"
+          },
+          {
+            "title": "CP-4 · Corporate facility covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "htz.adj_ebitda": {
+        "label": "Hertz · Adj. EBITDA",
+        "value": "$1,410M",
+        "unit": "$M",
+        "definition": "LTM Adjusted EBITDA on the company's non-GAAP definition, benchmarked to the governing indenture.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-08-07 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2588 · CP-1 attempt 1",
+        "snapshot": "snp_htz_q2_2026 · accepted · build a43cb903",
+        "method": "adj_ebitda · host calculator · Decimal · verified",
+        "derivation": "Q3_25 520 + Q4_25 180 + Q1_26 260 + Q2_26 450 = 1,410",
+        "citations": [
+          {
+            "chip": "D-03 p.4 ¶2",
+            "document_sha256": "eaa57706524e631173b510c79fadcf66ae405b8cf4e1d2b02ba901b5956387bd",
+            "source_label": "D-03 · Hertz 8-K Q2 2026 earnings release",
+            "page": 4,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Adjusted Corporate EBITDA of $450 million for the second quarter.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-3C · Fleet collateral quality (RESTRICTED · ABS borrowing base not in SET-v2)",
+            "module_id": "CP-3C",
+            "state": "ACCEPTED WITH LIMITATION"
+          },
+          {
+            "title": "CP-4 · Corporate facility covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "htz.fcf": {
+        "label": "Hertz · FCF",
+        "value": "−$210M",
+        "unit": "$M",
+        "definition": "Net cash from operating activities less purchases of property and equipment, LTM.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-08-07 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2588 · CP-1 attempt 1",
+        "snapshot": "snp_htz_q2_2026 · accepted · build a43cb903",
+        "method": "fcf · host calculator · Decimal · verified",
+        "derivation": "CFO 2,140 − NON_FLEET_CAPEX 350 − NET_FLEET_INVESTMENT 2,000 = −210",
+        "citations": [
+          {
+            "chip": "D-02 p.12 ¶1",
+            "document_sha256": "5743921df428915a06af58f3bc24ae136e1246eae140b481707b4fc3782fda98",
+            "source_label": "D-02 · Hertz Form 10-Q Q2 2026",
+            "page": 12,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Net cash provided by operating activities of $2,140 million; net fleet investment of $2,000 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-3C · Fleet collateral quality (RESTRICTED · ABS borrowing base not in SET-v2)",
+            "module_id": "CP-3C",
+            "state": "ACCEPTED WITH LIMITATION"
+          },
+          {
+            "title": "CP-4 · Corporate facility covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "htz.liquidity": {
+        "label": "Hertz · Liquidity",
+        "value": "$1,140M",
+        "unit": "$M",
+        "definition": "Unrestricted cash plus undrawn committed facility capacity at period end.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-08-07 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2588 · CP-1 attempt 1",
+        "snapshot": "snp_htz_q2_2026 · accepted · build a43cb903",
+        "method": "liquidity · host calculator · Decimal · verified",
+        "derivation": "CASH 700 + RCF_AVAILABLE 440 = 1,140",
+        "citations": [
+          {
+            "chip": "D-02 p.44 ¶2",
+            "document_sha256": "5743921df428915a06af58f3bc24ae136e1246eae140b481707b4fc3782fda98",
+            "source_label": "D-02 · Hertz Form 10-Q Q2 2026",
+            "page": 44,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Liquidity of $1,140 million, comprising $700 million of unrestricted cash and $440 million available under the revolver.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-3C · Fleet collateral quality (RESTRICTED · ABS borrowing base not in SET-v2)",
+            "module_id": "CP-3C",
+            "state": "ACCEPTED WITH LIMITATION"
+          },
+          {
+            "title": "CP-4 · Corporate facility covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "htz.interest_cov": {
+        "label": "Hertz · Int. cov.",
+        "value": "1.4x",
+        "unit": "x",
+        "definition": "LTM Adjusted EBITDA over LTM cash interest paid.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-08-07 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2588 · CP-1 attempt 1",
+        "snapshot": "snp_htz_q2_2026 · accepted · build a43cb903",
+        "method": "interest_cov · host calculator · Decimal · verified",
+        "derivation": "LTM_ADJ_CORP_EBITDA 1,410 / CASH_INTEREST 1,010 = 1.4x",
+        "citations": [
+          {
+            "chip": "D-02 p.13 ¶3",
+            "document_sha256": "5743921df428915a06af58f3bc24ae136e1246eae140b481707b4fc3782fda98",
+            "source_label": "D-02 · Hertz Form 10-Q Q2 2026",
+            "page": 13,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Cash paid for interest of $1,010 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-3C · Fleet collateral quality (RESTRICTED · ABS borrowing base not in SET-v2)",
+            "module_id": "CP-3C",
+            "state": "ACCEPTED WITH LIMITATION"
+          },
+          {
+            "title": "CP-4 · Corporate facility covenant interpreter",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "chtr.net_leverage": {
+        "label": "Charter · Net lev.",
+        "value": "4.4x",
+        "unit": "x",
+        "definition": "Total debt less unrestricted cash, over LTM Adjusted EBITDA (the credit agreement's covenant definition). · DEVIATES: Charter adds back stock compensation under its credit agreement.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-25 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2601 · CP-1 attempt 1",
+        "snapshot": "snp_chtr_q2_2026 · accepted · build a43cb903",
+        "method": "net_leverage · host calculator · Decimal · verified",
+        "derivation": "(TOTAL_DEBT 101,900 − CASH 1,540) / LTM_ADJ_EBITDA 22,640 = 4.43x on Charter's credit-agreement definition (add-backs $1,020)",
+        "citations": [
+          {
+            "chip": "D-02 p.38 ¶2",
+            "document_sha256": "d0236e8cb5bd19ca173797e63b6ad2a5d3c8d1a290c2bed54e456d0ca975890e",
+            "source_label": "D-02 · Charter Form 10-Q Q2 2026",
+            "page": 38,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Net leverage ratio of 4.4x as defined in the credit agreement, with stock compensation and other non-cash items added back.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-01 p.72 ¶1",
+            "document_sha256": "2e42b02bd64aba61b20811173f8bbee4f40f3ac7a4f75b7d6af675cf64e78873",
+            "source_label": "D-01 · Charter Form 10-K FY2025",
+            "page": 72,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Total debt of $101.9 billion.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality (LITE_CREDIT_22)",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Credit agreement definition audit",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": {
+          "amount": "0.2x",
+          "restatement": "4.6x on the house standard, which does not add back $1,020M of stock compensation"
+        }
+      },
+      "chtr.gross_leverage": {
+        "label": "Charter · Gross lev.",
+        "value": "4.5x",
+        "unit": "x",
+        "definition": "Total debt over LTM Adjusted EBITDA. · DEVIATES: Charter adds back stock compensation under its credit agreement.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-25 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2601 · CP-1 attempt 1",
+        "snapshot": "snp_chtr_q2_2026 · accepted · build a43cb903",
+        "method": "gross_leverage · host calculator · Decimal · verified",
+        "derivation": "TOTAL_DEBT 101,900 / LTM_ADJ_EBITDA 22,640 = 4.5x on Charter's credit-agreement definition",
+        "citations": [
+          {
+            "chip": "D-01 p.72 ¶1",
+            "document_sha256": "2e42b02bd64aba61b20811173f8bbee4f40f3ac7a4f75b7d6af675cf64e78873",
+            "source_label": "D-01 · Charter Form 10-K FY2025",
+            "page": 72,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Total debt of $101.9 billion.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          },
+          {
+            "chip": "D-03 p.2 ¶1",
+            "document_sha256": "662eb3caf744c147d82726799fba6838dc3796a408be64c26b2b2e834b9d3f6e",
+            "source_label": "D-03 · Charter Q2 2026 trending schedule (8-K Ex-99.2)",
+            "page": 2,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Adjusted EBITDA of $5,750 million for the second quarter.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality (LITE_CREDIT_22)",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Credit agreement definition audit",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": {
+          "amount": "0.2x",
+          "restatement": "4.7x on the house standard, which does not add back $1,020M of stock compensation"
+        }
+      },
+      "chtr.adj_ebitda": {
+        "label": "Charter · Adj. EBITDA",
+        "value": "$22,640M",
+        "unit": "$M",
+        "definition": "LTM Adjusted EBITDA on the company's non-GAAP definition, benchmarked to the governing indenture.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-25 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2601 · CP-1 attempt 1",
+        "snapshot": "snp_chtr_q2_2026 · accepted · build a43cb903",
+        "method": "adj_ebitda · host calculator · Decimal · verified",
+        "derivation": "Q3_25 5,620 + Q4_25 5,580 + Q1_26 5,690 + Q2_26 5,750 = 22,640",
+        "citations": [
+          {
+            "chip": "D-03 p.2 ¶1",
+            "document_sha256": "662eb3caf744c147d82726799fba6838dc3796a408be64c26b2b2e834b9d3f6e",
+            "source_label": "D-03 · Charter Q2 2026 trending schedule (8-K Ex-99.2)",
+            "page": 2,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Adjusted EBITDA of $5,750 million for the second quarter.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality (LITE_CREDIT_22)",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Credit agreement definition audit",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "chtr.fcf": {
+        "label": "Charter · FCF",
+        "value": "$3,540M",
+        "unit": "$M",
+        "definition": "Net cash from operating activities less purchases of property and equipment, LTM.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-25 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2601 · CP-1 attempt 1",
+        "snapshot": "snp_chtr_q2_2026 · accepted · build a43cb903",
+        "method": "fcf · host calculator · Decimal · verified",
+        "derivation": "CFO 14,900 − CAPEX 11,360 = 3,540",
+        "citations": [
+          {
+            "chip": "D-02 p.9 ¶1",
+            "document_sha256": "d0236e8cb5bd19ca173797e63b6ad2a5d3c8d1a290c2bed54e456d0ca975890e",
+            "source_label": "D-02 · Charter Form 10-Q Q2 2026",
+            "page": 9,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Net cash flows from operating activities of $14.9 billion; capital expenditures of $11.4 billion.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality (LITE_CREDIT_22)",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Credit agreement definition audit",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "chtr.liquidity": {
+        "label": "Charter · Liquidity",
+        "value": "$3,820M",
+        "unit": "$M",
+        "definition": "Unrestricted cash plus undrawn committed facility capacity at period end.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-25 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2601 · CP-1 attempt 1",
+        "snapshot": "snp_chtr_q2_2026 · accepted · build a43cb903",
+        "method": "liquidity · host calculator · Decimal · verified",
+        "derivation": "CASH 1,540 + RCF_AVAILABLE 2,280 = 3,820",
+        "citations": [
+          {
+            "chip": "D-02 p.40 ¶3",
+            "document_sha256": "d0236e8cb5bd19ca173797e63b6ad2a5d3c8d1a290c2bed54e456d0ca975890e",
+            "source_label": "D-02 · Charter Form 10-Q Q2 2026",
+            "page": 40,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Cash of $1.5 billion and $2.3 billion available under the revolving credit facility.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality (LITE_CREDIT_22)",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Credit agreement definition audit",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "chtr.interest_cov": {
+        "label": "Charter · Int. cov.",
+        "value": "4.3x",
+        "unit": "x",
+        "definition": "LTM Adjusted EBITDA over LTM cash interest paid.",
+        "period": "LTM Q2-26 · LTM ended 2026-06-30",
+        "scenario": "BASE",
+        "evidence_date": "2026-07-25 · current",
+        "computed_at": "2026-09-09T14:20:18Z · run_2601 · CP-1 attempt 1",
+        "snapshot": "snp_chtr_q2_2026 · accepted · build a43cb903",
+        "method": "interest_cov · host calculator · Decimal · verified",
+        "derivation": "LTM_ADJ_EBITDA 22,640 / CASH_INTEREST 5,270 = 4.3x",
+        "citations": [
+          {
+            "chip": "D-02 p.10 ¶2",
+            "document_sha256": "d0236e8cb5bd19ca173797e63b6ad2a5d3c8d1a290c2bed54e456d0ca975890e",
+            "source_label": "D-02 · Charter Form 10-Q Q2 2026",
+            "page": 10,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Cash paid for interest of $5.27 billion.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-1D · Earnings quality (LITE_CREDIT_22)",
+            "module_id": "CP-1D",
+            "state": "ACCEPTED"
+          },
+          {
+            "title": "CP-4 · Credit agreement definition audit",
+            "module_id": "CP-4",
+            "state": "ACCEPTED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "flyyq.net_leverage": {
+        "label": "Spirit · Net lev.",
+        "value": "12.4x",
+        "unit": "x",
+        "definition": "Total debt less unrestricted cash, over LTM Adjusted EBITDA · house standard (the credit agreement's covenant definition).",
+        "period": "LTM Q1-26 · LTM ended 2026-03-31",
+        "scenario": "BASE",
+        "evidence_date": "2026-05-14 · 118 days old · stale",
+        "computed_at": "2026-09-09T14:20:18Z · run_2410 · CP-1 attempt 1",
+        "snapshot": "snp_flyyq_q2_2026 · accepted · build a43cb903",
+        "method": "net_leverage · host calculator · Decimal · verified",
+        "derivation": "(TOTAL_DEBT 4,060 − CASH 220) / LTM_ADJ_EBITDA 310 = 12.4x",
+        "citations": [
+          {
+            "chip": "D-02 p.31 ¶2",
+            "document_sha256": "ef5612c606c0af4f5f4c1a72a9879c342949148b08a600fdab8dfc996e434601",
+            "source_label": "D-02 · Spirit Form 10-Q Q1 2026",
+            "page": 31,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Total debt of $4,060 million and cash of $220 million at March 31, 2026.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-4C · Fulcrum security determination (BLOCKED · plan feasibility)",
+            "module_id": "CP-4C",
+            "state": "BLOCKED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "flyyq.gross_leverage": {
+        "label": "Spirit · Gross lev.",
+        "value": "13.1x",
+        "unit": "x",
+        "definition": "Total debt over LTM Adjusted EBITDA · house standard.",
+        "period": "LTM Q1-26 · LTM ended 2026-03-31",
+        "scenario": "BASE",
+        "evidence_date": "2026-05-14 · 118 days old · stale",
+        "computed_at": "2026-09-09T14:20:18Z · run_2410 · CP-1 attempt 1",
+        "snapshot": "snp_flyyq_q2_2026 · accepted · build a43cb903",
+        "method": "gross_leverage · host calculator · Decimal · verified",
+        "derivation": "TOTAL_DEBT 4,060 / LTM_ADJ_EBITDA 310 = 13.1x",
+        "citations": [
+          {
+            "chip": "D-02 p.31 ¶2",
+            "document_sha256": "ef5612c606c0af4f5f4c1a72a9879c342949148b08a600fdab8dfc996e434601",
+            "source_label": "D-02 · Spirit Form 10-Q Q1 2026",
+            "page": 31,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Total debt of $4,060 million at March 31, 2026.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-4C · Fulcrum security determination (BLOCKED · plan feasibility)",
+            "module_id": "CP-4C",
+            "state": "BLOCKED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "flyyq.adj_ebitda": {
+        "label": "Spirit · Adj. EBITDA",
+        "value": "$310M",
+        "unit": "$M",
+        "definition": "LTM Adjusted EBITDA on the company's non-GAAP definition, benchmarked to the governing indenture.",
+        "period": "LTM Q1-26 · LTM ended 2026-03-31",
+        "scenario": "BASE",
+        "evidence_date": "2026-05-14 · 118 days old · stale",
+        "computed_at": "2026-09-09T14:20:18Z · run_2410 · CP-1 attempt 1",
+        "snapshot": "snp_flyyq_q2_2026 · accepted · build a43cb903",
+        "method": "adj_ebitda · host calculator · Decimal · verified",
+        "derivation": "Q2_25 120 + Q3_25 40 + Q4_25 60 + Q1_26 90 = 310",
+        "citations": [
+          {
+            "chip": "D-02 p.6 ¶1",
+            "document_sha256": "ef5612c606c0af4f5f4c1a72a9879c342949148b08a600fdab8dfc996e434601",
+            "source_label": "D-02 · Spirit Form 10-Q Q1 2026",
+            "page": 6,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Adjusted EBITDA of $90 million for the first quarter.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-4C · Fulcrum security determination (BLOCKED · plan feasibility)",
+            "module_id": "CP-4C",
+            "state": "BLOCKED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "flyyq.fcf": {
+        "label": "Spirit · FCF",
+        "value": "−$420M",
+        "unit": "$M",
+        "definition": "Net cash from operating activities less purchases of property and equipment, LTM.",
+        "period": "LTM Q1-26 · LTM ended 2026-03-31",
+        "scenario": "BASE",
+        "evidence_date": "2026-05-14 · 118 days old · stale",
+        "computed_at": "2026-09-09T14:20:18Z · run_2410 · CP-1 attempt 1",
+        "snapshot": "snp_flyyq_q2_2026 · accepted · build a43cb903",
+        "method": "fcf · host calculator · Decimal · verified",
+        "derivation": "CFO −180 − CAPEX 240 = −420",
+        "citations": [
+          {
+            "chip": "D-02 p.8 ¶2",
+            "document_sha256": "ef5612c606c0af4f5f4c1a72a9879c342949148b08a600fdab8dfc996e434601",
+            "source_label": "D-02 · Spirit Form 10-Q Q1 2026",
+            "page": 8,
+            "bboxes": [[0.085, 0.3, 0.83, 0.05]],
+            "matched_text": "Net cash used in operating activities of $180 million; capital expenditures of $240 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-4C · Fulcrum security determination (BLOCKED · plan feasibility)",
+            "module_id": "CP-4C",
+            "state": "BLOCKED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "flyyq.liquidity": {
+        "label": "Spirit · Liquidity",
+        "value": "$280M",
+        "unit": "$M",
+        "definition": "Unrestricted cash plus undrawn committed facility capacity at period end.",
+        "period": "LTM Q1-26 · LTM ended 2026-03-31",
+        "scenario": "BASE",
+        "evidence_date": "2026-05-14 · 118 days old · stale",
+        "computed_at": "2026-09-09T14:20:18Z · run_2410 · CP-1 attempt 1",
+        "snapshot": "snp_flyyq_q2_2026 · accepted · build a43cb903",
+        "method": "liquidity · host calculator · Decimal · verified",
+        "derivation": "CASH 220 + DIP_AVAILABLE 60 = 280",
+        "citations": [
+          {
+            "chip": "D-03 p.3 ¶1",
+            "document_sha256": "aa1ce6c9aa93f476c9de388a3f64f8f9e790f27fcddb1e4fadb32e76213cb818",
+            "source_label": "D-03 · Spirit 8-K Item 1.03 Chapter 11 filing",
+            "page": 3,
+            "bboxes": [[0.085, 0.21, 0.83, 0.05]],
+            "matched_text": "Debtor-in-possession financing of $300 million, of which $60 million remains available.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-4C · Fulcrum security determination (BLOCKED · plan feasibility)",
+            "module_id": "CP-4C",
+            "state": "BLOCKED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      },
+      "flyyq.interest_cov": {
+        "label": "Spirit · Int. cov.",
+        "value": "0.3x",
+        "unit": "x",
+        "definition": "LTM Adjusted EBITDA over LTM cash interest paid.",
+        "period": "LTM Q1-26 · LTM ended 2026-03-31",
+        "scenario": "BASE",
+        "evidence_date": "2026-05-14 · 118 days old · stale",
+        "computed_at": "2026-09-09T14:20:18Z · run_2410 · CP-1 attempt 1",
+        "snapshot": "snp_flyyq_q2_2026 · accepted · build a43cb903",
+        "method": "interest_cov · host calculator · Decimal · verified",
+        "derivation": "LTM_ADJ_EBITDA 310 / CASH_INTEREST 1,030 = 0.3x",
+        "citations": [
+          {
+            "chip": "D-02 p.9 ¶3",
+            "document_sha256": "ef5612c606c0af4f5f4c1a72a9879c342949148b08a600fdab8dfc996e434601",
+            "source_label": "D-02 · Spirit Form 10-Q Q1 2026",
+            "page": 9,
+            "bboxes": [[0.085, 0.39, 0.83, 0.05]],
+            "matched_text": "Cash paid for interest of $1,030 million.",
+            "observed_at": "2026-09-09T14:30:00Z",
+            "render_url": null
+          }
+        ],
+        "supporting_research": [
+          {
+            "title": "CP-4C · Fulcrum security determination (BLOCKED · plan feasibility)",
+            "module_id": "CP-4C",
+            "state": "BLOCKED"
+          }
+        ],
+        "driver": null,
+        "deviation": null
+      }
+    }
+  },
+  "observed_at": "2026-09-09T14:30:00Z"
+}
