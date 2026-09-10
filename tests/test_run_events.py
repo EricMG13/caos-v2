@@ -253,6 +253,19 @@ def test_an_attempt_cannot_start_on_a_run_that_has_ended(
     assert _names(conn, run_id) == [RunEvent.RUN_FAILED.value]
 
 
+def test_start_run_refuses_a_float_ceiling(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """Invariant 7 on the ceiling itself: a run carrying a float ceiling would
+    give invariant 8's checks a number they cannot trust."""
+    conn, case_id, _run_id = run
+
+    with pytest.raises(Refusal) as caught:
+        start_run(conn, case_id, budget_ceiling=0.5)  # type: ignore[arg-type]
+
+    assert caught.value.code is RefusalCode.MONEY_NOT_DECIMAL
+
+
 def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
     run: tuple[StoreConnection, UUID, UUID],
 ) -> None:
