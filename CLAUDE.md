@@ -149,15 +149,13 @@ system this size means nobody looked.
 
 **Phase 6.**
 
-- **The run tail has no HTTP binding.** `server/api/stream.py` answers every rule
-  `SYSTEM_SPEC.md` §9 states — resume excluding the marker, membership rechecked
-  before each event, closure on the terminal event — and none of it is served
-  over a socket yet. `text/event-stream` is transport, and a web framework is a
-  dependency that needs a dated decision entry. *Upgrade:* the phase that adds
-  the first route brings FastAPI, its entry, the actor matrix
-  (`test_production_never_trusts_role_header`,
-  `test_unauthorised_case_is_private_404`) and the first `IO_BUDGET` under
-  `server/api/` with it.
+- **The run tail still has no HTTP binding.** `server/api/stream.py` answers
+  every rule `SYSTEM_SPEC.md` §9 states — resume excluding the marker,
+  membership rechecked before each event, closure on the terminal event — and
+  none of it is served over a socket yet. The run document is; the tail is the
+  next PR in this phase, and `text/event-stream` needs a connection held open,
+  which the document's request-scoped one is not. *Upgrade:* the events route,
+  with the five-minute deadline below.
 - **The role an actor carries is global, and nothing reads it.**
   `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
   asserts, which is what the actor matrix is about; but every authority decision
