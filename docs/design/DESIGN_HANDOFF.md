@@ -16,39 +16,52 @@ font families, so `caos-shell.css` declares `--font-sans|mono|display` first
 |---|---|
 | `caos-v2-personas.html` | Turns 1–2. Turn 1 (persona-as-shell) is superseded; Turn 2 conformed the layout to `IA_SPEC.md`. |
 | `caos-shell.css` | The workspace shell every card draws: four bands, the nine-section rail, panels, tags, severity glyphs, the projection table, the paper, the route DAG. One stylesheet so no two cards drift. |
+| `caos-shell.additions.css` | The register, intake and source-pack idioms, and the rule that keeps a decision brief from ever overflowing. |
+| `caos-evidence.css` | The one evidence surface: the drawer, the page render with its rectangle, and the passport. |
 | `03 Committee and Model.dc.html` | Turn 3 — the two sections `docs/DECISIONS.md` §14 rewrote. |
-| `04 Run.dc.html` | Turn 4 — `/run/`. |
+| `04 Run.dc.html` | Turn 4 — `/run/`, running and at the plan gate. |
+| `05 Directory and Upload.dc.html` | Turn 5 — where evidence enters, and what the machine may assert. |
+| `06 Report and Admin.dc.html` | Turn 6 — the opinion, and the section that does not pretend. |
+| `07 Evidence and passport.dc.html` | Turn 7 — the drawer at 1280 px and the ten-field passport. |
+| `08 States and refusals.dc.html` | Turn 8 — specimen boards: the seven states, the page-level states, the refused controls. |
+| `09 Rail and responsive.dc.html` | Turn 9 — the rail's local groups, 1080 px and 1024 px. |
 
 ## Card map
 
+Every section is drawn. Cards `2c` and `2d` are superseded by `3a`/`3b` and `3c`:
+they drew a `.docx` publication gate and a workbook builder, neither of which this
+build produces.
+
 | Section | URL | Card | State it shows |
 |---|---|---|---|
-| Directory | `/directory/` | — | Turn 5 |
-| Upload | `/upload/` | — | Turn 5 |
-| Analysis | `/analysis/` | `2a` | Module output, evidence trace, clearance |
-| Book | `/book/` | `2b` | Facets, comparison, passport |
-| Run | `/run/` | **`4a`** | Route pinned, running; accept refused `RUN_NOT_TERMINAL` |
+| Directory | `/directory/` | **`5a`** | Case register: search, one filter, one action per row, no batch state |
+| Directory | `/directory/` | **`5b`** | Document-first intake: six labelled suggestions, one corrected, nothing committed |
+| Upload | `/upload/` | **`5c`** | Source pack: grade, disposition, pages, digest, set versions; one withdrawn, one restated |
+| Analysis | `/analysis/` | `2a` · **`7a`** | Module output and evidence trace; the drawer open at 1280 px |
+| Book | `/book/` | `2b` · **`7b`** | Facets and comparison; the ten-field passport over an actual cell |
+| Run | `/run/` | **`4a`** | Route pinned and running; accept refused `RUN_NOT_TERMINAL` |
 | Run | `/run/` | **`4b`** | The plan gate: resolved not pinned, approval digest-bound, nothing reserved |
 | Model | `/model/` | **`3c`** | CP-CF's projection read-only, residual column, unavailable propagating |
-| Report | `/report/` | — | Turn 6 |
+| Report | `/report/` | **`6a`** | Draft revision; sign-off refused `UNCITED_FIGURE_IN_JUDGMENT`, the figure named |
 | Committee | `/committee/` | **`3a`** | Deliverable on paper `DRAFT — NOT FILED`; filing refused `APPROVER_NOT_INDEPENDENT` |
 | Committee | `/committee/` | **`3b`** | Filed by an independent approver; receipt, watermark gone |
-| Admin | `/admin/` | — | Turn 6 |
+| Admin | `/admin/` | **`6b`** | An explicit unavailable capability naming the four things that are missing |
 
-Cards `2c` and `2d` are superseded by `3a`/`3b` and `3c`: they drew a `.docx`
-publication gate and a workbook builder, neither of which this build produces.
+### Cross-cutting contracts
 
-## Remaining turns
-
-| Turn | Cards | What it must show |
+| Contract | Card | What it fixes |
 |---|---|---|
-| 5 | Directory, Upload | Case register (one action per row, no batch); document-first intake with **labelled suggestions**; per-source grade, disposition, page count, digest, set-version membership; withdrawal checked live; restatement as a conflict row |
-| 6 | Report, Admin | Draft revision and the opinion binding the exact revision; freeze refused on an uncited `ANALYST_JUDGMENT` figure; Admin as an explicit unavailable capability naming what is missing |
-| 7 | Evidence drawer, passport | Analysis at 1280 px with the drawer open (`D-04 p.68 ¶2`, page render, rectangle, matched text, observation time); the ten-field passport over an actual cell and over a projected cell |
-| 8 | States | One region in all seven states side by side; the page-level offline sentence; private 404 and absent route sharing one wording |
-| 9 | Refused controls | Filing, run accept and a ribbon primary each visible and refused with its typed code |
-| 10 | Rail, served role | Nine count/state lines; the section-local group in three variants; the two foot controls |
-| 11 | Responsive | 1080 px (right column folds into the drawer) and 1024 px (rail strip). Nothing below 1024 |
+| The seven states | **`8a`** | One region eight times; `ready` is the one with no marker |
+| Page-level states | **`8b`** | The offline sentence; a private case and an absent route share one wording |
+| Refused controls | **`8c`** | Six typed codes, each with the condition that clears it |
+| The rail | **`9a`** | Nine sections, three section-local groups, two foot controls |
+| Responsive | **`9b`** · **`9c`** | 1080 px folds the right column into the drawer; 1024 px collapses the rail to a strip |
+
+## Open design questions the build must answer
+
+1. **Sign out at 1024 px.** The strip rail in `9c` keeps one foot control, Ask. `IA_SPEC.md` §3 sets two as a maximum, not a minimum, so this conforms — but where sign out goes at that width is undrawn. Options: into the Ask menu, into the ribbon, or a second 22px strip button.
+2. **Below 1024 px.** `9c`'s note argues for one honest sentence rather than a reflow. It is not drawn.
+3. **The CP-6 debate's home.** Decided as an Analysis module tab (`docs/design/BRIEF.md`); the card that draws it is Turn 2's `2a` tab strip, not yet its own card.
 
 ## What the build inherits from the cards
 
@@ -58,3 +71,5 @@ publication gate and a workbook builder, neither of which this build produces.
 - **Paper is for filed output only** — the Committee document, nowhere else.
 - **Projection** — residual as its own column; an unreconciled period unavailable with its reason; every later period in that case unavailable by propagation, never zero growth.
 - **Route** — node states are the bundle's four with the reason named; the one `QA_GATE` is drawn as a gate; edges are typed from `profile["edges"]`.
+- **Suggestions are labelled** — anything the machine proposes carries a dashed `SUGGESTED` chip until a person commits it, and the browser posts files and nothing else.
+- **The states machinery** — `RegionState` takes one of seven kinds plus `ready`; `ready` renders children with no marker; `observed-empty` requires a timestamp; `unavailable` uses the fixed wording.
