@@ -1,0 +1,226 @@
+"""Phase 6 debt: the loop meets `execute_module` and charges what was reported.
+
+`docs/REBUILD_PLAN.md` lists `test_the_loop_charges_what_the_provider_reported`
+under Phase 6, owed by Phase 4. Phase 4's loop reserved an estimate and charged
+whatever its stub handed back; Phase 5 built the real module execution and the
+real provider, which reports `usage.cost`. This is the join.
+
+The distinction the test exists for: an estimate is what the run set aside before
+the call, and a charge is what the call cost. A ledger that recorded the estimate
+would reconcile perfectly against itself and tell nobody what was spent.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from decimal import Decimal
+from pathlib import Path
+from uuid import UUID
+
+import pytest
+
+from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute, resolve_route
+from server.engine.runtime import Execution, run_route
+from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import Bundle
+from server.methodology.runner import ModuleProvider
+from server.provider import Completion
+from server.store import RunStatus, StoreConnection
+from server.store.runs import run_status, start_run
+
+VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
+PROFILE = "FULL_CREDIT_32"
+# Two nodes: CP-0 and CP-DR. The smallest real pathway in the catalog.
+SELECTION = "DEEP_RESEARCH"
+
+ESTIMATE = Decimal("0.50")
+# Deliberately unlike the estimate, and unlike a round number, so a ledger that
+# recorded the wrong one cannot coincidentally agree.
+REPORTED = Decimal("0.0000041")
+
+REPORT = b"""Acme Holdings plc annual report 2026
+Total debt at 31 December 2026 was USD 1,240.0m
+"""
+
+
+@dataclass
+class _Completions:
+    """A completion provider that answers with one valid claim, at a known cost."""
+
+    source_id: UUID
+    charge: Decimal = REPORTED
+    calls: list[str] = field(default_factory=list)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        self.calls.append(prompt[:40])
+        body = json.dumps(
+            {
+                "claims": [
+                    {
+                        "statement": "Total debt was USD 1,240.0m.",
+                        "citations": [
+                            {
+                                "source_id": str(self.source_id),
+                                "page": 1,
+                                "matched_text": "Total debt at 31 December 2026",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        return Completion(
+            content=body, charge=self.charge, generation_id="gen-loop-test"
+        )
+
+
+@pytest.fixture
+def route() -> ResolvedRoute:
+    catalog = json.loads(
+        (
+            VENDORED
+            / "skills/cp-os-credit-os/references"
+            / "CREDIT_OS_V_MODULE_CATALOG_v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    return resolve_route(catalog, PROFILE, SELECTION)
+
+
+@pytest.fixture
+def ready(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> tuple[StoreConnection, UUID, UUID, BlobStore]:
+    conn, case_id = case
+    blobs = BlobStore(tmp_path / "blobs")
+    [source_id] = admit_pack(
+        conn,
+        blobs,
+        case_id=case_id,
+        documents=[Document(filename=BoundaryText.of("report.txt"), data=REPORT)],
+    )
+    run_id = start_run(conn, case_id)
+    conn.commit()
+    return conn, run_id, source_id, blobs
+
+
+def _charges(conn: StoreConnection, run_id: UUID) -> list[Decimal]:
+    rows = conn.execute(
+        "SELECT amount FROM budget_ledger WHERE run_id = %s ORDER BY charged_at",
+        (run_id,),
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def _reserved(conn: StoreConnection, run_id: UUID) -> list[Decimal]:
+    rows = conn.execute(
+        "SELECT amount FROM budget_reservations WHERE run_id = %s", (run_id,)
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def test_the_loop_charges_what_the_provider_reported(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """The named test. Reserved the estimate, charged the report.
+
+    Both numbers are in the store afterwards and they are different, which is
+    the point: the reservation is what the ceiling was checked against, and the
+    charge is what the run actually cost.
+    """
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id)
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        delivered=_delivered(conn, source_id),
+    )
+
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(provider, ESTIMATE),
+    )
+
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    charges = _charges(conn, run_id)
+    assert charges == [REPORTED, REPORTED], "the ledger holds what the calls cost"
+    assert _reserved(conn, run_id) == [ESTIMATE, ESTIMATE], "and what was set aside"
+    assert REPORTED != ESTIMATE, "a test that compared two equal numbers proves nothing"
+
+
+def test_the_artifact_is_the_envelope_the_host_built(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """What the loop stores is the canonical envelope, addressed by its digest --
+    not the provider's body, which is untrusted JSON the host has already
+    replaced."""
+    conn, run_id, source_id, blobs = ready
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=_Completions(source_id),
+        delivered=_delivered(conn, source_id),
+    )
+
+    run_route(
+        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
+    )
+
+    row = conn.execute(
+        "SELECT artifact_sha256 FROM artifacts WHERE run_id = %s"
+        " ORDER BY created_at LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    assert row is not None
+    stored = json.loads(blobs.get(str(row[0])))
+
+    assert stored["module_id"] == "CP-0", "the host's module id, not the module's"
+    assert stored["build_id"].startswith("a43cb903")
+    assert len(stored["authority_digest"]) == 64
+    assert stored["claims"][0]["citations"][0]["bboxes"], "anchored by the host"
+
+
+def test_a_module_that_cannot_be_anchored_stops_the_run(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """A refusal inside a node is not a node that quietly produced nothing. The
+    attempt and its reservation stay; the run does not complete."""
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id)
+    completions.source_id = UUID(int=0)  # cites evidence never delivered
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        delivered=_delivered(conn, source_id),
+    )
+
+    with pytest.raises(Exception, match="CITATION_NOT_DELIVERED"):
+        run_route(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            execution=Execution(provider, ESTIMATE),
+        )
+
+    assert run_status(conn, run_id) is RunStatus.RUNNING
+    assert _reserved(conn, run_id) == [ESTIMATE], "the call was paid for regardless"
+    assert _charges(conn, run_id) == [], "and nothing was accepted"
+
+
+def _delivered(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:
+    rows = conn.execute(
+        "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
+        (source_id,),
+    ).fetchall()
+    return [(source_id, str(row[0])) for row in rows]

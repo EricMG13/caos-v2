@@ -16,6 +16,7 @@ here rather than the object the provider sent.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
@@ -48,6 +49,22 @@ Rules that will cause your answer to be refused if broken:
 - `source_id` must be one of the ids given below.
 - Use no keys other than those shown.
 """
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleOutcome:
+    """What one module execution produced, and what the call cost.
+
+    Two things rather than one because they answer to different rules: the
+    envelope is the module's output under invariant 9, and the charge is the
+    provider's reported `usage.cost` under invariant 8. The loop needs both and
+    they must not be conflated -- a charge folded into the envelope would be a
+    figure inside a document the host claims to have derived.
+    """
+
+    envelope: Envelope
+    charge: Decimal
+    generation_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +116,7 @@ def execute_module(
     module_id: str,
     delivered: list[Delivery],
     provider: CompletionProvider,
-) -> Envelope:
+) -> ModuleOutcome:
     """Run one module and return the envelope the host is willing to store.
 
     The order is the contract: authority is verified before the prompt is built,
@@ -121,11 +138,16 @@ def execute_module(
             Claim(statement=BoundaryText.of(statement), citations=tuple(anchored))
         )
 
-    return Envelope(
+    envelope = Envelope(
         # The host's, not the module's. Whatever it claimed about its own
         # identity did not survive this line (invariant 3).
         module_id=module_id,
         build_id=authority.build_id,
         authority_digest=authority_digest(authority),
         claims=tuple(claims),
+    )
+    return ModuleOutcome(
+        envelope=envelope,
+        charge=completion.charge,
+        generation_id=completion.generation_id,
     )
