@@ -199,6 +199,51 @@ def test_readiness_is_read_only_from_the_cp0_artifact(catalog: dict[str, Any]) -
     assert readiness_from(route, honest) == {"CP-1A": "READY"}
 
 
+def test_readiness_from_skips_nodes_before_the_cp0_one(catalog: dict[str, Any]) -> None:
+    """CP-0 need not be `route.nodes[0]`: the search walks past whatever precedes
+    it rather than assuming its position."""
+    route = ResolvedRoute(
+        profile_id="p",
+        selection_id="s",
+        nodes=(RouteNode("RN-1", "CP-1", 1), RouteNode("RN-0", "CP-0", 0)),
+        edges=(),
+    )
+    accepted = {"RN-0": _cp0_artifact(**{"CP-1A": "READY"})}
+
+    assert readiness_from(route, accepted) == {"CP-1A": "READY"}
+
+
+def test_readiness_from_a_route_with_no_cp0_node_is_empty(
+    catalog: dict[str, Any],
+) -> None:
+    route = ResolvedRoute(
+        profile_id="p",
+        selection_id="s",
+        nodes=(RouteNode("RN-1", "CP-1", 1),),
+        edges=(),
+    )
+
+    assert readiness_from(route, {}) == {}
+
+
+def test_a_profile_entry_that_is_not_a_mapping_is_refused() -> None:
+    catalog = {"profiles": {"BAD": ["not", "a", "mapping"]}}
+
+    with pytest.raises(Refusal) as caught:
+        resolve_route(catalog, "BAD", "whatever")
+
+    assert caught.value.code is RefusalCode.ROUTE_PROFILE_UNKNOWN
+
+
+def test_a_pathway_entry_that_is_not_a_mapping_is_refused() -> None:
+    catalog = {"profiles": {"P": {"pathways": {"BAD": ["not", "a", "mapping"]}}}}
+
+    with pytest.raises(Refusal) as caught:
+        resolve_route(catalog, "P", "BAD")
+
+    assert caught.value.code is RefusalCode.ROUTE_SELECTION_UNKNOWN
+
+
 def test_a_node_with_every_edge_met_is_runnable(catalog: dict[str, Any]) -> None:
     route = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
     accepted = _accept(route, "CP-0", cp0=_cp0_artifact())

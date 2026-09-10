@@ -235,6 +235,39 @@ def test_a_quote_that_appears_twice_is_refused(
     assert caught.value.code is RefusalCode.CITATION_AMBIGUOUS
 
 
+def test_an_empty_quote_is_refused(
+    case: tuple[StoreConnection, UUID], blobs: BlobStore
+) -> None:
+    """`matched_text.split()` on whitespace-only text is an empty run, which is
+    not a match of zero words -- it is nothing to search for."""
+    conn, case_id = case
+    source_id = _admit(conn, case_id, blobs, REPORT)
+
+    with pytest.raises(Refusal) as caught:
+        anchor_citation(conn, source_id=source_id, page=1, matched_text="   ")
+
+    assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
+
+
+def test_verify_citations_refuses_a_delivered_source_with_no_live_row(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """A source_id can be in the caller's `delivered` set and still not name a
+    live source: the boundary re-checks it against the store rather than
+    trusting the set (invariant 3: the host owns identity)."""
+    conn, _case_id = case
+    phantom = uuid4()
+
+    with pytest.raises(Refusal) as caught:
+        verify_citations(
+            conn,
+            delivered={phantom},
+            citations=[Citation(source_id=phantom, page=1, matched_text="Total debt")],
+        )
+
+    assert caught.value.code is RefusalCode.EVIDENCE_NOT_AVAILABLE
+
+
 def test_a_quote_on_the_wrong_page_is_refused(
     case: tuple[StoreConnection, UUID], blobs: BlobStore
 ) -> None:

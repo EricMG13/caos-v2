@@ -9,6 +9,7 @@ invariant 11 rests on it being more than that.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,24 @@ def test_an_address_that_is_not_a_digest_never_reaches_the_filesystem(
         blobs.get(address)
 
     assert caught.value.code is RefusalCode.BLOB_ADDRESS_INVALID
+
+
+def test_put_removes_its_staging_file_when_the_write_fails(
+    blobs: BlobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full disk otherwise leaves its staging file behind on every attempt, and
+    the next attempt meets the same full disk."""
+    message = "no space left on device"
+
+    def _failing_fsync(_fd: int) -> None:
+        raise OSError(message)
+
+    monkeypatch.setattr(os, "fsync", _failing_fsync)
+
+    with pytest.raises(OSError, match=message):
+        blobs.put(CONTENT)
+
+    assert [p for p in blobs.root.rglob("*") if p.is_file()] == []
 
 
 def test_put_leaves_no_staging_file_behind(blobs: BlobStore) -> None:

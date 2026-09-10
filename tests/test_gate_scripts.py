@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +23,18 @@ import scan_floors
 import tracked
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def _run_as_main(script: str, args: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
+    """Executes `script` with `__name__ == "__main__"`, in-process so coverage can
+    see it. The `_run()` subprocess helper above cannot: coverage.py does not
+    trace a subprocess, which is exactly why this line is otherwise dead in every
+    report this suite writes."""
+    monkeypatch.setattr(sys, "argv", [script, *args])
+    with pytest.raises(SystemExit) as caught:
+        runpy.run_path(str(REPO / "scripts" / script), run_name="__main__")
+    assert isinstance(caught.value.code, int)
+    return caught.value.code
 
 
 def _run(script: str, *args: str, cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
@@ -298,6 +312,158 @@ def test_tracked_python_skips_a_file_that_is_no_longer_on_disk(
     (tmp_path / "gone.py").unlink()
 
     assert tracked.tracked_python(tmp_path) == [tmp_path / "here.py"]
+
+
+def test_tracked_python_refuses_when_git_is_not_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(RuntimeError, match="git is not on PATH"):
+        tracked.tracked_python(tmp_path)
+
+
+def test_check_tested_main_refuses_when_nothing_is_scanned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    monkeypatch.setattr(check_tested, "REPO", tmp_path)
+
+    assert check_tested.main([]) == 2
+    assert "scanned no files" in capsys.readouterr().err
+
+
+def test_check_tested_main_reports_untested_symbols_and_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = tmp_path / "m.py"
+    module.write_text("def foo() -> None: ...\n", encoding="utf-8")
+    missing_tests_dir = tmp_path / "no_such_tests_dir"
+
+    result = check_tested.main([str(module), "--tests", str(missing_tests_dir)])
+
+    assert result == 1
+    assert "'foo' has no test naming it" in capsys.readouterr().out
+
+
+def test_check_tested_main_passes_when_every_symbol_is_named(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "m.py"
+    module.write_text("def foo() -> None: ...\n", encoding="utf-8")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_m.py").write_text("foo()\n", encoding="utf-8")
+
+    assert check_tested.main([str(module), "--tests", str(tests_dir)]) == 0
+
+
+def test_io_budget_main_passes_while_no_request_paths_exist_in_process(
+    tmp_path: Path,
+) -> None:
+    assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 0
+
+
+def test_io_budget_main_refuses_a_route_module_that_declares_no_budget_in_process(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "routes.py").write_text("def list_cases() -> None: ...\n", encoding="utf-8")
+
+    assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 1
+    assert "IO_BUDGET" in capsys.readouterr().err
+
+
+def test_io_budget_main_reports_without_asserting_in_process(tmp_path: Path) -> None:
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "routes.py").write_text("def list_cases() -> None: ...\n", encoding="utf-8")
+
+    assert io_budget.main(["--root", str(tmp_path)]) == 0
+
+
+def test_io_budget_main_passes_when_a_module_declares_the_budget(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "routes.py").write_text("IO_BUDGET = 1\n", encoding="utf-8")
+
+    assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 0
+    assert "1 of 1 route module(s) declare IO_BUDGET" in capsys.readouterr().out
+
+
+def test_main_builds_claims_from_the_cover_and_unscanned_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI's `--cover`/`--unscanned` wiring, not `floor_failures` directly:
+    passing `--cover` is what makes `main` build a `Claims` from the repo's
+    tracked files in the first place."""
+    repo = tmp_path / "repo"
+    (repo / "server").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "server" / "api.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+
+    report = repo / "bandit.json"
+    report.write_text(
+        json.dumps({"errors": [], "metrics": {"server/api.py": {}}}), encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+
+    result = scan_floors.main(
+        [
+            str(report),
+            "--cover",
+            "server",
+            "--unscanned",
+            "tests",
+            "--repo",
+            str(repo),
+        ]
+    )
+
+    assert result == 0
+
+
+def test_main_prints_a_failure_line_per_floor_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = tmp_path / "bandit.json"
+    report.write_text(json.dumps({"errors": [], "metrics": {}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert scan_floors.main([str(report), "--min-files", "1"]) == 1
+    assert "0 files" in capsys.readouterr().err
+
+
+def test_check_tested_module_guard_exits_with_mains_return_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The whole repo's own tree: `make lint` already guarantees this passes.
+    assert _run_as_main("check_tested.py", [], monkeypatch) == 0
+
+
+def test_io_budget_module_guard_exits_with_mains_return_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Phase 0: no `server/api` yet, so the real repo always takes this branch.
+    assert _run_as_main("io_budget.py", [], monkeypatch) == 0
+
+
+def test_scan_floors_module_guard_exits_with_mains_return_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = tmp_path / "bandit.json"
+    report.write_text(
+        json.dumps({"errors": [], "metrics": {"server/api.py": {}}}), encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert (
+        _run_as_main("scan_floors.py", [str(report), "--min-files", "1"], monkeypatch)
+        == 0
+    )
 
 
 def test_tracked_python_fails_closed_on_an_unreadable_path(tmp_path: Path) -> None:

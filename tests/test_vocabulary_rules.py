@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import ast
 import re
+import runpy
+import sys
 from pathlib import Path
 
 import check_vocabulary
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 CONTEXT_MD = (REPO / "CONTEXT.md").read_text(encoding="utf-8")
@@ -80,6 +83,85 @@ def test_violations_catches_a_plural_synonym(tmp_path: Path) -> None:
     )
     assert len(reported) == 1
     assert "'block'" in reported[0]
+
+
+def test_identifiers_includes_function_arguments() -> None:
+    tree = ast.parse("def f(chunk_size): ...\n")
+    found = {name for _, name in check_vocabulary.identifiers(tree)}
+    assert "chunk_size" in found
+
+
+def test_identifiers_includes_attribute_assignment_targets() -> None:
+    tree = ast.parse("self.chunk_count = 1\n")
+    found = {name for _, name in check_vocabulary.identifiers(tree)}
+    assert "chunk_count" in found
+
+
+def test_identifiers_includes_except_handler_names() -> None:
+    tree = ast.parse("try:\n    pass\nexcept ValueError as fragment_error:\n    pass\n")
+    found = {name for _, name in check_vocabulary.identifiers(tree)}
+    assert "fragment_error" in found
+
+
+def test_identifiers_includes_match_capture_names() -> None:
+    tree = ast.parse("match x:\n    case chunk_capture:\n        pass\n")
+    found = {name for _, name in check_vocabulary.identifiers(tree)}
+    assert "chunk_capture" in found
+
+
+def test_banned_terms_skips_an_empty_synonym_cell() -> None:
+    """A trailing comma in the Domain table's synonym cell is an empty phrase,
+    which normalises to no token and bans nothing."""
+    doctored = "| **case** | one engagement | deal, |\n"
+    assert check_vocabulary.banned_terms(doctored) == {"deal": "case"}
+
+
+def test_check_vocabulary_main_refuses_when_context_and_gate_disagree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    doctored = tmp_path / "CONTEXT.md"
+    doctored.write_text("| **case** | d | mismatched_synonym |\n", encoding="utf-8")
+    monkeypatch.setattr(check_vocabulary, "CONTEXT_MD", doctored)
+
+    assert check_vocabulary.main([]) == 2
+    assert "disagree" in capsys.readouterr().err
+
+
+def test_check_vocabulary_main_refuses_when_nothing_is_scanned(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(check_vocabulary, "tracked_python", lambda _repo: [])
+
+    assert check_vocabulary.main([]) == 2
+    assert "scanned no files" in capsys.readouterr().err
+
+
+def test_check_vocabulary_main_reports_violations_and_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = tmp_path / "m.py"
+    module.write_text("def read_chunk() -> None: ...\n", encoding="utf-8")
+
+    assert check_vocabulary.main([str(module)]) == 1
+    assert "'chunk'" in capsys.readouterr().out
+
+
+def test_check_vocabulary_main_passes_when_clean(tmp_path: Path) -> None:
+    module = tmp_path / "m.py"
+    module.write_text("def read_block() -> None: ...\n", encoding="utf-8")
+
+    assert check_vocabulary.main([str(module)]) == 0
+
+
+def test_check_vocabulary_module_guard_exits_with_mains_return_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The whole repo's own tree: `make lint` already guarantees this passes.
+    script = REPO / "scripts" / "check_vocabulary.py"
+    monkeypatch.setattr(sys, "argv", ["check_vocabulary.py"])
+    with pytest.raises(SystemExit) as caught:
+        runpy.run_path(str(script), run_name="__main__")
+    assert caught.value.code == 0
 
 
 def test_ts_gate_enforces_the_same_tokens() -> None:

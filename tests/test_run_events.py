@@ -151,6 +151,19 @@ def test_locking_a_run_that_does_not_exist_is_refused(
     assert caught.value.code is RefusalCode.RUN_NOT_FOUND
 
 
+def test_run_status_of_an_unknown_run_is_refused(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """The same refusal an unauthorised run gets, so that neither answer tells a
+    caller the other one exists."""
+    conn, _case_id, _run_id = run
+
+    with pytest.raises(Refusal) as caught:
+        run_status(conn, uuid4())
+
+    assert caught.value.code is RefusalCode.RUN_NOT_FOUND
+
+
 def test_an_event_carries_its_position_name_and_an_aware_time(
     run: tuple[StoreConnection, UUID, UUID],
 ) -> None:
