@@ -436,3 +436,34 @@ it through the same path as any other — and it is one a reviewer can read.
 so "one click from its evidence" meant one click to a line range. Coordinates are
 the fix, and coordinates have to come from the document. The choice of library
 follows CAOS-Final, which reached the same requirement and the same answer.
+
+## 2026-09-10 §22 — The HTTP surface is FastAPI, and it fails closed on identity
+
+`fastapi==0.141.1` and `uvicorn==0.52.4` at runtime, `httpx==0.28.1` in the
+development toolchain for `TestClient`. FastAPI brings `starlette` and
+`pydantic`; the last of those is the reason it is the right choice rather than a
+default one. `SYSTEM_SPEC.md` §9 asks that every JSON success serve a *named*
+model with `extra="forbid"` in both directions, and a pinned key set asserted by
+a contract test. That is a description of a pydantic model, and writing it by
+hand would be re-implementing a library this repository would then have to
+maintain.
+
+**Identity fails closed.** `SYSTEM_SPEC.md` §8 allows development to trust a role
+header and requires production to derive role from OIDC groups only. The switch
+is `CAOS_TRUST_ROLE_HEADER`, and it is **off unless explicitly set to `1`** — the
+convenience is opt-in, not opt-out. An environment variable that has to be set
+to *disable* trust is one a misconfigured deployment forgets, and the failure is
+silent and total. With it off, a client-supplied role header cannot escalate:
+`test_production_never_trusts_role_header`.
+
+**Unknown and unauthorised are the same answer.** Both are 404
+(`test_unauthorised_case_is_private_404`). A 403 on a case a stranger may not see
+tells them the case exists, which is the whole of what they were trying to learn.
+
+`uvicorn` is installed but nothing in this repository calls it: the image's
+entrypoint gains a process with this entry, and `make dev` stops failing.
+
+**Reason.** The alternative to a framework here is hand-rolled routing, request
+parsing and response validation, which is the part of a web stack most likely to
+be got subtly wrong and least interesting to own. The dependency is accepted for
+the model layer specifically; the routing is what comes with it.

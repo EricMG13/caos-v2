@@ -4,4 +4,6 @@ mypy==1.18.2
 pytest==9.0.3
 # The suite exercises the store against a real database, so the development
 # toolchain installs what the runtime installs.
+# FastAPI's TestClient (docs/DECISIONS.md 22).
+httpx==0.28.1
 -r requirements.in
