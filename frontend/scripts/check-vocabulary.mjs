@@ -7,7 +7,7 @@
 // Never prose, string literals or JSX text. tests/test_vocabulary_rules.py
 // asserts ENFORCED below equals the Python gate's.
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -45,10 +45,18 @@ export function normalise(phrase) {
     }
     spaced += phrase[i];
   }
-  return spaced
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return trimUnderscores(spaced.toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+}
+
+// Leading/trailing "_" trimmed by hand rather than `/^_+|_+$/` — the same
+// anchor-adjacent-quantifier shape already replaced above and in
+// sections.ts/ReportSection.tsx (javascript/typescript:S8786).
+function trimUnderscores(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === "_") start += 1;
+  while (end > start && value[end - 1] === "_") end -= 1;
+  return value.slice(start, end);
 }
 
 /** Synonym token → the term it displaces, from CONTEXT.md's Domain table. */
@@ -166,7 +174,12 @@ function resolveGit() {
     const candidate = resolve(dir, name);
     try {
       accessSync(candidate, constants.X_OK);
-      return candidate;
+      // X_OK alone passes on an ordinary directory (its search/traverse bit),
+      // so a PATH entry that is a directory named "git" would otherwise be
+      // accepted here and crash the later execFileSync with EACCES — the same
+      // pitfall shutil.which's own _access_check guards against with
+      // `not os.path.isdir(fn)`. This mirrors that check.
+      if (!statSync(candidate).isDirectory()) return candidate;
     } catch {
       // not here; keep looking
     }
