@@ -2,8 +2,10 @@ __pycache__/
 *.py[cod]
 .venv*/
 node_modules/
-frontend/out/
-frontend/.next/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+frontend/a11y-results/
 .dev-data/
 *.xlsx
 !vendor/**/*.xlsx
