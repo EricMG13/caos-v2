@@ -8,6 +8,7 @@ that it looks at identifiers rather than at prose.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import check_vocabulary
@@ -79,3 +80,18 @@ def test_violations_catches_a_plural_synonym(tmp_path: Path) -> None:
     )
     assert len(reported) == 1
     assert "'block'" in reported[0]
+
+
+def test_ts_gate_enforces_the_same_tokens() -> None:
+    """The TypeScript gate carries the same ENFORCED set, read from its source.
+
+    One glossary, two halves: if either side adds or drops a synonym the other
+    must follow, or a wrong word becomes legal in one language.
+    """
+    gate = (REPO / "frontend" / "scripts" / "check-vocabulary.mjs").read_text(
+        encoding="utf-8"
+    )
+    literal = re.search(r"export const ENFORCED = \[(.*?)\];", gate, re.DOTALL)
+    assert literal, "the TypeScript gate no longer declares ENFORCED as a literal"
+    tokens = set(re.findall(r'"([a-z_]+)"', literal.group(1)))
+    assert tokens == set(check_vocabulary.ENFORCED)

@@ -129,8 +129,12 @@ system this size means nobody looked.
   `version`, `response` — and each is exempt with a stated reason in
   `NOT_ENFORCED`. The check refuses to run if `CONTEXT.md` and that list drift
   apart. *Upgrade:* enforce an exempt synonym the day it is actually misused.
-- **The two identifier gates read Python only.** TypeScript identifiers are
-  unchecked. *Upgrade:* Phase 9, with the frontend.
+- **The untested-definition gate reads Python only.** The vocabulary gate has
+  its TypeScript half (`frontend/scripts/check-vocabulary.mjs`, same
+  `ENFORCED` set, asserted by `tests/test_vocabulary_rules.py`); a public
+  TypeScript export no test names is not refused. *Upgrade:* when the frontend
+  grows a module whose logic is not exercised by the workbench, port
+  `check_tested.py` over the compiler API the vocabulary gate already uses.
 - **`io_budget.py --assert` enforces only that some `server/api/` module
   declares an `IO_BUDGET`.** It keys on the route directory, not on `server/`:
   a store module has no request path and no round-trip budget to declare.
