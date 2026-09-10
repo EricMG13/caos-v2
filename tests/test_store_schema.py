@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from server.boundary_text import BoundaryText
@@ -86,6 +87,28 @@ def test_a_database_built_from_another_schema_is_refused(empty_database: str) ->
             apply_schema(conn, sql=DRIFTED)
 
         assert caught.value.code is RefusalCode.STORE_SCHEMA_DRIFT
+
+
+def test_an_autocommit_connection_is_refused_rather_than_half_applied(
+    empty_database: str,
+) -> None:
+    """Everything `apply_schema` promises is a property of one transaction.
+
+    Under autocommit the advisory lock is taken and released by its own
+    statement, so two processes starting at once both apply; and the DDL commits
+    separately from the digest that records it, so a crash between them leaves a
+    database whose tables exist and whose bookkeeping says they do not -- which
+    the next startup answers by applying the schema again, onto tables that are
+    already there. The mode is refused rather than supported.
+    """
+    with psycopg.connect(empty_database, autocommit=True) as conn:
+        with pytest.raises(Refusal) as caught:
+            apply_schema(conn)
+
+        assert caught.value.code is RefusalCode.STORE_NOT_TRANSACTIONAL
+
+    with connect(empty_database) as conn:
+        assert _columns(conn) == [], "a refused apply must leave nothing behind"
 
 
 def test_the_drift_refusal_carries_no_schema_text(empty_database: str) -> None:
