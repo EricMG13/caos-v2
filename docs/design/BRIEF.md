@@ -21,12 +21,15 @@ clean; every point lost is composition and truth). The old app's Content Securit
 (`script-src 'self'` plus hashes, no `unsafe-inline`) blocked the overlay — v2's static
 export keeps that posture.
 
-## Priority order
+## Priority order (owner's answers, 2026-09-10)
 
-_To be filled from the owner's answers to the critique's questions (priority direction,
-scope, off-limits areas). Until then the order is the critique's: P0 Book truth and
-unguarded objects · P0 identity band never clips · P1 reference marker never lies ·
-P1 brief and evidence open at rest · P2 server-classified intake · P2 paper at proofing size._
+1. **Composition at rest first.** The decision brief and the evidence rail are open by default; the identity band never clips the case name; the four bands are invariant on every section.
+2. **Truth on the Book and Committee.** No unguarded object ever reaches a cell; `observed-empty` when there is nothing; a reference or seeded marker never sits above live rows — the section renders `unavailable` instead.
+3. **The Model's residual and the reference primary.** Residual as its own column with forward-propagating unavailability; a seeded fixture can never be checkpointed, accepted or filed as live.
+
+Scope carried into the design turns: **every P0 and P1** from both snapshots. P2 findings (server-classified intake, paper at proofing size, a glossary for `CP-*` codes, the second-inspector rails) are recorded in the disposition table and picked up by the section that owns them, not pulled forward.
+
+Decided here: the **CP-6A Bull / Bear / Chair debate lives in Analysis** as a module tab — it is a module output like any other, rendered in the centre column with the Chair's weighting matrix as its table; Committee shows it only as an accepted artifact in the deliverable. **Nothing from the old app is off-limits**: the redesign replaces composition; the primitives worth keeping are the preserve column below.
 
 ## Five principles the new design inherits
 
