@@ -1,8 +1,10 @@
-"""The HTTP surface, and one answer for a stranger.
+"""The HTTP surface. Two request paths, and one answer for a stranger.
 
-`SYSTEM_SPEC.md` §9 and `docs/DECISIONS.md` §22. This is the run document
+`SYSTEM_SPEC.md` §9 and `docs/DECISIONS.md` §22. The run document is what
 `/run/` will draw in Phase 9: each node's state with the reason for it, and the
-one QA_GATE reading as a gate.
+one QA_GATE reading as a gate. The events path is the socket
+`server/api/stream.py`'s contract is served over -- that module already answers
+every rule §9 states, and this is where those answers meet a connection.
 
 The privacy rule is the load-bearing one. A run somebody may not see and a run
 that does not exist get the same status and the same body, because 403 is the
@@ -24,17 +26,22 @@ person from an anonymous one.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import asynccontextmanager
+from json import dumps
 from os import environ
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from server.api.identity import Actor, actor_from_headers
+from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
+from server.api.stream import TERMINAL, StreamEvent, tail
 from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
@@ -47,7 +54,7 @@ from server.engine.route import (
 )
 from server.engine.runtime import accepted_artifacts
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, connect
+from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
 from server.store.routes import resolved_route
 
@@ -56,9 +63,24 @@ from server.store.routes import resolved_route
 # with the size of the route -- which is the shape the predecessor got wrong.
 IO_BUDGET = 4
 
-# Reading a run is reading its case. Anything this document shows, a reader of
-# the case may see; holding it grants nothing further.
+# `GET /api/runs/{run_id}/events`: the same two authority reads, then whatever
+# the tail costs -- and that again on every poll. Named separately because it is
+# a different request path, and a budget that averaged two paths would describe
+# neither.
+EVENTS_IO_BUDGET = 2 + TAIL_IO_BUDGET
+
+# Reading a run is reading its case. Anything either path shows, a reader of the
+# case may see; holding it grants nothing further.
 READ_REQUIRES = Standing.READER
+
+# §9: a tail closes so the edge can reauthenticate. Five minutes, and it lives
+# here rather than in `stream.py` because it is a property of the connection
+# being held open, which is a thing only the route has.
+TAIL_DEADLINE = 300.0
+# How long the loop waits before asking again. Short enough that a run finishing
+# closes the stream promptly, long enough that an idle watcher is not a query a
+# second (CLAUDE.md known gaps -- `LISTEN`/`NOTIFY` is the upgrade).
+POLL_INTERVAL = 0.5
 
 DATABASE_URL = "CAOS_DATABASE_URL"
 BLOB_ROOT = "CAOS_BLOB_ROOT"
@@ -71,7 +93,24 @@ _STATUS = {
     RefusalCode.CASE_NOT_FOUND: 404,
 }
 
-app = FastAPI(title="CAOS", version="2")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Apply the declared schema before the first request, and refuse to start
+    without a database.
+
+    "Postgres schema in full at startup" is the store's rule, and `apply_schema`
+    is idempotent -- it applies to an empty database, checks the digest against
+    an applied one, and refuses `STORE_SCHEMA_DRIFT` when they disagree. Doing it
+    here rather than lazily means a process pointed at the wrong database dies at
+    boot instead of serving 500s that look like a bug in the route.
+    """
+    with connect(_database_url()) as conn:
+        apply_schema(conn)
+    yield
+
+
+app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
 
 
 class EdgeView(BaseModel):
@@ -118,12 +157,16 @@ class RefusalBody(BaseModel):
     refusal: RefusalCode
 
 
-def store_connection() -> Iterator[StoreConnection]:
-    """One connection per request, from the environment."""
+def _database_url() -> str:
     url = environ.get(DATABASE_URL)
     if not url:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
-    with connect(url) as conn:
+    return url
+
+
+def store_connection() -> Iterator[StoreConnection]:
+    """One connection per request, from the environment."""
+    with connect(_database_url()) as conn:
         yield conn
 
 
@@ -169,6 +212,85 @@ def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDo
         route_digest=route_digest(route),
         nodes=[_node_view(route, accepted, node, states) for node in route.nodes],
     )
+
+
+@app.get("/api/runs/{run_id}/events")
+def read_run_events(run_id: UUID, request: Request, conn: Store) -> StreamingResponse:
+    """The run's events as `text/event-stream`, resuming after `Last-Event-ID`.
+
+    The authority read happens here, before the first byte, so that an
+    unauthorised watcher gets the same 404 the run document gives rather than an
+    empty 200 -- which would still confirm the id names a run somebody watches.
+    """
+    actor = actor_from_headers(request.headers)
+    case_id, _status = _visible(conn, run_id, actor)
+
+    return StreamingResponse(
+        _frames(conn, run_id, case_id, actor, _marker(request.headers)),
+        media_type="text/event-stream",
+        # No store, and no proxy buffering: a tail that arrived in one block when
+        # the run ended would not be a tail.
+        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
+    )
+
+
+def _frames(
+    conn: StoreConnection,
+    run_id: UUID,
+    case_id: UUID,
+    actor: Actor,
+    last_event_id: int,
+) -> Iterator[bytes]:
+    """Frames until the run is terminal, the actor loses standing, or the
+    deadline passes.
+
+    `TAIL_DEADLINE` is read here rather than bound as a default, so a process
+    does not have to restart to pick up a corrected value.
+    """
+    started = monotonic()
+    marker = last_event_id
+    while True:
+        for event in tail(
+            conn, run_id=run_id, actor_id=actor.user_id, last_event_id=marker
+        ):
+            marker = event.id
+            yield _frame(event)
+            if event.name in TERMINAL:
+                return
+
+        # The tail is silent both when it is caught up and when standing was
+        # revoked mid-stream. Asking directly is what tells those apart -- an SSE
+        # connection is exactly the thing that stays open across a revocation,
+        # and a loop that idled to the deadline instead would keep a revoked
+        # reader's socket alive for five minutes.
+        if not satisfies(
+            standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
+        ):
+            return
+        if monotonic() - started >= TAIL_DEADLINE:
+            return
+        sleep(POLL_INTERVAL)
+
+
+def _frame(event: StreamEvent) -> bytes:
+    """One SSE frame. The name triggers a refetch; `data` is a placeholder
+    because the spec dispatches no event without one, and a real payload would be
+    a second copy of state the client is about to fetch properly."""
+    return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
+
+
+def _marker(headers: object) -> int:
+    """The client's resume position, or the beginning.
+
+    A browser-supplied string. Refusing the connection would strand a client that
+    can only fix it by clearing storage, and re-delivering from the start is what
+    the contract already tolerates.
+    """
+    get = getattr(headers, "get", None)
+    value = get("last-event-id") if get is not None else None
+    if not isinstance(value, str) or not value.isdigit():
+        return 0
+    return int(value)
 
 
 def _node_view(
