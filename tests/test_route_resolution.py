@@ -335,6 +335,33 @@ def test_cp_cf_waits_for_all_required_owners(catalog: dict[str, Any]) -> None:
     assert _state(route, accepted, "CP-CF") is NodeState.RUNNABLE
 
 
+def test_the_extension_appends_cp_cf_alone(catalog: dict[str, Any]) -> None:
+    """Phase 7's named test. CP-CF is placed; CP-MODEL is not.
+
+    `docs/DECISIONS.md` §14 (adopting CAOS-Final §48) is why: no workbook build,
+    so no CP-MODEL, and the model extension that once placed both now places one.
+    A route that quietly carried CP-MODEL would be pinned into the digest the
+    plan gate binds, and every replay would carry a module the host cannot run.
+    """
+    plain = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    extended = resolve_route(
+        catalog,
+        PROFILE,
+        "FULL_CREDIT_ASSESSMENT",
+        extensions=RouteExtensions(model_extension=True),
+    )
+
+    added = {node.module_id for node in extended.nodes} - {
+        node.module_id for node in plain.nodes
+    }
+
+    assert added == {"CP-CF"}, "one module, and it is CP-CF"
+    assert "CP-MODEL" not in {node.module_id for node in extended.nodes}
+    # It is part of what the gate digests, so a replay takes the extended route
+    # rather than re-deciding whether to extend it.
+    assert route_digest(extended) != route_digest(plain)
+
+
 def test_model_extension_refuses_missing_owner(catalog: dict[str, Any]) -> None:
     """COVENANT_REFINANCING carries CP-1 and CP-4 but no CP-2G. An extended
     route missing a required owner is refused during resolution, before pinning
