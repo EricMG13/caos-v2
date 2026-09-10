@@ -1,0 +1,69 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { UNAVAILABLE_WORDING } from "@/app/transport";
+import { RefusedControl } from "@/controls/RefusedControl";
+import { RegionState } from "@/states/RegionState";
+
+describe("the states", () => {
+  test("test_unavailable_and_absent_route_share_one_wording", () => {
+    const { unmount } = render(
+      <RegionState status={{ kind: "unavailable" }}>{() => <p>never</p>}</RegionState>,
+    );
+    expect(screen.getByText(UNAVAILABLE_WORDING)).toBeInTheDocument();
+    expect(screen.queryByText("never")).toBeNull();
+    unmount();
+    expect(UNAVAILABLE_WORDING).toBe("Unavailable or not permitted.");
+  });
+
+  test("test_observed_empty_requires_timestamp", () => {
+    render(
+      <RegionState
+        status={{ kind: "observed-empty", observed_at: "2026-09-09T14:30:00Z", document: {} }}
+      >
+        {() => null}
+      </RegionState>,
+    );
+    const region = screen.getByRole("status");
+    expect(region).toHaveAttribute("data-surface-state", "observed-empty");
+    expect(region.querySelector("time")).toHaveAttribute("datetime", "2026-09-09T14:30:00Z");
+  });
+
+  test("ready renders its children with no marker", () => {
+    render(
+      <RegionState status={{ kind: "ready", document: 1 }}>{(n) => <p>doc {n}</p>}</RegionState>,
+    );
+    expect(screen.getByText("doc 1")).toBeInTheDocument();
+    expect(document.querySelector("[data-surface-state]")).toBeNull();
+  });
+
+  test("stale keeps the document on screen behind its marker", () => {
+    render(
+      <RegionState status={{ kind: "stale", document: "d" }} onReload={() => {}}>
+        {(d) => <p>body {d}</p>}
+      </RegionState>,
+    );
+    expect(document.querySelector("[data-surface-state='stale']")).not.toBeNull();
+    expect(screen.getByText("body d")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "RELOAD" })).toBeInTheDocument();
+  });
+
+  test("test_refused_control_stays_visible_with_reason", () => {
+    render(
+      <MemoryRouter>
+        <RefusedControl
+          refusal={{ code: "APPROVER_NOT_INDEPENDENT", clears: "an independent approver files it" }}
+          className="rb solid"
+        >
+          File
+        </RefusedControl>
+      </MemoryRouter>,
+    );
+    const control = screen.getByRole("button", { name: "File" });
+    expect(control).toBeVisible();
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).not.toHaveAttribute("disabled");
+    expect(control).toHaveAttribute("data-refusal", "APPROVER_NOT_INDEPENDENT");
+    expect(control).toHaveAccessibleDescription(/APPROVER_NOT_INDEPENDENT — clears when/);
+    expect(screen.getByText(/an independent approver files it/)).toBeVisible();
+  });
+});
