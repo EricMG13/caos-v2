@@ -511,6 +511,36 @@ def test_the_image_floor_accepts_a_scan_with_targets(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_main_refuses_a_trivy_scan_that_examined_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # In-process, unlike the _run() tests above: coverage.py cannot trace a
+    # subprocess, and the --trivy branch of main()'s body was otherwise
+    # measured nowhere.
+    report = tmp_path / "trivy.json"
+    report.write_text(json.dumps({"Results": []}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert scan_floors.main([str(report), "--trivy"]) == 1
+    assert "scanned nothing" in capsys.readouterr().err
+
+
+def test_main_accepts_a_trivy_scan_with_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = tmp_path / "trivy.json"
+    report.write_text(
+        json.dumps(
+            {"Results": [{"Target": "caos:ci (debian 13)", "Vulnerabilities": []}]}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert scan_floors.main([str(report), "--trivy"]) == 0
+    assert "examined 1 target" in capsys.readouterr().out
+
+
 def test_scanned_targets_ignores_a_result_with_no_target() -> None:
     report: dict[str, object] = {"Results": [{"Class": "lang-pkgs"}, {"Target": "app"}]}
 
