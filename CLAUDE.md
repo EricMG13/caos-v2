@@ -67,11 +67,16 @@ Standing rules that back them:
 
 ## Where things live
 
-- `engine/route.py` — `resolve_route`, `dependency_order`, `node_states`,
+- `server/engine/route.py` — `resolve_route`, `dependency_order`, `node_states`,
   `frontier`. Typed edges from `profile["edges"]`, never from
-  `navigation.dependencies`.
-- `engine/runtime.py` — the frontier loop. No checkpointer: recovery is
+  `navigation.dependencies`. Pure: no I/O, no clock. Corrected from `engine/`
+  for the reason §20 corrected `storage/` — the security floor claims `scripts`
+  and `server`, so a top-level `engine/` would be a tracked tree no list claims,
+  which `scripts/scan_floors.py` now refuses.
+- `server/engine/runtime.py` — the frontier loop. No checkpointer: recovery is
   recomputation from the accepted-attempt ledger.
+- `server/store/routes.py` — the pin. Resolution stays pure by keeping the one
+  place it meets the store outside `server/engine/`.
 - `server/store/` — Postgres owns everything transactional; bytes are content-
   addressed in the blob store. `schema.sql` is the declared schema, applied in
   full at startup and refused when the database was built from a different one
