@@ -67,11 +67,16 @@ Standing rules that back them:
 
 ## Where things live
 
-- `engine/route.py` — `resolve_route`, `dependency_order`, `node_states`,
+- `server/engine/route.py` — `resolve_route`, `dependency_order`, `node_states`,
   `frontier`. Typed edges from `profile["edges"]`, never from
-  `navigation.dependencies`.
-- `engine/runtime.py` — the frontier loop. No checkpointer: recovery is
+  `navigation.dependencies`. Pure: no I/O, no clock. Corrected from `engine/`
+  for the reason §20 corrected `storage/` — the security floor claims `scripts`
+  and `server`, so a top-level `engine/` would be a tracked tree no list claims,
+  which `scripts/scan_floors.py` now refuses.
+- `server/engine/runtime.py` — the frontier loop. No checkpointer: recovery is
   recomputation from the accepted-attempt ledger.
+- `server/store/routes.py` — the pin. Resolution stays pure by keeping the one
+  place it meets the store outside `server/engine/`.
 - `server/store/` — Postgres owns everything transactional; bytes are content-
   addressed in the blob store. `schema.sql` is the declared schema, applied in
   full at startup and refused when the database was built from a different one
@@ -145,6 +150,23 @@ system this size means nobody looked.
 - **`make dev` fails.** The schema arrived with Phase 1
   (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
   route, which `docs/REBUILD_PLAN.md` places in Phase 6.
+
+**Phase 4.**
+
+- **The frontier's ready nodes run in order, not concurrently.**
+  `docs/REBUILD_PLAN.md` Phase 4 and `SYSTEM_SPEC.md` §4 both write the loop as
+  `await gather(*(run_node(n) for n in ready))`. This build runs them one after
+  another. Nothing about correctness depends on the difference — the frontier is
+  recomputed from the store on every pass either way, and Phase 4's exit tests
+  are about recovery and reservations rather than parallelism — but a wide
+  frontier takes as long as the sum of its nodes instead of the longest one.
+  *Upgrade:* the phase that makes the provider call real (Phase 5) is where the
+  latency starts to matter and where an async store connection has to arrive
+  anyway; the loop's shape does not change, only the `for` becomes a `gather`.
+- **The reservation estimate is the caller's number.** `run_route` takes one
+  `estimate` and reserves it for every node. A real estimate is per module and
+  comes from the model's price and the prompt's size (`docs/DECISIONS.md` §16).
+  *Upgrade:* Phase 5, with the provider that knows both.
 
 **Phase 2.**
 

@@ -24,7 +24,9 @@ from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect
 from server.store.events import Event, RunEvent, events_of, lock_run
 from server.store.runs import (
+    accept_attempt,
     complete_attempt,
+    complete_run,
     create_case,
     fail_run,
     run_status,
@@ -93,8 +95,15 @@ def test_terminal_event_is_exactly_once(
     assert replayed is False, "the replay must not claim to have completed the run"
     assert _count(conn, "artifacts", run_id) == 1
     assert _count(conn, "budget_ledger", run_id) == 1
-    assert _names(conn, run_id) == [
+    # One of each is the whole test. Stated as a count rather than only as a
+    # list, so a later phase adding an event cannot weaken it by editing the
+    # list -- which is exactly what Phase 4 did when ATTEMPT_ACCEPTED arrived.
+    names = _names(conn, run_id)
+    assert names.count(RunEvent.RUN_COMPLETE.value) == 1
+    assert names.count(RunEvent.ATTEMPT_ACCEPTED.value) == 1
+    assert names == [
         RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
     assert run_status(conn, run_id) is RunStatus.COMPLETE
@@ -192,7 +201,47 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
         charge=CHARGE,
     )
 
-    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3]
+    # CP-0 started, CP-1 started, CP-1 accepted, run complete.
+    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4]
+
+
+def test_accept_attempt_records_the_artifact_without_ending_the_run(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A route has many nodes and only the last one ends the run. Accepting is
+    therefore its own operation, and a replay of it appends no second event."""
+    conn, _case_id, run_id = run
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+
+    assert (
+        accept_attempt(
+            conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+        )
+        is True
+    )
+    assert run_status(conn, run_id) is RunStatus.RUNNING
+
+    assert (
+        accept_attempt(
+            conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+        )
+        is False
+    ), "the replay accepted nothing new"
+    assert _count(conn, "artifacts", run_id) == 1
+    assert _count(conn, "budget_ledger", run_id) == 1
+    assert _names(conn, run_id).count(RunEvent.ATTEMPT_ACCEPTED.value) == 1
+
+
+def test_complete_run_ends_a_run_once(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id = run
+
+    assert complete_run(conn, run_id) is True
+    assert complete_run(conn, run_id) is False
+
+    assert _names(conn, run_id) == [RunEvent.RUN_COMPLETE.value]
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
 
 
 def test_a_transition_that_changed_nothing_appends_no_event(
@@ -219,7 +268,7 @@ def test_a_transition_that_changed_nothing_appends_no_event(
     assert _names(conn, run_id) == [
         RunEvent.ATTEMPT_STARTED.value,
         RunEvent.RUN_FAILED.value,
-    ]
+    ], "a terminal run accepts nothing, so there is no ATTEMPT_ACCEPTED"
     assert run_status(conn, run_id) is RunStatus.FAILED
     # And it accepted nothing on the way past. A failed run holding an accepted
     # artifact is a node Phase 3 would recompute as COMPLETE.
