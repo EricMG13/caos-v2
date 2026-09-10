@@ -20,6 +20,9 @@ CREATE TABLE runs (
     run_id     uuid PRIMARY KEY,
     case_id    uuid NOT NULL REFERENCES cases (case_id),
     status     text NOT NULL,
+    -- Invariant 8's number. A run without a ceiling is the invariant with the
+    -- figure left out, so every run carries one from the moment it starts.
+    budget_ceiling numeric NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     -- The set is closed in the database as well as in RunStatus: a status the
     -- host does not know is a status no reader can act on.
@@ -149,3 +152,17 @@ CREATE TABLE run_routes (
     resolved     jsonb NOT NULL,
     pinned_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- What a run has set aside, taken before each provider call and never released.
+-- An indeterminate call may have reached the provider and may be billed
+-- (docs/DECISIONS.md section 16), so releasing its reservation would let the
+-- retry spend money the run has already committed. Append-only: a retry is a new
+-- attempt and a new row.
+CREATE TABLE budget_reservations (
+    attempt_id  uuid PRIMARY KEY REFERENCES run_attempts (attempt_id),
+    run_id      uuid NOT NULL REFERENCES runs (run_id),
+    amount      numeric NOT NULL CHECK (amount >= 0),
+    reserved_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX budget_reservations_by_run ON budget_reservations (run_id);
