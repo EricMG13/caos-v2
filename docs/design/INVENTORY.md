@@ -13,7 +13,7 @@ the source path and digest); `new` means it is written against the tokens.
 | `Rail` | `ds/RailShell` idiom, new markup | all nine | 9a 9b 9c |
 | `ServedRole` | new | all nine | 3a 3b 3c 4a 4b |
 | `SeverityMark` | new (`DESIGN.md` glyph vocabulary) | all nine | 3a 3c 4a |
-| `Panel` | `ds/Panel` | all nine | 3a 3c 4a 4b |
+| `Panel` | `.pnl` markup from `caos.css` (the design project's panel) | all nine | 3a 3c 4a 4b |
 | `Tag` | `ds/Tag` | all nine | 3a 3b 3c 4a |
 | `RefusedControl` | `ds/ActionReason` + typed code | all nine | 3a 4a 4b 6a 8c |
 | `RegionState` | `ds/SurfaceState` | all nine | 8a 8b |
