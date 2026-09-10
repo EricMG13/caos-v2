@@ -6,9 +6,11 @@ SEC := .venv-security/bin
 
 venv:  ## dev toolchain on 3.14, security toolchain on 3.12 (AI_CODE_QUALITY 4)
 	uv venv --python 3.14 .venv
-	uv pip install --python .venv --require-hashes -r requirements-dev.txt
+	uv pip install --python .venv --require-hashes --only-binary :all: \
+		-r requirements-dev.txt
 	uv venv --python 3.12 .venv-security
-	uv pip install --python .venv-security --require-hashes -r requirements-security.txt
+	uv pip install --python .venv-security --require-hashes --only-binary :all: \
+		-r requirements-security.txt
 	uv tool install pre-commit >/dev/null 2>&1 || true
 	pre-commit install
 

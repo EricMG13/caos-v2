@@ -31,3 +31,20 @@ def test_every_job_declares_a_timeout() -> None:
 def test_ci_cancels_superseded_runs() -> None:
     text = CI_YAML.read_text(encoding="utf-8")
     assert "cancel-in-progress: true" in text
+
+
+def test_every_install_is_wheels_only() -> None:
+    """--require-hashes pins which bytes arrive. It does not stop those bytes
+    being a source distribution, and a source distribution's setup.py runs at
+    install time -- so a pinned dependency would still be something CI executes
+    rather than merely installs. `--only-binary :all:` is what closes that, and
+    this is what stops the next job being added without it."""
+    installs = [
+        line.strip()
+        for line in CI_YAML.read_text(encoding="utf-8").splitlines()
+        if "pip install" in line and "--require-hashes" in line
+    ]
+
+    assert installs, "CI installs something; this test found nothing"
+    for install in installs:
+        assert "--only-binary :all:" in install, install

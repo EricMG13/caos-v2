@@ -151,6 +151,22 @@ system this size means nobody looked.
   (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
   route, which `docs/REBUILD_PLAN.md` places in Phase 6.
 
+**Phase 5.**
+
+- **No per-model price table, so the reservation is still a flat estimate.**
+  `docs/DECISIONS.md` §16 wants each configured model to carry a dated
+  `(input, output)` price as `Decimal` driving the reservation ceiling. The
+  provider reports `usage.cost`, which is the *actual* charge and is what the
+  ledger records; the number reserved *before* the call is still the caller's
+  single estimate. *Upgrade:* the price table lands with the module executor
+  that knows the prompt's size, and retires the Phase 4 gap below with it.
+- **The `provider` CI job is red until its credential exists.** It runs on a
+  schedule and on dispatch only — never on a pull request — and sets
+  `CAOS_REQUIRE_PROVIDER=1`, so a missing secret fails loudly rather than
+  skipping. Until `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
+  (variable) are set on the repository, every scheduled run fails. That is the
+  intended signal, not a gap to widen.
+
 **Phase 4.**
 
 - **The frontier's ready nodes run in order, not concurrently.**
