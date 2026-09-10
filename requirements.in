@@ -1,3 +1,5 @@
 # Runtime dependencies. The development toolchain lives in requirements-dev.in.
 # The store's driver (docs/DECISIONS.md section 20).
 psycopg[binary]==3.2.12
+# PDF text with a rectangle, region and line per character (docs/DECISIONS.md 21).
+pdfminer.six==20260107
