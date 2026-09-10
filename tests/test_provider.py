@@ -222,6 +222,21 @@ def test_the_default_transport_is_urllib_and_satisfies_the_protocol() -> None:
     assert isinstance(transport, UrllibTransport)
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    ["file:///etc", "ftp://example.invalid", "data:text/plain,hello", "/etc"],
+)
+def test_a_base_url_that_is_not_http_is_refused(base_url: str) -> None:
+    """bandit B310, fixed rather than suppressed. The default `urlopen` also
+    speaks `file:`, so a base URL from configuration could read a local file
+    instead of calling a provider. The transport refuses the scheme, and its
+    opener has no handler that could serve one."""
+    with pytest.raises(Refusal) as caught:
+        OpenRouter(api_key="k", model="m", base_url=base_url).complete(PROMPT)
+
+    assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+
+
 def test_a_provider_without_a_model_is_refused() -> None:
     """§16: `OPENROUTER_MODEL` has no default. Unset means there is no live
     provider, not that some other model should be picked."""
