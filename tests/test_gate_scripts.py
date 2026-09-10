@@ -99,6 +99,51 @@ def test_floor_failures_reports_each_floor_separately() -> None:
     assert len(failures) == 2
 
 
+def test_scan_floor_refuses_a_file_under_cover_that_the_report_skipped() -> None:
+    """The floor `--min-files 1` could not express. One scannable file satisfied
+    it while bandit silently skipped the rest -- the failure mode of
+    docs/AI_CODE_QUALITY.md section 4, with a green tick on it."""
+    report: dict[str, object] = {"metrics": {"server/blobs.py": {}, "_totals": {}}}
+    claims = scan_floors.Claims(
+        cover=("server",),
+        unscanned=("tests",),
+        tracked=("server/blobs.py", "server/refusals.py"),
+    )
+
+    failures = scan_floors.floor_failures(report, claims=claims)
+
+    assert len(failures) == 1
+    assert "server/refusals.py" in failures[0]
+
+
+def test_scan_floor_refuses_a_tracked_file_no_list_claims() -> None:
+    """Every tracked .py is either scanned or deliberately not. A third category
+    is a file nobody decided about, which is how a new directory joins the tree
+    and is scanned by nothing."""
+    report: dict[str, object] = {"metrics": {"server/blobs.py": {}, "_totals": {}}}
+    claims = scan_floors.Claims(
+        cover=("server",),
+        unscanned=("tests",),
+        tracked=("server/blobs.py", "engine/route.py"),
+    )
+
+    failures = scan_floors.floor_failures(report, claims=claims)
+
+    assert len(failures) == 1
+    assert "engine/route.py" in failures[0]
+
+
+def test_scan_floor_accepts_a_report_that_covered_everything_it_claimed() -> None:
+    report: dict[str, object] = {"metrics": {"server/blobs.py": {}, "_totals": {}}}
+    claims = scan_floors.Claims(
+        cover=("server",),
+        unscanned=("tests",),
+        tracked=("server/blobs.py", "tests/test_blob_store.py"),
+    )
+
+    assert scan_floors.floor_failures(report, claims=claims) == []
+
+
 def test_declares_budget_accepts_an_annotated_declaration() -> None:
     assert io_budget.declares_budget("IO_BUDGET: int = 3\n", "m.py")
     assert io_budget.declares_budget("IO_BUDGET = 3\n", "m.py")
