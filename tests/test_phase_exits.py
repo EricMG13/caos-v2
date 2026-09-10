@@ -34,11 +34,6 @@ NOT_YET_REACHED = {
     # Phase 10 -- qualification. The corpus harness and the verdict.
     "test_a_verdict_binds_provider_corpus_build_date_expiry_and_reviewer",
     "test_a_host_control_reads_orchestration_proof_never_qualified",
-    # Owed by "the first phase exposing an HTTP route" (plan, standing rules).
-    # Identity derivation ships here; the 404 is about a route, and no route
-    # exists yet -- the run tail's contract is built and its transport is not,
-    # recorded under Phase 6 in CLAUDE.md's known gaps.
-    "test_unauthorised_case_is_private_404",
 }
 
 
