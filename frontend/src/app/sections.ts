@@ -62,10 +62,19 @@ function renamed(search: string, renames: Record<string, string> | undefined): s
   return query ? `?${query}` : "";
 }
 
+// Trailing slashes stripped by hand rather than `/\/+$/` — SonarQube flags
+// that shape as super-linear (typescript:S8786) though it cannot backtrack;
+// the loop reads the same and draws no such flag.
+function stripTrailingSlashes(pathname: string): string {
+  let end = pathname.length;
+  while (end > 0 && pathname[end - 1] === "/") end -= 1;
+  return pathname.slice(0, end);
+}
+
 /** Where a pathname forwards, with its query carried over, or null. */
 export function forward(pathname: string, search: string): Forward | null {
   if (sectionFromPath(pathname)) return null;
-  const bare = pathname.replace(/\/+$/, "") || "/";
+  const bare = stripTrailingSlashes(pathname) || "/";
   // Root → Directory; a listed slug → its home; a section without its
   // trailing slash → the same section. Anything else is absent.
   const target =
