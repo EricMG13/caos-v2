@@ -161,6 +161,40 @@ def test_covered_files_excludes_the_totals_row() -> None:
     assert scan_floors.covered_files(report) == ["server/api.py"]
 
 
+def test_covered_files_treats_a_missing_metrics_block_as_uncovered() -> None:
+    assert scan_floors.covered_files({"errors": []}) == []
+
+
+def test_main_accepts_a_report_covering_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # In-process, unlike the _run() tests above: coverage.py cannot trace a
+    # subprocess, and main()'s own body -- argument parsing, the
+    # report_within refusal path -- was otherwise measured nowhere.
+    report = tmp_path / "bandit.json"
+    report.write_text(
+        json.dumps({"errors": [], "metrics": {"server/api.py": {}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert scan_floors.main([str(report), "--min-files", "1"]) == 0
+
+
+def test_main_refuses_a_report_outside_the_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    report = outside / "bandit.json"
+    report.write_text('{"metrics": {}}', encoding="utf-8")
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    monkeypatch.chdir(inside)
+    with pytest.raises(SystemExit):
+        scan_floors.main([str(report)])
+    assert "is outside" in capsys.readouterr().err
+
+
 def test_floor_failures_reports_each_floor_separately() -> None:
     report: dict[str, object] = {"metrics": {"_totals": {}}, "errors": ["boom"]}
     failures = scan_floors.floor_failures(report, min_files=1, no_parse_errors=True)
