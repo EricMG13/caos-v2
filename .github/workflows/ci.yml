@@ -116,7 +116,10 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
+      # --ignore-scripts: a dependency's lifecycle script is code this repository
+      # did not review. Playwright's browsers are installed by its own pinned
+      # binary in an explicit step below.
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
@@ -126,6 +129,11 @@ jobs:
           for s in directory upload analysis book run model report committee admin; do
             test -f "dist/$s/index.html" || { echo "missing dist/$s/index.html"; exit 1; }
           done
+      # The pinned binary from the lock, not `npx`, which resolves and may fetch
+      # a package at run time (SonarQube githubactions:S6505, S8543).
+      - run: ./node_modules/.bin/playwright install --with-deps
+      - run: npm run a11y
+      - run: npm run test:workbench
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
