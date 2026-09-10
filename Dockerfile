@@ -32,8 +32,10 @@ RUN useradd --system --uid 10001 --no-create-home caos \
     && chown -R caos:caos /app
 USER 10001
 
-# There is no process to serve yet: the first HTTP route is a known gap, and an
-# image whose entrypoint pretended otherwise would fail at deploy rather than
-# here. What this image is for today is being scanned -- it carries the runtime
-# dependencies, which is where the vulnerabilities live.
-CMD ["python", "-c", "raise SystemExit('no HTTP route yet: see CLAUDE.md known gaps, Phase 6')"]
+# The route surface (`docs/DECISIONS.md` §22). One worker: a run tail holds its
+# connection for up to five minutes, so how many of those a deployment can
+# afford is a question about its database's connection count -- not a default
+# worth guessing here.
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "server.api.app:app", \
+     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
