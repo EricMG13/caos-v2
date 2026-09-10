@@ -43,5 +43,7 @@ security:  # the floor is checked first: a report that parsed nothing must fail
 
 check: lint types test security
 
-dev:
-	@echo "no application code yet; the API and worker arrive in Phase 1" && exit 1
+dev:  ## the route surface. CAOS_DATABASE_URL and CAOS_BLOB_ROOT are read per request
+	# No --reload: it needs watchfiles, and a dependency that only the developer
+	# loop uses still has to be locked, audited and justified.
+	$(PY) -m uvicorn server.api.app:app --port 8000

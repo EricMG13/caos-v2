@@ -1,4 +1,4 @@
-"""The run document, and privacy.
+"""The two request paths: the run document, the tail over a socket, and privacy.
 
 `docs/REBUILD_PLAN.md` Phase 6: "The run endpoint serves node states with their
 reasons, and the one QA_GATE reads as a gate". The one QA_GATE in the catalog is
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -25,8 +26,10 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+from server.api import app as app_module
 from server.api.app import (
     IO_BUDGET,
+    TAIL_DEADLINE,
     EdgeView,
     NodeView,
     RefusalBody,
@@ -34,15 +37,16 @@ from server.api.app import (
     app,
     blob_store,
     read_run,
+    read_run_events,
     store_connection,
 )
 from server.blobs import BlobStore
 from server.engine.route import resolve_route
-from server.refusals import RefusalCode
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.members import Standing, grant, revoke
+from server.store.members import Standing, grant, revoke, standing_of
 from server.store.routes import pin_route, pinned_route
-from server.store.runs import start_run
+from server.store.runs import complete_attempt, start_attempt, start_run
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1]
@@ -50,6 +54,8 @@ CATALOG_PATH = (
     / "CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
 PROFILE = "FULL_CREDIT_32"
+ARTIFACT = "e" * 64
+CHARGE = Decimal("0.01")
 
 
 @pytest.fixture(scope="module")
@@ -59,15 +65,22 @@ def catalog() -> dict[str, Any]:
 
 
 @pytest.fixture
-def client(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Iterator[TestClient]:
+def client(
+    case: tuple[StoreConnection, UUID],
+    empty_database: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[TestClient]:
     """The app served against the test's own database and blob root.
 
-    Overriding the two dependencies rather than pointing environment variables at
-    the fixture keeps the production path -- open a connection per request from
-    `CAOS_DATABASE_URL` -- the only path the process itself has.
+    `CAOS_DATABASE_URL` is set because startup reads it: entering the client runs
+    the real lifespan, so every test here also proves the process can boot. The
+    per-request connection is then overridden onto the fixture's own, which is
+    the one holding the case these tests set up.
     """
     conn, _case_id = case
     blobs = BlobStore(tmp_path / "blobs")
+    monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     app.dependency_overrides[store_connection] = lambda: conn
     app.dependency_overrides[blob_store] = lambda: blobs
     try:
@@ -275,7 +288,10 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         if isinstance(route, APIRoute)
     }
 
-    assert declared == {"/api/runs/{run_id}": read_run.__name__}
+    assert declared == {
+        "/api/runs/{run_id}": read_run.__name__,
+        "/api/runs/{run_id}/events": read_run_events.__name__,
+    }
 
 
 def test_the_reported_digest_is_the_one_that_was_pinned(
@@ -319,6 +335,204 @@ def test_each_request_path_declares_what_it_costs_the_store(
         "the run document costs what it says it costs; a read that grew with "
         "the size of the route would show up here first"
     )
+
+
+def test_the_tail_is_served_as_an_event_stream(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
+    """The transport half of `server/api/stream.py`: the same contract, now over
+    a socket."""
+    conn, _case_id = case
+    run_id, viewer = run
+    _finish(conn, run_id)
+
+    response = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert [name for _, name in _sse(response.text)] == [
+        "ATTEMPT_STARTED",
+        "ATTEMPT_ACCEPTED",
+        "RUN_COMPLETE",
+    ]
+
+
+def test_every_frame_carries_an_id_and_a_name_and_no_state(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
+    """The client never reads a payload -- a name triggers a refetch. A payload
+    on the wire would be a second copy of state the client is about to fetch
+    properly, and the first thing to go stale."""
+    conn, _case_id = case
+    run_id, viewer = run
+    _finish(conn, run_id)
+
+    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
+
+    assert [line for line in text.splitlines() if line.startswith("data:")] == [
+        "data: {}"
+    ] * 3
+    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3"]
+
+
+def test_last_event_id_resumes_after_the_marker(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
+    """`Last-Event-ID` is the last event the client actually received, so
+    delivery starts strictly after it. Re-delivering it would make a client that
+    refetches on every name do the work twice."""
+    conn, _case_id = case
+    run_id, viewer = run
+    _finish(conn, run_id)
+
+    text = client.get(
+        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "2"}
+    ).text
+
+    assert [name for _, name in _sse(text)] == ["RUN_COMPLETE"]
+
+
+def test_a_last_event_id_that_is_not_a_number_starts_from_the_beginning(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
+    """A resume marker is a browser-supplied string. Refusing the connection
+    would strand a client that can only fix it by clearing storage; starting
+    over re-delivers, which is what the contract already tolerates."""
+    conn, _case_id = case
+    run_id, viewer = run
+    _finish(conn, run_id)
+
+    text = client.get(
+        f"/api/runs/{run_id}/events",
+        headers={**_as(viewer), "last-event-id": "; DROP TABLE runs"},
+    ).text
+
+    assert len(_sse(text)) == 3
+
+
+def test_an_unauthorised_tail_is_the_same_private_404(
+    client: TestClient, run: tuple[UUID, UUID]
+) -> None:
+    """The stream cannot be the one surface that answers differently. An empty
+    200 would still say the id is a well-formed run somebody could watch."""
+    run_id, _viewer = run
+
+    response = client.get(f"/api/runs/{run_id}/events", headers=_as(uuid4()))
+
+    assert response.status_code == 404
+    assert response.json() == {"refusal": "RUN_NOT_FOUND"}
+
+
+def test_the_tail_closes_at_its_deadline(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§9 wants a tail that closes so the edge can reauthenticate. This run never
+    goes terminal, so the deadline is the only thing that ends the stream --
+    without it this test does not fail, it hangs."""
+    conn, _case_id = case
+    run_id, viewer = run
+    start_attempt(conn, run_id, "CP-1")
+    conn.commit()
+    monkeypatch.setattr(app_module, "TAIL_DEADLINE", 0.0)
+
+    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
+
+    assert [name for _, name in _sse(text)] == ["ATTEMPT_STARTED"]
+    assert TAIL_DEADLINE == 300.0, "five minutes is the shipped value"
+
+
+def test_a_watcher_revoked_mid_stream_closes_rather_than_idling(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An SSE connection is exactly the thing that stays open across a
+    revocation. The tail goes quiet for a revoked reader and for a caught-up one
+    alike, so the loop asks directly -- otherwise a revoked reader's socket stays
+    alive until the deadline.
+
+    Standing is taken away by making the route's own read say so from the second
+    call on: the first is the request's own check, the second is the poll.
+    """
+    conn, _case_id = case
+    run_id, viewer = run
+    start_attempt(conn, run_id, "CP-1")
+    conn.commit()
+    answers = iter([True])
+
+    def revoked_after_the_request(
+        conn: StoreConnection, *, case_id: UUID, user_id: UUID
+    ) -> Standing | None:
+        if next(answers, False):
+            return standing_of(conn, case_id=case_id, user_id=user_id)
+        return None
+
+    monkeypatch.setattr(app_module, "standing_of", revoked_after_the_request)
+
+    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
+
+    assert [name for _, name in _sse(text)] == ["ATTEMPT_STARTED"]
+
+
+def test_a_process_with_no_database_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail at boot, not at the first request. A process that started without a
+    database would answer every request with a 500 that reads like a bug in the
+    route rather than a deployment pointed at nothing."""
+    monkeypatch.delenv(app_module.DATABASE_URL, raising=False)
+
+    with pytest.raises(Refusal) as caught, TestClient(app):
+        pass  # pragma: no cover -- entering the client is what raises
+
+    assert caught.value.code is RefusalCode.STORE_NOT_TRANSACTIONAL
+
+
+def test_startup_applies_the_declared_schema(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Postgres schema in full at startup". The database here has had nothing
+    applied to it, and after the app has started it holds the store's tables."""
+    from server.store import connect
+
+    monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+
+    with TestClient(app):
+        pass
+
+    with connect(empty_database) as conn:
+        applied = conn.execute(
+            "SELECT count(*) FROM information_schema.tables"
+            " WHERE table_schema = 'public' AND table_name IN"
+            " ('runs', 'run_events', 'case_members', 'audit_events')"
+        ).fetchone()
+    assert applied is not None
+    assert applied[0] == 4
+
+
+def _finish(conn: StoreConnection, run_id: UUID) -> None:
+    """Three events: started, accepted, complete."""
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    complete_attempt(
+        conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+    )
+    conn.commit()
+
+
+def _sse(text: str) -> list[tuple[str, str]]:
+    """Each frame's id and event name, in order."""
+    frames = []
+    for block in text.strip().split("\n\n"):
+        fields = dict(
+            line.split(": ", 1) for line in block.splitlines() if ": " in line
+        )
+        frames.append((fields["id"], fields["event"]))
+    return frames
 
 
 class _CountingConnection:

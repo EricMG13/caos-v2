@@ -143,19 +143,15 @@ system this size means nobody looked.
   a store module has no request path and no round-trip budget to declare.
   *Upgrade:* Phase 2 raises the floor to one budget per request path, with
   `test_io_budget_read_evidence`.
-- **`make dev` fails.** The schema arrived with Phase 1
-  (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
-  route, which `docs/REBUILD_PLAN.md` places in Phase 6.
-
 **Phase 6.**
 
-- **The run tail still has no HTTP binding.** `server/api/stream.py` answers
-  every rule `SYSTEM_SPEC.md` §9 states — resume excluding the marker,
-  membership rechecked before each event, closure on the terminal event — and
-  none of it is served over a socket yet. The run document is; the tail is the
-  next PR in this phase, and `text/event-stream` needs a connection held open,
-  which the document's request-scoped one is not. *Upgrade:* the events route,
-  with the five-minute deadline below.
+- **A run tail polls.** `server/api/app.py` re-reads `run_events` every
+  `POLL_INTERVAL` until the run is terminal, standing is lost, or
+  `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
+  watcher still costs `EVENTS_IO_BUDGET` queries every half second — six a
+  second, per open connection. *Upgrade:* `LISTEN`/`NOTIFY` on the event append,
+  making the poll a fallback rather than the mechanism; worth doing when there
+  are enough concurrent watchers to measure it, not before.
 - **The role an actor carries is global, and nothing reads it.**
   `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
   asserts, which is what the actor matrix is about; but every authority decision
@@ -165,10 +161,6 @@ system this size means nobody looked.
   assume a role is present, is how a role header gets trusted "just for now".
   *Upgrade:* the first authority that is genuinely account-wide rather than
   case-scoped — administration, in Phase 10.
-- **The tail does not close after five minutes.** §9 wants a tail to close for
-  edge reauthentication; this one returns when it is caught up, which a
-  request-scoped generator does anyway. *Upgrade:* the deadline belongs with the
-  connection that holds it open, so it arrives with the route.
 
 **Phase 5.**
 
