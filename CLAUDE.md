@@ -147,6 +147,22 @@ system this size means nobody looked.
   (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
   route, which `docs/REBUILD_PLAN.md` places in Phase 6.
 
+**Phase 6.**
+
+- **The run tail has no HTTP binding.** `server/api/stream.py` answers every rule
+  `SYSTEM_SPEC.md` §9 states — resume excluding the marker, membership rechecked
+  before each event, closure on the terminal event — and none of it is served
+  over a socket yet. `text/event-stream` is transport, and a web framework is a
+  dependency that needs a dated decision entry. *Upgrade:* the phase that adds
+  the first route brings FastAPI, its entry, the actor matrix
+  (`test_production_never_trusts_role_header`,
+  `test_unauthorised_case_is_private_404`) and the first `IO_BUDGET` under
+  `server/api/` with it.
+- **The tail does not close after five minutes.** §9 wants a tail to close for
+  edge reauthentication; this one returns when it is caught up, which a
+  request-scoped generator does anyway. *Upgrade:* the deadline belongs with the
+  connection that holds it open, so it arrives with the route.
+
 **Phase 5.**
 
 - **The envelope is the host's minimal shape, not CP-1's payload schema.** The
