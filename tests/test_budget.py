@@ -192,6 +192,17 @@ def test_concurrent_reservations_at_the_ceiling_refuse(
         assert remaining(conn, run_id) == CEILING_FOR_TEST - HALF
 
 
+def test_remaining_of_an_unknown_run_is_refused(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    conn, _case_id = case
+
+    with pytest.raises(Refusal) as caught:
+        remaining(conn, uuid4())
+
+    assert caught.value.code is RefusalCode.RUN_NOT_FOUND
+
+
 def test_a_run_without_a_stated_ceiling_gets_the_declared_default(
     case: tuple[StoreConnection, UUID],
 ) -> None:

@@ -160,6 +160,19 @@ def test_locking_a_run_that_does_not_exist_is_refused(
     assert caught.value.code is RefusalCode.RUN_NOT_FOUND
 
 
+def test_run_status_of_an_unknown_run_is_refused(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """The same refusal an unauthorised run gets, so that neither answer tells a
+    caller the other one exists."""
+    conn, _case_id, _run_id = run
+
+    with pytest.raises(Refusal) as caught:
+        run_status(conn, uuid4())
+
+    assert caught.value.code is RefusalCode.RUN_NOT_FOUND
+
+
 def test_an_event_carries_its_position_name_and_an_aware_time(
     run: tuple[StoreConnection, UUID, UUID],
 ) -> None:
@@ -287,6 +300,19 @@ def test_an_attempt_cannot_start_on_a_run_that_has_ended(
 
     assert caught.value.code is RefusalCode.RUN_NOT_RUNNING
     assert _names(conn, run_id) == [RunEvent.RUN_FAILED.value]
+
+
+def test_start_run_refuses_a_float_ceiling(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """Invariant 7 on the ceiling itself: a run carrying a float ceiling would
+    give invariant 8's checks a number they cannot trust."""
+    conn, case_id, _run_id = run
+
+    with pytest.raises(Refusal) as caught:
+        start_run(conn, case_id, budget_ceiling=0.5)  # type: ignore[arg-type]
+
+    assert caught.value.code is RefusalCode.MONEY_NOT_DECIMAL
 
 
 def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
