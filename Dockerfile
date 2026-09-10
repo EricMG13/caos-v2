@@ -5,7 +5,9 @@
 # not cover.
 #
 # Digest-pinned; a tag alone is not a pin. python:3.14-slim.
-FROM python@sha256:cae66f2ef0ec51a9891263eeee7f987dacf0a9879e8aa9353d5606e0530619a5
+# Re-pinned for CVE-2026-14456 (openssl, HIGH) -- the answer to a red image
+# scan is a re-pin, the same as a red audit is a recompile.
+FROM python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
 # Fail the build rather than the first request: a runtime that silently differs
 # from the locked one is the thing --require-hashes exists to prevent.
@@ -20,8 +22,18 @@ COPY requirements.txt ./
 # --require-hashes pins which bytes arrive; --only-binary :all: stops those bytes
 # being a source distribution whose setup.py runs at install time
 # (SonarCloud githubactions:S8541, fixed the same way in CI).
+#
+# pip is removed once installation is done. It is a build-time tool with
+# nothing to do at runtime, and it carries its own vendored copies of msgpack
+# and setuptools -- CVEs in those land on this image whenever pip's bundle is
+# behind, for a tool this process never calls. `ensurepip`'s bundled wheel is
+# the same pip a second time and goes with it.
 RUN pip install --no-cache-dir --require-hashes --only-binary :all: \
-        -r requirements.txt
+        -r requirements.txt \
+    && rm -rf /usr/local/lib/python3.14/site-packages/pip \
+              /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+              /usr/local/lib/python3.14/ensurepip \
+              /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14
 
 COPY server/ ./server/
 COPY vendor/ ./vendor/
