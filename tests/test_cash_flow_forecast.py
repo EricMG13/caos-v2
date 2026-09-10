@@ -337,4 +337,7 @@ def test_the_same_request_twice_is_the_same_answer() -> None:
     """Invariant 6: pure. No clock, no randomness, byte-identical output."""
     request = _request([("FY26", "BASE")], [_driver("FY26")])
 
-    assert cash_flow_forecast(request) == cash_flow_forecast(request)
+    first = cash_flow_forecast(request)
+    second = cash_flow_forecast(request)
+
+    assert first == second
