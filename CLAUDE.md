@@ -166,6 +166,15 @@ system this size means nobody looked.
   skipping. Until `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) are set on the repository, every scheduled run fails. That is the
   intended signal, not a gap to widen.
+- **`UrllibTransport`'s error path is tested at the director, not over a
+  socket.** `test_an_error_status_arrives_as_an_http_error_the_transport_can_type`
+  asks the real `_opener()` to convert a non-2xx, which is where the handler set
+  actually decides the answer; what it does not do is send that status over a
+  real connection. A local TLS endpoint would, and needs a certificate — which
+  needs a signing dependency and a decision entry, for a defect that lives
+  entirely in which handlers the director holds. *Upgrade:* fold it into the
+  `provider` job, which already has a real endpoint on the other end, by asking
+  the live provider for a status it will refuse.
 
 **Phase 4.**
 

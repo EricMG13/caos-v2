@@ -21,17 +21,30 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
+from email.message import Message
+from io import BytesIO
 
 import pytest
 
-from server.provider import Completion, OpenRouter, Transport, UrllibTransport
+from server.provider import (
+    DEFAULT_BASE_URL,
+    Completion,
+    OpenRouter,
+    Transport,
+    UrllibTransport,
+    _opener,
+)
 from server.refusals import Refusal, RefusalCode
 
 PROMPT = "Total debt at 31 December 2026 was USD 1,240.0m. Summarise."
 SECRET_ECHO = "Total debt at 31 December 2026 was USD 1,240.0m"
+# What a vendor puts in an error body. It reaches the transport and stops there.
+VENDOR_ERROR = b'{"error":{"message":"rate limited by upstream"}}'
 
 LIVE_KEY = os.environ.get("OPENROUTER_API_KEY")
 LIVE_MODEL = os.environ.get("OPENROUTER_MODEL")
@@ -252,6 +265,55 @@ def test_a_provider_without_a_model_is_refused() -> None:
         OpenRouter(api_key="k", model="", transport=_Transport()).complete(PROMPT)
 
     assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+
+
+def test_an_error_status_arrives_as_an_http_error_the_transport_can_type() -> None:
+    """The refusal table above is reachable only if a non-2xx arrives as an
+    `HTTPError`, and this is the wiring that decides whether it does.
+
+    `_opener()` is built from nothing, so it holds exactly the handlers it is
+    given. `HTTPErrorProcessor` does not raise; it hands a non-2xx to the
+    director's error machinery, and *that* raises `HTTPError` only if something
+    is registered under `http` to do it. With nothing registered the lookup is a
+    bare `KeyError`, `UrllibTransport`'s `except urllib.error.HTTPError` never
+    runs, and every 401, 429 and 5xx leaves the provider boundary as an untyped
+    crash rather than a code from the closed set -- with the vendor's message
+    attached to it, which is the one thing §16 says must not travel.
+
+    `_Transport` cannot catch this: that double hands back a status, which is
+    the layer above. Driving it end to end would take a TLS fixture and a new
+    dependency to sign one, for a defect that is entirely in which handlers the
+    director holds -- so the director is asked directly.
+    """
+    director = _opener()
+    request = urllib.request.Request(f"{DEFAULT_BASE_URL}/chat/completions")
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        director.error(
+            "http", request, BytesIO(VENDOR_ERROR), 429, "Too Many Requests", Message()
+        )
+
+    assert caught.value.code == 429
+    assert caught.value.read() == VENDOR_ERROR, "the body the transport returns"
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["file:///etc/hostname", "ftp://example.invalid/x", "data:text/plain,hello"],
+)
+def test_the_error_handler_adds_no_scheme_the_opener_did_not_have(url: str) -> None:
+    """The opener's other promise, still kept. Being able to raise on an error
+    status is not a reason to be able to *open* anything new -- these three are
+    what bandit B310 was about.
+
+    Asked of the director rather than of the scheme guard above it: the guard is
+    the first refusal and has its own test, and this is the second one behind it.
+    Plain `http:` is not here because it never reaches the director -- the guard
+    refuses the scheme, which is the point of having both.
+    """
+    director = _opener()
+
+    assert director.open(urllib.request.Request(url)) is None, "no handler served it"
 
 
 def test_the_live_provider_returns_a_completion() -> None:

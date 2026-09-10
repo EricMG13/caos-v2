@@ -84,10 +84,20 @@ def _opener() -> urllib.request.OpenerDirector:
     No redirect handler either: a provider that answers 3xx is not one this code
     understands, and following the redirect is how a permitted scheme turns into
     a forbidden one.
+
+    `HTTPDefaultErrorHandler` is the one that is easy to leave out, and it is not
+    optional. `HTTPErrorProcessor` does not raise on a non-2xx; it hands the
+    response to this director's error machinery, which raises `HTTPError` only
+    because this handler is registered to do it. Without it that lookup is a bare
+    `KeyError`, `post`'s `except urllib.error.HTTPError` below never runs, and
+    every 401, 429 and 5xx leaves this boundary as an untyped crash carrying the
+    vendor's message -- which is the whole of what §16 says must not travel. It
+    raises and opens nothing, so the scheme set above is unchanged.
     """
     director = urllib.request.OpenerDirector()
     director.add_handler(urllib.request.HTTPSHandler())
     director.add_handler(urllib.request.HTTPErrorProcessor())
+    director.add_handler(urllib.request.HTTPDefaultErrorHandler())
     return director
 
 
