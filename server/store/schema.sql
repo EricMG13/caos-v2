@@ -167,3 +167,44 @@ CREATE TABLE budget_reservations (
 );
 
 CREATE INDEX budget_reservations_by_run ON budget_reservations (run_id);
+
+-- Tenancy. Case standing and global role are separate (SYSTEM_SPEC.md 8); this
+-- is the case half. A revoked membership keeps its row: a run that already
+-- cited this actor's approval has to stay explicable.
+CREATE TABLE case_members (
+    case_id    uuid NOT NULL REFERENCES cases (case_id),
+    user_id    uuid NOT NULL,
+    standing   text NOT NULL,
+    granted_at timestamptz NOT NULL DEFAULT now(),
+    revoked_at timestamptz,
+    PRIMARY KEY (case_id, user_id),
+    CONSTRAINT case_members_standing_is_known CHECK (
+        standing IN ('READER', 'WRITER', 'APPROVER', 'ADMIN')
+    )
+);
+
+-- Append-only, hash-chained per case. The chain has no external anchor, so what
+-- it gives is detection: an entry edited in place no longer hashes to what the
+-- next one says came before it.
+CREATE TABLE audit_events (
+    case_id         uuid NOT NULL REFERENCES cases (case_id),
+    seq             bigint NOT NULL,
+    actor_id        uuid NOT NULL,
+    action          text NOT NULL,
+    -- The digest, never the payload. An audit event records that a decision was
+    -- made and what it bound to, not the document behind it.
+    payload_sha256  text NOT NULL,
+    previous_sha256 text NOT NULL,
+    entry_sha256    text NOT NULL,
+    at              timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (case_id, seq),
+    CONSTRAINT audit_events_seq_is_positive CHECK (seq > 0)
+);
+
+-- One row per case: the lock two governed writes contend on, and the head a
+-- retained package is compared against.
+CREATE TABLE audit_chain_heads (
+    case_id     uuid PRIMARY KEY REFERENCES cases (case_id),
+    seq         bigint NOT NULL,
+    head_sha256 text NOT NULL
+);
