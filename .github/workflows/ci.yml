@@ -8,7 +8,7 @@
 # section 4 exists to prevent, so none is scaffolded ahead of its subject:
 #   postgres  (two-connection races) ...... Phase 1
 #   provider  (one live OpenRouter call) .. Phase 5 (docs/DECISIONS.md 16)
-#   image     (Trivy) ..................... the phase that adds the Dockerfile
+#   image     (Trivy) ..................... Phase 7, below
 #   frontend  (lint, tsc, unit, build, a11y, workbench) ... Phase 9, below
 name: ci
 on:
@@ -175,6 +175,37 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
           CAOS_REQUIRE_PROVIDER: "1"
+
+  image:
+    # Arrives with the Dockerfile it scans (docs/DECISIONS.md section 11). Until
+    # Phase 7 there was no image and `trivy fs` reported every target as *not
+    # scanned* -- a gate that passes because it found nothing.
+    #
+    # It has something to find now: the runtime carries psycopg, pdfminer and
+    # cryptography, and section 21 records cryptography as the real cost of
+    # reading a PDF. This job is where that cost is measured rather than assumed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: docker build -t caos:ci .
+      - uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: caos:ci
+          format: json
+          output: trivy.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+      # The floor first: a scanner that scanned nothing is a failure, not a pass
+      # (docs/AI_CODE_QUALITY.md section 4). Only then does the finding count.
+      - run: python scripts/scan_floors.py trivy.json --trivy
+      - uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: caos:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
   security:
     # Python pinned deliberately. bandit 1.7.10 reaches for ast.Constant.s,
