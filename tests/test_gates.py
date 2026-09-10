@@ -145,11 +145,11 @@ def test_a_withdrawn_source_refuses_the_read_and_reopens_the_gate(
     reopens because the fingerprint moved.
     """
     conn, case_id, run_id, source_id, approver = gated
-    block_id = str(
-        conn.execute(
-            "SELECT block_id FROM source_blocks WHERE source_id = %s", (source_id,)
-        ).fetchone()[0]
-    )
+    row = conn.execute(
+        "SELECT block_id FROM source_blocks WHERE source_id = %s", (source_id,)
+    ).fetchone()
+    assert row is not None
+    block_id = str(row[0])
     reviewed = source_set_fingerprint(conn, case_id)
     approve_gate(conn, _approval(run_id, approver, reviewed))
     assert read_evidence(conn, source_id=source_id, block_id=block_id)
@@ -225,10 +225,12 @@ def test_the_fingerprint_ignores_the_order_sources_arrived_in(
     admit_pack(conn, blobs, case_id=case_id, documents=[first, second])
     one_way = source_set_fingerprint(conn, case_id)
 
-    other = conn.execute(
+    created = conn.execute(
         "INSERT INTO cases (case_id, title) VALUES (%s, %s) RETURNING case_id",
         (uuid4(), "same documents, other order"),
-    ).fetchone()[0]
+    ).fetchone()
+    assert created is not None
+    other = created[0]
     admit_pack(conn, blobs, case_id=other, documents=[second, first])
 
     assert source_set_fingerprint(conn, other) == one_way
