@@ -8,9 +8,19 @@ import { RevisionEditor } from "./RevisionEditor";
 import type { ViewProps } from "@/app/views";
 import type { DeliverableSection, Opinion } from "@/wire/report";
 
-/** `rev_4` → `rev_5`: the next edit is a new revision, never an amendment. */
+/** `rev_4` → `rev_5`: the next edit is a new revision, never an amendment.
+ *  Walks the trailing digit run by hand rather than `/(\d+)$/` — a regex
+ *  SonarQube flags as super-linear (typescript:S8786) though this shape
+ *  cannot backtrack; the loop is exactly as clear and has no such shape. */
 export function nextRevisionId(id: string): string {
-  return id.replace(/(\d+)$/, (n) => String(Number(n) + 1));
+  let end = id.length;
+  while (end > 0) {
+    const code = id.charCodeAt(end - 1);
+    if (code < 48 || code > 57) break; // not '0'-'9'
+    end -= 1;
+  }
+  const digits = id.slice(end);
+  return digits ? id.slice(0, end) + String(Number(digits) + 1) : id;
 }
 
 function SectionList({ sections, revision }: { sections: DeliverableSection[]; revision: string }) {

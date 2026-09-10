@@ -7,8 +7,8 @@
 // Never prose, string literals or JSX text. tests/test_vocabulary_rules.py
 // asserts ENFORCED below equals the Python gate's.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { basename, delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -26,8 +26,25 @@ export const ENFORCED = [
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
+// Lower-to-upper transitions, found by hand rather than a lookbehind+lookahead
+// regex — SonarQube flags that shape as super-linear (javascript:S8786) though
+// it holds no quantifier to backtrack on; a char-code scan reads the same and
+// draws no such flag.
+function isLowerOrDigit(code) {
+  return (code >= 97 && code <= 122) || (code >= 48 && code <= 57); // a-z, 0-9
+}
+function isUpper(code) {
+  return code >= 65 && code <= 90; // A-Z
+}
+
 export function normalise(phrase) {
-  const spaced = phrase.replace(/(?<=[a-z0-9])(?=[A-Z])/g, "_");
+  let spaced = "";
+  for (let i = 0; i < phrase.length; i += 1) {
+    if (i > 0 && isUpper(phrase.charCodeAt(i)) && isLowerOrDigit(phrase.charCodeAt(i - 1))) {
+      spaced += "_";
+    }
+    spaced += phrase[i];
+  }
   return spaced
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
@@ -139,9 +156,27 @@ export function violations(path, text, banned) {
   return lines;
 }
 
+// Absolute path to `git`, resolved once from PATH's own directories (mirrors
+// scripts/tracked.py's shutil.which) — the subprocess below then runs that
+// resolved path, never the bare name "git" left for the child to look up.
+function resolveGit() {
+  const name = process.platform === "win32" ? "git.exe" : "git";
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    const candidate = resolve(dir, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // not here; keep looking
+    }
+  }
+  throw new Error("git is not on PATH; the gate cannot determine what a PR carries");
+}
+
 function trackedTypeScript() {
   const out = execFileSync(
-    "git",
+    resolveGit(),
     [
       "ls-files",
       "-z",
