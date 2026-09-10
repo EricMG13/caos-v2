@@ -80,3 +80,59 @@ CREATE TABLE budget_ledger (
 );
 
 CREATE INDEX budget_ledger_by_run ON budget_ledger (run_id);
+
+-- Evidence. Ingestion is the only way bytes enter a case (SYSTEM_SPEC.md 5), so
+-- there is exactly one table bytes are named from and no path that writes it
+-- except server/evidence/ingest.py.
+CREATE TABLE sources (
+    source_id       uuid PRIMARY KEY,
+    case_id         uuid NOT NULL REFERENCES cases (case_id),
+    document_sha256 text NOT NULL,
+    filename        text NOT NULL,
+    admitted_at     timestamptz NOT NULL DEFAULT now(),
+    -- Invariant 1's second half. Withdrawal hides a source; it never deletes
+    -- one, because a run that already cited it has to stay explicable. The full
+    -- contract -- refused at every use, re-opening the plan gate -- is owed by
+    -- Phase 6 with its own named test (docs/REBUILD_PLAN.md).
+    withdrawn_at    timestamptz
+);
+
+CREATE INDEX sources_by_case ON sources (case_id);
+
+-- How sources are read (docs/DECISIONS.md section 45, adopted with Phase 2).
+-- A view rather than a WHERE clause every caller has to remember.
+CREATE VIEW live_sources AS
+    SELECT source_id, case_id, document_sha256, filename, admitted_at
+    FROM sources
+    WHERE withdrawn_at IS NULL;
+
+-- The unit read_evidence returns. One row per block, never a JSON column on the
+-- source row: that column is the ~8x read defect docs/AI_CODE_QUALITY.md
+-- section 1 measures, because reading one block parsed every block.
+CREATE TABLE source_blocks (
+    source_id uuid NOT NULL REFERENCES sources (source_id),
+    block_id  text NOT NULL,
+    page      integer NOT NULL,
+    text      text NOT NULL,
+    PRIMARY KEY (source_id, block_id)
+);
+
+-- The coordinate index behind invariant 11. Never returned to a module: tokens
+-- exist so the host can re-locate a quote and refuse one it cannot. `region_id`
+-- is the column or paragraph a line belongs to, and is what stops a quote being
+-- assembled across a column gutter.
+CREATE TABLE source_tokens (
+    source_id uuid NOT NULL REFERENCES sources (source_id),
+    token_id  bigint NOT NULL,
+    page      integer NOT NULL,
+    region_id integer NOT NULL,
+    line_id   integer NOT NULL,
+    text      text NOT NULL,
+    x0        double precision NOT NULL,
+    y0        double precision NOT NULL,
+    x1        double precision NOT NULL,
+    y1        double precision NOT NULL,
+    PRIMARY KEY (source_id, token_id)
+);
+
+CREATE INDEX source_tokens_by_page ON source_tokens (source_id, page, token_id);
