@@ -99,3 +99,64 @@ def test_an_uncited_figure_is_refused_at_the_render() -> None:
         render(payload)
 
     assert caught.value.code is RefusalCode.DELIVERABLE_UNCITED_FIGURE
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda p: p.update(artifacts=[]), id="no artifacts"),
+        pytest.param(
+            lambda p: p.update(artifacts="not-a-list"), id="artifacts not a list"
+        ),
+        pytest.param(
+            lambda p: p["artifacts"].__setitem__(0, "not-a-mapping"),
+            id="artifact not a mapping",
+        ),
+        pytest.param(
+            lambda p: p["artifacts"][0].update(claims="not-a-list"),
+            id="claims not a list",
+        ),
+        pytest.param(
+            lambda p: p["artifacts"][0]["claims"].__setitem__(0, "not-a-mapping"),
+            id="claim not a mapping",
+        ),
+        pytest.param(
+            lambda p: p["artifacts"][0]["claims"][0]["citations"].__setitem__(
+                0, "not-a-mapping"
+            ),
+            id="citation not a mapping",
+        ),
+        pytest.param(lambda p: p.update(case_title=""), id="case_title empty"),
+    ],
+)
+def test_a_malformed_payload_is_refused_not_crashed(mutate: object) -> None:
+    """Every shape a frozen payload can be wrong in reaches the same closed
+    code, `DELIVERABLE_PAYLOAD_INVALID` -- never an unhandled `TypeError` or
+    `KeyError` from treating a stranger's JSON as trusted structure."""
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    mutate(payload)  # type: ignore[operator]
+
+    with pytest.raises(Refusal) as caught:
+        render(payload)
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+
+
+def test_no_narrative_omits_the_section_rather_than_refusing() -> None:
+    """The narrative is optional; its absence is not malformed."""
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    del payload["narrative"]
+
+    page = render(payload)
+
+    assert b"Analyst narrative" not in page
+
+
+def test_a_narrative_that_is_not_a_string_is_refused() -> None:
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["narrative"] = 123
+
+    with pytest.raises(Refusal) as caught:
+        render(payload)
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
