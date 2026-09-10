@@ -220,6 +220,23 @@ def frontier(route: ResolvedRoute, accepted: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def waiting_on(
+    route: ResolvedRoute, accepted: Mapping[str, Any], route_node_id: str
+) -> tuple[Edge, ...]:
+    """Every dependency this node is still waiting for, typed.
+
+    The reason behind a state. A surface reporting BLOCKED with no cause tells a
+    reader the run is stuck without telling them what it is stuck on, and the
+    types are what separate a node waiting for a module from one waiting for a
+    person at the QA gate.
+    """
+    complete = {
+        node.module_id for node in route.nodes if node.route_node_id in accepted
+    }
+    node = next(n for n in route.nodes if n.route_node_id == route_node_id)
+    return _unmet(route, node.module_id, complete)
+
+
 def limitations_of(
     route: ResolvedRoute, accepted: Mapping[str, Any], route_node_id: str
 ) -> tuple[Edge, ...]:
@@ -228,12 +245,8 @@ def limitations_of(
     A node that carries a limitation forward has to be able to say which one:
     "RESTRICTED" on an artifact with no cause attached is not auditable.
     """
-    complete = {
-        node.module_id for node in route.nodes if node.route_node_id in accepted
-    }
-    node = next(n for n in route.nodes if n.route_node_id == route_node_id)
     return tuple(
-        edge for edge in _unmet(route, node.module_id, complete) if edge.type in SOFT
+        edge for edge in waiting_on(route, accepted, route_node_id) if edge.type in SOFT
     )
 
 
