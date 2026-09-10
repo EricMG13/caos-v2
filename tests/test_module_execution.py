@@ -30,6 +30,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.envelope import Claim, Envelope, parse_claims
 from server.methodology.executor import (
     Delivery,
+    ModuleOutcome,
     build_prompt,
     deliver,
     execute_module,
@@ -117,7 +118,7 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
     whatever the module put in its own body."""
     conn, source_id, delivered = admitted
 
-    envelope = execute_module(
+    outcome = execute_module(
         conn,
         bundle,
         module_id="CP-1",
@@ -125,6 +126,7 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
         provider=_Stub(_body(source_id)),
     )
 
+    envelope = outcome.envelope
     assert isinstance(envelope, Envelope)
     assert envelope.module_id == "CP-1"
     assert envelope.build_id.startswith("a43cb903")
@@ -139,7 +141,7 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
     rectangle it never saw (invariant 11)."""
     conn, source_id, delivered = admitted
 
-    envelope = execute_module(
+    outcome = execute_module(
         conn,
         bundle,
         module_id="CP-1",
@@ -147,12 +149,35 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
         provider=_Stub(_body(source_id)),
     )
 
-    [claim] = envelope.claims
+    [claim] = outcome.envelope.claims
     assert isinstance(claim, Claim)
     assert claim.statement.value.startswith("Total debt")
     [citation] = claim.citations
     assert citation.document_sha256
     assert citation.bboxes
+
+
+def test_the_outcome_keeps_the_charge_out_of_the_envelope(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """Two things, not one. The envelope is the module's output under invariant
+    9; the charge is the provider's reported cost under invariant 8. Folding the
+    charge into the envelope would put a figure inside a document the host
+    claims to have derived from evidence."""
+    conn, source_id, delivered = admitted
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        module_id="CP-1",
+        delivered=delivered,
+        provider=_Stub(_body(source_id)),
+    )
+
+    assert isinstance(outcome, ModuleOutcome)
+    assert outcome.charge == Decimal("0.001")
+    assert outcome.generation_id == "gen-stub"
+    assert not hasattr(outcome.envelope, "charge")
 
 
 def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
@@ -293,7 +318,7 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
         pytest.skip(_NO_CREDENTIAL)
     conn, _source_id, delivered = admitted
 
-    envelope = execute_module(
+    outcome = execute_module(
         conn,
         bundle,
         module_id="CP-1",
@@ -301,6 +326,7 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
         provider=OpenRouter(api_key=LIVE_KEY, model=LIVE_MODEL),
     )
 
+    envelope = outcome.envelope
     assert envelope.module_id == "CP-1"
     assert envelope.claims, "a module that cited nothing produced no envelope"
     for claim in envelope.claims:
