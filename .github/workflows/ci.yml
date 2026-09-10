@@ -47,12 +47,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        # Digest-pinned; a tag alone is not a pin. postgres:17-alpine.
+        image: postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env: {POSTGRES_PASSWORD: caos, POSTGRES_DB: caos}
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+        ports: ["5432:5432"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: {python-version: "3.14"}
       - run: pip install --require-hashes -r requirements-dev.txt
       - run: pytest
+        env:
+          CAOS_TEST_POSTGRES_URL: postgresql://postgres:caos@localhost:5432/caos
+          # A store suite that skipped is not a store suite that passed.
+          CAOS_REQUIRE_POSTGRES: "1"
       - run: python scripts/io_budget.py --assert
 
   security:

@@ -1,1 +1,3 @@
-# No runtime dependencies yet.
+# Runtime dependencies. The development toolchain lives in requirements-dev.in.
+# The store's driver (docs/DECISIONS.md section 20).
+psycopg[binary]==3.2.12

@@ -72,8 +72,10 @@ Standing rules that back them:
   `navigation.dependencies`.
 - `engine/runtime.py` — the frontier loop. No checkpointer: recovery is
   recomputation from the accepted-attempt ledger.
-- `storage/` — Postgres owns everything transactional; bytes are content-
-  addressed in the blob store.
+- `server/store/` — Postgres owns everything transactional; bytes are content-
+  addressed in the blob store. `schema.sql` is the declared schema, applied in
+  full at startup and refused when the database was built from a different one
+  (`docs/DECISIONS.md` §20, which corrected this line from `storage/`).
 - `methodology/` — bundle verification, the registry (the only seam for adding
   or upgrading a module), and the calculator execution boundary.
 - `vendor/deploy-v/` — the methodology bundle, read-only, pinned
@@ -136,7 +138,32 @@ system this size means nobody looked.
   a store module has no request path and no round-trip budget to declare.
   *Upgrade:* Phase 2 raises the floor to one budget per request path, with
   `test_io_budget_read_evidence`.
-- **`make dev` fails.** There is no API or schema until Phase 1.
+- **`make dev` fails.** The schema arrived with Phase 1
+  (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
+  route, which `docs/REBUILD_PLAN.md` places in Phase 6.
+
+**Phase 1.**
+
+- **A schema change is refused, not migrated.** `apply_schema` refuses
+  `STORE_SCHEMA_DRIFT` against a database built from a different declared
+  schema, which is the right answer only while no deployment holds data — it
+  offers a running system no way forward. *Upgrade:* the first deployment brings
+  an ordered migration table and a decision entry overriding §20; the drift
+  refusal stays as the check that the migrations were actually run.
+- **The recorded digest proves the declared schema did not change, not that the
+  database still matches it.** `apply_schema` compares the SHA-256 of
+  `schema.sql` against what was applied; a table altered or dropped outside this
+  code afterwards passes unnoticed. It catches the failure that startup exists to
+  catch — a process meeting a database an older build created — and not
+  tampering. *Upgrade:* apply the declared schema into a scratch namespace and
+  diff `information_schema` against the live one, the day a database is edited by
+  anything but this function.
+- **The store suite skips without `CAOS_TEST_POSTGRES_URL`.** A local `make
+  test` with the variable unset reports success having exercised none of the
+  store. CI sets `CAOS_REQUIRE_POSTGRES=1`, which turns that skip into a
+  failure, so the gap is local only. *Upgrade:* none needed while CI is the
+  gate; the day a developer's green run is trusted on its own, the variable
+  becomes required everywhere.
 - **`scan_floors.py --min-files 1` is a weak floor.** One scannable file
   satisfies it while bandit silently skips the rest. *Upgrade:* Phase 1, when
   there is a `server/` tree to claim — `--cover scripts server methodology
