@@ -22,6 +22,7 @@ lint:
 	$(PY) -m ruff format --check .
 	$(PY) scripts/check_vocabulary.py
 	$(PY) scripts/check_tested.py
+	node frontend/scripts/check-vocabulary.mjs
 
 types:
 	$(PY) -m mypy scripts tests server
