@@ -27,7 +27,13 @@ from decimal import Decimal
 
 import pytest
 
-from server.provider import Completion, OpenRouter, Transport, UrllibTransport
+from server.provider import (
+    Completion,
+    CompletionProvider,
+    OpenRouter,
+    Transport,
+    UrllibTransport,
+)
 from server.refusals import Refusal, RefusalCode
 
 PROMPT = "Total debt at 31 December 2026 was USD 1,240.0m. Summarise."
@@ -126,6 +132,27 @@ def test_the_call_forbids_provider_fallbacks() -> None:
     assert sent["provider"] == {"allow_fallbacks": False}
     assert sent["stream"] is False
     assert str(sent["_url"]).endswith("/chat/completions")
+
+
+def test_json_object_mode_is_asked_for_only_when_wanted() -> None:
+    """A narrowing of the provider's output, never a guarantee about it. The
+    host still parses and validates: what a module claims about its own output
+    is what invariant 3 says never survives."""
+    sent: dict[str, object] = {}
+
+    @dataclass
+    class _Recorder(_Transport):
+        def post(
+            self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
+        ) -> tuple[int, bytes]:
+            sent.update(json.loads(body))
+            return 200, self.payload
+
+    _provider(_Recorder()).complete(PROMPT)
+    assert "response_format" not in sent
+
+    _provider(_Recorder()).complete(PROMPT, json_object=True)
+    assert sent["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.parametrize("status", [400, 401, 402, 403, 404, 413, 422])
@@ -243,6 +270,15 @@ def test_a_base_url_that_is_not_http_is_refused(base_url: str) -> None:
         OpenRouter(api_key="k", model="m", base_url=base_url).complete(PROMPT)
 
     assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+
+
+def test_openrouter_is_a_completion_provider() -> None:
+    """The protocol the module executor depends on. `runtime.Provider` is a
+    different shape for a different job, and the two are kept apart so a double
+    for one cannot be accepted where the other was meant."""
+    provider: CompletionProvider = OpenRouter(api_key="k", model="m")
+
+    assert callable(provider.complete)
 
 
 def test_a_provider_without_a_model_is_refused() -> None:
