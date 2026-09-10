@@ -25,6 +25,22 @@ from tracked import tracked_python
 MEASURED = re.compile(r'\bfilename="([^"]*)"')
 
 
+def scanned_targets(report: Mapping[str, object]) -> list[str]:
+    """The targets a Trivy report actually examined.
+
+    An image report with no Results at all is the same failure as a bandit
+    report with no metrics: the scan ran, exited zero, and looked at nothing.
+    """
+    results = report.get("Results")
+    if not isinstance(results, list):
+        return []
+    return [
+        str(result.get("Target"))
+        for result in results
+        if isinstance(result, dict) and result.get("Target")
+    ]
+
+
 def covered_files(report: Mapping[str, object]) -> list[str]:
     """The files a bandit report actually measured, excluding its own totals row."""
     metrics = report.get("metrics")
@@ -153,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path)
     parser.add_argument("--min-files", type=int, default=1)
     parser.add_argument("--no-parse-errors", action="store_true")
+    parser.add_argument("--trivy", action="store_true")
     parser.add_argument("--cover", nargs="*", default=[])
     parser.add_argument("--unscanned", nargs="*", default=[])
     parser.add_argument(
@@ -170,7 +187,22 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as refusal:
         parser.error(str(refusal))
     text = report_path.read_text(encoding="utf-8")
+    # `--trivy` reads the scanner's own JSON, so it takes the same branch a
+    # bandit report does; only `--cobertura` reshapes what was read.
     report = cobertura_metrics(text) if args.cobertura else json.loads(text)
+
+    if args.trivy:
+        targets = scanned_targets(report)
+        if not targets:
+            print(
+                f"{args.report}: the image scan examined no targets; "
+                "a scan that scanned nothing is a failure",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"image scan examined {len(targets)} target(s)")
+        return 0
+
     claims = None
     if args.cover:
         repo = args.repo.resolve()
