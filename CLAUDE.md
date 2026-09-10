@@ -144,6 +144,15 @@ system this size means nobody looked.
 
 **Phase 2.**
 
+- **A quote matches whole tokens exactly.** `matched_text` is split on
+  whitespace and each word must equal a token, punctuation included. A module
+  quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
+  `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
+  costs a retry, an over-eager match costs a rectangle over text the quote does
+  not contain — but it will refuse quotes a reader would call correct.
+  *Upgrade:* Phase 5, when a real module's real quotes say which normalisations
+  are needed; anything decided before then is guesswork about a caller that does
+  not exist.
 - **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
   blob store inside the caller's transaction, and the blob store is a filesystem
   that transaction cannot roll back. The orphans are harmless — content-
