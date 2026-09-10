@@ -20,6 +20,7 @@ from __future__ import annotations
 import http.client
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -62,6 +63,29 @@ class Transport(Protocol):
     ) -> tuple[int, bytes]: ...
 
 
+ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    """An opener that can only speak HTTP.
+
+    `urllib.request.urlopen` uses the default opener, which also handles
+    `file:`, `ftp:` and `data:` -- so a base URL that ever came from
+    configuration could read a local file instead of calling a provider. This
+    director is built from nothing and given two handlers, so the other schemes
+    are not merely discouraged, they are absent.
+
+    No redirect handler either: a provider that answers 3xx is not one this code
+    understands, and following the redirect is how a permitted scheme turns into
+    a forbidden one.
+    """
+    director = urllib.request.OpenerDirector()
+    director.add_handler(urllib.request.HTTPHandler())
+    director.add_handler(urllib.request.HTTPSHandler())
+    director.add_handler(urllib.request.HTTPErrorProcessor())
+    return director
+
+
 @dataclass(frozen=True, slots=True)
 class UrllibTransport:
     """`urllib.request`, and no vendor SDK."""
@@ -69,11 +93,13 @@ class UrllibTransport:
     def post(
         self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
     ) -> tuple[int, bytes]:
+        if urllib.parse.urlsplit(url).scheme not in ALLOWED_SCHEMES:
+            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
         request = urllib.request.Request(
             url, data=body, headers=dict(headers), method="POST"
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with _opener().open(request, timeout=timeout) as response:
                 return int(response.status), bytes(response.read())
         except urllib.error.HTTPError as error:
             return int(error.code), bytes(error.read())
