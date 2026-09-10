@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
+from server.store.budget import CEILING
 from server.store.events import RunEvent, append, lock_run
 
 
@@ -33,12 +34,24 @@ def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
     return case_id
 
 
-def start_run(conn: StoreConnection, case_id: UUID) -> UUID:
-    """Start a run against a case. RUNNING is the only state a run starts in."""
+def start_run(
+    conn: StoreConnection, case_id: UUID, *, budget_ceiling: Decimal | None = None
+) -> UUID:
+    """Start a run against a case. RUNNING is the only state a run starts in.
+
+    The ceiling is carried from the first row rather than attached later: a run
+    that existed for even one attempt without one is invariant 8 with the number
+    left out. `server.store.budget.CEILING` is what a caller that names none
+    gets.
+    """
+    ceiling = CEILING if budget_ceiling is None else budget_ceiling
+    if not isinstance(ceiling, Decimal):
+        raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
     run_id = uuid4()
     conn.execute(
-        "INSERT INTO runs (run_id, case_id, status) VALUES (%s, %s, %s)",
-        (run_id, case_id, RunStatus.RUNNING.value),
+        "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
+        " VALUES (%s, %s, %s, %s)",
+        (run_id, case_id, RunStatus.RUNNING.value, ceiling),
     )
     return run_id
 
