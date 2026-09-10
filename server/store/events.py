@@ -62,25 +62,24 @@ def lock_run(conn: StoreConnection, run_id: UUID) -> RunStatus:
     return RunStatus(row[0])
 
 
-def append(conn: StoreConnection, run_id: UUID, event: RunEvent) -> int:
-    """Append `event` to the run's stream and return the position it took.
+def append(conn: StoreConnection, run_id: UUID, event: RunEvent) -> None:
+    """Append `event` to the run's stream.
 
     Never call this except beside the transition it records, in that
     transition's transaction.
+
+    The position is allocated by the same statement that takes it. Reading
+    `max(seq)` and inserting it back separately is two round trips, and the
+    caller would have to be trusted to keep them in one transaction for the
+    lock above to mean anything.
     """
     lock_run(conn, run_id)
-    row = conn.execute(
-        "SELECT coalesce(max(seq), 0) + 1 FROM run_events WHERE run_id = %s",
-        (run_id,),
-    ).fetchone()
-    # An aggregate over zero rows still returns one row.
-    assert row is not None
-    seq = int(row[0])
     conn.execute(
-        "INSERT INTO run_events (run_id, seq, name) VALUES (%s, %s, %s)",
-        (run_id, seq, event.value),
+        "INSERT INTO run_events (run_id, seq, name)"
+        " SELECT %s::uuid, coalesce(max(seq), 0) + 1, %s::text"
+        " FROM run_events WHERE run_id = %s",
+        (run_id, event.value, run_id),
     )
-    return seq
 
 
 def events_of(conn: StoreConnection, run_id: UUID) -> list[Event]:
