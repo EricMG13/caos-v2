@@ -1,0 +1,315 @@
+"""Phase 1 exit test: a crash in the commit gap yields one of everything.
+
+Invariant 6 (CLAUDE.md): execution is durable and exactly-once. `SYSTEM_SPEC.md`
+section 2 says how -- a run-state transition commits its state and its event in
+one transaction, every event insert rides a conditional update whose zero rows
+mean no event, and `run_events.seq` is allocated under the run row lock.
+
+The commit gap is the window between the work being done and the transaction
+that records it landing. A process can die on either side of the commit and must
+not be able to tell the difference afterwards: replaying the same completion
+must leave one artifact, one charge and one terminal event, never two.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+import pytest
+
+from server.boundary_text import BoundaryText
+from server.refusals import Refusal, RefusalCode
+from server.store import RunStatus, StoreConnection, apply_schema, connect
+from server.store.events import Event, RunEvent, events_of, lock_run
+from server.store.runs import (
+    complete_attempt,
+    create_case,
+    fail_run,
+    run_status,
+    start_attempt,
+    start_run,
+)
+
+ARTIFACT = "b" * 64
+CHARGE = Decimal("0.0142")
+
+
+@pytest.fixture
+def run(empty_database: str) -> Iterator[tuple[StoreConnection, UUID, UUID]]:
+    """A case and a RUNNING run on a committed connection."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Acme 2026 refinancing"))
+        run_id = start_run(conn, case_id)
+        conn.commit()
+        yield conn, case_id, run_id
+
+
+def _names(conn: StoreConnection, run_id: UUID) -> list[str]:
+    return [event.name for event in events_of(conn, run_id)]
+
+
+def _count(conn: StoreConnection, table: str, run_id: UUID) -> int:
+    row = conn.execute(
+        # `table` is a literal from this module, never caller input.
+        f"SELECT count(*) FROM {table} WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def test_terminal_event_is_exactly_once(
+    run: tuple[StoreConnection, UUID, UUID], empty_database: str
+) -> None:
+    """The Phase 1 exit test.
+
+    The completion commits. The process then dies before it learns that it did,
+    which is indistinguishable from the commit never happening -- so recovery
+    replays it. One artifact, one charge, one terminal event.
+    """
+    conn, _case_id, run_id = run
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    conn.commit()
+
+    completed = complete_attempt(
+        conn,
+        attempt_id=attempt_id,
+        artifact_sha256=ARTIFACT,
+        charge=CHARGE,
+    )
+    assert completed is True
+
+    # The crash: the caller never saw the commit, so recovery does it again.
+    replayed = complete_attempt(
+        conn,
+        attempt_id=attempt_id,
+        artifact_sha256=ARTIFACT,
+        charge=CHARGE,
+    )
+
+    assert replayed is False, "the replay must not claim to have completed the run"
+    assert _count(conn, "artifacts", run_id) == 1
+    assert _count(conn, "budget_ledger", run_id) == 1
+    assert _names(conn, run_id) == [
+        RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.RUN_COMPLETE.value,
+    ]
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+
+
+def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
+    run: tuple[StoreConnection, UUID, UUID], empty_database: str
+) -> None:
+    """The other side of the gap. The work happened; the transaction did not.
+
+    Nothing may survive it -- a charge without its terminal event is the shape
+    that lets a run be billed twice on the retry.
+    """
+    conn, case_id, run_id = run
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    conn.commit()
+
+    with connect(empty_database) as dying:
+        dying.execute(
+            "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id)"
+            " VALUES (%s, %s, %s, %s)",
+            (attempt_id, ARTIFACT, run_id, case_id),
+        )
+        dying.close()  # the process dies here, mid-transaction
+
+    assert _count(conn, "artifacts", run_id) == 0
+    assert _count(conn, "budget_ledger", run_id) == 0
+    assert _names(conn, run_id) == [RunEvent.ATTEMPT_STARTED.value]
+
+    assert (
+        complete_attempt(
+            conn,
+            attempt_id=attempt_id,
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+        )
+        is True
+    )
+    assert _count(conn, "artifacts", run_id) == 1
+    assert _count(conn, "budget_ledger", run_id) == 1
+
+
+def test_locking_a_run_that_does_not_exist_is_refused(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """`lock_run` is where every ordering guarantee starts, so it is also where
+    an unknown run stops -- before a caller can append to a stream that has no
+    run behind it."""
+    conn, _case_id, _run_id = run
+
+    with pytest.raises(Refusal) as caught:
+        lock_run(conn, uuid4())
+
+    assert caught.value.code is RefusalCode.RUN_NOT_FOUND
+
+
+def test_an_event_carries_its_position_name_and_an_aware_time(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id = run
+    start_attempt(conn, run_id, "CP-1")
+
+    [event] = events_of(conn, run_id)
+
+    assert isinstance(event, Event)
+    assert (event.seq, event.name) == (1, RunEvent.ATTEMPT_STARTED.value)
+    # timestamptz, never a naive local time: an event stream that cannot be
+    # ordered across a deployment's timezone is not an audit trail.
+    assert event.at.tzinfo is not None
+
+
+def test_events_of_a_run_are_numbered_from_one_without_gaps(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id = run
+    start_attempt(conn, run_id, "CP-0")
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    complete_attempt(
+        conn,
+        attempt_id=attempt_id,
+        artifact_sha256=ARTIFACT,
+        charge=CHARGE,
+    )
+
+    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3]
+
+
+def test_a_transition_that_changed_nothing_appends_no_event(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """The conditional-update rule, on a run that is already terminal.
+
+    A completion arriving for a failed run is not a completion. Zero rows
+    updated, no event -- otherwise a run carries two terminal events and the
+    stream that closes on one of them closes twice.
+    """
+    conn, _case_id, run_id = run
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    assert fail_run(conn, run_id) is True
+
+    completed = complete_attempt(
+        conn,
+        attempt_id=attempt_id,
+        artifact_sha256=ARTIFACT,
+        charge=CHARGE,
+    )
+
+    assert completed is False
+    assert _names(conn, run_id) == [
+        RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.RUN_FAILED.value,
+    ]
+    assert run_status(conn, run_id) is RunStatus.FAILED
+    # And it accepted nothing on the way past. A failed run holding an accepted
+    # artifact is a node Phase 3 would recompute as COMPLETE.
+    assert _count(conn, "artifacts", run_id) == 0
+    assert _count(conn, "budget_ledger", run_id) == 0
+
+
+def test_failing_a_run_twice_appends_one_event(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id = run
+
+    assert fail_run(conn, run_id) is True
+    assert fail_run(conn, run_id) is False
+
+    assert _names(conn, run_id) == [RunEvent.RUN_FAILED.value]
+
+
+def test_an_attempt_cannot_start_on_a_run_that_has_ended(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A terminal run is terminal. An attempt started after it would be work
+    nothing can accept and a charge nothing can reconcile."""
+    conn, _case_id, run_id = run
+    fail_run(conn, run_id)
+
+    with pytest.raises(Refusal) as caught:
+        start_attempt(conn, run_id, "CP-1")
+
+    assert caught.value.code is RefusalCode.RUN_NOT_RUNNING
+    assert _names(conn, run_id) == [RunEvent.RUN_FAILED.value]
+
+
+def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """Invariant 7: Decimal, never float, on any money path. Binary floating
+    point cannot represent a cent, and a charge is what a run is billed."""
+    conn, _case_id, run_id = run
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+
+    with pytest.raises(Refusal) as caught:
+        complete_attempt(
+            conn,
+            attempt_id=attempt_id,
+            artifact_sha256=ARTIFACT,
+            charge=0.0142,  # type: ignore[arg-type]
+        )
+
+    assert caught.value.code is RefusalCode.MONEY_NOT_DECIMAL
+    assert _count(conn, "budget_ledger", run_id) == 0
+
+
+def test_the_charge_survives_as_the_decimal_it_was_given(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id = run
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    complete_attempt(
+        conn,
+        attempt_id=attempt_id,
+        artifact_sha256=ARTIFACT,
+        charge=CHARGE,
+    )
+
+    row = conn.execute(
+        "SELECT amount FROM budget_ledger WHERE run_id = %s", (run_id,)
+    ).fetchone()
+
+    assert row is not None
+    assert row[0] == CHARGE
+    assert isinstance(row[0], Decimal)
+
+
+def test_every_run_event_is_one_the_database_accepts(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """`RunEvent` and the `run_events_name_is_known` CHECK are one closed set."""
+    conn, _case_id, run_id = run
+
+    for index, event in enumerate(RunEvent, start=1):
+        conn.execute(
+            "INSERT INTO run_events (run_id, seq, name) VALUES (%s, %s, %s)",
+            (run_id, index, event.value),
+        )
+    conn.commit()
+
+
+def test_an_unknown_attempt_cannot_complete_a_run(
+    run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A completion names the attempt it is completing. One that never started
+    has no reservation behind it, so it may not charge or transition."""
+    conn, _case_id, run_id = run
+
+    with pytest.raises(Refusal) as caught:
+        complete_attempt(
+            conn,
+            attempt_id=uuid4(),
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+        )
+
+    assert caught.value.code is RefusalCode.ATTEMPT_NOT_FOUND
+    assert run_status(conn, run_id) is RunStatus.RUNNING
+    assert _names(conn, run_id) == []

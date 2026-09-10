@@ -162,6 +162,12 @@ system this size means nobody looked.
   tampering. *Upgrade:* apply the declared schema into a scratch namespace and
   diff `information_schema` against the live one, the day a database is edited by
   anything but this function.
+- **`budget_ledger` records a charge and enforces no ceiling.** One charge per
+  attempt is a database fact, but nothing refuses the charge that takes a run
+  past a budget, because invariant 8's reservation belongs to the provider call
+  and there is no provider call yet. *Upgrade:* Phase 4 reserves before the call
+  and reconciles after, and its three named tests
+  (`docs/REBUILD_PLAN.md` Phase 4) are what make the ceiling bite.
 - **A blob is read whole into memory and has no size ceiling.** `BlobStore.get`
   returns `bytes`, so a source document's size is bounded by nothing but the
   process. Nothing admits documents yet, so nothing can reach it. *Upgrade:*
