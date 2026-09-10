@@ -5,7 +5,7 @@
 #   sonarqube (CI analysis with coverage) . Phase 1 (docs/DECISIONS.md 15)
 #   provider  (one live OpenRouter call) .. Phase 5 (docs/DECISIONS.md 16)
 #   image     (Trivy) ..................... the phase that adds the Dockerfile
-#   frontend  (lint, tsc, a11y) ........... Phase 9
+#   frontend  (lint, tsc, unit, build, a11y, workbench) ... Phase 9, below
 name: ci
 on:
   push:
@@ -96,7 +96,41 @@ jobs:
       - run: |
           n=$(git diff --numstat origin/${{ github.base_ref }}...HEAD -- . \
               ':!*.lock' ':!requirements*.txt' ':!**/vendor/**' ':!docs/**' \
-              ':!package-lock.json' ':!frontend/fixtures/**' \
+              ':!*package-lock.json' ':!frontend/fixtures/**' \
               | awk '{s+=$1+$2} END {print s+0}')
           echo "changed lines: $n"
           [ "$n" -le 800 ] || { echo "PR too large; split it (docs/AI_CODE_QUALITY.md)"; exit 1; }
+
+  frontend:
+    # The workspace (Phase 9): the TypeScript vocabulary gate rides `npm run
+    # lint`; the a11y matrix and the workbench smoke run on three engines over
+    # the static export, with fixtures served by the preview middleware.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run: {working-directory: frontend}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: nine section routes in the export
+        run: |
+          for s in directory upload analysis book run model report committee admin; do
+            test -f "dist/$s/index.html" || { echo "missing dist/$s/index.html"; exit 1; }
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: frontend-evidence
+          path: |
+            frontend/a11y-results/
+            frontend/test-results/
+          if-no-files-found: ignore

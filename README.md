@@ -23,7 +23,7 @@ Starting the build: [`docs/INITIALISATION_PROMPT.md`](docs/INITIALISATION_PROMPT
 
 ## Status
 
-Pre-implementation. Seeded on 2026-09-10 from the CAOS-Final specification
+Phase 9 in progress (`frontend/`, `docs/DECISIONS.md` §18–§19). Seeded on 2026-09-10 from the CAOS-Final specification
 (`docs/DECISIONS.md` §12); no application code exists yet. This is deliberate —
 the predecessor tree reached 29k lines of server code before its route
 resolution was found to be reading the wrong table.

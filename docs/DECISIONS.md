@@ -295,3 +295,77 @@ without editing upstream: `verify_package.py` refuses an unindexed skill
 folder, and its `--refresh` rewrites six upstream files and moves the build id
 away from the one §13 pins. Beside the bundle, upstream stays byte-identical
 and the host addition is still authority verified on the bytes at use.
+
+## 2026-09-10 §18 — The workspace consumes the design system as vendored source and tokens
+
+`frontend/src/ds/` carries the predecessor's shared primitives copied from
+`github.com/EricMG13/Credit-Operating-System` at `f454c654f`
+(`caos/frontend/src/components/shared/{TextInput,ActionReason,SurfaceState}`,
+`components/pipeline/atoms.tsx` for `Tag`, `lib/use-modal-a11y.ts`,
+`lib/pipeline/sev.ts`), each with its blob hash and the change made to it in
+`frontend/src/ds/VENDORED.md`; `Panel`, `StatCard`, `SectionHeader` and
+`StatusGlyph` were read and not carried, because the sections draw the design
+project's panel markup and no surface needs the other three. Two changes are substantive:
+`useModalA11y` takes the opener as an argument and never reads
+`document.activeElement` (`IA_SPEC.md` §7), and `SurfaceState`'s kinds are the
+seven of `IA_SPEC.md` §6 with the `DESIGN.md` severity shapes. The shell
+stylesheet `frontend/src/styles/caos.css` is the design project's
+`caos-shell.css`, `caos-shell.additions.css` and `caos-evidence.css`
+(`docs/design/DESIGN_HANDOFF.md`) ported with every colour bound to a token.
+
+Tokens are the bound design system's values as `DESIGN.md` lists them
+(`--caos-accent #4f8cff`, `--caos-border #262633`, `--caos-muted #8a8a9a`,
+`--caos-panel #12121a`, `--caos-elevated #1a1a24`). The predecessor's
+`globals.css` re-tuned four of them (`#63a1ff`, `#34384a`, `#a1a1b5`,
+`#11131d`); that tuning was a contrast finding in the critique, not a token
+source, and is not adopted. Four on-dark text tints
+(`--caos-{success,warning,critical,accent}-bright`) are derived here for
+status copy; they are signal, never decoration. The app declares
+`--font-sans|mono|display` as system stacks; no web font. Nothing loads the
+design system's `_ds_bundle.js` (a React 18 IIFE built for the old
+information architecture) and nothing depends on the private `caos-frontend`
+package.
+
+**Reason.** The primitives worth keeping are the critique's preserve column
+(`docs/design/BRIEF.md`): the refused-but-visible action, the measured
+scroll-region focus, the modal focus stack. Copying source with a recorded
+hash keeps them auditable without a dependency on a package this repository
+cannot pin; the bundle runtime would carry the discarded rails, palette and
+persona shell with it.
+
+## 2026-09-10 §19 — The frontend toolchain and its dependencies
+
+`frontend/` is `caos-workspace`: Vite 6, React 19, TypeScript 5.9, Tailwind 4
+through `@tailwindcss/vite`, `react-router` 7 — a single-page application
+exported statically, `scripts/export-sections.mjs` copying `dist/index.html`
+to `dist/<slug>/index.html` for the nine section URLs and every pre-v2 slug in
+`src/app/routes.json`. No Node in production. Dev and preview serve the
+fixtures at the wire's routes from `vite.config.ts`; the production build
+carries none of them.
+
+Dependencies, pinned exactly in `frontend/package.json` and hashed in
+`package-lock.json`: `react`, `react-dom`, `react-router`, `tailwindcss`,
+`@tailwindcss/vite`. Development only: `vite`, `@vitejs/plugin-react`,
+`typescript`, `vitest`, `jsdom`, `@testing-library/{react,dom,jest-dom}`,
+`@playwright/test`, `playwright`, `axe-core`, `eslint`, `typescript-eslint`,
+`eslint-plugin-react-hooks`, `eslint-plugin-jsx-a11y`, `prettier`, and the
+type packages `@types/{react,react-dom,node}`. Nothing else: no HTTP client,
+no icon set, no chart library, no motion library, no PDF or canvas export,
+no model SDK — the predecessor carried all of those and the workspace needs
+none (`IA_SPEC.md` §8: no chart that carries a number the passport cannot
+explain). A new package is a new entry here.
+
+Gates that arrive with this code: the TypeScript vocabulary gate
+(`frontend/scripts/check-vocabulary.mjs`, the same `ENFORCED` set as
+`scripts/check_vocabulary.py`, asserted by
+`tests/test_vocabulary_rules.py::test_ts_gate_enforces_the_same_tokens`), an
+axe matrix over three engines, nine routes plus every fixture state and three
+viewports with a completeness floor, and a Playwright workbench smoke with
+`retries: 0`; the `frontend` CI job runs them (`docs/DECISIONS.md` §11).
+`playwright` is pinned to the release whose browsers this machine already
+caches.
+
+**Reason.** The owner chose Vite + React 19 + TypeScript over the
+predecessor's Next.js (`docs/DECISIONS.md` §12): a static export has no server
+to trust, and one process is the deployment shape (`SYSTEM_SPEC.md` §11).
+Exact pins because a floating range is a dependency change nobody recorded.
