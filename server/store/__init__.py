@@ -31,6 +31,11 @@ SCHEMA = (Path(__file__).with_name("schema.sql")).read_text(encoding="utf-8")
 # starting at once do not both read an empty bookkeeping table and both apply.
 # The value is arbitrary and permanent; it identifies this lock, nothing else.
 _SCHEMA_LOCK = 0x0CA05_5CE_1
+# The one table declared here rather than in schema.sql, because it is what
+# decides whether schema.sql has been applied and so has to exist first. `IF NOT
+# EXISTS` is right here and wrong there for the same reason: this statement is
+# meant to do nothing on every start after the first.
+#
 # One row, enforced by the database rather than argued from the lock above: the
 # primary key admits only `true` and the CHECK admits only `true`, so a second
 # row cannot be inserted and `SELECT` cannot become order-dependent.
@@ -61,6 +66,12 @@ def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
     declared schema. The refusal carries the code alone: the schema body would
     put table and column names into whatever logs it.
     """
+    if conn.autocommit:
+        # Both guarantees below are properties of one transaction: the advisory
+        # lock is transaction-scoped, and the DDL has to land with the digest
+        # that records it or not at all. Autocommit voids both silently, so it
+        # is refused rather than supported.
+        raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     digest = sha256(sql.encode("utf-8")).hexdigest()
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK,))
     conn.execute(_BOOKKEEPING)
