@@ -6,9 +6,11 @@
 // with zero scan_error, else exit 1 — a matrix with a hole is not a pass.
 // Adapted from the predecessor's scripts/a11y-axe.mjs at f454c65.
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium, firefox, webkit } from "playwright";
 import { summarizeAxeViolations } from "./axe-results.mjs";
 import { ENGINES, LOADING, ROUTES, SETTLED, VIEWPORTS } from "./fixture-routes.mjs";
@@ -27,10 +29,17 @@ const viewports = (process.env.VIEWPORTS || VIEWPORTS.join(",")).split(",").map(
 });
 const routes = process.env.ROUTES ? process.env.ROUTES.split(",") : ROUTES;
 
+// The pinned binary by path, never `npx`: `npx` resolves through PATH and may
+// fetch and run a package's lifecycle scripts, and its wrapper process does not
+// forward a signal to vite — which then holds the port the workbench needs.
+const VITE = fileURLToPath(new URL("../node_modules/vite/bin/vite.js", import.meta.url));
+
 async function startPreview() {
   if (process.env.BASE) return null;
-  const child = spawn("npx", ["vite", "preview", "--strictPort", "--port", String(PORT)], {
+  const child = spawn(process.execPath, [VITE, "preview", "--strictPort", "--port", String(PORT)], {
     stdio: ["ignore", "pipe", "inherit"],
+    // Its own process group, so the kill below reaches every child.
+    detached: true,
   });
   await new Promise((resolveReady, reject) => {
     const timer = setTimeout(() => reject(new Error("vite preview did not start")), 30_000);
@@ -179,7 +188,15 @@ try {
     await browser.close();
   }
 } finally {
-  preview?.kill();
+  if (preview) {
+    try {
+      process.kill(-preview.pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
+    // Wait for the port to be released before the workbench claims it.
+    await Promise.race([once(preview, "exit"), new Promise((r) => setTimeout(r, 10_000))]);
+  }
 }
 
 const expected = engines.length * viewports.length * routes.length;
