@@ -182,10 +182,11 @@ system this size means nobody looked.
   failure, so the gap is local only. *Upgrade:* none needed while CI is the
   gate; the day a developer's green run is trusted on its own, the variable
   becomes required everywhere.
-- **`scan_floors.py --min-files 1` is a weak floor.** One scannable file
-  satisfies it while bandit silently skips the rest. *Upgrade:* Phase 1, when
-  there is a `server/` tree to claim — `--cover scripts server methodology
-  --unscanned tests`, refusing any tracked `.py` no list claims.
+- ~~**`scan_floors.py --min-files 1` is a weak floor.**~~ Closed in Phase 1.
+  The floor is now `--cover scripts server --unscanned tests`: a tracked `.py`
+  under `--cover` that the report did not measure is a failure, and so is one
+  neither list claims. `methodology` joins `--cover` in Phase 5, which is when
+  the directory exists — naming it now would claim a tree that is not there.
 - **The record cites decisions this repository did not take.** The specs
   lifted from CAOS-Final at `cf8c3a9` cite its §18–§48; `docs/DECISIONS.md`
   §12 maps each to the entry here or to the phase that adopts it. *Upgrade:*

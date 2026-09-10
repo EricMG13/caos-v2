@@ -110,7 +110,9 @@ jobs:
       # `|| true` so the floor check, not bandit's exit code, is the verdict:
       # a report that parsed nothing must fail even when it found nothing.
       - run: bandit -r scripts server -f json -o bandit.json || true
-      - run: python scripts/scan_floors.py bandit.json --min-files 1 --no-parse-errors
+      - run: |
+          python scripts/scan_floors.py bandit.json --no-parse-errors \
+                 --cover scripts server --unscanned tests
       - run: bandit -r scripts server
       - run: |
           pip-audit --require-hashes -r requirements.txt \

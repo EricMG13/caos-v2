@@ -32,7 +32,8 @@ test:
 
 security:  # the floor is checked first: a report that parsed nothing must fail
 	$(SEC)/bandit -r scripts server -f json -o bandit.json || true
-	$(PY) scripts/scan_floors.py bandit.json --min-files 1 --no-parse-errors
+	$(PY) scripts/scan_floors.py bandit.json --no-parse-errors \
+		--cover scripts server --unscanned tests
 	$(SEC)/bandit -r scripts server
 	$(SEC)/pip-audit --require-hashes -r requirements.txt -r requirements-dev.txt \
 		-r requirements-security.txt
