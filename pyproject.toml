@@ -8,7 +8,7 @@ dependencies = []
 [tool.ruff]
 target-version = "py314"
 line-length = 88
-extend-exclude = [".venv", "vendor"]
+extend-exclude = [".venv", "vendor", ".claude"]
 
 [tool.ruff.lint]
 # One rule family per measured failure mode in docs/AI_CODE_QUALITY.md section 1.

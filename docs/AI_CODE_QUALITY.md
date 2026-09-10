@@ -109,6 +109,13 @@ a naive version bump fails loudly.
 scanner reporting zero files. This applies to every scanning gate, not just
 bandit.
 
+**Every gate judges what this branch tracks, and nothing else.** The identifier
+gates take their file set from `git ls-files` (`scripts/tracked.py`); `ruff` and
+`mypy` walk the filesystem instead, so they exclude `.claude`, where the harness
+keeps worktrees of *other* branches. A finding in one of those is a finding
+against a different branch's code: nothing this PR can fix, and a red gate no
+author can clear.
+
 ---
 
 ## 5. What these controls do not fix

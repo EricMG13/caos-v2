@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .venv*/
+.claude/worktrees/
 node_modules/
 frontend/dist/
 frontend/playwright-report/
