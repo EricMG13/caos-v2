@@ -63,16 +63,22 @@ class Transport(Protocol):
     ) -> tuple[int, bytes]: ...
 
 
-ALLOWED_SCHEMES = frozenset({"http", "https"})
+# HTTPS only. The prompt carries evidence and the header carries the key, so
+# there is no request this makes that may cross a network in clear text -- and
+# `http` in this set is the whole of what "clear-text protocol" findings are
+# about. A self-hosted endpoint that speaks only `http` is a decision entry, not
+# a default.
+ALLOWED_SCHEMES = frozenset({"https"})
 
 
 def _opener() -> urllib.request.OpenerDirector:
-    """An opener that can only speak HTTP.
+    """An opener that can only speak HTTPS.
 
     `urllib.request.urlopen` uses the default opener, which also handles
-    `file:`, `ftp:` and `data:` -- so a base URL that ever came from
-    configuration could read a local file instead of calling a provider. This
-    director is built from nothing and given two handlers, so the other schemes
+    `file:`, `ftp:`, `data:` and plain `http:` -- so a base URL that ever came
+    from configuration could read a local file, or send the key and the prompt
+    across a network in clear text, instead of calling a provider. This director
+    is built from nothing and given one transport handler, so the other schemes
     are not merely discouraged, they are absent.
 
     No redirect handler either: a provider that answers 3xx is not one this code
@@ -80,7 +86,6 @@ def _opener() -> urllib.request.OpenerDirector:
     a forbidden one.
     """
     director = urllib.request.OpenerDirector()
-    director.add_handler(urllib.request.HTTPHandler())
     director.add_handler(urllib.request.HTTPSHandler())
     director.add_handler(urllib.request.HTTPErrorProcessor())
     return director
