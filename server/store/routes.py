@@ -13,10 +13,16 @@ what that run is.
 
 from __future__ import annotations
 
-from json import dumps
+from json import dumps, loads
 from uuid import UUID
 
-from server.engine.route import ResolvedRoute, route_digest
+from server.engine.route import (
+    Edge,
+    EdgeType,
+    ResolvedRoute,
+    RouteNode,
+    route_digest,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.events import RunEvent, append, lock_run
@@ -58,6 +64,42 @@ def pinned_route(conn: StoreConnection, run_id: UUID) -> str | None:
         "SELECT route_digest FROM run_routes WHERE run_id = %s", (run_id,)
     ).fetchone()
     return None if row is None else str(row[0])
+
+
+def resolved_route(conn: StoreConnection, run_id: UUID) -> ResolvedRoute | None:
+    """The pinned route itself, rebuilt from the row, or None before the gate.
+
+    Read back rather than re-resolved. A surface that resolved the catalog again
+    to draw a running route would draw whatever the catalog says today, which is
+    the one thing pinning exists to prevent.
+    """
+    row = conn.execute(
+        "SELECT resolved FROM run_routes WHERE run_id = %s", (run_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    stored = loads(row[0]) if isinstance(row[0], str | bytes) else row[0]
+    return ResolvedRoute(
+        profile_id=str(stored["profile_id"]),
+        selection_id=str(stored["selection_id"]),
+        nodes=tuple(
+            RouteNode(
+                route_node_id=str(node["route_node_id"]),
+                module_id=str(node["module_id"]),
+                stage=int(node["stage"]),
+            )
+            for node in stored["nodes"]
+        ),
+        edges=tuple(
+            Edge(
+                source=str(edge["source"]),
+                target=str(edge["target"]),
+                type=EdgeType(edge["type"]),
+            )
+            for edge in stored["edges"]
+        ),
+        predicates=tuple((str(pair[0]), str(pair[1])) for pair in stored["predicates"]),
+    )
 
 
 def _canonical(resolved: ResolvedRoute) -> str:
