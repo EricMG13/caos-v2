@@ -65,7 +65,7 @@ CREATE TABLE run_events (
     PRIMARY KEY (run_id, seq),
     CONSTRAINT run_events_seq_is_positive CHECK (seq > 0),
     CONSTRAINT run_events_name_is_known CHECK (
-        name IN ('ATTEMPT_STARTED', 'RUN_COMPLETE', 'RUN_FAILED')
+        name IN ('ROUTE_PINNED', 'ATTEMPT_STARTED', 'RUN_COMPLETE', 'RUN_FAILED')
     )
 );
 
@@ -136,3 +136,16 @@ CREATE TABLE source_tokens (
 );
 
 CREATE INDEX source_tokens_by_page ON source_tokens (source_id, page, token_id);
+
+-- The pin. Invariant 10: the route is resolved once, digested at the plan gate,
+-- and execution reads only this row. `resolved` is the whole route as resolved,
+-- so a replay reads what was pinned rather than re-deriving it from a catalog
+-- that may have moved.
+CREATE TABLE run_routes (
+    run_id       uuid PRIMARY KEY REFERENCES runs (run_id),
+    profile_id   text NOT NULL,
+    selection_id text NOT NULL,
+    route_digest text NOT NULL,
+    resolved     jsonb NOT NULL,
+    pinned_at    timestamptz NOT NULL DEFAULT now()
+);

@@ -28,6 +28,7 @@ class RunEvent(StrEnum):
     the same set; `test_every_run_event_is_one_the_database_accepts` keeps them
     from becoming two."""
 
+    ROUTE_PINNED = "ROUTE_PINNED"
     ATTEMPT_STARTED = "ATTEMPT_STARTED"
     RUN_COMPLETE = "RUN_COMPLETE"
     RUN_FAILED = "RUN_FAILED"
