@@ -208,3 +208,21 @@ CREATE TABLE audit_chain_heads (
     seq         bigint NOT NULL,
     head_sha256 text NOT NULL
 );
+
+-- A human gate, and the content it was released over. Invariant 5: approval
+-- binds the exact reviewed content, so the row keeps the fingerprint the
+-- approver saw. A gate whose current fingerprint differs is open again -- which
+-- is how a withdrawal reopens one without anything going looking for approvals
+-- to cancel.
+CREATE TABLE run_gates (
+    run_id            uuid NOT NULL REFERENCES runs (run_id),
+    gate              text NOT NULL,
+    preview_sha256    text NOT NULL,
+    input_fingerprint text NOT NULL,
+    approved_by       uuid NOT NULL,
+    approved_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (run_id, gate),
+    CONSTRAINT run_gates_gate_is_known CHECK (
+        gate IN ('SOURCE_SET', 'RESEARCH_PLAN')
+    )
+);
