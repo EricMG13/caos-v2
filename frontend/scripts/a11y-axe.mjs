@@ -22,10 +22,26 @@ const BASE = process.env.BASE || `http://localhost:${PORT}`;
 const resultFile = process.env.A11Y_RESULT_FILE || "a11y-results/matrix.json";
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"];
 const engines = (process.env.ENGINES || ENGINES.join(",")).split(",");
+// WIDTHxHEIGHT parsed by hand rather than `/^(\d+)x(\d+)$/` — the same
+// anchor-adjacent quantified shape already replaced elsewhere in this
+// codebase (javascript/typescript:S8786).
+function isDigits(part) {
+  return part.length > 0 && [...part].every((ch) => ch >= "0" && ch <= "9");
+}
+function parseViewport(value) {
+  const trimmed = value.trim();
+  const x = trimmed.indexOf("x");
+  if (x < 0) return null;
+  const width = trimmed.slice(0, x);
+  const height = trimmed.slice(x + 1);
+  return isDigits(width) && isDigits(height)
+    ? { width: Number(width), height: Number(height) }
+    : null;
+}
 const viewports = (process.env.VIEWPORTS || VIEWPORTS.join(",")).split(",").map((value) => {
-  const match = value.trim().match(/^(\d+)x(\d+)$/);
-  if (!match) throw new Error(`bad viewport "${value}"`);
-  return { width: Number(match[1]), height: Number(match[2]) };
+  const parsed = parseViewport(value);
+  if (!parsed) throw new Error(`bad viewport "${value}"`);
+  return parsed;
 });
 const routes = process.env.ROUTES ? process.env.ROUTES.split(",") : ROUTES;
 
