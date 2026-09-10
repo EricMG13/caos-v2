@@ -8,6 +8,12 @@
 #   frontend  (lint, tsc, unit, build, a11y, workbench) ... Phase 9, below
 name: ci
 on:
+  # The provider job runs on a schedule and on dispatch, never on a pull
+  # request: it spends money and needs a credential no fork has
+  # (docs/DECISIONS.md section 16).
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
   push:
   pull_request:
     # Declared, not defaulted: a draft pull request produced no run under the
@@ -91,6 +97,27 @@ jobs:
           CAOS_TEST_POSTGRES_URL: postgresql://postgres:caos@localhost:5432/caos
           # A race suite that skipped is not a race suite that passed.
           CAOS_REQUIRE_POSTGRES: "1"
+
+  provider:
+    # One real call, nightly. A provider suite that never called the provider is
+    # the vacuous pass docs/AI_CODE_QUALITY.md section 4 forbids, so this job
+    # exists to make the skip impossible: CAOS_REQUIRE_PROVIDER=1 turns a missing
+    # credential into a failure rather than a green tick.
+    if: github.event_name != 'pull_request' && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: {python-version: "3.14"}
+      - run: pip install --require-hashes -r requirements-dev.txt
+      - run: pytest tests/test_provider.py
+        env:
+          # The key is a repository secret and the model id a repository
+          # variable; neither appears in a file this repository tracks.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          CAOS_REQUIRE_PROVIDER: "1"
 
   security:
     # Python pinned deliberately. bandit 1.7.10 reaches for ast.Constant.s,
