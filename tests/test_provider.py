@@ -224,13 +224,21 @@ def test_the_default_transport_is_urllib_and_satisfies_the_protocol() -> None:
 
 @pytest.mark.parametrize(
     "base_url",
-    ["file:///etc", "ftp://example.invalid", "data:text/plain,hello", "/etc"],
+    [
+        "file:///etc",
+        "ftp://example.invalid",
+        "data:text/plain,hello",
+        "/etc",
+        # Clear text. The header carries the key and the body carries evidence.
+        "http://openrouter.ai/api/v1",
+    ],
 )
 def test_a_base_url_that_is_not_http_is_refused(base_url: str) -> None:
-    """bandit B310, fixed rather than suppressed. The default `urlopen` also
-    speaks `file:`, so a base URL from configuration could read a local file
-    instead of calling a provider. The transport refuses the scheme, and its
-    opener has no handler that could serve one."""
+    """bandit B310 and the clear-text finding, both fixed rather than
+    suppressed. The default `urlopen` speaks `file:`, `ftp:`, `data:` and plain
+    `http:`, so a base URL from configuration could read a local file or put the
+    key and the prompt on the wire unencrypted. The transport refuses the
+    scheme, and its opener has no handler that could serve one."""
     with pytest.raises(Refusal) as caught:
         OpenRouter(api_key="k", model="m", base_url=base_url).complete(PROMPT)
 
