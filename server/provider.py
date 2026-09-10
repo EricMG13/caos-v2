@@ -120,6 +120,19 @@ class UrllibTransport:
             return int(error.code), bytes(error.read())
 
 
+class CompletionProvider(Protocol):
+    """Anything that can answer a prompt with a `Completion`.
+
+    Named for what it returns rather than for who implements it: the module
+    executor depends on this, and `server/engine/runtime.py`'s `Provider` is a
+    different shape for a different job -- one takes a prompt, the other takes a
+    route node. Keeping them apart is what stops a test double for one being
+    accepted where the other was meant.
+    """
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion: ...
+
+
 @dataclass(frozen=True, slots=True)
 class OpenRouter:
     """One model, one identity, no fallbacks."""
@@ -129,13 +142,19 @@ class OpenRouter:
     base_url: str = DEFAULT_BASE_URL
     transport: Transport = field(default_factory=UrllibTransport)
 
-    def complete(self, prompt: str) -> Completion:
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         """Ask once. Never twice: a retry is the caller's decision and its own
-        reservation (`server/store/budget.py`)."""
+        reservation (`server/store/budget.py`).
+
+        `json_object` asks the provider to constrain its own output to a JSON
+        object. It is a narrowing, never a guarantee: the envelope is still
+        parsed and validated by the host, because a module's claim about its own
+        output is exactly what invariant 3 says never survives.
+        """
         if not self.model:
             raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
 
-        status, body = self._post(prompt)
+        status, body = self._post(prompt, json_object=json_object)
         if status in NEVER_RETRIED:
             raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
         if status in TRANSIENT or status >= 500:
@@ -144,17 +163,18 @@ class OpenRouter:
             raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
         return _completion(_decode(body))
 
-    def _post(self, prompt: str) -> tuple[int, bytes]:
-        payload = json.dumps(
-            {
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                # One run, one provider identity. A fallback would move the run
-                # to a model its charges were never priced against.
-                "provider": {"allow_fallbacks": False},
-            }
-        ).encode("utf-8")
+    def _post(self, prompt: str, *, json_object: bool = False) -> tuple[int, bytes]:
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            # One run, one provider identity. A fallback would move the run
+            # to a model its charges were never priced against.
+            "provider": {"allow_fallbacks": False},
+        }
+        if json_object:
+            request["response_format"] = {"type": "json_object"}
+        payload = json.dumps(request).encode("utf-8")
         try:
             return self.transport.post(
                 f"{self.base_url}/chat/completions",

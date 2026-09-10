@@ -153,6 +153,20 @@ system this size means nobody looked.
 
 **Phase 5.**
 
+- **The envelope is the host's minimal shape, not CP-1's payload schema.** The
+  bundle ships `CP-1__CanonicalDataFoundation__payload.schema.txt`, and nothing
+  validates a module's output against it yet: `server/methodology/envelope.py`
+  enforces the host's own closed shape — claims, statements, citations — which
+  is what invariant 9's "bounded schema, undeclared fields refused" needs to
+  mean before a schema validator exists. *Upgrade:* the registry that derives
+  each module's payload schema from the manifest (`docs/DECISIONS.md` §24) is
+  where the bundle's own schema starts being enforced; it needs a JSON-schema
+  dependency and therefore a decision entry.
+- **Only `SKILL.md` reaches the prompt.** A module's `reference_files` are
+  verified and assembled but not sent: one module's reference set runs to tens
+  of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
+  retrieval index the bundle ships (`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`) is
+  what selects the references a question actually needs.
 - **No per-model price table, so the reservation is still a flat estimate.**
   `docs/DECISIONS.md` §16 wants each configured model to carry a dated
   `(input, output)` price as `Decimal` driving the reservation ceiling. The
