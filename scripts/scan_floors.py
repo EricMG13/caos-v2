@@ -11,12 +11,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from tracked import tracked_python
+
+# Cobertura carries `filename` on `<class>` and on no other element, so this is
+# the set of files the report measured.
+MEASURED = re.compile(r'\bfilename="([^"]*)"')
 
 
 def covered_files(report: Mapping[str, object]) -> list[str]:
@@ -25,6 +31,41 @@ def covered_files(report: Mapping[str, object]) -> list[str]:
     if not isinstance(metrics, dict):
         return []
     return [name for name in metrics if name != "_totals"]
+
+
+def cobertura_metrics(report: str) -> Mapping[str, object]:
+    """A Cobertura coverage report normalised to the shape the floors already read.
+
+    A coverage report is a scanner report and falls through the same floor: one
+    that measured nothing is a report SonarQube imports as a number rather than
+    as an error. Read as text rather than parsed -- `xml.etree` is vulnerable to
+    entity expansion (bandit B314) for one attribute of one element.
+    """
+    return {"metrics": {name: {} for name in MEASURED.findall(report)}}
+
+
+def report_within(path: Path, base: Path) -> Path:
+    """`path` resolved, provided it lies under `base`; refused otherwise.
+
+    `report` is the one argument that reaches the filesystem, so nothing
+    stopped `scan_floors.py ../../etc/passwd` reading a file outside the
+    tree. A scanner report is a build output of the tree being scanned, so
+    it is read only from under the directory the gate ran in.
+
+    `os.path.realpath` and `startswith` rather than `Path.resolve` and
+    `is_relative_to`: this is the documented sanitizer shape for the rule
+    that flags this (bandit path-traversal, SonarPython S8707-class).
+    """
+    resolved = os.path.realpath(path)
+    root = os.path.realpath(base)
+    # The separator is load-bearing: "/base-secret/x" starts with "/base".
+    if not resolved.startswith(root + os.sep):
+        message = (
+            f"{path} is outside {base}; a scanner report is read only from "
+            "under the directory the gate was invoked in"
+        )
+        raise ValueError(message)
+    return Path(resolved)
 
 
 def _parse_errors(report: Mapping[str, object]) -> list[object]:
@@ -117,9 +158,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--repo", type=Path, default=Path(__file__).resolve().parents[1]
     )
+    parser.add_argument(
+        "--cobertura",
+        action="store_true",
+        help="read a Cobertura coverage report rather than a bandit JSON one",
+    )
     args = parser.parse_args(argv)
 
-    report = json.loads(args.report.read_text(encoding="utf-8"))
+    try:
+        report_path = report_within(args.report, Path.cwd())
+    except ValueError as refusal:
+        parser.error(str(refusal))
+    text = report_path.read_text(encoding="utf-8")
+    report = cobertura_metrics(text) if args.cobertura else json.loads(text)
     claims = None
     if args.cover:
         repo = args.repo.resolve()

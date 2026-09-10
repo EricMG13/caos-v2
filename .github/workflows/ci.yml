@@ -2,7 +2,6 @@
 # passes because it found nothing is the failure mode docs/AI_CODE_QUALITY.md
 # section 4 exists to prevent, so none is scaffolded ahead of its subject:
 #   postgres  (two-connection races) ...... Phase 1
-#   sonarqube (CI analysis with coverage) . Phase 1 (docs/DECISIONS.md 15)
 #   provider  (one live OpenRouter call) .. Phase 5 (docs/DECISIONS.md 16)
 #   image     (Trivy) ..................... the phase that adds the Dockerfile
 #   frontend  (lint, tsc, unit, build, a11y, workbench) ... Phase 9, below
@@ -31,7 +30,8 @@ jobs:
       # --only-binary :all: — a source distribution runs its own setup code at
       # install time, which is not code this repository reviewed (SonarQube
       # githubactions:S8541). Every pinned dependency publishes a wheel; the
-      # other jobs below carry the same flag on the same install.
+      # other jobs below (including security's requirements-security.txt)
+      # carry the same flag on the same install.
       - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
       - run: ruff check .
       - run: ruff format --check .
@@ -64,11 +64,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: {python-version: "3.14"}
       - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
+      # Writes coverage.xml; the flags are in pyproject.toml so this and a
+      # local run produce the same report.
       - run: pytest
         env:
           CAOS_TEST_POSTGRES_URL: postgresql://postgres:caos@localhost:5432/caos
           # A store suite that skipped is not a store suite that passed.
           CAOS_REQUIRE_POSTGRES: "1"
+      # A coverage report is a scanner report: one that measured nothing
+      # imports as a number rather than as an error, so it is refused here,
+      # before the sonarqube job reads it.
+      - run: python scripts/scan_floors.py coverage.xml --cobertura
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage.xml
+          # The analysis runs in another job; a missing report there is silent.
+          if-no-files-found: error
       - run: python scripts/io_budget.py --assert
 
   postgres:
@@ -97,6 +109,41 @@ jobs:
           # A race suite that skipped is not a race suite that passed.
           CAOS_REQUIRE_POSTGRES: "1"
 
+  sonarqube:
+    # The third reviewer, and the one job here that does not decide its own
+    # verdict: it submits the analysis, and `SonarCloud Code Analysis` --
+    # posted by SonarQube Cloud's GitHub App and required on `main` -- carries
+    # the quality gate's answer. It runs from CI rather than from SonarQube
+    # Cloud's own side because automatic analysis cannot import a coverage
+    # report, and this repository now has one.
+    needs: test
+    # A pull request is analysed as one; `main` is analysed as the branch new
+    # code is measured against; a branch push is neither -- two analyses of
+    # one commit would be two submissions to one project.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Blame is what assigns a line to the new-code period the quality gate
+      # judges, and a depth-1 clone has no blame to read.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: {fetch-depth: 0}
+      # Lands coverage.xml at the root, where sonar-project.properties says it is.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: {name: coverage}
+      - name: Refuse an analysis with no credential
+        env: {SONAR_TOKEN: "${{ secrets.SONAR_TOKEN }}"}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_TOKEN is empty: no repository secret of that name reached this job"
+            exit 1
+          fi
+          echo "SONAR_TOKEN received, ${#SONAR_TOKEN} characters"
+      - uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+
   security:
     # Python pinned deliberately. bandit 1.7.10 reaches for ast.Constant.s,
     # which newer interpreters do not provide: under 3.14 it skips every file
@@ -111,7 +158,7 @@ jobs:
         with: {fetch-depth: 0}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: {python-version: "3.12"}
-      - run: pip install --require-hashes -r requirements-security.txt
+      - run: "pip install --require-hashes --only-binary :all: -r requirements-security.txt"
       # `|| true` so the floor check, not bandit's exit code, is the verdict:
       # a report that parsed nothing must fail even when it found nothing.
       - run: bandit -r scripts server -f json -o bandit.json || true

@@ -27,8 +27,9 @@ lint:
 types:
 	$(PY) -m mypy scripts tests server
 
-test:
+test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarqube job
 	$(PY) -m pytest
+	$(PY) scripts/scan_floors.py coverage.xml --cobertura
 	$(PY) scripts/io_budget.py --assert
 
 security:  # the floor is checked first: a report that parsed nothing must fail

@@ -35,4 +35,13 @@ exclude = ["^\\.venv/", "^vendor/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --cov --cov-report=xml --cov-report=term:skip-covered"
+
+[tool.coverage.run]
+branch = true
+# One root, not the individual source directories: each `source` entry is a
+# root Cobertura filenames are resolved against, and naming three of them
+# writes the same "__init__.py" for each. The repo root keeps every filename
+# repo-relative, which is what scan_floors.py and sonar.sources both expect.
+source = ["."]
+omit = ["tests/*", "vendor/*", ".venv*/*"]

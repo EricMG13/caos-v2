@@ -23,10 +23,10 @@ import tracked
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(script: str, *args: str, cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(REPO / "scripts" / script), *args],
-        cwd=REPO,
+        cwd=cwd,
         capture_output=True,
         text=True,
         check=False,
@@ -44,24 +44,92 @@ def _report(tmp_path: Path, *, files: list[str], errors: list[str]) -> str:
 
 
 def test_scan_floor_refuses_a_report_that_covered_no_files(tmp_path: Path) -> None:
-    result = _run(
-        "scan_floors.py", _report(tmp_path, files=[], errors=[]), "--min-files", "1"
-    )
+    report = _report(tmp_path, files=[], errors=[])
+    result = _run("scan_floors.py", report, "--min-files", "1", cwd=tmp_path)
     assert result.returncode != 0
     assert "0 files" in result.stdout + result.stderr
 
 
 def test_scan_floor_refuses_a_report_with_parse_errors(tmp_path: Path) -> None:
     report = _report(tmp_path, files=["server/api.py"], errors=["syntax error"])
-    result = _run("scan_floors.py", report, "--min-files", "1", "--no-parse-errors")
+    result = _run(
+        "scan_floors.py", report, "--min-files", "1", "--no-parse-errors", cwd=tmp_path
+    )
     assert result.returncode != 0
     assert "parse error" in result.stdout + result.stderr
 
 
 def test_scan_floor_accepts_a_report_that_covered_a_file(tmp_path: Path) -> None:
     report = _report(tmp_path, files=["server/api.py"], errors=[])
-    result = _run("scan_floors.py", report, "--min-files", "1", "--no-parse-errors")
+    result = _run(
+        "scan_floors.py", report, "--min-files", "1", "--no-parse-errors", cwd=tmp_path
+    )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scan_floor_refuses_a_cobertura_report_that_covered_no_files(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "coverage.xml"
+    report.write_text("<coverage></coverage>", encoding="utf-8")
+    result = _run("scan_floors.py", str(report), "--cobertura", cwd=tmp_path)
+    assert result.returncode != 0
+    assert "0 files" in result.stdout + result.stderr
+
+
+def test_scan_floor_accepts_a_cobertura_report_that_covered_a_file(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "coverage.xml"
+    report.write_text(
+        "<coverage><packages><package><classes>"
+        '<class filename="server/api.py"></class>'
+        "</classes></package></packages></coverage>",
+        encoding="utf-8",
+    )
+    result = _run("scan_floors.py", str(report), "--cobertura", cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scan_floor_refuses_a_report_outside_the_invocation_directory(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    report = _report(outside, files=["server/api.py"], errors=[])
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    result = _run("scan_floors.py", report, "--min-files", "1", cwd=inside)
+    assert result.returncode != 0
+    assert "is outside" in result.stdout + result.stderr
+
+
+def test_report_within_accepts_a_path_under_base(tmp_path: Path) -> None:
+    report = tmp_path / "coverage.xml"
+    report.write_text("x", encoding="utf-8")
+    assert scan_floors.report_within(report, tmp_path) == report.resolve()
+
+
+def test_report_within_refuses_a_path_outside_base(tmp_path: Path) -> None:
+    outside = tmp_path / "outside" / "coverage.xml"
+    outside.parent.mkdir()
+    outside.write_text("x", encoding="utf-8")
+    base = tmp_path / "inside"
+    base.mkdir()
+    with pytest.raises(ValueError, match="is outside"):
+        scan_floors.report_within(outside, base)
+
+
+def test_cobertura_metrics_reads_every_filename_attribute() -> None:
+    report = (
+        "<coverage><packages><package><classes>"
+        '<class filename="a.py"></class><class filename="b.py"></class>'
+        "</classes></package></packages></coverage>"
+    )
+    assert scan_floors.covered_files(scan_floors.cobertura_metrics(report)) == [
+        "a.py",
+        "b.py",
+    ]
 
 
 def test_io_budget_passes_while_no_request_paths_exist(tmp_path: Path) -> None:
@@ -91,6 +159,40 @@ def test_io_budget_ignores_a_server_with_no_request_paths(tmp_path: Path) -> Non
 def test_covered_files_excludes_the_totals_row() -> None:
     report: dict[str, object] = {"metrics": {"server/api.py": {}, "_totals": {}}}
     assert scan_floors.covered_files(report) == ["server/api.py"]
+
+
+def test_covered_files_treats_a_missing_metrics_block_as_uncovered() -> None:
+    assert scan_floors.covered_files({"errors": []}) == []
+
+
+def test_main_accepts_a_report_covering_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # In-process, unlike the _run() tests above: coverage.py cannot trace a
+    # subprocess, and main()'s own body -- argument parsing, the
+    # report_within refusal path -- was otherwise measured nowhere.
+    report = tmp_path / "bandit.json"
+    report.write_text(
+        json.dumps({"errors": [], "metrics": {"server/api.py": {}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert scan_floors.main([str(report), "--min-files", "1"]) == 0
+
+
+def test_main_refuses_a_report_outside_the_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    report = outside / "bandit.json"
+    report.write_text('{"metrics": {}}', encoding="utf-8")
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    monkeypatch.chdir(inside)
+    with pytest.raises(SystemExit):
+        scan_floors.main([str(report)])
+    assert "is outside" in capsys.readouterr().err
 
 
 def test_floor_failures_reports_each_floor_separately() -> None:
