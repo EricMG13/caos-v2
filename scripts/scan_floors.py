@@ -13,7 +13,10 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+
+from tracked import tracked_python
 
 
 def covered_files(report: Mapping[str, object]) -> list[str]:
@@ -29,8 +32,47 @@ def _parse_errors(report: Mapping[str, object]) -> list[object]:
     return list(errors) if isinstance(errors, list) else []
 
 
+@dataclass(frozen=True, slots=True)
+class Claims:
+    """What the scan says it covers, what it says it does not, and what exists.
+
+    Between `cover` and `unscanned` every tracked `.py` must be claimed. The
+    third category -- a file neither list mentions -- is the one nobody decided
+    about, and it is a failure rather than a default, because the alternative is
+    a directory joining the tree and being scanned by nothing.
+    """
+
+    cover: tuple[str, ...] = ()
+    unscanned: tuple[str, ...] = ()
+    tracked: tuple[str, ...] = ()
+
+    def _under(self, path: str, roots: tuple[str, ...]) -> bool:
+        return any(path == root or path.startswith(f"{root}/") for root in roots)
+
+    def skipped(self, covered: frozenset[str]) -> list[str]:
+        """Tracked files this scan claimed to cover and did not measure."""
+        return [
+            path
+            for path in self.tracked
+            if self._under(path, self.cover) and path not in covered
+        ]
+
+    def unclaimed(self) -> list[str]:
+        """Tracked files neither list mentions."""
+        return [
+            path
+            for path in self.tracked
+            if not self._under(path, self.cover)
+            and not self._under(path, self.unscanned)
+        ]
+
+
 def floor_failures(
-    report: Mapping[str, object], *, min_files: int, no_parse_errors: bool
+    report: Mapping[str, object],
+    *,
+    min_files: int = 1,
+    no_parse_errors: bool = False,
+    claims: Claims | None = None,
 ) -> list[str]:
     """One line per floor the report fell through."""
     failures = []
@@ -43,6 +85,25 @@ def floor_failures(
     errors = _parse_errors(report)
     if no_parse_errors and errors:
         failures.append(f"report carries {len(errors)} parse error(s)")
+    if claims is not None:
+        failures.extend(_claim_failures(claims, frozenset(covered)))
+    return failures
+
+
+def _claim_failures(claims: Claims, covered: frozenset[str]) -> list[str]:
+    failures = []
+    skipped = claims.skipped(covered)
+    if skipped:
+        failures.append(
+            f"the scan covers {', '.join(claims.cover)} but did not measure "
+            f"{len(skipped)} tracked file(s): {', '.join(sorted(skipped))}"
+        )
+    unclaimed = claims.unclaimed()
+    if unclaimed:
+        failures.append(
+            f"{len(unclaimed)} tracked file(s) claimed by neither --cover nor "
+            f"--unscanned: {', '.join(sorted(unclaimed))}"
+        )
     return failures
 
 
@@ -51,11 +112,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path)
     parser.add_argument("--min-files", type=int, default=1)
     parser.add_argument("--no-parse-errors", action="store_true")
+    parser.add_argument("--cover", nargs="*", default=[])
+    parser.add_argument("--unscanned", nargs="*", default=[])
+    parser.add_argument(
+        "--repo", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     args = parser.parse_args(argv)
 
     report = json.loads(args.report.read_text(encoding="utf-8"))
+    claims = None
+    if args.cover:
+        repo = args.repo.resolve()
+        claims = Claims(
+            cover=tuple(args.cover),
+            unscanned=tuple(args.unscanned),
+            tracked=tuple(str(path.relative_to(repo)) for path in tracked_python(repo)),
+        )
     failures = floor_failures(
-        report, min_files=args.min_files, no_parse_errors=args.no_parse_errors
+        report,
+        min_files=args.min_files,
+        no_parse_errors=args.no_parse_errors,
+        claims=claims,
     )
     for line in failures:
         print(f"{args.report}: {line}", file=sys.stderr)
