@@ -88,26 +88,26 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     return attempt_id
 
 
-def complete_attempt(
+def accept_attempt(
     conn: StoreConnection,
     *,
     attempt_id: UUID,
     artifact_sha256: str,
     charge: Decimal,
 ) -> bool:
-    """Accept an attempt's artifact, charge it, and complete the run it belongs
-    to. Returns whether this call was the one that completed the run.
+    """Accept one attempt's artifact and charge it. Returns whether this call
+    was the one that accepted it.
 
     Which run and which case are read from the attempt rather than taken from
     the caller. The store already knows, and a caller that can name them can
     name the wrong ones -- charging one run's ledger for another run's work
     (invariant 3: the host owns identity).
 
-    Everything here is written to survive being called twice with the same
-    arguments, because a caller that crashed after the commit cannot tell that
-    it committed. The artifact and the charge are keyed by `attempt_id` and land
-    with `ON CONFLICT DO NOTHING`; the run's transition is a conditional update,
-    and its zero rows are what suppress a second terminal event.
+    Written to survive being called twice with the same arguments, because a
+    caller that crashed after the commit cannot tell that it committed. The
+    artifact and the charge are keyed by `attempt_id`, so a replay lands on the
+    rows it already wrote; the ATTEMPT_ACCEPTED event rides the artifact insert's
+    row count, so a replay appends nothing.
 
     A run that has already ended accepts nothing further -- not the artifact and
     not the charge. Writing them anyway would leave a failed run holding an
@@ -123,17 +123,49 @@ def complete_attempt(
         conn.commit()  # nothing changed; release the row lock rather than hold it
         return False
 
-    conn.execute(
+    accepted = conn.execute(
         "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id)"
         " VALUES (%s, %s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
         (attempt_id, artifact_sha256, run_id, case_id),
-    )
+    ).rowcount
     conn.execute(
         "INSERT INTO budget_ledger (attempt_id, run_id, amount)"
         " VALUES (%s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
         (attempt_id, run_id, charge),
     )
+    if accepted:
+        append(conn, run_id, RunEvent.ATTEMPT_ACCEPTED)
+    conn.commit()
+    return bool(accepted)
+
+
+def complete_run(conn: StoreConnection, run_id: UUID) -> bool:
+    """End a run that finished its route. Returns whether this call ended it."""
+    lock_run(conn, run_id)
     return _transition(conn, run_id, RunStatus.COMPLETE, RunEvent.RUN_COMPLETE)
+
+
+def complete_attempt(
+    conn: StoreConnection,
+    *,
+    attempt_id: UUID,
+    artifact_sha256: str,
+    charge: Decimal,
+) -> bool:
+    """Accept the attempt and end the run it belongs to.
+
+    The single-node shape Phase 1 exits on, kept as one call because
+    `test_terminal_event_is_exactly_once` is about the two committing as one
+    story: a crash in the gap yields one artifact, one charge, one terminal
+    event, however many times it is replayed.
+    """
+    accept_attempt(
+        conn,
+        attempt_id=attempt_id,
+        artifact_sha256=artifact_sha256,
+        charge=charge,
+    )
+    return complete_run(conn, _attempt_owner(conn, attempt_id)[0])
 
 
 def fail_run(conn: StoreConnection, run_id: UUID) -> bool:
