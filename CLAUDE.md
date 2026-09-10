@@ -146,6 +146,28 @@ system this size means nobody looked.
   (`docs/DECISIONS.md` §20); there is no process to serve until the first HTTP
   route, which `docs/REBUILD_PLAN.md` places in Phase 6.
 
+**Phase 2.**
+
+- **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
+  blob store inside the caller's transaction, and the blob store is a filesystem
+  that transaction cannot roll back. The orphans are harmless — content-
+  addressed, immutable, and reused verbatim if the same document is admitted
+  again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
+  `sources` row names, the day the store is large enough for the space to matter.
+- **One block per line; the bounded line group is not built.**
+  `SYSTEM_SPEC.md` §5 wants one block per line "while small" and bounded line
+  groups once not. This build always packs a line per block, so a large document
+  produces more blocks than it should. *Upgrade:* the group arrives with the
+  first document big enough to need it, splitting a line at the group width
+  rather than giving it a block of its own. Block ids are zero-padded to six
+  digits, so reading order and `block_id` order agree up to 999,999 lines.
+- **The plain-text extractor's rectangles are a fixed-pitch rendering.** A `.txt`
+  document has no typography, so `PlainTextExtractor` states its cell size and
+  derives rectangles from character positions. It is a real, reproducible
+  mapping, not a measurement of a page. *Upgrade:* Phase 6 owes
+  `test_citations_anchor_in_an_extracted_pdf` with a real extractor, which
+  implements the same protocol and changes nothing above it.
+
 **Phase 1.**
 
 - **A schema change is refused, not migrated.** `apply_schema` refuses
