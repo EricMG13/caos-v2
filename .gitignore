@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .venv*/
+# A checkout of this repository is not content of it.
 .claude/worktrees/
 node_modules/
 frontend/dist/
