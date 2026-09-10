@@ -57,11 +57,19 @@ build produces.
 | The rail | **`9a`** | Nine sections, three section-local groups, two foot controls |
 | Responsive | **`9b`** · **`9c`** | 1080 px folds the right column into the drawer; 1024 px collapses the rail to a strip |
 
-## Open design questions the build must answer
+## Open design questions, answered by the build (2026-09-10)
 
-1. **Sign out at 1024 px.** The strip rail in `9c` keeps one foot control, Ask. `IA_SPEC.md` §3 sets two as a maximum, not a minimum, so this conforms — but where sign out goes at that width is undrawn. Options: into the Ask menu, into the ribbon, or a second 22px strip button.
-2. **Below 1024 px.** `9c`'s note argues for one honest sentence rather than a reflow. It is not drawn.
-3. **The CP-6 debate's home.** Decided as an Analysis module tab (`docs/design/BRIEF.md`); the card that draws it is Turn 2's `2a` tab strip, not yet its own card.
+1. **Sign out at 1024 px.** The strip keeps both foot controls, stacked, as two
+   full-width 26 px buttons showing `ASK` and `OUT` (`frontend/src/chrome/Rail.tsx`,
+   `caos.css` `@media (max-width: 1024px)`). Two remains the maximum `IA_SPEC.md` §3 sets.
+2. **Below 1024 px.** Nothing reflows further: the strip rail and the bands persist and
+   the body scrolls. No honest sentence is drawn because nothing is hidden.
+3. **The CP-6 debate's home.** An Analysis module tab, `CP-6A`, in the centre column
+   (`frontend/src/sections/analysis/`), as `docs/design/BRIEF.md` decided.
+
+Both foot controls are refused in this build with the phase that clears them named
+(`PROVIDER_UNPLACED`, `IDENTITY_UNPLACED`): a control that did nothing would be a
+placeholder that looks operational.
 
 ## What the build inherits from the cards
 

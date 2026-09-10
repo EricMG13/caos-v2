@@ -126,6 +126,9 @@ jobs:
           for s in directory upload analysis book run model report committee admin; do
             test -f "dist/$s/index.html" || { echo "missing dist/$s/index.html"; exit 1; }
           done
+      - run: npx playwright install --with-deps
+      - run: npm run a11y
+      - run: npm run test:workbench
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
