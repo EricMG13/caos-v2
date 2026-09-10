@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { App } from "@/app/App";
 import { UNAVAILABLE_WORDING } from "@/app/transport";
 import { RefusedControl } from "@/controls/RefusedControl";
 import { RegionState } from "@/states/RegionState";
@@ -12,6 +13,9 @@ describe("the states", () => {
     expect(screen.getByText(UNAVAILABLE_WORDING)).toBeInTheDocument();
     expect(screen.queryByText("never")).toBeNull();
     unmount();
+    window.history.pushState({}, "", "/nothing/");
+    render(<App />);
+    expect(screen.getByRole("main")).toHaveTextContent(UNAVAILABLE_WORDING);
     expect(UNAVAILABLE_WORDING).toBe("Unavailable or not permitted.");
   });
 
