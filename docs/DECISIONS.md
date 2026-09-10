@@ -405,3 +405,34 @@ unmentioned until the first write to it, which is the one failure applying a
 schema at startup exists to catch. This repository has never deployed, so there
 is no data a migration would have to carry; the day there is, that is the entry
 which overrides this one.
+
+## 2026-09-10 §21 — PDF text is extracted with `pdfminer.six`
+
+`pdfminer.six==20260107`, the second runtime dependency. It is what turns a real
+PDF into the tokens invariant 11 needs: it exposes a layout tree of
+`LTTextBox` → `LTTextLine` → `LTChar`, which maps onto the three things a token
+must carry — the region a quote may not leave, the line it sits on, and a
+rectangle taken from the characters themselves rather than estimated.
+
+`server/evidence/pdf.py` implements the same `Extractor` protocol the plain-text
+extractor does, so nothing above the seam changes: ingestion, block packing,
+citation anchoring and the refusals are all unaltered.
+`docs/REBUILD_PLAN.md` owes `test_citations_anchor_in_an_extracted_pdf` from
+Phase 2 and this is what pays it.
+
+It brings `cryptography` transitively, for encrypted PDFs. That is the real cost
+of this entry and it is worth stating plainly: a large compiled dependency with
+its own CVE stream, in an image that otherwise has none. It is accepted because
+the alternative is a coordinate index the host derives from something other than
+the document — which is invariant 11 with the evidence taken out. Both install
+wheels-only under `--require-hashes --only-binary :all:`, checked on 3.14 before
+this entry was written.
+
+The fixture the exit test reads is a PDF this repository builds byte by byte
+rather than a binary checked into the tree. It is a real PDF — `pdfminer` parses
+it through the same path as any other — and it is one a reviewer can read.
+
+**Reason.** The predecessor's locators were line ranges over extracted text (§9),
+so "one click from its evidence" meant one click to a line range. Coordinates are
+the fix, and coordinates have to come from the document. The choice of library
+follows CAOS-Final, which reached the same requirement and the same answer.
