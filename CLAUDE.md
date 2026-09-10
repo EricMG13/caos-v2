@@ -158,6 +158,18 @@ system this size means nobody looked.
   tampering. *Upgrade:* apply the declared schema into a scratch namespace and
   diff `information_schema` against the live one, the day a database is edited by
   anything but this function.
+- **A blob is read whole into memory and has no size ceiling.** `BlobStore.get`
+  returns `bytes`, so a source document's size is bounded by nothing but the
+  process. Nothing admits documents yet, so nothing can reach it. *Upgrade:*
+  Phase 2 is where bytes first enter a case, and where the ceiling and a
+  streaming read belong — a ceiling here would be a number invented ahead of the
+  ingestion contract that has to state it.
+- **`BlobStore.path_of` hands out a filesystem path.** It validates the address
+  first, so no caller can name a path outside the root, but it does let one
+  write to the store without going through `put` and its digest. It is public
+  because proving the mismatch refusal means damaging a blob through the real
+  filesystem. *Upgrade:* make it private the day a caller needs a streaming read
+  instead, which is the only other reason to want it.
 - **The store suite skips without `CAOS_TEST_POSTGRES_URL`.** A local `make
   test` with the variable unset reports success having exercised none of the
   store. CI sets `CAOS_REQUIRE_POSTGRES=1`, which turns that skip into a
