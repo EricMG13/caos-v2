@@ -14,6 +14,7 @@ first deployment happened to create.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from uuid import uuid4
 
 import psycopg
@@ -61,8 +62,9 @@ def test_every_run_status_is_one_the_database_accepts(empty_database: str) -> No
 
         for status in RunStatus:
             conn.execute(
-                "INSERT INTO runs (run_id, case_id, status) VALUES (%s, %s, %s)",
-                (uuid4(), case_id, status.value),
+                "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
+                " VALUES (%s, %s, %s, %s)",
+                (uuid4(), case_id, status.value, Decimal("1.00")),
             )
         conn.commit()
 
