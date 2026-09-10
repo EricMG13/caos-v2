@@ -162,6 +162,15 @@ system this size means nobody looked.
   (`test_production_never_trusts_role_header`,
   `test_unauthorised_case_is_private_404`) and the first `IO_BUDGET` under
   `server/api/` with it.
+- **The role an actor carries is global, and nothing reads it.**
+  `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
+  asserts, which is what the actor matrix is about; but every authority decision
+  that matters is per case and is taken at commit time against `case_members`
+  (`SYSTEM_SPEC.md` §8), so no code path consults the global role today. It is
+  derived rather than deferred because deriving it later, once routes exist that
+  assume a role is present, is how a role header gets trusted "just for now".
+  *Upgrade:* the first authority that is genuinely account-wide rather than
+  case-scoped — administration, in Phase 10.
 - **The tail does not close after five minutes.** §9 wants a tail to close for
   edge reauthentication; this one returns when it is caught up, which a
   request-scoped generator does anyway. *Upgrade:* the deadline belongs with the

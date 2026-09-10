@@ -3,3 +3,6 @@
 psycopg[binary]==3.2.12
 # PDF text with a rectangle, region and line per character (docs/DECISIONS.md 21).
 pdfminer.six==20260107
+# The HTTP surface and its named wire models (docs/DECISIONS.md 22).
+fastapi==0.141.1
+uvicorn==0.52.4
