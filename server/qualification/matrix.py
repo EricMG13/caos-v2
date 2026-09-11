@@ -36,6 +36,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
@@ -61,10 +62,23 @@ class ExpectedCitation:
 
 
 @dataclass(frozen=True, slots=True)
-class AnswerKey:
-    """What one case of the set expects, and the label the matrix reports it by."""
+class QualificationCase:
+    """One case of the set: its inputs, its route, and its answer key.
 
-    case_label: str
+    Both halves in one object, because `CONTEXT.md` defines a qualification set
+    as "the immutable cases and answer keys" and they are useless apart. The
+    first draft of this module carried the keys alone, which is why
+    `build_matrix` had to be handed a `runs` mapping it could not produce: there
+    was nothing here to run.
+
+    `expects` is this case's answer key — the citations a correct run must
+    produce.
+    """
+
+    label: str
+    documents: tuple[Document, ...]
+    profile_id: str
+    selection_id: str
     expects: tuple[ExpectedCitation, ...]
 
 
@@ -72,7 +86,7 @@ class AnswerKey:
 class QualificationSet:
     """The immutable cases and answer keys one verdict is measured against."""
 
-    keys: tuple[AnswerKey, ...]
+    cases: tuple[QualificationCase, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,18 +127,24 @@ def qualification_set_digest(qualification: QualificationSet) -> str:
     set's identity an accident. Labels cross the boundary here, which is where
     they become pinned state.
     """
-    _not_empty(qualification)
+    assert_measurable(qualification)
     canonical = sorted(
         [
-            BoundaryText.of(key.case_label.strip(), limit=_LABEL_LIMIT).value,
+            BoundaryText.of(case.label.strip(), limit=_LABEL_LIMIT).value,
+            [case.profile_id, case.selection_id],
+            # The inputs, not only the answers. Two sets with identical keys
+            # over different documents are different sets, and a verdict binding
+            # one must not read as binding the other.
             sorted(
-                [
-                    [expect.module_id, expect.document_sha256, expect.matched_text]
-                    for expect in key.expects
-                ]
+                [document.filename.value, sha256(document.data).hexdigest()]
+                for document in case.documents
+            ),
+            sorted(
+                [expect.module_id, expect.document_sha256, expect.matched_text]
+                for expect in case.expects
             ),
         ]
-        for key in qualification.keys
+        for case in qualification.cases
     )
     return sha256(
         json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
@@ -146,8 +166,8 @@ def build_matrix(
     depend on read order, and a case with no run is the vacuous pass in its
     purest form — the row that would have failed is simply not there.
     """
-    _not_empty(qualification)
-    labels = [key.case_label for key in qualification.keys]
+    assert_measurable(qualification)
+    labels = [case.label for case in qualification.cases]
     if len(set(labels)) != len(labels):
         raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
     for label in labels:
@@ -158,8 +178,8 @@ def build_matrix(
         qualification_set_sha256=qualification_set_digest(qualification),
         build_id=bundle.build_id,
         rows=tuple(
-            _row(conn, blobs, bundle, key=key, run_id=runs[key.case_label])
-            for key in qualification.keys
+            _row(conn, blobs, bundle, case=case, run_id=runs[case.label])
+            for case in qualification.cases
         ),
     )
 
@@ -169,7 +189,7 @@ def _row(
     blobs: BlobStore,
     bundle: Bundle,
     *,
-    key: AnswerKey,
+    case: QualificationCase,
     run_id: UUID,
 ) -> MatrixRow:
     """One case. The proof may fail; the comparison is made either way.
@@ -185,13 +205,13 @@ def _row(
         refusal = failed.code
 
     cited = _cited(conn, blobs, run_id)
-    met = tuple(expect for expect in key.expects if _matches(expect, cited))
+    met = tuple(expect for expect in case.expects if _matches(expect, cited))
     return MatrixRow(
-        case_label=key.case_label,
+        case_label=case.label,
         proven=refusal is None,
         refusal=refusal,
         met=met,
-        missed=tuple(expect for expect in key.expects if expect not in met),
+        missed=tuple(expect for expect in case.expects if expect not in met),
     )
 
 
@@ -259,13 +279,20 @@ def _quotes(
     return found
 
 
-def _not_empty(qualification: QualificationSet) -> None:
-    """A set with no cases, or a case expecting nothing, measures nothing.
+def assert_measurable(qualification: QualificationSet) -> None:
+    """A set with no cases, a case expecting nothing, or a case with no
+    documents: each measures nothing.
+
+    Public because the harness has to apply it *before* it performs a single
+    case, and a copy of the rule there would be a second place to keep in step
+    with this one.
 
     It would also match everything, which is the shape of a qualification that
     reads as a pass because it asked no question.
     """
-    if not qualification.keys:
+    if not qualification.cases:
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
-    if any(not key.expects for key in qualification.keys):
+    if any(not case.expects or not case.documents for case in qualification.cases):
+        # A case expecting nothing measures nothing; a case with no documents
+        # cannot be run and cannot be cited. Both are the same hole.
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)

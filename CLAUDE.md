@@ -170,18 +170,28 @@ system this size means nobody looked.
   *Upgrade:* the day the envelope carries a figure as a `Decimal` (the payload
   schema of the Phase 5 gap above), a key gains an expected value and the matrix
   compares it.
-- **The matrix is handed its runs; nothing drives the set.** `build_matrix`
-  takes a `runs` mapping of case label to run id and refuses a key with no run,
-  but the loop that actually executes each case of a qualification set is not
-  here — it would be `run_route` per case plus a provider, and that is a
-  separate concern from comparing what came out. *Upgrade:* the driver that
-  performs the set, records each run id, and hands the mapping to this function.
+- ~~**The matrix is handed its runs; nothing drives the set.**~~ Closed by
+  `server/qualification/harness.py`. `perform` admits each case, runs the route
+  the case declares through the same `run_route` every other caller uses, and
+  hands `build_matrix` the runs it made. Folding the cases into the set also
+  closed a hole in the digest: it now covers the documents and the route
+  selection, so two sets with identical answer keys over different evidence no
+  longer digest the same.
 - **A qualification set lives in memory and is digested, not stored.** There is
-  no table and no file format: a caller constructs `QualificationSet` and gets a
-  digest a verdict can bind. That is enough for the binding to be checkable and
-  not enough for two people to be sure they hold the same set without comparing
-  digests by hand. *Upgrade:* a declared on-disk form with a loader, the day a
-  set outgrows the process that built it.
+  no table and no file format: a caller constructs `QualificationSet` in Python
+  and gets a digest a verdict can bind. That is enough for the binding to be
+  checkable and not enough for two people to be sure they hold the same set
+  without comparing digests by hand — and now that a case carries its documents
+  as bytes, a set of any size is a Python literal nobody wants to write.
+  *Upgrade:* a declared on-disk form with a loader, which is the next thing this
+  phase needs and the thing a reviewer would actually be handed.
+- **A qualification run costs real money and nothing bounds the set.** `perform`
+  runs every case through the real provider seam under `Harness.estimate`, and a
+  set of two hundred cases is two hundred routes' worth of calls. Each run has
+  its own ceiling (invariant 8), but nothing refuses a *set* whose total would
+  exceed what the caller meant to spend. *Upgrade:* a ceiling on the set,
+  checked against the sum of the per-run ceilings before the first case is
+  admitted — the same fail-closed shape one run already has, one level up.
 - **The proof says every accepted artifact holds up, not that the run finished.**
   `assert_orchestration_proof` re-derives its three claims over the artifacts a
   run accepted; it does not check that the run reached COMPLETE or that every
