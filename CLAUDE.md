@@ -142,6 +142,16 @@ system this size means nobody looked.
   TypeScript export no test names is not refused. *Upgrade:* when the frontend
   grows a module whose logic is not exercised by the workbench, port
   `check_tested.py` over the compiler API the vocabulary gate already uses.
+- **The literal-bidi gate scans a named list of roots, not what git tracks.**
+  `test_no_file_this_repository_writes_carries_a_literal_bidi_control` walks the
+  directories in `WRITTEN`, which mirrors `sonar-project.properties`'s source
+  list. A new top-level tree this repository writes goes unscanned until it is
+  added there, and the gate catches the nine bidi controls `BoundaryText`
+  refuses — not zero-width characters or homoglyphs, which deceive a reader
+  differently and are not the trojan-source class. The file floor (`scanned >
+  100`) is what stops a moved root reading as a clean pass. *Upgrade:* drive it
+  from `scripts/tracked.py` the day that module lists more than `*.py`, which is
+  also what would let `check_tested.py` see the frontend.
 - **`io_budget.py --assert` enforces only that some `server/api/` module
   declares an `IO_BUDGET`.** It keys on the route directory, not on `server/`:
   a store module has no request path and no round-trip budget to declare.

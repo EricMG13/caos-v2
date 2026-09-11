@@ -199,5 +199,5 @@ def test_a_verdict_carries_its_human_text_across_the_boundary() -> None:
     signs something other than what the bytes say.
     """
     with pytest.raises(Refusal) as refused:
-        read_verdict(document(reviewer="R. Mehta‮, credit risk"), now=NOW)
+        read_verdict(document(reviewer="R. Mehta\u202e, credit risk"), now=NOW)
     assert refused.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
