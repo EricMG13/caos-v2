@@ -28,17 +28,25 @@ from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, frontier
 from server.store import StoreConnection
 from server.store.budget import reserve
-from server.store.runs import accept_attempt, complete_run, start_attempt
+from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
 
 CP0 = "CP-0"
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderResult:
-    """What one module's execution produced: an artifact, and what it cost."""
+    """What one module's execution produced: an artifact, what it cost, and who
+    produced it.
+
+    The identity travels beside the charge because they are recorded together
+    and for the same reason: a run has to be able to say afterwards what was
+    spent and what spent it (invariant 3).
+    """
 
     artifact_sha256: str
     charge: Decimal
+    model: str
+    generation_id: str
 
 
 class Provider(Protocol):
@@ -136,6 +144,10 @@ def _run_node(
     accept_attempt(
         conn,
         attempt_id=attempt_id,
-        artifact_sha256=result.artifact_sha256,
-        charge=result.charge,
+        accepted=Accepted(
+            artifact_sha256=result.artifact_sha256,
+            charge=result.charge,
+            model=result.model,
+            generation_id=result.generation_id,
+        ),
     )

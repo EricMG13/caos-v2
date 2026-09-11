@@ -97,6 +97,9 @@ class _Completions:
     # carried on would be indistinguishable from one that stopped at the first.
     refuses_call: int | None = None
 
+    # What the host configured; with fallbacks off it is what answers.
+    model: str = "a-model/for-the-test"
+
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.prompts.append(prompt)
         if len(self.prompts) == self.refuses_call:
@@ -137,6 +140,12 @@ class _DamagesWhatWasAccepted:
     conn: StoreConnection
     blobs: BlobStore
     inner: _Completions
+
+    @property
+    def model(self) -> str:
+        """Whatever it wraps. A double that invented its own identity would
+        record a producer no test had asked for."""
+        return self.inner.model
 
     # What to damage on the second call. Two shapes of a store that moved
     # under a running set, and `perform` must survive both.

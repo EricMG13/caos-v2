@@ -28,6 +28,10 @@ from server.store import StoreConnection, apply_schema, connect
 from server.store.budget import CEILING, remaining, reserve, reserved_for
 from server.store.runs import create_case, start_attempt, start_run
 
+# The producer an accepted artifact carries.
+MODEL = "a-model/for-the-test"
+GENERATION = "gen-for-the-test"
+
 CEILING_FOR_TEST = Decimal("1.00")
 HALF = Decimal("0.60")
 
@@ -127,9 +131,12 @@ def test_crash_after_remote_completion_keeps_its_reservation(
     # The provider completed; the process dies before accepting the artifact.
     with connect(empty_database) as dying:
         dying.execute(
-            "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id)"
-            " VALUES (%s, %s, %s, %s)",
-            (attempt_id, "d" * 64, run_id, case_id),
+            "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
+            " model, generation_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            # The producer the real path records; written here too, because the
+            # row this simulates is the one a real call would have left.
+            (attempt_id, "d" * 64, run_id, case_id, MODEL, GENERATION),
         )
         dying.close()
 

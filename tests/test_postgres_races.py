@@ -18,12 +18,18 @@ from server.boundary_text import BoundaryText
 from server.store import RunStatus, apply_schema, connect
 from server.store.events import events_of
 from server.store.runs import (
+    Accepted,
     complete_attempt,
     create_case,
     run_status,
     start_attempt,
     start_run,
 )
+
+# The producer the store records beside every accepted artifact: what the
+# host configured, and the provider's own handle for the call.
+MODEL = "a-model/for-the-test"
+GENERATION = "gen-for-the-test"
 
 ARTIFACT = "c" * 64
 CHARGE = Decimal("0.0142")
@@ -83,8 +89,12 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
             return complete_attempt(
                 conn,
                 attempt_id=attempt_id,
-                artifact_sha256=ARTIFACT,
-                charge=CHARGE,
+                accepted=Accepted(
+                    artifact_sha256=ARTIFACT,
+                    charge=CHARGE,
+                    model=MODEL,
+                    generation_id=GENERATION,
+                ),
             )
 
     with ThreadPoolExecutor(max_workers=2) as pool:

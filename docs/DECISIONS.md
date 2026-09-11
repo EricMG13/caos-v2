@@ -573,3 +573,54 @@ each caller invent its own serialisation, which is how two people end up
 measuring against sets they believe are the same. A declared form with one
 loader makes "do we hold the same set" a question with a mechanical answer, and
 it is the precondition three other ledger entries were waiting on.
+
+## 2026-09-11 §25 — An accepted artifact records the model that produced it, from the host's own configuration
+
+`CLAUDE.md`'s Phase 10 ledger: a verdict binds `provider` — a string in a
+document this repository did not write — and nothing could compare it against
+what the runs behind it actually called, because nothing a run left behind named
+a model. The charge was recorded and the artifact was recorded; who produced
+them was not. Invariant 3 says the host owns identity, and in this one place it
+did not.
+
+**The identity is the host's configuration, not the provider's report of
+itself.** `OpenRouter._post` sets `"provider": {"allow_fallbacks": false}`
+precisely so that the model asked for is the model that answers, so the host
+already holds the fact. Reading `model` back out of the response body would be
+taking a claim where a fact was available — the same mistake invariant 3 names
+about provider-claimed frontmatter, and it would have made every live call
+depend on a response shape this repository cannot verify without a credential.
+`CompletionProvider` therefore declares `model` and `OpenRouter` already had it.
+
+**A read-only protocol member.** Declared as a property rather than as
+`model: str`, because a plain annotation on a `Protocol` is a read-write member
+and `OpenRouter` is a frozen dataclass — the mutable form would have left the
+real provider failing to satisfy its own protocol. The type checker caught that
+before a caller did, which is the argument for `mypy --strict` in one line.
+
+**On the artifact, not on the attempt.** `run_attempts` exists before the call
+and knows nothing yet; `artifacts` is the row `accept_attempt` writes when a
+call has completed. Recording the producer there is one insert rather than an
+insert and an update, keeps the `ON CONFLICT DO NOTHING` replay semantics
+exactly as they were, and lets both columns be `NOT NULL` — an artifact whose
+producer is unknown is what they exist to make impossible. An attempt that was
+charged but never accepted has no producer recorded, which is the same case as
+having no artifact.
+
+**`generation_id` travels beside `model` and is not the same kind of thing.**
+The model is the host's fact; the generation id is the provider's own handle for
+the call, kept so a bill can be reconciled against a run. They are stored
+together and read apart.
+
+**`Accepted` groups what one completed call produced.** Four keyword arguments
+tripped the argument ceiling, and the answer is the one `Execution` and
+`Harness` already use: none of artifact, charge, model and generation id is
+meaningful without the others. It lives in `server/store/runs.py` rather than
+beside `ProviderResult`, so the store does not import from the engine above it.
+
+**Reason.** Without this the harness holds one half of a comparison it can never
+complete: it knows which runs a verdict covers and cannot know what they called.
+The alternative — trusting the reviewer's `provider` string — is what the ledger
+entry already calls a binding rather than a fact. This makes the other half a
+fact the store holds, and is the precondition for refusing a verdict that names
+a model the runs behind it never used. That refusal is a separate change.

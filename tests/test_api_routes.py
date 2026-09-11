@@ -46,7 +46,12 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke, standing_of
 from server.store.routes import pin_route, pinned_route
-from server.store.runs import complete_attempt, start_attempt, start_run
+from server.store.runs import Accepted, complete_attempt, start_attempt, start_run
+
+# The producer the store records beside every accepted artifact: what the
+# host configured, and the provider's own handle for the call.
+MODEL = "a-model/for-the-test"
+GENERATION = "gen-for-the-test"
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1]
@@ -594,7 +599,14 @@ def _finish(conn: StoreConnection, run_id: UUID) -> None:
     """Three events: started, accepted, complete."""
     attempt_id = start_attempt(conn, run_id, "CP-1")
     complete_attempt(
-        conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+        conn,
+        attempt_id=attempt_id,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
     conn.commit()
 
