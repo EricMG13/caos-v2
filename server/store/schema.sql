@@ -237,19 +237,23 @@ CREATE TABLE run_gates (
 
 -- The analyst's signature on one exact revision. Append-only (SYSTEM_SPEC.md 2):
 -- an opinion that could be edited is not a signature.
+-- Keyed by case first: a revision id is the case's own label (`rev_3` is every
+-- case's third revision), never a key this host minted.
 CREATE TABLE deliverable_opinions (
     revision_id    text NOT NULL,
     case_id        uuid NOT NULL REFERENCES cases (case_id),
     payload_sha256 text NOT NULL,
     signed_by      uuid NOT NULL,
     signed_at      timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (revision_id, signed_by, signed_at)
+    PRIMARY KEY (case_id, revision_id, signed_by, signed_at)
 );
 
--- The freeze, and the filing that follows it. One row per revision: a revision
--- frozen twice would have two sets of bytes claiming to be the same document.
+-- The freeze, and the filing that follows it. One row per revision of a case: a
+-- revision frozen twice would have two sets of bytes claiming to be the same
+-- document. Per case, for the reason above -- keyed on the id alone, the first
+-- case to freeze `rev_3` took that name from every other case.
 CREATE TABLE deliverable_publications (
-    revision_id    text PRIMARY KEY,
+    revision_id    text NOT NULL,
     case_id        uuid NOT NULL REFERENCES cases (case_id),
     payload_sha256 text NOT NULL,
     frozen_by      uuid NOT NULL,
@@ -257,5 +261,6 @@ CREATE TABLE deliverable_publications (
     -- Filing is a separate act by a separate person (APPROVER_NOT_INDEPENDENT),
     -- so it is null until someone independent performs it.
     filed_by       uuid,
-    filed_at       timestamptz
+    filed_at       timestamptz,
+    PRIMARY KEY (case_id, revision_id)
 );
