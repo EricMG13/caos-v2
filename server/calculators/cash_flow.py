@@ -327,15 +327,19 @@ def _decimal(value: object, field: str) -> Decimal:
     if isinstance(value, float):
         raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
     if isinstance(value, Decimal):
-        return value
-    if not isinstance(value, str | int):
+        parsed = value
+    elif isinstance(value, str | int):
+        try:
+            parsed = Decimal(str(value))
+        except InvalidOperation:
+            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID) from None
+    else:
         raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    try:
-        parsed = Decimal(str(value))
-    except InvalidOperation:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID) from None
     if not parsed.is_finite():
-        # Invariant 7: refused before use, not carried into a ratio.
+        # Invariant 7: refused before use, not carried into a ratio. Every path
+        # above lands here, because a `Decimal` a caller had already parsed is
+        # the same value as the string it was parsed from -- and it was the one
+        # spelling of infinity that used to reach a division.
         raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
     return parsed
 
