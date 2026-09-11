@@ -99,11 +99,24 @@ def _line_tokens(line: str, line_number: int, region_id: int) -> list[Token]:
 
 
 def _words(line: str) -> list[tuple[str, int]]:
-    """Each whitespace-separated run with the column it starts at."""
-    words = []
-    column = 0
-    for part in line.split(" "):
-        if part:
-            words.append((part, column))
-        column += len(part) + 1
+    """Each whitespace-separated run with the column it starts at.
+
+    Whitespace as `str.split()` draws it, not the space character alone.
+    `server/evidence/citations.py` splits `matched_text` that way, so a token
+    holding an interior tab is one the index can never be asked for: the line is
+    delivered by `read_evidence` and the verbatim quote of it is then refused
+    `CITATION_NOT_LOCATED`. The two have to agree on where a word ends, or the
+    evidence a module was handed is evidence it cannot cite.
+    """
+    words: list[tuple[str, int]] = []
+    start: int | None = None
+    for column, character in enumerate(line):
+        if not character.isspace():
+            if start is None:
+                start = column
+        elif start is not None:
+            words.append((line[start:column], start))
+            start = None
+    if start is not None:
+        words.append((line[start:], start))
     return words

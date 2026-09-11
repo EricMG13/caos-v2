@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from psycopg.pq import TransactionStatus
 
 from server.engine.route import ResolvedRoute, resolve_route, route_digest
 from server.refusals import Refusal, RefusalCode
@@ -107,3 +108,27 @@ def test_a_run_before_its_plan_gate_has_no_resolved_route(
     conn.commit()
 
     assert resolved_route(conn, run_id) is None
+
+
+def test_a_refused_pin_does_not_keep_the_run_row_locked(
+    catalog: dict[str, Any], case: tuple[StoreConnection, UUID]
+) -> None:
+    """`pin_route` takes the run row lock to read the pin under it.
+
+    The replay path commits before returning, because "the lock is not worth
+    holding"; the refusal path raised with the transaction still open, so a
+    second plan gate on that run waited for whatever the caller did next --
+    which for a caller that answered the refusal and went on to serve another
+    request was the rest of that request. Every other refusal that takes this
+    lock -- `apply_schema`, `reserve` -- ends its transaction first.
+    """
+    conn, case_id = case
+    run_id = start_run(conn, case_id)
+    conn.commit()
+    pin_route(conn, run_id, _route(catalog, "LIQUIDITY_REVIEW"))
+
+    with pytest.raises(Refusal) as caught:
+        pin_route(conn, run_id, _route(catalog, "EARNINGS_UPDATE"))
+
+    assert caught.value.code is RefusalCode.ROUTE_ALREADY_PINNED
+    assert conn.info.transaction_status is TransactionStatus.IDLE

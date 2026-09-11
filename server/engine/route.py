@@ -246,11 +246,19 @@ def waiting_on(
     reader the run is stuck without telling them what it is stuck on, and the
     types are what separate a node waiting for a module from one waiting for a
     person at the QA gate.
+
+    A node the route does not carry is `ORCHESTRATION_NODE_NOT_IN_ROUTE`. The
+    node list is closed (invariant 10), so asking about one outside it is a
+    fact about the route rather than an accident -- and the alternative was
+    `StopIteration`, which is untyped here and disappears silently if it is
+    ever raised inside a generator.
     """
     complete = {
         node.module_id for node in route.nodes if node.route_node_id in accepted
     }
-    node = next(n for n in route.nodes if n.route_node_id == route_node_id)
+    node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
+    if node is None:
+        raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
     return _unmet(route, node.module_id, complete)
 
 

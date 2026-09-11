@@ -30,8 +30,9 @@ from server.evidence.citations import (
     anchor_citation,
     verify_citations,
 )
+from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
-from server.evidence.read import IO_BUDGET, read_evidence
+from server.evidence.read import IO_BUDGET, Block, read_block, read_evidence
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -349,3 +350,51 @@ def test_verified_citations_come_back_with_their_rectangles(
     # The host derived these; the module supplied only page and matched_text.
     assert box.page == 1
     assert box.x0 < box.x1 and box.y0 < box.y1
+
+
+def test_a_block_carries_the_page_it_sits_on(
+    case: tuple[StoreConnection, UUID], blobs: BlobStore
+) -> None:
+    """`read_block` answers with the page as well as the text, in one row fetch.
+
+    The page is the host's to know: a module that is told the wrong one cites
+    the wrong one, and invariant 11 then refuses a quote that is really there.
+    """
+    conn, case_id = case
+    body = "\n".join(f"filler line {n}" for n in range(LINES_PER_PAGE))
+    source_id = _admit(
+        conn, case_id, blobs, f"{body}\nTotal debt at 31 December\n".encode()
+    )
+
+    row = conn.execute(
+        "SELECT block_id FROM source_blocks WHERE source_id = %s"
+        " ORDER BY block_id DESC",
+        (source_id,),
+    ).fetchone()
+    assert row is not None
+    counter = _CountingConnection(conn)
+
+    block = read_block(counter, source_id=source_id, block_id=str(row[0]))  # type: ignore[arg-type]
+
+    assert isinstance(block, Block)
+    assert block.page == 2
+    assert block.text.value == "Total debt at 31 December"
+    assert counter.executed == IO_BUDGET == 1
+
+
+def test_read_block_refuses_what_read_evidence_refuses(
+    case: tuple[StoreConnection, UUID], blobs: BlobStore
+) -> None:
+    """One boundary, not two. A second path to a block is a second place the
+    live-source check could be forgotten (invariant 1)."""
+    conn, case_id = case
+    source_id = _admit(conn, case_id, blobs, REPORT)
+    block_id = _first_block(conn, source_id)
+    conn.execute(
+        "UPDATE sources SET withdrawn_at = now() WHERE source_id = %s", (source_id,)
+    )
+
+    with pytest.raises(Refusal) as caught:
+        read_block(conn, source_id=source_id, block_id=block_id)
+
+    assert caught.value.code is RefusalCode.EVIDENCE_NOT_AVAILABLE

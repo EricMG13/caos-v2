@@ -97,7 +97,7 @@ def freeze(
     is the signature applied to something nobody read.
     """
     digest = sha256(payload).hexdigest()
-    opinion = _opinion(conn, revision_id)
+    opinion = _opinion(conn, case_id, revision_id)
     if opinion is None:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_SIGNED)
     if opinion.payload_sha256 != digest:
@@ -131,9 +131,13 @@ def file_deliverable(
     `APPROVER_NOT_INDEPENDENT` is not about standing: the filer may hold ADMIN.
     It is about a chain in which one actor occupied every role, which records a
     decision nobody independently reviewed.
+
+    Refuses `DELIVERABLE_ALREADY_FILED` for a revision somebody has filed. A
+    receipt is the record of who filed, so returning one to a second caller
+    whose write changed no row names somebody the store does not.
     """
-    opinion = _opinion(conn, revision_id)
-    frozen = _frozen(conn, revision_id)
+    opinion = _opinion(conn, case_id, revision_id)
+    frozen = _frozen(conn, case_id, revision_id)
     if opinion is None or frozen is None:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
 
@@ -150,11 +154,19 @@ def file_deliverable(
     )
 
     def write(connection: StoreConnection) -> None:
-        connection.execute(
+        filed = connection.execute(
             "UPDATE deliverable_publications SET filed_by = %s, filed_at = now()"
-            " WHERE revision_id = %s AND filed_by IS NULL",
-            (actor_id, revision_id),
-        )
+            " WHERE revision_id = %s AND case_id = %s AND filed_by IS NULL",
+            (actor_id, revision_id, case_id),
+        ).rowcount
+        if not filed:
+            # Somebody filed first. Inside the write rather than as a read
+            # beforehand, because the row is only settled under this
+            # transaction: two independent filers both pass a precondition and
+            # exactly one of them changes a row. Raising here rolls the
+            # transaction back, so the chain records the one filing that
+            # happened rather than one entry per actor who tried.
+            raise Refusal(RefusalCode.DELIVERABLE_ALREADY_FILED)
 
     governed_write(conn, action, write)
 
@@ -186,11 +198,19 @@ def receipt_bytes(receipt: Receipt) -> bytes:
     ).encode("utf-8")
 
 
-def _opinion(conn: StoreConnection, revision_id: str) -> Opinion | None:
+def _opinion(conn: StoreConnection, case_id: UUID, revision_id: str) -> Opinion | None:
+    """The case's latest signature on this revision.
+
+    Scoped to the case, because a revision id is a caller's string rather than
+    a key this host minted. Looked up on the string alone, one case's signature
+    released another case's freeze -- and the publication row, the audit entry
+    and every later filing landed in a case whose members never signed
+    anything.
+    """
     row = conn.execute(
         "SELECT revision_id, payload_sha256, signed_by FROM deliverable_opinions"
-        " WHERE revision_id = %s ORDER BY signed_at DESC LIMIT 1",
-        (revision_id,),
+        " WHERE revision_id = %s AND case_id = %s ORDER BY signed_at DESC LIMIT 1",
+        (revision_id, case_id),
     ).fetchone()
     if row is None:
         return None
@@ -201,10 +221,13 @@ def _opinion(conn: StoreConnection, revision_id: str) -> Opinion | None:
     )
 
 
-def _frozen(conn: StoreConnection, revision_id: str) -> tuple[UUID, str] | None:
+def _frozen(
+    conn: StoreConnection, case_id: UUID, revision_id: str
+) -> tuple[UUID, str] | None:
+    """This case's freeze of this revision. Scoped for the reason `_opinion` is."""
     row = conn.execute(
         "SELECT frozen_by, payload_sha256 FROM deliverable_publications"
-        " WHERE revision_id = %s",
-        (revision_id,),
+        " WHERE revision_id = %s AND case_id = %s",
+        (revision_id, case_id),
     ).fetchone()
     return None if row is None else (UUID(str(row[0])), str(row[1]))
