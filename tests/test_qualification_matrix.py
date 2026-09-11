@@ -38,10 +38,10 @@ from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
 from server.qualification.matrix import (
-    AnswerKey,
     ExpectedCitation,
     Matrix,
     MatrixRow,
+    QualificationCase,
     QualificationSet,
     build_matrix,
     qualification_set_digest,
@@ -155,9 +155,20 @@ def ran(
     return Ran(conn, blobs, run_id, case_id, str(digest[0]))
 
 
-def _key(ran: Ran, *, quote: str = QUOTE, module_id: str = "CP-0") -> AnswerKey:
-    return AnswerKey(
-        case_label="acme-2026-refinancing",
+def _one_case(
+    ran: Ran, *, quote: str = QUOTE, module_id: str = "CP-0"
+) -> QualificationCase:
+    """One case of a set, carrying the document its expectation names.
+
+    This suite is about the comparison rather than the running, so the case's
+    inputs are the same document the `ran` fixture already admitted -- what
+    matters here is that the key and the artifact meet.
+    """
+    return QualificationCase(
+        label="acme-2026-refinancing",
+        documents=(Document(filename=BoundaryText.of("report.txt"), data=REPORT),),
+        profile_id=PROFILE,
+        selection_id=SELECTION,
         expects=(
             ExpectedCitation(
                 module_id=module_id,
@@ -186,7 +197,7 @@ def test_the_matrix_reports_every_case_and_concludes_nothing(ran: Ran) -> None:
     reviewer's signature is the reviewer's, and a field here that read as one
     would be the host grading itself.
     """
-    qualification = QualificationSet(keys=(_key(ran),))
+    qualification = QualificationSet(cases=(_one_case(ran),))
     matrix = _matrix(ran, qualification)
 
     assert matrix.qualification_set_sha256 == qualification_set_digest(qualification)
@@ -195,7 +206,7 @@ def test_the_matrix_reports_every_case_and_concludes_nothing(ran: Ran) -> None:
     assert row.case_label == "acme-2026-refinancing"
     assert row.proven is True
     assert row.refusal is None
-    assert row.met == _key(ran).expects
+    assert row.met == _one_case(ran).expects
     assert row.missed == ()
 
     # The structural half, from this side: no field on the matrix or its rows
@@ -215,8 +226,8 @@ def test_a_missed_answer_key_is_reported_not_hidden(ran: Ran) -> None:
     evidence, and the case it dropped is the case the reviewer is being asked
     about.
     """
-    missing = _key(ran, quote="Net leverage at 31 December 2026")
-    matrix = _matrix(ran, QualificationSet(keys=(missing,)))
+    missing = _one_case(ran, quote="Net leverage at 31 December 2026")
+    matrix = _matrix(ran, QualificationSet(cases=(missing,)))
 
     [row] = matrix.rows
     assert row.proven is True, "the run is sound; it simply did not cite this"
@@ -226,8 +237,8 @@ def test_a_missed_answer_key_is_reported_not_hidden(ran: Ran) -> None:
 
 def test_a_key_naming_another_module_is_missed_not_matched(ran: Ran) -> None:
     """The right quote from the wrong module is not the answer to this key."""
-    elsewhere = _key(ran, module_id="CP-6")
-    matrix = _matrix(ran, QualificationSet(keys=(elsewhere,)))
+    elsewhere = _one_case(ran, module_id="CP-6")
+    matrix = _matrix(ran, QualificationSet(cases=(elsewhere,)))
 
     [row] = matrix.rows
     assert row.met == ()
@@ -250,8 +261,8 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
     ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
     ran.conn.commit()
 
-    key = _key(ran)
-    [row] = _matrix(ran, QualificationSet(keys=(key,))).rows
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
     assert row.proven is False
     assert row.refusal is RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED
     assert row.met == ()
@@ -260,9 +271,9 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
 
 def test_the_matrix_refuses_a_key_with_no_run(ran: Ran) -> None:
     """A case silently skipped is the vacuous pass in its purest form."""
-    orphan = replace(_key(ran), case_label="not-a-case-that-ran")
+    orphan = replace(_one_case(ran), label="not-a-case-that-ran")
     with pytest.raises(Refusal) as refused:
-        _matrix(ran, QualificationSet(keys=(_key(ran), orphan)))
+        _matrix(ran, QualificationSet(cases=(_one_case(ran), orphan)))
 
     assert refused.value.code is RefusalCode.QUALIFICATION_RUN_MISSING
 
@@ -270,18 +281,18 @@ def test_the_matrix_refuses_a_key_with_no_run(ran: Ran) -> None:
 def test_the_matrix_refuses_a_set_with_nothing_in_it(ran: Ran) -> None:
     """An empty qualification set measures nothing and would match everything."""
     with pytest.raises(Refusal) as empty:
-        _matrix(ran, QualificationSet(keys=()))
+        _matrix(ran, QualificationSet(cases=()))
     assert empty.value.code is RefusalCode.QUALIFICATION_SET_EMPTY
 
     with pytest.raises(Refusal) as expectless:
-        _matrix(ran, QualificationSet(keys=(replace(_key(ran), expects=()),)))
+        _matrix(ran, QualificationSet(cases=(replace(_one_case(ran), expects=()),)))
     assert expectless.value.code is RefusalCode.QUALIFICATION_SET_EMPTY
 
 
 def test_the_matrix_refuses_two_keys_for_one_case(ran: Ran) -> None:
     """One case, one key. Two would make "the answer" depend on read order."""
     with pytest.raises(Refusal) as refused:
-        _matrix(ran, QualificationSet(keys=(_key(ran), _key(ran))))
+        _matrix(ran, QualificationSet(cases=(_one_case(ran), _one_case(ran))))
 
     assert refused.value.code is RefusalCode.QUALIFICATION_SET_AMBIGUOUS
 
@@ -294,21 +305,21 @@ def test_a_qualification_set_digest_binds_every_case_and_key(ran: Ran) -> None:
     was given is that editing any key produces a different digest, so the
     reviewer's binding no longer names the set in front of you.
     """
-    base = QualificationSet(keys=(_key(ran),))
+    base = QualificationSet(cases=(_one_case(ran),))
     digest = qualification_set_digest(base)
     assert len(digest) == 64
-    assert digest == qualification_set_digest(QualificationSet(keys=(_key(ran),))), (
-        "the same set digests the same, or nothing can be compared against it"
-    )
+    assert digest == qualification_set_digest(
+        QualificationSet(cases=(_one_case(ran),))
+    ), "the same set digests the same, or nothing can be compared against it"
 
     moved = [
-        QualificationSet(keys=(_key(ran, quote="Something else entirely"),)),
-        QualificationSet(keys=(_key(ran, module_id="CP-6"),)),
-        QualificationSet(keys=(replace(_key(ran), case_label="another-case"),)),
+        QualificationSet(cases=(_one_case(ran, quote="Something else entirely"),)),
+        QualificationSet(cases=(_one_case(ran, module_id="CP-6"),)),
+        QualificationSet(cases=(replace(_one_case(ran), label="another-case"),)),
         QualificationSet(
-            keys=(
-                _key(ran),
-                replace(_key(ran), case_label="a-second-case"),
+            cases=(
+                _one_case(ran),
+                replace(_one_case(ran), label="a-second-case"),
             )
         ),
     ]
@@ -325,17 +336,17 @@ def test_the_digest_does_not_depend_on_the_order_keys_were_written_in(
     the set's identity an accident of authorship, and two reviewers signing the
     same body of cases would bind two different things.
     """
-    first = replace(_key(ran), case_label="a-case")
-    second = replace(_key(ran), case_label="b-case")
+    first = replace(_one_case(ran), label="a-case")
+    second = replace(_one_case(ran), label="b-case")
 
     assert qualification_set_digest(
-        QualificationSet(keys=(first, second))
-    ) == qualification_set_digest(QualificationSet(keys=(second, first)))
+        QualificationSet(cases=(first, second))
+    ) == qualification_set_digest(QualificationSet(cases=(second, first)))
 
 
 def test_a_matrix_row_is_immutable_once_reported(ran: Ran) -> None:
     """Evidence a reader can edit after the fact is not evidence."""
-    [row] = _matrix(ran, QualificationSet(keys=(_key(ran),))).rows
+    [row] = _matrix(ran, QualificationSet(cases=(_one_case(ran),))).rows
     assert isinstance(row, MatrixRow)
 
     with pytest.raises(AttributeError):
@@ -351,7 +362,7 @@ def test_a_case_label_crosses_the_boundary_where_it_is_digested(ran: Ran) -> Non
     signing a set whose contents read differently to them than to the store.
     """
     deceptive = QualificationSet(
-        keys=(replace(_key(ran), case_label="acme\u202e-2026"),)
+        cases=(replace(_one_case(ran), label="acme\u202e-2026"),)
     )
 
     with pytest.raises(Refusal) as refused:
@@ -391,8 +402,8 @@ def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     )
     ran.conn.commit()
 
-    key = _key(ran)
-    [row] = _matrix(ran, QualificationSet(keys=(key,))).rows
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
     assert row.proven is False
     # Which code fires depends on which of the proof's checks the shape trips
     # first -- a valid JSON object with no `build_id` is a moved build before it
