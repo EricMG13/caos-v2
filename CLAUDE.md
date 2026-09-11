@@ -147,6 +147,21 @@ system this size means nobody looked.
   a store module has no request path and no round-trip budget to declare.
   *Upgrade:* Phase 2 raises the floor to one budget per request path, with
   `test_io_budget_read_evidence`.
+
+**Phase 9.**
+
+- **The phase-exit gate reads a workspace test by its literal title.**
+  `tests/test_phase_exits.py` now reads `frontend/tests/` as well as `tests/`,
+  which is what lets Phase 9 be exited by the TypeScript tests the plan names.
+  It matches `test("test_x", ...)` and `it("test_x", ...)` textually, so a title
+  assembled at run time — the chrome suite builds one per section from a
+  template — is invisible to it. No test the plan names is written that way, and
+  `test_the_gate_reads_the_workspace_suite_as_well_as_this_one` fails the day
+  the reader stops finding the two it must. *Upgrade:* resolve titles through
+  the compiler API the vocabulary gate already uses, the day the plan first
+  names a test whose title is computed — the same upgrade `check_tested.py`'s
+  TypeScript half is waiting on, and worth doing once, for both.
+
 **Phase 6.**
 
 - **A run tail polls.** `server/api/app.py` re-reads `run_events` every
