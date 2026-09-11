@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build && node scripts/export-sections.mjs",
     "preview": "vite preview --strictPort --port 4173",
-    "lint": "eslint --max-warnings=0 . && prettier --check . && node scripts/check-vocabulary.mjs",
+    "lint": "eslint --max-warnings=0 . && prettier --check . && node scripts/check-vocabulary.mjs && node scripts/check-tested.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "a11y": "node scripts/a11y-axe.mjs",

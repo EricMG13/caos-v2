@@ -136,12 +136,19 @@ system this size means nobody looked.
   `version`, `response` — and each is exempt with a stated reason in
   `NOT_ENFORCED`. The check refuses to run if `CONTEXT.md` and that list drift
   apart. *Upgrade:* enforce an exempt synonym the day it is actually misused.
-- **The untested-definition gate reads Python only.** The vocabulary gate has
-  its TypeScript half (`frontend/scripts/check-vocabulary.mjs`, same
-  `ENFORCED` set, asserted by `tests/test_vocabulary_rules.py`); a public
-  TypeScript export no test names is not refused. *Upgrade:* when the frontend
-  grows a module whose logic is not exercised by the workbench, port
-  `check_tested.py` over the compiler API the vocabulary gate already uses.
+- ~~**The untested-definition gate reads Python only.**~~ Closed by
+  `frontend/scripts/check-tested.mjs`, which rides `npm run lint` beside the
+  vocabulary gate's TypeScript half and is driven from `tests/test_gate_scripts.py`
+  the way CI drives it. It keeps the Python half's two scope rules so the two
+  enforce one thing, and states two of its own: an `interface` or a `type` is
+  erased before anything runs, so `tsc --noEmit` at every use site is what
+  checks it; and a React component is covered through the section that composes
+  it, because a component is reached by rendering rather than by name and
+  demanding a mention per component buys shallow render tests. It found 32
+  exports carrying real logic that no test named -- `confidenceTier`,
+  `severityOf`, `isUncited`, `withdrawRefusal`, `useModalA11y` among them --
+  and `frontend/tests/unit/helpers.test.ts` and `hooks.test.tsx` are what
+  closed them.
 - **The literal-bidi gate scans a named list of roots, not what git tracks.**
   `test_no_file_this_repository_writes_carries_a_literal_bidi_control` walks the
   directories in `WRITTEN`, which mirrors `sonar-project.properties`'s source
@@ -152,11 +159,17 @@ system this size means nobody looked.
   100`) is what stops a moved root reading as a clean pass. *Upgrade:* drive it
   from `scripts/tracked.py` the day that module lists more than `*.py`, which is
   also what would let `check_tested.py` see the frontend.
-- **`io_budget.py --assert` enforces only that some `server/api/` module
-  declares an `IO_BUDGET`.** It keys on the route directory, not on `server/`:
-  a store module has no request path and no round-trip budget to declare.
-  *Upgrade:* Phase 2 raises the floor to one budget per request path, with
-  `test_io_budget_read_evidence`.
+- ~~**`io_budget.py --assert` enforces only that some `server/api/` module
+  declares an `IO_BUDGET`.**~~ Closed. The floor is now every module under
+  `server/api/`, and a module that makes no round trip declares `0` --
+  `server/api/identity.py` is the one that does. Every module rather than every
+  module a heuristic recognises as serving a path: "it declares no route" and
+  "it never names the store" are both things a module can stop being true of
+  without anyone noticing, so a gate resting on either is one the next request
+  path can be written around, which is what the old floor allowed. It still
+  keys on the route directory rather than on `server/`, because a store module
+  has no request path. `test_io_budget_read_evidence` is the per-path
+  assertion the entry asked for and predates this.
 
 **Phase 10.**
 
