@@ -148,6 +148,25 @@ system this size means nobody looked.
   *Upgrade:* Phase 2 raises the floor to one budget per request path, with
   `test_io_budget_read_evidence`.
 
+**Phase 10.**
+
+- **A verdict is read and not stored.** `read_verdict` refuses a document
+  missing any of the six bindings or past its expiry, and returns a `Verdict`
+  the caller holds; there is no `qualification_verdicts` table and no query that
+  answers "is this build qualified". Nothing consumes a verdict yet, so nothing
+  can read a stale one. *Upgrade:* the qualification-set harness stores the
+  verdict beside the run set it was measured over, which is the first caller
+  with a reason to look one up.
+- **The provider identity in a verdict is the reviewer's word, not the host's.**
+  Invariant 3 says the host owns identity, and here it does not: `provider` is a
+  string in a document this repository did not write, and nothing compares it
+  against the provider the runs behind the verdict actually called. It is a
+  binding rather than a fact, which is the honest reading of a reviewer's
+  signature — but it is not the same guarantee the rest of the system gives.
+  *Upgrade:* the harness records the provider each run reported and the verdict
+  is refused when its `provider` names a different one, which is a comparison
+  only the harness has both halves of.
+
 **Phase 9.**
 
 - **The phase-exit gate reads a workspace test by its literal title.**

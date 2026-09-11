@@ -45,8 +45,8 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # because "not yet" with no reason is how a list like this becomes a list of
 # tests nobody intends to write.
 NOT_YET_REACHED = {
-    # Phase 10 -- qualification. The corpus harness and the verdict.
-    "test_a_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer",
+    # Phase 10 -- qualification. The verdict has landed; what is still owed is
+    # the host's own control, and the qualification-set harness behind it.
     "test_a_host_control_reads_orchestration_proof_never_qualified",
 }
 

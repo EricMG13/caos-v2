@@ -199,7 +199,7 @@ reviewer's signature that the outputs met the answer keys, and it remains an
 external input until the credential and the analyst approvals exist.
 
 **Exit:**
-`test_a_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer`
+`test_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer`
 refuses a verdict missing any of the six or past its expiry;
 `test_a_host_control_reads_orchestration_proof_never_qualified` — no code path
 in this repository can mint `QUALIFIED`.

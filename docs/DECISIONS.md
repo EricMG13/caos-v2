@@ -491,7 +491,7 @@ So `CONTEXT.md` gains a term — **qualification set**, "the immutable cases and
 answer keys one verdict is measured against" — and Phase 10 is corrected in
 place to use it, per §12's adopted process rule, the same way §20 corrected
 `storage/` to `server/store/`. The exit test is
-`test_a_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer`.
+`test_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer`.
 `docs/AI_CODE_QUALITY.md` §5 is corrected in the same breath; it was the only
 other page spelling the concept the old way.
 
