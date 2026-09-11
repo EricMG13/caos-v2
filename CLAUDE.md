@@ -212,20 +212,19 @@ system this size means nobody looked.
   async store connection Phase 5's gap already owes; over a synchronous one a
   concurrent harness would serialise on the connection, for the same wall clock
   and harder reasoning.
-- **A refusal raised before a run exists still ends the set.** `perform` records
-  a `Refusal` from `run_route` in `Performed.stopped`, stops, and returns what
-  it performed. The refusals it cannot record are the ones raised before there
-  is a run to record them against — `resolve_route`, `create_case`,
-  `admit_pack`, `pin_route` — which still propagate and discard every earlier
-  case's record with them. Resolving the route first (it is pure) removes the
-  one that used to leave an orphan RUNNING run behind; the rest are setup
-  failures on a case the caller assembled, and they are loud where a misassembled
-  set should be loud. *Upgrade:* the day a set is loaded from the declared
-  on-disk form rather than built in Python, a case that will not admit is a
-  file defect rather than a caller's bug, and belongs in a record like any
-  other. **That day has arrived** — §24 landed the on-disk form — so this is now
-  work that is due rather than work that is blocked, and it is the first thing to
-  do in this phase that is not waiting on something else.
+- **A document that will not admit still ends the set, after the cases before
+  it were paid for.** `perform` records a `Refusal` from `run_route` in
+  `Performed.stopped` and stops; what it cannot record is a refusal raised
+  before there is a run to record it against. Route resolution has left that
+  category — every case's route is now resolved in the pass over the whole set,
+  before anything is admitted, because resolution is pure and an unknown pathway
+  on the last case of ten was knowable from the catalog and the set alone. What
+  remains is `admit_pack` refusing `SOURCE_HAS_NO_TEXT` on a document whose
+  bytes carry none, which needs the extractor and therefore the case row, and so
+  cannot be answered before the earlier cases have run. *Upgrade:* extract once,
+  up front, and hand `admit_pack` what it already produced — which is worth
+  doing the day extraction is the expensive half, and is today a second pass
+  over bytes to answer a question about a set someone assembled badly.
 - **An unrun node's state is a weaker reading when the artifacts cannot be
   read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
   soft edge's readiness comes from, and bytes that will not load would raise out
