@@ -178,14 +178,22 @@ def _refusal(ran: Ran) -> RefusalCode:
 
 
 def names_qualified() -> set[str]:
-    """Every tracked module under `server/` whose source names QUALIFIED.
+    """Every tracked module this repository ships whose source names QUALIFIED.
 
-    Read from the AST rather than by grep so a mention inside a comment or a
+    Read from the AST rather than by grep, so a mention inside a comment or a
     docstring -- which mints nothing -- does not read as a code path.
+
+    Scope is every tracked `.py` outside `tests/`, not just `server/`: the plan
+    says "no code path in this repository", and a gate script is a code path.
+    The suite is excluded because asserting on the word is what these tests are
+    for. TypeScript is not scanned and does not need to be -- the workspace has
+    no `Assurance` to construct and no authority to construct one with
+    (`CLAUDE.md`, "persona is not authority"); it can only render what the host
+    serves, and the host cannot serve this.
     """
     naming: set[str] = set()
     for path in tracked_python(REPO):
-        if not path.is_relative_to(REPO / "server"):
+        if path.is_relative_to(REPO / "tests"):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
@@ -205,11 +213,12 @@ def test_a_host_control_reads_orchestration_proof_never_qualified(ran: Ran) -> N
     word. There is no argument and no store state that makes it return the
     other one -- it has no branch that could.
 
-    *Structural.* `QUALIFIED` is named in exactly two files: the enum that
-    declares the word, and the reader that relays a reviewer's signed verdict.
-    No module that derives anything from the host's own records mentions it, so
-    there is no second path to audit. That is what "no code path in this
-    repository can mint `QUALIFIED`" has to mean to be checkable.
+    *Structural.* Across every module this repository ships, `QUALIFIED` is
+    named in exactly two files: the enum that declares the word, and the reader
+    that relays a reviewer's signed verdict. Nothing that derives anything from
+    the host's own records mentions it, so there is no second path to audit.
+    That is what "no code path in this repository can mint `QUALIFIED`" has to
+    mean to be checkable.
     """
     proof = _prove(ran)
 
