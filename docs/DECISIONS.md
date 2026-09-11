@@ -520,3 +520,56 @@ the plan's wording at the price of the one token the gate most needs to hold —
 the two spellings of the pinned source set are exactly the two lineages
 `CONTEXT.md` exists to prevent. The plan is the cheaper thing to correct, and
 correcting it in place is what §12 already says to do.
+
+## 2026-09-11 §24 — A qualification set has a declared on-disk form: a manifest and the documents beside it
+
+`CLAUDE.md`'s Phase 10 ledger asked for this in two entries and blocked two more
+on it. A set that lives only in memory is enough for a digest to be checkable
+and not enough for two people to be sure they hold the same set without
+comparing digests by hand — and once §23's **qualification set** grew to carry
+each case's documents as bytes, writing one in Python stopped being reasonable
+at any size a reviewer would care about.
+
+**A directory, not a single file.** A case carries documents and documents are
+bytes. Base64 inside one JSON file would keep the form self-contained at the
+price of the thing it exists for: a reviewer handed a set must be able to open
+the documents it is measured over. So the form is a manifest naming its cases,
+and the documents beside it:
+
+    acme-q3/
+      qualification.json
+      documents/acme-2026/report.txt
+
+**The digest does not move.** `qualification_set_digest` already covers each
+document's filename and the hash of its bytes, so a set read from disk digests
+exactly as the same set built in Python. That is the property the form rests on
+and the reason it is worth having: a verdict's `qualification_set_sha256` can
+name a directory somebody is holding. `server/qualification/on_disk.py` adds
+nothing to the digest and takes nothing away — it produces the same dataclasses
+from bytes rather than from a literal, and a test asserts the two agree.
+
+**A document's filename is its path's last segment.** One field rather than
+two. Two would be two things that can disagree, and the digest covers the
+filename: a manifest naming a document `report.txt` while reading `other.txt`
+would digest as the first and admit the second.
+
+**Read the way a signed verdict is read.** The manifest is authored, possibly
+not here and possibly years later, so it gets `read_verdict`'s treatment — a
+closed shape, undeclared keys refused, nothing coerced. Malformed is one code,
+`QUALIFICATION_SET_FILE_INVALID`, because it has one remedy: fix the file. A
+document path leaving the set's own directory is kept apart as
+`QUALIFICATION_SET_PATH_ESCAPES`, because its remedy differs and so does its
+seriousness — it is the one refusal here about safety rather than shape, and it
+is decided by resolving the path and comparing it to the resolved root rather
+than by inspecting the string for `..`, which only answers the spellings someone
+thought of.
+
+**No new dependency.** `json`, `pathlib` and `hashlib`, all standard library.
+The form is readable by anything, which is the same promise
+`server/deliverable/package.py` makes about an audit package.
+
+**Reason.** The alternative was leaving the set a Python literal and letting
+each caller invent its own serialisation, which is how two people end up
+measuring against sets they believe are the same. A declared form with one
+loader makes "do we hold the same set" a question with a mechanical answer, and
+it is the precondition three other ledger entries were waiting on.
