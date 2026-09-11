@@ -59,6 +59,7 @@ from server.qualification.matrix import (
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
+from server.store.budget import CEILING
 from server.store.runs import run_status
 
 REPO = Path(__file__).resolve().parents[1]
@@ -72,6 +73,8 @@ CATALOG = json.loads(
 PROFILE = "FULL_CREDIT_32"
 SELECTION = "DEEP_RESEARCH"
 ESTIMATE = Decimal("0.50")
+# Enough for any set these tests build: the per-run ceiling times ten.
+SET_CEILING = CEILING * 10
 
 QUOTE = "Total debt at 31 December 2026"
 REPORT = b"""Acme Holdings plc annual report 2026
@@ -198,6 +201,7 @@ def _perform(
     qualification: QualificationSet,
     *,
     refuses_call: int | None = None,
+    ceiling: Decimal = SET_CEILING,
 ) -> PerformedSet:
     return perform(
         conn,
@@ -207,6 +211,7 @@ def _perform(
             catalog=CATALOG,
             completions=_Completions(refuses_call=refuses_call),
             estimate=ESTIMATE,
+            ceiling=ceiling,
         ),
         qualification=qualification,
     )
@@ -316,6 +321,65 @@ def test_a_key_naming_a_document_the_case_does_not_carry_is_refused(
         assert refused.value.code is RefusalCode.QUALIFICATION_KEY_UNANSWERABLE
         # Refused before anything ran, not after paying for it.
         assert _count(conn, "SELECT count(*) FROM runs") == 0
+
+
+def test_a_set_that_could_outspend_its_ceiling_is_refused_before_it_starts(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """Invariant 8 one level up.
+
+    Each run has its own ceiling and refuses the reservation that would breach
+    it. Nothing bounded the *set*: two hundred cases were two hundred routes'
+    worth of calls, each individually within budget and collectively whatever
+    they happened to come to.
+
+    Checked against the sum of the per-run ceilings, not against an estimate of
+    what the set will actually cost. A ceiling is a statement about the worst
+    case — one that let a set start because it would *probably* come in under
+    would be a forecast, and invariant 8 is not a forecast.
+    """
+    from server.store import apply_schema, connect
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.commit()
+
+        with pytest.raises(Refusal) as refused:
+            _perform(
+                conn,
+                BlobStore(tmp_path / "blobs"),
+                QualificationSet(
+                    cases=(_case("acme-2026", REPORT), _case("borealis-2026", OTHER))
+                ),
+                # Two cases, so two runs at `budget.CEILING` each. A set ceiling
+                # of one run's worth cannot cover them.
+                ceiling=CEILING,
+            )
+
+        assert refused.value.code is RefusalCode.QUALIFICATION_SET_OVER_CEILING
+        assert _count(conn, "SELECT count(*) FROM cases") == 0
+        assert _count(conn, "SELECT count(*) FROM runs") == 0
+
+
+def test_a_set_within_its_ceiling_performs(empty_database: str, tmp_path: Path) -> None:
+    """The other side of the refusal, so it is a ceiling and not a wall."""
+    from server.store import apply_schema, connect
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.commit()
+
+        performed = _perform(
+            conn,
+            BlobStore(tmp_path / "blobs"),
+            QualificationSet(
+                cases=(_case("acme-2026", REPORT), _case("borealis-2026", OTHER))
+            ),
+            ceiling=CEILING * 2,
+        )
+
+        assert performed.matrix is not None
+        assert len(performed.performed) == 2
 
 
 def test_a_case_with_no_documents_is_refused(
@@ -632,6 +696,7 @@ def test_an_unreadable_artifact_does_not_take_the_set_down_with_it(
                 catalog=CATALOG,
                 completions=_DamagesWhatWasAccepted(conn, blobs, _Completions()),
                 estimate=ESTIMATE,
+                ceiling=SET_CEILING,
             ),
             qualification=QualificationSet(cases=(_case("acme-2026", REPORT),)),
         )
@@ -676,6 +741,7 @@ def test_a_run_whose_pin_is_gone_reports_no_pinned_nodes(
                     conn, blobs, _Completions(), loses_the_pin=True
                 ),
                 estimate=ESTIMATE,
+                ceiling=SET_CEILING,
             ),
             qualification=QualificationSet(cases=(_case("acme-2026", REPORT),)),
         )

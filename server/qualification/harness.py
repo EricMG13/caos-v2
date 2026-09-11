@@ -75,6 +75,7 @@ from server.qualification.matrix import (
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
+from server.store.budget import CEILING
 from server.store.routes import pin_route, resolved_route
 from server.store.runs import create_case, run_status, start_run
 
@@ -98,6 +99,10 @@ class Harness:
     catalog: Mapping[str, Any]
     completions: CompletionProvider
     estimate: Decimal
+    # What the whole set may cost. Each run has its own ceiling (invariant 8);
+    # nothing bounded the set until this, and two hundred cases were two
+    # hundred routes' worth of calls, each individually within budget.
+    ceiling: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +195,7 @@ def perform(
         case.label: resolve_route(harness.catalog, case.profile_id, case.selection_id)
         for case in qualification.cases
     }
+    _affordable(qualification, harness)
 
     # A loop rather than a comprehension: every turn of it admits documents,
     # opens a run and calls a provider, and a line that spends money should
@@ -224,6 +230,24 @@ def perform(
             runs={record.case_label: record.run_id for record in performed},
         ),
     )
+
+
+def _affordable(qualification: QualificationSet, harness: Harness) -> None:
+    """The set's ceiling against the sum of the per-run ceilings.
+
+    Invariant 8 one level up, and the same shape: a ceiling refuses the
+    operation that would breach it *before* it happens. Each run opened here
+    takes `server.store.budget.CEILING`, so what the set may spend is that times
+    the number of cases.
+
+    Compared against the worst case rather than an estimate of the likely one.
+    A set admitted because it would *probably* come in under would be a
+    forecast, and a budget that fails closed cannot rest on one — the whole
+    reason the reservation exists is that the call is billable whether or not
+    the guess was good.
+    """
+    if CEILING * len(qualification.cases) > harness.ceiling:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 
 def _distinct(qualification: QualificationSet) -> None:
