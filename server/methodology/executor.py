@@ -21,7 +21,7 @@ from uuid import UUID
 
 from server.boundary_text import BoundaryText
 from server.evidence.citations import verify_citations
-from server.evidence.read import read_evidence
+from server.evidence.read import Block, read_block
 from server.methodology.bundle import Bundle, assemble_authority, authority_digest
 from server.methodology.envelope import Claim, Envelope, parse_claims
 from server.provider import CompletionProvider
@@ -69,10 +69,16 @@ class ModuleOutcome:
 
 @dataclass(frozen=True, slots=True)
 class Delivery:
-    """One block of evidence handed to a module, and where it came from."""
+    """One block of evidence handed to a module, and where it came from.
+
+    `page` is part of "where it came from". A module cites the page the prompt
+    named, so a delivery that could not say which page it was read from is one
+    whose quotes invariant 11 refuses the moment the block is not on page one.
+    """
 
     source_id: UUID
     block_id: str
+    page: int
     text: BoundaryText
 
 
@@ -81,24 +87,31 @@ def deliver(
 ) -> list[Delivery]:
     """Read the blocks this node is to receive, through the evidence boundary.
 
-    Through `read_evidence` rather than around it: withdrawal is checked live at
-    every use (invariant 1), and a delivery assembled by a different query would
-    be the one path that skipped the check.
+    Through the evidence boundary rather than around it: withdrawal is checked
+    live at every use (invariant 1), and a delivery assembled by a different
+    query would be the one path that skipped the check.
     """
     return [
-        Delivery(
-            source_id=source_id,
-            block_id=block_id,
-            text=read_evidence(conn, source_id=source_id, block_id=block_id),
+        _delivery(
+            source_id,
+            block_id,
+            read_block(conn, source_id=source_id, block_id=block_id),
         )
         for source_id, block_id in deliveries
     ]
 
 
+def _delivery(source_id: UUID, block_id: str, block: Block) -> Delivery:
+    return Delivery(
+        source_id=source_id, block_id=block_id, page=block.page, text=block.text
+    )
+
+
 def build_prompt(module_id: str, authority: bytes, delivered: list[Delivery]) -> str:
     """The question, the authority, and the evidence -- in that order."""
     evidence = "\n\n".join(
-        f"source_id: {item.source_id}\npage: 1\n{item.text.value}" for item in delivered
+        f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}"
+        for item in delivered
     )
     return (
         _INSTRUCTION.format(module_id=module_id)
