@@ -76,6 +76,7 @@ def canonical(envelope: Envelope) -> bytes:
             "module_id": envelope.module_id,
             "build_id": envelope.build_id,
             "authority_digest": envelope.authority_digest,
+            "claims_refused": envelope.claims_refused,
             "claims": [
                 {
                     "statement": claim.statement.value,

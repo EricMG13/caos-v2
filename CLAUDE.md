@@ -428,6 +428,12 @@ system this size means nobody looked.
   each module's payload schema from the manifest (`docs/DECISIONS.md` §24) is
   where the bundle's own schema starts being enforced; it needs a JSON-schema
   dependency and therefore a decision entry.
+- **A refused claim is counted, not shown.** `claims_refused` travels in the
+  stored envelope (`docs/DECISIONS.md` §26) and nothing renders it: the
+  deliverable prints the claims that survived and says nothing of the ones that
+  did not, so a page can read as complete over a module that asserted twice
+  what it kept. *Upgrade:* the deliverable's provenance line carries the count,
+  the day a reader relies on the page without the store beside it.
 - **Only `SKILL.md` reaches the prompt.** A module's `reference_files` are
   verified and assembled but not sent: one module's reference set runs to tens
   of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
@@ -494,7 +500,7 @@ system this size means nobody looked.
   whitespace and each word must equal a token, punctuation included. A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
   `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
-  costs a retry, an over-eager match costs a rectangle over text the quote does
+  costs its claim (§26), an over-eager match costs a rectangle over text the quote does
   not contain — but it will refuse quotes a reader would call correct.
   *Upgrade:* Phase 5, when a real module's real quotes say which normalisations
   are needed; anything decided before then is guesswork about a caller that does
