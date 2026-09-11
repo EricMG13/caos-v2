@@ -142,11 +142,55 @@ system this size means nobody looked.
   TypeScript export no test names is not refused. *Upgrade:* when the frontend
   grows a module whose logic is not exercised by the workbench, port
   `check_tested.py` over the compiler API the vocabulary gate already uses.
+- **The literal-bidi gate scans a named list of roots, not what git tracks.**
+  `test_no_file_this_repository_writes_carries_a_literal_bidi_control` walks the
+  directories in `WRITTEN`, which mirrors `sonar-project.properties`'s source
+  list. A new top-level tree this repository writes goes unscanned until it is
+  added there, and the gate catches the nine bidi controls `BoundaryText`
+  refuses — not zero-width characters or homoglyphs, which deceive a reader
+  differently and are not the trojan-source class. The file floor (`scanned >
+  100`) is what stops a moved root reading as a clean pass. *Upgrade:* drive it
+  from `scripts/tracked.py` the day that module lists more than `*.py`, which is
+  also what would let `check_tested.py` see the frontend.
 - **`io_budget.py --assert` enforces only that some `server/api/` module
   declares an `IO_BUDGET`.** It keys on the route directory, not on `server/`:
   a store module has no request path and no round-trip budget to declare.
   *Upgrade:* Phase 2 raises the floor to one budget per request path, with
   `test_io_budget_read_evidence`.
+
+**Phase 10.**
+
+- **A verdict is read and not stored.** `read_verdict` refuses a document
+  missing any of the six bindings or past its expiry, and returns a `Verdict`
+  the caller holds; there is no `qualification_verdicts` table and no query that
+  answers "is this build qualified". Nothing consumes a verdict yet, so nothing
+  can read a stale one. *Upgrade:* the qualification-set harness stores the
+  verdict beside the run set it was measured over, which is the first caller
+  with a reason to look one up.
+- **The provider identity in a verdict is the reviewer's word, not the host's.**
+  Invariant 3 says the host owns identity, and here it does not: `provider` is a
+  string in a document this repository did not write, and nothing compares it
+  against the provider the runs behind the verdict actually called. It is a
+  binding rather than a fact, which is the honest reading of a reviewer's
+  signature — but it is not the same guarantee the rest of the system gives.
+  *Upgrade:* the harness records the provider each run reported and the verdict
+  is refused when its `provider` names a different one, which is a comparison
+  only the harness has both halves of.
+
+**Phase 9.**
+
+- **The phase-exit gate reads a workspace test by its literal title.**
+  `tests/test_phase_exits.py` now reads `frontend/tests/` as well as `tests/`,
+  which is what lets Phase 9 be exited by the TypeScript tests the plan names.
+  It matches `test("test_x", ...)` and `it("test_x", ...)` textually, so a title
+  assembled at run time — the chrome suite builds one per section from a
+  template — is invisible to it. No test the plan names is written that way, and
+  `test_the_gate_reads_the_workspace_suite_as_well_as_this_one` fails the day
+  the reader stops finding the two it must. *Upgrade:* resolve titles through
+  the compiler API the vocabulary gate already uses, the day the plan first
+  names a test whose title is computed — the same upgrade `check_tested.py`'s
+  TypeScript half is waiting on, and worth doing once, for both.
+
 **Phase 6.**
 
 - **A run tail polls.** `server/api/app.py` re-reads `run_events` every

@@ -37,6 +37,34 @@ def test_every_context_synonym_is_classified() -> None:
     assert stale == set(), f"classified synonyms CONTEXT.md no longer lists: {stale}"
 
 
+def test_the_qualification_set_keeps_its_own_synonyms_and_remaps_nothing(
+    tmp_path: Path,
+) -> None:
+    """Phase 10's term, and the one it is careful not to take over.
+
+    `docs/DECISIONS.md` §23: the body a verdict is measured against is a
+    *qualification set*, not a source set and not a corpus. It gets a term
+    because it is a concept CONTEXT.md did not have -- cases and their answer
+    keys, spanning runs -- rather than an exemption for the word the plan
+    reached for first.
+
+    `corpus` stays where it was. Listing it again under the new term would
+    remap it silently, because `banned_terms` is last-wins by token, and a
+    reader of the gate's message would then be told to spell a source set as a
+    qualification set.
+    """
+    banned = check_vocabulary.banned_terms(CONTEXT_MD)
+    assert banned["benchmark"] == "qualification set"
+    assert banned["golden_set"] == "qualification set"
+    assert banned["corpus"] == "source set"
+
+    module = tmp_path / "m.py"
+    module.write_text("def load_benchmark_cases() -> None: ...\n", encoding="utf-8")
+    reported = list(check_vocabulary.violations(module, banned))
+    assert len(reported) == 1
+    assert "'qualification set'" in reported[0]
+
+
 def test_a_new_context_synonym_is_unclassified_until_someone_decides() -> None:
     doctored = CONTEXT_MD + "\n| **case** | one engagement | matter |\n"
     missing, _ = check_vocabulary.unclassified(check_vocabulary.banned_terms(doctored))

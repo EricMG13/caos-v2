@@ -467,3 +467,56 @@ entrypoint gains a process with this entry, and `make dev` stops failing.
 parsing and response validation, which is the part of a web stack most likely to
 be got subtly wrong and least interesting to own. The dependency is accepted for
 the model layer specifically; the routing is what comes with it.
+
+## 2026-09-11 §23 — The body a verdict is measured against is a **qualification set**
+
+`docs/REBUILD_PLAN.md` Phase 10 was written around a *corpus*: "the corpus
+harness", "corpus digest", and an exit test named
+`test_a_verdict_binds_provider_corpus_build_date_expiry_and_reviewer`.
+`CONTEXT.md` lists **corpus** as a synonym for **source set**, and
+`scripts/check_vocabulary.py` enforces it on identifiers — so that exit test
+could not be written under the name the plan gave it. Two of this repository's
+own controls contradicted each other, and the phase could not start until one
+of them moved.
+
+**The gate was right and the plan was wrong.** Not because a gate outranks a
+plan, but because the concept the plan meant is genuinely not a source set. A
+source set is immutable, versioned, and pinned to one run (`SYSTEM_SPEC.md` §5).
+The thing a verdict is measured against is a body of *cases* and their answer
+keys that spans runs and outlives any one of them. `CONTEXT.md` had no term for
+it, which is why the plan reached for the nearest available word and picked one
+that was already taken.
+
+So `CONTEXT.md` gains a term — **qualification set**, "the immutable cases and
+answer keys one verdict is measured against" — and Phase 10 is corrected in
+place to use it, per §12's adopted process rule, the same way §20 corrected
+`storage/` to `server/store/`. The exit test is
+`test_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer`.
+`docs/AI_CODE_QUALITY.md` §5 is corrected in the same breath; it was the only
+other page spelling the concept the old way.
+
+**`corpus` stays banned, and stays pointing at source set.** It is not listed
+again under the new term. `banned_terms` maps a synonym to a term last-wins by
+token, so a second listing would silently re-point it, and the gate would start
+telling a reader who wrote `corpus` meaning the pinned documents of one run to
+spell it "qualification set". The cost of leaving it where it is: someone who
+writes `corpus` meaning the qualification set is refused and told to use
+"source set", which is the wrong half of the answer. That is a worse message
+and a better outcome than a wrong word admitted — the identifier is refused
+either way, and the reader who reads this entry finds the right term one line
+below the one they were pointed at.
+
+`benchmark` and `golden set` are the synonyms the new term displaces, both
+ENFORCED in both halves of the gate (`scripts/check_vocabulary.py` and
+`frontend/scripts/check-vocabulary.mjs`, kept equal by
+`tests/test_vocabulary_rules.py::test_ts_gate_enforces_the_same_tokens`).
+Neither carries an ordinary technical meaning in this repository: nothing here
+measures performance, and no tracked file names either word today.
+
+**Reason.** A glossary with a hole in it is how a synonym gets minted: the word
+that was reached for was not chosen over the right one, it was chosen because
+the right one did not exist. Adding an exemption for `corpus` would have kept
+the plan's wording at the price of the one token the gate most needs to hold —
+the two spellings of the pinned source set are exactly the two lineages
+`CONTEXT.md` exists to prevent. The plan is the cheaper thing to correct, and
+correcting it in place is what §12 already says to do.

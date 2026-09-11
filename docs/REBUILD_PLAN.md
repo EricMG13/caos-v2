@@ -181,9 +181,16 @@ refuses a late response carrying a different snapshot for either one.
 
 ## Phase 10 — Qualification
 
-- The corpus harness, the answer keys, the matrix.
-- A verdict is bound to provider identity, corpus digest, build, date, expiry
-  and reviewer.
+Corrected in place per §12's process rule: this phase was written around a
+*corpus*, which `CONTEXT.md` bans as a synonym for **source set** and
+`scripts/check_vocabulary.py` refuses on an identifier — the exit test below
+could not have been written under its original name. The body a verdict is
+measured against is a **qualification set**, a term `CONTEXT.md` now carries
+(`docs/DECISIONS.md` §23).
+
+- The qualification-set harness, the answer keys, the matrix.
+- A verdict is bound to provider identity, qualification-set digest, build,
+  date, expiry and reviewer.
 
 Two words, defined here because nothing else defines them. `ORCHESTRATION_PROOF`
 is what the host can assert on its own: the pinned methodology ran as pinned,
@@ -191,7 +198,8 @@ against the pinned sources, and every citation re-located. `QUALIFIED` is a
 reviewer's signature that the outputs met the answer keys, and it remains an
 external input until the credential and the analyst approvals exist.
 
-**Exit:** `test_a_verdict_binds_provider_corpus_build_date_expiry_and_reviewer`
+**Exit:**
+`test_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer`
 refuses a verdict missing any of the six or past its expiry;
 `test_a_host_control_reads_orchestration_proof_never_qualified` — no code path
 in this repository can mint `QUALIFIED`.
