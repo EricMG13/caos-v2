@@ -29,6 +29,13 @@ from uuid import UUID
 
 from server.refusals import Refusal, RefusalCode
 
+# No round trips: the actor comes out of two headers and a closed group table,
+# and nothing here touches the store. Declared rather than exempted, because
+# `server/api/` is where every module is on a request path and "it does no I/O"
+# is a fact worth stating rather than a rule a gate has to infer every time
+# (`scripts/io_budget.py`). The day this reads a user row, this number moves.
+IO_BUDGET = 0
+
 # The development convenience, and it is opt-in. An environment variable that had
 # to be set to *disable* trust is one a deployment forgets, and that failure is
 # silent and total: every request would arrive as whatever it said it was.

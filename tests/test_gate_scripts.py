@@ -390,7 +390,7 @@ def test_io_budget_main_passes_when_a_module_declares_the_budget(
     (api / "routes.py").write_text("IO_BUDGET = 1\n", encoding="utf-8")
 
     assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 0
-    assert "1 of 1 route module(s) declare IO_BUDGET" in capsys.readouterr().out
+    assert "all 1 route module(s) declare IO_BUDGET" in capsys.readouterr().out
 
 
 def test_main_builds_claims_from_the_cover_and_unscanned_flags(
@@ -545,3 +545,51 @@ def test_scanned_targets_ignores_a_result_with_no_target() -> None:
     report: dict[str, object] = {"Results": [{"Class": "lang-pkgs"}, {"Target": "app"}]}
 
     assert scan_floors.scanned_targets(report) == ["app"]
+
+
+def test_io_budget_refuses_a_second_route_module_that_declares_no_budget(
+    tmp_path: Path,
+) -> None:
+    """The floor was "some module declares one", so the second route to arrive
+    was never asked.
+
+    `CLAUDE.md`'s Phase 0 ledger called this out and pointed the upgrade at
+    Phase 2. Excessive I/O is the largest measured multiple in
+    `docs/AI_CODE_QUALITY.md`, and the predecessor's `read_evidence` is what it
+    was measured on -- so a gate that stops asking after the first answer is a
+    gate the next request path walks past.
+    """
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "runs.py").write_text("IO_BUDGET = 4\n", encoding="utf-8")
+    (api / "cases.py").write_text("def list_cases() -> None: ...\n", encoding="utf-8")
+
+    assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 1
+
+
+def test_io_budget_takes_zero_as_a_declared_cost(tmp_path: Path) -> None:
+    """A module in the route directory that makes no round trip declares `0`.
+
+    The rule is every module, not every module a heuristic recognises as
+    serving a path: "it has no route decorator" and "it never names the store"
+    are things a module can stop being true of without anyone noticing, and a
+    gate resting on either is one a new request path can be written around.
+    Zero is a cost, and stating it is cheaper than proving the exemption.
+    """
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "identity.py").write_text("IO_BUDGET = 0\n", encoding="utf-8")
+
+    assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 0
+
+
+def test_io_budget_names_the_modules_that_did_not_declare_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refusal a reader can act on names the files, not just the count."""
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "cases.py").write_text("def list_cases() -> None: ...\n", encoding="utf-8")
+
+    assert io_budget.main(["--assert", "--root", str(tmp_path)]) == 1
+    assert "cases.py" in capsys.readouterr().err
