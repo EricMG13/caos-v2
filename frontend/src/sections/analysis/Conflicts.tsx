@@ -6,14 +6,18 @@ import { CitationChip } from "@/evidence/CitationChip";
 import type { AdjustedRow, Conflict } from "@/wire/analysis";
 
 export function Conflicts({ conflicts }: { conflicts: Conflict[] }) {
+  // Colour is signal: an empty register has nothing to warn about.
+  const open = conflicts.length > 0;
   return (
     <section className="pnl" data-conflicts>
       <header>
-        <SeverityMark severity="WARNING" />
+        {open ? <SeverityMark severity="WARNING" /> : null}
         <h2>Definition conflict register</h2>
         <span className="cp">CP-1B</span>
         <span className="right">
-          <span className="tag warn">{conflicts.length} PRESERVED · NONE RESOLVED</span>
+          <span className={`tag${open ? " warn" : ""}`}>
+            {conflicts.length} PRESERVED · NONE RESOLVED
+          </span>
         </span>
       </header>
       <ul className="pb flush plain">

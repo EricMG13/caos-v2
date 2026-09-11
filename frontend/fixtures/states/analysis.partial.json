@@ -141,16 +141,6 @@
           "label": "CP-1C · Peers",
           "meta": "RESTRICTED",
           "on": false
-        },
-        {
-          "label": "CP-6A · Chair",
-          "meta": "BLOCKED",
-          "on": false
-        },
-        {
-          "label": "CP-MEMO",
-          "meta": "BLOCKED",
-          "on": false
         }
       ]
     },
@@ -237,8 +227,8 @@
         "source_id": "d_06",
         "label": "D-06",
         "title": "8-K Ally floor-plan amendment",
-        "grade": "B",
-        "disposition": "ADMITTED",
+        "grade": "C",
+        "disposition": "WITHDRAWN",
         "pages": 8
       }
     ],
@@ -304,7 +294,8 @@
           "bboxes": [[0.085, 0.39, 0.83, 0.05]],
           "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027. The interest rate was reduced and the facility is secured by Carvana LLC vehicle inventory, general intangibles, and cash deposit accounts.",
           "observed_at": "2026-09-09T14:30:00Z",
-          "render_url": null
+          "render_url": null,
+          "withdrawn_at": "2026-09-09T09:41:00Z"
         }
       },
       {
@@ -1104,18 +1095,6 @@
         "name": "Peer benchmark",
         "state": "RESTRICTED",
         "reason": "OPTIONAL input · private-market peer set not in SET-v4 · one peer set only"
-      },
-      {
-        "module_id": "CP-6A",
-        "name": "Chair weighting",
-        "state": "BLOCKED",
-        "reason": "REQUIRED upstream CP-6 not accepted"
-      },
-      {
-        "module_id": "CP-MEMO",
-        "name": "Deliverable",
-        "state": "BLOCKED",
-        "reason": "REQUIRED upstream CP-6A"
       }
     ],
     "capital": [
@@ -1134,7 +1113,8 @@
           "bboxes": [[0.085, 0.39, 0.83, 0.05]],
           "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027. The interest rate was reduced and the facility is secured by Carvana LLC vehicle inventory, general intangibles, and cash deposit accounts.",
           "observed_at": "2026-09-09T14:30:00Z",
-          "render_url": null
+          "render_url": null,
+          "withdrawn_at": "2026-09-09T09:41:00Z"
         }
       },
       {
@@ -1262,7 +1242,8 @@
           "bboxes": [[0.085, 0.39, 0.83, 0.05]],
           "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027. The interest rate was reduced and the facility is secured by Carvana LLC vehicle inventory, general intangibles, and cash deposit accounts.",
           "observed_at": "2026-09-09T14:30:00Z",
-          "render_url": null
+          "render_url": null,
+          "withdrawn_at": "2026-09-09T09:41:00Z"
         }
       },
       {
@@ -1373,7 +1354,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1432,7 +1413,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1491,7 +1472,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1540,7 +1521,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1589,7 +1570,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1648,7 +1629,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1697,7 +1678,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1756,7 +1737,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -1835,7 +1816,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],

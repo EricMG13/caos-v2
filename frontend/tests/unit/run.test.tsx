@@ -110,11 +110,19 @@ describe("Run", () => {
       "RUN_NOT_TERMINAL",
     );
     // A COMPLETE node is acceptable, and nothing in this build accepts: the
-    // control stays visible and refused with the phase that clears it.
+    // control stays visible and refused with what clears it.
     fireEvent.click(container.querySelector('button.node[data-node="CP-1"]')!);
     const acceptable = screen.getByRole("button", { name: "Accept" });
     expect(acceptable).toHaveAttribute("data-refusal", "ACTION_UNPLACED");
     expect(acceptable).not.toHaveAttribute("disabled");
+  });
+
+  test("an attempt with no generation id says so rather than inventing one", () => {
+    const { container } = mount(running);
+    expect(running.body.attempts["CP-6"]?.[0]?.generation_id).toBeNull();
+    const attempt = container.querySelector(".att[data-attempt='1']");
+    expect(attempt).toHaveTextContent("no generation id");
+    expect(attempt).not.toHaveTextContent("gen_—");
   });
 
   test("the selected node's attempts, digest and limitation are in the right column", () => {

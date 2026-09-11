@@ -23,12 +23,18 @@
         {
           "label": "Open case",
           "primary": true,
-          "refusal": null
+          "refusal": {
+            "code": "NO_CASE_REGISTERED",
+            "clears": "a case is registered — drop documents on the Intake tab to create the first one"
+          }
         },
         {
           "label": "Admit pack",
           "primary": false,
-          "refusal": null
+          "refusal": {
+            "code": "INTAKE_UNPLACED",
+            "clears": "the API serves an intake route — this build's API serves only the run document and its event stream"
+          }
         }
       ]
     },

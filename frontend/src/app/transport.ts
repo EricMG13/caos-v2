@@ -42,7 +42,7 @@ function refusalOf(body: unknown): Refusal {
   ) {
     return { code: (body as Refusal).code, clears: (body as Refusal).clears };
   }
-  return { code: "RESPONSE_INVALID", clears: "The server answers with a typed refusal." };
+  return { code: "RESPONSE_INVALID", clears: "the server answers with a typed refusal" };
 }
 
 async function bodyOf(response: Response): Promise<unknown> {
@@ -61,7 +61,7 @@ export function classify(document: unknown): RegionStatus {
   if (!keysMatch(record)) {
     return {
       kind: "error",
-      refusal: { code: "WIRE_KEYS_MISMATCH", clears: "The document carries the pinned keys." },
+      refusal: { code: "WIRE_KEYS_MISMATCH", clears: "the document carries the pinned keys" },
     };
   }
   const typed = record as unknown as AnyDocument;
@@ -71,7 +71,7 @@ export function classify(document: unknown): RegionStatus {
         kind: "error",
         refusal: {
           code: "OBSERVED_EMPTY_UNTIMED",
-          clears: "An observed-empty response carries the time it was observed.",
+          clears: "an observed-empty response carries the time it was observed",
         },
       };
     }

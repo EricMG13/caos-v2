@@ -15,7 +15,10 @@
         {
           "label": "Admit pack",
           "primary": true,
-          "refusal": { "code": "NO_FILES_SELECTED", "clears": "at least one file is selected" }
+          "refusal": {
+            "code": "INTAKE_UNPLACED",
+            "clears": "the API serves an intake route — this section has no drop region; documents are chosen on Directory › Intake and not yet sent"
+          }
         },
         {
           "label": "Pin set",

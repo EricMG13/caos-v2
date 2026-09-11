@@ -52,7 +52,7 @@ function OpinionPanel({ body, role }: { body: ReportBody; role: ServedRole }) {
           <dd>
             <time dateTime={revision.saved_at}>{revision.saved_at}</time>
           </dd>
-          <dt>Signer</dt>
+          <dt>You</dt>
           <dd>
             {role.role} · {role.standing}
           </dd>

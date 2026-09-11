@@ -23,12 +23,18 @@
         {
           "label": "Open case",
           "primary": true,
-          "refusal": null
+          "refusal": {
+            "code": "CASE_NOT_CHOSEN",
+            "clears": "a case is opened from its own row — the register keeps no selection for this control to open"
+          }
         },
         {
           "label": "Admit pack",
           "primary": false,
-          "refusal": null
+          "refusal": {
+            "code": "INTAKE_UNPLACED",
+            "clears": "the API serves an intake route — this build's API serves only the run document and its event stream"
+          }
         }
       ]
     },

@@ -65,7 +65,7 @@ function RegisterTab({ body }: { body: DirectoryBody }) {
           </span>
         </header>
         <div className="pb flush">
-          <CaseRegister rows={rows} selected={rows[0]?.case_id ?? null} />
+          <CaseRegister rows={rows} />
           {rows.length === 0 ? <p className="pb note">No case matches.</p> : null}
         </div>
       </section>
@@ -86,8 +86,9 @@ function IntakeLine({ intake }: { intake: Intake | null }) {
   const open = intake.suggestions.filter((s) => !s.committed).length;
   return (
     <p className="note" data-intake-open>
-      <b>One intake is open for review.</b> {intake.files.length} files admitted as one pack ·{" "}
-      {open} of {intake.suggestions.length} suggestions uncommitted
+      <b>One intake is open for review.</b> {intake.files.length}{" "}
+      {intake.files.length === 1 ? "file" : "files"} admitted as one pack · {open} of{" "}
+      {intake.suggestions.length} suggestions uncommitted
       {intake.run_id ? (
         <>
           {" "}
@@ -129,6 +130,14 @@ function Committing({ intake, caseId }: { intake: Intake; caseId: string | null 
   );
 }
 
+/** Bytes under a kilobyte read as bytes, and megabytes as megabytes: a 512-byte
+    file is not "1 KB", nor "0 KB", and a 5 MB report is not "5120 KB". */
+function sizeOf(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+}
+
 function AdmittedPack({ intake }: { intake: Intake }) {
   const headingId = useId();
   return (
@@ -147,7 +156,7 @@ function AdmittedPack({ intake }: { intake: Intake }) {
           {intake.files.map((file) => (
             <li key={file.sha256} className="att">
               <span className="a">{file.name}</span>
-              <span>{Math.round(file.bytes / 1024)} KB</span>
+              <span>{sizeOf(file.bytes)}</span>
               <code title={file.sha256}>{file.sha256.slice(0, 12)}</code>
             </li>
           ))}
