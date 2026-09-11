@@ -177,14 +177,14 @@ system this size means nobody looked.
   closed a hole in the digest: it now covers the documents and the route
   selection, so two sets with identical answer keys over different evidence no
   longer digest the same.
-- **A qualification set lives in memory and is digested, not stored.** There is
-  no table and no file format: a caller constructs `QualificationSet` in Python
-  and gets a digest a verdict can bind. That is enough for the binding to be
-  checkable and not enough for two people to be sure they hold the same set
-  without comparing digests by hand — and now that a case carries its documents
-  as bytes, a set of any size is a Python literal nobody wants to write.
-  *Upgrade:* a declared on-disk form with a loader, which is the next thing this
-  phase needs and the thing a reviewer would actually be handed.
+- ~~**A qualification set lives in memory and is digested, not stored.**~~
+  Closed by `server/qualification/on_disk.py` (`docs/DECISIONS.md` §24): a
+  manifest naming its cases with the documents beside it, and a loader that
+  produces the same dataclasses a Python caller would. The digest does not move,
+  which is what lets a verdict's `qualification_set_sha256` name a directory
+  somebody is holding. There is still no *table* — a set is a directory, not a
+  row — and nothing here needs one while a set is authored rather than
+  generated.
 - **A qualification run costs real money and nothing bounds the set.** `perform`
   runs every case through the real provider seam under `Harness.estimate`, and a
   set of two hundred cases is two hundred routes' worth of calls. Each run has
@@ -223,7 +223,9 @@ system this size means nobody looked.
   set should be loud. *Upgrade:* the day a set is loaded from the declared
   on-disk form rather than built in Python, a case that will not admit is a
   file defect rather than a caller's bug, and belongs in a record like any
-  other.
+  other. **That day has arrived** — §24 landed the on-disk form — so this is now
+  work that is due rather than work that is blocked, and it is the first thing to
+  do in this phase that is not waiting on something else.
 - **An unrun node's state is a weaker reading when the artifacts cannot be
   read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
   soft edge's readiness comes from, and bytes that will not load would raise out
@@ -246,9 +248,10 @@ system this size means nobody looked.
   cannot be handed to anyone who was not there when the set was performed. That
   is the right shape while it is re-derived on every ask — a stored proof is a
   claim about a store that has since moved — and the wrong one as soon as a
-  verdict has to cite the proofs behind it. *Upgrade:* the declared on-disk form
-  the qualification set is waiting for; the two land together or neither means
-  anything.
+  verdict has to cite the proofs behind it. *Upgrade:* a declared form for the
+  proof beside the set's own (§24), which has landed — so what blocked this is
+  gone and what remains is the work itself: somewhere to put a proof, and a
+  reader that can be handed one.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
   re-deriving the proof and re-reading every artifact for its citations. Two of
@@ -281,8 +284,8 @@ system this size means nobody looked.
   up — it holds the matrix and the proofs a verdict would be measured over — and
   deliberately does not: a signature bound to a `PerformedSet` that lives no
   longer than the process that built it is a binding nobody can re-check.
-  *Upgrade:* the declared on-disk form above, then the verdict stored beside the
-  performed set it names.
+  *Upgrade:* the set's on-disk form has landed (§24), so the verdict stored
+  beside the performed set it names is now the whole of what is left here.
 - **The provider identity in a verdict is the reviewer's word, not the host's.**
   Invariant 3 says the host owns identity, and here it does not: `provider` is a
   string in a document this repository did not write, and nothing compares it
