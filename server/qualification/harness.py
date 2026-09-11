@@ -20,6 +20,32 @@ would report a pass nobody earned.
 answerable, every label distinct — before the first provider call. A set with an
 unanswerable key is a defect in the set, and finding it after paying for the
 runs tells you the same thing later and more expensively.
+
+**What only the harness can report.** `assert_orchestration_proof` re-derives
+its three claims over the artifacts a run *accepted*. That is the strongest true
+statement it can make from a run id alone, and it is narrower than "the route
+ran": a run that accepted CP-0 and then stopped proves what it accepted, and the
+matrix row it feeds reads `proven`. The harness resolved and pinned the route,
+so it holds the node list the proof is silent about — a `Performed` carries the
+run's own status and the pinned nodes that produced nothing, beside the proof
+rather than folded into it.
+
+**A case that stops is recorded, and the set stops.** A change of mind from this
+module's first draft, which let a refusal inside a run propagate — but only half
+of one. The objection to catching a refusal was that it turns a broken run into
+a quiet miss, and that is answered by *where* the refusal goes rather than by
+re-raising it: `Performed.stopped` carries the typed code. What re-raising costs
+is everything already bought — the records, the proofs, the provider calls
+behind them — and the paragraph above with it, since a route that ran to its end
+has no unrun nodes to report.
+
+Carrying on past it would be the opposite mistake. The refusals that end a run
+are mostly not the case's: a missing credential, a ceiling reached, a moved
+bundle recur on every case after it, and each one costs another run, another
+reservation `server/store/budget.py` never releases, and — for the refusals that
+may have reached the provider — another charge. So the set stops at the first
+one and returns what it performed, and `matrix` is None, because a comparison
+that omits the cases after the stop reads as complete.
 """
 
 from __future__ import annotations
@@ -33,8 +59,8 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import resolve_route
-from server.engine.runtime import Execution, run_route
+from server.engine.route import NodeState, ResolvedRoute, node_states, resolve_route
+from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
@@ -46,10 +72,11 @@ from server.qualification.matrix import (
     assert_measurable,
     build_matrix,
 )
+from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
-from server.store.routes import pin_route
-from server.store.runs import create_case, start_run
+from server.store import RunStatus, StoreConnection
+from server.store.routes import pin_route, resolved_route
+from server.store.runs import create_case, run_status, start_run
 
 # The label a case is admitted under. A qualification case is a case like any
 # other in the store, which is what lets the proof read it like any other.
@@ -73,14 +100,75 @@ class Harness:
     estimate: Decimal
 
 
+@dataclass(frozen=True, slots=True)
+class Unrun:
+    """A pinned node that produced no artifact, and the state explaining it.
+
+    The state matters as much as the name: BLOCKED is the route's own rules
+    being applied, RUNNABLE is a run that stopped with work still in front of
+    it. A list of bare node ids would read the same either way.
+    """
+
+    route_node_id: str
+    state: NodeState
+
+
+@dataclass(frozen=True, slots=True)
+class Performed:
+    """One case, performed: what the run did and what the host can say about it.
+
+    Four facts, deliberately not summed:
+
+    - `status` — the run's own, read from the store. The proof does not check
+      that a run reached COMPLETE, and this is where that is answered.
+    - `stopped` — the refusal that ended execution short of the route's end.
+      Apart from `refusal` because they fail at different moments: one is the
+      run, the other is the host's later reading of what the run left behind.
+    - `proof` / `refusal` — exactly one is set. The proof is taken over whatever
+      was accepted, whether or not the run finished.
+    - `unrun` — the pinned nodes with no accepted artifact.
+
+    A run that stopped after CP-0 with a sound proof is a different thing to a
+    reviewer than a run that finished with an unprovable one, and one combined
+    flag would tell them apart by losing both.
+    """
+
+    case_label: str
+    run_id: UUID
+    status: RunStatus
+    stopped: RefusalCode | None
+    proof: OrchestrationProof | None
+    refusal: RefusalCode | None
+    unrun: tuple[Unrun, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PerformedSet:
+    """A set performed: each case's run, and the matrix over the runs it made.
+
+    The set digest and the build are on the matrix and are not repeated here:
+    two copies of one binding are two things that can disagree, and the matrix
+    is what a reviewer is handed.
+
+    `matrix` is None when the set stopped before its last case. A matrix is a
+    comparison across the whole set, and one built over the cases that happened
+    to run before a provider went away would read as complete. The records are
+    still here: what was performed is worth keeping even when what it adds up
+    to is not yet a measurement.
+    """
+
+    performed: tuple[Performed, ...]
+    matrix: Matrix | None
+
+
 def perform(
     conn: StoreConnection,
     blobs: BlobStore,
     harness: Harness,
     *,
     qualification: QualificationSet,
-) -> Matrix:
-    """Run every case of the set and report the matrix.
+) -> PerformedSet:
+    """Run every case of the set and report what each run did, and the matrix.
 
     The order is the contract: the set is checked whole, then each case is
     admitted and run, then the matrix is built over the runs this call made.
@@ -91,31 +179,77 @@ def perform(
     # is empty, and "it has no documents" is the more useful of two true
     # answers about the same defect.
     assert_measurable(qualification)
+    _distinct(qualification)
     _answerable(qualification)
 
-    runs: dict[str, UUID] = {
-        case.label: _run_one(conn, blobs, harness, case=case)
-        for case in qualification.cases
-    }
-    return build_matrix(
-        conn, blobs, harness.bundle, qualification=qualification, runs=runs
+    # A loop rather than a comprehension: every turn of it admits documents,
+    # opens a run and calls a provider, and a line that spends money should
+    # look like one.
+    performed: list[Performed] = []
+    for case in qualification.cases:
+        record = _perform_one(conn, blobs, harness, case=case)
+        performed.append(record)
+        if record.stopped is not None:
+            # Stop, having recorded it. Carrying on would be a bet that the
+            # refusal was this case's, and the ones that end a run are mostly
+            # not: a missing credential, a ceiling reached, a moved bundle all
+            # recur on the next case, and each retry costs another run, another
+            # reservation `server/store/budget.py` never releases, and — for
+            # the refusals that are billable — another charge.
+            break
+
+    return PerformedSet(
+        performed=tuple(performed),
+        # Only over a set that finished — which means every case, and every one
+        # of them to the end of its route. A matrix missing the cases after the
+        # one that stopped reads as complete; so does a row that says `proven`
+        # and `met` about a run that accepted CP-0 and went no further, which is
+        # the very confusion `Performed` exists to undo.
+        matrix=None
+        if any(record.stopped is not None for record in performed)
+        else build_matrix(
+            conn,
+            blobs,
+            harness.bundle,
+            qualification=qualification,
+            runs={record.case_label: record.run_id for record in performed},
+        ),
     )
 
 
-def _run_one(
+def _distinct(qualification: QualificationSet) -> None:
+    """Two cases under one label make "the answer" depend on read order.
+
+    `build_matrix` refuses this too, and only once every case has been paid
+    for — which is what the paragraph above promises does not happen. Checked
+    here so that promise is true.
+    """
+    labels = [case.label for case in qualification.cases]
+    if len(set(labels)) != len(labels):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
+
+
+def _perform_one(
     conn: StoreConnection,
     blobs: BlobStore,
     harness: Harness,
     *,
     case: QualificationCase,
-) -> UUID:
-    """One case: admitted, pinned, run. Returns the run the matrix will read.
+) -> Performed:
+    """One case: admitted, pinned, run, and recorded.
 
-    A refusal inside the run is not caught here. It leaves the run recoverable
-    and the attempt recorded, exactly as it would for any other caller, and the
-    matrix would report the row as unproven — but a harness that swallowed it
-    would turn a broken run into a quiet miss.
+    A refusal inside the run is recorded rather than raised, so the cases after
+    it are still performed. It is not swallowed: it lands in `stopped` as a
+    typed code, and the run it left behind is as recoverable and as fully
+    attempted as it would be for any other caller.
     """
+    # Resolved once, before the run exists. It is pure and reads no store
+    # (invariant 10), so taking it first costs nothing and means an unknown
+    # profile or selection refuses without having left a RUNNING run behind
+    # that has no pin, no attempts and no terminal event — one nothing can
+    # complete, fail, or prove.
+    route = resolve_route(harness.catalog, case.profile_id, case.selection_id)
+
     case_id = create_case(conn, BoundaryText.of(case.label, limit=_LABEL_LIMIT))
     source_ids = admit_pack(
         conn, blobs, case_id=case_id, documents=list(case.documents)
@@ -123,28 +257,106 @@ def _run_one(
     run_id = start_run(conn, case_id)
     conn.commit()
 
-    # Resolved once and pinned, then executed from that same object: invariant
-    # 10 is that the route is resolved once, and resolving twice would make the
-    # pin and the execution two answers that merely happen to agree.
-    route = resolve_route(harness.catalog, case.profile_id, case.selection_id)
+    # Pinned from that same object, then executed from it: resolving twice
+    # would make the pin and the execution two answers that merely happen to
+    # agree.
     pin_route(conn, run_id, route)
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=harness.bundle,
-                blobs=blobs,
-                completions=harness.completions,
-                delivered=_delivered(conn, source_ids),
+
+    stopped: RefusalCode | None = None
+    try:
+        run_route(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            execution=Execution(
+                ModuleProvider(
+                    conn=conn,
+                    bundle=harness.bundle,
+                    blobs=blobs,
+                    completions=harness.completions,
+                    delivered=_delivered(conn, source_ids),
+                ),
+                harness.estimate,
             ),
-            harness.estimate,
-        ),
+        )
+    except Refusal as failed:
+        # Every durable step of an attempt commits on its own
+        # (`server/engine/runtime.py`), so there is nothing half-written here to
+        # keep, and the next case starts on a clean transaction.
+        conn.rollback()
+        stopped = failed.code
+
+    proof: OrchestrationProof | None = None
+    refusal: RefusalCode | None = None
+    try:
+        proof = assert_orchestration_proof(conn, blobs, harness.bundle, run_id=run_id)
+    except Refusal as unprovable:
+        refusal = unprovable.code
+
+    return Performed(
+        case_label=case.label,
+        run_id=run_id,
+        status=run_status(conn, run_id),
+        stopped=stopped,
+        proof=proof,
+        refusal=refusal,
+        unrun=_unrun(conn, blobs, run_id),
     )
-    return run_id
+
+
+def _unrun(conn: StoreConnection, blobs: BlobStore, run_id: UUID) -> tuple[Unrun, ...]:
+    """The pinned nodes that produced no accepted artifact, in route order.
+
+    The route comes from the pin rather than from the object this module just
+    resolved, for the reason `proof.py` and `matrix.py` both re-read it: the
+    host owns identity (invariant 3), and a caller's copy of what the store
+    said is a claim. No pin means no pinned nodes, which is the literal reading
+    and the one the proof has already refused this run for.
+
+    `node_states` is the single source of truth for which nodes are done —
+    asking it, and separately asking which `route_node_id` has an artifact,
+    is two definitions of "complete" that agree only while no route runs one
+    module twice.
+
+    Empty is the whole route having run. A node here is not a failure by itself
+    — BLOCKED is the route's own rules being applied — which is why the state
+    travels with the name.
+    """
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return ()
+    states = node_states(route, _accepted(conn, blobs, route, run_id))
+    return tuple(
+        Unrun(route_node_id=node.route_node_id, state=states[node.route_node_id])
+        for node in route.nodes
+        if states[node.route_node_id] is not NodeState.COMPLETE
+    )
+
+
+def _accepted(
+    conn: StoreConnection, blobs: BlobStore, route: ResolvedRoute, run_id: UUID
+) -> dict[str, Any]:
+    """What the run accepted, and never a reason to end the set.
+
+    `accepted_artifacts` reads CP-0's body out of the blob store to recover the
+    readiness a soft edge turns on, and bytes that will not load raise — which,
+    left unguarded here, would take down the whole set from inside the function
+    added to keep one bad case from doing that. A run whose artifacts cannot be
+    read has already refused its proof; the fallback keeps which nodes are
+    COMPLETE exact and gives up only the readiness that separates a BLOCKED
+    node from a RESTRICTED one.
+    """
+    try:
+        return accepted_artifacts(conn, blobs, route, run_id)
+    except (Refusal, ValueError):
+        rows = conn.execute(
+            "SELECT t.route_node_id FROM artifacts a"
+            " JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s",
+            (run_id,),
+        ).fetchall()
+        return {str(row[0]): {} for row in rows}
 
 
 def _delivered(conn: StoreConnection, source_ids: list[UUID]) -> list[tuple[UUID, str]]:

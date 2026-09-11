@@ -192,22 +192,69 @@ system this size means nobody looked.
   exceed what the caller meant to spend. *Upgrade:* a ceiling on the set,
   checked against the sum of the per-run ceilings before the first case is
   admitted — the same fail-closed shape one run already has, one level up.
-- **The proof says every accepted artifact holds up, not that the run finished.**
-  `assert_orchestration_proof` re-derives its three claims over the artifacts a
-  run accepted; it does not check that the run reached COMPLETE or that every
-  pinned node produced one. A run that accepted CP-0 and then failed still
-  proves what it did accept, which is the true and narrower statement — but a
-  reader could take "orchestration proven" for "the route ran". *Upgrade:* the
-  qualification-set harness compares the proof against the pinned node list,
-  because a matrix row is about a whole run rather than about the part of one
-  that happened.
-- **A proof is computed and not recorded.** Nothing stores an
-  `OrchestrationProof` and no route serves one, so it cannot be handed to anyone
-  — it can only be re-taken. That is the right shape while it is re-derived on
-  every ask (a stored proof is a claim about a store that has since moved), and
-  the wrong one as soon as a verdict has to cite the proofs behind it.
-  *Upgrade:* the harness records the proof beside the run it covers, and the
-  verdict binds that set.
+- ~~**The proof says every accepted artifact holds up, not that the run
+  finished.**~~ Closed beside the proof rather than inside it.
+  `assert_orchestration_proof` still makes only the narrower claim, which is the
+  true one it can make from a run id alone. The harness resolved and pinned the
+  route, so it holds what the proof is silent about: a `Performed` carries the
+  run's own status and the pinned nodes that produced no artifact, each with the
+  state the route left it in — BLOCKED is the route's rules applied, RUNNABLE is
+  a run that stopped with work in front of it. The facts sit beside the proof
+  and are not summed, because a run that stopped with a sound proof and a run
+  that finished with an unprovable one are different things to a reviewer.
+- **A refusal raised before a run exists still ends the set.** `perform` records
+  a `Refusal` from `run_route` in `Performed.stopped`, stops, and returns what
+  it performed. The refusals it cannot record are the ones raised before there
+  is a run to record them against — `resolve_route`, `create_case`,
+  `admit_pack`, `pin_route` — which still propagate and discard every earlier
+  case's record with them. Resolving the route first (it is pure) removes the
+  one that used to leave an orphan RUNNING run behind; the rest are setup
+  failures on a case the caller assembled, and they are loud where a misassembled
+  set should be loud. *Upgrade:* the day a set is loaded from the declared
+  on-disk form rather than built in Python, a case that will not admit is a
+  file defect rather than a caller's bug, and belongs in a record like any
+  other.
+- **An unrun node's state is a weaker reading when the artifacts cannot be
+  read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
+  soft edge's readiness comes from, and bytes that will not load would raise out
+  of the one function added to stop a bad case ending the set. Guarded, it falls
+  back to artifact presence: which nodes are COMPLETE stays exact, and what is
+  given up is the readiness that separates a BLOCKED node from a RESTRICTED one.
+  The run has already refused its proof by then, so the signal is not lost.
+  *Upgrade:* none — a run whose artifacts are unreadable has a worse problem
+  than the precision of this field.
+- **`Unrun` does not say whether a node was attempted.** A node the provider was
+  asked for and refused and a node execution never reached both come back
+  RUNNABLE, although `run_attempts` holds the difference: the first has a
+  started, unaccepted row and a reservation, the second has nothing. With the
+  frontier running its ready nodes in order this is at most one node per run.
+  *Upgrade:* read the attempt rows alongside the states, the day a wide frontier
+  runs concurrently and more than one node can be mid-flight.
+- **A proof is held and not stored.** `perform` now holds each case's
+  `OrchestrationProof` beside the run id it covers — and only for as long as the
+  caller does. There is no table and no route that serves one, so a proof still
+  cannot be handed to anyone who was not there when the set was performed. That
+  is the right shape while it is re-derived on every ask — a stored proof is a
+  claim about a store that has since moved — and the wrong one as soon as a
+  verdict has to cite the proofs behind it. *Upgrade:* the declared on-disk form
+  the qualification set is waiting for; the two land together or neither means
+  anything.
+- **Each case's artifacts are read four times.** `run_route`'s last frontier
+  pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
+  re-deriving the proof and re-reading every artifact for its citations. Two of
+  those are deliberate: the matrix stands alone, and reading a proof back from
+  the harness would make it trust a caller's copy of what the store said
+  (invariant 3). Against a provider call per node none of it shows. *Upgrade:*
+  hand the accepted mapping from `_perform_one` to the matrix the day a set is
+  large enough for the reads to be measurable — which is the same day the
+  per-set budget above starts to bite.
+- **`perform` returns with a read transaction open.** Its last writes commit
+  inside the store calls, and the proof, the status read, `_unrun` and the
+  matrix all read after them without committing or rolling back. Under the
+  `with connect(...)` every caller uses today the connection closes immediately
+  after; a caller that held one would leave a session idle-in-transaction,
+  pinning a snapshot. *Upgrade:* end the transaction on the way out, in the
+  phase that first gives this a caller which outlives one set.
 - **A bundle upgrade invalidates every earlier run's proof.** The authority is
   re-derived from the bundle that is here now, so after an upgrade a run that
   was correct under the old build refuses `ORCHESTRATION_BUILD_MOVED`. That is
@@ -220,18 +267,25 @@ system this size means nobody looked.
   missing any of the six bindings or past its expiry, and returns a `Verdict`
   the caller holds; there is no `qualification_verdicts` table and no query that
   answers "is this build qualified". Nothing consumes a verdict yet, so nothing
-  can read a stale one. *Upgrade:* the qualification-set harness stores the
-  verdict beside the run set it was measured over, which is the first caller
-  with a reason to look one up.
+  can read a stale one. The harness is now the caller with a reason to look one
+  up — it holds the matrix and the proofs a verdict would be measured over — and
+  deliberately does not: a signature bound to a `PerformedSet` that lives no
+  longer than the process that built it is a binding nobody can re-check.
+  *Upgrade:* the declared on-disk form above, then the verdict stored beside the
+  performed set it names.
 - **The provider identity in a verdict is the reviewer's word, not the host's.**
   Invariant 3 says the host owns identity, and here it does not: `provider` is a
   string in a document this repository did not write, and nothing compares it
   against the provider the runs behind the verdict actually called. It is a
   binding rather than a fact, which is the honest reading of a reviewer's
   signature — but it is not the same guarantee the rest of the system gives.
-  *Upgrade:* the harness records the provider each run reported and the verdict
-  is refused when its `provider` names a different one, which is a comparison
-  only the harness has both halves of.
+  The harness has one half of the comparison and not the other: it holds the
+  runs, and nothing a run leaves behind names the model it called —
+  `ProviderResult` carries an artifact digest and a charge, and `run_attempts`
+  neither a model nor a generation id. *Upgrade:* record the provider identity
+  on the attempt it was charged against, a store change with its own decision
+  entry, and the precondition for the harness refusing a verdict whose
+  `provider` names a model the runs behind it never called.
 
 **Phase 9.**
 
