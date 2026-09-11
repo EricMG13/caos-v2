@@ -202,6 +202,16 @@ system this size means nobody looked.
   a run that stopped with work in front of it. The facts sit beside the proof
   and are not summed, because a run that stopped with a sound proof and a run
   that finished with an unprovable one are different things to a reviewer.
+- **The harness performs its cases one after another.** `perform` runs each case
+  to the end of its route before opening the next, so a ten-case set takes the
+  sum of ten runs rather than the longest. It is the Phase 4 gap below one level
+  up, with the same answer: nothing about correctness turns on it, because each
+  case is its own run against its own case row. This entry was written once and
+  lost in a rebase onto the harness's other half — recorded again here, which is
+  the only way a ledger survives its own history being rewritten. *Upgrade:* the
+  async store connection Phase 5's gap already owes; over a synchronous one a
+  concurrent harness would serialise on the connection, for the same wall clock
+  and harder reasoning.
 - **A refusal raised before a run exists still ends the set.** `perform` records
   a `Refusal` from `run_route` in `Performed.stopped`, stops, and returns what
   it performed. The refusals it cannot record are the ones raised before there
@@ -301,6 +311,49 @@ system this size means nobody looked.
   names a test whose title is computed — the same upgrade `check_tested.py`'s
   TypeScript half is waiting on, and worth doing once, for both.
 
+**Phase 8.**
+
+- **The analyst narrative reaches the page as one escaped paragraph.**
+  `_narrative` takes a `str` and emits a single `<p>`, so a narrative with two
+  paragraphs, a list or an emphasised clause arrives as one run of text. That is
+  the safe direction while the render must stay pure and the narrative is
+  analyst-authored text reaching a governed page — escaping everything is the
+  only reading that cannot surprise — but a committee paper whose narrative
+  cannot have two paragraphs is a real limit on the deliverable. *Upgrade:* a
+  bounded structured narrative, the day an analyst's revision needs shape rather
+  than prose.
+- **A citation renders without its page when the payload omits one.**
+  `_citation` reads `str(citation.get("page", ""))`, while `matched_text` and
+  `document_sha256` beside it are refused when absent — so a payload with no
+  `page` prints "page " rather than refusing. Unreachable from any real run:
+  `server/methodology/envelope.py` lists `page` in `CITATION_KEYS` and parses it
+  with `int(citation["page"])`, and `server/methodology/runner.py` writes it into
+  every stored artifact, so only a payload hand-built for `freeze` can carry a
+  citation without one. The cost is a cosmetic line on the page rather than a
+  false assurance, which is why it is recorded and not fixed. *Upgrade:* refuse
+  it here too, for consistency with the two fields beside it, the day a payload
+  has any author but this repository.
+
+**Phase 7.**
+
+- **`_ratio` divides at the process-global `Decimal` context.** Nothing under
+  `server/` sets a context, so the precision and rounding of every ratio come
+  from `decimal.getcontext()` — 28 significant digits by default, and mutable by
+  anything else in the process. The module's own promise is "same inputs,
+  byte-identical output", and it holds only while nothing else touches that
+  context; a library that set it on import would change these numbers without
+  changing this file. *Upgrade:* a `localcontext()` around the division with a
+  stated precision and rounding, which turns the output's shape into a decision
+  rather than an inheritance.
+- **The residual tolerance is absolute, not relative.** `residual >
+  inputs.tolerance` compares against a default of `0.001` while the host never
+  learns what units the model's balances are in. On figures stated in millions
+  that is effectively exact; on figures stated in units it is a cent, and the
+  same set of drivers reconciles or does not depending on a scale nobody
+  declared. The caller can pass a tolerance, which is what makes this a limit
+  rather than a defect. *Upgrade:* a tolerance stated relative to the balance it
+  is judging, the day a forecast request carries its own scale.
+
 **Phase 6.**
 
 - **A run tail polls.** `server/api/app.py` re-reads `run_events` every
@@ -318,7 +371,10 @@ system this size means nobody looked.
   derived rather than deferred because deriving it later, once routes exist that
   assume a role is present, is how a role header gets trusted "just for now".
   *Upgrade:* the first authority that is genuinely account-wide rather than
-  case-scoped — administration, in Phase 10.
+  case-scoped. This entry used to name administration in Phase 10; Phase 10 came
+  and went without it, and `docs/REBUILD_PLAN.md` lists an admin UI under what is
+  deliberately not in the plan — so there is no scheduled upgrade, and saying so
+  is better than pointing at a phase that has closed.
 
 **Phase 5.**
 
@@ -375,6 +431,21 @@ system this size means nobody looked.
   `estimate` and reserves it for every node. A real estimate is per module and
   comes from the model's price and the prompt's size (`docs/DECISIONS.md` §16).
   *Upgrade:* Phase 5, with the provider that knows both.
+
+**Phase 3.**
+
+- **A route's predicates are frozen and never evaluated.** `ResolvedRoute`
+  carries them, `route_digest` covers them, and `server/store/routes.py` writes
+  and reads them back — and no code consults them. `CONDITIONAL` sits in
+  `BLOCKING` beside `REQUIRED`, so a conditional edge blocks unconditionally and
+  its condition decides nothing. That is the fail-closed direction, and the only
+  one available: a condition the host cannot evaluate must not be assumed met,
+  and the predecessor's failure was the opposite — edges that did not enforce
+  what they claimed. But invariant 10's "frozen predicates" are, for now, frozen
+  without yet being predicates, and a reader of the pin could take the presence
+  of a predicate for its enforcement. *Upgrade:* the phase that gives a predicate
+  a grammar and an evaluator, which is the same thing that would make
+  `CONDITIONAL` behave differently from `REQUIRED`.
 
 **Phase 2.**
 
