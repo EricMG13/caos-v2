@@ -48,7 +48,9 @@ function WithdrawalCell({ row }: { row: SourceRow }) {
     <td className="m wrap" data-withdrawal>
       {row.withdrawn_at ? (
         <>
-          <span className="stale">Withdrawn {stamp(row.withdrawn_at)}</span>
+          <span className="stale">
+            Withdrawn <time dateTime={row.withdrawn_at}>{stamp(row.withdrawn_at)}</time>
+          </span>
           <span className="sub">{checked}</span>
         </>
       ) : (
