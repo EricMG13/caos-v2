@@ -35,6 +35,36 @@ class Document:
     data: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class _Block:
+    """One packed block, before it is written: its id, its page, its text.
+
+    The text is `BoundaryText` because that is what the block will be read back
+    as. Packing before writing is what lets a line the boundary refuses refuse
+    the pack rather than the read.
+    """
+
+    block_id: str
+    page: int
+    text: BoundaryText
+
+
+@dataclass(frozen=True, slots=True)
+class _Packed:
+    """One document, extracted and packed, before any of it is written.
+
+    One object rather than three arguments threaded through two functions --
+    the shape `Execution` and `Harness` already take here. They are the whole
+    of what admitting a document needs, and passing them apart made the
+    signature wide enough that the argument ceiling refused it, which is the
+    ceiling doing its job.
+    """
+
+    document: Document
+    tokens: list[Token]
+    blocks: list[_Block]
+
+
 def admit_pack(
     conn: StoreConnection,
     blobs: BlobStore,
@@ -65,10 +95,16 @@ def admit_pack(
         # one run and one provider bill later than here.
         raise Refusal(RefusalCode.SOURCE_HAS_NO_TEXT)
 
-    source_ids = []
-    for document, tokens in extracted:
-        source_ids.append(_admit_one(conn, blobs, case_id, document, tokens))
-    return source_ids
+    # And pack the blocks, which is where the text crosses the boundary. Here
+    # rather than at the write, for the same reason the check above is here:
+    # a line the boundary refuses is a line `read_evidence` refuses, so
+    # admitting it would pin a source no run can read.
+    packed = [
+        _Packed(document=document, tokens=tokens, blocks=_blocks(tokens))
+        for document, tokens in extracted
+    ]
+
+    return [_admit_one(conn, blobs, case_id, one) for one in packed]
 
 
 def _require_case(conn: StoreConnection, case_id: UUID) -> None:
@@ -80,20 +116,21 @@ def _require_case(conn: StoreConnection, case_id: UUID) -> None:
 
 
 def _admit_one(
-    conn: StoreConnection,
-    blobs: BlobStore,
-    case_id: UUID,
-    document: Document,
-    tokens: list[Token],
+    conn: StoreConnection, blobs: BlobStore, case_id: UUID, packed: _Packed
 ) -> UUID:
     source_id = uuid4()
     conn.execute(
         "INSERT INTO sources (source_id, case_id, document_sha256, filename)"
         " VALUES (%s, %s, %s, %s)",
-        (source_id, case_id, blobs.put(document.data), document.filename.value),
+        (
+            source_id,
+            case_id,
+            blobs.put(packed.document.data),
+            packed.document.filename.value,
+        ),
     )
-    _store_tokens(conn, source_id, tokens)
-    _store_blocks(conn, source_id, tokens)
+    _store_tokens(conn, source_id, packed.tokens)
+    _store_blocks(conn, source_id, packed.blocks)
     return source_id
 
 
@@ -121,23 +158,38 @@ def _store_tokens(conn: StoreConnection, source_id: UUID, tokens: list[Token]) -
         )
 
 
-def _store_blocks(conn: StoreConnection, source_id: UUID, tokens: list[Token]) -> None:
-    """One block per line, in reading order, keyed by `(source_id, block_id)`."""
+def _blocks(tokens: list[Token]) -> list[_Block]:
+    """One block per line, in reading order, its text across the boundary.
+
+    `source_blocks.text` is pinned state, and CLAUDE.md's rule is that every
+    string reaching pinned state carries `BoundaryText`. It was carried on the
+    way out instead -- `read_evidence` calls `BoundaryText.of` -- which left
+    admission writing a bare `str`, so a line over the limit and a line holding
+    the override control the boundary exists to refuse were both admitted and
+    then refused at every read. A refusal here costs a pack; there it cost a
+    pinned source no run can read.
+    """
     lines: dict[int, list[Token]] = {}
     for token in tokens:
         lines.setdefault(token.line_id, []).append(token)
 
+    return [
+        _Block(
+            block_id=f"{BLOCK_PREFIX}{ordinal:06d}",
+            page=line[0].page,
+            text=BoundaryText.of(" ".join(token.text for token in line)),
+        )
+        for ordinal, (_line_id, line) in enumerate(sorted(lines.items()))
+    ]
+
+
+def _store_blocks(conn: StoreConnection, source_id: UUID, blocks: list[_Block]) -> None:
     with conn.cursor() as cursor:
         cursor.executemany(
             "INSERT INTO source_blocks (source_id, block_id, page, text)"
             " VALUES (%s, %s, %s, %s)",
             [
-                (
-                    source_id,
-                    f"{BLOCK_PREFIX}{ordinal:06d}",
-                    line[0].page,
-                    " ".join(token.text for token in line),
-                )
-                for ordinal, (_line_id, line) in enumerate(sorted(lines.items()))
+                (source_id, block.block_id, block.page, block.text.value)
+                for block in blocks
             ],
         )
