@@ -13,9 +13,9 @@ pure for the same reason.
 
 What it proves, and what it does not: it proves the payload hashes to what the
 receipt says, that the page re-renders byte-identically from that payload, and
-that the receipt names three different people. It cannot prove the chain was
-never rewritten wholesale -- that is what comparing the retained
-`audit_head` against a live one is for (`server/store/audit.py`).
+that the receipt fills all three roles with three different people. It cannot
+prove the chain was never rewritten wholesale -- that is what comparing the
+retained `audit_head` against a live one is for (`server/store/audit.py`).
 """
 
 from __future__ import annotations
@@ -26,6 +26,11 @@ import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+
+# The three roles `SYSTEM_SPEC.md` section 7 keeps apart: the analyst who signed
+# the opinion, whoever froze it, and the independent filer. Named here because a
+# check that counted them without naming them is what let one go missing.
+ROLES = ("signed_by", "frozen_by", "filed_by")
 
 PAYLOAD = "payload.json"
 RECEIPT = "receipt.json"
@@ -75,12 +80,17 @@ def verify_package(archive_bytes: bytes) -> Verification:
     if digest != receipt.get("payload_sha256"):
         return Verification(False, "the payload does not hash to what the receipt says")
 
-    actors = {
-        receipt.get("signed_by"),
-        receipt.get("frozen_by"),
-        receipt.get("filed_by"),
-    }
-    if len(actors) != 3:
+    # Filled before distinct, and in that order. Counting a set of three reads
+    # meant "three people", but an absent role arrived as `None` and counted as
+    # one of them -- so a receipt naming two signatories and omitting the third
+    # made a set of three and verified, which is the one shape this check is
+    # here to refuse. A role that names nobody is refused before the roles are
+    # compared, because "fewer than three people" is the wrong thing to tell a
+    # reader holding a receipt that is simply incomplete.
+    named = [receipt.get(role) for role in ROLES]
+    if any(not isinstance(actor, str) or not actor.strip() for actor in named):
+        return Verification(False, "the receipt does not name all three roles")
+    if len({str(actor).strip() for actor in named}) != 3:
         return Verification(False, "the receipt names fewer than three people")
 
     from server.deliverable.render import render
