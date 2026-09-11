@@ -126,6 +126,13 @@ def resolve_route(
     `extensions.research_brief` appends CP-DR at stage 99 and
     `extensions.model_extension` appends CP-CF at stage 100, both host-declared
     and neither editing the catalog (`docs/DECISIONS.md` §6).
+
+    An extension naming a module the pathway already runs is refused
+    `ROUTE_DUPLICATE_MODULE` by `dependency_order`, rather than appending a
+    second node for it. Skipping the append would be the quieter answer and the
+    worse one: a caller asking for this pathway *with* a research brief means
+    the brief to reach CP-DR, and a route that ignored the extension would say
+    nothing about having ignored it.
     """
     extended = extensions or RouteExtensions()
     profile = _profile(catalog, profile_id)
@@ -168,6 +175,16 @@ def dependency_order(
     route rather than of dictionary iteration -- which is what lets the digest
     mean something.
     """
+    # One node per module, checked before anything is keyed by module. Every
+    # reader downstream assumes it -- `node_states` builds its complete set from
+    # `module_id`, `readiness_from` returns at the first CP-0 node -- and so did
+    # the two dicts below, which is what made a second node for one module
+    # disappear into a key collision instead of into a refusal. A closed node
+    # list (invariant 10) cannot lose a member that way.
+    modules = [node.module_id for node in nodes]
+    if len(set(modules)) != len(modules):
+        raise Refusal(RefusalCode.ROUTE_DUPLICATE_MODULE)
+
     incoming = {node.module_id: 0 for node in nodes}
     for edge in edges:
         incoming[edge.target] += 1

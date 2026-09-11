@@ -182,6 +182,63 @@ def test_dependency_order_refuses_a_cycle() -> None:
     assert caught.value.code is RefusalCode.ROUTE_HAS_A_CYCLE
 
 
+def test_dependency_order_refuses_two_nodes_for_one_module() -> None:
+    """A route is one node per module, and this is where that is enforced.
+
+    Every reader downstream assumes it. `node_states` builds its complete set
+    from `module_id`, `readiness_from` returns at the first CP-0 node, and
+    `_unmet` resolves edges by module. Nothing said so, and the ordering below
+    keyed its own bookkeeping by module too -- so a second node for one module
+    did not collide with the rule, it collided with a dict key, and one of the
+    two simply stopped existing.
+
+    Refused rather than collapsed. Invariant 10 calls the resolved route a
+    closed node list; a list that loses members to a key collision is not
+    closed, and the loss reaches the digest a replay is bound to.
+    """
+    nodes = [
+        RouteNode("RN-EARLY-CP-A", "CP-A", 1),
+        RouteNode("RN-LATE-CP-A", "CP-A", 9),
+    ]
+
+    with pytest.raises(Refusal) as caught:
+        dependency_order(nodes, [])
+
+    assert caught.value.code is RefusalCode.ROUTE_DUPLICATE_MODULE
+
+
+def test_an_extension_naming_a_module_the_pathway_already_runs_is_refused(
+    catalog: dict[str, Any],
+) -> None:
+    """The reachable half of the rule above, on the vendored catalog.
+
+    DEEP_RESEARCH already runs CP-DR. Asking for the research extension on it
+    appended a second CP-DR, and the pathway's own node -- the one whose
+    `route_node_id` the pathway declared -- vanished: three nodes in, two out,
+    no refusal. The surviving node carried the extension's stage and id, so the
+    pinned route named a node the pathway never declared while dropping one it
+    did.
+
+    `test_the_research_extension_appends_cp_dr_without_editing_the_catalog`
+    missed it by running on LIQUIDITY_REVIEW, which carries no CP-DR: the test
+    picked the pathway where appending is safe.
+
+    Refusing is the useful answer rather than skipping the append. Someone
+    asking for this pathway *with* a brief means the brief to reach CP-DR, and
+    silently not appending would discard it as surely as silently dropping a
+    node did.
+    """
+    with pytest.raises(Refusal) as caught:
+        resolve_route(
+            catalog,
+            PROFILE,
+            "DEEP_RESEARCH",
+            extensions=RouteExtensions(research_brief={"question": "refinancing"}),
+        )
+
+    assert caught.value.code is RefusalCode.ROUTE_DUPLICATE_MODULE
+
+
 def test_readiness_is_read_only_from_the_cp0_artifact(catalog: dict[str, Any]) -> None:
     """`docs/DECISIONS.md` §12, adopting CAOS-Final §18: readiness is read from
     the accepted CP-0 artifact and never passed in.
