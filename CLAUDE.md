@@ -336,6 +336,21 @@ system this size means nobody looked.
   the compiler API the vocabulary gate already uses, the day the plan first
   names a test whose title is computed — the same upgrade `check_tested.py`'s
   TypeScript half is waiting on, and worth doing once, for both.
+- **The workbench proves the offline state against an aborted route, not
+  against the fixture middleware.** `serveSection` simulates a request that
+  never reached the server by destroying the socket, and that reset carries no
+  response — so a client may retry it (RFC 9110 §9.2.2), and WebKit does. The
+  retry's backoff outran the five-second assertion and turned `main` red on a
+  tree that had passed the same step minutes earlier. The test now aborts
+  `/api/sections/**` itself, which says the same thing in one
+  engine-independent step; what it gives up is coverage of the middleware's
+  offline arm. That arm is still driven on all three engines by the a11y
+  matrix, over the same `/analysis/?fixture=offline` in `STATE_ROUTES`, which
+  tolerates the retry because it waits fifteen seconds for the loading marker
+  to detach rather than five. *Upgrade:* make the arm fast and unambiguous the
+  day a WebKit build can be run against it — the sandbox this was diagnosed in
+  cannot fetch one, and a change to that arm checked only by CI would be a
+  guess.
 
 **Phase 8.**
 
