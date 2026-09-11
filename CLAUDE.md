@@ -291,13 +291,16 @@ system this size means nobody looked.
   against the provider the runs behind the verdict actually called. It is a
   binding rather than a fact, which is the honest reading of a reviewer's
   signature — but it is not the same guarantee the rest of the system gives.
-  The harness has one half of the comparison and not the other: it holds the
-  runs, and nothing a run leaves behind names the model it called —
-  `ProviderResult` carries an artifact digest and a charge, and `run_attempts`
-  neither a model nor a generation id. *Upgrade:* record the provider identity
-  on the attempt it was charged against, a store change with its own decision
-  entry, and the precondition for the harness refusing a verdict whose
-  `provider` names a model the runs behind it never called.
+  The harness now holds **both** halves: every accepted artifact records the
+  model the host configured and the provider's generation id beside the charge
+  (`docs/DECISIONS.md` §25), so what the runs behind a verdict called is a fact
+  the store holds rather than something nobody could ask. What is left is the
+  comparison itself — nothing yet refuses a verdict whose `provider` names a
+  model no run used, so the binding is still the reviewer's word in practice
+  even though it is now checkable in principle. *Upgrade:* the harness reads the
+  models its runs recorded and refuses a verdict that does not name one of them,
+  which is a change to `read_verdict`'s callers rather than to `read_verdict`,
+  since the document is still the reviewer's to write.
 
 **Phase 9.**
 

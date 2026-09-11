@@ -64,6 +64,7 @@ class ModuleOutcome:
 
     envelope: Envelope
     charge: Decimal
+    model: str
     generation_id: str
 
 
@@ -149,5 +150,9 @@ def execute_module(
     return ModuleOutcome(
         envelope=envelope,
         charge=completion.charge,
+        # What the host asked, and what the provider called the call. The first
+        # is a fact the host holds, the second is the provider's own handle and
+        # is kept for reconciling a bill rather than for trusting.
+        model=provider.model,
         generation_id=completion.generation_id,
     )

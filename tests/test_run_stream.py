@@ -25,7 +25,18 @@ from server.api.stream import IO_BUDGET, StreamEvent, tail
 from server.store import StoreConnection
 from server.store.events import RunEvent
 from server.store.members import Standing, grant, revoke
-from server.store.runs import complete_attempt, fail_run, start_attempt, start_run
+from server.store.runs import (
+    Accepted,
+    complete_attempt,
+    fail_run,
+    start_attempt,
+    start_run,
+)
+
+# The producer the store records beside every accepted artifact: what the
+# host configured, and the provider's own handle for the call.
+MODEL = "a-model/for-the-test"
+GENERATION = "gen-for-the-test"
 
 ARTIFACT = "e" * 64
 CHARGE = Decimal("0.01")
@@ -58,7 +69,14 @@ def test_sse_closes_after_terminal_delivery(
     conn, run_id, viewer = watched
     attempt_id = start_attempt(conn, run_id, "CP-1")
     complete_attempt(
-        conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+        conn,
+        attempt_id=attempt_id,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
 
     # An event queued behind the terminal one. Nothing the host writes puts one
@@ -118,7 +136,14 @@ def test_a_tail_resumes_after_last_event_id(
     conn, run_id, viewer = watched
     attempt_id = start_attempt(conn, run_id, "CP-1")
     complete_attempt(
-        conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+        conn,
+        attempt_id=attempt_id,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
     first = list(tail(conn, run_id=run_id, actor_id=viewer))
 

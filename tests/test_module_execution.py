@@ -59,6 +59,9 @@ class _Stub:
 
     body: str
 
+    # What the host configured; with fallbacks off it is what answers.
+    model: str = "a-model/for-the-test"
+
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.prompt = prompt
         return Completion(

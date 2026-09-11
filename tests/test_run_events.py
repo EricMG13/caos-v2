@@ -24,6 +24,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect
 from server.store.events import Event, RunEvent, events_of, lock_run
 from server.store.runs import (
+    Accepted,
     accept_attempt,
     complete_attempt,
     complete_run,
@@ -33,6 +34,11 @@ from server.store.runs import (
     start_attempt,
     start_run,
 )
+
+# The producer the store records beside every accepted artifact: what the
+# host configured, and the provider's own handle for the call.
+MODEL = "a-model/for-the-test"
+GENERATION = "gen-for-the-test"
 
 ARTIFACT = "b" * 64
 CHARGE = Decimal("0.0142")
@@ -79,8 +85,12 @@ def test_terminal_event_is_exactly_once(
     completed = complete_attempt(
         conn,
         attempt_id=attempt_id,
-        artifact_sha256=ARTIFACT,
-        charge=CHARGE,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
     assert completed is True
 
@@ -88,8 +98,12 @@ def test_terminal_event_is_exactly_once(
     replayed = complete_attempt(
         conn,
         attempt_id=attempt_id,
-        artifact_sha256=ARTIFACT,
-        charge=CHARGE,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
 
     assert replayed is False, "the replay must not claim to have completed the run"
@@ -123,9 +137,10 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
 
     with connect(empty_database) as dying:
         dying.execute(
-            "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id)"
-            " VALUES (%s, %s, %s, %s)",
-            (attempt_id, ARTIFACT, run_id, case_id),
+            "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
+            " model, generation_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (attempt_id, ARTIFACT, run_id, case_id, MODEL, GENERATION),
         )
         dying.close()  # the process dies here, mid-transaction
 
@@ -137,8 +152,12 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
         complete_attempt(
             conn,
             attempt_id=attempt_id,
-            artifact_sha256=ARTIFACT,
-            charge=CHARGE,
+            accepted=Accepted(
+                artifact_sha256=ARTIFACT,
+                charge=CHARGE,
+                model=MODEL,
+                generation_id=GENERATION,
+            ),
         )
         is True
     )
@@ -197,8 +216,12 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
     complete_attempt(
         conn,
         attempt_id=attempt_id,
-        artifact_sha256=ARTIFACT,
-        charge=CHARGE,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
 
     # CP-0 started, CP-1 started, CP-1 accepted, run complete.
@@ -215,7 +238,14 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
 
     assert (
         accept_attempt(
-            conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+            conn,
+            attempt_id=attempt_id,
+            accepted=Accepted(
+                artifact_sha256=ARTIFACT,
+                charge=CHARGE,
+                model=MODEL,
+                generation_id=GENERATION,
+            ),
         )
         is True
     )
@@ -223,7 +253,14 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
 
     assert (
         accept_attempt(
-            conn, attempt_id=attempt_id, artifact_sha256=ARTIFACT, charge=CHARGE
+            conn,
+            attempt_id=attempt_id,
+            accepted=Accepted(
+                artifact_sha256=ARTIFACT,
+                charge=CHARGE,
+                model=MODEL,
+                generation_id=GENERATION,
+            ),
         )
         is False
     ), "the replay accepted nothing new"
@@ -260,8 +297,12 @@ def test_a_transition_that_changed_nothing_appends_no_event(
     completed = complete_attempt(
         conn,
         attempt_id=attempt_id,
-        artifact_sha256=ARTIFACT,
-        charge=CHARGE,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
 
     assert completed is False
@@ -327,8 +368,12 @@ def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
         complete_attempt(
             conn,
             attempt_id=attempt_id,
-            artifact_sha256=ARTIFACT,
-            charge=0.0142,  # type: ignore[arg-type]
+            accepted=Accepted(
+                artifact_sha256=ARTIFACT,
+                charge=0.0142,  # type: ignore[arg-type]
+                model=MODEL,
+                generation_id=GENERATION,
+            ),
         )
 
     assert caught.value.code is RefusalCode.MONEY_NOT_DECIMAL
@@ -343,8 +388,12 @@ def test_the_charge_survives_as_the_decimal_it_was_given(
     complete_attempt(
         conn,
         attempt_id=attempt_id,
-        artifact_sha256=ARTIFACT,
-        charge=CHARGE,
+        accepted=Accepted(
+            artifact_sha256=ARTIFACT,
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
     )
 
     row = conn.execute(
@@ -381,8 +430,12 @@ def test_an_unknown_attempt_cannot_complete_a_run(
         complete_attempt(
             conn,
             attempt_id=uuid4(),
-            artifact_sha256=ARTIFACT,
-            charge=CHARGE,
+            accepted=Accepted(
+                artifact_sha256=ARTIFACT,
+                charge=CHARGE,
+                model=MODEL,
+                generation_id=GENERATION,
+            ),
         )
 
     assert caught.value.code is RefusalCode.ATTEMPT_NOT_FOUND
