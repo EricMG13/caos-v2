@@ -381,6 +381,56 @@ def test_a_receipt_naming_fewer_than_three_people_does_not_verify() -> None:
     assert verification.reason == "the receipt names fewer than three people"
 
 
+def test_a_receipt_that_omits_a_role_does_not_verify() -> None:
+    """The gap beside the test above: absent, not duplicated.
+
+    The three actors were read into a set and counted, so a role the receipt
+    simply does not carry arrived as `None` and counted as a person. Two named
+    signatories and a missing third made a set of three and verified -- the one
+    shape this check exists to refuse, passing because nothing asserted the
+    roles were filled before asserting they differed.
+
+    `verify_package` is the control for an archive nobody here produced, five
+    years from now, so what it does with a malformed receipt is the whole of
+    what it is for.
+    """
+    receipt = json.dumps(
+        {
+            "payload_sha256": hashlib.sha256(PAYLOAD_BYTES).hexdigest(),
+            "signed_by": str(uuid4()),
+            "frozen_by": str(uuid4()),
+        }
+    ).encode("utf-8")
+
+    verification = verify_package(
+        build_package(PAYLOAD_BYTES, receipt, render(PAYLOAD_DATA))
+    )
+
+    assert verification.verified is False
+    assert verification.reason == "the receipt does not name all three roles"
+
+
+def test_a_receipt_naming_a_role_with_blank_text_does_not_verify() -> None:
+    """A role filled with spaces names nobody, and is absence with a space in
+    it -- the same reading `server/qualification/verdict.py` takes of a binding
+    that is present and empty."""
+    receipt = json.dumps(
+        {
+            "payload_sha256": hashlib.sha256(PAYLOAD_BYTES).hexdigest(),
+            "signed_by": str(uuid4()),
+            "frozen_by": str(uuid4()),
+            "filed_by": "   ",
+        }
+    ).encode("utf-8")
+
+    verification = verify_package(
+        build_package(PAYLOAD_BYTES, receipt, render(PAYLOAD_DATA))
+    )
+
+    assert verification.verified is False
+    assert verification.reason == "the receipt does not name all three roles"
+
+
 def test_a_package_is_the_same_bytes_for_the_same_inputs() -> None:
     """A package whose bytes moved with the clock could not be compared against
     a retained copy, which is what detecting a rewrite depends on."""
