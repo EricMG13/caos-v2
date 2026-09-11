@@ -518,6 +518,48 @@ def test_two_cases_under_one_label_are_refused_before_either_runs(
         assert _count(conn, "SELECT count(*) FROM runs") == 0
 
 
+def test_an_unknown_pathway_in_a_later_case_refuses_before_the_first_one_runs(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """A set is checked whole before the first provider call — routes included.
+
+    Route resolution is pure and reads no store (invariant 10), so nothing made
+    it wait until a case's turn. Resolving inside the loop meant a bad pathway
+    on the last case of ten was found after nine had been admitted, run and
+    paid for, and then thrown away with the refusal: the most expensive possible
+    moment to learn something knowable from the catalog and the set alone.
+
+    Every route is now resolved up front, so this costs a case row, a run and a
+    provider call each of zero.
+    """
+    from server.store import apply_schema, connect
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.commit()
+
+        with pytest.raises(Refusal) as refused:
+            _perform(
+                conn,
+                BlobStore(tmp_path / "blobs"),
+                QualificationSet(
+                    cases=(
+                        _case("acme-2026", REPORT),
+                        replace(
+                            _case("borealis-2026", OTHER),
+                            selection_id="NO_SUCH_PATHWAY",
+                        ),
+                    )
+                ),
+            )
+
+        assert refused.value.code is RefusalCode.ROUTE_SELECTION_UNKNOWN
+        # The first case is untouched: not admitted, not run, not charged.
+        assert _count(conn, "SELECT count(*) FROM cases") == 0
+        assert _count(conn, "SELECT count(*) FROM runs") == 0
+        assert _count(conn, "SELECT count(*) FROM budget_reservations") == 0
+
+
 def test_an_unknown_pathway_refuses_without_leaving_a_run_behind(
     empty_database: str, tmp_path: Path
 ) -> None:

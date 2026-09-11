@@ -181,13 +181,22 @@ def perform(
     assert_measurable(qualification)
     _distinct(qualification)
     _answerable(qualification)
+    # Routes too. Resolution is pure and reads no store (invariant 10), so
+    # nothing made it wait for a case's turn — and resolving inside the loop
+    # meant a bad pathway on the last case of ten was found after nine had been
+    # admitted, run and paid for, then discarded with the refusal. Knowable from
+    # the catalog and the set alone, so it is answered before anything is spent.
+    routes = {
+        case.label: resolve_route(harness.catalog, case.profile_id, case.selection_id)
+        for case in qualification.cases
+    }
 
     # A loop rather than a comprehension: every turn of it admits documents,
     # opens a run and calls a provider, and a line that spends money should
     # look like one.
     performed: list[Performed] = []
     for case in qualification.cases:
-        record = _perform_one(conn, blobs, harness, case=case)
+        record = _perform_one(conn, blobs, harness, case=case, route=routes[case.label])
         performed.append(record)
         if record.stopped is not None:
             # Stop, having recorded it. Carrying on would be a bet that the
@@ -235,21 +244,19 @@ def _perform_one(
     harness: Harness,
     *,
     case: QualificationCase,
+    route: ResolvedRoute,
 ) -> Performed:
     """One case: admitted, pinned, run, and recorded.
+
+    The route arrives resolved, from the pass `perform` makes over the whole set
+    before it spends anything — so by here an unknown pathway has already been
+    refused, and refused without a case row or a run behind it.
 
     A refusal inside the run is recorded rather than raised, so the cases after
     it are still performed. It is not swallowed: it lands in `stopped` as a
     typed code, and the run it left behind is as recoverable and as fully
     attempted as it would be for any other caller.
     """
-    # Resolved once, before the run exists. It is pure and reads no store
-    # (invariant 10), so taking it first costs nothing and means an unknown
-    # profile or selection refuses without having left a RUNNING run behind
-    # that has no pin, no attempts and no terminal event — one nothing can
-    # complete, fail, or prove.
-    route = resolve_route(harness.catalog, case.profile_id, case.selection_id)
-
     case_id = create_case(conn, BoundaryText.of(case.label, limit=_LABEL_LIMIT))
     source_ids = admit_pack(
         conn, blobs, case_id=case_id, documents=list(case.documents)
