@@ -137,3 +137,29 @@ def test_ingestion_takes_any_extractor(
     assert row is not None
     assert row[:3] == (7, 3, 11)
     assert (row[3], row[4]) == (100.0, 157.6)
+
+
+def test_a_token_never_holds_the_whitespace_a_quote_is_split_on() -> None:
+    """The round trip `read_evidence` promises: text this repository delivered
+    can be quoted back to it.
+
+    `server/evidence/citations.py` splits `matched_text` with `str.split()`,
+    which separates every whitespace class. A token holding an interior tab is
+    therefore one the index can never be asked for: the line reaches a module
+    through `read_evidence` and the verbatim quote of it is refused
+    `CITATION_NOT_LOCATED`. The extractor and the matcher have to draw the word
+    boundary in the same place, or the evidence a module was handed is evidence
+    it cannot cite.
+    """
+    line = "Total\tdebt\N{NO-BREAK SPACE}was USD 1,240.0m"
+    tokens = PlainTextExtractor().extract(line.encode())
+
+    assert [token.text for token in tokens] == line.split()
+
+
+def test_a_tab_advances_the_column_like_any_other_cell() -> None:
+    """The rectangles stay a reproducible fixed-pitch rendering: one cell per
+    character, whichever character it is."""
+    [_total, debt] = PlainTextExtractor().extract(b"Total\tdebt")
+
+    assert debt.x0 == MARGIN + len("Total\t") * CELL_WIDTH
