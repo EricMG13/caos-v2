@@ -118,11 +118,14 @@ system this size means nobody looked.
 
 **Phase 0.**
 
-- **No `image` CI job.** There is no Dockerfile and no runtime lock with
-  packages in it, so Trivy would report every target as *not scanned*
-  (`docs/DECISIONS.md` §11). *Upgrade:* the phase that adds the Dockerfile adds
-  `trivy image` with `--exit-code 1` on fixable HIGH/CRITICAL and a scan floor
-  asserting a non-empty target list.
+- ~~**No `image` CI job.**~~ Closed in Phase 7, and recorded here late. The
+  entry said there was no Dockerfile and no runtime lock with packages in it,
+  so Trivy would report every target as *not scanned*; the Dockerfile arrived
+  with the PDF extractor and the `image` job builds it, scans it, and runs the
+  upgrade this entry asked for — `scripts/scan_floors.py trivy.json --trivy`
+  asserting a non-empty target list, then `trivy image` failing on fixable
+  HIGH/CRITICAL. A ledger entry that describes a gap the tree has since closed
+  is the same defect as a missing one, read the other way round.
 - **`check_tested.py` matches a name as a whole word anywhere in the suite's
   bytes,** docstrings and comments included. It catches the definition no test
   mentions, not the definition whose test asserts nothing. *Upgrade:* resolve
