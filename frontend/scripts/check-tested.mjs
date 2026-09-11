@@ -35,7 +35,11 @@ import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-const REPO = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+// Resolved on call, not at import: the rules below are pure and a test that
+// imports them for those rules should not have to be running from a file URL.
+function repo() {
+  return resolve(fileURLToPath(new URL("../..", import.meta.url)));
+}
 
 // Entry points are exercised by running the file, which names the file rather
 // than the symbol — the reason check_tested.py exempts `main`.
@@ -115,13 +119,13 @@ function resolveGit() {
 
 function tracked(root, patterns) {
   const out = execFileSync(resolveGit(), ["ls-files", "-z", "--", ...patterns], {
-    cwd: REPO,
+    cwd: repo(),
     encoding: "utf8",
   });
   return out
     .split("\0")
     .filter(Boolean)
-    .map((file) => resolve(REPO, file))
+    .map((file) => resolve(repo(), file))
     .filter((file) => existsSync(file));
 }
 
@@ -138,7 +142,7 @@ function sources(root) {
 // and not yet staged still covers the export it names, and a gate that said
 // otherwise would refuse the change that fixes it.
 function testSources(root) {
-  return walk(join(root ?? join(REPO, "frontend"), "tests"), [".ts", ".tsx"]);
+  return walk(join(root ?? join(repo(), "frontend"), "tests"), [".ts", ".tsx"]);
 }
 
 function walk(directory, suffixes) {

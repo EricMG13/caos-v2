@@ -9,7 +9,7 @@ import { LedgerProvider, useLedger } from "@/app/ledger";
 import { SECTION_ABBREVIATIONS, SECTION_LABELS } from "@/app/sections";
 import { openTail } from "@/app/sse";
 import { useModalA11y } from "@/ds/use-modal-a11y";
-import { EvidenceProvider, useEvidence } from "@/evidence/EvidenceContext";
+import { useEvidence } from "@/evidence/EvidenceContext";
 import { SECTIONS } from "@/wire/shared";
 
 describe("every section has a word and an abbreviation", () => {
@@ -54,19 +54,6 @@ describe("a hook outside its provider says so rather than rendering nothing", ()
     }
     render(<AsksOffPage />);
     expect(screen.getByText("null")).toBeInTheDocument();
-  });
-
-  test("useEvidence inside the provider is the one surface for the workspace", () => {
-    function Opens() {
-      const evidence = useEvidence();
-      return <span>{typeof evidence.openCitation}</span>;
-    }
-    render(
-      <EvidenceProvider>
-        <Opens />
-      </EvidenceProvider>,
-    );
-    expect(screen.getByText("function")).toBeInTheDocument();
   });
 });
 

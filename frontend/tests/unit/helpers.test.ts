@@ -12,7 +12,7 @@ import { refusalText } from "@/controls/RefusedControl";
 import { SEV_COLOR, sevSurface, sevVar } from "@/ds/sev";
 import { NODE_SEVERITY, confidenceTier, nodeTone } from "@/sections/analysis/tone";
 import { stepLabel } from "@/sections/committee/FilingLadder";
-import { caseHref, filledColumns } from "@/sections/directory/CaseRegister";
+import { COLUMNS, caseHref, filledColumns } from "@/sections/directory/CaseRegister";
 import { figureCounts, isUncited, kindLabel } from "@/sections/report/RevisionEditor";
 import { shortDigest } from "@/sections/report/text";
 import { nodeAccept } from "@/sections/run/NodeDetail";
@@ -122,19 +122,12 @@ describe("navigation and the event tail", () => {
 });
 
 describe("the helpers a section reads its own rows with", () => {
-  // Every column `COLUMNS` names, empty, so a test can fill exactly one.
+  // Built from `COLUMNS` itself, so the fixture cannot drift from the columns
+  // the component actually draws.
   const row = (over: Partial<CaseRow> = {}): CaseRow =>
     ({
-      case_id: "",
-      issuer: "",
-      sector: "",
-      rating: "",
-      pathway: "",
-      snapshot: "",
-      state: "",
+      ...Object.fromEntries(COLUMNS.map((column) => [column.key, ""])),
       severity: "IDLE",
-      net_leverage: "",
-      updated_at: "",
       standing: "READER",
       ...over,
     }) as CaseRow;

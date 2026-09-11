@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -595,67 +596,36 @@ def test_io_budget_names_the_modules_that_did_not_declare_one(
     assert "cases.py" in capsys.readouterr().err
 
 
-def _check_tested_mjs(root: Path) -> subprocess.CompletedProcess[str]:
-    """Drive the TypeScript half the way CI does: as a process, over a tree."""
-    return subprocess.run(
-        [
-            "node",
-            str(REPO / "frontend" / "scripts" / "check-tested.mjs"),
-            "--root",
-            str(root),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def test_the_typescript_half_exempts_what_the_python_half_exempts() -> None:
+    """One rule, two halves, read from the other's source.
 
+    The TypeScript half's *behaviour* is asserted in the frontend suite, where
+    the `typescript` it imports is installed; this job never runs `npm ci`, so
+    driving it from here would test whether node_modules happens to be present.
+    `test_ts_gate_enforces_the_same_tokens` keeps the vocabulary pair in step
+    the same way and for the same reason.
 
-def _workspace(root: Path, source: str, test: str) -> None:
-    (root / "src").mkdir(parents=True, exist_ok=True)
-    (root / "tests").mkdir(parents=True, exist_ok=True)
-    (root / "src" / "thing.ts").write_text(source, encoding="utf-8")
-    (root / "tests" / "thing.test.ts").write_text(test, encoding="utf-8")
-
-
-def test_the_untested_definition_gate_has_a_typescript_half(tmp_path: Path) -> None:
-    """`check_tested.py` reads Python, and the workspace is 6,700 lines of it.
-
-    The vocabulary gate has had both halves since Phase 9; this one did not, so
-    a public export the workbench never exercises was refused by nothing. Same
-    two scope rules as the Python half, or the two halves disagree about what
-    they are enforcing: module-level exports only, and a name is named when the
-    test sources mention it as a whole word.
+    What has to agree across the two is the exemption: a name one half lets
+    through and the other refuses is one rule wearing two answers.
     """
-    _workspace(
-        tmp_path, "export function reconcile(): void {}\n", "it('x', () => {})\n"
+    gate = (REPO / "frontend" / "scripts" / "check-tested.mjs").read_text(
+        encoding="utf-8"
     )
-    refused = _check_tested_mjs(tmp_path)
+    literal = re.search(r"export const EXEMPT = new Set\(\[(.*?)\]\);", gate, re.DOTALL)
+    assert literal, "the TypeScript gate no longer declares EXEMPT as a literal"
+    exempt = set(re.findall(r'"([a-z]+)"', literal.group(1)))
 
-    assert refused.returncode == 1, refused.stdout + refused.stderr
-    assert "reconcile" in refused.stdout
-
-
-def test_the_typescript_half_accepts_an_export_a_test_names(tmp_path: Path) -> None:
-    _workspace(
-        tmp_path,
-        "export function reconcile(): void {}\n",
-        "import { reconcile } from '../src/thing';\nit('x', () => reconcile());\n",
+    assert set(check_tested.EXEMPT) <= exempt, (
+        "the Python half exempts a name the TypeScript half would refuse"
     )
 
-    assert _check_tested_mjs(tmp_path).returncode == 0
 
+def test_the_typescript_half_is_wired_into_the_workspace_lint() -> None:
+    """A gate nothing runs is not a gate.
 
-def test_the_typescript_half_does_not_match_a_name_inside_a_longer_word(
-    tmp_path: Path,
-) -> None:
-    """The Python half's rule, kept identical: `runner` does not name `run`."""
-    _workspace(tmp_path, "export function run(): void {}\n", "it('the runner runs')\n")
+    It rides `npm run lint`, which the CI `frontend` job runs -- the one job
+    that installs what it imports.
+    """
+    package = (REPO / "frontend" / "package.json").read_text(encoding="utf-8")
 
-    assert _check_tested_mjs(tmp_path).returncode == 1
-
-
-def test_the_typescript_half_refuses_to_run_over_nothing(tmp_path: Path) -> None:
-    """A scan that scanned nothing is a failure, in both halves."""
-    (tmp_path / "src").mkdir(parents=True)
-
-    assert _check_tested_mjs(tmp_path).returncode == 2
+    assert "scripts/check-tested.mjs" in json.loads(package)["scripts"]["lint"]
