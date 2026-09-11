@@ -22,6 +22,8 @@ export const ENFORCED = [
   "pipeline",
   "workflow",
   "ready_set",
+  "benchmark",
+  "golden_set",
 ];
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");

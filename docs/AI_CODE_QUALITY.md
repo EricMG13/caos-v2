@@ -123,5 +123,5 @@ author can clear.
 The report's root causes include "AI lacking local business logic" and "poor
 adherence to repository idioms". No linter detects a plausible-looking credit
 calculation that is wrong. That is what the methodology bundle, the calculator
-boundary and the qualification corpus are for — and why the invariants in
+boundary and the qualification set are for — and why the invariants in
 `CLAUDE.md` are non-negotiable rather than advisory.

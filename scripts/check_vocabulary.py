@@ -36,6 +36,8 @@ ENFORCED = frozenset(
         "pipeline",
         "workflow",
         "ready_set",
+        "benchmark",
+        "golden_set",
     }
 )
 

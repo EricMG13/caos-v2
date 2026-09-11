@@ -46,7 +46,7 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # tests nobody intends to write.
 NOT_YET_REACHED = {
     # Phase 10 -- qualification. The corpus harness and the verdict.
-    "test_a_verdict_binds_provider_corpus_build_date_expiry_and_reviewer",
+    "test_a_verdict_binds_provider_qualification_set_build_date_expiry_and_reviewer",
     "test_a_host_control_reads_orchestration_proof_never_qualified",
 }
 

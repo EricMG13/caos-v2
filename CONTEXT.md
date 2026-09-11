@@ -23,6 +23,7 @@ introduces a synonym for a term below.
 | **deliverable** | the document the host renders from a frozen snapshot | report, output, export |
 | **opinion** | the analyst's signature on an exact revision | approval, sign-off of the deliverable |
 | **filing** | the independent approval that makes a deliverable final | publication, release |
+| **qualification set** | the immutable cases and answer keys one verdict is measured against | benchmark, golden set |
 
 ## Node states — the bundle's words, unchanged
 
