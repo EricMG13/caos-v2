@@ -160,6 +160,30 @@ system this size means nobody looked.
 
 **Phase 10.**
 
+- **The proof says every accepted artifact holds up, not that the run finished.**
+  `assert_orchestration_proof` re-derives its three claims over the artifacts a
+  run accepted; it does not check that the run reached COMPLETE or that every
+  pinned node produced one. A run that accepted CP-0 and then failed still
+  proves what it did accept, which is the true and narrower statement — but a
+  reader could take "orchestration proven" for "the route ran". *Upgrade:* the
+  qualification-set harness compares the proof against the pinned node list,
+  because a matrix row is about a whole run rather than about the part of one
+  that happened.
+- **A proof is computed and not recorded.** Nothing stores an
+  `OrchestrationProof` and no route serves one, so it cannot be handed to anyone
+  — it can only be re-taken. That is the right shape while it is re-derived on
+  every ask (a stored proof is a claim about a store that has since moved), and
+  the wrong one as soon as a verdict has to cite the proofs behind it.
+  *Upgrade:* the harness records the proof beside the run it covers, and the
+  verdict binds that set.
+- **A bundle upgrade invalidates every earlier run's proof.** The authority is
+  re-derived from the bundle that is here now, so after an upgrade a run that
+  was correct under the old build refuses `ORCHESTRATION_BUILD_MOVED`. That is
+  the fail-closed direction and invariant 4 read strictly — the host cannot
+  assert bytes it no longer holds — but it means the proof is a statement about
+  *now*, not a certificate with a shelf life. *Upgrade:* none while one build is
+  vendored at a time; the day two are, the proof takes the build the run was
+  pinned to and verifies against that tree.
 - **A verdict is read and not stored.** `read_verdict` refuses a document
   missing any of the six bindings or past its expiry, and returns a `Verdict`
   the caller holds; there is no `qualification_verdicts` table and no query that
