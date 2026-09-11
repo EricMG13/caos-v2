@@ -188,13 +188,18 @@ system this size means nobody looked.
   somebody is holding. There is still no *table* — a set is a directory, not a
   row — and nothing here needs one while a set is authored rather than
   generated.
-- **A qualification run costs real money and nothing bounds the set.** `perform`
-  runs every case through the real provider seam under `Harness.estimate`, and a
-  set of two hundred cases is two hundred routes' worth of calls. Each run has
-  its own ceiling (invariant 8), but nothing refuses a *set* whose total would
-  exceed what the caller meant to spend. *Upgrade:* a ceiling on the set,
-  checked against the sum of the per-run ceilings before the first case is
-  admitted — the same fail-closed shape one run already has, one level up.
+- ~~**A qualification run costs real money and nothing bounds the set.**~~
+  Closed: `Harness.ceiling` is what the whole set may cost, and `_affordable`
+  refuses `QUALIFICATION_SET_OVER_CEILING` before the first case is admitted.
+  What is left is the shape of the comparison rather than its absence: the
+  ceiling is checked against the sum of the per-run ceilings, which is the worst
+  case, so a caller must budget for what the set *could* spend and not for what
+  it probably will. That is deliberate — a set admitted because it would likely
+  come in under would be a forecast, and invariant 8 does not rest on one — and
+  it means a set ceiling under `budget.CEILING` times the number of cases is
+  refused however cheap the runs turn out to be. *Upgrade:* per-run ceilings
+  derived from the set's, the day a caller wants a set of two hundred cases
+  without budgeting five dollars for each.
 - ~~**The proof says every accepted artifact holds up, not that the run
   finished.**~~ Closed beside the proof rather than inside it.
   `assert_orchestration_proof` still makes only the narrower claim, which is the
