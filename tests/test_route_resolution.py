@@ -40,6 +40,7 @@ from server.engine.route import (
     readiness_from,
     resolve_route,
     route_digest,
+    waiting_on,
 )
 from server.refusals import Refusal, RefusalCode
 
@@ -446,3 +447,22 @@ def test_an_unknown_profile_is_refused(catalog: dict[str, Any]) -> None:
         resolve_route(catalog, "NO_SUCH_PROFILE", "FULL_CREDIT_ASSESSMENT")
 
     assert caught.value.code is RefusalCode.ROUTE_PROFILE_UNKNOWN
+
+
+def test_a_node_the_route_does_not_carry_is_a_typed_refusal(
+    catalog: dict[str, Any],
+) -> None:
+    """`waiting_on` is what a surface asks for the reason behind a state.
+
+    Asked for a node the route does not carry it raised `StopIteration` -- an
+    untyped escape from the one module whose whole contract is typed refusals,
+    and the exception that disappears silently if it is ever raised inside a
+    generator. The answer is the code the proof already uses for exactly this
+    fact.
+    """
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+
+    with pytest.raises(Refusal) as caught:
+        waiting_on(route, {}, "RN-no-such-node")
+
+    assert caught.value.code is RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE

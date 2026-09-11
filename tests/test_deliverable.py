@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from server.boundary_text import BoundaryText
 from server.deliverable.filing import (
     Opinion,
     Receipt,
@@ -39,7 +40,9 @@ from server.deliverable.package import (
 from server.deliverable.render import render
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.audit import audit_trail
 from server.store.members import Standing, grant
+from server.store.runs import create_case
 
 REVISION = "rev-001"
 
@@ -458,3 +461,89 @@ def test_a_filed_package_is_never_overwritten(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError):
         write_package(path, build_package(PAYLOAD_BYTES, b"{}", b"<html></html>"))
+
+
+def test_a_revision_is_filed_once(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """Filing is an act, not a statement about one.
+
+    The `UPDATE` that records a filing is conditional on nobody having filed
+    yet, and a second filer changed no row -- but the call returned a receipt
+    naming them anyway and wrote a second `DELIVERABLE_FILED` into the case's
+    chain. The receipt is the record of who filed, so one that names somebody
+    the store does not is the one thing it must never be.
+    """
+    conn, case_id, _signer = signed
+    freezer = _approver(conn, case_id)
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=freezer,
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+    filer = _approver(conn, case_id)
+    second = _approver(conn, case_id)
+    receipt = file_deliverable(
+        conn, case_id=case_id, actor_id=filer, revision_id=REVISION
+    )
+    assert receipt.filed_by == filer
+
+    with pytest.raises(Refusal) as caught:
+        file_deliverable(conn, case_id=case_id, actor_id=second, revision_id=REVISION)
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FILED
+    row = conn.execute(
+        "SELECT filed_by FROM deliverable_publications WHERE revision_id = %s",
+        (REVISION,),
+    ).fetchone()
+    assert row is not None and UUID(str(row[0])) == filer
+    filings = [entry for entry in audit_trail(conn, case_id) if "FILED" in entry.action]
+    assert len(filings) == 1
+
+
+def test_a_freeze_belongs_to_the_case_its_opinion_was_signed_in(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A revision id is a caller's string, not a key the host minted.
+
+    Looked up on that string alone, one case's signature released another
+    case's freeze -- and the publication row, the audit entry and every later
+    filing landed in a case whose members never signed anything.
+    """
+    conn, _case_id, _signer = signed
+    other = create_case(conn, BoundaryText.of("Some other issuer"))
+    intruder = _approver(conn, other)
+
+    with pytest.raises(Refusal) as caught:
+        freeze(
+            conn,
+            case_id=other,
+            actor_id=intruder,
+            revision_id=REVISION,
+            payload=PAYLOAD_BYTES,
+        )
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_NOT_SIGNED
+
+
+def test_a_filing_belongs_to_the_case_it_was_frozen_in(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, case_id, _signer = signed
+    freezer = _approver(conn, case_id)
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=freezer,
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+    other = create_case(conn, BoundaryText.of("Some other issuer"))
+    intruder = _approver(conn, other)
+
+    with pytest.raises(Refusal) as caught:
+        file_deliverable(conn, case_id=other, actor_id=intruder, revision_id=REVISION)
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_NOT_FROZEN

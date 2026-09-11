@@ -341,3 +341,22 @@ def test_the_same_request_twice_is_the_same_answer() -> None:
     second = cash_flow_forecast(request)
 
     assert first == second
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_a_non_finite_decimal_is_refused_like_a_non_finite_string(value: str) -> None:
+    """Invariant 7 is about the value, not about how it was spelled.
+
+    `_decimal` accepts a `Decimal` that a caller already parsed -- which is the
+    one path that reached a ratio without passing the finiteness check, so
+    `Decimal("Infinity")` divided into a leverage figure and `Decimal("NaN")`
+    compared false against every tolerance and reported a period that
+    reconciles.
+    """
+    request = _request([("FY26", "BASE")], [_driver("FY26")])
+    request["drivers"][0]["ebitda"] = Decimal(value)
+
+    with pytest.raises(Refusal) as caught:
+        cash_flow_forecast(request)
+
+    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID

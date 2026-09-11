@@ -25,6 +25,7 @@ import pytest
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Claim, Envelope, parse_claims
@@ -95,7 +96,11 @@ def admitted(
     return conn, source_id, delivered
 
 
-def _body(source_id: UUID, quote: str = "Total debt at 31 December 2026") -> str:
+def _body(
+    source_id: UUID,
+    quote: str = "Total debt at 31 December 2026",
+    page: int = 1,
+) -> str:
     return json.dumps(
         {
             "claims": [
@@ -104,7 +109,7 @@ def _body(source_id: UUID, quote: str = "Total debt at 31 December 2026") -> str
                     "citations": [
                         {
                             "source_id": str(source_id),
-                            "page": 1,
+                            "page": page,
                             "matched_text": quote,
                         }
                     ],
@@ -295,7 +300,12 @@ def test_the_prompt_carries_the_authority_and_the_evidence(
 def test_build_prompt_names_every_delivered_source() -> None:
     source_id = uuid4()
     delivered = [
-        Delivery(source_id=source_id, block_id="b000000", text=BoundaryText.of("x")),
+        Delivery(
+            source_id=source_id,
+            block_id="b000000",
+            page=1,
+            text=BoundaryText.of("x"),
+        ),
     ]
 
     prompt = build_prompt("CP-1", b"AUTHORITY BYTES", delivered)
@@ -340,3 +350,52 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
             assert citation.bboxes, "the host derived a rectangle for the quote"
             for box in citation.bboxes:
                 assert box.x0 < box.x1 and box.y0 < box.y1
+
+
+def test_a_delivery_announces_the_page_its_block_sits_on(
+    case: tuple[StoreConnection, UUID], tmp_path: Path, bundle: Bundle
+) -> None:
+    """The prompt names the page the host read the block from.
+
+    A module can only cite the page it was told. Announcing every block as page
+    one made every quote past the first page a citation invariant 11 refuses --
+    `CITATION_NOT_LOCATED` for a quote that is on the page, under a number
+    nobody gave the module a way to know.
+    """
+    conn, case_id = case
+    blobs = BlobStore(tmp_path / "blobs")
+    filler = "\n".join(f"filler line {n}" for n in range(LINES_PER_PAGE))
+    [source_id] = admit_pack(
+        conn,
+        blobs,
+        case_id=case_id,
+        documents=[
+            Document(
+                filename=BoundaryText.of("report.txt"),
+                data=f"{filler}\nTotal debt at 31 December 2026\n".encode(),
+            )
+        ],
+    )
+    last = conn.execute(
+        "SELECT block_id, page FROM source_blocks WHERE source_id = %s"
+        " ORDER BY block_id DESC",
+        (source_id,),
+    ).fetchone()
+    assert last is not None and last[1] == 2
+    delivered = deliver(conn, [(source_id, str(last[0]))])
+
+    prompt = build_prompt("CP-1", b"authority", delivered)
+    assert [line for line in prompt.splitlines() if line.startswith("page:")] == [
+        "page: 2"
+    ]
+
+    # And the citation a module makes from that prompt anchors.
+    outcome = execute_module(
+        conn,
+        bundle,
+        module_id="CP-1",
+        delivered=delivered,
+        provider=_Stub(_body(source_id, page=2)),
+    )
+    [claim] = outcome.envelope.claims
+    assert [citation.page for citation in claim.citations] == [2]

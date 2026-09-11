@@ -13,6 +13,7 @@ guessed right, and a caller entitled to know already has the delivered set.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
@@ -30,26 +31,53 @@ IO_BUDGET = 1
 _BLOCK_ID_LENGTH = 7
 
 
-def read_evidence(
-    conn: StoreConnection, *, source_id: UUID, block_id: str
-) -> BoundaryText:
+@dataclass(frozen=True, slots=True)
+class Block:
+    """One block as the host holds it: its text, and the page it sits on.
+
+    The page travels with the text because it is the host's fact and the
+    module's obligation. A module cites the page it was told about, so a module
+    told the wrong one writes a citation invariant 11 refuses -- for a quote
+    that is really there, under a number nobody gave it a way to know.
+    """
+
+    page: int
+    text: BoundaryText
+
+
+def read_block(conn: StoreConnection, *, source_id: UUID, block_id: str) -> Block:
     """One block of one live source, or `EVIDENCE_NOT_AVAILABLE`.
 
     The join to `live_sources` is what makes withdrawal a live check at every use
     rather than a promise made when the source set was pinned (invariant 1).
+
+    Still one row fetch: the page is a column of the row already being read, so
+    `IO_BUDGET` is unchanged and there is no second path to a block that could
+    forget the join above.
     """
     if not _is_block_id(block_id):
         raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
 
     row = conn.execute(
-        "SELECT blocks.text FROM source_blocks AS blocks"
+        "SELECT blocks.page, blocks.text FROM source_blocks AS blocks"
         " JOIN live_sources USING (source_id)"
         " WHERE blocks.source_id = %s AND blocks.block_id = %s",
         (source_id, block_id),
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
-    return BoundaryText.of(row[0])
+    return Block(page=int(row[0]), text=BoundaryText.of(row[1]))
+
+
+def read_evidence(
+    conn: StoreConnection, *, source_id: UUID, block_id: str
+) -> BoundaryText:
+    """The text of one block of one live source, or `EVIDENCE_NOT_AVAILABLE`.
+
+    The named boundary of invariant 2, and a projection of `read_block` rather
+    than a second query -- one statement, one live-source check, one refusal.
+    """
+    return read_block(conn, source_id=source_id, block_id=block_id).text
 
 
 def _is_block_id(block_id: str) -> bool:

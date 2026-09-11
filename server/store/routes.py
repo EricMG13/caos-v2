@@ -38,6 +38,10 @@ def pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> s
     ).fetchone()
     if row is not None:
         if str(row[0]) != digest:
+            # Rolled back before refusing, for the reason the replay below
+            # commits: this transaction holds the run row lock, and a refused
+            # plan gate should not keep the next one waiting on it.
+            conn.rollback()
             raise Refusal(RefusalCode.ROUTE_ALREADY_PINNED)
         conn.commit()  # the same gate, replayed; the lock is not worth holding
         return digest

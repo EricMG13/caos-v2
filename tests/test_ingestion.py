@@ -239,3 +239,51 @@ def test_a_pack_for_a_case_that_does_not_exist_is_refused(
         )
 
     assert caught.value.code is RefusalCode.CASE_NOT_FOUND
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        pytest.param(
+            ("word " * 1200).strip(),
+            RefusalCode.BOUNDARY_TEXT_TOO_LONG,
+            id="a line longer than the boundary's limit",
+        ),
+        pytest.param(
+            "Total debt \N{RIGHT-TO-LEFT OVERRIDE} was USD 1,240.0m",
+            RefusalCode.BOUNDARY_TEXT_INVALID,
+            id="a line carrying an override control",
+        ),
+    ],
+)
+def test_a_document_the_boundary_refuses_never_reaches_the_pinned_set(
+    case: tuple[StoreConnection, UUID], tmp_path: Path, body: str, code: RefusalCode
+) -> None:
+    """`source_blocks.text` is pinned state, so the boundary belongs at the door.
+
+    It was applied on the way out instead: `read_evidence` calls
+    `BoundaryText.of` and admission wrote a bare `str`. So a line over the
+    boundary's limit, and a line carrying the override control the boundary
+    exists to refuse, were both admitted -- into the set a SOURCE_SET gate can
+    then be approved over -- and refused at every later read. That is
+    `admit_pack`'s own argument against admitting a document with no text, one
+    run and one provider bill later than here.
+    """
+    conn, case_id = case
+    blobs = BlobStore(tmp_path / "blobs")
+
+    with pytest.raises(Refusal) as caught:
+        admit_pack(
+            conn,
+            blobs,
+            case_id=case_id,
+            documents=[
+                Document(filename=BoundaryText.of("report.txt"), data=body.encode())
+            ],
+        )
+
+    assert caught.value.code is code
+    left = conn.execute(
+        "SELECT count(*) FROM sources WHERE case_id = %s", (case_id,)
+    ).fetchone()
+    assert left is not None and left[0] == 0
