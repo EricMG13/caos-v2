@@ -44,11 +44,15 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # Named in the plan, and legitimately not written yet. Every entry states why,
 # because "not yet" with no reason is how a list like this becomes a list of
 # tests nobody intends to write.
-NOT_YET_REACHED = {
-    # Phase 10 -- qualification. The verdict has landed; what is still owed is
-    # the host's own control, and the qualification-set harness behind it.
-    "test_a_host_control_reads_orchestration_proof_never_qualified",
-}
+#
+# It is empty, and that is the point it has been working towards: every test
+# `docs/REBUILD_PLAN.md` names across all eleven phases is now defined in one of
+# the two suites. From here the list only ever grows by someone adding a name to
+# the plan, which is the direction it should grow in. What the plan still owes
+# is work it never named a test for -- the qualification-set harness, its answer
+# keys and the matrix -- and this gate cannot see that, which is why the phase
+# is not closed on the strength of it alone.
+NOT_YET_REACHED: set[str] = set()
 
 
 def named_in_the_plan() -> set[str]:
