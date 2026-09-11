@@ -52,6 +52,14 @@ CREATE TABLE artifacts (
     artifact_sha256 text NOT NULL,
     run_id          uuid NOT NULL REFERENCES runs (run_id),
     case_id         uuid NOT NULL REFERENCES cases (case_id),
+    -- Who produced it. `model` is the host's own configuration, not the
+    -- provider's report of itself (invariant 3); `generation_id` is the
+    -- provider's handle for the call, kept for reconciling a bill against a
+    -- run. NOT NULL because both are known at the moment the row is written,
+    -- and an artifact whose producer is unknown is what this column exists to
+    -- make impossible (`docs/DECISIONS.md` §25).
+    model           text NOT NULL,
+    generation_id   text NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 

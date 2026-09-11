@@ -130,6 +130,21 @@ class CompletionProvider(Protocol):
     accepted where the other was meant.
     """
 
+    @property
+    def model(self) -> str:
+        """The identity the host configured, which with fallbacks off is the
+        identity that answers.
+
+        Read from here rather than from the response body: a model naming
+        itself is a claim, and invariant 3 says the host owns identity.
+
+        A property rather than a plain annotation, so a frozen implementer
+        satisfies it. `model: str` on a Protocol is a read-write member, and
+        `OpenRouter` is frozen — declaring the mutable form would have made the
+        real provider fail to satisfy its own protocol, which the type checker
+        caught before a caller did.
+        """
+
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion: ...
 
 

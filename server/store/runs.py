@@ -14,6 +14,7 @@ caller.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -88,12 +89,32 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     return attempt_id
 
 
+@dataclass(frozen=True, slots=True)
+class Accepted:
+    """What one completed call produced, as the store records it.
+
+    One thing rather than four loose arguments, for the reason `Execution` and
+    `Harness` are one thing each: none of these is meaningful without the
+    others. An artifact with no charge was never paid for, a charge with no
+    producer cannot be reconciled against a bill, and a producer with no
+    artifact is a call that returned nothing.
+
+    `model` is the host's own configuration and `generation_id` is the
+    provider's handle for the call — kept apart because only the first is a
+    fact the host owns (invariant 3).
+    """
+
+    artifact_sha256: str
+    charge: Decimal
+    model: str
+    generation_id: str
+
+
 def accept_attempt(
     conn: StoreConnection,
     *,
     attempt_id: UUID,
-    artifact_sha256: str,
-    charge: Decimal,
+    accepted: Accepted,
 ) -> bool:
     """Accept one attempt's artifact and charge it. Returns whether this call
     was the one that accepted it.
@@ -102,6 +123,11 @@ def accept_attempt(
     the caller. The store already knows, and a caller that can name them can
     name the wrong ones -- charging one run's ledger for another run's work
     (invariant 3: the host owns identity).
+
+    The producer is written with the artifact rather than onto the attempt: the
+    attempt row exists before the call and knows nothing yet, and this insert is
+    already the one that says a call completed. One row, one write, and the
+    replay semantics below unchanged.
 
     Written to survive being called twice with the same arguments, because a
     caller that crashed after the commit cannot tell that it committed. The
@@ -113,7 +139,7 @@ def accept_attempt(
     not the charge. Writing them anyway would leave a failed run holding an
     accepted artifact, and Phase 3 recomputes node states from exactly those.
     """
-    if not isinstance(charge, Decimal):
+    if not isinstance(accepted.charge, Decimal):
         # Before any write: a float that reached the ledger would already have
         # lost the cent it cannot represent (invariant 7).
         raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
@@ -123,20 +149,28 @@ def accept_attempt(
         conn.commit()  # nothing changed; release the row lock rather than hold it
         return False
 
-    accepted = conn.execute(
-        "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id)"
-        " VALUES (%s, %s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
-        (attempt_id, artifact_sha256, run_id, case_id),
+    inserted = conn.execute(
+        "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
+        " model, generation_id)"
+        " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
+        (
+            attempt_id,
+            accepted.artifact_sha256,
+            run_id,
+            case_id,
+            accepted.model,
+            accepted.generation_id,
+        ),
     ).rowcount
     conn.execute(
         "INSERT INTO budget_ledger (attempt_id, run_id, amount)"
         " VALUES (%s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
-        (attempt_id, run_id, charge),
+        (attempt_id, run_id, accepted.charge),
     )
-    if accepted:
+    if inserted:
         append(conn, run_id, RunEvent.ATTEMPT_ACCEPTED)
     conn.commit()
-    return bool(accepted)
+    return bool(inserted)
 
 
 def complete_run(conn: StoreConnection, run_id: UUID) -> bool:
@@ -146,11 +180,7 @@ def complete_run(conn: StoreConnection, run_id: UUID) -> bool:
 
 
 def complete_attempt(
-    conn: StoreConnection,
-    *,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    charge: Decimal,
+    conn: StoreConnection, *, attempt_id: UUID, accepted: Accepted
 ) -> bool:
     """Accept the attempt and end the run it belongs to.
 
@@ -159,12 +189,7 @@ def complete_attempt(
     story: a crash in the gap yields one artifact, one charge, one terminal
     event, however many times it is replayed.
     """
-    accept_attempt(
-        conn,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        charge=charge,
-    )
+    accept_attempt(conn, attempt_id=attempt_id, accepted=accepted)
     return complete_run(conn, _attempt_owner(conn, attempt_id)[0])
 
 

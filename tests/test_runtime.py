@@ -78,7 +78,12 @@ class _Provider:
             READY_EVERYWHERE if module_id == "CP-0" else {"module_id": module_id}
         )
         digest = self.blobs.put(json.dumps(payload).encode("utf-8"))
-        return ProviderResult(artifact_sha256=digest, charge=Decimal("0.01"))
+        return ProviderResult(
+            artifact_sha256=digest,
+            charge=Decimal("0.01"),
+            model="a-model/for-the-test",
+            generation_id="gen-runtime-test",
+        )
 
 
 def test_the_fake_provider_satisfies_the_protocol(blobs: BlobStore) -> None:

@@ -37,6 +37,8 @@ PROFILE = "FULL_CREDIT_32"
 SELECTION = "DEEP_RESEARCH"
 
 ESTIMATE = Decimal("0.50")
+# What the host configured and therefore what answered: fallbacks are off.
+MODEL = "a-model/for-the-test"
 # Deliberately unlike the estimate, and unlike a round number, so a ledger that
 # recorded the wrong one cannot coincidentally agree.
 REPORTED = Decimal("0.0000041")
@@ -52,6 +54,9 @@ class _Completions:
 
     source_id: UUID
     charge: Decimal = REPORTED
+    # The identity a real provider carries: what the host configured, which
+    # with fallbacks off is what answers.
+    model: str = MODEL
     calls: list[str] = field(default_factory=list)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
@@ -153,6 +158,44 @@ def test_the_loop_charges_what_the_provider_reported(
     assert charges == [REPORTED, REPORTED], "the ledger holds what the calls cost"
     assert _reserved(conn, run_id) == [ESTIMATE, ESTIMATE], "and what was set aside"
     assert REPORTED != ESTIMATE, "a test that compared two equal numbers proves nothing"
+
+
+def test_an_accepted_artifact_records_the_model_that_produced_it(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """Invariant 3 over the one identity the store did not hold.
+
+    A verdict binds `provider` — a string in a document this repository did not
+    write — and nothing could compare it against what the runs behind it called,
+    because nothing a run left behind named a model. The charge was recorded and
+    the artifact was recorded; who produced them was not.
+
+    The identity is the host's own configuration, not the provider's report of
+    itself. `OpenRouter._post` sets `allow_fallbacks: false` precisely so that
+    what was asked for is what answered, and reading the model back out of the
+    response body would be taking a claim where the host already holds a fact
+    (invariant 3).
+    """
+    conn, run_id, source_id, blobs = ready
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=_Completions(source_id),
+        delivered=_delivered(conn, source_id),
+    )
+
+    run_route(
+        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
+    )
+
+    recorded = conn.execute(
+        "SELECT model, generation_id FROM artifacts WHERE run_id = %s", (run_id,)
+    ).fetchall()
+    assert [(str(row[0]), str(row[1])) for row in recorded] == [
+        (MODEL, "gen-loop-test"),
+        (MODEL, "gen-loop-test"),
+    ], "one identity per accepted artifact, for both nodes of the pathway"
 
 
 def test_the_artifact_is_the_envelope_the_host_built(

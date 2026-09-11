@@ -59,6 +59,8 @@ class ModuleProvider:
             artifact_sha256=self.blobs.put(canonical(outcome.envelope)),
             # What the call reported, not what the run set aside for it.
             charge=outcome.charge,
+            model=outcome.model,
+            generation_id=outcome.generation_id,
         )
 
 

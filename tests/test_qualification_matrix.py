@@ -68,6 +68,9 @@ class _Completions:
     source_id: UUID
     calls: list[str] = field(default_factory=list)
 
+    # What the host configured; with fallbacks off it is what answers.
+    model: str = "a-model/for-the-test"
+
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls.append(prompt[:24])
         return Completion(
