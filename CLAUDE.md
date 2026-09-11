@@ -160,6 +160,28 @@ system this size means nobody looked.
 
 **Phase 10.**
 
+- **An answer key names citations, not figures.** `ExpectedCitation` is
+  `(module_id, document_sha256, matched_text)`, because that is the strongest
+  key the canonical envelope can be checked against: an envelope carries
+  statements and citations, not typed numbers. A key saying "net leverage is
+  4.2x" has nothing to compare against, so the matrix measures whether a run
+  found the right *evidence* rather than whether it reached the right
+  *conclusion* — which is a real part of qualification and not the whole of it.
+  *Upgrade:* the day the envelope carries a figure as a `Decimal` (the payload
+  schema of the Phase 5 gap above), a key gains an expected value and the matrix
+  compares it.
+- **The matrix is handed its runs; nothing drives the set.** `build_matrix`
+  takes a `runs` mapping of case label to run id and refuses a key with no run,
+  but the loop that actually executes each case of a qualification set is not
+  here — it would be `run_route` per case plus a provider, and that is a
+  separate concern from comparing what came out. *Upgrade:* the driver that
+  performs the set, records each run id, and hands the mapping to this function.
+- **A qualification set lives in memory and is digested, not stored.** There is
+  no table and no file format: a caller constructs `QualificationSet` and gets a
+  digest a verdict can bind. That is enough for the binding to be checkable and
+  not enough for two people to be sure they hold the same set without comparing
+  digests by hand. *Upgrade:* a declared on-disk form with a loader, the day a
+  set outgrows the process that built it.
 - **The proof says every accepted artifact holds up, not that the run finished.**
   `assert_orchestration_proof` re-derives its three claims over the artifacts a
   run accepted; it does not check that the run reached COMPLETE or that every
