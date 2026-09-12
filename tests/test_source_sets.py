@@ -143,7 +143,8 @@ def test_same_bytes_different_extraction_changes_snapshot(
 
 
 @pytest.mark.parametrize(
-    "invalid", ["empty", "unknown", "json", "nonfinite", "binding", "filename"]
+    "invalid",
+    ["empty", "unknown", "json", "nonfinite", "binding", "filename", "timestamp"],
 )
 def test_invalid_live_set_refuses_without_retaining_lock(
     case: tuple[StoreConnection, UUID],
@@ -180,6 +181,12 @@ def test_invalid_live_set_refuses_without_retaining_lock(
         )
     if invalid == "filename":
         conn.execute("UPDATE sources SET filename = %s", ("bad\u202e",))
+    if invalid == "timestamp":
+        conn.execute("SET TIME ZONE 'Europe/Paris'")
+        conn.execute(
+            "UPDATE sources SET admitted_at ="
+            " '0001-01-01 00:00:00+00:09:21'::timestamptz"
+        )
     conn.commit()
     with pytest.raises(Refusal) as caught:
         snapshot_source_set(conn, case_id)
@@ -193,7 +200,8 @@ def test_invalid_live_set_refuses_without_retaining_lock(
     with connect(empty_database) as other:
         other.execute("SET lock_timeout = '1s'")
         lock_case(other, case_id)
-    assert conn.execute("SELECT count(*) FROM source_set_versions").fetchone() == (0,)
+    for table in ("source_set_versions", "source_set_members"):
+        assert conn.execute("SELECT count(*) FROM " + table).fetchone() == (0,)
 
 
 @pytest.mark.parametrize("stage", ["header", "member", "commit"])
