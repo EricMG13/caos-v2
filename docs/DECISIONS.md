@@ -732,6 +732,31 @@ that is what the envelope holds. The bundle's registers — the tables a module'
 own payload schema declares — are a later phase, and until then a chained module
 inherits sentences rather than a financial base.
 
+## 2026-09-12 §29 — Canonical Markdown is the authoritative handoff
+
+Deploy V's exact, validated canonical Markdown remains the analytical authority
+and the downstream handoff. Typed UI fields are closed, validated sidecar
+projections of it. The UI and host-rendered report are presentations of the
+accepted Markdown and projections, not a second model-authored authority.
+
+The host owns identities a module cannot establish: run, immutable source set,
+extractor and extraction manifest, resolved route, bundle manifest/build,
+adapter version, and accepted upstream artifacts. Those identities travel with
+the handoff and are checked by the adapter; provider-claimed identity is never
+substituted for them.
+
+The catalog-selected CP-0 remains the single executable preparation/readiness
+node. The host's extraction manifest is preparation metadata supplied to CP-0,
+not another LLM route stage. `CP-PARSE` remains only as an authority alias for
+archived compatibility; it is not inserted into the catalog route, so extraction
+and preparation do not run twice. The no-Excel/no-Word decision and archived
+workbook/publication contracts remain unchanged.
+
+**Reason.** The current claims JSON discards the bundle's complete registers and
+cannot become canonical merely because the host stores it. Adding a second model
+summary would create competing authority; preserving the exact validated
+Markdown and deriving presentation fields mechanically preserves one handoff.
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a
