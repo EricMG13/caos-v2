@@ -688,6 +688,7 @@ def test_an_upstream_statement_is_not_citable_evidence(
     claim that rests on it."""
     conn, source_id, delivered = admitted
     sentence = "Leverage stood at 4.0x on the agreed basis."
+    stub = _Stub(_body(source_id, quote=sentence))
 
     with pytest.raises(Refusal) as caught:
         execute_module(
@@ -703,7 +704,14 @@ def test_an_upstream_statement_is_not_citable_evidence(
                     ),
                 ),
             ),
-            provider=_Stub(_body(source_id, quote=sentence)),
+            provider=stub,
         )
 
     assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
+    # The same refusal would fire if `execute_module` simply never gave the
+    # module an upstream section to quote from -- the sentence is absent from
+    # the delivered evidence either way. Asserting on the prompt the stub
+    # captured is what tells the two apart: the section reached the module
+    # and was refused as context, not silently dropped before it got there.
+    assert "--- UPSTREAM" in stub.prompt
+    assert sentence in stub.prompt

@@ -105,7 +105,12 @@ class Delivery:
 
 @dataclass(frozen=True, slots=True)
 class UpstreamClaim:
-    """One thing an earlier module established, and the quotes under it."""
+    """One thing an earlier module established, and the quotes under it.
+
+    Plain `str`, not `BoundaryText`: this is transient prompt context that is
+    never persisted, and the text was already validated at the boundary once,
+    when the upstream module's own claim was stored.
+    """
 
     statement: str
     quotes: tuple[str, ...]
@@ -128,10 +133,11 @@ class Assignment:
     # The modules this one must return a readiness verdict for: the pinned
     # route less itself when it is the gate, and empty for everyone else.
     gate_expects: frozenset[str] = frozenset()
-    # This node's direct predecessors' accepted results (`route.predecessors`),
-    # read from the store by the caller that holds the route -- this dataclass
-    # only carries what it was handed, the same division `gate_expects` already
-    # draws.
+    # This node's direct predecessors' accepted results
+    # (`predecessors(route, module_id)` in `server/engine/route.py`), read
+    # from the store by the caller that holds the route -- this dataclass
+    # only carries what it was handed, the same division `gate_expects`
+    # already draws.
     upstream: tuple[Upstream, ...] = ()
 
 
