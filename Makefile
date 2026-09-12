@@ -57,7 +57,7 @@ security:  # the floor is checked first: a report that parsed nothing must fail
 check: lint types test security
 
 doctor:  ## versions and configuration presence; values are never printed
-	@python3 scripts/dev_doctor.py
+	@$(PY) scripts/dev_doctor.py
 
 dev-up:  ## persistent dev DB/blob root plus an isolated ephemeral test-admin DB
 	mkdir -p .dev-data/blobs
