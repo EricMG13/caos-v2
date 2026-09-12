@@ -52,6 +52,7 @@ from server.engine.route import (
     ResolvedRoute,
     RouteNode,
     node_states,
+    readiness_from,
     route_digest,
     waiting_on,
 )
@@ -148,6 +149,11 @@ class NodeView(BaseModel):
     # page a reviewer can act on -- so it is said, not left to be inferred from
     # an edge type in a list.
     awaiting_gate: bool
+    # The gate's own verdict on this module, when the gate has given one. After
+    # Phase 11 a node can be BLOCKED because CP-0 did not clear it, and no edge
+    # names that cause -- `waiting_on` would be empty and the state would read
+    # as unexplained.
+    gate_verdict: str | None
 
 
 class RunDocument(BaseModel):
@@ -249,6 +255,10 @@ def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDo
 
     accepted = accepted_artifacts(conn, blobs, route, run_id)
     states = node_states(route, accepted)
+    # `accepted` already carries CP-0's body -- `accepted_artifacts` fetches it
+    # for exactly this reason -- so reading the verdict out of it here costs no
+    # further round trip and `IO_BUDGET` does not move.
+    readiness = readiness_from(route, accepted)
     return RunDocument(
         run_id=run_id,
         status=status,
@@ -257,7 +267,9 @@ def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDo
         # a stored digest that had drifted from the stored route would show up
         # here rather than being reported over the top of it.
         route_digest=route_digest(route),
-        nodes=[_node_view(route, accepted, node, states) for node in route.nodes],
+        nodes=[
+            _node_view(route, accepted, node, states, readiness) for node in route.nodes
+        ],
     )
 
 
@@ -345,6 +357,7 @@ def _node_view(
     accepted: Mapping[str, Any],
     node: RouteNode,
     states: Mapping[str, NodeState],
+    readiness: Mapping[str, str],
 ) -> NodeView:
     unmet = waiting_on(route, accepted, node.route_node_id)
     return NodeView(
@@ -353,6 +366,10 @@ def _node_view(
         state=states[node.route_node_id].value,
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
         awaiting_gate=any(edge.type is EdgeType.QA_GATE for edge in unmet),
+        # `.get`, not `[]`: a module the gate has not ruled on -- every module,
+        # until CP-0's own artifact is accepted -- has no verdict rather than a
+        # false one, and None is that absence on the wire.
+        gate_verdict=readiness.get(node.module_id),
     )
 
 
