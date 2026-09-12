@@ -118,6 +118,7 @@ def gate_state(
 def source_set_fingerprint(conn: StoreConnection, case_id: UUID) -> str:
     """A digest over the case's live sources.
 
+    Compatibility only, not an enforced run pin; new snapshots use source_sets.
     Order-independent, because the order documents were admitted in is not a
     change to the evidence and must not reopen a gate. Over `live_sources`, so a
     withdrawal moves it -- which is the whole mechanism by which withdrawal
