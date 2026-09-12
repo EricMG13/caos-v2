@@ -1,6 +1,6 @@
 # Rebuild plan
 
-Eleven phases (0–10). Each has an exit test — a named, runnable check that fails
+Thirteen phases (0–12). Each has an exit test — a named, runnable check that fails
 before the phase and passes after. A phase is not done because the code exists;
 it is done when its exit test passes and the prior phases' tests still pass.
 
@@ -256,6 +256,68 @@ has ever seen came from a test fixture.
 `test_readiness_applies_only_once_the_gate_is_accepted`;
 `test_a_node_receives_its_direct_predecessors_accepted_claims`;
 `test_an_upstream_statement_is_not_citable_evidence`.
+
+## Phase 12 — The handoff carries its data, and the workspace shows it
+
+The core function, and the one the system has never performed. A module's
+handoff is what the analysis *is*: the narrative a reader reads and the register
+tables every figure, chart and downstream module is built from. This build
+stores cited sentences instead — Phase 5 chose the host's minimal envelope
+deliberately, and the ledger has said since that the day it carries a figure as
+a `Decimal` is the day an answer key can name one. That day is this phase.
+
+- **A handoff is one payload.** The module's narrative in the bundle's six
+  ordered sections, and its registers as typed rows: for CP-1 the nineteen
+  `T4.*` and the nine stable `cp1.*` tables the skill's completeness contract
+  names. A figure is a `Decimal`; a period is a period; every cell carries its
+  currency, its unit, its calculation status from the eight the canon allows and
+  its lineage class from the thirteen extraction types.
+- **Every figure is cited or null with a gap.** Invariant 11 extends from a
+  statement to a cell — `[Insufficient Information]` is the literal text, null is
+  never zero, and a figure with neither a citation nor a gap is refused. A table
+  this system draws is a table whose every number names its page.
+- **The schema is host-declared per module, and checked against the bundle.**
+  CP-1 ships its contract as prose — a Markdown reference and the skill's
+  completeness contract — so the host declares the registers, their columns,
+  their critical columns and their minimum rows in code, and a test asserts the
+  declaration still matches the catalog's `required_table_ids` and the skill's
+  own numbers. Parsing the bundle's prose at run time would be guessing; drift
+  between the two is a fact a test can state.
+- **The host computes the confidence, the module reports its counts.** The score
+  is `clamp((0.6E + 0.4C) * S - P, 0, 100)`. Completeness is mechanical, the
+  source gate is CP-0's verdict, and the penalties, the caps and the bands are
+  arithmetic — all the host's. Only the lineage class per material claim and the
+  finding severities are the module's, as counts. A module asserting its own
+  score is the provider-claimed identity invariant 3 refuses.
+- **The prompt carries what the skill calls mandatory.** CP-1's runbook, steps
+  and schema reference are binding on every run and none of them is sent today:
+  about 74 KB against 20 KB. This is the Phase 5 gap — "only `SKILL.md` reaches
+  the prompt" — closing for one module, with the budget stated rather than
+  discovered.
+- **The workspace shows the narrative and the tables, and nothing else.** The
+  Analysis section serves one document built from accepted handoffs: the credit
+  narrative, then every register as a table with its citations. The widgets the
+  section was drawn around that no handoff feeds leave its contract rather than
+  being served invented values, and a chart is the same register rows drawn.
+- **Confirmed before it is displayed.** A live CP-1 run over the real issuer
+  documents, its payload validated, its score computed and its memo rendered —
+  narrative and lossless register appendix — is what says the system can produce
+  a handoff at all. The display slice follows it, not the other way round.
+
+**Not in this phase.** The other twenty-three modules, which follow by the same
+pattern once one is proven. The Book, Model and Committee sections. Per-module
+evidence selection, which is what the gate's dropped `evidence_demand` is for.
+Charts: the rows they need land here, the drawing does not.
+
+**Exit:** `test_the_declared_register_schema_matches_the_bundles_own_contract`;
+`test_a_handoff_carries_every_register_its_module_declares`;
+`test_a_row_missing_a_critical_column_is_refused`;
+`test_a_figure_is_cited_or_null_with_a_gap`;
+`test_the_host_computes_the_confidence_the_module_reports_counts`;
+`test_the_prompt_carries_the_companions_the_skill_calls_mandatory`;
+`test_cp1_produces_its_declared_registers_from_real_documents`;
+`test_the_analysis_document_is_built_from_accepted_handoffs`;
+`test_the_analysis_section_renders_a_handoffs_narrative_and_tables`.
 
 ---
 

@@ -37,6 +37,7 @@ from server.engine.route import (
     frontier,
     limitations_of,
     node_states,
+    predecessors,
     readiness_from,
     resolve_route,
     route_digest,
@@ -544,3 +545,62 @@ def test_a_malformed_readiness_map_refuses_rather_than_raising(
         node_states(route, accepted)
 
     assert caught.value.code is RefusalCode.READINESS_INVALID
+
+
+def test_a_nodes_predecessors_are_its_edge_sources_in_route_order(
+    catalog: dict[str, Any],
+) -> None:
+    """CP-2D carries a REQUIRED edge from each of CP-0, CP-1 and CP-2 in this
+    pathway. `expected` is built from `route.edges` and `route.nodes` directly
+    -- not by calling `predecessors` a second time -- so this compares the
+    function's output against an independently derived value rather than a
+    re-derivation of itself: a real check that the returned set of modules is
+    the pinned catalog's own answer for CP-2D, not an assumption taken on
+    faith.
+
+    It does not pin the *order* claim by itself: for this pathway CP-0, CP-1
+    and CP-2 sort identically whether by route position, by edge-declaration
+    order in `profile["edges"]`, or by plain alphabetical order, so an
+    implementation using any of those instead of route order would still
+    satisfy this test.
+    `test_predecessors_use_route_order_not_edge_or_alphabetical_order` below
+    is the one built so the three hypotheses disagree.
+    """
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+
+    assert predecessors(route, "CP-0") == ()
+    assert "CP-1" in predecessors(route, "CP-2D")
+
+    sources = {edge.source for edge in route.edges if edge.target == "CP-2D"}
+    expected = tuple(
+        node.module_id for node in route.nodes if node.module_id in sources
+    )
+
+    assert predecessors(route, "CP-2D") == expected
+
+
+def test_predecessors_use_route_order_not_edge_or_alphabetical_order() -> None:
+    """A hand-built route where the three candidate orderings disagree.
+
+    The catalog-based test above cannot distinguish route order from
+    edge-declaration order or from alphabetical order, because its three
+    predecessor ids happen to sort the same way under all three. Here
+    `nodes` puts "B" before "A" while `edges` declares A's edge first and
+    "A" sorts first alphabetically, so edge order and alphabetical order
+    both give `("A", "B")` and only route order gives the `("B", "A")` this
+    asserts. An implementation returning `tuple(sorted(sources))`, or one
+    walking `route.edges` in declaration order, fails this test and passes
+    the one above -- which is the gap this test closes.
+
+    `route.nodes` need not name "T" for `predecessors` to answer: the
+    function never looks the target up, it only uses `module_id` to filter
+    edges by target, so the fixture leaves it out.
+    """
+    route = ResolvedRoute(
+        profile_id="P",
+        selection_id="S",
+        nodes=(RouteNode("RN-B", "B", 1), RouteNode("RN-A", "A", 2)),
+        edges=(Edge("A", "T", EdgeType.REQUIRED), Edge("B", "T", EdgeType.REQUIRED)),
+    )
+
+    assert predecessors(route, "T") == ("B", "A")

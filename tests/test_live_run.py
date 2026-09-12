@@ -120,6 +120,7 @@ def test_a_live_run_admits_documents_and_completes_its_route(
                 completions=completions,
                 delivered=_every_block(conn, source_ids),
                 route=route,
+                run_id=run_id,
             ),
             ESTIMATE,
         ),

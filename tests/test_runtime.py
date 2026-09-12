@@ -29,6 +29,7 @@ from server.engine.runtime import (
     Provider,
     ProviderResult,
     accepted_artifacts,
+    artifact_digests,
     run_route,
 )
 from server.refusals import Refusal, RefusalCode
@@ -275,6 +276,34 @@ def test_accepted_artifacts_reads_cp0s_payload_and_no_other(
 
     assert accepted[_node_id(route, "CP-0")] == READY_EVERYWHERE
     assert accepted[_node_id(route, "CP-1")] == {}
+
+
+def test_artifact_digests_maps_accepted_attempts_to_their_digest(
+    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+) -> None:
+    """The join `accepted_artifacts` above and `runner.ModuleProvider._upstream`
+    both read now lives in this one function -- proved here in isolation from
+    either caller, since a test that only ever saw it through one of them could
+    not tell a coincidence from the shared row set the fix depends on."""
+    conn, case_id = case
+    run_id = start_run(conn, case_id)
+    conn.commit()
+
+    assert artifact_digests(conn, run_id) == {}, "nothing accepted yet"
+
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(_Provider(blobs), ESTIMATE),
+    )
+
+    digests = artifact_digests(conn, run_id)
+    assert set(digests) == {
+        _node_id(route, module) for module in ("CP-0", "CP-1", "CP-2", "CP-2D")
+    }
+    assert json.loads(blobs.get(digests[_node_id(route, "CP-0")])) == READY_EVERYWHERE
 
 
 def _node_id(route: ResolvedRoute, module_id: str) -> str:

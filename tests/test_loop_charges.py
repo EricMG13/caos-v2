@@ -29,8 +29,16 @@ from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
+from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
-from server.store.runs import run_status, start_run
+from server.store.routes import pin_route
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    run_status,
+    start_attempt,
+    start_run,
+)
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 PROFILE = "FULL_CREDIT_32"
@@ -60,10 +68,14 @@ class _Completions:
     model: str = MODEL
     # What the gate says about the one other module of this pathway.
     verdict: str = "READY"
-    calls: list[str] = field(default_factory=list)
+    # Whole prompts, not a prefix: the predecessor-chain test below
+    # (`docs/REBUILD_PLAN.md` Phase 11, "The chain") reads the upstream section
+    # back out of the second node's prompt, and a truncated copy would not
+    # carry it.
+    prompts: list[str] = field(default_factory=list)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.calls.append(prompt[:40])
+        self.prompts.append(prompt)
         body = json.dumps(
             {
                 "claims": [
@@ -148,8 +160,9 @@ def test_the_loop_charges_what_the_provider_reported(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -189,8 +202,9 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -218,8 +232,9 @@ def test_the_artifact_is_the_envelope_the_host_built(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -253,8 +268,9 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     with pytest.raises(Exception, match="CITATION_NOT_DELIVERED"):
@@ -269,6 +285,86 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
     assert run_status(conn, run_id) is RunStatus.RUNNING
     assert _reserved(conn, run_id) == [ESTIMATE], "the call was paid for regardless"
     assert _charges(conn, run_id) == [], "and nothing was accepted"
+
+
+def test_the_loop_hands_each_node_its_predecessors_results(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """DEEP_RESEARCH is CP-0 then CP-DR: the second node's prompt carries the
+    first node's accepted statement, read from the artifact the host stored."""
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id)
+    pin_route(conn, run_id, route)
+
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(
+            ModuleProvider(
+                conn=conn,
+                bundle=Bundle(root=VENDORED),
+                blobs=blobs,
+                completions=completions,
+                delivered=_every_block(conn, source_id),
+                route=route,
+                run_id=run_id,
+            ),
+            ESTIMATE,
+        ),
+    )
+
+    first, second = completions.prompts
+    assert "--- UPSTREAM" not in first
+    assert "module_id: CP-0" in second
+    assert "Total debt was USD 1,240.0m." in second
+
+
+def test_a_predecessor_artifact_of_another_shape_is_refused_not_raised(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """Valid JSON of a shape the host did not write is a typed refusal.
+
+    `_upstream` indexed the stored artifact directly, so a claim without
+    `citations` raised `KeyError` across the provider seam -- from inside
+    `_run_node`, after the reservation, out of a boundary whose whole contract
+    is that refusals are typed. It reads the way the proof reads the same bytes
+    now, and refuses with the same code.
+    """
+    conn, run_id, source_id, blobs = ready
+    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
+    digest = blobs.put(json.dumps({"claims": [{"statement": 40}]}).encode("utf-8"))
+    accept_attempt(
+        conn,
+        attempt_id=start_attempt(conn, run_id, cp0),
+        accepted=Accepted(
+            artifact_sha256=digest,
+            charge=REPORTED,
+            model=MODEL,
+            generation_id="gen-loop-test",
+        ),
+    )
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=_Completions(source_id),
+        delivered=_every_block(conn, source_id),
+        route=route,
+        run_id=run_id,
+    )
+
+    with pytest.raises(Refusal) as caught:
+        run_route(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            execution=Execution(provider, ESTIMATE),
+        )
+
+    assert caught.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
 
 
 def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
@@ -290,8 +386,9 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -300,7 +397,7 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
 
     nodes = {node.module_id: node.route_node_id for node in route.nodes}
     assert run_status(conn, run_id) is RunStatus.COMPLETE
-    assert len(completions.calls) == 1, "the gate was asked; what it blocked was not"
+    assert len(completions.prompts) == 1, "the gate was asked; what it blocked was not"
     assert _charges(conn, run_id) == [REPORTED], "one charge, for the one call"
     assert _reserved(conn, run_id) == [ESTIMATE], "and one reservation behind it"
     assert _attempted(conn, run_id) == [nodes["CP-0"]], "no attempt row at all"
@@ -316,7 +413,7 @@ def _attempted(conn: StoreConnection, run_id: UUID) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
-def _delivered(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:
+def _every_block(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:
     rows = conn.execute(
         "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
         (source_id,),
