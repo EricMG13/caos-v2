@@ -20,8 +20,9 @@ from uuid import UUID, uuid4
 
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING
+from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
 
 
@@ -48,6 +49,7 @@ def start_run(
     ceiling = CEILING if budget_ceiling is None else budget_ceiling
     if not isinstance(ceiling, Decimal):
         raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
+    lock_case(conn, case_id)
     run_id = uuid4()
     conn.execute(
         "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
@@ -76,6 +78,7 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     completed (`docs/DECISIONS.md` §12, adopting CAOS-Final §21 with Phase 4).
     """
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
 
     attempt_id = uuid4()
