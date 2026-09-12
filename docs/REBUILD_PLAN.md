@@ -204,6 +204,59 @@ refuses a verdict missing any of the six or past its expiry;
 `test_a_host_control_reads_orchestration_proof_never_qualified` — no code path
 in this repository can mint `QUALIFIED`.
 
+## Phase 11 — The gate and the chain
+
+Two things the run has never had, both found by the first live run over a real
+issuer (`docs/DECISIONS.md` §26 records that run): CP-0's verdict deciding what
+runs, and a module seeing the modules before it. Nineteen modules executed as
+nineteen independent reads of the same documents, and CP-0's readiness could not
+reach the store at all — `server/engine/route.py` carries a reader for it while
+`ENVELOPE_KEYS` refused every key but `claims`, so the only readiness the host
+has ever seen came from a test fixture.
+
+- **The gate's shape.** The canonical envelope carries `content_to_module_map`
+  beside `claims`, from the gate module alone — the bundle's own key, so the
+  reader that exists is the reader that runs. Rows are closed to `module_id`,
+  `readiness_status` and `readiness_effect`: bounded to the pinned route's
+  modules, to the bundle's four states, and to `BoundaryText`. Every pinned
+  module is covered or the answer is refused, because CP-0's own instructions
+  make identifying the runnable modules its job — `READINESS_INVALID` for a
+  shape, status, duplicate or unknown module, `READINESS_INCOMPLETE` for a
+  pinned module the gate ignored. The prompt names the ids it must cover. The
+  rows are stored in the canonical bytes, so the artifact digest covers the
+  verdict.
+- **What the verdict does.** A module's own status decides its state: `BLOCKED`
+  and `CONDITIONAL` never become runnable, `READY_WITH_LIMITATIONS` runs as
+  `RESTRICTED` and carries its limitation, `READY` leaves the edges in charge.
+  The gate is not gated by itself, and before it is accepted the edges decide —
+  which is what already keeps the route behind CP-0. A node the gate blocked
+  costs no call and no charge, and leaves the run COMPLETE with that node
+  reported unrun rather than failing it. `readiness_from` refuses a malformed
+  map with a typed code instead of raising `KeyError` out of a pure function.
+- **The chain.** `ModuleProvider` holds the pinned route and uses the
+  `route_node_id` it is already handed. Each node's prompt carries its direct
+  predecessors' accepted statements and the quotes behind them, read from the
+  host's own artifacts (invariant 3), between the authority and the evidence.
+  Upstream is context, never evidence: a citation must still name delivered
+  evidence, so an upstream sentence that is not in the documents cannot be
+  cited.
+- **Not in this phase.** Each module's own payload schema and the bundle's
+  canonical-Markdown contract — the registers, the six ordered sections, the
+  confidence score — which is what a co-pilot run produces and this one does
+  not. Per-module evidence selection, which is what the gate's own
+  `evidence_demand` and `active_representation_ids` are for, and the reason
+  dropping those two fields is recorded rather than silent. Transitive upstream:
+  a module sees its predecessors, not their predecessors.
+
+**Exit:** `test_a_gate_answer_missing_a_pinned_module_is_refused`;
+`test_only_the_gate_module_may_return_a_readiness_map`;
+`test_a_malformed_readiness_map_refuses_rather_than_raising`;
+`test_a_module_the_gate_blocked_never_becomes_runnable`;
+`test_ready_with_limitations_runs_as_restricted`;
+`test_readiness_applies_only_once_the_gate_is_accepted`;
+`test_a_node_receives_its_direct_predecessors_accepted_claims`;
+`test_an_upstream_statement_is_not_citable_evidence`.
+
 ---
 
 ## Standing rules across all phases

@@ -45,14 +45,28 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # because "not yet" with no reason is how a list like this becomes a list of
 # tests nobody intends to write.
 #
-# It is empty, and that is the point it has been working towards: every test
-# `docs/REBUILD_PLAN.md` names across all eleven phases is now defined in one of
-# the two suites. From here the list only ever grows by someone adding a name to
-# the plan, which is the direction it should grow in. What the plan still owes
-# is work it never named a test for -- the qualification-set harness, its answer
-# keys and the matrix -- and this gate cannot see that, which is why the phase
-# is not closed on the strength of it alone.
-NOT_YET_REACHED: set[str] = set()
+# It was empty, which was the point it had been working towards: every test the
+# plan named across Phases 0-10 was defined. It grows here in the direction it
+# should -- Phase 11 names its exit tests before the work that satisfies them
+# exists, and each name leaves this list in the PR that writes it. What the plan
+# still owes is work it never named a test for -- the qualification-set harness,
+# its answer keys and the matrix -- and this gate cannot see that, which is why
+# a phase is not closed on the strength of it alone.
+NOT_YET_REACHED: set[str] = {
+    # Phase 11, the gate: the envelope does not carry a readiness map yet, so
+    # there is nothing for these to assert against.
+    "test_a_gate_answer_missing_a_pinned_module_is_refused",
+    "test_only_the_gate_module_may_return_a_readiness_map",
+    "test_a_malformed_readiness_map_refuses_rather_than_raising",
+    # Phase 11, the verdict: a module's own readiness does not reach its state.
+    "test_a_module_the_gate_blocked_never_becomes_runnable",
+    "test_ready_with_limitations_runs_as_restricted",
+    "test_readiness_applies_only_once_the_gate_is_accepted",
+    # Phase 11, the chain: every node is handed the same evidence and no
+    # upstream section exists to test.
+    "test_a_node_receives_its_direct_predecessors_accepted_claims",
+    "test_an_upstream_statement_is_not_citable_evidence",
+}
 
 
 def named_in_the_plan() -> set[str]:
