@@ -419,3 +419,24 @@ def test_newer_database_or_changed_applied_prefix_refuses(
         conn.commit()
         with pytest.raises(Refusal):
             apply_schema(conn)
+
+
+def test_apply_schema_closed_connection_is_sanitized(empty_database: str) -> None:
+    """rollback_or_close must retain the migration's safe refusal code."""
+    conn = connect(empty_database)
+    conn.close()
+    with pytest.raises(Refusal) as caught:
+        apply_schema(conn)
+    assert caught.value.code is RefusalCode.STORE_SCHEMA_DRIFT
+
+
+def test_apply_schema_cleanup_preserves_cancellation(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(conn: StoreConnection, sql: str) -> None:
+        conn.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(store, "_migrate", interrupted)
+    with connect(empty_database) as conn, pytest.raises(KeyboardInterrupt):
+        apply_schema(conn)
