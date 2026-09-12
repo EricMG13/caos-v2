@@ -220,7 +220,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: requirements-dev.txt
       - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
-      - run: pytest tests/test_provider.py tests/test_module_execution.py tests/test_live_run.py
+      - run: pytest --live-provider -m live_provider
         env:
           # The key is a repository secret and the model id a repository
           # variable; neither appears in a file this repository tracks.

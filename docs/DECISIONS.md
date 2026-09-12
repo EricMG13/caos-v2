@@ -116,6 +116,16 @@ waiving (`SYSTEM_SPEC.md` §11) — this is the first instance of that rule.
 dependency of its own, so the lock and the installer cannot disagree. The two
 interpreter versions are forced by §4 of `docs/AI_CODE_QUALITY.md`.
 
+## 2026-09-12 §10a — Pre-commit is part of the pinned development toolchain
+
+Pre-commit 4.6.2 is locked in `requirements-dev.txt`, and `make venv` installs
+hooks through `.venv/bin/pre-commit`. It does not install or invoke a global
+tool and does not hide installation failure.
+
+**Reason.** The hook runner enforces repository gates, so its version and
+installation must be reproduced by the same hashed, wheels-only development
+lock as the hooks it drives.
+
 ## 2026-09-08 §11 — A CI job arrives with the code it scans
 
 Phase 0 ships `lint`, `types`, `test`, `security` and `size`. `postgres`,

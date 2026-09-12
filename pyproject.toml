@@ -36,6 +36,7 @@ exclude = ["^\\.venv/", "^vendor/"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --cov --cov-report=xml --cov-report=term:skip-covered"
+markers = ["live_provider: makes a paid call to the configured provider"]
 
 [tool.coverage.run]
 branch = true
