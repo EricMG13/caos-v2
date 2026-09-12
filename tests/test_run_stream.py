@@ -79,13 +79,10 @@ def test_sse_closes_after_terminal_delivery(
         ),
     )
 
-    # An event queued behind the terminal one. Nothing the host writes puts one
-    # there -- a terminal run accepts no further transition -- so it is inserted
-    # directly. Without it this test would pass whether or not the tail stopped,
-    # because the terminal event happens to be last.
+    # Late billing may follow a terminal event; it must not keep this tail open.
     conn.execute(
         "INSERT INTO run_events (run_id, seq, name) VALUES (%s, %s, %s)",
-        (run_id, 4, RunEvent.ATTEMPT_STARTED.value),
+        (run_id, 5, RunEvent.CALL_OUTCOME_RECORDED.value),
     )
     conn.commit()
 
@@ -93,11 +90,15 @@ def test_sse_closes_after_terminal_delivery(
 
     assert _names(delivered) == [
         RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
     assert delivered[-1].name == RunEvent.RUN_COMPLETE.value, "the last thing sent"
-    assert len(delivered) == 3, "delivery stopped at the terminal event"
+    assert len(delivered) == 4, "delivery stopped at the terminal event"
+    assert _names(
+        list(tail(conn, run_id=run_id, actor_id=viewer, last_event_id=4))
+    ) == [RunEvent.CALL_OUTCOME_RECORDED.value]
 
 
 def test_a_failed_run_closes_the_stream_too(
@@ -152,10 +153,11 @@ def test_a_tail_resumes_after_last_event_id(
     )
 
     assert _names(resumed) == [
+        RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
-    assert [event.id for event in resumed] == [2, 3]
+    assert [event.id for event in resumed] == [2, 3, 4]
 
 
 def test_resuming_from_the_last_event_delivers_nothing(

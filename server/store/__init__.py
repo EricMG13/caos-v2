@@ -40,6 +40,10 @@ MIGRATIONS = (
         "0006_budget",
         Path(__file__).with_name("0006_budget.sql").read_text(encoding="utf-8"),
     ),
+    (
+        "0007_call_outcomes",
+        Path(__file__).with_name("0007_call_outcomes.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

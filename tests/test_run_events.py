@@ -114,9 +114,11 @@ def test_terminal_event_is_exactly_once(
     # list -- which is exactly what Phase 4 did when ATTEMPT_ACCEPTED arrived.
     names = _names(conn, run_id)
     assert names.count(RunEvent.RUN_COMPLETE.value) == 1
+    assert names.count(RunEvent.CALL_OUTCOME_RECORDED.value) == 1
     assert names.count(RunEvent.ATTEMPT_ACCEPTED.value) == 1
     assert names == [
         RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
@@ -128,8 +130,8 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
 ) -> None:
     """The other side of the gap. The work happened; the transaction did not.
 
-    Nothing may survive it -- a charge without its terminal event is the shape
-    that lets a run be billed twice on the retry.
+    The uncommitted analytical write leaves nothing. A committed independent
+    outcome would retain its bill even if the process died before acceptance.
     """
     conn, case_id, run_id = run
     attempt_id = start_attempt(conn, run_id, "CP-1")
@@ -224,8 +226,8 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
         ),
     )
 
-    # CP-0 started, CP-1 started, CP-1 accepted, run complete.
-    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4]
+    # CP-0 started, CP-1 started, outcome recorded, CP-1 accepted, run complete.
+    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4, 5]
 
 
 def test_accept_attempt_records_the_artifact_without_ending_the_run(
@@ -306,15 +308,16 @@ def test_a_transition_that_changed_nothing_appends_no_event(
     )
 
     assert completed is False
+    assert _count(conn, "budget_ledger", run_id) == 1
     assert _names(conn, run_id) == [
         RunEvent.ATTEMPT_STARTED.value,
         RunEvent.RUN_FAILED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
     ], "a terminal run accepts nothing, so there is no ATTEMPT_ACCEPTED"
     assert run_status(conn, run_id) is RunStatus.FAILED
     # And it accepted nothing on the way past. A failed run holding an accepted
     # artifact is a node Phase 3 would recompute as COMPLETE.
     assert _count(conn, "artifacts", run_id) == 0
-    assert _count(conn, "budget_ledger", run_id) == 0
 
 
 def test_failing_a_run_twice_appends_one_event(

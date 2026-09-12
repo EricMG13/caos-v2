@@ -10,6 +10,7 @@ from conftest import route_fault
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked
 from test_route_pinning import CATALOG_PATH, PROFILE
+from test_store_schema import _records
 
 import server.store.routes as routes
 from server.boundary_text import BoundaryText
@@ -180,9 +181,12 @@ def test_normal_sql_cannot_mutate_pins(
     conn, case_id = case
     run = start_run(conn, case_id)
     digest = routes.pin_route(conn, run, route)
-    with pytest.raises(psycopg.Error, match="route pins are immutable"):
+    before = _records(conn)
+    subject = "(?:route pins|call records)" if " runs " in mutation else "route pins"
+    with pytest.raises(psycopg.Error, match=f"{subject} are immutable"):
         conn.execute(mutation)
     conn.rollback()
+    assert _records(conn) == before
     assert routes.pinned_route(conn, run) == digest
     assert len(events_of(conn, run)) == 1
 

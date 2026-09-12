@@ -722,6 +722,7 @@ def test_the_tail_is_served_as_an_event_stream(
     assert response.headers["cache-control"] == "no-store"
     assert [name for _, name in _sse(response.text)] == [
         "ATTEMPT_STARTED",
+        "CALL_OUTCOME_RECORDED",
         "ATTEMPT_ACCEPTED",
         "RUN_COMPLETE",
     ]
@@ -741,8 +742,8 @@ def test_every_frame_carries_an_id_and_a_name_and_no_state(
 
     assert [line for line in text.splitlines() if line.startswith("data:")] == [
         "data: {}"
-    ] * 3
-    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3"]
+    ] * 4
+    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3", "4"]
 
 
 def test_last_event_id_resumes_after_the_marker(
@@ -756,7 +757,7 @@ def test_last_event_id_resumes_after_the_marker(
     _finish(conn, run_id)
 
     text = client.get(
-        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "2"}
+        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "3"}
     ).text
 
     assert [name for _, name in _sse(text)] == ["RUN_COMPLETE"]
@@ -777,7 +778,7 @@ def test_a_last_event_id_that_is_not_a_number_starts_from_the_beginning(
         headers={**_as(viewer), "last-event-id": "; DROP TABLE runs"},
     ).text
 
-    assert len(_sse(text)) == 3
+    assert len(_sse(text)) == 4
 
 
 def test_an_unauthorised_tail_is_the_same_private_404(
@@ -909,7 +910,7 @@ def test_startup_applies_the_declared_schema(
 
 
 def _finish(conn: StoreConnection, run_id: UUID) -> None:
-    """Three events: started, accepted, complete."""
+    """Four events: started, outcome recorded, accepted, complete."""
     attempt_id = start_attempt(conn, run_id, "CP-1")
     complete_attempt(
         conn,
