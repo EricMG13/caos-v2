@@ -45,14 +45,28 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # because "not yet" with no reason is how a list like this becomes a list of
 # tests nobody intends to write.
 #
-# It is empty again. Phase 11 named eight exit tests -- three for the gate,
-# three for the verdict, two for the chain -- before the work that satisfies
-# them existed, and each left this list in the PR that wrote the test it
-# names, which is the direction the list should move in. What the plan still
-# owes is work it never named a test for -- the qualification-set harness, its
-# answer keys and the matrix -- and this gate cannot see that, which is why a
-# phase is not closed on the strength of it alone.
-NOT_YET_REACHED: set[str] = set()
+# Phase 11's eight names left this list one at a time, as each test was
+# written, which is the direction it should move in. Phase 12's nine are named
+# by the plan before the work that satisfies them exists, and leave the same
+# way. What the plan still owes is work it never named a test for -- the
+# qualification-set harness, its answer keys and the matrix -- and this gate
+# cannot see that, which is why a phase is not closed on the strength of it
+# alone.
+NOT_YET_REACHED: set[str] = {
+    # Phase 12, the handoff: no module payload exists yet, so a register, a
+    # critical column and a cited figure are all things no artifact carries.
+    "test_the_declared_register_schema_matches_the_bundles_own_contract",
+    "test_a_handoff_carries_every_register_its_module_declares",
+    "test_a_row_missing_a_critical_column_is_refused",
+    "test_a_figure_is_cited_or_null_with_a_gap",
+    "test_the_host_computes_the_confidence_the_module_reports_counts",
+    "test_the_prompt_carries_the_companions_the_skill_calls_mandatory",
+    "test_cp1_produces_its_declared_registers_from_real_documents",
+    # Phase 12, the display: nothing serves a section document, and the
+    # workspace's Analysis body is the widget set this phase replaces.
+    "test_the_analysis_document_is_built_from_accepted_handoffs",
+    "test_the_analysis_section_renders_a_handoffs_narrative_and_tables",
+}
 
 
 def named_in_the_plan() -> set[str]:
