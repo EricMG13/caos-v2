@@ -26,7 +26,9 @@ Starting the build: [`docs/INITIALISATION_PROMPT.md`](docs/INITIALISATION_PROMPT
 The repository was seeded on 2026-09-10 from the CAOS-Final specification
 (`docs/DECISIONS.md` §12) and now contains the rebuilt application plus the
 Phase 9 workspace. Its gates are being repaired in the ordered slices tracked
-by [`docs/REPAIR_PLAN.md`](docs/REPAIR_PLAN.md); Phase 1 is not yet complete.
+by [`docs/REPAIR_PLAN.md`](docs/REPAIR_PLAN.md). Phase 1 was accepted at
+`e3964e6ec1d64a7d7059eef4211b251e1a2fe9e9`; Phase 2 is in progress.
+This is not application or release acceptance.
 
 ## Local development
 
