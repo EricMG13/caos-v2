@@ -43,7 +43,7 @@ from server.api.app import (
     store_connection,
 )
 from server.blobs import BlobStore
-from server.engine.route import resolve_route
+from server.engine.route import ResolvedRoute, resolve_route
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke, standing_of
@@ -345,6 +345,29 @@ def test_the_run_document_carries_node_states_with_their_reasons(
     assert by_module["CP-1"]["gate_verdict"] is None
 
 
+def _accept_gate(
+    conn: StoreConnection,
+    run_id: UUID,
+    route: ResolvedRoute,
+    tmp_path: Path,
+    verdicts: object,
+) -> None:
+    """Accept a CP-0 artifact whose readiness map is `verdicts`. The blob store
+    is on the same root the `client` fixture points the app's injected one at --
+    not a second store, but the one the request is about to read from."""
+    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
+    digest = BlobStore(tmp_path / "blobs").put(
+        json.dumps({"content_to_module_map": verdicts}).encode("utf-8")
+    )
+    accept_attempt(
+        conn,
+        attempt_id=start_attempt(conn, run_id, cp0),
+        accepted=Accepted(
+            artifact_sha256=digest, charge=CHARGE, model=MODEL, generation_id=GENERATION
+        ),
+    )
+
+
 def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
     client: TestClient,
     case: tuple[StoreConnection, UUID],
@@ -360,30 +383,16 @@ def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
     run_id, viewer = run
     route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
     pin_route(conn, run_id, route)
-    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
-
-    # The same root the `client` fixture points the app's injected blob store
-    # at (both resolve `tmp_path` within this one test, so this is not a second
-    # store -- it is the one the request is about to read from).
-    blobs = BlobStore(tmp_path / "blobs")
-    digest = blobs.put(
-        json.dumps(
-            {
-                "content_to_module_map": [
-                    {"module_id": "CP-1", "readiness_status": "BLOCKED"},
-                    {"module_id": "CP-2", "readiness_status": "READY"},
-                    {"module_id": "CP-2D", "readiness_status": "READY"},
-                ]
-            }
-        ).encode("utf-8")
-    )
-    attempt_id = start_attempt(conn, run_id, cp0)
-    accept_attempt(
+    _accept_gate(
         conn,
-        attempt_id=attempt_id,
-        accepted=Accepted(
-            artifact_sha256=digest, charge=CHARGE, model=MODEL, generation_id=GENERATION
-        ),
+        run_id,
+        route,
+        tmp_path,
+        [
+            {"module_id": "CP-1", "readiness_status": "BLOCKED"},
+            {"module_id": "CP-2", "readiness_status": "READY"},
+            {"module_id": "CP-2D", "readiness_status": "READY"},
+        ],
     )
 
     body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
@@ -393,6 +402,31 @@ def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
     assert by_module["CP-1"]["waiting_on"] == []
     assert by_module["CP-1"]["gate_verdict"] == "BLOCKED"
     assert by_module["CP-2"]["gate_verdict"] == "READY"
+
+
+def test_a_stored_gate_map_the_host_cannot_bound_is_a_server_fault(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """`READINESS_INVALID` became reachable here in Phase 11: the verdict is read
+    out of an artifact this server wrote, so a map it cannot bound is the
+    server's own fault. Absent from `_STATUS` it answered 400 -- telling the
+    caller their request was the problem, about bytes they do not hold."""
+    conn, _case_id = case
+    run_id, viewer = run
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    pin_route(conn, run_id, route)
+    _accept_gate(conn, run_id, route, tmp_path, "READY")
+
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+
+    assert (response.status_code, response.json()) == (
+        503,
+        {"refusal": "READINESS_INVALID"},
+    )
 
 
 def test_the_one_qa_gate_reads_as_a_gate(

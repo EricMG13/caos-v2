@@ -649,8 +649,11 @@ about a module would be a gate that cleared it by omission.
 limitation; READY leaves the edges in charge. A blocked node costs no call and
 no charge, and the run completes with it reported unrun. The run surface carries
 the verdict as `NodeView.gate_verdict`, because a node the gate blocked has no
-unmet edge for `waiting_on` to name and a state with no cause is what
-`SYSTEM_SPEC.md` §9's run document exists to avoid.
+unmet edge for `waiting_on` to name — and a state with no cause is the thing
+`NodeView` ("a node's state and the reason for it") and `waiting_on` ("a surface
+reporting BLOCKED with no cause tells a reader the run is stuck without telling
+them what it is stuck on") each exist to prevent. `SYSTEM_SPEC.md` §9 is the
+wire's strictness rules and says nothing about it; those two docstrings do.
 
 **Only the gate may answer.** For every other module the host asks for no map,
 and one returned anyway is an undeclared field — the same answer `extra=forbid`

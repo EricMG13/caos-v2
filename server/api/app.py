@@ -104,6 +104,10 @@ _STATUS = {
     RefusalCode.BLOB_NOT_FOUND: 503,
     RefusalCode.BLOB_DIGEST_MISMATCH: 503,
     RefusalCode.BLOB_ADDRESS_INVALID: 503,
+    # The gate's map is read out of a stored artifact, so a map the host cannot
+    # bound is bytes this server wrote -- a store fault like the three above it,
+    # and nothing the caller holds could be corrected to avoid it.
+    RefusalCode.READINESS_INVALID: 503,
 }
 
 

@@ -33,6 +33,28 @@ def _url_for(database: str) -> str:
     return urlunsplit(parts._replace(path=f"/{database}"))
 
 
+def gate_verdict(prompt: str, status: str = "READY") -> dict[str, object]:
+    """The gate's readiness map when the prompt asked for one, nothing when it
+    did not -- merged by a stub into the body it was already returning.
+
+    Phase 11 refuses a gate that does not cover every other module of the pinned
+    route, so four completion stubs need the same extra key; here once rather
+    than as four copies of one row. Every fixture route in this suite with a gate
+    is DEEP_RESEARCH -- CP-0 and CP-DR alone -- so one row covers the rest of it.
+    """
+    if "content_to_module_map" not in prompt:
+        return {}
+    return {
+        "content_to_module_map": [
+            {
+                "module_id": "CP-DR",
+                "readiness_status": status,
+                "readiness_effect": "what the admitted source allows",
+            }
+        ]
+    }
+
+
 @pytest.fixture
 def case(empty_database: str) -> Iterator[tuple[object, UUID]]:
     """An open case on a committed connection, with the schema applied.

@@ -411,20 +411,27 @@ ROUTE = frozenset({"CP-0", "CP-1", "CP-2"})
 EXPECTED = frozenset({"CP-1", "CP-2"})
 
 
+def _answer(rows: object) -> str:
+    """A gate answer whose map is `rows`, whatever shape the case gives it."""
+    return json.dumps({"claims": [], "content_to_module_map": rows})
+
+
+_ROW = {"module_id": "CP-1", "readiness_status": "READY", "readiness_effect": "e"}
+
+
+def _row(**fields: object) -> dict[str, object]:
+    """`_ROW` with whatever the case replaces. Typed `object`, because half the
+    cases below are about a row whose values are not strings."""
+    return {**_ROW, **fields}
+
+
 def _map(**statuses: str) -> str:
-    return json.dumps(
-        {
-            "claims": [],
-            "content_to_module_map": [
-                {
-                    "module_id": module_id,
-                    "readiness_status": status,
-                    "readiness_effect": f"{module_id} effect",
-                }
-                for module_id, status in statuses.items()
-            ],
-        }
-    )
+    """The gate's whole answer for the modules named, every row valid."""
+    rows = [
+        _row(module_id=name, readiness_status=status, readiness_effect=f"{name} effect")
+        for name, status in statuses.items()
+    ]
+    return _answer(rows)
 
 
 def test_the_gate_returns_a_readiness_row_for_every_module_it_was_asked_about() -> None:
@@ -447,129 +454,30 @@ def test_a_gate_answer_missing_a_pinned_module_is_refused() -> None:
     assert caught.value.code is RefusalCode.READINESS_INCOMPLETE
 
 
+# The other module `EXPECTED` names, answered properly: each case below is about
+# one row, and a map covering only that row would refuse READINESS_INCOMPLETE
+# before the check under test was reached.
+_OK = _row(module_id="CP-2")
+
+
 @pytest.mark.parametrize(
-    "body",
+    "rows",
     [
-        json.dumps({"claims": [], "content_to_module_map": "READY"}),
-        json.dumps({"claims": [], "content_to_module_map": [{"module_id": "CP-1"}]}),
-        json.dumps(
-            {
-                "claims": [],
-                "content_to_module_map": [
-                    {
-                        "module_id": "CP-1",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                        "confidence": 90,
-                    },
-                    {
-                        "module_id": "CP-2",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                ],
-            }
+        pytest.param("READY", id="not a list"),
+        pytest.param([{"module_id": "CP-1"}], id="row missing keys"),
+        pytest.param([_row(confidence=90), _OK], id="undeclared key"),
+        pytest.param([_row(readiness_status="PROBABLY"), _OK], id="unknown status"),
+        pytest.param([_row(module_id="CP-9"), _OK], id="unknown module"),
+        pytest.param([_row(), _row(readiness_status="BLOCKED")], id="duplicate module"),
+        pytest.param([_row(module_id=["CP-1"]), _OK], id="non-string module id"),
+        pytest.param(
+            [_row(readiness_effect=90), _OK], id="non-string readiness effect"
         ),
-        json.dumps(
-            {
-                "claims": [],
-                "content_to_module_map": [
-                    {
-                        "module_id": "CP-1",
-                        "readiness_status": "PROBABLY",
-                        "readiness_effect": "e",
-                    },
-                    {
-                        "module_id": "CP-2",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                ],
-            }
-        ),
-        json.dumps(
-            {
-                "claims": [],
-                "content_to_module_map": [
-                    {
-                        "module_id": "CP-9",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                    {
-                        "module_id": "CP-2",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                ],
-            }
-        ),
-        json.dumps(
-            {
-                "claims": [],
-                "content_to_module_map": [
-                    {
-                        "module_id": "CP-1",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                    {
-                        "module_id": "CP-1",
-                        "readiness_status": "BLOCKED",
-                        "readiness_effect": "e",
-                    },
-                ],
-            }
-        ),
-        json.dumps(
-            {
-                "claims": [],
-                "content_to_module_map": [
-                    {
-                        "module_id": ["CP-1"],
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                    {
-                        "module_id": "CP-2",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                ],
-            }
-        ),
-        json.dumps(
-            {
-                "claims": [],
-                "content_to_module_map": [
-                    {
-                        "module_id": "CP-1",
-                        "readiness_status": "READY",
-                        "readiness_effect": 90,
-                    },
-                    {
-                        "module_id": "CP-2",
-                        "readiness_status": "READY",
-                        "readiness_effect": "e",
-                    },
-                ],
-            }
-        ),
-    ],
-    ids=[
-        "not a list",
-        "row missing keys",
-        "undeclared key",
-        "unknown status",
-        "unknown module",
-        "duplicate module",
-        "non-string module id",
-        "non-string readiness effect",
     ],
 )
-def test_a_readiness_map_the_host_cannot_bound_is_refused(body: str) -> None:
+def test_a_readiness_map_the_host_cannot_bound_is_refused(rows: object) -> None:
     with pytest.raises(Refusal) as caught:
-        parse_readiness(body, expected=EXPECTED)
+        parse_readiness(_answer(rows), expected=EXPECTED)
 
     assert caught.value.code is RefusalCode.READINESS_INVALID
 
@@ -609,14 +517,11 @@ def test_the_stored_gate_artifact_carries_its_readiness(
     """The rows live in the canonical bytes, so the artifact digest covers what
     the gate decided."""
     conn, source_id, delivered = admitted
-    body = json.loads(_body(source_id))
-    body["content_to_module_map"] = [
-        {
-            "module_id": "CP-1",
-            "readiness_status": "READY_WITH_LIMITATIONS",
-            "readiness_effect": "no audited statements",
-        }
-    ]
+    verdict = _row(
+        readiness_status="READY_WITH_LIMITATIONS",
+        readiness_effect="no audited statements",
+    )
+    body = json.loads(_body(source_id)) | {"content_to_module_map": [verdict]}
 
     outcome = execute_module(
         conn,
@@ -629,14 +534,8 @@ def test_the_stored_gate_artifact_carries_its_readiness(
 
     [row] = outcome.envelope.readiness
     assert row.module_id == "CP-1"
-    stored = json.loads(canonical(outcome.envelope))["content_to_module_map"]
-    assert stored == [
-        {
-            "module_id": "CP-1",
-            "readiness_status": "READY_WITH_LIMITATIONS",
-            "readiness_effect": "no audited statements",
-        }
-    ]
+    # The row the module sent, back out of the bytes the digest addresses.
+    assert json.loads(canonical(outcome.envelope))["content_to_module_map"] == [verdict]
 
 
 def test_a_node_receives_its_direct_predecessors_accepted_claims() -> None:

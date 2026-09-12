@@ -36,6 +36,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import gate_verdict
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -108,32 +109,26 @@ class _Completions:
         if len(self.prompts) == self.refuses_call:
             raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE)
         source_id = prompt.split("source_id: ")[1].split("\n")[0].strip()
-        body: dict[str, object] = {
-            "claims": [
+        return Completion(
+            content=json.dumps(
                 {
-                    "statement": "Total debt was reported.",
-                    "citations": [
+                    "claims": [
                         {
-                            "source_id": source_id,
-                            "page": 1,
-                            "matched_text": QUOTE,
+                            "statement": "Total debt was reported.",
+                            "citations": [
+                                {
+                                    "source_id": source_id,
+                                    "page": 1,
+                                    "matched_text": QUOTE,
+                                }
+                            ],
                         }
                     ],
+                    # A verdict on the rest of the route, when the prompt is the
+                    # gate's. Every case here runs CP-0 and CP-DR alone.
+                    **gate_verdict(prompt),
                 }
-            ]
-        }
-        if "content_to_module_map" in prompt:
-            # Every case in this suite runs the same two-node pathway (CP-0,
-            # CP-DR), so the gate has exactly one other module to answer for.
-            body["content_to_module_map"] = [
-                {
-                    "module_id": "CP-DR",
-                    "readiness_status": "READY",
-                    "readiness_effect": "the admitted source covers it",
-                }
-            ]
-        return Completion(
-            content=json.dumps(body),
+            ),
             charge=Decimal("0.0000041"),
             generation_id="gen-harness-test",
         )

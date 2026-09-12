@@ -28,6 +28,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from conftest import gate_verdict
 from tracked import tracked_python
 
 from server.blobs import BlobStore
@@ -72,32 +73,26 @@ class _Completions:
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls.append(prompt[:24])
-        body: dict[str, object] = {
-            "claims": [
+        return Completion(
+            content=json.dumps(
                 {
-                    "statement": "Total debt was USD 1,240.0m.",
-                    "citations": [
+                    "claims": [
                         {
-                            "source_id": str(self.source_id),
-                            "page": 1,
-                            "matched_text": QUOTE,
+                            "statement": "Total debt was USD 1,240.0m.",
+                            "citations": [
+                                {
+                                    "source_id": str(self.source_id),
+                                    "page": 1,
+                                    "matched_text": QUOTE,
+                                }
+                            ],
                         }
                     ],
+                    # A verdict on the rest of the route, when the prompt is the
+                    # gate's. `catalog_route` below is CP-0 and CP-DR alone.
+                    **gate_verdict(prompt),
                 }
-            ]
-        }
-        if "content_to_module_map" in prompt:
-            # This fixture's route is CP-0 and CP-DR alone (`catalog_route`
-            # below), so the gate has exactly one other module to answer for.
-            body["content_to_module_map"] = [
-                {
-                    "module_id": "CP-DR",
-                    "readiness_status": "READY",
-                    "readiness_effect": "the one admitted source covers it",
-                }
-            ]
-        return Completion(
-            content=json.dumps(body),
+            ),
             charge=Decimal("0.0000041"),
             generation_id="gen-proof-test",
         )
