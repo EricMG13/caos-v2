@@ -28,6 +28,7 @@ from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_evidence
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.audit import audit_trail
 from server.store.gates import (
     Gate,
     GateApproval,
@@ -179,6 +180,39 @@ def test_withdrawal_is_a_governed_write(
 
     assert caught.value.code is RefusalCode.NOT_AUTHORISED
     assert source_set_fingerprint(conn, case_id)
+
+
+def test_withdrawing_what_is_not_live_here_is_refused_and_recorded_nowhere(
+    gated: tuple[StoreConnection, UUID, UUID, UUID, UUID], tmp_path: Path
+) -> None:
+    """The audit chain records decisions that happened.
+
+    A second withdrawal, another case's source and an id that names nothing all
+    changed no row -- and each wrote SOURCE_WITHDRAWN into this case's chain, so
+    the chain claimed four withdrawals where there had been one.
+    """
+    conn, case_id, _run_id, source_id, approver = gated
+    other = conn.execute(
+        "INSERT INTO cases (case_id, title) VALUES (%s, %s) RETURNING case_id",
+        (uuid4(), "another issuer"),
+    ).fetchone()
+    assert other is not None
+    [foreign] = admit_pack(
+        conn,
+        BlobStore(tmp_path / "other"),
+        case_id=other[0],
+        documents=[Document(filename=BoundaryText.of("b.txt"), data=b"Beta line\n")],
+    )
+    conn.commit()
+    withdraw_source(conn, case_id=case_id, source_id=source_id, actor_id=approver)
+
+    for target in (source_id, foreign, uuid4()):
+        with pytest.raises(Refusal) as caught:
+            withdraw_source(conn, case_id=case_id, source_id=target, actor_id=approver)
+        assert caught.value.code is RefusalCode.EVIDENCE_NOT_AVAILABLE
+
+    actions = [entry.action for entry in audit_trail(conn, case_id)]
+    assert actions.count("SOURCE_WITHDRAWN") == 1
 
 
 def test_a_reader_cannot_release_a_gate(

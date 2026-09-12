@@ -22,6 +22,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -178,7 +180,10 @@ def test_store_connection_refuses_without_a_database_url(
     with pytest.raises(Refusal) as caught:
         next(store_connection())
 
-    assert caught.value.code is RefusalCode.STORE_NOT_TRANSACTIONAL
+    # Not STORE_NOT_TRANSACTIONAL, which it used to be: that code names an
+    # autocommit connection, and a reader chasing it would look for the wrong
+    # misconfiguration.
+    assert caught.value.code is RefusalCode.STORE_NOT_CONFIGURED
 
 
 def test_store_connection_opens_a_real_connection_from_the_environment(
@@ -205,7 +210,95 @@ def test_blob_store_refuses_without_a_blob_root(
     with pytest.raises(Refusal) as caught:
         blob_store()
 
-    assert caught.value.code is RefusalCode.BLOB_NOT_FOUND
+    assert caught.value.code is RefusalCode.STORE_NOT_CONFIGURED
+
+
+def test_a_misconfigured_store_is_a_server_fault_not_a_bad_request(
+    case: tuple[StoreConnection, UUID],
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the blob root unset every run read failed 400 BLOB_NOT_FOUND --
+    telling the client its request was bad, and answering an unknown run with
+    something other than the 404 a stranger always gets. A store the process
+    cannot reach is the server's fault, the same for every caller."""
+    conn, _case_id = case
+    monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+    monkeypatch.delenv("CAOS_BLOB_ROOT", raising=False)
+    app.dependency_overrides[store_connection] = lambda: conn
+    try:
+        with TestClient(app) as opened:
+            response = opened.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"refusal": "STORE_NOT_CONFIGURED"}
+
+
+def test_a_store_that_does_not_answer_is_a_server_fault(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A configured store that does not answer -- the commonest store fault --
+    reached every caller as a bare 500, and the server's log as psycopg's
+    message naming the host, port and role. It is refused like any other store
+    fault: 503, and the code alone, with nothing chained behind it."""
+    monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+    monkeypatch.setenv(app_module.BLOB_ROOT, str(tmp_path))
+    with TestClient(app) as opened:
+        monkeypatch.setenv(
+            app_module.DATABASE_URL,
+            "postgresql://caos@127.0.0.1:1/caos?connect_timeout=2",
+        )
+        named = opened.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+        anonymous = opened.get(f"/api/runs/{uuid4()}/events")
+
+    for response in (named, anonymous):
+        assert (response.status_code, response.json()) == (
+            503,
+            {"refusal": "STORE_UNAVAILABLE"},
+        )
+    with pytest.raises(Refusal) as caught:
+        next(store_connection())
+    assert caught.value.code == "STORE_UNAVAILABLE"
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_only_a_run_id_that_cannot_be_read_is_answered_as_a_missing_run() -> None:
+    """Registered for the whole app, the handler answered every malformed path
+    parameter as a missing run, so the first route to take a case id would have
+    said RUN_NOT_FOUND about it. Any other path keeps FastAPI's default until
+    its route says what it should get."""
+    other = FastAPI()
+    other.add_exception_handler(
+        RequestValidationError, app.exception_handlers[RequestValidationError]
+    )
+
+    @other.get("/api/cases/{case_id}")
+    def read_case(case_id: UUID) -> str:
+        return str(case_id)
+
+    assert TestClient(other).get("/api/cases/not-a-case").status_code == 422
+
+
+def test_a_malformed_run_id_is_answered_like_any_unknown_run(
+    client: TestClient, run: tuple[UUID, UUID]
+) -> None:
+    """A path that cannot name a run names no run. FastAPI's own 422 answered
+    it instead -- before identity, in a body that is not the declared refusal
+    and that quotes the input back."""
+    _run_id, viewer = run
+    unknown = client.get(f"/api/runs/{uuid4()}", headers=_as(viewer))
+
+    for path in ("/api/runs/not-a-run", "/api/runs/not-a-run/events"):
+        named = client.get(path, headers=_as(viewer))
+        anonymous = client.get(path)
+
+        assert (named.status_code, named.json()) == (404, unknown.json())
+        assert (anonymous.status_code, anonymous.json()) == (
+            401,
+            {"refusal": "NOT_AUTHENTICATED"},
+        )
 
 
 def test_blob_store_is_rooted_at_the_environment_path(
@@ -570,7 +663,7 @@ def test_a_process_with_no_database_refuses_to_start(
     with pytest.raises(Refusal) as caught, TestClient(app):
         pass  # pragma: no cover -- entering the client is what raises
 
-    assert caught.value.code is RefusalCode.STORE_NOT_TRANSACTIONAL
+    assert caught.value.code is RefusalCode.STORE_NOT_CONFIGURED
 
 
 def test_startup_applies_the_declared_schema(

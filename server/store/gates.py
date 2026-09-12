@@ -154,11 +154,17 @@ def withdraw_source(
     )
 
     def write(connection: StoreConnection) -> None:
-        connection.execute(
+        withdrawn = connection.execute(
             "UPDATE sources SET withdrawn_at = now()"
             " WHERE source_id = %s AND case_id = %s AND withdrawn_at IS NULL",
             (source_id, case_id),
-        )
+        ).rowcount
+        if not withdrawn:
+            # Already withdrawn, another case's, or no source at all: nothing
+            # was withdrawn, so the chain must not say something was. One code
+            # for the three, as `read_evidence` gives one -- the difference
+            # between them is not this caller's to learn from a refusal.
+            raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
 
     governed_write(conn, action, write)
 
