@@ -14,38 +14,61 @@ what that run is.
 from __future__ import annotations
 
 from json import dumps, loads
+from re import fullmatch
+from typing import Any
 from uuid import UUID
 
+import psycopg
+
+from server.boundary_text import BoundaryText
 from server.engine.route import (
     Edge,
     EdgeType,
     ResolvedRoute,
     RouteNode,
+    dependency_order,
     route_digest,
 )
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.events import RunEvent, append, lock_run
 
 
 def pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> str:
-    """Pin `resolved` to the run and return its digest."""
+    """Own the atomic pin/event transaction, including replay and refusal."""
+    if conn.autocommit:
+        raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
+    try:
+        digest = _pin_route(conn, run_id, resolved)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+    return digest
+
+
+def _pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> str:
+    try:
+        raw = _canonical(resolved)
+    except (TypeError, ValueError, AttributeError, RecursionError):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID) from None
+    resolved = _decode(raw)
     digest = route_digest(resolved)
-    lock_run(conn, run_id)
-
-    row = conn.execute(
-        "SELECT route_digest FROM run_routes WHERE run_id = %s", (run_id,)
-    ).fetchone()
-    if row is not None:
-        if str(row[0]) != digest:
-            # Rolled back before refusing, for the reason the replay below
-            # commits: this transaction holds the run row lock, and a refused
-            # plan gate should not keep the next one waiting on it.
-            conn.rollback()
+    status = lock_run(conn, run_id)
+    stored = resolved_route(conn, run_id)
+    if stored is not None:
+        if route_digest(stored) != digest:
             raise Refusal(RefusalCode.ROUTE_ALREADY_PINNED)
-        conn.commit()  # the same gate, replayed; the lock is not worth holding
         return digest
-
+    if status is not RunStatus.RUNNING:
+        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    if conn.execute(
+        "SELECT 1 FROM run_attempts WHERE run_id = %s LIMIT 1", (run_id,)
+    ).fetchone():
+        raise Refusal(RefusalCode.ROUTE_PIN_TOO_LATE)
     conn.execute(
         "INSERT INTO run_routes (run_id, profile_id, selection_id, route_digest,"
         " resolved) VALUES (%s, %s, %s, %s, %s)",
@@ -54,20 +77,17 @@ def pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> s
             resolved.profile_id,
             resolved.selection_id,
             digest,
-            _canonical(resolved),
+            raw,
         ),
     )
     append(conn, run_id, RunEvent.ROUTE_PINNED)
-    conn.commit()
     return digest
 
 
 def pinned_route(conn: StoreConnection, run_id: UUID) -> str | None:
     """The digest pinned to this run, or None. What execution reads."""
-    row = conn.execute(
-        "SELECT route_digest FROM run_routes WHERE run_id = %s", (run_id,)
-    ).fetchone()
-    return None if row is None else str(row[0])
+    route = resolved_route(conn, run_id)
+    return None if route is None else route_digest(route)
 
 
 def resolved_route(conn: StoreConnection, run_id: UUID) -> ResolvedRoute | None:
@@ -77,38 +97,114 @@ def resolved_route(conn: StoreConnection, run_id: UUID) -> ResolvedRoute | None:
     to draw a running route would draw whatever the catalog says today, which is
     the one thing pinning exists to prevent.
     """
-    row = conn.execute(
-        "SELECT resolved FROM run_routes WHERE run_id = %s", (run_id,)
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT profile_id, selection_id, route_digest, resolved::text"
+            " FROM run_routes WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+    except psycopg.Error:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     if row is None:
         return None
-    stored = loads(row[0]) if isinstance(row[0], str | bytes) else row[0]
+    route = _decode(row[3])
+    if (route.profile_id, route.selection_id, route_digest(route)) != row[:3]:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return route
+
+
+def _fields(value: object, fields: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != set(fields.split()):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return value
+
+
+def _items(value: object, maximum: int) -> list[Any]:
+    if not isinstance(value, list) or len(value) > maximum:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return value
+
+
+def _identifier(value: object) -> str:
+    if not isinstance(value, str) or not fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return value
+
+
+def _decode(raw: str) -> ResolvedRoute:
+    """Validate stored shape without coercing, reordering or changing its hash.
+
+    Catalog: 18 routes, max19 nodes/88 edges, IDs57/6 and stages1-19.
+    Limits allow both host slots99/100 and headroom: 128 nodes/IDs/predicates,
+    1024 edges, 8,388,608 JSON characters (including worst-case ASCII escapes).
+    Predicates reuse the existing 4096 text boundary.
+    """
+    if len(raw) > 8_388_608:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    try:
+        return _rebuild(loads(raw))
+    except (Refusal, TypeError, ValueError, RecursionError):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID) from None
+
+
+def _rebuild(value: object) -> ResolvedRoute:
+    stored = _fields(value, "profile_id selection_id nodes edges predicates")
+    nodes = tuple(_node(node) for node in _items(stored["nodes"], 128))
+    edges = tuple(_edge(edge) for edge in _items(stored["edges"], 1024))
+    predicates = tuple(_predicate(pair) for pair in _items(stored["predicates"], 128))
+    modules = {node.module_id for node in nodes}
+    if (
+        not nodes
+        or len({n.route_node_id for n in nodes}) != len(nodes)
+        or len(set(edges)) != len(edges)
+        or any(e.source not in modules or e.target not in modules for e in edges)
+        or len({p[0] for p in predicates}) != len(predicates)
+        or dependency_order(nodes, edges) != nodes
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     return ResolvedRoute(
-        profile_id=str(stored["profile_id"]),
-        selection_id=str(stored["selection_id"]),
-        nodes=tuple(
-            RouteNode(
-                route_node_id=str(node["route_node_id"]),
-                module_id=str(node["module_id"]),
-                stage=int(node["stage"]),
-            )
-            for node in stored["nodes"]
-        ),
-        edges=tuple(
-            Edge(
-                source=str(edge["source"]),
-                target=str(edge["target"]),
-                type=EdgeType(edge["type"]),
-            )
-            for edge in stored["edges"]
-        ),
-        predicates=tuple((str(pair[0]), str(pair[1])) for pair in stored["predicates"]),
+        _identifier(stored["profile_id"]),
+        _identifier(stored["selection_id"]),
+        nodes,
+        edges,
+        predicates,
     )
 
 
+def _node(value: object) -> RouteNode:
+    node = _fields(value, "route_node_id module_id stage")
+    if type(node["stage"]) is not int or not 1 <= node["stage"] <= 100:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return RouteNode(
+        _identifier(node["route_node_id"]),
+        _identifier(node["module_id"]),
+        node["stage"],
+    )
+
+
+def _edge(value: object) -> Edge:
+    edge = _fields(value, "source target type")
+    return Edge(
+        _identifier(edge["source"]), _identifier(edge["target"]), EdgeType(edge["type"])
+    )
+
+
+def _predicate(value: object) -> tuple[str, str]:
+    pair = _items(value, 2)
+    if (
+        len(pair) != 2
+        or not isinstance(pair[1], str)
+        or not pair[1].strip()
+        or BoundaryText.of(pair[1]).value != pair[1]
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return _identifier(pair[0]), pair[1]
+
+
 def _canonical(resolved: ResolvedRoute) -> str:
-    """The route as stored: the same shape `route_digest` hashes, so what a
-    replay reads back and what the digest promised cannot disagree."""
+    """Stored object shape; route_digest retains its established array shape."""
     return dumps(
         {
             "profile_id": resolved.profile_id,
@@ -125,7 +221,7 @@ def _canonical(resolved: ResolvedRoute) -> str:
                 {"source": edge.source, "target": edge.target, "type": edge.type.value}
                 for edge in resolved.edges
             ],
-            "predicates": [list(pair) for pair in resolved.predicates],
+            "predicates": resolved.predicates,
         },
         sort_keys=True,
         separators=(",", ":"),

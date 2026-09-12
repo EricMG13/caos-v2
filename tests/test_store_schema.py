@@ -31,6 +31,7 @@ from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_block
 from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
+from server.store.routes import resolved_route
 from server.store.runs import create_case, run_status, start_run
 
 # A declared schema that differs from the repository's by one table -- the shape
@@ -305,12 +306,13 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         assert _catalog(conn) == catalog
 
 
+@pytest.mark.parametrize("prefix", [2, 3])
 def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
-    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
 ) -> None:
     with connect(empty_database) as conn:
         with monkeypatch.context() as patch:
-            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:2])
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:prefix])
             apply_schema(conn)
         blobs = BlobStore(tmp_path)
         digest = _populate(conn, blobs)
@@ -329,6 +331,10 @@ def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
         apply_schema(conn)
         assert _records(conn, columns) == before
         assert blobs.get(digest) == b"synthetic legacy document and artifact"
+
+        [run] = conn.execute("SELECT run_id FROM runs").fetchone() or ()
+        with pytest.raises(Refusal, match=r"^ROUTE_IDENTITY_INVALID$"):
+            resolved_route(conn, run)
 
 
 def test_populated_legacy_advances_and_repeat_preserves_history(
@@ -420,7 +426,7 @@ def test_failed_migration_rolls_back_and_releases_lock(
             _legacy(conn)
         elif state == "versioned":
             apply_schema(conn)
-        before = _columns(conn)
+        before, catalog = _columns(conn), _catalog(conn)
         conn.commit()
         monkeypatch.setattr(
             store,
@@ -440,22 +446,28 @@ def test_failed_migration_rolls_back_and_releases_lock(
         assert failed_states == [psycopg.pq.TransactionStatus.INERROR]
         assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
         assert _columns(conn) == before
+        assert _catalog(conn) == catalog
         with connect(empty_database) as other:
             assert other.execute(
                 "SELECT pg_try_advisory_xact_lock(%s)", (store._SCHEMA_LOCK,)
             ).fetchone() == (True,)
 
 
-@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("state", ["fresh", "legacy", "prefix"])
 def test_concurrent_starters_apply_once(
     empty_database: str,
-    legacy: bool,
+    state: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    if legacy:
+    if state != "fresh":
         with connect(empty_database) as conn:
-            _legacy(conn)
+            if state == "legacy":
+                _legacy(conn)
+            else:
+                with monkeypatch.context() as patch:
+                    patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:3])
+                    apply_schema(conn)
             _populate(conn, BlobStore(tmp_path))
     monkeypatch.setattr(
         store,

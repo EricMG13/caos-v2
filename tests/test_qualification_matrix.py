@@ -29,7 +29,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import gate_verdict
+from conftest import gate_verdict, route_fault
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -298,7 +298,8 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
     word for itself -- a match the host cannot stand behind is worse to a
     reviewer than an honest miss beside a refusal that explains it.
     """
-    ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    with route_fault(ran.conn):
+        ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
     ran.conn.commit()
 
     key = _one_case(ran)
@@ -307,6 +308,31 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
     assert row.refusal is RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED
     assert row.met == ()
     assert row.missed == key.expects
+
+
+_SECONDARY_REFUSALS = (
+    RefusalCode.ROUTE_IDENTITY_INVALID,
+    RefusalCode.STORE_UNAVAILABLE,
+    RefusalCode.RUN_NOT_FOUND,
+)
+
+
+@pytest.mark.parametrize("code", _SECONDARY_REFUSALS)
+def test_refusal(ran: Ran, monkeypatch: pytest.MonkeyPatch, code: RefusalCode) -> None:
+    from server.qualification import matrix
+
+    def refuse(*_args: object) -> None:
+        raise Refusal(code)
+
+    monkeypatch.setattr(matrix, "_cited", refuse)
+    key = _one_case(ran)
+    if code is not RefusalCode.ROUTE_IDENTITY_INVALID:
+        with pytest.raises(Refusal, match=f"^{code}$"):
+            _matrix(ran, QualificationSet(cases=(key,)))
+        return
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is code
+    assert not row.proven and not row.met and row.missed == key.expects
 
 
 def test_the_matrix_refuses_a_key_with_no_run(ran: Ran) -> None:

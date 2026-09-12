@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
@@ -31,6 +32,22 @@ _LIVE_CONFIGURATION = (
     "OPENROUTER_MODEL",
     "CAOS_TEST_POSTGRES_URL",
 )
+
+
+@contextmanager
+def route_fault(conn: object) -> Iterator[None]:
+    """Privileged corruption only in this suite's disposable UUID databases."""
+    from typing import cast
+
+    from server.store import StoreConnection
+
+    connection = cast(StoreConnection, conn)
+    row = connection.execute("SELECT current_database()").fetchone()
+    assert row is not None and row[0].startswith("caos_test_")
+    with connection.transaction():
+        connection.execute("ALTER TABLE run_routes DISABLE TRIGGER route_immutable")
+        yield
+        connection.execute("ALTER TABLE run_routes ENABLE TRIGGER route_immutable")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

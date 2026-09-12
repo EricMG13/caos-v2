@@ -28,12 +28,12 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from conftest import gate_verdict
+from conftest import gate_verdict, route_fault
 from tracked import tracked_python
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute, resolve_route
+from server.engine.route import ResolvedRoute, resolve_route, route_digest
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
@@ -45,7 +45,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant
-from server.store.routes import pin_route
+from server.store.routes import _canonical, pin_route
 from server.store.runs import start_run
 
 REPO = Path(__file__).resolve().parents[1]
@@ -266,7 +266,8 @@ def test_the_proof_refuses_a_run_whose_route_was_never_pinned(
     ran: Ran,
 ) -> None:
     """ "Ran as pinned" is unanswerable without a pin (invariant 10)."""
-    ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    with route_fault(ran.conn):
+        ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
     ran.conn.commit()
 
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED
@@ -276,10 +277,13 @@ def test_the_proof_refuses_a_node_the_pin_does_not_carry(ran: Ran) -> None:
     """An accepted artifact for a node outside the pinned route is the exact
     failure invariant 10 exists to prevent: execution that did not read the pin.
     """
-    truncated = replace(ran.route, nodes=ran.route.nodes[:1])
-    ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    truncated = replace(ran.route, nodes=ran.route.nodes[:1], edges=())
+    with route_fault(ran.conn):
+        ran.conn.execute(
+            "UPDATE run_routes SET resolved = %s, route_digest = %s WHERE run_id = %s",
+            (_canonical(truncated), route_digest(truncated), ran.run_id),
+        )
     ran.conn.commit()
-    pin_route(ran.conn, ran.run_id, truncated)
 
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE
 

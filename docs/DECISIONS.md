@@ -987,3 +987,53 @@ costs O(manifest bytes) per entry lookup; there is no additional cache or lock.
 Persisted run comparisons, source/research/approval bindings, shared root
 reference delivery and the §29 canonical Markdown runtime remain subsequent
 work. This prerequisite does not close F01/F04 or change the claims-only runtime.
+
+## 2026-09-12 §36 — Verify stored route identity and refuse late pin creation
+
+Both `resolved_route` and `pinned_route` use one verified read of stored JSON,
+profile, selection and digest. Decode the exact consumed object shape without
+string/integer coercion; require nonempty unique route-node/module identities,
+known unique typed edges with present endpoints, an acyclic closed graph in the
+existing dependency order, and unique predicate keys paired with bounded text.
+Malformed or inconsistent state refuses `ROUTE_IDENTITY_INVALID`; API readers
+report this as the established sanitized 503 store failure. Missing pins remain
+`None`; read transactions stay owned by their caller.
+
+The installed catalog was measured: 18 selectable routes, at most 19 nodes and
+88 edges, stages 1–19, node IDs at most 57 characters and module IDs at most 6.
+Resource bounds are 128 nodes, 1024 edges, 128 predicates, 128-character ASCII
+identifiers, stages 1–100 and the existing 4096-character `BoundaryText` predicate
+value limit. Host research/model slots 99/100 remain supported. The coarse JSON
+parse ceiling is 8,388,608 **characters**, enough for all bounded fields even
+with worst-case ASCII Unicode escapes; this is not a byte-size claim or a
+database transfer limit. Exact field/count bounds are the primary validation.
+The vendor identity helper's two-digit stage grammar is not substituted.
+
+The existing `route_digest` contract is unchanged: node arrays, sorted edge
+arrays and the original predicate ordering. Stored JSON keeps its object shape;
+predicate containers reach JSON serialization directly so malformed strings or
+mapping pairs cannot become valid pairs through iteration. No second route
+hash, catalog upgrade or generic serialization framework is introduced.
+
+`pin_route` validates the same invariants, takes the shared case-first/run lock,
+and owns one commit for the row and ROUTE_PINNED event. A valid exact replay
+checks actual stored content and can return the historical digest after the run
+is terminal, without adding an event. A new pin requires RUNNING and no attempt;
+otherwise it refuses RUN_NOT_RUNNING or ROUTE_PIN_TOO_LATE. Conflicts leave the
+existing pin/event intact. Autocommit is refused; refusal, database failure and
+cancellation roll back or close the connection, including commit-time failures.
+
+Append-only migration `0004_route_integrity` forbids normal UPDATE, DELETE and
+TRUNCATE of route pins, including TRUNCATE CASCADE. Historical rows are preserved
+without guessed inputs or automatic repair. Privileged trigger removal remains
+outside this guarantee; corruption regressions explicitly disable only the
+named row guard inside a transaction in their own disposable test databases,
+restore it before asserting reader/proof outcomes, and verify failure cleanup.
+Both legacy-upgrade and already-migrated backup/restore proofs retain native
+catalogs, original rows and synthetic blobs; see MIGRATIONS.md.
+
+This is a Phase2 prerequisite for complete run-input pins. It does not enforce
+execution approvals, certify methodology selection, change canonical handoffs,
+or close F01. Source version/fingerprint, coherent bundle identity, host adapter
+and actual research content still need one complete run binding; runtime must
+later reject route-only legacy runs before execution.
