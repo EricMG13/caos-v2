@@ -156,25 +156,38 @@ jobs:
           SONAR_HOST_URL: https://sonarcloud.io
 
   provider:
-    # One real call, nightly. A provider suite that never called the provider is
-    # the vacuous pass docs/AI_CODE_QUALITY.md section 4 forbids, so this job
-    # exists to make the skip impossible: CAOS_REQUIRE_PROVIDER=1 turns a missing
-    # credential into a failure rather than a green tick.
+    # The live calls, nightly: one bare completion, CP-1 alone, and a whole run
+    # from admitted documents to a proven route (tests/test_live_run.py). A
+    # provider suite that never called the provider is the vacuous pass
+    # docs/AI_CODE_QUALITY.md section 4 forbids, so this job exists to make the
+    # skip impossible: CAOS_REQUIRE_PROVIDER=1 turns a missing credential into a
+    # failure rather than a green tick, and CAOS_REQUIRE_POSTGRES=1 does the
+    # same for the store the two runs need.
     if: github.event_name != 'pull_request' && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        # Digest-pinned; a tag alone is not a pin. postgres:17-alpine.
+        image: postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env: {POSTGRES_PASSWORD: caos, POSTGRES_DB: caos}
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+        ports: ["5432:5432"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: {python-version: "3.14"}
       - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
-      - run: pytest tests/test_provider.py
+      - run: pytest tests/test_provider.py tests/test_module_execution.py tests/test_live_run.py
         env:
           # The key is a repository secret and the model id a repository
           # variable; neither appears in a file this repository tracks.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
           CAOS_REQUIRE_PROVIDER: "1"
+          CAOS_TEST_POSTGRES_URL: postgresql://postgres:caos@localhost:5432/caos
+          CAOS_REQUIRE_POSTGRES: "1"
 
   image:
     # Arrives with the Dockerfile it scans (docs/DECISIONS.md section 11). Until

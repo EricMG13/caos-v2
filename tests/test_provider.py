@@ -347,6 +347,78 @@ def test_the_error_handler_adds_no_scheme_the_opener_did_not_have(url: str) -> N
     assert director.open(urllib.request.Request(url)) is None, "no handler served it"
 
 
+def test_the_provider_is_configured_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§16: the repository reads these three names. Until `from_environment`
+    only the tests did, so a live test proved the test's wiring rather than the
+    application's."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://gateway.example/api/v1")
+
+    provider = OpenRouter.from_environment()
+
+    assert provider.api_key == "not-a-real-key"
+    assert provider.model == "openai/gpt-4o-mini"
+    assert provider.base_url == "https://gateway.example/api/v1"
+
+
+def test_the_base_url_defaults_when_the_environment_names_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+
+    assert OpenRouter.from_environment().base_url == DEFAULT_BASE_URL
+
+
+@pytest.mark.parametrize("unset", ["OPENROUTER_API_KEY", "OPENROUTER_MODEL"])
+def test_an_environment_missing_the_key_or_the_model_configures_no_provider(
+    monkeypatch: pytest.MonkeyPatch, unset: str
+) -> None:
+    """The model has no default, and a missing key is a 401 the provider would
+    take a round trip to report. Both are refused before any call -- with the
+    code alone, never the key that was present."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-not-a-real-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.delenv(unset)
+
+    with pytest.raises(Refusal) as caught:
+        OpenRouter.from_environment()
+
+    assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+    assert "sk-or-v1" not in f"{caught.value!r} {caught.value}"
+
+
+def test_the_key_never_appears_in_the_providers_repr() -> None:
+    """A repr is what a failed assertion, a debugger and a log line all print,
+    and the provider is the one object carrying §16's secret."""
+    provider = OpenRouter(api_key="sk-or-v1-not-a-real-key", model="openai/gpt-4o-mini")
+
+    assert "sk-or-v1" not in repr(provider)
+
+
+def test_a_key_no_header_can_carry_is_refused_without_quoting_it() -> None:
+    """A key read with its line ending attached. `http.client` refuses the
+    header with a `ValueError` whose message is the header itself -- the key --
+    and that is no transport failure, so it left the boundary untyped. Nothing
+    is sent; the address is this machine's discard port in case it ever is."""
+    provider = OpenRouter(
+        api_key="sk-or-v1-not-a-real-key\r\n",
+        model="openai/gpt-4o-mini",
+        base_url="https://127.0.0.1:9",
+    )
+
+    with pytest.raises(Refusal) as caught:
+        provider.complete(PROMPT)
+
+    assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+    leaked = str(caught.value) + repr(caught.value) + repr(caught.value.__cause__)
+    assert "sk-or-v1" not in leaked
+
+
 def test_the_live_provider_returns_a_completion() -> None:
     """The one call that really leaves the machine.
 
