@@ -345,10 +345,11 @@ def test_legacy_acceptance_replay_never_invents_an_outcome(
     legacy: str,
 ) -> None:
     conn, run, attempt = money_run
+    accepted = replace(ACCEPTED, model="legacy model")
     if legacy != "artifact":
         conn.execute(
             "INSERT INTO budget_ledger (attempt_id,run_id,amount) VALUES (%s,%s,%s)",
-            (attempt, run, ACCEPTED.charge),
+            (attempt, run, accepted.charge),
         )
     if legacy != "ledger":
         conn.execute(
@@ -357,22 +358,22 @@ def test_legacy_acceptance_replay_never_invents_an_outcome(
             " SELECT %s,run_id,case_id,%s,%s,%s FROM runs WHERE run_id=%s",
             (
                 attempt,
-                ACCEPTED.artifact_sha256,
-                ACCEPTED.model,
-                ACCEPTED.generation_id,
+                accepted.artifact_sha256,
+                accepted.model,
+                accepted.generation_id,
                 run,
             ),
         )
     conn.commit()
     before = _records(conn)
     if legacy == "exact":
-        assert not runs.accept_attempt(conn, attempt_id=attempt, accepted=ACCEPTED)
+        assert not runs.accept_attempt(conn, attempt_id=attempt, accepted=accepted)
     else:
         with pytest.raises(Refusal, match=r"^CALL_OUTCOME_LEGACY$"):
             runs.accept_attempt(
                 conn,
                 attempt_id=attempt,
-                accepted=replace(ACCEPTED, charge=Decimal("0.26")),
+                accepted=replace(accepted, charge=Decimal("0.26")),
             )
     assert _records(conn) == before
     with pytest.raises(Refusal, match=r"^CALL_OUTCOME_LEGACY$"):
