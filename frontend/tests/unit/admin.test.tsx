@@ -42,6 +42,14 @@ describe("Admin", () => {
     );
   });
 
+  test("the admin document claims no route or process the deployment does not have", () => {
+    // GET /api/health is specified (SYSTEM_SPEC §11) and not served; the one
+    // process has no worker (SYSTEM_SPEC §1).
+    const text = JSON.stringify(fixture);
+    expect(text).not.toContain("HEALTH · 200");
+    expect(text).not.toMatch(/\bworker\b/);
+  });
+
   test("admin does not pretend: no settings form, no toggles, no controls", () => {
     const { container } = mount(fixture);
     expect(container.querySelector("form")).toBeNull();

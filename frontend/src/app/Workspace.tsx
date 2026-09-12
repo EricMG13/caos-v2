@@ -98,7 +98,12 @@ export function Workspace({ section }: { section: Section }) {
 
   return (
     <div className="ap" data-section={section}>
-      <Ribbon ribbon={(chrome ?? fallback).ribbon} subject={chrome?.subject ?? null} />
+      <Ribbon
+        ribbon={(chrome ?? fallback).ribbon}
+        subject={chrome?.subject ?? null}
+        tabs={chrome?.tabs.map((tab) => tab.id)}
+        onTab={(id) => setTabChoice({ key, value: id })}
+      />
       <DecisionBrief brief={(chrome ?? fallback).brief} />
       <SectionTabs
         label={SECTION_LABELS[section]}

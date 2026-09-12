@@ -12,7 +12,21 @@ const TONE: Record<string, string> = {
   neutral: "",
 };
 
-export function Ribbon({ ribbon, subject }: { ribbon: RibbonWire; subject: Subject | null }) {
+export function Ribbon({
+  ribbon,
+  subject,
+  tabs,
+  onTab,
+}: {
+  ribbon: RibbonWire;
+  subject: Subject | null;
+  /** The section's own tabs. An action naming any other tab opens nothing, so it
+      stays refused, for that reason, rather than becoming a live control that
+      does nothing. */
+  tabs?: readonly string[];
+  /** Opens a tab of this section: the one kind of action the workspace performs itself. */
+  onTab?: (tab: string) => void;
+}) {
   const actions = ribbon.actions.slice(0, 3);
   return (
     <header className="ribbon" aria-label="Ribbon">
@@ -45,17 +59,27 @@ export function Ribbon({ ribbon, subject }: { ribbon: RibbonWire; subject: Subje
           <span className="lbl">approval</span>
           {ribbon.approval}
         </span>
-        {actions.map((action, index) => (
-          <RefusedControl
-            key={index}
-            refusal={action.refusal}
-            reasonDisplay="hidden"
-            className={`rb ${action.primary ? "solid" : ""}`}
-            data-primary={action.primary || undefined}
-          >
-            {action.label}
-          </RefusedControl>
-        ))}
+        {actions.map((action, index) => {
+          const tab = action.tab !== undefined && tabs?.includes(action.tab) ? action.tab : null;
+          // A tab the section does not have is the reason, not a missing route.
+          const refusal =
+            action.refusal ??
+            (action.tab !== undefined && tab === null
+              ? { code: "VIEW_UNPLACED", clears: `this section has a ${action.tab} tab` }
+              : null);
+          return (
+            <RefusedControl
+              key={index}
+              refusal={refusal}
+              onClick={tab !== null && onTab ? () => onTab(tab) : undefined}
+              reasonDisplay="hidden"
+              className={`rb ${action.primary ? "solid" : ""}`}
+              data-primary={action.primary || undefined}
+            >
+              {action.label}
+            </RefusedControl>
+          );
+        })}
       </div>
     </header>
   );

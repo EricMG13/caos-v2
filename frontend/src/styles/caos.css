@@ -126,6 +126,8 @@ button.rb{cursor: pointer}
 .chip{display: inline-flex;align-items: center;gap: 5px;height: 18px;padding: 0 7px;border-radius: 999px;font: 500 8.5px var(--font-mono);color: var(--acc-t);background: color-mix(in srgb, var(--acc) 8%, transparent);border: 1px solid var(--acc-bd);white-space: nowrap;cursor: pointer}
 .chip .pg{color: var(--caos-muted);font-size: 8px}
 .chip.linked,.chip[aria-expanded="true"]{outline: 2px solid var(--caos-accent);outline-offset: -1px;background: color-mix(in srgb, var(--acc) 18%, transparent)}
+/* A citation of a withdrawn source: struck through and dashed, so the mark is shape as well as hue. */
+.chip.withdrawn{border-style: dashed;border-color: color-mix(in srgb, var(--warn) 55%, transparent);color: var(--warn-t);text-decoration: line-through}
 .sug{display: inline-flex;align-items: center;gap: 5px;height: 17px;padding: 0 6px;border-radius: 3px;font: 600 8px var(--font-mono);letter-spacing: 0.07em;border: 1px dashed color-mix(in srgb, var(--warn) 55%, transparent);color: var(--warn-t);background: color-mix(in srgb, var(--warn) 7%, transparent);white-space: nowrap}
 /* ================= tables ================= */
 table.fin,table.proj,table.cases,table.reg,table.prov{width: 100%;border-collapse: collapse}
@@ -454,6 +456,7 @@ table.proj td .cellbtn{box-sizing: border-box;width: calc(100% + 14px);margin: -
 /* A citation on paper is a 24 px target drawn as a small pill inside its sentence: the button carries the hit box, the inner span the ink. */
 .rd-paper button.rd-cite{display: inline-flex;align-items: center;min-height: 24px;min-width: 24px;border: 0;padding: 0 2px;margin: -7px 0 -7px 3px;vertical-align: middle}
 .rd-paper button.rd-cite > span{border: 1px solid var(--paper-rule);border-radius: 3px;padding: 0 4px;line-height: 1.5}
+.rd-paper button.rd-cite.withdrawn > span{border-style: dashed;text-decoration: line-through}
 .rd-paper button.rd-cite:focus-visible > span{outline: 2px solid var(--paper-cite);outline-offset: 1px}
 /* The provenance index on paper takes the paper's ink, not the terminal's. */
 .rd-paper table.prov th{color: var(--paper-meta);border-color: var(--paper-rule)}

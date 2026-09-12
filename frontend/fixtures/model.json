@@ -30,7 +30,10 @@
         {
           "label": "Compare cases",
           "primary": true,
-          "refusal": null
+          "refusal": {
+            "code": "VIEW_UNPLACED",
+            "clears": "the Model section draws BASE and DOWNSIDE side by side — each case's table reads in turn on the Projection tab"
+          }
         }
       ]
     },
@@ -814,7 +817,8 @@
           "bboxes": [[0.12, 0.33, 0.76, 0.05]],
           "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027, secured by Carvana LLC vehicle inventory and cash deposit accounts.",
           "observed_at": "2026-09-09T14:30:00Z",
-          "render_url": null
+          "render_url": null,
+          "withdrawn_at": "2026-09-09T09:41:00Z"
         }
       }
     ],
@@ -10241,7 +10245,8 @@
             "bboxes": [[0.12, 0.33, 0.76, 0.05]],
             "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027, secured by Carvana LLC vehicle inventory and cash deposit accounts.",
             "observed_at": "2026-09-09T14:30:00Z",
-            "render_url": null
+            "render_url": null,
+            "withdrawn_at": "2026-09-09T09:41:00Z"
           },
           {
             "chip": "D-02 p.18 ¶2",
@@ -10282,7 +10287,8 @@
             "bboxes": [[0.12, 0.33, 0.76, 0.05]],
             "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027, secured by Carvana LLC vehicle inventory and cash deposit accounts.",
             "observed_at": "2026-09-09T14:30:00Z",
-            "render_url": null
+            "render_url": null,
+            "withdrawn_at": "2026-09-09T09:41:00Z"
           }
         },
         "deviation": null

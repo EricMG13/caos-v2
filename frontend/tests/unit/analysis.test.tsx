@@ -7,6 +7,7 @@ import { fireEvent, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { AnalysisSection } from "@/sections/analysis/AnalysisSection";
+import { Conflicts } from "@/sections/analysis/Conflicts";
 import { PASSPORT_FIELDS, type DocumentOf } from "@/wire";
 
 const fixture = JSON.parse(
@@ -155,6 +156,45 @@ describe("analysis", () => {
       expect(shown.textContent).toContain(item.state);
       expect(shown.querySelector(".why")?.textContent).toBe(item.reason);
     });
+  });
+
+  test("the frontier is the nodes that may run now, and names no module the host does not place", () => {
+    const partial = JSON.parse(
+      readFileSync(join(__dirname, "../../fixtures/states/analysis.partial.json"), "utf8"),
+    ) as DocumentOf<"analysis">;
+    for (const document of [fixture, partial]) {
+      // CONTEXT.md: the frontier is the nodes RUNNABLE or RESTRICTED.
+      for (const item of document.body.frontier) {
+        expect(["RUNNABLE", "RESTRICTED"]).toContain(item.state);
+      }
+      for (const item of document.chrome.rail_local?.items ?? []) {
+        expect(item.meta).toMatch(/^(RUNNABLE|RESTRICTED)\b/);
+      }
+      // DECISIONS §14: the host places no CP-MEMO.
+      expect(JSON.stringify(document)).not.toContain("CP-MEMO");
+    }
+  });
+
+  test("the source register agrees with Upload on each source's grade and disposition", () => {
+    const upload = JSON.parse(
+      readFileSync(join(__dirname, "../../fixtures/upload.json"), "utf8"),
+    ) as DocumentOf<"upload">;
+    for (const row of fixture.body.register) {
+      const source = upload.body.sources.find((entry) => entry.source_id === row.label);
+      expect(source, row.label).toBeDefined();
+      expect([row.grade, row.disposition], row.label).toEqual([source!.grade, source!.disposition]);
+    }
+  });
+
+  test("an empty conflict register raises no warning", () => {
+    const { container } = render(
+      <EvidenceProvider>
+        <Conflicts conflicts={[]} />
+      </EvidenceProvider>,
+    );
+    expect(container.querySelector("[data-conflicts] header [data-severity]")).toBeNull();
+    expect(container.querySelector("[data-conflicts] header .tag.warn")).toBeNull();
+    expect(container).toHaveTextContent("No definition conflict is served for this module.");
   });
 
   test("capital structure carries seniority and leverage-through; triggers are armed", () => {

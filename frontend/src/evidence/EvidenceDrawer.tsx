@@ -96,7 +96,21 @@ export function EvidenceDrawer({
             </dd>
             <dt>Rectangles</dt>
             <dd>{citation.bboxes.length}</dd>
+            {citation.withdrawn_at ? (
+              <>
+                <dt>Withdrawn</dt>
+                <dd data-withdrawn>
+                  <time dateTime={citation.withdrawn_at}>{citation.withdrawn_at}</time>
+                </dd>
+              </>
+            ) : null}
           </dl>
+          {citation.withdrawn_at ? (
+            <div className="note limitation">
+              <b>This source has been withdrawn.</b> The citation stays so the conclusion that rests
+              on it stays explicable; a read of the source now refuses at the boundary.
+            </div>
+          ) : null}
           <div className="focusnote">
             <b>Escape</b> returns focus to the chip that opened this.
           </div>

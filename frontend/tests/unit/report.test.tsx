@@ -75,6 +75,16 @@ describe("Report", () => {
     expect(nextRevisionId("rev_12")).toBe("rev_13");
   });
 
+  test("the opinion panel names the viewer as the viewer, never as the signer", () => {
+    const { container } = mount();
+    const panel = q(container, "section[aria-labelledby='opinion-title']");
+    const labels = [...panel.querySelectorAll("dt")].map((dt) => dt.textContent);
+    // rev_4 is unsigned: a 'Signer' row holding the viewer's role says they signed.
+    expect(report.body.opinion).toBeNull();
+    expect(labels).not.toContain("Signer");
+    expect(labels).toContain("You");
+  });
+
   test("test_report_surface_is_not_paper", () => {
     const { container } = mount();
     expect(container.querySelector(".rd-paper")).toBeNull();

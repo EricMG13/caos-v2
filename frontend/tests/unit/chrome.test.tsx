@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { Rail } from "@/chrome/Rail";
 import { Ribbon } from "@/chrome/Ribbon";
@@ -54,6 +54,107 @@ describe("the chrome", () => {
         doc.chrome.ribbon.actions.filter((a) => a.primary),
         name,
       ).toHaveLength(1);
+      unmount();
+    }
+  });
+
+  test("a ribbon action that names a tab of this section is live and opens it", () => {
+    const opened: string[] = [];
+    render(
+      <Ribbon
+        ribbon={{
+          chips: [],
+          execution: "IDLE",
+          persistence: "SAVED",
+          approval: "UNRATIFIED",
+          actions: [{ label: "Compare", primary: true, refusal: null, tab: "compare" }],
+        }}
+        subject={null}
+        tabs={["table", "compare"]}
+        onTab={(tab) => opened.push(tab)}
+      />,
+    );
+    const compare = screen.getByRole("button", { name: "Compare" });
+    expect(compare).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(compare);
+    expect(opened).toEqual(["compare"]);
+  });
+
+  test("an action naming a tab the section does not have is refused for that, never a live no-op", () => {
+    const opened: string[] = [];
+    render(
+      <Ribbon
+        ribbon={{
+          chips: [],
+          execution: "IDLE",
+          persistence: "SAVED",
+          approval: "UNRATIFIED",
+          actions: [{ label: "Compare", primary: true, refusal: null, tab: "nope" }],
+        }}
+        subject={null}
+        tabs={["table", "compare"]}
+        onTab={(tab) => opened.push(tab)}
+      />,
+    );
+    const compare = screen.getByRole("button", { name: "Compare" });
+    expect(compare).toHaveAttribute("aria-disabled", "true");
+    // The reason is the missing tab, not a missing API route.
+    expect(compare).toHaveAttribute("data-refusal", "VIEW_UNPLACED");
+    expect(compare.getAttribute("title")).toContain("nope");
+    fireEvent.click(compare);
+    expect(opened).toEqual([]);
+  });
+
+  test("the book's primary Compare opens its Compare tab", () => {
+    const book = documents().find(([name]) => name === "book.json")![1];
+    const primary = book.chrome.ribbon.actions.find((action) => action.primary);
+    expect(primary).toMatchObject({ label: "Compare", refusal: null, tab: "compare" });
+    expect(book.chrome.tabs.map((tab) => tab.id)).toContain("compare");
+  });
+
+  test("every refusal a fixture carries reads as a clause after 'clears when', and names no build phase", () => {
+    const frames = readdirSync(`${FIXTURES}run/frames`).map((name) => `run/frames/${name}`);
+    const clauses: string[] = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(walk);
+      if (typeof value !== "object" || value === null) return;
+      const record = value as Record<string, unknown>;
+      if (typeof record["code"] === "string" && typeof record["clears"] === "string") {
+        clauses.push(record["clears"]);
+      }
+      Object.values(record).forEach(walk);
+    };
+    for (const [, doc] of documents()) walk(doc);
+    for (const name of frames) walk(JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8")));
+    // A scan that found nothing would pass every assertion below.
+    expect(clauses.length).toBeGreaterThan(20);
+    for (const clause of clauses) {
+      // Every surface reads it as "Clears when " + clause + ".".
+      expect(clause).toMatch(/^[a-z]/);
+      expect(clause.endsWith(".")).toBe(false);
+      expect(clause).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
+    }
+  });
+
+  test("every refused control in the chrome names what clears it today, never a build phase", () => {
+    for (const [name, doc] of documents()) {
+      const { container, unmount } = render(
+        <MemoryRouter>
+          <Ribbon ribbon={doc.chrome.ribbon} subject={doc.chrome.subject} />
+          <Rail
+            section="analysis"
+            entries={doc.chrome.rail}
+            local={doc.chrome.rail_local}
+            servedRole={doc.chrome.served_role}
+            search=""
+          />
+        </MemoryRouter>,
+      );
+      for (const control of container.querySelectorAll("[aria-disabled='true']")) {
+        expect(control.getAttribute("title"), name).not.toMatch(
+          /Phase \d|REBUILD_PLAN|backend phase/,
+        );
+      }
       unmount();
     }
   });
