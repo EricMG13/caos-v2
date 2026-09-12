@@ -327,6 +327,13 @@ def _perform_one(
     except Refusal as unprovable:
         refusal = unprovable.code
 
+    try:
+        unrun = _unrun(conn, blobs, run_id)
+    except Refusal as unattributed:
+        if unattributed.code is not RefusalCode.ROUTE_IDENTITY_INVALID:
+            raise
+        proof, refusal, unrun = None, unattributed.code, ()
+
     return Performed(
         case_label=case.label,
         run_id=run_id,
@@ -334,7 +341,7 @@ def _perform_one(
         stopped=stopped,
         proof=proof,
         refusal=refusal,
-        unrun=_unrun(conn, blobs, run_id),
+        unrun=unrun,
     )
 
 
@@ -354,7 +361,7 @@ def _unrun(conn: StoreConnection, blobs: BlobStore, run_id: UUID) -> tuple[Unrun
 
     Empty is the whole route having run. A node here is not a failure by itself
     — BLOCKED is the route's own rules being applied — which is why the state
-    travels with the name.
+    travels with the name. Invalid route identity means unknown attribution.
     """
     route = resolved_route(conn, run_id)
     if route is None:

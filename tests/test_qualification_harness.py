@@ -36,7 +36,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import gate_verdict
+from conftest import gate_verdict, route_fault
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -165,7 +165,8 @@ class _DamagesWhatWasAccepted:
             # Committed, because this stands for another process moving the
             # store: `perform` rolls back the transaction the refusal leaves
             # open, and an uncommitted delete would simply come back.
-            self.conn.execute("DELETE FROM run_routes")
+            with route_fault(self.conn):
+                self.conn.execute("DELETE FROM run_routes")
             self.conn.commit()
         else:
             for [digest] in self.conn.execute("SELECT artifact_sha256 FROM artifacts"):
@@ -754,6 +755,51 @@ def test_a_run_whose_pin_is_gone_reports_no_pinned_nodes(
         assert record.stopped is RefusalCode.PROVIDER_UNAVAILABLE
         assert record.refusal is RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED
         assert record.unrun == ()
+
+
+def test_a_late_invalid_pin_clears_proof_and_preserves_the_stopped_record(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.qualification import harness as subject
+    from server.store import apply_schema, connect
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        blobs = BlobStore(tmp_path / "blobs")
+        original = subject._unrun
+
+        def corrupt(c: StoreConnection, b: BlobStore, run: UUID) -> tuple[Unrun, ...]:
+            with route_fault(c):
+                c.execute(
+                    "UPDATE run_routes SET route_digest = repeat('0', 64)"
+                    " WHERE run_id = %s",
+                    (run,),
+                )
+            c.commit()
+            return original(c, b, run)
+
+        monkeypatch.setattr(subject, "_unrun", corrupt)
+        [record] = _perform(
+            conn,
+            blobs,
+            QualificationSet(cases=(_case("invalid-pin", REPORT),)),
+            refuses_call=2,
+        ).performed
+        assert record.stopped is RefusalCode.PROVIDER_UNAVAILABLE
+        assert record.refusal is RefusalCode.ROUTE_IDENTITY_INVALID
+        assert record.proof is None and record.unrun == ()
+
+        def unavailable(*_args: object) -> None:
+            raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+
+        monkeypatch.setattr(subject, "_unrun", unavailable)
+        with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$"):
+            _perform(
+                conn,
+                blobs,
+                QualificationSet(cases=(_case("store-down", REPORT),)),
+                refuses_call=2,
+            )
 
 
 def test_a_performed_set_concludes_nothing() -> None:

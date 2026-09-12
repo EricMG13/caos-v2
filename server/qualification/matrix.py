@@ -205,7 +205,13 @@ def _row(
     except Refusal as failed:
         refusal = failed.code
 
-    cited = _cited(conn, blobs, run_id)
+    try:
+        cited = _cited(conn, blobs, run_id)
+    except Refusal as unattributed:
+        if unattributed.code is not RefusalCode.ROUTE_IDENTITY_INVALID:
+            raise
+        refusal = unattributed.code
+        cited = set()
     met = tuple(expect for expect in case.expects if _matches(expect, cited))
     return MatrixRow(
         case_label=case.label,
@@ -231,7 +237,7 @@ def _cited(
     The module is taken from the route pin, not from the envelope that claims it
     — the same reason `proof.py` does (invariant 3: the host owns identity). A
     run with no pin cites nothing this function can attribute, which is a row
-    that misses every key rather than one that raises.
+    that misses every key; an invalid pin refuses so `_row` records uncertainty.
     """
     route = resolved_route(conn, run_id)
     module_of = (
