@@ -117,8 +117,9 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     without a database.
 
     "Postgres schema in full at startup" is the store's rule, and `apply_schema`
-    is idempotent -- it applies to an empty database, checks the digest against
-    an applied one, and refuses `STORE_SCHEMA_DRIFT` when they disagree. Doing it
+    is idempotent -- it advances a verified migration prefix on this fresh
+    connection and refuses `STORE_SCHEMA_DRIFT` for unknown or edited history.
+    It commits the migration transaction before requests begin. Doing it
     here rather than lazily means a process pointed at the wrong database dies at
     boot instead of serving 500s that look like a bug in the route.
     """
