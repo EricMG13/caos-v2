@@ -8,14 +8,16 @@ application and vendor sources were not changed. Baseline was
 
 ## F02 reproduction
 
-Probe: `.superpowers/sdd/probe_f02_false_completion.py`.
+Probe: `tests/probes/f02_false_completion.py` (not named `test_*.py`, so it is
+outside ordinary pytest collection while remaining inside existing test scan
+and type scope).
 
 Command (provider variables deliberately removed):
 
 ```sh
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL \
   CAOS_TEST_POSTGRES_URL=postgresql://postgres:caos@127.0.0.1:32777/caos \
-  .venv/bin/python .superpowers/sdd/probe_f02_false_completion.py
+  .venv/bin/python tests/probes/f02_false_completion.py
 ```
 
 Observed exit: `1`, as expected for the unfixed regression.
@@ -112,3 +114,39 @@ no-Excel/no-Word archived scope.
 Focused recheck: Ruff lint and format, Python compile, and `git diff --check`
 passed. The isolated probe still exited `1` with
 `stored_status=COMPLETE accepted_nodes=1/4`, the intended F02 reproduction.
+
+## CI parity correction
+
+The probe moved from scratch space to `tests/probes/f02_false_completion.py`
+because the security floor requires every committed Python file to be either
+scanned or explicitly accounted for. Its name keeps it outside ordinary pytest
+collection; its location puts it within the existing lint, mypy and scanner
+accounting. The repository root remains `Path(__file__).resolve().parents[2]`
+for the new `tests/probes/` depth.
+
+The new path was staged before CI-parity checks; `git ls-files --cached --
+tests/probes/f02_false_completion.py` returned that path. No scanner exclusion
+or local exclude configuration was added by this task. The existing
+`.superpowers/sdd/.gitignore` accounts for scratch briefs/ledgers and was left
+unchanged.
+
+Complete focused results after relocation:
+
+- `make lint types`: pass, including Ruff, format, vocabulary/tested checks and
+  strict mypy over 88 source files.
+- `.venv/bin/python scripts/scan_floors.py bandit.json --no-parse-errors
+  --cover scripts server --unscanned tests`: pass.
+- `git diff --check` and cached-diff check: pass.
+- Relocated isolated probe: expected exit `1`, with
+  `stored_status=COMPLETE accepted_nodes=1/4` and the fail-only-`COMPLETE`
+  assertion. Provider variables were removed and its no-provider tripwire was
+  not reached.
+
+Confidence review of the relocation: the main risk was a green scanner floor
+that had not discovered an untracked destination. Staging first and verifying
+the exact path through `git ls-files --cached` closed that risk. Mypy then
+exposed the probe provider's overly broad return annotation and optional query
+row; both were fixed at their types rather than suppressed. The path depth,
+pytest non-collection name, failure condition, isolated database cleanup and
+no-provider behavior were re-read and re-executed. No concern remains specific
+to the relocation; F02 itself remains the intentional open defect.

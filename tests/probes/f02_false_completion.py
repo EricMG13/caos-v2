@@ -23,7 +23,7 @@ sys.path.insert(0, str(REPO))
 from server.blobs import BlobStore  # noqa: E402
 from server.boundary_text import BoundaryText  # noqa: E402
 from server.engine.route import resolve_route  # noqa: E402
-from server.engine.runtime import Execution, run_route  # noqa: E402
+from server.engine.runtime import Execution, ProviderResult, run_route  # noqa: E402
 from server.store import RunStatus, apply_schema, connect  # noqa: E402
 from server.store.budget import reserve  # noqa: E402
 from server.store.routes import pin_route  # noqa: E402
@@ -47,7 +47,7 @@ class ProviderWasCalled(AssertionError):
 
 
 class NoProvider:
-    def execute(self, route_node_id: str, module_id: str) -> object:
+    def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
         raise ProviderWasCalled
 
 
@@ -105,9 +105,11 @@ def main() -> None:
                 execution=Execution(NoProvider(), Decimal("0.01")),
             )
             status = run_status(conn, run_id)
-            accepted = conn.execute(
+            accepted_row = conn.execute(
                 "SELECT count(*) FROM artifacts WHERE run_id = %s", (run_id,)
-            ).fetchone()[0]
+            ).fetchone()
+            assert accepted_row is not None
+            accepted = accepted_row[0]
             print(
                 f"stored_status={status.value} "
                 f"accepted_nodes={accepted}/{len(route.nodes)}"
