@@ -102,11 +102,17 @@ def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
     string kept twice is a join two callers can silently drift out of step on
     the day the schema moves under one of them and not the other.
     """
+    # Ordered, because the rows collapse into a dict and a node may hold more
+    # than one accepted attempt: the latest wins, which is a rule rather than
+    # whatever order the planner returned. Presence was all `node_states`
+    # needed; Phase 11's chain reads the winning artifact's *contents* into the
+    # next node's prompt, so which one wins is now part of the answer.
     rows = conn.execute(
         "SELECT attempts.route_node_id, artifacts.artifact_sha256"
         " FROM artifacts"
         " JOIN run_attempts AS attempts USING (attempt_id)"
-        " WHERE artifacts.run_id = %s",
+        " WHERE artifacts.run_id = %s"
+        " ORDER BY artifacts.created_at",
         (run_id,),
     ).fetchall()
     return {str(route_node_id): str(digest) for route_node_id, digest in rows}

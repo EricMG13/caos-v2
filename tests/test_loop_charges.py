@@ -29,9 +29,16 @@ from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
+from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.routes import pin_route
-from server.store.runs import run_status, start_run
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    run_status,
+    start_attempt,
+    start_run,
+)
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 PROFILE = "FULL_CREDIT_32"
@@ -312,6 +319,52 @@ def test_the_loop_hands_each_node_its_predecessors_results(
     assert "--- UPSTREAM" not in first
     assert "module_id: CP-0" in second
     assert "Total debt was USD 1,240.0m." in second
+
+
+def test_a_predecessor_artifact_of_another_shape_is_refused_not_raised(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """Valid JSON of a shape the host did not write is a typed refusal.
+
+    `_upstream` indexed the stored artifact directly, so a claim without
+    `citations` raised `KeyError` across the provider seam -- from inside
+    `_run_node`, after the reservation, out of a boundary whose whole contract
+    is that refusals are typed. It reads the way the proof reads the same bytes
+    now, and refuses with the same code.
+    """
+    conn, run_id, source_id, blobs = ready
+    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
+    digest = blobs.put(json.dumps({"claims": [{"statement": 40}]}).encode("utf-8"))
+    accept_attempt(
+        conn,
+        attempt_id=start_attempt(conn, run_id, cp0),
+        accepted=Accepted(
+            artifact_sha256=digest,
+            charge=REPORTED,
+            model=MODEL,
+            generation_id="gen-loop-test",
+        ),
+    )
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=_Completions(source_id),
+        delivered=_every_block(conn, source_id),
+        route=route,
+        run_id=run_id,
+    )
+
+    with pytest.raises(Refusal) as caught:
+        run_route(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            execution=Execution(provider, ESTIMATE),
+        )
+
+    assert caught.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
 
 
 def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(

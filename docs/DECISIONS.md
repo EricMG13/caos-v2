@@ -683,8 +683,10 @@ and a caller's copy of what a module said is a claim rather than a fact
 
 **Context, never evidence.** The section says so, and the rule that enforces it
 was already there: a citation must name delivered evidence, so a module quoting
-an earlier module's sentence is refused `CITATION_NOT_LOCATED` and loses that
-claim (§26).
+an earlier module's sentence is refused `CITATION_NOT_LOCATED`. On this tree
+that refusal takes the module's whole answer with it; §26 is what narrows it to
+the claim the quote rests on, and until §26 lands a chained module that mistakes
+its context for evidence loses the answer rather than the sentence.
 
 **What it is not.** The upstream section carries statements and quotes, because
 that is what the envelope holds. The bundle's registers — the tables a module's

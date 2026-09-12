@@ -36,6 +36,7 @@ from server.methodology.executor import (
     execute_module,
 )
 from server.provider import CompletionProvider
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
 
@@ -111,10 +112,13 @@ class ModuleProvider:
         wanted = predecessors(self.route, module_id)
         if not wanted:
             return ()
+        # Built once, not once per node: the membership test is inside a
+        # comprehension over every node of the route.
+        named = set(wanted)
         nodes = {
             node.module_id: node.route_node_id
             for node in self.route.nodes
-            if node.module_id in set(wanted)
+            if node.module_id in named
         }
         digests = artifact_digests(self.conn, self.run_id)
         upstream: list[Upstream] = []
@@ -125,23 +129,57 @@ class ModuleProvider:
             digest = digests.get(nodes.get(predecessor, ""))
             if digest is None:
                 continue
-            stored = json.loads(self.blobs.get(digest))
             upstream.append(
                 Upstream(
-                    module_id=predecessor,
-                    claims=tuple(
-                        UpstreamClaim(
-                            statement=str(claim["statement"]),
-                            quotes=tuple(
-                                str(citation["matched_text"])
-                                for citation in claim["citations"]
-                            ),
-                        )
-                        for claim in stored["claims"]
-                    ),
+                    module_id=predecessor, claims=_stored_claims(self.blobs, digest)
                 )
             )
         return tuple(upstream)
+
+
+def _stored_claims(blobs: BlobStore, artifact_sha256: str) -> tuple[UpstreamClaim, ...]:
+    """One predecessor's accepted claims, read the way a proof reads one.
+
+    The same shape as `server/qualification/proof.py`'s `_envelope`, and for the
+    same reason: these are bytes the host wrote, and bare indexing into them
+    raised `KeyError` or `TypeError` on valid JSON of another shape -- an
+    untyped exception crossing the provider seam from inside `_run_node`, after
+    the reservation. "This artifact cannot be read" is already named
+    `ORCHESTRATION_ARTIFACT_UNREADABLE`, including when the bytes will not load
+    at all, so the two readers of one artifact refuse it with one code. Nothing
+    document-derived reaches the refusal (`CLAUDE.md`: log the typed code).
+
+    An empty claim list is not refused here, unlike in the proof: this function
+    assembles context rather than proving anything, and a predecessor with
+    nothing to carry forward is an empty upstream section, not a fault.
+    """
+    try:
+        decoded = json.loads(blobs.get(artifact_sha256))
+    except (ValueError, Refusal):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
+    if not isinstance(decoded, dict):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    claims = decoded.get("claims")
+    if not isinstance(claims, list):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    return tuple(_stored_claim(claim) for claim in claims)
+
+
+def _stored_claim(claim: object) -> UpstreamClaim:
+    if not isinstance(claim, dict):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    statement = claim.get("statement")
+    citations = claim.get("citations")
+    if not isinstance(statement, str) or not isinstance(citations, list):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+
+    quotes = []
+    for citation in citations:
+        quote = citation.get("matched_text") if isinstance(citation, dict) else None
+        if not isinstance(quote, str):
+            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+        quotes.append(quote)
+    return UpstreamClaim(statement=statement, quotes=tuple(quotes))
 
 
 def canonical(envelope: Envelope) -> bytes:

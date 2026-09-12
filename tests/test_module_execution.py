@@ -539,8 +539,14 @@ def test_the_stored_gate_artifact_carries_its_readiness(
 
 
 def test_a_node_receives_its_direct_predecessors_accepted_claims() -> None:
-    """The chain: what CP-1 established reaches CP-2 as context, from the
-    host's own stored artifact rather than from a caller's summary."""
+    """The chain: what CP-1 established reaches CP-2's prompt as context, ahead
+    of the evidence and marked as not being any.
+
+    The assembly is what this asserts, over an `Upstream` the test hands in.
+    That those values are read from the host's own stored artifact rather than
+    from a caller's summary is `test_the_loop_hands_each_node_its_predecessors_results`
+    in `tests/test_loop_charges.py`, which takes them back out of a real run.
+    """
     upstream = [
         Upstream(
             module_id="CP-1",
@@ -583,8 +589,9 @@ def test_an_upstream_statement_is_not_citable_evidence(
     admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
 ) -> None:
     """Invariant 11 does not soften for the chain: a module quoting an earlier
-    module's sentence rather than the document is refused, and §26 refuses the
-    claim that rests on it."""
+    module's sentence rather than the document is refused. On this tree that
+    refuses the module's whole answer; §26 is what narrows it to the claim the
+    quote rests on."""
     conn, source_id, delivered = admitted
     sentence = "Leverage stood at 4.0x on the agreed basis."
     stub = _Stub(_body(source_id, quote=sentence))
