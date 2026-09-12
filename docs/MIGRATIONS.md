@@ -142,3 +142,31 @@ databases (`caos_restore_20a970c548fd4ea68c10fa0b2f6b4df2`,
 `caos_restore_8e5104a3823447b1b0082bd6fff7e49a`) and temporary synthetic blobs
 were removed. This is root-reported independent evidence, separate from the
 implementer's execution above; neither used development data.
+
+## Version 5 complete run-input proof — 2026-09-12
+
+`0005_run_inputs` adds one complete immutable input row per run, composite
+run/case, source-version/fingerprint and route/digest foreign keys, UPDATE/DELETE/
+TRUNCATE guards, and the INPUT_PINNED event name. Existing migration bytes and
+all legacy/current-prefix rows remain intact; no complete pins are backfilled.
+The populated-prefix upgrade regression now includes version 4 explicitly;
+concurrent startup begins from a populated version 4. Fresh and legacy-upgraded
+catalog parity, repeat application and native-catalog failure rollback continue
+to run against real disposable PostgreSQL. Focused storage/schema: **94 passed
+in 11.64s**, before the final route-FK regression update and full backend gates.
+
+The existing owned restore probe was extended to include a second, known source,
+captured source version, verified route, complete input and INPUT_PINNED event
+in the migrated backup. It compares every original column/row and native catalog
+after restore, reads the complete pin through the verified loader, preserves
+UNKNOWN legacy provenance, and compares each copied blob with its original
+bytes. It uses only UUID-named temporary databases and synthetic blob roots.
+
+Executed with the provider-scrubbed command above against test port 55437:
+**PASS** twice, both upgrading/verifying migration version **5**. Legacy dump
+**32,193 bytes**, `caos_restore_9d4e71b1c8f6421cb70f42a937a95268` restored into
+`caos_restore_35311207fd9f4039b4790cc9b97dfd48`; migrated complete-input dump
+**54,694 bytes**, `caos_restore_4c66734eac704e64899b6eaa22b27874` restored into
+`caos_restore_47f3896a12c7445c900229dad9d7457e`. All four owned databases and
+temporary synthetic blob roots were removed and can be regenerated. Existing
+development databases, containers, volumes and blobs were untouched.

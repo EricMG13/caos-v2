@@ -168,7 +168,7 @@ def _refuse_reads_and_replay(
     [
         "UPDATE run_routes SET profile_id = 'changed'",
         "DELETE FROM run_routes",
-        "TRUNCATE run_routes",
+        "TRUNCATE run_routes CASCADE",
         "TRUNCATE runs CASCADE",
     ],
 )

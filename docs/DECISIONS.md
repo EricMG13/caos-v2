@@ -1037,3 +1037,67 @@ execution approvals, certify methodology selection, change canonical handoffs,
 or close F01. Source version/fingerprint, coherent bundle identity, host adapter
 and actual research content still need one complete run binding; runtime must
 later reject route-only legacy runs before execution.
+
+## 2026-09-12 §37 — Complete immutable run-input storage
+
+`run_inputs` holds at most one complete pin per run, separately from the existing
+route and captured source-set stores. The host derives the owner from the real
+run, loads the selected case-local source version through `load_source_set`,
+verifies the recorded route through `resolved_route`, and derives build/manifest
+identity from one coherent `Bundle`. The caller selects only the run, source
+version and research content. The existing executor now declares its actual
+adapter as `claims-json-v1`; this does not claim the future Markdown adapter.
+
+The format-1 fingerprint reuses §33's sorted, compact, UTF-8, ensure_ascii=False,
+finite JSON hashing helper. It binds case UUID, source version AND verified
+source fingerprint, verified route digest, Bundle build ID, exact raw-manifest
+SHA-256, adapter version and canonical research JSON string (or JSON null for
+absence). Run UUID owns the row but is excluded from this content fingerprint;
+two runs with identical inputs may therefore share the same fingerprint.
+Returning from source A to A+B and then A preserves the later distinct source
+version even though the first and last source-content fingerprints agree.
+
+Research accepts an exact JSON object or None. Object keys must already be
+strings; tuple/bytes/custom values are refused. Every key/string must already
+satisfy BoundaryText and NFC: reject normalization changes, do not silently
+change reviewed content. The storage bounds are depth 16 (root depth zero),
+4096 visited values including object keys and containers, 4096 characters per
+key/string, signed 64-bit integers, finite JSON floats, and 65,536 canonical
+UTF-8 bytes. None, {}, empty strings, booleans, integers and floats remain
+distinct. Canonical serialization sorts object keys only and preserves array
+order and exact accepted Unicode/text. The frozen slotted RunInput retains
+only the immutable canonical string; callers parse fresh copies when needed.
+These are storage safety bounds, not validation of the CP_DR linked lifecycle,
+approved-plan hash, CP-0 anchoring or any source/tool authorization.
+
+`pin_run_input` owns the case-first/run-locked transaction. `pin_route` and
+`snapshot_source_set` commit and must be prepared separately; neither is called
+inside complete-pin creation. Missing/unverified dependencies refuse. New pins
+require RUNNING and no attempts; a valid exact replay can return after terminal
+status without another event. Changing any bound input refuses rather than
+rewriting history. One INSERT and one INPUT_PINNED event commit together;
+refusal, database failure, cancellation and commit failure roll back or close.
+Autocommit is refused. There is no network/provider call under these locks.
+
+The historical loader verifies stored shape and canonical research, recomputes
+the input fingerprint and compares source/route identities with their verified
+records and the real run owner. It retains the caller-owned read transaction.
+It never adopts today's Bundle/adapter identity: runtime must later compare
+the recorded identity with actual executing authority before spend.
+
+Append-only migration 0005 uses native PK and composite FKs for real run/case,
+source case/version/fingerprint and route run/digest consistency. Native
+UPDATE/DELETE/TRUNCATE guards preserve pins; original migrations and legacy
+rows are unchanged. Privileged trigger removal is outside normal SQL guarantees
+and is used only in owned disposable corruption regressions.
+
+Real PostgreSQL evidence covers independent fingerprint components (including
+pairwise different research briefs), exact replay/one event, first/second-write
+and deferred-commit failure, cancellation/closed connection cleanup, observed
+blocking same/conflicting first pins, independent cases, malformed dependencies
+and content, native FKs/immutability, populated current-prefix upgrade and native
+catalog parity. The 94 focused storage/migration cases passed; the owned restore
+probe additionally restored a complete input with real captured provenance.
+See MIGRATIONS.md and the task report for executed gate details. Approval/API/
+runtime/evidence integration remains sequential work. F01 is still open, and
+route-only legacy runs receive no invented complete input or execution bypass.

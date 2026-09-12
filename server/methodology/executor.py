@@ -40,6 +40,7 @@ QUOTE_MISSES = frozenset(
 # the skill goes into the prompt, because the reference set of one module runs to
 # tens of thousands of tokens and the budget is invariant 8's, not a suggestion.
 SKILL = "SKILL.md"
+CLAIMS_ADAPTER_VERSION = "claims-json-v1"
 
 _INSTRUCTION = """\
 You are executing methodology module {module_id}. The authority for this module

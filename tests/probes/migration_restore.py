@@ -18,11 +18,15 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_run_inputs import _prepare
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 
 from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
 from server.evidence.read import read_block
 from server.store import MIGRATIONS, apply_schema, connect
+from server.store.run_inputs import load_run_input, pin_run_input
+from server.store.runs import create_case
 
 _ADMIN = "postgresql://postgres:local-test-admin-only@127.0.0.1:55437/postgres"
 _CONTAINER = "caos-workbench-dev-test-postgres-1"
@@ -57,9 +61,16 @@ def main(*, migrated: bool = False) -> None:
             blobs = BlobStore(Path(tmp) / "original_blobs")
             with connect(_ADMIN.rsplit("/", 1)[0] + "/" + original) as conn:
                 _legacy(conn)
-                digest = _populate(conn, blobs)
+                _populate(conn, blobs)
                 if migrated:
                     apply_schema(conn)
+                    case_id = create_case(
+                        conn, BoundaryText.of("complete input restore")
+                    )
+                    run, sources, bundle, _ = _prepare(conn, case_id, blobs.root)
+                    pin = pin_run_input(
+                        conn, run, sources.version, bundle, {"q": "Café?"}
+                    )
                 columns = _columns(conn)
                 before = _records(conn, columns)
                 catalog = _catalog(conn)
@@ -117,16 +128,15 @@ def main(*, migrated: bool = False) -> None:
                 ).fetchall() == [(i,) for i in range(1, len(MIGRATIONS) + 1)]
                 assert conn.execute(
                     "SELECT count(*) FROM source_extractions"
-                ).fetchone() == (0,)
+                ).fetchone() == (1 if migrated else 0,)
+                if migrated:
+                    assert load_run_input(conn, run) == pin
                 for (source,) in conn.execute(
                     "SELECT source_id FROM sources"
                 ).fetchall():
-                    assert (
-                        read_block(
-                            conn, source_id=source, block_id="b000000"
-                        ).text.value
-                        == "synthetic"
-                    )
+                    assert read_block(
+                        conn, source_id=source, block_id="b000000"
+                    ).text.value in {"synthetic", "one"}
                 for table, column in (
                     ("sources", "document_sha256"),
                     ("artifacts", "artifact_sha256"),
@@ -138,11 +148,10 @@ def main(*, migrated: bool = False) -> None:
                         )
                     )
                     for (stored_digest,) in rows:
-                        assert stored_digest == digest
-                        assert (
-                            BlobStore(Path(tmp) / "restored_blobs").get(stored_digest)
-                            == b"synthetic legacy document and artifact"
+                        restored_bytes = BlobStore(Path(tmp) / "restored_blobs").get(
+                            stored_digest
                         )
+                        assert restored_bytes == blobs.get(stored_digest)
             print(
                 f"PASS dump={len(dump)} bytes; {original} -> {restored};"
                 f" version={len(MIGRATIONS)}; rows/blobs intact;"
