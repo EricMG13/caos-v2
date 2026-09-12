@@ -36,6 +36,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import gate_verdict
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -122,7 +123,10 @@ class _Completions:
                                 }
                             ],
                         }
-                    ]
+                    ],
+                    # A verdict on the rest of the route, when the prompt is the
+                    # gate's. Every case here runs CP-0 and CP-DR alone.
+                    **gate_verdict(prompt),
                 }
             ),
             charge=Decimal("0.0000041"),

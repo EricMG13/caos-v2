@@ -664,3 +664,40 @@ and the wrapped lines — the phrase assembled across a gutter that §5 exists t
 refuse — or re-asking the model, a second call per module to recover claims
 already known not to anchor. Refusing per claim keeps the matcher exactly as
 strict as it was and gives up only what it could never have kept.
+## 2026-09-12 §27 — The gate's verdict reaches the store, and decides what runs
+
+`server/engine/route.py` has carried `readiness_from` since route resolution
+landed, and nothing could reach it: `ENVELOPE_KEYS` refused every key but
+`claims`, so the only readiness the host had ever seen came from a test
+fixture, and CP-0's verdict on a nineteen-node route decided nothing.
+
+**The bundle's key, not a host invention.** The envelope carries
+`content_to_module_map`, the name CP-0's own payload schema declares, so the
+reader that exists is the reader that runs. Rows keep three of the schema's
+five fields; `evidence_demand` and `active_representation_ids` are what
+per-module evidence selection will need and are recorded as not kept.
+
+**Bounded, and complete.** Module ids must be the pinned route's, less the gate
+itself; statuses are the bundle's four; the effect is `BoundaryText`. Coverage
+is required — `READINESS_INCOMPLETE` — because CP-0's instructions make
+identifying the runnable modules its job, and a gate that silently said nothing
+about a module would be a gate that cleared it by omission.
+
+**A module's own verdict decides its state.** CONDITIONAL and BLOCKED are both
+"not cleared"; READY_WITH_LIMITATIONS is RESTRICTED, which runs and carries the
+limitation; READY leaves the edges in charge. A blocked node costs no call and
+no charge, and the run completes with it reported unrun. The run surface carries
+the verdict as `NodeView.gate_verdict`, because a node the gate blocked has no
+unmet edge for `waiting_on` to name — and a state with no cause is the thing
+`NodeView` ("a node's state and the reason for it") and `waiting_on` ("a surface
+reporting BLOCKED with no cause tells a reader the run is stuck without telling
+them what it is stuck on") each exist to prevent. `SYSTEM_SPEC.md` §9 is the
+wire's strictness rules and says nothing about it; those two docstrings do.
+
+**Only the gate may answer.** For every other module the host asks for no map,
+and one returned anyway is an undeclared field — the same answer `extra=forbid`
+gives any other stray key.
+
+**Reason.** The alternative was a host-side gate reading document types, which
+puts methodology in the host against invariant 4, with no classifier to read
+them anyway.

@@ -28,6 +28,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import gate_verdict
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -87,7 +88,10 @@ class _Completions:
                                 }
                             ],
                         }
-                    ]
+                    ],
+                    # A verdict on the rest of the route, when the prompt is the
+                    # gate's. `catalog_route` below is CP-0 and CP-DR alone.
+                    **gate_verdict(prompt),
                 }
             ),
             charge=Decimal("0.0000041"),
@@ -147,6 +151,7 @@ def ran(
                 blobs=blobs,
                 completions=_Completions(source_id),
                 delivered=[(source_id, str(row[0])) for row in blocks],
+                route=catalog_route,
             ),
             ESTIMATE,
         ),

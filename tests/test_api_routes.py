@@ -43,12 +43,18 @@ from server.api.app import (
     store_connection,
 )
 from server.blobs import BlobStore
-from server.engine.route import resolve_route
+from server.engine.route import ResolvedRoute, resolve_route
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke, standing_of
 from server.store.routes import pin_route, pinned_route
-from server.store.runs import Accepted, complete_attempt, start_attempt, start_run
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    complete_attempt,
+    start_attempt,
+    start_run,
+)
 
 # The producer the store records beside every accepted artifact: what the
 # host configured, and the provider's own handle for the call.
@@ -440,6 +446,94 @@ def test_the_run_document_carries_node_states_with_their_reasons(
     assert {
         (edge["source"], edge["type"]) for edge in by_module["CP-1"]["waiting_on"]
     } == {("CP-0", "REQUIRED")}
+    # No CP-0 artifact is accepted in this run, so the gate has not spoken for
+    # any module -- `gate_verdict` is the absence of a verdict, not a state
+    # this test happens not to exercise.
+    assert by_module["CP-1"]["gate_verdict"] is None
+
+
+def _accept_gate(
+    conn: StoreConnection,
+    run_id: UUID,
+    route: ResolvedRoute,
+    tmp_path: Path,
+    verdicts: object,
+) -> None:
+    """Accept a CP-0 artifact whose readiness map is `verdicts`. The blob store
+    is on the same root the `client` fixture points the app's injected one at --
+    not a second store, but the one the request is about to read from."""
+    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
+    digest = BlobStore(tmp_path / "blobs").put(
+        json.dumps({"content_to_module_map": verdicts}).encode("utf-8")
+    )
+    accept_attempt(
+        conn,
+        attempt_id=start_attempt(conn, run_id, cp0),
+        accepted=Accepted(
+            artifact_sha256=digest, charge=CHARGE, model=MODEL, generation_id=GENERATION
+        ),
+    )
+
+
+def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Phase 6 asked for "node states with their reasons", and after Phase 11 a
+    node can be BLOCKED by the gate rather than by an edge. `waiting_on` cannot
+    carry that cause -- there is no edge to name -- so the verdict travels
+    beside it, or the surface reports a state with no reason at all."""
+    conn, _case_id = case
+    run_id, viewer = run
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    pin_route(conn, run_id, route)
+    _accept_gate(
+        conn,
+        run_id,
+        route,
+        tmp_path,
+        [
+            {"module_id": "CP-1", "readiness_status": "BLOCKED"},
+            {"module_id": "CP-2", "readiness_status": "READY"},
+            {"module_id": "CP-2D", "readiness_status": "READY"},
+        ],
+    )
+
+    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+
+    by_module = {node["module_id"]: node for node in body["nodes"]}
+    assert by_module["CP-1"]["state"] == "BLOCKED"
+    assert by_module["CP-1"]["waiting_on"] == []
+    assert by_module["CP-1"]["gate_verdict"] == "BLOCKED"
+    assert by_module["CP-2"]["gate_verdict"] == "READY"
+
+
+def test_a_stored_gate_map_the_host_cannot_bound_is_a_server_fault(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """`READINESS_INVALID` became reachable here in Phase 11: the verdict is read
+    out of an artifact this server wrote, so a map it cannot bound is the
+    server's own fault. Absent from `_STATUS` it answered 400 -- telling the
+    caller their request was the problem, about bytes they do not hold."""
+    conn, _case_id = case
+    run_id, viewer = run
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    pin_route(conn, run_id, route)
+    _accept_gate(conn, run_id, route, tmp_path, "READY")
+
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+
+    assert (response.status_code, response.json()) == (
+        503,
+        {"refusal": "READINESS_INVALID"},
+    )
 
 
 def test_the_one_qa_gate_reads_as_a_gate(
@@ -517,6 +611,7 @@ def test_the_wire_key_sets_are_pinned() -> None:
         "state",
         "waiting_on",
         "awaiting_gate",
+        "gate_verdict",
     }
     assert set(EdgeView.model_fields) == {"source", "type"}
     assert set(RefusalBody.model_fields) == {"refusal"}

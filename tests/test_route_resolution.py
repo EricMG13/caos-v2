@@ -466,3 +466,81 @@ def test_a_node_the_route_does_not_carry_is_a_typed_refusal(
         waiting_on(route, {}, "RN-no-such-node")
 
     assert caught.value.code is RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE
+
+
+def test_a_module_the_gate_blocked_never_becomes_runnable(
+    catalog: dict[str, Any],
+) -> None:
+    """CP-0 is the gate: a module it did not clear is BLOCKED whatever the
+    edges say, so the run makes no call and no charge for it."""
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    accepted = _accept(
+        route,
+        "CP-0",
+        cp0=_cp0_artifact(**{"CP-1": "BLOCKED", "CP-2": "READY", "CP-2D": "READY"}),
+    )
+
+    states = node_states(route, accepted)
+
+    assert states[_node_id(route, "CP-1")] is NodeState.BLOCKED
+    assert _node_id(route, "CP-1") not in frontier(route, accepted)
+
+
+def test_a_conditional_verdict_blocks_like_a_blocked_one(
+    catalog: dict[str, Any],
+) -> None:
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    accepted = _accept(
+        route,
+        "CP-0",
+        cp0=_cp0_artifact(**{"CP-1": "CONDITIONAL", "CP-2": "READY", "CP-2D": "READY"}),
+    )
+
+    assert node_states(route, accepted)[_node_id(route, "CP-1")] is NodeState.BLOCKED
+
+
+def test_ready_with_limitations_runs_as_restricted(catalog: dict[str, Any]) -> None:
+    """RESTRICTED runs and carries its limitation forward (CONTEXT.md); it is
+    not a refusal."""
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    accepted = _accept(
+        route,
+        "CP-0",
+        cp0=_cp0_artifact(
+            **{"CP-1": "READY_WITH_LIMITATIONS", "CP-2": "READY", "CP-2D": "READY"}
+        ),
+    )
+
+    states = node_states(route, accepted)
+
+    assert states[_node_id(route, "CP-1")] is NodeState.RESTRICTED
+    assert _node_id(route, "CP-1") in frontier(route, accepted)
+
+
+def test_readiness_applies_only_once_the_gate_is_accepted(
+    catalog: dict[str, Any],
+) -> None:
+    """Before the gate has run there is no verdict to apply, and the edges are
+    what keep the route behind CP-0."""
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+
+    states = node_states(route, {})
+
+    assert states[_node_id(route, "CP-0")] is NodeState.RUNNABLE
+    assert states[_node_id(route, "CP-1")] is NodeState.BLOCKED
+
+
+def test_a_malformed_readiness_map_refuses_rather_than_raising(
+    catalog: dict[str, Any],
+) -> None:
+    """A row the store could not have written is still a row this pure function
+    must not raise `KeyError` over."""
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    accepted = _accept(
+        route, "CP-0", cp0={"content_to_module_map": [{"module_id": "CP-1"}]}
+    )
+
+    with pytest.raises(Refusal) as caught:
+        node_states(route, accepted)
+
+    assert caught.value.code is RefusalCode.READINESS_INVALID
