@@ -422,6 +422,18 @@ system this size means nobody looked.
 
 **Phase 6.**
 
+- **Identity before the store rests on parameter order.** `read_run` and
+  `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
+  the whole of what refuses an anonymous request before a connection is opened:
+  FastAPI builds a route's dependency list in signature order (`get_dependant`)
+  and solves it sequentially (`solve_dependencies`), so the ordering is a
+  property of a pinned dependency rather than something the code says out loud.
+  `test_an_anonymous_request_opens_no_store_connection` counts the dependency's
+  calls, so a reorder and a FastAPI that stopped doing this both fail there --
+  which is what makes this a limit rather than a defect. *Upgrade:*
+  `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
+  inserts at the front of the list whatever the parameters say; worth taking the
+  day a third route arrives and the order has to be remembered three times.
 - **A run tail polls.** `server/api/app.py` re-reads `run_events` every
   `POLL_INTERVAL` until the run is terminal, standing is lost, or
   `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
