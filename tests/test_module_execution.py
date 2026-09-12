@@ -538,6 +538,40 @@ def test_a_gate_answer_missing_a_pinned_module_is_refused() -> None:
                 ],
             }
         ),
+        json.dumps(
+            {
+                "claims": [],
+                "content_to_module_map": [
+                    {
+                        "module_id": ["CP-1"],
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                    {
+                        "module_id": "CP-2",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                ],
+            }
+        ),
+        json.dumps(
+            {
+                "claims": [],
+                "content_to_module_map": [
+                    {
+                        "module_id": "CP-1",
+                        "readiness_status": "READY",
+                        "readiness_effect": 90,
+                    },
+                    {
+                        "module_id": "CP-2",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                ],
+            }
+        ),
     ],
     ids=[
         "not a list",
@@ -546,6 +580,8 @@ def test_a_gate_answer_missing_a_pinned_module_is_refused() -> None:
         "unknown status",
         "unknown module",
         "duplicate module",
+        "non-string module id",
+        "non-string readiness effect",
     ],
 )
 def test_a_readiness_map_the_host_cannot_bound_is_refused(body: str) -> None:

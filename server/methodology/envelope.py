@@ -155,7 +155,16 @@ def _readiness(row: object, expected: frozenset[str]) -> Readiness:
 
     module_id = row["module_id"]
     status = row["readiness_status"]
-    if module_id not in expected or status not in READINESS_STATUSES:
+    # `expected` and READINESS_STATUSES are frozensets: testing membership
+    # before the type is confirmed lets an unhashable value (a list, a dict)
+    # raise TypeError instead of refusing -- the one path this boundary exists
+    # to close. The isinstance checks must short-circuit first.
+    if (
+        not isinstance(module_id, str)
+        or not isinstance(status, str)
+        or module_id not in expected
+        or status not in READINESS_STATUSES
+    ):
         raise Refusal(RefusalCode.READINESS_INVALID)
 
     effect = row["readiness_effect"]
