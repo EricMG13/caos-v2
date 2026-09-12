@@ -907,6 +907,41 @@ runtime approval enforcement are subsequent slices; F04 remains open. The old
 whole-case `source_set_fingerprint` remains compatibility behavior and is not an
 enforced execution pin. Mixed-PDF dispatch and geometry fidelity remain Phase 3.
 
+## 2026-09-12 §34 — Immutable source-set versions retain complete membership
+
+Migration `0003_source_sets` stores a case-local positive version, format version
+1, fingerprint and positive member count, with explicit immutable member rows.
+`snapshot_source_set` takes Task6's shared case-first lock at READ COMMITTED,
+captures all live sources and owns commit/rollback, including unchanged replay.
+Call it after unrelated setup has committed. No provider/network I/O or retries
+occur under its lock. `load_source_set` reads an exact case/version with a
+caller-owned transaction and verifies count, provenance bindings and fingerprint.
+
+The fingerprint uses §33's canonical JSON serialization and hashes an object
+with `format_version: 1`, string `case_id`, and `members` ordered by source UUID.
+Each member includes string source UUID, document SHA-256, filename, admission
+timestamp normalized to UTC ISO-8601, canonical extractor identity JSON string,
+output SHA-256 and extraction SHA-256. These fields are captured, not reloaded
+from mutable source metadata. The stored extraction binding is recomputed from
+document/extractor/output identity; output text/geometry remain bound by §33.
+Empty, UNKNOWN and malformed sets refuse. No legacy identities are fabricated.
+
+Unchanged current content returns the latest version. Changed content allocates
+latest version plus one; returning to an earlier content state creates another
+version with the same content fingerprint. Later admission never joins existing
+membership; withdrawal preserves history. Historical loading does not authorize
+withdrawn evidence: the existing live read predicate and one-query reads remain.
+The old whole-case fingerprint remains compatibility behavior, not a run pin.
+Run/approval/UI integration and automatic snapshots remain subsequent work.
+
+Native PK/FKs enforce source/case consistency. UPDATE/DELETE/TRUNCATE refuse;
+deferred INSERT checks on both tables require the exact immutable positive
+count. A completed set cannot accept another member: every inserter sees at
+least its existing complete membership plus its own row, so even concurrent
+extra insertions fail. Missing headers refuse. This protects normal SQL changes,
+not privileged trigger removal. The row checks cost O(N²) counts over sources,
+not tokens; batch validation is warranted only by measured throughput.
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a

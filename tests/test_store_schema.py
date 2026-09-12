@@ -50,6 +50,44 @@ def _columns(conn: StoreConnection) -> list[tuple[object, ...]]:
         return cursor.fetchall()
 
 
+def _catalog(conn: StoreConnection) -> list[object]:
+    """Compare native definitions, normalizing only each owned schema's name."""
+    schema = conn.execute("SELECT current_schema()").fetchone()
+    assert schema is not None
+    queries = (
+        "SELECT table_name,column_name,column_default,is_identity,is_generated"
+        " FROM information_schema.columns WHERE table_schema=current_schema()"
+        " ORDER BY table_name,ordinal_position",
+        "SELECT c.relname,k.conname,k.contype,k.condeferrable,k.condeferred,"
+        " k.convalidated,pg_get_constraintdef(k.oid) FROM pg_constraint k"
+        " JOIN pg_class c ON c.oid=k.conrelid"
+        " WHERE c.relnamespace=current_schema()::regnamespace"
+        " ORDER BY c.relname,k.conname",
+        "SELECT tablename,indexname,indexdef FROM pg_indexes"
+        " WHERE schemaname=current_schema() ORDER BY tablename,indexname",
+        "SELECT c.relname,t.tgname,t.tgenabled,pg_get_triggerdef(t.oid)"
+        " FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid"
+        " WHERE c.relnamespace=current_schema()::regnamespace AND NOT t.tgisinternal"
+        " ORDER BY c.relname,t.tgname",
+        "SELECT proname,pg_get_functiondef(oid) FROM pg_proc"
+        " WHERE pronamespace=current_schema()::regnamespace ORDER BY proname",
+        "SELECT table_name,view_definition FROM information_schema.views"
+        " WHERE table_schema=current_schema() ORDER BY table_name",
+    )
+    return [
+        [
+            tuple(
+                value.replace(schema[0] + ".", "<schema>.")
+                if isinstance(value, str)
+                else value
+                for value in row
+            )
+            for row in conn.execute(query).fetchall()
+        ]
+        for query in queries
+    ]
+
+
 def test_the_declared_schema_holds_a_case_and_its_run(empty_database: str) -> None:
     with connect(empty_database) as conn:
         apply_schema(conn)
@@ -247,6 +285,7 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         )
         assert blobs.get(digest) == b"synthetic legacy document and artifact"
         upgraded = _columns(conn)
+        catalog = _catalog(conn)
         apply_schema(conn)
         assert _records(conn, columns) == before
         [new_source] = admit_pack(
@@ -263,6 +302,33 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         conn.execute("SET search_path TO real_fresh")
         apply_schema(conn)
         assert _columns(conn) == upgraded
+        assert _catalog(conn) == catalog
+
+
+def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:2])
+            apply_schema(conn)
+        blobs = BlobStore(tmp_path)
+        digest = _populate(conn, blobs)
+        case_id = conn.execute("SELECT case_id FROM cases LIMIT 1").fetchone()
+        assert case_id is not None
+        admit_pack(
+            conn,
+            blobs,
+            case_id=case_id[0],
+            documents=[Document(BoundaryText.of("known.txt"), b"known")],
+        )
+        conn.commit()
+        columns, before = _columns(conn), _records(conn)
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        assert blobs.get(digest) == b"synthetic legacy document and artifact"
 
 
 def test_populated_legacy_advances_and_repeat_preserves_history(
@@ -316,7 +382,8 @@ def test_populated_legacy_advances_and_repeat_preserves_history(
     [
         "UPDATE store_migrations SET digest = 'edited' WHERE version = 1",
         "UPDATE store_migrations SET name = 'unknown' WHERE version = 1",
-        "UPDATE store_migrations SET version = 3 WHERE version = 1",
+        "UPDATE store_migrations SET version ="
+        " (SELECT max(version) + 1 FROM store_migrations) WHERE version = 1",
         "DELETE FROM store_migrations",
         "DROP TABLE store_migrations",
         "DELETE FROM store_schema",

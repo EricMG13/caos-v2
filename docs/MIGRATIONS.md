@@ -1,6 +1,6 @@
 # Migration and recovery procedure
 
-The declared version is `len(server.store.MIGRATIONS)` (currently **2**).
+The declared version is `len(server.store.MIGRATIONS)` (currently **3**).
 `server/store/schema.sql` is immutable migration `0001_legacy`; its original
 bytes remain unchanged. Add the next reviewed SQL file under `server/store/`
 and append its stable name and UTF-8 body to `MIGRATIONS`. Do not edit, reorder,
@@ -88,3 +88,17 @@ Created and removed only `caos_restore_d079c3f869124d7e873b31de73b5203b` and
 `caos_restore_0b643d0975734a6a8303bb5b24f781ff`. Temporary synthetic blobs were
 removed with the probe temporary directory. Existing databases, dev blobs,
 containers and volumes were unchanged.
+
+## Version 3 immutable source-set proof — 2026-09-12
+
+`0003_source_sets` adds explicit versions/members and a case/source unique key.
+Real PostgreSQL tests compare original named columns, all rows and blobs through
+both legacy and Task7a upgrades and repeated startup. Fresh/legacy-upgraded
+catalogs match columns, defaults, constraints, indexes, triggers, functions and
+views. The existing synthetic migration failure/tail/concurrency proofs remain.
+
+The same owned probe passed: custom dump **32,192 bytes**, restored legacy
+database upgraded to version **3**, original rows/blobs intact and legacy
+provenance still UNKNOWN. Only `caos_restore_dc2c638667404644816d53d28bb7d6a8`
+and `caos_restore_f1317d3de09b4b42a7fa38330be247a7` were created and removed;
+temporary synthetic blobs were removed. No development data was changed.
