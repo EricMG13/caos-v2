@@ -659,3 +659,31 @@ gives any other stray key.
 **Reason.** The alternative was a host-side gate reading document types, which
 puts methodology in the host against invariant 4, with no classifier to read
 them anyway.
+
+## 2026-09-12 §28 — A module is handed its direct predecessors, as context
+
+The first live run over a real issuer executed nineteen modules as nineteen
+independent reads of the same documents. The bundle's own chain is the opposite:
+each module consumes the registers of the modules before it, which is what the
+co-pilot runs show and what `**Upstream:** CP-1 …` in every SKILL.md asks for.
+
+**Direct predecessors, from the pin.** The sources of every edge into the node,
+in route order, read from the pinned route. Not transitive: a module sees what
+it was meant to build on, and the route is what says so.
+
+**From the store, not from memory.** `ModuleProvider` reads each predecessor's
+accepted artifact through `artifact_digests`, the same reader the frontier uses
+to decide what is accepted, so the chain and the frontier cannot disagree about
+what a run has produced. A run resumed in another process has only the store,
+and a caller's copy of what a module said is a claim rather than a fact
+(invariant 3).
+
+**Context, never evidence.** The section says so, and the rule that enforces it
+was already there: a citation must name delivered evidence, so a module quoting
+an earlier module's sentence is refused `CITATION_NOT_LOCATED` and loses that
+claim (§26).
+
+**What it is not.** The upstream section carries statements and quotes, because
+that is what the envelope holds. The bundle's registers — the tables a module's
+own payload schema declares — are a later phase, and until then a chained module
+inherits sentences rather than a financial base.

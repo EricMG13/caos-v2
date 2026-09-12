@@ -45,19 +45,14 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # because "not yet" with no reason is how a list like this becomes a list of
 # tests nobody intends to write.
 #
-# It was empty, which was the point it had been working towards: every test the
-# plan named across Phases 0-10 was defined. It grows here in the direction it
-# should -- Phase 11 names its exit tests before the work that satisfies them
-# exists, and each name leaves this list in the PR that writes it. What the plan
-# still owes is work it never named a test for -- the qualification-set harness,
-# its answer keys and the matrix -- and this gate cannot see that, which is why
-# a phase is not closed on the strength of it alone.
-NOT_YET_REACHED: set[str] = {
-    # Phase 11, the chain: every node is handed the same evidence and no
-    # upstream section exists to test.
-    "test_a_node_receives_its_direct_predecessors_accepted_claims",
-    "test_an_upstream_statement_is_not_citable_evidence",
-}
+# It is empty again. Phase 11 named eight exit tests -- three for the gate,
+# three for the verdict, two for the chain -- before the work that satisfies
+# them existed, and each left this list in the PR that wrote the test it
+# names, which is the direction the list should move in. What the plan still
+# owes is work it never named a test for -- the qualification-set harness, its
+# answer keys and the matrix -- and this gate cannot see that, which is why a
+# phase is not closed on the strength of it alone.
+NOT_YET_REACHED: set[str] = set()
 
 
 def named_in_the_plan() -> set[str]:

@@ -500,6 +500,13 @@ system this size means nobody looked.
   sends the reason and the UI has nowhere to put it. *Upgrade:* the
   workspace's wire type and the section that draws a node —
   `frontend/src/sections/run/RouteGraph.tsx` and `NodeDetail.tsx`.
+- **An upstream section is unbounded.** A node's prompt carries every claim of
+  every direct predecessor (`docs/DECISIONS.md` §28), and nothing caps the
+  total: a node with five predecessors of fifty claims each carries two hundred
+  and fifty statements and their quotes on top of the authority and every block
+  of evidence. On the routes run so far it is a few thousand tokens. *Upgrade:*
+  a declared bound with a typed refusal, the day a wide route meets a model's
+  context rather than a budget.
 
 **Phase 4.**
 
