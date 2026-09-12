@@ -15,6 +15,7 @@ here rather than the object the provider sent.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
@@ -103,6 +104,22 @@ class Delivery:
 
 
 @dataclass(frozen=True, slots=True)
+class UpstreamClaim:
+    """One thing an earlier module established, and the quotes under it."""
+
+    statement: str
+    quotes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Upstream:
+    """What one direct predecessor accepted, as the host stored it."""
+
+    module_id: str
+    claims: tuple[UpstreamClaim, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Assignment:
     """What the host hands one module for one node of one run."""
 
@@ -111,6 +128,11 @@ class Assignment:
     # The modules this one must return a readiness verdict for: the pinned
     # route less itself when it is the gate, and empty for everyone else.
     gate_expects: frozenset[str] = frozenset()
+    # This node's direct predecessors' accepted results (`route.predecessors`),
+    # read from the store by the caller that holds the route -- this dataclass
+    # only carries what it was handed, the same division `gate_expects` already
+    # draws.
+    upstream: tuple[Upstream, ...] = ()
 
 
 def deliver(
@@ -138,14 +160,37 @@ def _delivery(source_id: UUID, block_id: str, block: Block) -> Delivery:
     )
 
 
+def _upstream(upstream: Sequence[Upstream]) -> str:
+    """Earlier modules' accepted results, as context.
+
+    Marked as not evidence in the text, and enforced by the rule that was
+    already there: a citation names delivered evidence or it does not anchor.
+    """
+    if not upstream:
+        return ""
+    sections = []
+    for module in upstream:
+        lines = [f"module_id: {module.module_id}"]
+        for claim in module.claims:
+            lines.append(f"- {claim.statement}")
+            lines.extend(f"  quoted: {quote}" for quote in claim.quotes)
+        sections.append("\n".join(lines))
+    return (
+        "\n--- UPSTREAM (earlier modules' accepted results: context, not "
+        "evidence; cite only the evidence below) ---\n" + "\n\n".join(sections)
+    )
+
+
 def build_prompt(
     module_id: str,
     authority: bytes,
     delivered: list[Delivery],
     *,
     gate_expects: frozenset[str] = frozenset(),
+    upstream: Sequence[Upstream] = (),
 ) -> str:
-    """The question, the authority, and the evidence -- in that order."""
+    """The question, the authority, what the chain established, and the
+    evidence -- in that order."""
     evidence = "\n\n".join(
         f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}"
         for item in delivered
@@ -160,6 +205,7 @@ def build_prompt(
         + gate
         + "\n--- AUTHORITY ---\n"
         + authority.decode("utf-8", errors="replace")
+        + _upstream(upstream)
         + "\n--- EVIDENCE ---\n"
         + evidence
     )
@@ -180,15 +226,18 @@ def execute_module(
     cannot locate exactly once refuses the whole envelope, which is invariant 11
     happening before the artifact rather than after it.
 
-    `assignment` carries the module id, the delivered evidence and the gate
-    expectation as one thing rather than three loose arguments, for the same
-    reason `Execution` and `Accepted` (`docs/DECISIONS.md` §25) are one thing
-    each: a module id with no evidence answers nothing, evidence with no module
-    id has no authority to be read against, and the gate expectation is a fact
-    about *this* module-and-run pair, not a fourth independent input. Deciding
-    what that expectation is belongs to the caller that holds the route
-    (`ModuleProvider.execute`) -- this function only reads it off the
-    assignment it was handed.
+    `assignment` carries the module id, the delivered evidence, the gate
+    expectation and the upstream context as one thing rather than four loose
+    arguments, for the same reason `Execution` and `Accepted`
+    (`docs/DECISIONS.md` §25) are one thing each: a module id with no evidence
+    answers nothing, evidence with no module id has no authority to be read
+    against, and the gate expectation and the upstream context are each a fact
+    about *this* module-and-run pair, not independent inputs. Deciding what
+    they are belongs to `ModuleProvider.execute`, the caller that holds the
+    route -- this function only reads them off the assignment it was handed,
+    and hands `upstream` straight to the prompt: what keeps it from becoming
+    evidence is `verify_citations` refusing a quote that is not in
+    `assignment.delivered`, not anything this function does.
     """
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_prompt(
@@ -196,6 +245,7 @@ def execute_module(
         authority.files[SKILL],
         assignment.delivered,
         gate_expects=assignment.gate_expects,
+        upstream=assignment.upstream,
     )
 
     completion = provider.complete(prompt, json_object=True)

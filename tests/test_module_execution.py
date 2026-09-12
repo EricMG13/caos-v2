@@ -39,6 +39,8 @@ from server.methodology.executor import (
     Assignment,
     Delivery,
     ModuleOutcome,
+    Upstream,
+    UpstreamClaim,
     build_prompt,
     deliver,
     execute_module,
@@ -635,3 +637,73 @@ def test_the_stored_gate_artifact_carries_its_readiness(
             "readiness_effect": "no audited statements",
         }
     ]
+
+
+def test_a_node_receives_its_direct_predecessors_accepted_claims() -> None:
+    """The chain: what CP-1 established reaches CP-2 as context, from the
+    host's own stored artifact rather than from a caller's summary."""
+    upstream = [
+        Upstream(
+            module_id="CP-1",
+            claims=(
+                UpstreamClaim(
+                    statement="Total debt was USD 1,240.0m at the year end.",
+                    quotes=("Total debt at 31 December 2026",),
+                ),
+            ),
+        )
+    ]
+
+    prompt = build_prompt("CP-2", b"AUTHORITY BYTES", [], upstream=upstream)
+
+    assert "--- UPSTREAM" in prompt
+    assert "CP-1" in prompt
+    assert "Total debt was USD 1,240.0m at the year end." in prompt
+    assert "Total debt at 31 December 2026" in prompt
+    assert prompt.index("--- UPSTREAM") < prompt.index("--- EVIDENCE ---")
+
+
+def test_a_node_with_no_accepted_predecessor_gets_no_upstream_section() -> None:
+    assert "--- UPSTREAM" not in build_prompt("CP-0", b"AUTHORITY BYTES", [])
+
+
+def test_the_upstream_section_says_it_is_not_evidence() -> None:
+    """A module may not cite it, and the prompt is where it is told so; the
+    refusal if it tries is `CITATION_NOT_LOCATED`, tested below."""
+    prompt = build_prompt(
+        "CP-2",
+        b"AUTHORITY BYTES",
+        [],
+        upstream=[Upstream(module_id="CP-1", claims=())],
+    )
+
+    assert "not evidence" in prompt
+
+
+def test_an_upstream_statement_is_not_citable_evidence(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """Invariant 11 does not soften for the chain: a module quoting an earlier
+    module's sentence rather than the document is refused, and §26 refuses the
+    claim that rests on it."""
+    conn, source_id, delivered = admitted
+    sentence = "Leverage stood at 4.0x on the agreed basis."
+
+    with pytest.raises(Refusal) as caught:
+        execute_module(
+            conn,
+            bundle,
+            assignment=Assignment(
+                module_id="CP-2",
+                delivered=delivered,
+                upstream=(
+                    Upstream(
+                        module_id="CP-1",
+                        claims=(UpstreamClaim(statement=sentence, quotes=()),),
+                    ),
+                ),
+            ),
+            provider=_Stub(_body(source_id, quote=sentence)),
+        )
+
+    assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
