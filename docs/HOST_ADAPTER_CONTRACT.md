@@ -19,8 +19,11 @@ The UI/report renders host-held Markdown and projections.
 CP-0 is the catalog-selected preparation/readiness node. The host extraction
 manifest is preparation metadata supplied to CP-0; it is not a second LLM route
 stage. `CP-PARSE` remains an authority alias for archived compatibility, not an
-additional executable node. Preparation runs once. Excel and Word remain out of
-scope; their archived contracts remain archived.
+additional executable node. Preparation runs once
+([catalog preparation](../vendor/deploy-v/skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json#L1351),
+[host alias](../server/methodology/bundle.py#L35)). Excel and Word remain out of
+scope; their archived contracts remain archived
+([decision §14](DECISIONS.md#2026-09-10-14--the-host-places-no-model-build-and-no-publication-module-the-deliverable-is-rendered-by-the-host)).
 
 ## Current versus target
 

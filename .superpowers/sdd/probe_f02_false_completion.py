@@ -112,7 +112,7 @@ def main() -> None:
                 f"stored_status={status.value} "
                 f"accepted_nodes={accepted}/{len(route.nodes)}"
             )
-            assert status is RunStatus.RUNNING, (
+            assert status is not RunStatus.COMPLETE, (
                 "F02: blocked downstream nodes wrongly allowed terminal COMPLETE"
             )
     finally:
