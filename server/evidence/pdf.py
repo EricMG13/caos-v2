@@ -20,18 +20,35 @@ already tested -- which is what a seam is for.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.metadata import version
 from io import BytesIO
 
 from pdfminer.layout import LTChar, LTPage, LTTextBox, LTTextLine
 from pdfminer.pdfparser import PDFSyntaxError
 
-from server.evidence.extract import Token
+from server.evidence.extract import ExtractorIdentity, Token
 from server.refusals import Refusal, RefusalCode
 
 
 @dataclass(frozen=True, slots=True)
 class PdfExtractor:
     """Bytes of a PDF, as tokens with real coordinates."""
+
+    @property
+    def identity(self) -> ExtractorIdentity:
+        # Default layout/dispatch behavior is versioned with the installed engine.
+        return ExtractorIdentity(
+            "caos.pdfminer",
+            "1",
+            {
+                "pdfminer_version": version("pdfminer.six"),
+                "laparams": "default",
+                "password": "",
+                "page_numbers": "all",
+                "maxpages": 0,
+                "caching": True,
+            },
+        )
 
     def extract(self, data: bytes) -> list[Token]:
         """Refuses `SOURCE_NOT_READABLE` for bytes that are not a readable PDF.
