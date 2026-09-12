@@ -108,11 +108,16 @@ Standing rules that back them:
 - `make dev` — the `api` process alone, on port 8000. It needs a Postgres URL
   in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
   per request, and applies `schema.sql` at startup. No worker, nothing seeded.
-- `make test` — the suite.
+- `make test` — the offline suite with PostgreSQL required; paid provider tests
+  remain deselected.
 - `make test-provider` — the live suite against the real model. Needs
   `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and `CAOS_TEST_POSTGRES_URL`, and
   fails rather than skips without them.
-- `make check` — lint, types, tests, security, in that order.
+- `make check` — the complete offline engineering gate: required PostgreSQL,
+  backend lint/types/tests/coverage/I/O/races/security, frontend lint/types/unit/
+  production and demo builds/a11y/workbench, then the image gate, sequentially.
+  `make check-fast` is explicitly partial; `make check-size PR_BASE=<commit>` is
+  the separate PR-only size gate.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
 
 ## Known gaps (honest ledger)
@@ -661,12 +666,11 @@ system this size means nobody looked.
   because proving the mismatch refusal means damaging a blob through the real
   filesystem. *Upgrade:* make it private the day a caller needs a streaming read
   instead, which is the only other reason to want it.
-- **The store suite skips without `CAOS_TEST_POSTGRES_URL`.** A local `make
-  test` with the variable unset reports success having exercised none of the
-  store. CI sets `CAOS_REQUIRE_POSTGRES=1`, which turns that skip into a
-  failure, so the gap is local only. *Upgrade:* none needed while CI is the
-  gate; the day a developer's green run is trusted on its own, the variable
-  becomes required everywhere.
+- ~~**The store suite skips without `CAOS_TEST_POSTGRES_URL`.**~~ Closed in
+  Phase 1. `make test` and `make check` set `CAOS_REQUIRE_POSTGRES=1`, and the
+  complete gate first refuses an absent or unreachable configured test
+  database. Only the explicitly partial `make check-fast` permits database
+  suites to skip.
 - ~~**`scan_floors.py --min-files 1` is a weak floor.**~~ Closed in Phase 1.
   The floor is now `--cover scripts server --unscanned tests`: a tracked `.py`
   under `--cover` that the report did not measure is a failure, and so is one

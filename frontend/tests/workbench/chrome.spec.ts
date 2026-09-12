@@ -30,5 +30,8 @@ for (const section of SECTIONS) {
     await expect(role.locator("button, a, select, input")).toHaveCount(0);
     // Exactly one primary action in the ribbon.
     await expect(page.locator("header.ribbon [data-primary]")).toHaveCount(1);
+    const demo = page.getByRole("complementary", { name: "Demonstration mode" });
+    await expect(demo).toContainText("READ-ONLY DEMONSTRATION");
+    await expect(demo).toContainText("NOTHING IS PERSISTED");
   });
 }

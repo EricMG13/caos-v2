@@ -335,7 +335,7 @@ jobs:
   frontend:
     # The workspace (Phase 9): the TypeScript vocabulary gate rides `npm run
     # lint`; the a11y matrix and the workbench smoke run on three engines over
-    # the static export, with fixtures served by the preview middleware.
+    # the separate demo export, with explicit fixtures in preview middleware.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -360,6 +360,7 @@ jobs:
           for s in directory upload analysis book run model report committee admin; do
             test -f "dist/$s/index.html" || { echo "missing dist/$s/index.html"; exit 1; }
           done
+      - run: npm run build:demo
       # The browsers are cached by the lock that pins Playwright; --with-deps
       # still installs the OS libraries, which live outside the cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

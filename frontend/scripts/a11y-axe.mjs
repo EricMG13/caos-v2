@@ -52,11 +52,25 @@ const VITE = fileURLToPath(new URL("../node_modules/vite/bin/vite.js", import.me
 
 async function startPreview() {
   if (process.env.BASE) return null;
-  const child = spawn(process.execPath, [VITE, "preview", "--strictPort", "--port", String(PORT)], {
-    stdio: ["ignore", "pipe", "inherit"],
-    // Its own process group, so the kill below reaches every child.
-    detached: true,
-  });
+  const child = spawn(
+    process.execPath,
+    [
+      VITE,
+      "preview",
+      "--mode",
+      "demo",
+      "--outDir",
+      "dist-demo",
+      "--strictPort",
+      "--port",
+      String(PORT),
+    ],
+    {
+      stdio: ["ignore", "pipe", "inherit"],
+      // Its own process group, so the kill below reaches every child.
+      detached: true,
+    },
+  );
   await new Promise((resolveReady, reject) => {
     const timer = setTimeout(() => reject(new Error("vite preview did not start")), 30_000);
     child.stdout.on("data", (output) => {
