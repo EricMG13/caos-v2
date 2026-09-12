@@ -2,7 +2,15 @@
 PY  := .venv/bin/python
 SEC := .venv-security/bin
 
-.PHONY: venv lock lint types test test-provider security check dev
+-include .env
+export CAOS_DATABASE_URL CAOS_TEST_POSTGRES_URL CAOS_BLOB_ROOT
+export CAOS_TRUST_ROLE_HEADER CAOS_REQUIRE_POSTGRES
+
+.PHONY: bootstrap venv lock lint types test test-provider security check doctor \
+	dev dev-up dev-down dev-api dev-ui index
+
+bootstrap: venv  ## exact locked Python and Node development environments
+	npm --prefix frontend ci --ignore-scripts
 
 venv:  ## dev toolchain on 3.14, security toolchain on 3.12 (AI_CODE_QUALITY 4)
 	uv venv --python 3.14 .venv
@@ -48,7 +56,29 @@ security:  # the floor is checked first: a report that parsed nothing must fail
 
 check: lint types test security
 
-dev:  ## the route surface. CAOS_DATABASE_URL and CAOS_BLOB_ROOT are read per request
+doctor:  ## versions and configuration presence; values are never printed
+	@python3 scripts/dev_doctor.py
+
+dev-up:  ## persistent dev DB/blob root plus an isolated ephemeral test-admin DB
+	mkdir -p .dev-data/blobs
+	docker compose up -d --wait dev-postgres test-postgres
+
+dev-down:  ## stop only this project's services; preserve dev DB and blobs
+	docker compose down
+
+dev-api:  ## the route surface. CAOS_DATABASE_URL and CAOS_BLOB_ROOT are read per request
 	# No --reload: it needs watchfiles, and a dependency that only the developer
 	# loop uses still has to be locked, audited and justified.
-	$(PY) -m uvicorn server.api.app:app --port 8000
+	$(PY) -m uvicorn server.api.app:app --host 127.0.0.1 --port 8000
+
+dev: dev-api  ## retained API alias
+
+dev-ui:
+	npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 --strictPort
+
+index:  ## installed GitNexus only; never downloads or publishes
+	@if command -v gitnexus >/dev/null 2>&1; then \
+		gitnexus analyze --index-only; \
+	else \
+		echo "gitnexus is required; install it before indexing" >&2; exit 1; \
+	fi

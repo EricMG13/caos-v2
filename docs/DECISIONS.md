@@ -767,6 +767,24 @@ cannot become canonical merely because the host stores it. Adding a second model
 summary would create competing authority; preserving the exact validated
 Markdown and deriving presentation fields mechanically preserves one handoff.
 
+## 2026-09-12 §30 — Local development uses one project-scoped Compose stack
+
+Development uses the CI-pinned PostgreSQL image in two isolated services: a
+persistent database reached by a least-privilege application role, and a
+tmpfs-backed test-admin database. Both bind loopback-only deterministic ports;
+blobs remain in the ignored project-local `.dev-data/blobs` directory. Stopping
+the named Compose project removes neither the development volume nor blobs.
+
+Python 3.14, security Python 3.12, Node 24, and pinned pre-commit remain the
+existing toolchain; no dependency was added. GitNexus indexing uses only a
+runner already present locally or installed on the machine and runs
+`--index-only`.
+
+**Reason.** Separate named resources make test cleanup unable to reach durable
+development data, while one native Compose file is the smallest reproducible
+service layer. Fixed synthetic local credentials are configuration examples,
+not deployable secrets or permission to call a provider.
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a
