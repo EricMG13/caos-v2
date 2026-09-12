@@ -118,6 +118,9 @@ def snapshot_source_set(conn: StoreConnection, case_id: UUID) -> SourceSet:
     except psycopg.Error:
         rollback_or_close(conn)
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except OverflowError:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
     except BaseException:
         rollback_or_close(conn)
         raise
