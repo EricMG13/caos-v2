@@ -784,3 +784,28 @@ runner already present locally or installed on the machine and runs
 development data, while one native Compose file is the smallest reproducible
 service layer. Fixed synthetic local credentials are configuration examples,
 not deployable secrets or permission to call a provider.
+
+## 2026-09-12 §31 — Repair the pinned runtime base with four exact OS upgrades
+
+The live official `python:3.14-slim` tag still resolved to the image's existing
+digest, so changing the pin would not repair its twelve fixable HIGH/CRITICAL
+OS findings. The image instead upgrades only the four affected installed
+packages to the fixed trixie candidates: `gzip=1.13-1+deb13u1`,
+`libpcre2-8-0=10.46-1~deb13u2`, `libsqlite3-0=3.46.1-7+deb13u2`, and
+`perl-base=5.40.1-6+deb13u1`. `--only-upgrade` keeps the package set closed;
+the verified simulation and build each reported four upgrades, zero additions,
+and zero removals.
+
+The dated provenance is Debian's package index plus its primary security
+tracker entries for [gzip](https://security-tracker.debian.org/tracker/source-package/gzip),
+[pcre2](https://security-tracker.debian.org/tracker/source-package/pcre2),
+[sqlite3](https://security-tracker.debian.org/tracker/source-package/sqlite3),
+and [perl](https://security-tracker.debian.org/tracker/source-package/perl).
+The local image gate requires the same Trivy 0.70.0 as CI, proves that the JSON
+scan examined targets, then rejects any fixable HIGH/CRITICAL finding with
+`--ignore-unfixed`; no suppression or policy relaxation is permitted.
+
+**Reason.** A no-op base re-pin leaves the findings in place, while a broad
+unpinned OS upgrade changes unrelated runtime state. Four exact in-place
+security upgrades are the smallest reproducible repair until an official fixed
+base digest replaces them.
