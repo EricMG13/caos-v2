@@ -9,8 +9,9 @@ TRIVY_VERSION := 0.70.0
 export CAOS_DATABASE_URL CAOS_TEST_POSTGRES_URL CAOS_BLOB_ROOT
 export CAOS_TRUST_ROLE_HEADER CAOS_REQUIRE_POSTGRES
 
-.PHONY: bootstrap venv lock lint types test test-provider security image check doctor \
-	dev dev-up dev-down dev-api dev-ui index
+.PHONY: bootstrap venv lock lint types test test-fast test-provider test-postgres-races \
+	check-postgres security image frontend-check check-fast check-size check doctor \
+	dev dev-up dev-down dev-api dev-ui dev-ui-demo index
 
 bootstrap: venv  ## exact locked Python and Node development environments
 	npm --prefix frontend ci --ignore-scripts
@@ -40,9 +41,23 @@ types:
 	$(PY) -m mypy scripts tests server
 
 test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarqube job
-	$(PY) -m pytest
+	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 $(PY) -m pytest
 	$(PY) scripts/scan_floors.py coverage.xml --cobertura
 	$(PY) scripts/io_budget.py --assert
+
+test-fast:  ## partial: provider and PostgreSQL suites are skipped
+	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u CAOS_REQUIRE_PROVIDER -u CAOS_TEST_POSTGRES_URL CAOS_REQUIRE_POSTGRES=0 \
+		$(PY) -m pytest --no-cov
+
+check-postgres:  ## fail before complete gates when the configured test DB is absent
+	@$(PY) scripts/check_postgres.py
+
+test-postgres-races:
+	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 \
+		$(PY) -m pytest --no-cov tests/test_postgres_races.py
 
 test-provider:  ## the live suite; configuration comes only from the caller's environment
 	CAOS_REQUIRE_PROVIDER=1 CAOS_REQUIRE_POSTGRES=1 $(PY) -m pytest --no-cov \
@@ -65,7 +80,34 @@ image:  ## build and run the exact CI Trivy floor and severity gate
 	$(PY) scripts/scan_floors.py trivy.json --trivy
 	"$(TRIVY)" image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$(IMAGE)"
 
-check: lint types test security
+frontend-check:
+	npm --prefix frontend run lint
+	npm --prefix frontend run typecheck
+	npm --prefix frontend test
+	npm --prefix frontend run build
+	@for s in directory upload analysis book run model report committee admin; do \
+		test -f "frontend/dist/$$s/index.html" || { echo "missing frontend/dist/$$s/index.html"; exit 1; }; \
+	done
+	npm --prefix frontend run build:demo
+	env -u BASE -u ROUTES -u ENGINES -u VIEWPORTS -u A11Y_RESULT_FILE \
+		npm --prefix frontend run a11y
+	npm --prefix frontend run test:workbench
+
+check-fast: lint types test-fast  ## partial offline gate; excludes DB, browser, security and image
+
+check-size:
+	@$(PY) scripts/check_pr_size.py "$(PR_BASE)"
+
+# Recursive invocations keep this order even when the caller uses make -j.
+check:
+	@$(MAKE) --no-print-directory check-postgres
+	@$(MAKE) --no-print-directory lint
+	@$(MAKE) --no-print-directory types
+	@$(MAKE) --no-print-directory test
+	@$(MAKE) --no-print-directory test-postgres-races
+	@$(MAKE) --no-print-directory security
+	@$(MAKE) --no-print-directory frontend-check
+	@$(MAKE) --no-print-directory image
 
 doctor:  ## versions and configuration presence; values are never printed
 	@$(PY) scripts/dev_doctor.py
@@ -86,6 +128,9 @@ dev: dev-api  ## retained API alias
 
 dev-ui:
 	npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 --strictPort
+
+dev-ui-demo:  ## explicit read-only fixture workbench
+	npm --prefix frontend run dev:demo -- --host 127.0.0.1 --port 5173 --strictPort
 
 index:  ## installed GitNexus only; never downloads or publishes
 	@if command -v gitnexus >/dev/null 2>&1; then \

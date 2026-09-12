@@ -5,7 +5,11 @@
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
+const output = process.argv[2];
+if (!new Set(["dist", "dist-demo"]).has(output)) {
+  throw new Error("output directory must be dist or dist-demo");
+}
+const DIST = fileURLToPath(new URL(`../${output}/`, import.meta.url));
 const ROUTES = fileURLToPath(new URL("../src/app/routes.json", import.meta.url));
 
 const { sections, forwards } = JSON.parse(await readFile(ROUTES, "utf8"));

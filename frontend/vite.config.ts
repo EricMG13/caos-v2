@@ -5,8 +5,9 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Connect, type Plugin } from "vite";
 
-// Dev and preview serve the fixtures at the wire's routes; the production
-// build carries none of this. `?fixture=<state>` selects
+// Explicit demo dev and preview serve fixtures at the wire's routes. Ordinary
+// dev proxies to the real local API, and production carries none of this.
+// `?fixture=<state>` selects
 // fixtures/states/<section>.<state>.json, or drives a transport state.
 const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
 const SECTIONS = new Set([
@@ -100,23 +101,38 @@ async function serveEvents(fixture: string | null, req: IncomingMessage, res: Se
 
 const fixtureMiddleware: Connect.NextHandleFunction = (req, res, next) => {
   const url = new URL(req.url ?? "/", "http://localhost");
+  const pathname = url.pathname;
+  const isApi = pathname.startsWith("/api/");
+  if (isApi && !["GET", "HEAD"].includes(req.method ?? "GET")) {
+    res.setHeader("allow", "GET, HEAD");
+    send(
+      res,
+      405,
+      JSON.stringify({ code: "READ_ONLY_DEMO", clears: "a real API handles commands" }),
+    );
+    return;
+  }
   const requested = url.searchParams.get("fixture");
   // A state name is one word: never a path.
   if (requested !== null && !/^[a-z-]+$/.test(requested)) {
     send(res, 404, "{}");
     return;
   }
+  if (!isApi) {
+    next();
+    return;
+  }
   const fixture = requested;
-  const section = /^\/api\/sections\/([a-z]+)$/.exec(url.pathname)?.[1];
+  const section = /^\/api\/sections\/([a-z]+)$/.exec(pathname)?.[1];
   if (section && SECTIONS.has(section)) {
     void serveSection(section, fixture, res);
     return;
   }
-  if (url.pathname === "/api/events") {
+  if (pathname === "/api/events") {
     void serveEvents(fixture, req, res);
     return;
   }
-  const page = /^\/api\/pages\/([A-Za-z0-9-]+\.svg)$/.exec(url.pathname)?.[1];
+  const page = /^\/api\/pages\/([A-Za-z0-9-]+\.svg)$/.exec(pathname)?.[1];
   if (page) {
     void readJson(`pages/${page}`).then((body) => {
       if (body === null) return send(res, 404, "{}");
@@ -126,11 +142,7 @@ const fixtureMiddleware: Connect.NextHandleFunction = (req, res, next) => {
     });
     return;
   }
-  if (url.pathname.startsWith("/api/")) {
-    send(res, 404, "{}");
-    return;
-  }
-  next();
+  send(res, 404, "{}");
 };
 
 const fixtures: Plugin = {
@@ -143,11 +155,15 @@ const fixtures: Plugin = {
   },
 };
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), fixtures],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), tailwindcss(), ...(mode === "demo" ? [fixtures] : [])],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   publicDir: false,
-  server: { port: 5173, strictPort: true },
+  server: {
+    port: 5173,
+    strictPort: true,
+    proxy: mode === "demo" ? undefined : { "/api": { target: "http://127.0.0.1:8000" } },
+  },
   preview: { port: 4173, strictPort: true },
   build: { sourcemap: false, target: "es2022" },
-});
+}));

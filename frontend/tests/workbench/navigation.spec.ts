@@ -33,3 +33,17 @@ test("an absent route shares the private-404 wording", async ({ page }) => {
   await page.goto("/analysis/?fixture=unavailable");
   await expect(page.locator("main#body")).toContainText("Unavailable or not permitted.");
 });
+
+test("demo fixture HTTP is read-only before fixture selection", async ({ request }) => {
+  const get = await request.get("/api/sections/directory");
+  expect(get.status()).toBe(200);
+  expect(await get.json()).toHaveProperty("chrome");
+
+  const post = await request.post("/api/sections/directory?fixture=../../directory");
+  expect(post.status()).toBe(405);
+  expect(post.headers()["allow"]).toBe("GET, HEAD");
+  expect(await post.json()).toEqual({
+    code: "READ_ONLY_DEMO",
+    clears: "a real API handles commands",
+  });
+});
