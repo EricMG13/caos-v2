@@ -31,9 +31,8 @@ def record_outcome(
 ) -> bool:
     """Commit outcome/known charge/event even after termination; never analysis.
 
-    Owns the caller transaction. Exact replay is a no-op, conflicting replay
-    refuses, and legacy rows remain unverified rather than being backfilled.
-    An unknown outcome cannot later be overwritten with guessed reconciliation.
+    Owns the caller transaction. Exact replay is a no-op; conflicts and legacy
+    rows refuse. Unknown outcomes remain immutable, with no backfill.
     """
     try:
         inserted = _record(conn, attempt_id, outcome)
@@ -48,7 +47,6 @@ def record_outcome(
 
 
 def _record(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
-    _validate(outcome)
     run, _case, _status = _locked_attempt(conn, attempt)
     row = conn.execute(
         "SELECT l.amount, o.model, o.generation_id, o.diagnostic_sha256"
@@ -57,6 +55,14 @@ def _record(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
         " WHERE o.attempt_id = %s",
         (attempt,),
     ).fetchone()
+    if row is None:
+        if conn.execute(
+            "SELECT attempt_id FROM budget_ledger WHERE attempt_id = %s"
+            " UNION ALL SELECT attempt_id FROM artifacts WHERE attempt_id = %s",
+            (attempt, attempt),
+        ).fetchone():
+            raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
+    _validate(outcome)
     if row is not None:
         if row != (
             outcome.charge,
@@ -66,12 +72,6 @@ def _record(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
         ):
             raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
         return False
-    if conn.execute(
-        "SELECT attempt_id FROM budget_ledger WHERE attempt_id = %s"
-        " UNION ALL SELECT attempt_id FROM artifacts WHERE attempt_id = %s",
-        (attempt, attempt),
-    ).fetchone():
-        raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
     if outcome.charge is not None:
         conn.execute(
             "INSERT INTO budget_ledger (attempt_id,run_id,amount) VALUES (%s,%s,%s)",
