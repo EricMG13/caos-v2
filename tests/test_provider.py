@@ -419,6 +419,7 @@ def test_a_key_no_header_can_carry_is_refused_without_quoting_it() -> None:
     assert "sk-or-v1" not in leaked
 
 
+@pytest.mark.live_provider
 def test_the_live_provider_returns_a_completion() -> None:
     """The one call that really leaves the machine.
 

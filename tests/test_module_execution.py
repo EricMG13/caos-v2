@@ -428,6 +428,7 @@ def test_build_prompt_names_every_delivered_source() -> None:
     assert str(source_id) in prompt
 
 
+@pytest.mark.live_provider
 def test_cp1_produces_canonical_envelope_with_anchored_citations(
     admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
 ) -> None:

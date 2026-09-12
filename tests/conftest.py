@@ -26,6 +26,31 @@ sys.dont_write_bytecode = True
 POSTGRES_URL = os.environ.get("CAOS_TEST_POSTGRES_URL")
 POSTGRES_REQUIRED = os.environ.get("CAOS_REQUIRE_POSTGRES") == "1"
 _UNSET = "CAOS_TEST_POSTGRES_URL is unset: no database to run the store suite against"
+_LIVE_CONFIGURATION = (
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+    "CAOS_TEST_POSTGRES_URL",
+)
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--live-provider", action="store_true", help="run live provider tests"
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    live = [item for item in items if item.get_closest_marker("live_provider")]
+    if not config.getoption("--live-provider"):
+        items[:] = [item for item in items if item not in live]
+        config.hook.pytest_deselected(items=live)
+        return
+
+    missing = [name for name in _LIVE_CONFIGURATION if not os.environ.get(name)]
+    if live and missing:
+        raise pytest.UsageError("live provider tests require: " + ", ".join(missing))
 
 
 def _url_for(database: str) -> str:
