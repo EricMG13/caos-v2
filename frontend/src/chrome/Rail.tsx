@@ -4,7 +4,7 @@
 import { NavLink } from "react-router";
 import { ServedRole } from "./ServedRole";
 import { SECTION_ABBREVIATIONS, SECTION_LABELS, sectionPath } from "@/app/sections";
-import { RefusedControl } from "@/controls/RefusedControl";
+import { READ_ONLY_API, RefusedControl } from "@/controls/RefusedControl";
 import {
   SECTIONS,
   type RailEntry,
@@ -82,8 +82,8 @@ export function Rail({
           className="btn acc"
           reasonDisplay="hidden"
           refusal={{
-            code: "PROVIDER_UNPLACED",
-            clears: "Phase 5 places the provider (docs/REBUILD_PLAN.md).",
+            code: "ASK_UNPLACED",
+            clears: `the API serves an Ask route scoped to ${section ? ASK_SCOPE[section] : "the workspace"} — ${READ_ONLY_API}`,
           }}
           aria-label={`Ask about ${section ? ASK_SCOPE[section] : "the workspace"}`}
         >
@@ -96,8 +96,9 @@ export function Rail({
           className="btn"
           reasonDisplay="hidden"
           refusal={{
-            code: "IDENTITY_UNPLACED",
-            clears: "Phase 6 derives identity at the auth edge (docs/REBUILD_PLAN.md).",
+            code: "SIGN_OUT_UNPLACED",
+            clears:
+              "the authenticating proxy serves sign-out — this workspace holds no session of its own",
           }}
           aria-label="Sign out"
         >

@@ -90,11 +90,13 @@ describe("Directory", () => {
     // Committing a suggestion removes its label and refuses a second commit.
     const label = intake!.querySelector<HTMLElement>('[data-suggestion="label"]')!;
     expect(label.querySelector(".sug")).not.toBeNull();
-    // Nothing in this build commits: the control is visible and refused with the
-    // phase that clears it, and a click changes nothing.
+    // Nothing in this build commits: the control is visible and refused with
+    // what clears it -- true today, never a build phase -- and a click changes
+    // nothing.
     const commit = within(label).getByRole("button", { name: "Commit" });
     expect(commit).toHaveAttribute("aria-disabled", "true");
     expect(commit).toHaveAttribute("data-refusal", "STORE_UNPLACED");
+    expect(commit.getAttribute("title")).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
     fireEvent.click(commit);
     expect(label.querySelector(".sug")).not.toBeNull();
     expect(within(issuer).getByRole("button", { name: "Commit" })).toHaveAttribute(
@@ -125,6 +127,62 @@ describe("Directory", () => {
     // Nothing the browser could assert: no issuer, type, period or route fields.
     expect(container.querySelectorAll(".drop select, .drop textarea")).toHaveLength(0);
     expect(container.querySelectorAll(".drop input")).toHaveLength(1);
+  });
+
+  test("chosen files are said not to be sent, beside an admit control refused with its reason", () => {
+    const { container } = mount(fixture, "intake");
+    const drop = container.querySelector<HTMLElement>("[data-intake-drop]")!;
+    const admit = within(drop).getByRole("button", { name: "Admit pack" });
+    expect(admit).toHaveAttribute("aria-disabled", "true");
+    expect(admit).toHaveAttribute("data-refusal", "INTAKE_UNPLACED");
+    expect(admit.getAttribute("title")).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
+    const input = drop.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File(["a"], "a.txt")] } });
+    expect(drop.querySelector("[data-selected-files]")).toHaveTextContent(
+      "1 file selected · not sent",
+    );
+  });
+
+  test("no row of the register is drawn selected: the register has no selection", () => {
+    const { container } = mount(fixture);
+    const selected = () => container.querySelectorAll("table.reg[data-register] tbody tr.on");
+    expect(selected()).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Search cases"), { target: { value: "spirit" } });
+    expect(selected()).toHaveLength(0);
+  });
+
+  test("an intake of one small file reads in the singular and in bytes", () => {
+    const intake = fixture.body.intake!;
+    const one: DocumentOf<"directory"> = {
+      ...fixture,
+      body: {
+        ...fixture.body,
+        intake: { ...intake, files: [{ name: "memo.txt", bytes: 512, sha256: "b".repeat(64) }] },
+      },
+    };
+    const register = mount(one);
+    expect(register.container.querySelector("[data-intake-open]")).toHaveTextContent(
+      "1 file admitted as one pack",
+    );
+    register.unmount();
+    const { container } = mount(one, "intake");
+    expect(container.querySelector(".attlist")).toHaveTextContent("512 B");
+  });
+
+  test("a file of megabytes reads in megabytes, not thousands of kilobytes", () => {
+    const intake = fixture.body.intake!;
+    const large: DocumentOf<"directory"> = {
+      ...fixture,
+      body: {
+        ...fixture.body,
+        intake: {
+          ...intake,
+          files: [{ name: "annual-report.pdf", bytes: 5 * 1024 ** 2, sha256: "c".repeat(64) }],
+        },
+      },
+    };
+    const { container } = mount(large, "intake");
+    expect(container.querySelector(".attlist")).toHaveTextContent("5.0 MB");
   });
 
   test("test_empty_columns_are_not_rendered", () => {

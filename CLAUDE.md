@@ -105,7 +105,9 @@ Standing rules that back them:
 ## Running
 
 - `make venv` — the two toolchains. `make lock` — recompile every lock.
-- `make dev` — API + worker + Postgres, seeded.
+- `make dev` — the `api` process alone, on port 8000. It needs a Postgres URL
+  in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
+  per request, and applies `schema.sql` at startup. No worker, nothing seeded.
 - `make test` — the suite.
 - `make test-provider` — the live suite against the real model. Needs
   `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and `CAOS_TEST_POSTGRES_URL`, and
@@ -354,6 +356,29 @@ system this size means nobody looked.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
+- **The workspace reads fixtures; the API serves none of its routes.**
+  `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
+  section document and `sse.ts` tails `/api/events` for six lower-case event
+  names, while `server/api/app.py` serves `/api/runs/{id}` and its
+  `/events`, whose stream carries `RunEvent` names (`ROUTE_PINNED` …
+  `RUN_FAILED`). The refusal bodies differ as well: the client reads
+  `{code, clears}` and the server sends `{refusal}`, so a real server refusal
+  would be classed `RESPONSE_INVALID`. Every section therefore renders the
+  dev/preview fixtures and nothing else, and no governed write — commit,
+  withdraw, pin, approve, accept, sign, freeze, file — has a route. A control
+  refused for want of one now says so (`READ_ONLY_API`) instead of naming a
+  build phase that had already exited; a control refused for a domain reason —
+  `APPROVER_NOT_INDEPENDENT`, `RUN_NOT_TERMINAL` — still gives that reason,
+  which is the one its route will owe, although meeting it opens no route
+  today. The fixtures are the contract those routes owe, including two fields
+  the workspace now reads: `withdrawn_at` on a citation of a withdrawn source,
+  and `tab` on a ribbon action that opens one of the section's own tabs. This
+  entry was missing — the gap was found by driving every user story
+  (`docs/feature-status.csv`), not by the ledger.
+  *Upgrade:* a named model per section document behind `/api/sections/<s>`,
+  one event vocabulary chosen for both halves, and a refusal body that carries
+  what clears it; then a write route per governed action over the store call
+  that already exists.
 
 **Phase 8.**
 
@@ -400,6 +425,18 @@ system this size means nobody looked.
 
 **Phase 6.**
 
+- **Identity before the store rests on parameter order.** `read_run` and
+  `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
+  the whole of what refuses an anonymous request before a connection is opened:
+  FastAPI builds a route's dependency list in signature order (`get_dependant`)
+  and solves it sequentially (`solve_dependencies`), so the ordering is a
+  property of a pinned dependency rather than something the code says out loud.
+  `test_an_anonymous_request_opens_no_store_connection` counts the dependency's
+  calls, so a reorder and a FastAPI that stopped doing this both fail there --
+  which is what makes this a limit rather than a defect. *Upgrade:*
+  `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
+  inserts at the front of the list whatever the parameters say; worth taking the
+  day a third route arrives and the order has to be remembered three times.
 - **A run tail polls.** `server/api/app.py` re-reads `run_events` every
   `POLL_INTERVAL` until the run is terminal, standing is lost, or
   `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
@@ -419,6 +456,15 @@ system this size means nobody looked.
   and went without it, and `docs/REBUILD_PLAN.md` lists an admin UI under what is
   deliberately not in the plan — so there is no scheduled upgrade, and saying so
   is better than pointing at a phase that has closed.
+- **`GET /api/health` is specified and not served.** `SYSTEM_SPEC.md` §11 wants
+  liveness and readiness on one strict model — store, bundle, blob store, 200
+  when all hold and 503 otherwise, probed on a shared background task — and the
+  route answers FastAPI's own 404. The Admin section's document said
+  `HEALTH · 200` and listed a worker the one-process deployment does not have;
+  it now names the route as not served. Until the route exists a drifted schema
+  stops the process at boot, and every other store fault surfaces only on the
+  request that meets it. *Upgrade:* the route and its three probes, the day a
+  proxy or an operator has to ask whether the process can serve.
 
 **Phase 5.**
 

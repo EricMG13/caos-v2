@@ -65,7 +65,7 @@ function Cell({ row, column }: { row: CaseRow; column: Column }) {
   return <>{row[column.key]}</>;
 }
 
-export function CaseRegister({ rows, selected }: { rows: CaseRow[]; selected: string | null }) {
+export function CaseRegister({ rows }: { rows: CaseRow[] }) {
   const columns = filledColumns(rows);
   return (
     <table className="reg" data-register>
@@ -87,11 +87,7 @@ export function CaseRegister({ rows, selected }: { rows: CaseRow[]; selected: st
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr
-            key={row.case_id}
-            data-case={row.case_id}
-            className={row.case_id === selected ? "on" : undefined}
-          >
+          <tr key={row.case_id} data-case={row.case_id}>
             {columns.map((column) => (
               <td key={column.key} className={classOf(column)}>
                 <Cell row={row} column={column} />

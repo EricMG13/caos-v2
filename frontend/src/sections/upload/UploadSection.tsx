@@ -6,13 +6,13 @@ import { Restatements } from "./Restatements";
 import { SetVersions } from "./SetVersions";
 import { SourcePack } from "./SourcePack";
 import type { ViewProps } from "@/app/views";
-import { RefusalNote } from "@/controls/RefusedControl";
+import { READ_ONLY_API, RefusalNote } from "@/controls/RefusedControl";
 import type { Refusal } from "@/wire";
 
 /** The store writes; the browser never withdraws, pins or mints a timestamp. */
 const STORE_UNPLACED: Refusal = {
   code: "STORE_UNPLACED",
-  clears: "Phase 2 admits, pins and withdraws sources in the store (docs/REBUILD_PLAN.md)",
+  clears: `the API serves the store's withdrawal and pinning as routes — ${READ_ONLY_API}`,
 };
 
 const WITHDRAWN_AT_USE = {
@@ -48,7 +48,9 @@ export function UploadSection({ document, tab }: ViewProps<"upload">) {
             {shown.length ? (
               <SourcePack rows={shown} pinned={pinned} withdrawRefused={STORE_UNPLACED} />
             ) : (
-              <p className="pb note">No source is withdrawn.</p>
+              <p className="pb note">
+                {withdrawals ? "No source is withdrawn." : "The pack holds no source."}
+              </p>
             )}
           </div>
         </section>

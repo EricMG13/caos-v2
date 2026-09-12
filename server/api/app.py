@@ -36,7 +36,10 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from psycopg import OperationalError
 from pydantic import BaseModel, ConfigDict
 
 from server.api.identity import Actor, actor_from_headers
@@ -87,10 +90,19 @@ BLOB_ROOT = "CAOS_BLOB_ROOT"
 
 # The status for each refusal that can leave a route here. Unauthorised is
 # absent on purpose: it is answered as RUN_NOT_FOUND before it can be raised.
+# The store's own faults are 503: the server cannot answer, whoever asks, and a
+# 400 would tell the caller their request was the problem.
 _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
     RefusalCode.RUN_NOT_FOUND: 404,
     RefusalCode.CASE_NOT_FOUND: 404,
+    RefusalCode.STORE_NOT_CONFIGURED: 503,
+    RefusalCode.STORE_UNAVAILABLE: 503,
+    RefusalCode.STORE_NOT_TRANSACTIONAL: 503,
+    RefusalCode.STORE_SCHEMA_DRIFT: 503,
+    RefusalCode.BLOB_NOT_FOUND: 503,
+    RefusalCode.BLOB_DIGEST_MISMATCH: 503,
+    RefusalCode.BLOB_ADDRESS_INVALID: 503,
 }
 
 
@@ -160,23 +172,56 @@ class RefusalBody(BaseModel):
 def _database_url() -> str:
     url = environ.get(DATABASE_URL)
     if not url:
-        raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
+        raise Refusal(RefusalCode.STORE_NOT_CONFIGURED)
     return url
 
 
 def store_connection() -> Iterator[StoreConnection]:
-    """One connection per request, from the environment."""
-    with connect(_database_url()) as conn:
+    """One connection per request, from the environment.
+
+    A store that does not answer is refused like any other store fault. The
+    refusal is raised outside the `except`, so psycopg's message -- the host,
+    the port and the role -- is neither chained behind it nor logged with it.
+    """
+    conn: StoreConnection | None
+    try:
+        conn = connect(_database_url())
+    except OperationalError:
+        conn = None
+    if conn is None:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+    with conn:
         yield conn
 
 
 def blob_store() -> BlobStore:
     root = environ.get(BLOB_ROOT)
     if not root:
-        raise Refusal(RefusalCode.BLOB_NOT_FOUND)
+        raise Refusal(RefusalCode.STORE_NOT_CONFIGURED)
     return BlobStore(Path(root))
 
 
+def actor_from_request(request: Request) -> Actor:
+    """Who is asking. A dependency rather than a line in a route body.
+
+    FastAPI builds a route's dependency list in the order its parameters declare
+    them and solves it sequentially, so declaring this one before `Store` is
+    what keeps identity ahead of the connection. Two things rest on that. An
+    anonymous request is refused without opening one -- a connection is per
+    request and unpooled, and asking in a loop costs the asker nothing. And the
+    answer to a stranger does not depend on the store being reachable: a process
+    that has lost its database still says "I do not know who you are", which is
+    the only one of the two answers that is about the caller.
+
+    It closes the anonymous half and not the whole of it. A request asserting
+    any well-formed subject still reaches the connection, because whether that
+    subject is real is the edge's question rather than this process's
+    (`server/api/identity.py`).
+    """
+    return actor_from_headers(request.headers)
+
+
+Caller = Annotated[Actor, Depends(actor_from_request)]
 Store = Annotated[StoreConnection, Depends(store_connection)]
 Blobs = Annotated[BlobStore, Depends(blob_store)]
 
@@ -190,10 +235,36 @@ def _refused(_request: Request, refusal: Refusal) -> Response:
     )
 
 
+@app.exception_handler(RequestValidationError)
+async def _malformed_run_id(
+    request: Request, error: RequestValidationError
+) -> Response:
+    """A run id that cannot be read names no run.
+
+    FastAPI's own 422 answered it before identity, in a body that is not the
+    declared refusal and that quotes the input back. So it is answered as
+    `_visible` answers any run it cannot show: NOT_AUTHENTICATED to a caller
+    with no identity, RUN_NOT_FOUND to everyone else. Only for `run_id` -- any
+    other path parameter, a query or a body is not a missing run, and gets the
+    default until the route that takes one says what it should get instead.
+    """
+    unreadable = {tuple(detail.get("loc") or ())[:2] for detail in error.errors()}
+    if unreadable != {("path", "run_id")}:
+        return await request_validation_exception_handler(request, error)
+    try:
+        actor_from_headers(request.headers)
+    except Refusal as refusal:
+        return _refused(request, refusal)
+    return _refused(request, Refusal(RefusalCode.RUN_NOT_FOUND))
+
+
 @app.get("/api/runs/{run_id}", response_model=RunDocument)
-def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDocument:
-    """The run, its pinned route, and each node's state with its reason."""
-    actor = actor_from_headers(request.headers)
+def read_run(run_id: UUID, actor: Caller, conn: Store, blobs: Blobs) -> RunDocument:
+    """The run, its pinned route, and each node's state with its reason.
+
+    `actor` is declared first, and the order is load-bearing: see
+    `actor_from_request`.
+    """
     _case_id, status = _visible(conn, run_id, actor)
 
     route = resolved_route(conn, run_id)
@@ -215,14 +286,17 @@ def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDo
 
 
 @app.get("/api/runs/{run_id}/events")
-def read_run_events(run_id: UUID, request: Request, conn: Store) -> StreamingResponse:
+def read_run_events(
+    run_id: UUID, actor: Caller, request: Request, conn: Store
+) -> StreamingResponse:
     """The run's events as `text/event-stream`, resuming after `Last-Event-ID`.
 
     The authority read happens here, before the first byte, so that an
     unauthorised watcher gets the same 404 the run document gives rather than an
     empty 200 -- which would still confirm the id names a run somebody watches.
+    `actor` is declared before `conn` for the reason `actor_from_request` gives;
+    `request` is still taken, for the resume marker alone.
     """
-    actor = actor_from_headers(request.headers)
     case_id, _status = _visible(conn, run_id, actor)
 
     return StreamingResponse(

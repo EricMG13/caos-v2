@@ -31,7 +31,8 @@
         {
           "label": "Compare",
           "primary": true,
-          "refusal": null
+          "refusal": null,
+          "tab": "compare"
         },
         {
           "label": "Save view",
@@ -671,7 +672,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -730,7 +731,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -789,7 +790,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -848,7 +849,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -886,7 +887,8 @@
             "bboxes": [[0.085, 0.39, 0.83, 0.05]],
             "matched_text": "Renew the line of credit at $1.5 billion until April 30, 2027.",
             "observed_at": "2026-09-09T14:30:00Z",
-            "render_url": null
+            "render_url": null,
+            "withdrawn_at": "2026-09-09T09:41:00Z"
           }
         ],
         "supporting_research": [
@@ -907,7 +909,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
@@ -966,7 +968,7 @@
           },
           {
             "title": "rev_3 · Committee deliverable",
-            "module_id": "CP-MEMO",
+            "module_id": "HOST",
             "state": "FROZEN · NOT FILED"
           }
         ],
