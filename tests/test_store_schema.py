@@ -19,7 +19,7 @@ from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
 from threading import Barrier
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -306,7 +306,7 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         assert _catalog(conn) == catalog
 
 
-@pytest.mark.parametrize("prefix", [2, 3, 4])
+@pytest.mark.parametrize("prefix", [2, 3, 4, 5])
 def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
     empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
 ) -> None:
@@ -588,3 +588,103 @@ def test_apply_schema_cleanup_preserves_cancellation(
     monkeypatch.setattr(store, "_migrate", interrupted)
     with connect(empty_database) as conn, pytest.raises(KeyboardInterrupt):
         apply_schema(conn)
+
+
+@pytest.mark.parametrize(
+    "table,column",
+    [
+        ("runs", "budget_ceiling"),
+        ("budget_reservations", "amount"),
+        ("budget_ledger", "amount"),
+    ],
+)
+@pytest.mark.parametrize("value", ["-1", "NaN", "Infinity", "-Infinity"])
+def test_native_money_constraints_refuse_malformed_rows(
+    empty_database: str, tmp_path: Path, table: str, column: str, value: str
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _populate(conn, BlobStore(tmp_path))
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(f"UPDATE {table} SET {column} = %s", (Decimal(value),))
+        conn.rollback()
+
+
+@pytest.mark.parametrize("table", ["budget_reservations", "budget_ledger"])
+def test_budget_owner_keys_reject_existing_unrelated_run(
+    empty_database: str, tmp_path: Path, table: str
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _populate(conn, BlobStore(tmp_path))
+        other_case = create_case(conn, BoundaryText.of("unrelated owner"))
+        other_run = start_run(conn, other_case)
+        conn.commit()
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            conn.execute(f"UPDATE {table} SET run_id = %s", (other_run,))
+        conn.rollback()
+
+
+@pytest.mark.parametrize("prefix", [0, 5])
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        ("runs", "budget_ceiling", "-1"),
+        ("runs", "budget_ceiling", "NaN"),
+        ("budget_ledger", "amount", "-1"),
+        ("budget_ledger", "amount", "Infinity"),
+        ("budget_reservations", "amount", "NaN"),
+        ("budget_reservations", "amount", "Infinity"),
+        ("budget_reservations", "run_id", "unrelated"),
+        ("budget_ledger", "run_id", "unrelated"),
+    ],
+)
+def test_invalid_populated_money_upgrade_refuses_atomically(
+    empty_database: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prefix: int,
+    malformed: tuple[str, str, str],
+) -> None:
+    table, column, value = malformed
+    with connect(empty_database) as conn:
+        if prefix:
+            with monkeypatch.context() as patch:
+                patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:prefix])
+                apply_schema(conn)
+        else:
+            _legacy(conn)
+        _populate(conn, BlobStore(tmp_path))
+        invalid: Decimal | UUID
+        if value == "unrelated":
+            owner = create_case(conn, BoundaryText.of("unrelated historical owner"))
+            invalid = start_run(conn, owner)
+        else:
+            invalid = Decimal(value)
+        conn.execute(f"UPDATE {table} SET {column} = %s", (invalid,))
+        conn.commit()
+        before, columns, catalog = repr(_records(conn)), _columns(conn), _catalog(conn)
+        history = conn.execute("SELECT applied_digest FROM store_schema").fetchall()
+        migrations = (
+            conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+            if prefix
+            else None
+        )
+        conn.commit()
+        with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+            apply_schema(conn)
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+        assert repr(_records(conn)) == before
+        assert _columns(conn) == columns
+        assert _catalog(conn) == catalog
+        assert (
+            conn.execute("SELECT applied_digest FROM store_schema").fetchall()
+            == history
+        )
+        if prefix:
+            assert (
+                conn.execute(
+                    "SELECT * FROM store_migrations ORDER BY version"
+                ).fetchall()
+                == migrations
+            )

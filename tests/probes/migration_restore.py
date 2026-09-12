@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess  # nosec B404
 import sys
+from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -25,8 +26,9 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.read import read_block
 from server.store import MIGRATIONS, apply_schema, connect
+from server.store.budget import remaining, reserve
 from server.store.run_inputs import load_run_input, pin_run_input
-from server.store.runs import create_case
+from server.store.runs import Accepted, accept_attempt, create_case, start_attempt
 
 _ADMIN = "postgresql://postgres:local-test-admin-only@127.0.0.1:55437/postgres"
 _CONTAINER = "caos-workbench-dev-test-postgres-1"
@@ -61,7 +63,7 @@ def main(*, migrated: bool = False) -> None:
             blobs = BlobStore(Path(tmp) / "original_blobs")
             with connect(_ADMIN.rsplit("/", 1)[0] + "/" + original) as conn:
                 _legacy(conn)
-                _populate(conn, blobs)
+                digest = _populate(conn, blobs)
                 if migrated:
                     apply_schema(conn)
                     case_id = create_case(
@@ -70,6 +72,15 @@ def main(*, migrated: bool = False) -> None:
                     run, sources, bundle, _ = _prepare(conn, case_id, blobs.root)
                     pin = pin_run_input(
                         conn, run, sources.version, bundle, {"q": "Café?"}
+                    )
+                    attempt = start_attempt(conn, run, "CP-DR")
+                    reserve(conn, attempt, Decimal("0.25"))
+                    accept_attempt(
+                        conn,
+                        attempt_id=attempt,
+                        accepted=Accepted(
+                            digest, Decimal("0.75"), "synthetic", "restore"
+                        ),
                     )
                 columns = _columns(conn)
                 before = _records(conn, columns)
@@ -131,6 +142,7 @@ def main(*, migrated: bool = False) -> None:
                 ).fetchone() == (1 if migrated else 0,)
                 if migrated:
                     assert load_run_input(conn, run) == pin
+                    assert remaining(conn, run) == Decimal("4.25")
                 for (source,) in conn.execute(
                     "SELECT source_id FROM sources"
                 ).fetchall():

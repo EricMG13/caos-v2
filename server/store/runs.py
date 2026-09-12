@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
-from server.store.budget import CEILING
+from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
 
@@ -47,8 +47,7 @@ def start_run(
     gets.
     """
     ceiling = CEILING if budget_ceiling is None else budget_ceiling
-    if not isinstance(ceiling, Decimal):
-        raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
+    validate_spend(ceiling)
     lock_case(conn, case_id)
     run_id = uuid4()
     conn.execute(
@@ -142,10 +141,7 @@ def accept_attempt(
     not the charge. Writing them anyway would leave a failed run holding an
     accepted artifact, and Phase 3 recomputes node states from exactly those.
     """
-    if not isinstance(accepted.charge, Decimal):
-        # Before any write: a float that reached the ledger would already have
-        # lost the cent it cannot represent (invariant 7).
-        raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
+    validate_spend(accepted.charge)
 
     run_id, case_id = _attempt_owner(conn, attempt_id)
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
