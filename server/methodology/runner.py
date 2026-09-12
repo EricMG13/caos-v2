@@ -25,7 +25,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.engine.route import GATE_MODULE, ResolvedRoute, predecessors
-from server.engine.runtime import ProviderResult
+from server.engine.runtime import ProviderResult, artifact_digests
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Envelope
 from server.methodology.executor import (
@@ -98,9 +98,13 @@ class ModuleProvider:
         the store to read -- a caller's copy of what a predecessor said is a
         claim, not the fact this method needs.
 
-        One round trip regardless of how many predecessors this node has: every
-        accepted artifact of the run is read in the one query below, and which
-        rows answer *this* module's predecessors is decided in Python against
+        One round trip regardless of how many predecessors this node has:
+        `artifact_digests` (`server/engine/runtime.py`) reads every accepted
+        artifact of the run in one query -- the same query, and the same row
+        set, `accepted_artifacts` reads for the frontier itself, factored into
+        one function so the two readers cannot drift out of step with the
+        schema under them -- and which rows answer *this* module's
+        predecessors is decided in Python against
         `predecessors(self.route, module_id)`. A query per predecessor is
         exactly the shape `docs/AI_CODE_QUALITY.md` measures at ~8x.
         """
@@ -112,13 +116,7 @@ class ModuleProvider:
             for node in self.route.nodes
             if node.module_id in set(wanted)
         }
-        rows = self.conn.execute(
-            "SELECT attempts.route_node_id, artifacts.artifact_sha256"
-            " FROM artifacts JOIN run_attempts AS attempts USING (attempt_id)"
-            " WHERE artifacts.run_id = %s",
-            (self.run_id,),
-        ).fetchall()
-        digests = {str(node_id): str(digest) for node_id, digest in rows}
+        digests = artifact_digests(self.conn, self.run_id)
         upstream: list[Upstream] = []
         for predecessor in wanted:
             # Not every predecessor has run: a soft edge's source may never

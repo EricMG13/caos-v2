@@ -58,7 +58,8 @@ class _Completions:
     # The identity a real provider carries: what the host configured, which
     # with fallbacks off is what answers.
     model: str = MODEL
-    # Whole prompts, not a prefix: Task 7's test reads the upstream section
+    # Whole prompts, not a prefix: the predecessor-chain test below
+    # (`docs/REBUILD_PLAN.md` Phase 11, "The chain") reads the upstream section
     # back out of the second node's prompt, and a truncated copy would not
     # carry it.
     prompts: list[str] = field(default_factory=list)

@@ -92,6 +92,26 @@ def run_route(
     complete_run(conn, run_id)
 
 
+def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
+    """Every accepted artifact of the run, keyed by route node id.
+
+    One join, read in one place. `accepted_artifacts` below and
+    `server.methodology.runner.ModuleProvider._upstream` both need exactly this
+    row set -- the first to decide which nodes are COMPLETE and which body
+    to read, the second to read a node's predecessors' bodies -- and a query
+    string kept twice is a join two callers can silently drift out of step on
+    the day the schema moves under one of them and not the other.
+    """
+    rows = conn.execute(
+        "SELECT attempts.route_node_id, artifacts.artifact_sha256"
+        " FROM artifacts"
+        " JOIN run_attempts AS attempts USING (attempt_id)"
+        " WHERE artifacts.run_id = %s",
+        (run_id,),
+    ).fetchall()
+    return {str(route_node_id): str(digest) for route_node_id, digest in rows}
+
+
 def accepted_artifacts(
     conn: StoreConnection, blobs: BlobStore, route: ResolvedRoute, run_id: UUID
 ) -> dict[str, Any]:
@@ -105,21 +125,10 @@ def accepted_artifacts(
     readiness_nodes = {
         node.route_node_id for node in route.nodes if node.module_id == GATE_MODULE
     }
-    rows = conn.execute(
-        "SELECT attempts.route_node_id, artifacts.artifact_sha256"
-        " FROM artifacts"
-        " JOIN run_attempts AS attempts USING (attempt_id)"
-        " WHERE artifacts.run_id = %s",
-        (run_id,),
-    ).fetchall()
-
-    accepted: dict[str, Any] = {}
-    for route_node_id, digest in rows:
-        node_id = str(route_node_id)
-        accepted[node_id] = (
-            json.loads(blobs.get(str(digest))) if node_id in readiness_nodes else {}
-        )
-    return accepted
+    return {
+        node_id: (json.loads(blobs.get(digest)) if node_id in readiness_nodes else {})
+        for node_id, digest in artifact_digests(conn, run_id).items()
+    }
 
 
 def _run_node(
