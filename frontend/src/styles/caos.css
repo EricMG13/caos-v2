@@ -248,7 +248,7 @@ button.pill{height: 24px;font-family: var(--font-mono)}
 .secrow:last-child{border-bottom: 0}
 .secrow .n{font: 600 8px var(--font-mono);width: 16px;flex: none}
 .secrow.on{background: var(--caos-elevated);color: var(--caos-text);box-shadow: inset 2px 0 0 var(--caos-accent)}
-.secrow .src{margin-left: auto;font: 600 8px var(--font-mono);letter-spacing: 0.08em}
+.secrow .src{margin-left: auto;font: 600 8px var(--font-mono);letter-spacing: 0.08em;white-space: nowrap}
 .reslink{display: flex;gap: 7px;align-items: flex-start;padding: 5px 0;border-bottom: 1px solid var(--hairline);font-size: 10px;line-height: 1.4}
 .reslink:last-child{border-bottom: 0}
 .reslink .t{color: var(--acc-t)}
@@ -280,7 +280,7 @@ button.pill{height: 24px;font-family: var(--font-mono)}
 .refusal code{font: 700 8.5px var(--font-mono);color: var(--crit-t);letter-spacing: 0.06em}
 .refusal .cl{font-size: 9.5px;color: var(--caos-text);margin-top: 4px;line-height: 1.5}
 .refusal .cl b{color: var(--acc-t);font-weight: 600}
-.receipt{font: 500 8.5px var(--font-mono);color: var(--caos-text);line-height: 1.7;word-break: break-all;background: var(--caos-elevated);border: 1px solid var(--caos-border);border-radius: 4px;padding: 7px 9px;margin-top: 6px}
+.receipt{font: 500 8.5px var(--font-mono);color: var(--caos-text);line-height: 1.7;overflow-wrap: anywhere;background: var(--caos-elevated);border: 1px solid var(--caos-border);border-radius: 4px;padding: 7px 9px;margin-top: 6px}
 .receipt .k{color: var(--caos-muted)}
 /* ================= paper: filed output only ================= */
 .papergutter{background: var(--paper-gutter);padding: 18px;display: grid;place-items: start center;overflow: auto}
@@ -353,8 +353,9 @@ button.pill{height: 24px;font-family: var(--font-mono)}
 .dag line.adv{stroke: color-mix(in srgb, var(--caos-muted) 60%, transparent);stroke-dasharray: 2 3}
 .dag line.gate{stroke: var(--caos-warning);stroke-width: 2}
 .dag line.cond{stroke: color-mix(in srgb, var(--acc) 55%, transparent);stroke-dasharray: 6 3}
-.stagehdr{position: absolute;top: 8px;font: 700 7.5px var(--font-mono);letter-spacing: 0.12em;color: var(--caos-muted);text-transform: uppercase}
-.node{position: absolute;width: 128px;border: 1px solid var(--caos-border);border-radius: 5px;background: var(--caos-elevated);padding: 5px 8px 6px;box-sizing: border-box;text-align: left;color: inherit;font-family: inherit;cursor: pointer}
+/* One column wide (NODE_W, set by RouteGraph.tsx), wrapping to a second line above the nodes: a long stage name ran into the next column's. */
+.stagehdr{position: absolute;top: 8px;font: 700 7.5px var(--font-mono);line-height: 1.25;letter-spacing: 0.12em;color: var(--caos-muted);text-transform: uppercase;display: -webkit-box;-webkit-box-orient: vertical;-webkit-line-clamp: 2;overflow: hidden}
+.node{position: absolute;border: 1px solid var(--caos-border);border-radius: 5px;background: var(--caos-elevated);padding: 5px 8px 6px;box-sizing: border-box;text-align: left;color: inherit;font-family: inherit;cursor: pointer}
 .node .id{font: 700 9px var(--font-mono);color: var(--caos-text);display: flex;align-items: center;gap: 6px}
 .node .nm{font-size: 9px;color: var(--caos-muted);margin-top: 1px;white-space: nowrap;overflow: hidden;text-overflow: ellipsis}
 .node .st{font: 700 7.5px var(--font-mono);letter-spacing: 0.1em;margin-top: 4px;display: flex;align-items: center;gap: 5px}
@@ -393,6 +394,8 @@ select.tin{color-scheme: dark}
 /* ================= Directory, Upload, Admin (cards 5a–5c, 6b) ================= */
 /* A register cell that may wrap — issuer and sector in Directory, the source and withdrawal cells in Upload — so nine columns fit at 1280 without clipping. */
 table.reg td.wrap,table.reg th.wrap{white-space: normal;overflow-wrap: break-word}
+/* A timestamp in a wrapping cell stays one token: '2026-09-' then '09 09:41Z' reads as two. */
+table.reg td[data-withdrawal] time{white-space: nowrap}
 /* Nine columns plus the action: the register trims its gutters so it fits at 1024. */
 table.reg[data-register] th,table.reg[data-register] td{padding-left: 7px;padding-right: 7px}
 table.reg td .sub{display: block;margin-top: 2px;font: 500 8.5px var(--font-mono);color: var(--caos-muted);/* a file name is one word;it may break anywhere so the row need not widen */
@@ -422,13 +425,18 @@ li.pill{cursor: default}
 /* ================= Run: the DAG scrolls inside its panel ================= */
 /* .dag is the overflow:auto wrapper; .dagbox is the positioned box sized to the layout, so the route scrolls horizontally in its panel and never widens the page. */
 .dag .dagbox{position: relative}
-.dag .node{height: 62px;overflow: hidden}
+/* Sized by NODE_W and NODE_H in RouteGraph.tsx. Fixed line heights, so the two reason lines fit on every engine's fonts. */
+.dag .node{overflow: hidden}
+.dag .node .id,.dag .node .nm,.dag .node .st{line-height: 12px}
+/* The state line stays one line: 'RUNNABLE · FRONTIER' wrapping pushed the reason out of the box. */
+.dag .node .st{white-space: nowrap;letter-spacing: 0.06em}
 .dag .node .nm{display: block}
 .dag .node .why{display: -webkit-box;-webkit-line-clamp: 2;-webkit-box-orient: vertical;overflow: hidden}
 .dag .gatemark{position: absolute;width: 0;height: 0}
 .dag .gatemark .gatebox{left: -9px;top: -9px}
 .dag .gatemark .gatelbl{left: -24px;top: 12px}
-.kv dd.wrap{white-space: normal;word-break: break-all}
+/* Prose wraps between words; only an unbroken token (a digest) breaks anywhere. */
+.kv dd.wrap{white-space: normal;overflow-wrap: anywhere}
 .pb .actions{display: flex;flex-wrap: wrap;gap: 6px;align-items: center;margin-top: 8px}
 .att .t-ok{color: var(--ok-t)}
 .att .t-run{color: var(--acc-t)}
