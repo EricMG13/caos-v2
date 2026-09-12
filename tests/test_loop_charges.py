@@ -19,11 +19,12 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import gate_verdict
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute, resolve_route
-from server.engine.runtime import Execution, run_route
+from server.engine.route import NodeState, ResolvedRoute, node_states, resolve_route
+from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
@@ -57,36 +58,33 @@ class _Completions:
     # The identity a real provider carries: what the host configured, which
     # with fallbacks off is what answers.
     model: str = MODEL
+    # What the gate says about the one other module of this pathway.
+    verdict: str = "READY"
     calls: list[str] = field(default_factory=list)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls.append(prompt[:40])
-        body: dict[str, object] = {
-            "claims": [
-                {
-                    "statement": "Total debt was USD 1,240.0m.",
-                    "citations": [
-                        {
-                            "source_id": str(self.source_id),
-                            "page": 1,
-                            "matched_text": "Total debt at 31 December 2026",
-                        }
-                    ],
-                }
-            ]
-        }
-        if "content_to_module_map" in prompt:
-            # This fixture's route is CP-0 and CP-DR alone (module docstring
-            # above), so the gate has exactly one other module to answer for.
-            body["content_to_module_map"] = [
-                {
-                    "module_id": "CP-DR",
-                    "readiness_status": "READY",
-                    "readiness_effect": "the one admitted source covers it",
-                }
-            ]
+        body = json.dumps(
+            {
+                "claims": [
+                    {
+                        "statement": "Total debt was USD 1,240.0m.",
+                        "citations": [
+                            {
+                                "source_id": str(self.source_id),
+                                "page": 1,
+                                "matched_text": "Total debt at 31 December 2026",
+                            }
+                        ],
+                    }
+                ],
+                # A verdict on the rest of the route, when the prompt is the
+                # gate's. This pathway is CP-0 and CP-DR alone.
+                **gate_verdict(prompt, self.verdict),
+            }
+        )
         return Completion(
-            content=json.dumps(body), charge=self.charge, generation_id="gen-loop-test"
+            content=body, charge=self.charge, generation_id="gen-loop-test"
         )
 
 
@@ -271,6 +269,51 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
     assert run_status(conn, run_id) is RunStatus.RUNNING
     assert _reserved(conn, run_id) == [ESTIMATE], "the call was paid for regardless"
     assert _charges(conn, run_id) == [], "and nothing was accepted"
+
+
+def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """The verdict decides what runs, driven end to end rather than composed.
+
+    Each half held on its own -- the envelope carries the map, `_state_for`
+    reads it, the frontier offers RUNNABLE and RESTRICTED -- and nothing put a
+    real loop behind a real gate answer. CP-0 answers BLOCKED for the one other
+    node here, so it is never offered: one call, one reservation, one charge, no
+    attempt row, and a COMPLETE run reporting it unrun. A loop that ran it
+    anyway would pay a provider for an answer the gate had already refused.
+    """
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id, verdict="BLOCKED")
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        delivered=_delivered(conn, source_id),
+        route=route,
+    )
+
+    run_route(
+        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
+    )
+
+    nodes = {node.module_id: node.route_node_id for node in route.nodes}
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    assert len(completions.calls) == 1, "the gate was asked; what it blocked was not"
+    assert _charges(conn, run_id) == [REPORTED], "one charge, for the one call"
+    assert _reserved(conn, run_id) == [ESTIMATE], "and one reservation behind it"
+    assert _attempted(conn, run_id) == [nodes["CP-0"]], "no attempt row at all"
+    states = node_states(route, accepted_artifacts(conn, blobs, route, run_id))
+    assert states[nodes["CP-DR"]] is NodeState.BLOCKED, "reported unrun, with its cause"
+
+
+def _attempted(conn: StoreConnection, run_id: UUID) -> list[str]:
+    rows = conn.execute(
+        "SELECT route_node_id FROM run_attempts WHERE run_id = %s ORDER BY started_at",
+        (run_id,),
+    ).fetchall()
+    return [str(row[0]) for row in rows]
 
 
 def _delivered(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:

@@ -61,8 +61,11 @@ SOFT = frozenset({EdgeType.OPTIONAL, EdgeType.ADVISORY})
 # the schema declares -- CONDITIONAL, BLOCKED -- leave a soft edge soft.
 READY = frozenset({"READY", "READY_WITH_LIMITATIONS"})
 
-# The run's source-readiness gate. Named once here because three callers need
-# it: the reader below, the runtime's artifact fetch, and the executor's prompt.
+# The run's source-readiness gate. Named once here because three callers need it:
+# the reader below, the runtime's artifact fetch, and `ModuleProvider.execute` in
+# `server/methodology/runner.py`, where "only the gate is asked for a verdict" is
+# decided. `executor.py` never names it -- the assignment it is handed already
+# says what this module must cover.
 GATE_MODULE = "CP-0"
 
 # The host's model extension. `SYSTEM_SPEC.md` §6.2: CP-CF is appended at stage

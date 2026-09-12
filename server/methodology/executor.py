@@ -201,14 +201,18 @@ def execute_module(
     completion = provider.complete(prompt, json_object=True)
 
     sources = {item.source_id for item in assignment.delivered}
+    # The map first: it is a pure read of the same body, and a map the host
+    # cannot bound refuses this answer whatever the claims say. After the loop it
+    # was reached only once every quote had been anchored against the token index
+    # -- a query per citation spent on an answer already refused.
+    readiness = parse_readiness(completion.content, expected=assignment.gate_expects)
+
     claims = []
     for statement, citations in parse_claims(completion.content, delivered=sources):
         anchored = verify_citations(conn, delivered=sources, citations=citations)
         claims.append(
             Claim(statement=BoundaryText.of(statement), citations=tuple(anchored))
         )
-
-    readiness = parse_readiness(completion.content, expected=assignment.gate_expects)
 
     envelope = Envelope(
         # The host's, not the module's. Whatever it claimed about its own
