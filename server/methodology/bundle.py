@@ -21,16 +21,19 @@ well as CP-PARSE. The whole file, or a refusal.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from functools import cached_property
+import re
+from dataclasses import dataclass, field
 from hashlib import sha256
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, NoReturn, cast
 
+from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 
 MANIFEST_NAME = "DEPLOY_V_INTEGRITY_v1.json"
 SKILLS_DIR = "skills"
+# §35: pinned manifest is 68,657 bytes; read at most this ceiling plus one.
+MANIFEST_BYTE_LIMIT = 128 * 1024
 
 # The host's one declaration (`docs/DECISIONS.md` §5). CP-PARSE is not a folder
 # in this build; it is CP-0's authority under its own route node.
@@ -46,64 +49,189 @@ class Authority:
     files: dict[str, bytes]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Bundle:
-    """The vendored tree, and the manifest that says what it should contain."""
+    """One immutable manifest snapshot, selected before the Bundle is shared.
+
+    Only raw bytes are retained. Parsed entries are fresh copies, so a caller
+    cannot mutate cached metadata into authority. No lazy initialization race.
+    """
 
     root: Path
+    _raw_manifest: bytes = field(init=False, repr=False)
 
-    @cached_property
+    def __post_init__(self) -> None:
+        raw = _read_manifest(self.root)
+        _parse_manifest(raw)
+        object.__setattr__(self, "_raw_manifest", raw)
+
+    def verify_manifest(self) -> None:
+        """Refuse a removed or changed manifest; never adopt a replacement."""
+        if _read_manifest(self.root) != self._raw_manifest:
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+
+    @property
     def _manifest(self) -> dict[str, Any]:
-        raw = (self.root / MANIFEST_NAME).read_bytes()
-        loaded: dict[str, Any] = json.loads(raw)
+        self.verify_manifest()
+        loaded: dict[str, Any] = json.loads(self._raw_manifest)
         return loaded
 
-    @cached_property
+    @property
     def manifest_sha256(self) -> str:
         """The one vendored file the manifest cannot cover: its own bytes.
 
         `docs/DECISIONS.md` §13 records this digest separately, because the host
         does not mint an identity for something that ships with one.
         """
-        return sha256((self.root / MANIFEST_NAME).read_bytes()).hexdigest()
+        self.verify_manifest()
+        return sha256(self._raw_manifest).hexdigest()
 
-    @cached_property
+    @property
     def build_id(self) -> str:
         """The build a run is pinned to. One build never executes as another."""
-        return str(self._manifest["build_id"])
+        return cast(str, self._manifest["build_id"])
 
     def skill_of(self, module_id: str) -> dict[str, Any]:
         """The manifest entry for a module, following the host's carve-outs."""
         wanted = _CARVE_OUTS.get(module_id, module_id)
-        for skill in self._manifest.get("skills", []):
-            if skill.get("module_id") == wanted:
+        for skill in self._manifest["skills"]:
+            if skill["module_id"] == wanted:
                 entry: dict[str, Any] = skill
                 return entry
         raise Refusal(RefusalCode.AUTHORITY_MODULE_UNKNOWN)
+
+
+def _authority_name(value: object) -> str:
+    """A canonical relative POSIX name, never a filesystem instruction."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    try:
+        boundary = BoundaryText.of(value).value
+    except Refusal:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH) from None
+    path = PurePosixPath(value)
+    if (
+        boundary != value
+        or path.is_absolute()
+        or ".." in path.parts
+        or path.as_posix() != value
+        or not path.parts
+        or "\\" in value
+    ):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return value
+
+
+def _contained_path(root: Path, name: str) -> Path:
+    _authority_name(name)
+    try:
+        base = root.resolve(strict=True)
+        path = (base / name).resolve(strict=True)
+    except (OSError, ValueError):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH) from None
+    if not path.is_relative_to(base) or path == base:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return path
+
+
+def _read_manifest(root: Path) -> bytes:
+    path = _contained_path(root, MANIFEST_NAME)
+    if not path.is_file():
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(MANIFEST_BYTE_LIMIT + 1)
+    except OSError:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH) from None
+    if len(raw) > MANIFEST_BYTE_LIMIT:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return raw
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return result
+
+
+def _invalid_constant(value: str) -> NoReturn:
+    raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+
+
+def _is_digest(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) is not None
+
+
+def _validate_skill(skill: object) -> str:
+    if not isinstance(skill, dict):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    module_id = _authority_name(skill.get("module_id"))
+    folder = _authority_name(skill.get("folder_slug"))
+    if "/" in module_id or "/" in folder:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    hashes = skill.get("relative_file_hashes")
+    if not isinstance(hashes, dict) or "SKILL.md" not in hashes:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    for name, entry in hashes.items():
+        _authority_name(name)
+        if not isinstance(entry, dict) or not _is_digest(entry.get("sha256")):
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+        size = entry.get("bytes")
+        if type(size) is not int or size < 0 or (name == "SKILL.md" and size == 0):
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return module_id
+
+
+def _parse_manifest(raw: bytes) -> dict[str, Any]:
+    try:
+        loaded = json.loads(
+            raw, object_pairs_hook=_unique_object, parse_constant=_invalid_constant
+        )
+    except (ValueError, RecursionError):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH) from None
+    if (
+        not isinstance(loaded, dict)
+        or loaded.get("authority") != "DEPLOY_V_INTEGRITY_v1"
+        or loaded.get("schema_version") != "1.0"
+        or not _is_digest(loaded.get("build_id"))
+    ):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    skills = loaded.get("skills")
+    if not isinstance(skills, list) or not skills:
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    module_ids = [_validate_skill(skill) for skill in skills]
+    if len(set(module_ids)) != len(module_ids):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return loaded
 
 
 def verified_bytes(bundle: Bundle, module_id: str, relative_path: str) -> bytes:
     """One file of one module's authority, proven against the manifest.
 
     Refuses `AUTHORITY_BYTES_MISMATCH` for a file whose bytes have moved, one the
-    tree no longer has, and one the manifest never named -- which is also what
-    stops a path leaving the module's folder, since no traversal is a name the
-    manifest carries. The refusal carries the code alone: a path or a body would
-    put the vendor's filesystem into whatever logs it.
+    tree no longer has, and one the manifest never named. Both declared names
+    and their resolved targets must remain contained. The code alone travels:
+    a path or a body would put the vendor's filesystem into whatever logs it.
     """
     skill = bundle.skill_of(module_id)
-    expected = skill.get("relative_file_hashes", {}).get(relative_path)
+    expected = skill["relative_file_hashes"].get(relative_path)
     if not isinstance(expected, dict):
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
 
-    path = bundle.root / SKILLS_DIR / str(skill["folder_slug"]) / relative_path
+    skills = _contained_path(bundle.root, SKILLS_DIR)
+    folder = _contained_path(skills, skill["folder_slug"])
+    path = _contained_path(folder, relative_path)
+    if not path.is_file():
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     try:
         data = path.read_bytes()
     except OSError:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH) from None
 
-    if sha256(data).hexdigest() != expected.get("sha256"):
+    if len(data) != expected["bytes"] or sha256(data).hexdigest() != expected["sha256"]:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    bundle.verify_manifest()
     return data
 
 
@@ -115,12 +243,14 @@ def assemble_authority(bundle: Bundle, module_id: str) -> Authority:
     breaks CP-0 and CP-PARSE together.
     """
     skill = bundle.skill_of(module_id)
-    names = sorted(skill.get("relative_file_hashes", {}))
-    return Authority(
+    names = sorted(skill["relative_file_hashes"])
+    authority = Authority(
         module_id=module_id,
         build_id=bundle.build_id,
         files={name: verified_bytes(bundle, module_id, name) for name in names},
     )
+    bundle.verify_manifest()
+    return authority
 
 
 def authority_digest(authority: Authority) -> str:

@@ -176,11 +176,12 @@ def build_matrix(
 
     return Matrix(
         qualification_set_sha256=qualification_set_digest(qualification),
-        build_id=bundle.build_id,
         rows=tuple(
             _row(conn, blobs, bundle, case=case, run_id=runs[case.label])
             for case in qualification.cases
         ),
+        # Validate the same manifest again after all proofs and citation reads.
+        build_id=bundle.build_id,
     )
 
 
