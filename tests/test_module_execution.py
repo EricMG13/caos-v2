@@ -42,6 +42,7 @@ from server.methodology.executor import (
     deliver,
     execute_module,
 )
+from server.methodology.runner import canonical
 from server.provider import Completion, OpenRouter
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -138,6 +139,7 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
         module_id="CP-1",
         delivered=delivered,
         provider=_Stub(_body(source_id)),
+        route_modules=frozenset({"CP-1"}),
     )
 
     envelope = outcome.envelope
@@ -161,6 +163,7 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
         module_id="CP-1",
         delivered=delivered,
         provider=_Stub(_body(source_id)),
+        route_modules=frozenset({"CP-1"}),
     )
 
     [claim] = outcome.envelope.claims
@@ -186,6 +189,7 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
         module_id="CP-1",
         delivered=delivered,
         provider=_Stub(_body(source_id)),
+        route_modules=frozenset({"CP-1"}),
     )
 
     assert isinstance(outcome, ModuleOutcome)
@@ -208,6 +212,7 @@ def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
             module_id="CP-1",
             delivered=delivered,
             provider=_Stub(_body(source_id, quote="Total debt was USD 2,000.0m")),
+            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
@@ -225,6 +230,7 @@ def test_a_citation_naming_undelivered_evidence_is_refused(
             module_id="CP-1",
             delivered=delivered,
             provider=_Stub(_body(uuid4())),
+            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.CITATION_NOT_DELIVERED
@@ -246,6 +252,7 @@ def test_an_undeclared_field_refuses_the_envelope(
             module_id="CP-1",
             delivered=delivered,
             provider=_Stub(json.dumps(body)),
+            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.ENVELOPE_UNDECLARED_FIELD
@@ -265,6 +272,7 @@ def test_an_uncited_claim_is_refused(
             module_id="CP-1",
             delivered=delivered,
             provider=_Stub(json.dumps(body)),
+            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.ENVELOPE_UNCITED_CLAIM
@@ -296,7 +304,14 @@ def test_the_prompt_carries_the_authority_and_the_evidence(
     conn, source_id, delivered = admitted
     stub = _Stub(_body(source_id))
 
-    execute_module(conn, bundle, module_id="CP-1", delivered=delivered, provider=stub)
+    execute_module(
+        conn,
+        bundle,
+        module_id="CP-1",
+        delivered=delivered,
+        provider=stub,
+        route_modules=frozenset({"CP-1"}),
+    )
 
     assert "cp-1-canonical-data-foundation" in stub.prompt, "the skill is the authority"
     assert str(source_id) in stub.prompt
@@ -343,6 +358,7 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
         module_id="CP-1",
         delivered=delivered,
         provider=OpenRouter(api_key=LIVE_KEY, model=LIVE_MODEL),
+        route_modules=frozenset({"CP-1"}),
     )
 
     envelope = outcome.envelope
@@ -402,6 +418,7 @@ def test_a_delivery_announces_the_page_its_block_sits_on(
         module_id="CP-1",
         delivered=delivered,
         provider=_Stub(_body(source_id, page=2)),
+        route_modules=frozenset({"CP-1"}),
     )
     [claim] = outcome.envelope.claims
     assert [citation.page for citation in claim.citations] == [2]
@@ -549,3 +566,55 @@ def test_only_the_gate_module_may_return_a_readiness_map() -> None:
 
 def test_a_module_asked_for_no_verdict_and_giving_none_is_accepted() -> None:
     assert parse_readiness(_body(uuid4()), expected=frozenset()) == []
+
+
+def test_the_gate_is_asked_for_a_verdict_on_every_other_pinned_module() -> None:
+    prompt = build_prompt(
+        "CP-0", b"AUTHORITY BYTES", [], gate_expects=frozenset({"CP-1", "CP-2"})
+    )
+
+    assert "content_to_module_map" in prompt
+    assert "CP-1" in prompt and "CP-2" in prompt
+    assert "READY_WITH_LIMITATIONS" in prompt
+
+
+def test_a_module_that_is_not_the_gate_is_asked_for_no_verdict() -> None:
+    prompt = build_prompt("CP-1", b"AUTHORITY BYTES", [])
+
+    assert "content_to_module_map" not in prompt
+
+
+def test_the_stored_gate_artifact_carries_its_readiness(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """The rows live in the canonical bytes, so the artifact digest covers what
+    the gate decided."""
+    conn, source_id, delivered = admitted
+    body = json.loads(_body(source_id))
+    body["content_to_module_map"] = [
+        {
+            "module_id": "CP-1",
+            "readiness_status": "READY_WITH_LIMITATIONS",
+            "readiness_effect": "no audited statements",
+        }
+    ]
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        module_id="CP-0",
+        delivered=delivered,
+        provider=_Stub(json.dumps(body)),
+        route_modules=frozenset({"CP-0", "CP-1"}),
+    )
+
+    [row] = outcome.envelope.readiness
+    assert row.module_id == "CP-1"
+    stored = json.loads(canonical(outcome.envelope))["content_to_module_map"]
+    assert stored == [
+        {
+            "module_id": "CP-1",
+            "readiness_status": "READY_WITH_LIMITATIONS",
+            "readiness_effect": "no audited statements",
+        }
+    ]

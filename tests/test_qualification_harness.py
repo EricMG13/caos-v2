@@ -108,23 +108,32 @@ class _Completions:
         if len(self.prompts) == self.refuses_call:
             raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE)
         source_id = prompt.split("source_id: ")[1].split("\n")[0].strip()
-        return Completion(
-            content=json.dumps(
+        body: dict[str, object] = {
+            "claims": [
                 {
-                    "claims": [
+                    "statement": "Total debt was reported.",
+                    "citations": [
                         {
-                            "statement": "Total debt was reported.",
-                            "citations": [
-                                {
-                                    "source_id": source_id,
-                                    "page": 1,
-                                    "matched_text": QUOTE,
-                                }
-                            ],
+                            "source_id": source_id,
+                            "page": 1,
+                            "matched_text": QUOTE,
                         }
-                    ]
+                    ],
                 }
-            ),
+            ]
+        }
+        if "content_to_module_map" in prompt:
+            # Every case in this suite runs the same two-node pathway (CP-0,
+            # CP-DR), so the gate has exactly one other module to answer for.
+            body["content_to_module_map"] = [
+                {
+                    "module_id": "CP-DR",
+                    "readiness_status": "READY",
+                    "readiness_effect": "the admitted source covers it",
+                }
+            ]
+        return Completion(
+            content=json.dumps(body),
             charge=Decimal("0.0000041"),
             generation_id="gen-harness-test",
         )

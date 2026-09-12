@@ -72,23 +72,32 @@ class _Completions:
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls.append(prompt[:24])
-        return Completion(
-            content=json.dumps(
+        body: dict[str, object] = {
+            "claims": [
                 {
-                    "claims": [
+                    "statement": "Total debt was USD 1,240.0m.",
+                    "citations": [
                         {
-                            "statement": "Total debt was USD 1,240.0m.",
-                            "citations": [
-                                {
-                                    "source_id": str(self.source_id),
-                                    "page": 1,
-                                    "matched_text": QUOTE,
-                                }
-                            ],
+                            "source_id": str(self.source_id),
+                            "page": 1,
+                            "matched_text": QUOTE,
                         }
-                    ]
+                    ],
                 }
-            ),
+            ]
+        }
+        if "content_to_module_map" in prompt:
+            # This fixture's route is CP-0 and CP-DR alone (`catalog_route`
+            # below), so the gate has exactly one other module to answer for.
+            body["content_to_module_map"] = [
+                {
+                    "module_id": "CP-DR",
+                    "readiness_status": "READY",
+                    "readiness_effect": "the one admitted source covers it",
+                }
+            ]
+        return Completion(
+            content=json.dumps(body),
             charge=Decimal("0.0000041"),
             generation_id="gen-proof-test",
         )
@@ -153,6 +162,7 @@ def ran(
                 blobs=blobs,
                 completions=_Completions(source_id),
                 delivered=delivered,
+                route=catalog_route,
             ),
             ESTIMATE,
         ),

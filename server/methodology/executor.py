@@ -20,10 +20,11 @@ from decimal import Decimal
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
+from server.engine.route import GATE_MODULE
 from server.evidence.citations import verify_citations
 from server.evidence.read import Block, read_block
 from server.methodology.bundle import Bundle, assemble_authority, authority_digest
-from server.methodology.envelope import Claim, Envelope, parse_claims
+from server.methodology.envelope import Claim, Envelope, parse_claims, parse_readiness
 from server.provider import CompletionProvider
 from server.store import StoreConnection
 
@@ -48,6 +49,25 @@ Rules that will cause your answer to be refused if broken:
   join text across a blank line, do not add or remove punctuation.
 - `source_id` must be one of the ids given below.
 - Use no keys other than those shown.
+"""
+
+_GATE_INSTRUCTION = """\
+You are also this run's source-readiness gate. Beside `claims`, return
+`content_to_module_map`: one object for each module id listed here and no
+others.
+
+{module_ids}
+
+Each object has exactly these keys:
+
+{{"module_id": "...", "readiness_status": "READY", "readiness_effect": "..."}}
+
+Rules that will cause your answer to be refused if broken:
+- Every module id listed above appears exactly once, and no other id appears.
+- `readiness_status` is one of READY, READY_WITH_LIMITATIONS, CONDITIONAL,
+  BLOCKED.
+- `readiness_effect` says in one sentence what the source set allows or
+  prevents for that module.
 """
 
 
@@ -108,14 +128,26 @@ def _delivery(source_id: UUID, block_id: str, block: Block) -> Delivery:
     )
 
 
-def build_prompt(module_id: str, authority: bytes, delivered: list[Delivery]) -> str:
+def build_prompt(
+    module_id: str,
+    authority: bytes,
+    delivered: list[Delivery],
+    *,
+    gate_expects: frozenset[str] = frozenset(),
+) -> str:
     """The question, the authority, and the evidence -- in that order."""
     evidence = "\n\n".join(
         f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}"
         for item in delivered
     )
+    gate = (
+        _GATE_INSTRUCTION.format(module_ids=", ".join(sorted(gate_expects)))
+        if gate_expects
+        else ""
+    )
     return (
         _INSTRUCTION.format(module_id=module_id)
+        + gate
         + "\n--- AUTHORITY ---\n"
         + authority.decode("utf-8", errors="replace")
         + "\n--- EVIDENCE ---\n"
@@ -123,13 +155,14 @@ def build_prompt(module_id: str, authority: bytes, delivered: list[Delivery]) ->
     )
 
 
-def execute_module(
+def execute_module(  # noqa: PLR0913
     conn: StoreConnection,
     bundle: Bundle,
     *,
     module_id: str,
     delivered: list[Delivery],
     provider: CompletionProvider,
+    route_modules: frozenset[str],
 ) -> ModuleOutcome:
     """Run one module and return the envelope the host is willing to store.
 
@@ -138,9 +171,22 @@ def execute_module(
     token index *before* an envelope exists to be stored. A quote the host
     cannot locate exactly once refuses the whole envelope, which is invariant 11
     happening before the artifact rather than after it.
+
+    Six parameters, not grouped, unlike `Accepted` (`docs/DECISIONS.md` §25):
+    those four are one outcome and are meaningless apart. These six answer to
+    six different things -- the store, the authority, which module, what
+    evidence, who to ask, and (new here) which other modules the pinned route
+    contains, which only the gate consults. Inventing a parameter object to
+    duck the ceiling would document a grouping that answers to nothing.
     """
     authority = assemble_authority(bundle, module_id)
-    prompt = build_prompt(module_id, authority.files[SKILL], delivered)
+    # The gate is asked about every other module of the pinned route; every
+    # other module is asked about none, and returning a map anyway is an
+    # undeclared field.
+    expects = route_modules - {module_id} if module_id == GATE_MODULE else frozenset()
+    prompt = build_prompt(
+        module_id, authority.files[SKILL], delivered, gate_expects=expects
+    )
 
     completion = provider.complete(prompt, json_object=True)
 
@@ -152,6 +198,8 @@ def execute_module(
             Claim(statement=BoundaryText.of(statement), citations=tuple(anchored))
         )
 
+    readiness = parse_readiness(completion.content, expected=expects)
+
     envelope = Envelope(
         # The host's, not the module's. Whatever it claimed about its own
         # identity did not survive this line (invariant 3).
@@ -159,6 +207,7 @@ def execute_module(
         build_id=authority.build_id,
         authority_digest=authority_digest(authority),
         claims=tuple(claims),
+        readiness=tuple(readiness),
     )
     return ModuleOutcome(
         envelope=envelope,

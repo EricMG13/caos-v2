@@ -61,6 +61,10 @@ SOFT = frozenset({EdgeType.OPTIONAL, EdgeType.ADVISORY})
 # the schema declares -- CONDITIONAL, BLOCKED -- leave a soft edge soft.
 READY = frozenset({"READY", "READY_WITH_LIMITATIONS"})
 
+# The run's source-readiness gate. Named once here because three callers need
+# it: the reader below, the runtime's artifact fetch, and the executor's prompt.
+GATE_MODULE = "CP-0"
+
 # The host's model extension. `SYSTEM_SPEC.md` §6.2: CP-CF is appended at stage
 # 100 with synthesised REQUIRED edges naming every artifact owner it reads, so
 # CP-2G completing alone does not release it. No catalog is edited.
@@ -278,7 +282,7 @@ def limitations_of(
 def readiness_from(route: ResolvedRoute, accepted: Mapping[str, Any]) -> dict[str, str]:
     """Per-module readiness, read from the accepted CP-0 artifact and nowhere else."""
     for node in route.nodes:
-        if node.module_id != "CP-0":
+        if node.module_id != GATE_MODULE:
             continue
         artifact = accepted.get(node.route_node_id)
         if not isinstance(artifact, Mapping):

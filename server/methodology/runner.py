@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from server.blobs import BlobStore
+from server.engine.route import ResolvedRoute
 from server.engine.runtime import ProviderResult
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Envelope
@@ -36,9 +37,11 @@ from server.store import StoreConnection
 class ModuleProvider:
     """A `runtime.Provider` that runs a real module.
 
-    Holds the four things a module execution needs and the loop does not know
+    Holds the five things a module execution needs and the loop does not know
     about: the store to read evidence through, the bundle that is authority, the
-    blob store the envelope is written to, and the provider that answers.
+    blob store the envelope is written to, the provider that answers, and the
+    pinned route -- which is what tells the gate every other module it must
+    cover.
     """
 
     conn: StoreConnection
@@ -46,6 +49,9 @@ class ModuleProvider:
     blobs: BlobStore
     completions: CompletionProvider
     delivered: list[tuple[UUID, str]]
+    # The pin. The gate needs the module ids it must cover, and Phase 11's
+    # chain needs each node's predecessors from the same object.
+    route: ResolvedRoute
 
     def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
         outcome = execute_module(
@@ -54,6 +60,7 @@ class ModuleProvider:
             module_id=module_id,
             delivered=deliver(self.conn, self.delivered),
             provider=self.completions,
+            route_modules=frozenset(node.module_id for node in self.route.nodes),
         )
         return ProviderResult(
             artifact_sha256=self.blobs.put(canonical(outcome.envelope)),
@@ -76,6 +83,14 @@ def canonical(envelope: Envelope) -> bytes:
             "module_id": envelope.module_id,
             "build_id": envelope.build_id,
             "authority_digest": envelope.authority_digest,
+            "content_to_module_map": [
+                {
+                    "module_id": row.module_id,
+                    "readiness_status": row.readiness_status,
+                    "readiness_effect": row.readiness_effect.value,
+                }
+                for row in sorted(envelope.readiness, key=lambda row: row.module_id)
+            ],
             "claims": [
                 {
                     "statement": claim.statement.value,

@@ -61,24 +61,32 @@ class _Completions:
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls.append(prompt[:40])
-        body = json.dumps(
-            {
-                "claims": [
-                    {
-                        "statement": "Total debt was USD 1,240.0m.",
-                        "citations": [
-                            {
-                                "source_id": str(self.source_id),
-                                "page": 1,
-                                "matched_text": "Total debt at 31 December 2026",
-                            }
-                        ],
-                    }
-                ]
-            }
-        )
+        body: dict[str, object] = {
+            "claims": [
+                {
+                    "statement": "Total debt was USD 1,240.0m.",
+                    "citations": [
+                        {
+                            "source_id": str(self.source_id),
+                            "page": 1,
+                            "matched_text": "Total debt at 31 December 2026",
+                        }
+                    ],
+                }
+            ]
+        }
+        if "content_to_module_map" in prompt:
+            # This fixture's route is CP-0 and CP-DR alone (module docstring
+            # above), so the gate has exactly one other module to answer for.
+            body["content_to_module_map"] = [
+                {
+                    "module_id": "CP-DR",
+                    "readiness_status": "READY",
+                    "readiness_effect": "the one admitted source covers it",
+                }
+            ]
         return Completion(
-            content=body, charge=self.charge, generation_id="gen-loop-test"
+            content=json.dumps(body), charge=self.charge, generation_id="gen-loop-test"
         )
 
 
@@ -143,6 +151,7 @@ def test_the_loop_charges_what_the_provider_reported(
         blobs=blobs,
         completions=completions,
         delivered=_delivered(conn, source_id),
+        route=route,
     )
 
     run_route(
@@ -183,6 +192,7 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
         blobs=blobs,
         completions=_Completions(source_id),
         delivered=_delivered(conn, source_id),
+        route=route,
     )
 
     run_route(
@@ -211,6 +221,7 @@ def test_the_artifact_is_the_envelope_the_host_built(
         blobs=blobs,
         completions=_Completions(source_id),
         delivered=_delivered(conn, source_id),
+        route=route,
     )
 
     run_route(
@@ -245,6 +256,7 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
         blobs=blobs,
         completions=completions,
         delivered=_delivered(conn, source_id),
+        route=route,
     )
 
     with pytest.raises(Exception, match="CITATION_NOT_DELIVERED"):
