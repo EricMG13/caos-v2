@@ -45,18 +45,27 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # because "not yet" with no reason is how a list like this becomes a list of
 # tests nobody intends to write.
 #
-# It was empty, which was the point it had been working towards: every test the
-# plan named across Phases 0-10 was defined. It grows here in the direction it
-# should -- Phase 11 names its exit tests before the work that satisfies them
-# exists, and each name leaves this list in the PR that writes it. What the plan
-# still owes is work it never named a test for -- the qualification-set harness,
-# its answer keys and the matrix -- and this gate cannot see that, which is why
-# a phase is not closed on the strength of it alone.
+# Phase 11's eight names left this list one at a time, as each test was
+# written, which is the direction it should move in. Phase 12's nine are named
+# by the plan before the work that satisfies them exists, and leave the same
+# way. What the plan still owes is work it never named a test for -- the
+# qualification-set harness, its answer keys and the matrix -- and this gate
+# cannot see that, which is why a phase is not closed on the strength of it
+# alone.
 NOT_YET_REACHED: set[str] = {
-    # Phase 11, the chain: every node is handed the same evidence and no
-    # upstream section exists to test.
-    "test_a_node_receives_its_direct_predecessors_accepted_claims",
-    "test_an_upstream_statement_is_not_citable_evidence",
+    # Phase 12, the handoff: no module payload exists yet, so a register, a
+    # critical column and a cited figure are all things no artifact carries.
+    "test_the_declared_register_schema_matches_the_bundles_own_contract",
+    "test_a_handoff_carries_every_register_its_module_declares",
+    "test_a_row_missing_a_critical_column_is_refused",
+    "test_a_figure_is_cited_or_null_with_a_gap",
+    "test_the_host_computes_the_confidence_the_module_reports_counts",
+    "test_the_prompt_carries_the_companions_the_skill_calls_mandatory",
+    "test_cp1_produces_its_declared_registers_from_real_documents",
+    # Phase 12, the display: nothing serves a section document, and the
+    # workspace's Analysis body is the widget set this phase replaces.
+    "test_the_analysis_document_is_built_from_accepted_handoffs",
+    "test_the_analysis_section_renders_a_handoffs_narrative_and_tables",
 }
 
 

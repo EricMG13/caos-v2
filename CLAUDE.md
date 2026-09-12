@@ -556,6 +556,13 @@ system this size means nobody looked.
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from
   the engine rather than from the run document.
+- **An upstream section is unbounded.** A node's prompt carries every claim of
+  every direct predecessor (`docs/DECISIONS.md` §28), and nothing caps the
+  total: a node with five predecessors of fifty claims each carries two hundred
+  and fifty statements and their quotes on top of the authority and every block
+  of evidence. On the routes run so far it is a few thousand tokens. *Upgrade:*
+  a declared bound with a typed refusal, the day a wide route meets a model's
+  context rather than a budget.
 
 **Phase 4.**
 

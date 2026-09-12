@@ -158,6 +158,7 @@ def ran(
                 completions=_Completions(source_id),
                 delivered=delivered,
                 route=catalog_route,
+                run_id=run_id,
             ),
             ESTIMATE,
         ),
