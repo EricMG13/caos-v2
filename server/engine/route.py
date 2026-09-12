@@ -279,6 +279,19 @@ def limitations_of(
     )
 
 
+def predecessors(route: ResolvedRoute, module_id: str) -> tuple[str, ...]:
+    """The modules with an edge into this one, in route order.
+
+    Route order rather than edge order, so a prompt assembled from this reads
+    in the order the route runs and two runs of the same pin compose the same
+    prompt. Edge type is not consulted: a soft edge's source is still a module
+    this one was meant to build on, and whether it ran is answered by whether
+    it has an accepted artifact.
+    """
+    sources = {edge.source for edge in route.edges if edge.target == module_id}
+    return tuple(node.module_id for node in route.nodes if node.module_id in sources)
+
+
 def readiness_from(route: ResolvedRoute, accepted: Mapping[str, Any]) -> dict[str, str]:
     """Per-module readiness, read from the accepted gate artifact and nowhere else."""
     for node in route.nodes:

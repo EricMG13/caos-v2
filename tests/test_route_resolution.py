@@ -37,6 +37,7 @@ from server.engine.route import (
     frontier,
     limitations_of,
     node_states,
+    predecessors,
     readiness_from,
     resolve_route,
     route_digest,
@@ -544,3 +545,26 @@ def test_a_malformed_readiness_map_refuses_rather_than_raising(
         node_states(route, accepted)
 
     assert caught.value.code is RefusalCode.READINESS_INVALID
+
+
+def test_a_nodes_predecessors_are_its_edge_sources_in_route_order(
+    catalog: dict[str, Any],
+) -> None:
+    """CP-2D carries a REQUIRED edge from each of CP-0, CP-1 and CP-2 in this
+    pathway. `expected` is built from `route.edges` and `route.nodes` directly
+    -- not by calling `predecessors` a second time -- so this compares the
+    function's output against an independently derived value rather than a
+    re-derivation of itself, and a wrong order (edge order, sorted, or
+    whatever a bare `set` happened to iterate) would fail it.
+    """
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+
+    assert predecessors(route, "CP-0") == ()
+    assert "CP-1" in predecessors(route, "CP-2D")
+
+    sources = {edge.source for edge in route.edges if edge.target == "CP-2D"}
+    expected = tuple(
+        node.module_id for node in route.nodes if node.module_id in sources
+    )
+
+    assert predecessors(route, "CP-2D") == expected
