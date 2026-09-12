@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -107,6 +108,32 @@ def test_index_fails_closed_when_gitnexus_is_not_installed() -> None:
     assert "gitnexus is required; install it before indexing" in result.stderr
     assert "npx" not in result.stdout + result.stderr
     assert "pnpm" not in result.stdout + result.stderr
+
+
+def test_make_doctor_uses_the_bootstrapped_python(
+    tmp_path: Path,
+) -> None:
+    python = tmp_path / "python3"
+    python.write_text("#!/bin/sh\nexit 93\n", encoding="utf-8")
+    python.chmod(0o755)
+    sentinel = "synthetic-make-doctor-secret-4f8a"
+    environment = os.environ.copy()
+    environment["PATH"] = f"{tmp_path}:{environment['PATH']}"
+    for name in _load_doctor().REQUIRED_CONFIGURATION:
+        environment[name] = sentinel
+
+    result = subprocess.run(
+        ["make", "--no-print-directory", "doctor"],
+        cwd=REPO,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Python: 3.14" in result.stdout
+    assert sentinel not in result.stdout + result.stderr
 
 
 def test_compose_keeps_dev_and_test_storage_isolated() -> None:
