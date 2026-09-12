@@ -5,10 +5,10 @@
 // that quietly returned the wrong thing would still leave the section green.
 import { sectionPath } from "@/app/sections";
 import { EVENT_NAMES, eventsUrl } from "@/app/sse";
-import { OFFLINE_WORDING, UNAVAILABLE_WORDING } from "@/app/transport";
+import { OFFLINE_WORDING, UNAVAILABLE_WORDING, classify } from "@/app/transport";
 import { toneOf } from "@/chrome/SeverityMark";
 import { fallbackChrome } from "@/chrome/fallback";
-import { refusalText } from "@/controls/RefusedControl";
+import { ACTION_UNPLACED, READ_ONLY_API, refusalText } from "@/controls/RefusedControl";
 import { SEV_COLOR, sevSurface, sevVar } from "@/ds/sev";
 import { NODE_SEVERITY, confidenceTier, nodeTone } from "@/sections/analysis/tone";
 import { stepLabel } from "@/sections/committee/FilingLadder";
@@ -93,6 +93,41 @@ describe("the wire contract and the states around it", () => {
     });
     expect(refused.ribbon.chips[0]?.label).toBe("WIRE_KEYS_MISMATCH");
     expect(refused.brief.action).toContain("the document carries the pinned keys");
+  });
+
+  test("the fallback brief ends its clause once, however the refusal punctuates it", () => {
+    const brief = (clears: string) =>
+      fallbackChrome({ kind: "error", refusal: { code: "STORE_UNAVAILABLE", clears } }).brief
+        .action;
+    expect(brief("the store answers again.")).toBe("Clears when the store answers again.");
+    expect(brief("the store answers again")).toBe("Clears when the store answers again.");
+    expect(brief("the store answers again. ")).toBe("Clears when the store answers again.");
+    expect(brief("the store answers again?")).toBe("Clears when the store answers again?");
+  });
+
+  test("the client's own refusals read as a clause after 'clears when'", () => {
+    const chrome = Object.fromEntries(CHROME_KEYS.map((key) => [key, {}]));
+    const refusals = [
+      classify(null),
+      classify({ chrome, body: {}, observed_at: "", unexpected: true }),
+      classify({ chrome, body: {}, observed_at: "", observed_empty: true }),
+    ].map((status) => (status.kind === "error" ? status.refusal : null));
+    expect(refusals.map((refusal) => refusal?.code)).toEqual([
+      "RESPONSE_INVALID",
+      "WIRE_KEYS_MISMATCH",
+      "OBSERVED_EMPTY_UNTIMED",
+    ]);
+    for (const refusal of refusals) {
+      expect(refusal?.clears).toMatch(/^[a-z]/);
+      expect(refusal?.clears).not.toMatch(/\.$/);
+    }
+  });
+
+  test("an action nothing performs is refused with a reason that is true today", () => {
+    expect(ACTION_UNPLACED.code).toBe("ACTION_UNPLACED");
+    expect(ACTION_UNPLACED.clears).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
+    // The store calls exist; what is missing is the route to them.
+    expect(ACTION_UNPLACED.clears).toContain(READ_ONLY_API);
   });
 });
 

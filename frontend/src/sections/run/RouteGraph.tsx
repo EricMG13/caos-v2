@@ -7,10 +7,14 @@ import type { RouteEdge, RouteNode, Stage } from "@/wire/run";
 import type { EdgeType, NodeState, Severity } from "@/wire";
 
 export const NODE_W = 128;
-export const NODE_H = 62;
+// Tall enough for the id, the name, the state and two whole lines of reason;
+// at 62 the second reason line was cut through the middle. Both sizes are set
+// on each node and stage header here, not in caos.css, so each is one number.
+export const NODE_H = 76;
 export const COL_GAP = 40;
-export const ROW_H = 74;
+export const ROW_H = NODE_H + 12;
 const PAD_X = 14;
+// Below a stage header clamped at two lines: 8px down, two 9.4px lines.
 const TOP = 30;
 const PAD_BOTTOM = 10;
 
@@ -146,11 +150,20 @@ export function RouteGraph({
               <line key={key} className={cls} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2} />
             ))}
           </svg>
-          {layout.columns.map((column) => (
-            <span key={column.stage} className="stagehdr" style={{ left: column.x }}>
-              {labelOf.get(column.stage) ?? `Stage ${column.stage}`}
-            </span>
-          ))}
+          {layout.columns.map((column) => {
+            // Two lines fit above the nodes; a longer name is clamped and whole in its title.
+            const label = labelOf.get(column.stage) ?? `Stage ${column.stage}`;
+            return (
+              <span
+                key={column.stage}
+                className="stagehdr"
+                style={{ left: column.x, width: NODE_W }}
+                title={label}
+              >
+                {label}
+              </span>
+            );
+          })}
           {nodes.map((node) => {
             const placed = at.get(node.module_id);
             if (!placed) return null;
@@ -164,7 +177,7 @@ export function RouteGraph({
                 data-node={node.module_id}
                 data-state={node.state}
                 aria-pressed={on}
-                style={{ left: placed.x, top: placed.y }}
+                style={{ left: placed.x, top: placed.y, width: NODE_W, height: NODE_H }}
                 onClick={() => onSelect(node.module_id)}
               >
                 <span className="id">{node.module_id}</span>

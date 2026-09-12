@@ -367,10 +367,11 @@ whose contract is archived in `docs/archive/REPORT_BUILDER_SPEC.md`):
   the page as the artifacts carry them.
 
 Around it, the host's own chain: the analyst signs an opinion on the exact saved
-revision (expected-head CAS); freeze refuses without a current sign-off and
-refuses a narrative asserting an uncited figure; filing refuses the opinion
-signer and the freeze actor (`APPROVER_NOT_INDEPENDENT`) and writes an immutable
-detached receipt. The approved bytes always read `PENDING APPROVAL`.
+revision (expected-head CAS), and a frozen revision takes no further signature;
+freeze refuses without a current sign-off, refuses anyone who signed the
+revision, and refuses a narrative asserting an uncited figure; filing refuses
+the opinion signer and the freeze actor (`APPROVER_NOT_INDEPENDENT`) and writes
+an immutable detached receipt naming three people. The approved bytes always read `PENDING APPROVAL`.
 
 The audit package is verifiable with the standard library alone and re-renders
 the export from the frozen payload.

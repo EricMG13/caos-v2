@@ -4,7 +4,7 @@
 // review, never accepted on the analyst's behalf.
 import { useId, useState } from "react";
 import { Link } from "react-router";
-import { RefusedControl } from "@/controls/RefusedControl";
+import { READ_ONLY_API, RefusedControl } from "@/controls/RefusedControl";
 import type { Refusal } from "@/wire";
 import type { Intake, IntakeSuggestion } from "@/wire/directory";
 
@@ -15,7 +15,12 @@ const ALREADY_COMMITTED: Refusal = {
 /** A person commits a suggestion in the store; the browser proposes nothing and commits nothing. */
 const STORE_UNPLACED: Refusal = {
   code: "STORE_UNPLACED",
-  clears: "Phase 2 admits the pack and records the analyst's commit (docs/REBUILD_PLAN.md)",
+  clears: `the API serves a route that records the analyst's commit — ${READ_ONLY_API}`,
+};
+/** The browser posts files and nothing else — and in this build, not even that. */
+const INTAKE_UNPLACED: Refusal = {
+  code: "INTAKE_UNPLACED",
+  clears: `the API serves an intake route — ${READ_ONLY_API}`,
 };
 
 function SuggestionRow({
@@ -114,10 +119,15 @@ export function IntakeDrop() {
       />
       {names.length ? (
         <p className="sm" data-selected-files={names.length}>
-          {names.length} {names.length === 1 ? "file" : "files"} selected · admitted as one pack, or
-          none
+          {names.length} {names.length === 1 ? "file" : "files"} selected · not sent — once the
+          intake route exists the pack is admitted whole, or not at all
         </p>
       ) : null}
+      <div className="actions">
+        <RefusedControl refusal={INTAKE_UNPLACED} className="rowact">
+          Admit pack
+        </RefusedControl>
+      </div>
     </div>
   );
 }

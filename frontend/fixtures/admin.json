@@ -5,7 +5,7 @@
       "chips": [
         { "label": "ADMIN · THE DEPLOYMENT", "tone": "neutral" },
         { "label": "UNAVAILABLE CAPABILITY", "tone": "warn" },
-        { "label": "HEALTH · 200", "tone": "ok" },
+        { "label": "HEALTH · NOT SERVED", "tone": "warn" },
         { "label": "BUILD a43cb903", "tone": "neutral" }
       ],
       "execution": "IDLE",
@@ -61,8 +61,8 @@
         "code": "OIDC GROUPS"
       },
       {
-        "name": "Deployment inventory · store, blob store, bundle build, worker",
-        "code": "GET /api/health"
+        "name": "Deployment inventory · store, blob store, bundle build",
+        "code": "GET /api/health · NOT SERVED"
       },
       { "name": "Budget ceilings · per case and per run", "code": "ENVIRONMENT" }
     ]

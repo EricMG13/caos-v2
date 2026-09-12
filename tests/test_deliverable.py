@@ -13,6 +13,7 @@ actor occupied every role records a decision nobody independently reviewed.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from pathlib import Path
@@ -20,8 +21,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from psycopg.errors import LockNotAvailable
 
 from server.boundary_text import BoundaryText
+from server.deliverable import filing
 from server.deliverable.filing import (
     Opinion,
     Receipt,
@@ -39,16 +42,21 @@ from server.deliverable.package import (
 )
 from server.deliverable.render import render
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, connect
 from server.store.audit import audit_trail
 from server.store.members import Standing, grant
 from server.store.runs import create_case
 
-REVISION = "rev-001"
+REVISION = BoundaryText.of("rev-001")
+# The same visible label in the two Unicode normal forms: composed e-acute,
+# then "e" followed by a combining acute. Written as escapes so the file says
+# which is which rather than relying on how an editor saved it.
+NFC_LABEL = BoundaryText.of("rev-caf\u00e9")
+NFD_SPELLING = "rev-cafe\u0301"
 
 PAYLOAD_DATA: dict[str, Any] = {
     "case_title": "Acme Holdings plc",
-    "revision_id": REVISION,
+    "revision_id": REVISION.value,
     "artifacts": [
         {
             "module_id": "CP-1",
@@ -133,7 +141,7 @@ def test_freezing_without_a_signature_is_refused(
             conn,
             case_id=case_id,
             actor_id=actor,
-            revision_id="rev-unsigned",
+            revision_id=BoundaryText.of("rev-unsigned"),
             payload=PAYLOAD_BYTES,
         )
 
@@ -496,7 +504,7 @@ def test_a_revision_is_filed_once(
     assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FILED
     row = conn.execute(
         "SELECT filed_by FROM deliverable_publications WHERE revision_id = %s",
-        (REVISION,),
+        (REVISION.value,),
     ).fetchone()
     assert row is not None and UUID(str(row[0])) == filer
     filings = [entry for entry in audit_trail(conn, case_id) if "FILED" in entry.action]
@@ -528,6 +536,230 @@ def test_a_freeze_belongs_to_the_case_its_opinion_was_signed_in(
     assert caught.value.code is RefusalCode.DELIVERABLE_NOT_SIGNED
 
 
+def test_two_cases_each_freeze_their_own_revision_of_one_name(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A revision id is per case -- `rev_3` is every case's third revision.
+
+    Keyed on the id alone, the first case to freeze `rev_3` took the name from
+    every other case, and the second freeze escaped as an untyped
+    UniqueViolation carrying the statement that failed.
+    """
+    conn, case_id, _signer = signed
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=_approver(conn, case_id),
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+    other = create_case(conn, BoundaryText.of("Some other issuer"))
+    other_signer = _approver(conn, other)
+    sign_opinion(
+        conn,
+        case_id=other,
+        actor_id=other_signer,
+        revision_id=REVISION,
+        payload_sha256=_digest(PAYLOAD_BYTES),
+    )
+
+    digest = freeze(
+        conn,
+        case_id=other,
+        actor_id=_approver(conn, other),
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+
+    assert digest == _digest(PAYLOAD_BYTES)
+
+
+def test_a_revision_is_frozen_once(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A second freeze of one revision is refused by name and records nothing:
+    two freezes would be two sets of bytes claiming to be the same document."""
+    conn, case_id, _signer = signed
+    freezer = _approver(conn, case_id)
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=freezer,
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+
+    with pytest.raises(Refusal) as caught:
+        freeze(
+            conn,
+            case_id=case_id,
+            actor_id=freezer,
+            revision_id=REVISION,
+            payload=PAYLOAD_BYTES,
+        )
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FROZEN
+    actions = [entry.action for entry in audit_trail(conn, case_id)]
+    assert actions.count("DELIVERABLE_FROZEN") == 1
+
+
+def test_filing_refuses_every_signer_of_the_revision(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """Independence is from everyone who signed the revision, not only whoever
+    signed last. Checked against the latest signature alone, the first of two
+    signers could file the deliverable they had put their name to."""
+    conn, case_id, first = signed
+    sign_opinion(
+        conn,
+        case_id=case_id,
+        actor_id=_approver(conn, case_id),
+        revision_id=REVISION,
+        payload_sha256=_digest(PAYLOAD_BYTES),
+    )
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=_approver(conn, case_id),
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+
+    with pytest.raises(Refusal) as caught:
+        file_deliverable(conn, case_id=case_id, actor_id=first, revision_id=REVISION)
+
+    assert caught.value.code is RefusalCode.APPROVER_NOT_INDEPENDENT
+
+
+def test_the_receipt_names_the_signer_of_the_frozen_bytes(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A frozen revision's signatures are the ones its freeze was checked
+    against. An opinion signed after it -- on other bytes, or by the freezer on
+    the same ones -- became the signer a receipt named: the frozen digest paired
+    with a signature over bytes nobody froze, or the freezer named twice, which
+    no package verifies."""
+    conn, case_id, signer = signed
+    freezer = _approver(conn, case_id)
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=freezer,
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+    for late, digest in (
+        (_approver(conn, case_id), _digest(PAYLOAD_BYTES + b" amended")),
+        (freezer, _digest(PAYLOAD_BYTES)),
+    ):
+        with pytest.raises(Refusal) as caught:
+            sign_opinion(
+                conn,
+                case_id=case_id,
+                actor_id=late,
+                revision_id=REVISION,
+                payload_sha256=digest,
+            )
+        assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FROZEN
+
+    receipt = file_deliverable(
+        conn, case_id=case_id, actor_id=_approver(conn, case_id), revision_id=REVISION
+    )
+
+    assert receipt.signed_by == signer
+    assert receipt.payload_sha256 == _digest(PAYLOAD_BYTES)
+    package = build_package(PAYLOAD_BYTES, receipt_bytes(receipt), render(PAYLOAD_DATA))
+    assert verify_package(package).verified
+    actions = [entry.action for entry in audit_trail(conn, case_id)]
+    assert actions.count("OPINION_SIGNED") == 1
+
+
+def test_freezing_refuses_a_signer_of_the_revision(
+    signed: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """A signer who froze their own opinion, or co-signed the bytes before
+    freezing them, left a receipt naming them twice -- and a package naming
+    fewer than three people never verifies, however independent the filer.
+    Filing refuses every signer; the freeze refuses them first."""
+    conn, case_id, signer = signed
+    cosigner = _approver(conn, case_id)
+    sign_opinion(
+        conn,
+        case_id=case_id,
+        actor_id=cosigner,
+        revision_id=REVISION,
+        payload_sha256=_digest(PAYLOAD_BYTES),
+    )
+
+    for who in (signer, cosigner):
+        with pytest.raises(Refusal) as caught:
+            freeze(
+                conn,
+                case_id=case_id,
+                actor_id=who,
+                revision_id=REVISION,
+                payload=PAYLOAD_BYTES,
+            )
+        assert caught.value.code is RefusalCode.APPROVER_NOT_INDEPENDENT
+
+    actions = [entry.action for entry in audit_trail(conn, case_id)]
+    assert "DELIVERABLE_FROZEN" not in actions
+
+
+def test_no_signature_lands_between_the_independence_check_and_the_filing(
+    signed: tuple[StoreConnection, UUID, UUID],
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Independence is read under the case's chain lock. Read before it, the
+    filer could sign the frozen bytes from a second session after the check
+    passed and before the filing committed, and the chain recorded both.
+
+    The second session is injected at the one read the check makes, and waits
+    for the lock no longer than a test should."""
+    conn, case_id, _signer = signed
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=_approver(conn, case_id),
+        revision_id=REVISION,
+        payload=PAYLOAD_BYTES,
+    )
+    filer = _approver(conn, case_id)
+    read = filing._signatures
+
+    def then_sign_elsewhere(
+        connection: StoreConnection, case_id: UUID, revision_id: BoundaryText
+    ) -> list[tuple[UUID, str]]:
+        seen = read(connection, case_id, revision_id)
+        with (
+            contextlib.suppress(Refusal, LockNotAvailable),
+            connect(empty_database) as other,
+        ):
+            other.execute("SET lock_timeout = '200ms'")
+            sign_opinion(
+                other,
+                case_id=case_id,
+                actor_id=filer,
+                revision_id=revision_id,
+                payload_sha256=_digest(PAYLOAD_BYTES),
+            )
+        return seen
+
+    monkeypatch.setattr(filing, "_signatures", then_sign_elsewhere)
+    receipt = file_deliverable(
+        conn, case_id=case_id, actor_id=filer, revision_id=REVISION
+    )
+
+    assert receipt.filed_by == filer
+    signers = {
+        entry.actor_id
+        for entry in audit_trail(conn, case_id)
+        if entry.action == "OPINION_SIGNED"
+    }
+    assert filer not in signers
+
+
 def test_a_filing_belongs_to_the_case_it_was_frozen_in(
     signed: tuple[StoreConnection, UUID, UUID],
 ) -> None:
@@ -547,3 +779,81 @@ def test_a_filing_belongs_to_the_case_it_was_frozen_in(
         file_deliverable(conn, case_id=other, actor_id=intruder, revision_id=REVISION)
 
     assert caught.value.code is RefusalCode.DELIVERABLE_NOT_FROZEN
+
+
+def test_a_revision_is_one_revision_however_its_label_is_normalised(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """A revision id is a label somebody approves, not bytes somebody compares.
+
+    The two spellings of `rev-café` render identically and differ in byte
+    string. Carried as a bare `str` they were two revisions: the NFD spelling
+    found no signature at all, and signed under it the case would hold a
+    publication row each for one label -- "a revision is frozen once" holding
+    per byte string rather than per label somebody signed.
+    """
+    conn, case_id = case
+    signer = _approver(conn, case_id)
+    freezer = _approver(conn, case_id)
+    assert NFC_LABEL.value != NFD_SPELLING, "the two spellings differ in bytes"
+    sign_opinion(
+        conn,
+        case_id=case_id,
+        actor_id=signer,
+        revision_id=NFC_LABEL,
+        payload_sha256=_digest(PAYLOAD_BYTES),
+    )
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=freezer,
+        revision_id=NFC_LABEL,
+        payload=PAYLOAD_BYTES,
+    )
+
+    with pytest.raises(Refusal) as caught:
+        freeze(
+            conn,
+            case_id=case_id,
+            actor_id=freezer,
+            revision_id=BoundaryText.of(NFD_SPELLING),
+            payload=PAYLOAD_BYTES,
+        )
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FROZEN
+    rows = conn.execute(
+        "SELECT revision_id FROM deliverable_publications WHERE case_id = %s",
+        (case_id,),
+    ).fetchall()
+    assert [str(row[0]) for row in rows] == [NFC_LABEL.value]
+
+
+def test_a_revision_label_carrying_a_bidi_control_is_refused(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """The other half of what the boundary is for, at the same door.
+
+    U+202E makes a label render as something other than its bytes, so the
+    revision a reviewer reads on screen and the revision the store holds are
+    different things -- the trojan-source class (CVE-2021-42574) that is the
+    reason `BoundaryText` exists rather than a length check. The refusal is the
+    type's, reached through the signature filing now demands; the assertion that
+    no row landed is what would notice a later caller coercing its way past it.
+    """
+    conn, case_id = case
+    actor = _approver(conn, case_id)
+
+    with pytest.raises(Refusal) as caught:
+        sign_opinion(
+            conn,
+            case_id=case_id,
+            actor_id=actor,
+            revision_id=BoundaryText.of("rev-001\u202e"),
+            payload_sha256=_digest(PAYLOAD_BYTES),
+        )
+
+    assert caught.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
+    row = conn.execute(
+        "SELECT count(*) FROM deliverable_opinions WHERE case_id = %s", (case_id,)
+    ).fetchone()
+    assert row is not None and int(row[0]) == 0
