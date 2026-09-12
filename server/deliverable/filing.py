@@ -22,6 +22,12 @@ signatures a freeze was checked against are the ones filing reads.
 The opinion binds an exact revision by digest. Signing "the current draft" would
 bind whatever the draft became, which is the failure invariant 5 names for
 digest-bound gates and which applies here for the same reason.
+
+The revision id is `BoundaryText` because it is a label somebody approves, not
+bytes somebody compares. NFC-normalised at the boundary, an accented label is
+one revision however the caller's keyboard spelled it; as a bare `str` its two
+normal forms were two revisions, with a publication row each and "a revision is
+frozen once" holding per byte string rather than per label somebody signed.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID
 
+from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.audit import GovernedAction, governed_write
@@ -41,7 +48,7 @@ from server.store.members import Standing
 class Opinion:
     """One analyst's signature on one exact revision."""
 
-    revision_id: str
+    revision_id: BoundaryText
     payload_sha256: str
     signed_by: UUID
 
@@ -50,7 +57,7 @@ class Opinion:
 class Receipt:
     """What filing leaves behind: detached, immutable, and enough to verify."""
 
-    revision_id: str
+    revision_id: BoundaryText
     payload_sha256: str
     signed_by: UUID
     frozen_by: UUID
@@ -63,7 +70,7 @@ def sign_opinion(
     *,
     case_id: UUID,
     actor_id: UUID,
-    revision_id: str,
+    revision_id: BoundaryText,
     payload_sha256: str,
 ) -> None:
     """Sign an opinion on an exact revision, as a governed write.
@@ -78,7 +85,7 @@ def sign_opinion(
         actor_id=actor_id,
         action="OPINION_SIGNED",
         requires=Standing.APPROVER,
-        payload={"revision_id": revision_id, "payload_sha256": payload_sha256},
+        payload={"revision_id": revision_id.value, "payload_sha256": payload_sha256},
     )
 
     def write(connection: StoreConnection) -> None:
@@ -88,7 +95,7 @@ def sign_opinion(
             "INSERT INTO deliverable_opinions"
             " (revision_id, case_id, payload_sha256, signed_by)"
             " VALUES (%s, %s, %s, %s)",
-            (revision_id, case_id, payload_sha256, actor_id),
+            (revision_id.value, case_id, payload_sha256, actor_id),
         )
 
     governed_write(conn, action, write)
@@ -99,7 +106,7 @@ def freeze(
     *,
     case_id: UUID,
     actor_id: UUID,
-    revision_id: str,
+    revision_id: BoundaryText,
     payload: bytes,
 ) -> str:
     """Freeze the signed revision. Returns the payload digest that was frozen.
@@ -116,7 +123,7 @@ def freeze(
         actor_id=actor_id,
         action="DELIVERABLE_FROZEN",
         requires=Standing.APPROVER,
-        payload={"revision_id": revision_id, "payload_sha256": digest},
+        payload={"revision_id": revision_id.value, "payload_sha256": digest},
     )
 
     def write(connection: StoreConnection) -> None:
@@ -132,7 +139,7 @@ def freeze(
             " (revision_id, case_id, payload_sha256, frozen_by)"
             " VALUES (%s, %s, %s, %s)"
             " ON CONFLICT (case_id, revision_id) DO NOTHING",
-            (revision_id, case_id, digest, actor_id),
+            (revision_id.value, case_id, digest, actor_id),
         ).rowcount
         if not frozen:
             # Raising rolls the transaction back, so the chain holds the one
@@ -145,7 +152,7 @@ def freeze(
 
 
 def file_deliverable(
-    conn: StoreConnection, *, case_id: UUID, actor_id: UUID, revision_id: str
+    conn: StoreConnection, *, case_id: UUID, actor_id: UUID, revision_id: BoundaryText
 ) -> Receipt:
     """File a frozen deliverable, refusing anyone already in its chain.
 
@@ -169,7 +176,7 @@ def file_deliverable(
         actor_id=actor_id,
         action="DELIVERABLE_FILED",
         requires=Standing.APPROVER,
-        payload={"revision_id": revision_id, "payload_sha256": payload_sha256},
+        payload={"revision_id": revision_id.value, "payload_sha256": payload_sha256},
     )
     # The signer the write settles on, handed out of it for the receipt.
     signed_by: list[UUID] = []
@@ -192,7 +199,7 @@ def file_deliverable(
         filed = connection.execute(
             "UPDATE deliverable_publications SET filed_by = %s, filed_at = now()"
             " WHERE revision_id = %s AND case_id = %s AND filed_by IS NULL",
-            (actor_id, revision_id, case_id),
+            (actor_id, revision_id.value, case_id),
         ).rowcount
         if not filed:
             # Somebody filed first. Inside the write rather than as a read
@@ -222,7 +229,7 @@ def receipt_bytes(receipt: Receipt) -> bytes:
     """The detached receipt, canonical so it can be compared byte for byte."""
     return json.dumps(
         {
-            "revision_id": receipt.revision_id,
+            "revision_id": receipt.revision_id.value,
             "payload_sha256": receipt.payload_sha256,
             "signed_by": str(receipt.signed_by),
             "frozen_by": str(receipt.frozen_by),
@@ -235,7 +242,7 @@ def receipt_bytes(receipt: Receipt) -> bytes:
 
 
 def _signatures(
-    conn: StoreConnection, case_id: UUID, revision_id: str
+    conn: StoreConnection, case_id: UUID, revision_id: BoundaryText
 ) -> list[tuple[UUID, str]]:
     """Every signature on this revision of this case, newest first: who signed,
     and the payload digest they signed.
@@ -249,19 +256,19 @@ def _signatures(
     rows = conn.execute(
         "SELECT signed_by, payload_sha256 FROM deliverable_opinions"
         " WHERE revision_id = %s AND case_id = %s ORDER BY signed_at DESC",
-        (revision_id, case_id),
+        (revision_id.value, case_id),
     ).fetchall()
     return [(UUID(str(row[0])), str(row[1])) for row in rows]
 
 
 def _frozen(
-    conn: StoreConnection, case_id: UUID, revision_id: str
+    conn: StoreConnection, case_id: UUID, revision_id: BoundaryText
 ) -> tuple[UUID, str] | None:
     """This case's freeze of this revision. Scoped for the reason `_signatures`
     is."""
     row = conn.execute(
         "SELECT frozen_by, payload_sha256 FROM deliverable_publications"
         " WHERE revision_id = %s AND case_id = %s",
-        (revision_id, case_id),
+        (revision_id.value, case_id),
     ).fetchone()
     return None if row is None else (UUID(str(row[0])), str(row[1]))
