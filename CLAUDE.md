@@ -487,6 +487,19 @@ system this size means nobody looked.
   entirely in which handlers the director holds. *Upgrade:* fold it into the
   `provider` job, which already has a real endpoint on the other end, by asking
   the live provider for a status it will refuse.
+- **The gate's evidence demands are dropped.** A readiness row keeps
+  `module_id`, `readiness_status` and `readiness_effect`; CP-0's schema also
+  declares `evidence_demand` and `active_representation_ids`, which say *which*
+  sources a module needs (`docs/DECISIONS.md` §27). Nothing reads them yet, and
+  every module is still handed every block. *Upgrade:* per-module evidence
+  selection, which is the same change that would let a set with a 541-page
+  credit agreement run at all.
+- **The workspace cannot show the cause yet.** `NodeView.gate_verdict` names
+  why the gate blocked a module (`docs/DECISIONS.md` §27), but
+  `frontend/src/wire/run.ts`'s `RouteNode` does not carry the field, so the API
+  sends the reason and the UI has nowhere to put it. *Upgrade:* the
+  workspace's wire type and the section that draws a node —
+  `frontend/src/sections/run/RouteGraph.tsx` and `NodeDetail.tsx`.
 
 **Phase 4.**
 
