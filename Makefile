@@ -2,7 +2,7 @@
 PY  := .venv/bin/python
 SEC := .venv-security/bin
 
-.PHONY: venv lock lint types test security check dev
+.PHONY: venv lock lint types test test-provider security check dev
 
 venv:  ## dev toolchain on 3.14, security toolchain on 3.12 (AI_CODE_QUALITY 4)
 	uv venv --python 3.14 .venv
@@ -33,6 +33,12 @@ test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarq
 	$(PY) -m pytest
 	$(PY) scripts/scan_floors.py coverage.xml --cobertura
 	$(PY) scripts/io_budget.py --assert
+
+test-provider:  ## the live suite; credentials from the environment or an untracked .env (DECISIONS 16)
+	@# Sourced silently: a shell quotes a line it cannot run, and in .env that line can be a key.
+	@set -a; if [ -f .env ]; then . ./.env >/dev/null 2>&1; fi; set +a; \
+	CAOS_REQUIRE_PROVIDER=1 CAOS_REQUIRE_POSTGRES=1 $(PY) -m pytest --no-cov \
+		tests/test_provider.py tests/test_module_execution.py tests/test_live_run.py
 
 security:  # the floor is checked first: a report that parsed nothing must fail
 	$(SEC)/bandit -r scripts server -f json -o bandit.json || true

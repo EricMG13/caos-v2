@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -152,10 +153,32 @@ class CompletionProvider(Protocol):
 class OpenRouter:
     """One model, one identity, no fallbacks."""
 
-    api_key: str
+    # Out of the repr, which is what a failed assertion, a debugger and a log
+    # line all print (§16: the key never appears in a log).
+    api_key: str = field(repr=False)
     model: str
     base_url: str = DEFAULT_BASE_URL
     transport: Transport = field(default_factory=UrllibTransport)
+
+    @classmethod
+    def from_environment(cls) -> OpenRouter:
+        """The provider the environment configures, or `PROVIDER_NOT_CONFIGURED`.
+
+        §16's three names and nothing else: no dotenv library, no profile on
+        disk. Read at the call rather than at import, so a process started
+        before the key was set picks it up once it is. A missing key is refused
+        here rather than left to the provider's 401, which costs a round trip to
+        say the same thing.
+        """
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        model = os.environ.get("OPENROUTER_MODEL", "")
+        if not key or not model:
+            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+        return cls(
+            api_key=key,
+            model=model,
+            base_url=os.environ.get("OPENROUTER_BASE_URL") or DEFAULT_BASE_URL,
+        )
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         """Ask once. Never twice: a retry is the caller's decision and its own
@@ -211,6 +234,12 @@ class OpenRouter:
             # than wrapped, because its string carries the URL and sometimes the
             # body.
             raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE) from None
+        except ValueError:
+            # A request `http.client` will not build: a key with a line ending
+            # attached is the one a configuration produces. Certain rather than
+            # indeterminate -- nothing was sent -- and the message is the header
+            # itself, `Bearer` and the key.
+            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED) from None
 
 
 def _decode(body: bytes) -> Mapping[str, Any]:

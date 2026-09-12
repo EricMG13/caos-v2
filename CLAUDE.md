@@ -109,6 +109,9 @@ Standing rules that back them:
   in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
   per request, and applies `schema.sql` at startup. No worker, nothing seeded.
 - `make test` — the suite.
+- `make test-provider` — the live suite against the real model. Needs
+  `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and `CAOS_TEST_POSTGRES_URL`, and
+  fails rather than skips without them.
 - `make check` — lint, types, tests, security, in that order.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
 
@@ -486,12 +489,23 @@ system this size means nobody looked.
   ledger records; the number reserved *before* the call is still the caller's
   single estimate. *Upgrade:* the price table lands with the module executor
   that knows the prompt's size, and retires the Phase 4 gap below with it.
-- **The `provider` CI job is red until its credential exists.** It runs on a
-  schedule and on dispatch only — never on a pull request — and sets
-  `CAOS_REQUIRE_PROVIDER=1`, so a missing secret fails loudly rather than
-  skipping. Until `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
-  (variable) are set on the repository, every scheduled run fails. That is the
-  intended signal, not a gap to widen.
+- ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
+  2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
+  (variable) were set on the repository — outside the tree, which is why the
+  entry could not close itself. The job still runs on a schedule and on
+  dispatch only, never on a pull request, and it now carries Postgres beside
+  the credential: `CAOS_REQUIRE_PROVIDER=1` and `CAOS_REQUIRE_POSTGRES=1` turn
+  either one missing into a failure rather than a skip.
+- **The nightly live run proves one two-module pathway.**
+  `test_a_live_run_admits_documents_and_completes_its_route` runs
+  `DEEP_RESEARCH` — CP-0 then CP-DR — because two calls cost under a cent and
+  the job exists to prove the chain: documents admitted, a route pinned and
+  run, every citation re-located. Most of `FULL_CREDIT_ASSESSMENT`'s nineteen
+  modules have never answered a live model in CI, and a run there rests on each
+  one quoting its evidence word for word (the Phase 2 gap below).
+  `CAOS_LIVE_PATHWAY=FULL_CREDIT_ASSESSMENT make test-provider` runs them on
+  demand. *Upgrade:* the full pathway in the nightly job, once on-demand runs
+  have said what it costs and how often a quote fails to locate.
 - **`UrllibTransport`'s error path is tested at the director, not over a
   socket.** `test_an_error_status_arrives_as_an_http_error_the_transport_can_type`
   asks the real `_opener()` to convert a non-2xx, which is where the handler set
