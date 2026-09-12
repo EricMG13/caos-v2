@@ -27,6 +27,8 @@ import pytest
 import server.store as store
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence.ingest import Document, admit_pack
+from server.evidence.read import read_block
 from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
 from server.store.runs import create_case, run_status, start_run
@@ -154,7 +156,11 @@ def _populate(conn: StoreConnection, blobs: BlobStore) -> str:
         (source_id, case_id, digest),
     )
     conn.execute(
-        "INSERT INTO source_blocks VALUES (%s, 'b1', 1, 'synthetic')", (source_id,)
+        "INSERT INTO source_blocks VALUES (%s, 'b000000', 1, 'synthetic')", (source_id,)
+    )
+    conn.execute(
+        "INSERT INTO source_tokens VALUES (%s, 0, 1, 0, 0, 'synthetic', 1, 2, 3, 4)",
+        (source_id,),
     )
     conn.execute(
         "INSERT INTO run_attempts (attempt_id, run_id, route_node_id)"
@@ -197,20 +203,66 @@ def _populate(conn: StoreConnection, blobs: BlobStore) -> str:
     return digest
 
 
-def _records(conn: StoreConnection) -> list[object]:
-    tables = conn.execute(
-        "SELECT tablename FROM pg_tables WHERE schemaname = current_schema()"
-        " AND tablename NOT IN ('store_schema', 'store_migrations') ORDER BY tablename"
-    ).fetchall()
-    return [
-        conn.execute(
-            psycopg.sql.SQL(
-                "SELECT jsonb_agg(to_jsonb(t) - 'migration_probe'"
-                " ORDER BY to_jsonb(t)::text) FROM {} t"
-            ).format(psycopg.sql.Identifier(name))
-        ).fetchone()
-        for (name,) in tables
-    ]
+def _records(
+    conn: StoreConnection, columns: list[tuple[object, ...]] | None = None
+) -> dict[str, object]:
+    """Compare the original named tables/columns, including all their rows."""
+    tables: dict[str, list[str]] = {}
+    for table, column, *_ in _columns(conn) if columns is None else columns:
+        if table not in {"store_schema", "store_migrations"}:
+            tables.setdefault(str(table), []).append(str(column))
+    return {
+        table: conn.execute(
+            psycopg.sql.SQL("SELECT {} FROM {} ORDER BY {}").format(
+                psycopg.sql.SQL(", ").join(map(psycopg.sql.Identifier, names)),
+                psycopg.sql.Identifier(table),
+                psycopg.sql.SQL(", ").join(map(psycopg.sql.Identifier, names)),
+            )
+        ).fetchall()
+        for table, names in tables.items()
+    }
+
+
+def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
+    empty_database: str,
+    tmp_path: Path,
+) -> None:
+    with connect(empty_database) as conn:
+        _legacy(conn)
+        blobs = BlobStore(tmp_path)
+        digest = _populate(conn, blobs)
+        columns = _columns(conn)
+        before = _records(conn, columns)
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        assert conn.execute("SELECT count(*) FROM source_extractions").fetchone() == (
+            0,
+        )
+        row = conn.execute("SELECT source_id, case_id FROM sources").fetchone()
+        assert row is not None
+        source, case_id = row
+        assert (
+            read_block(conn, source_id=source, block_id="b000000").text.value
+            == "synthetic"
+        )
+        assert blobs.get(digest) == b"synthetic legacy document and artifact"
+        upgraded = _columns(conn)
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        [new_source] = admit_pack(
+            conn,
+            blobs,
+            case_id=case_id,
+            documents=[Document(BoundaryText.of("new.txt"), b"known extraction")],
+        )
+        assert conn.execute("SELECT source_id FROM source_extractions").fetchall() == [
+            (new_source,)
+        ]
+        conn.commit()
+        conn.execute("CREATE SCHEMA real_fresh")
+        conn.execute("SET search_path TO real_fresh")
+        apply_schema(conn)
+        assert _columns(conn) == upgraded
 
 
 def test_populated_legacy_advances_and_repeat_preserves_history(
@@ -222,7 +274,8 @@ def test_populated_legacy_advances_and_repeat_preserves_history(
         _legacy(conn)
         blobs = BlobStore(tmp_path)
         digest = _populate(conn, blobs)
-        before = _records(conn)
+        columns = _columns(conn)
+        before = _records(conn, columns)
         conn.commit()
         monkeypatch.setattr(
             store,
@@ -237,7 +290,7 @@ def test_populated_legacy_advances_and_repeat_preserves_history(
         )
         apply_schema(conn)
         assert conn.execute("SELECT migration_probe FROM cases").fetchone() == (7,)
-        assert _records(conn) == before
+        assert _records(conn, columns) == before
         assert blobs.get(digest) == b"synthetic legacy document and artifact"
         history = conn.execute(
             "SELECT * FROM store_migrations ORDER BY version"
@@ -287,6 +340,14 @@ def test_failed_migration_rolls_back_and_releases_lock(
     monkeypatch: pytest.MonkeyPatch,
     state: str,
 ) -> None:
+    rollback = store.rollback_or_close
+    failed_states = []
+
+    def record_failure(connection: StoreConnection) -> None:
+        failed_states.append(connection.info.transaction_status)
+        rollback(connection)
+
+    monkeypatch.setattr(store, "rollback_or_close", record_failure)
     with connect(empty_database) as conn:
         if state == "legacy":
             _legacy(conn)
@@ -298,9 +359,9 @@ def test_failed_migration_rolls_back_and_releases_lock(
             store,
             "MIGRATIONS",
             (
-                ("0001_legacy", SCHEMA),
+                *store.MIGRATIONS,
                 (
-                    "0002_probe",
+                    "probe_fails",
                     "CREATE TABLE secret_probe (id integer); SELECT missing_secret",
                 ),
             ),
@@ -309,6 +370,7 @@ def test_failed_migration_rolls_back_and_releases_lock(
         with pytest.raises(Refusal) as caught:
             apply_schema(conn)
         assert "secret" not in str(caught.value)
+        assert failed_states == [psycopg.pq.TransactionStatus.INERROR]
         assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
         assert _columns(conn) == before
         with connect(empty_database) as other:
@@ -331,7 +393,7 @@ def test_concurrent_starters_apply_once(
     monkeypatch.setattr(
         store,
         "MIGRATIONS",
-        (*store.MIGRATIONS, ("0002_probe", "CREATE TABLE once_only (id integer)")),
+        (*store.MIGRATIONS, ("probe_once", "CREATE TABLE once_only (id integer)")),
     )
     ready = Barrier(2)
 
@@ -345,7 +407,9 @@ def test_concurrent_starters_apply_once(
         for future in futures:
             future.result(timeout=15)
     with connect(empty_database) as conn:
-        assert conn.execute("SELECT count(*) FROM store_migrations").fetchone() == (2,)
+        assert conn.execute("SELECT count(*) FROM store_migrations").fetchone() == (
+            len(store.MIGRATIONS),
+        )
 
 
 def test_interruption_before_commit_rolls_back(
@@ -402,7 +466,7 @@ def test_newer_database_or_changed_applied_prefix_refuses(
     change: str,
 ) -> None:
     baseline = store.MIGRATIONS
-    later = (*baseline, ("0002_probe", "CREATE TABLE probe (id integer)"))
+    later = (*baseline, ("probe_tail", "CREATE TABLE probe (id integer)"))
     monkeypatch.setattr(store, "MIGRATIONS", later)
     with connect(empty_database) as conn:
         apply_schema(conn)
@@ -410,12 +474,16 @@ def test_newer_database_or_changed_applied_prefix_refuses(
             monkeypatch.setattr(store, "MIGRATIONS", baseline)
         elif change == "edited":
             monkeypatch.setattr(
-                store, "MIGRATIONS", (*baseline, ("0002_probe", "SELECT 1"))
+                store, "MIGRATIONS", (*baseline, ("probe_tail", "SELECT 1"))
             )
         elif change == "reordered":
-            conn.execute("UPDATE store_migrations SET version = version + 2")
+            conn.execute(
+                "UPDATE store_migrations SET version = version + %s", (len(later),)
+            )
         else:
-            conn.execute("DELETE FROM store_migrations WHERE version = 2")
+            conn.execute(
+                "DELETE FROM store_migrations WHERE version = %s", (len(later),)
+            )
         conn.commit()
         with pytest.raises(Refusal):
             apply_schema(conn)

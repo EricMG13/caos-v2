@@ -16,9 +16,11 @@ extractor implements the same protocol and nothing above this module changes.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Protocol
 
+from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 
 # A fixed-pitch cell, in points. 7.2 x 12.0 is a 12pt monospace at its usual
@@ -46,8 +48,43 @@ class Token:
     y1: float
 
 
+@dataclass(frozen=True, slots=True)
+class ExtractorIdentity:
+    """Host-owned algorithm/version and bounded flat effective configuration."""
+
+    name: str
+    version: str
+    config: dict[str, str | int | float | bool | None]
+
+    def canonical(self) -> str:
+        if not self.name or not self.version or type(self.config) is not dict:
+            raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
+        texts = [self.name, self.version, *self.config]
+        scalar_types = (str, int, float, bool, type(None))
+        for value in self.config.values():
+            if type(value) not in scalar_types:
+                raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
+            if isinstance(value, str):
+                texts.append(value)
+        for text in texts:
+            if type(text) is not str or BoundaryText.of(text).value != text:
+                raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
+        canonical = json.dumps(
+            {"name": self.name, "version": self.version, "config": self.config},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        BoundaryText.of(canonical)
+        return canonical
+
+
 class Extractor(Protocol):
     """Bytes to tokens. The one seam a real PDF extractor arrives through."""
+
+    @property
+    def identity(self) -> ExtractorIdentity: ...
 
     def extract(self, data: bytes) -> list[Token]: ...
 
@@ -59,6 +96,20 @@ class PlainTextExtractor:
     Refuses `SOURCE_NOT_READABLE` for bytes that are not UTF-8, carrying the code
     and nothing else -- the offending bytes are exactly what must not travel.
     """
+
+    @property
+    def identity(self) -> ExtractorIdentity:
+        return ExtractorIdentity(
+            "caos.plain-text",
+            "1",
+            {
+                "encoding": "utf-8",
+                "cell_width": CELL_WIDTH,
+                "cell_height": CELL_HEIGHT,
+                "margin": MARGIN,
+                "lines_per_page": LINES_PER_PAGE,
+            },
+        )
 
     def extract(self, data: bytes) -> list[Token]:
         try:

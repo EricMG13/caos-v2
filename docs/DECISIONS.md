@@ -870,6 +870,43 @@ a caller already holding a setup lock remains responsible for its transaction.
 Finer locks are warranted only by measured throughput, not speculative parallelism.
 No table, dependency, migration or global mutex is needed for this repair.
 
+## 2026-09-12 §33 — Record extraction provenance without inventing legacy history
+
+Migration `0002_extraction` adds append-only `source_extractions`, keyed by the
+admitted source. A missing row explicitly means UNKNOWN; migration never guesses
+which adapter produced historical tokens. Existing live-source evidence remains
+readable. Recovery for future executable source sets is explicit readmission and
+re-extraction by a known host adapter, never a provenance backfill.
+
+Format version 1 stores canonical extractor identity JSON (`name`, algorithm
+`version`, flat effective `config`, maximum 4096 characters), an output SHA-256,
+and an extraction SHA-256. Config values are finite JSON scalars; text must
+already satisfy BoundaryText normalization and bounds. Host implementations own
+this identity: plain text declares its UTF-8/fixed-cell/page settings; PDF declares
+its algorithm and installed pdfminer version/default layout settings. Filename
+does not select an adapter. Custom host extractors explicitly declare an identity.
+
+The output digest hashes a JSON object with `format_version: 1`, ordered `tokens`
+(each token's text/page/region_id/line_id/x0/y0/x1/y1) and ordered `blocks`
+(`[block_id, page, text]`). Coordinates are finite exact binary64 values before
+both hashing and writing. Token text is recorded exactly as stored; packing still
+applies the existing BoundaryText normalization. The extraction digest hashes
+`format_version: 1`, document SHA-256, the extractor identity object and output
+SHA-256. Both serializations use sorted keys, compact separators, UTF-8 with
+`ensure_ascii=False` and `allow_nan=False`. Source/case IDs and preview metadata
+will belong to the subsequent immutable source-set identity, not this content
+identity.
+
+All preparation and identity validation precede the shared case lock and writes.
+Admission retains caller-owned commit/rollback; it adds no provider operation.
+Database triggers refuse updates, deletes and truncation of provenance. These
+constraints protect normal SQL mutations, not privileged schema/trigger removal.
+
+This is a storage prerequisite only. Immutable source sets, run bindings and
+runtime approval enforcement are subsequent slices; F04 remains open. The old
+whole-case `source_set_fingerprint` remains compatibility behavior and is not an
+enforced execution pin. Mixed-PDF dispatch and geometry fidelity remain Phase 3.
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a

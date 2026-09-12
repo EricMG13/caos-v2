@@ -16,7 +16,13 @@ type StoreConnection = psycopg.Connection[tuple[Any, ...]]
 
 SCHEMA = (Path(__file__).with_name("schema.sql")).read_text(encoding="utf-8")
 # Append reviewed SQL files here; never edit an applied entry or schema.sql.
-MIGRATIONS = (("0001_legacy", SCHEMA),)
+MIGRATIONS = (
+    ("0001_legacy", SCHEMA),
+    (
+        "0002_extraction",
+        Path(__file__).with_name("0002_extraction.sql").read_text(encoding="utf-8"),
+    ),
+)
 
 # One well-known lock, held for the applying transaction only, so two processes
 # starting at once do not both read an empty bookkeeping table and both apply.
