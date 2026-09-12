@@ -95,3 +95,6 @@ never makes paid calls. It cannot manufacture the hosted Sonar or required
 GitHub statuses described in [`docs/CI_GATE_CONTRACT.md`](docs/CI_GATE_CONTRACT.md).
 `make index` uses an installed GitNexus executable with
 `--index-only`; it never downloads, embeds, injects instructions, or publishes.
+If GitNexus reports the known incremental `file_fts` index failure, rebuild only
+that local index with `gitnexus analyze --force --index-only`, then confirm it
+with `gitnexus status`.

@@ -1,8 +1,14 @@
 """The UI fixture server is explicit, and local gates say what they prove."""
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import check_postgres
+import check_pr_size
+import psycopg
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -70,6 +76,31 @@ def test_postgres_preflight_does_not_echo_the_connection_string() -> None:
     assert sentinel not in result.stdout + result.stderr
 
 
+def test_postgres_preflight_main_covers_success_missing_and_failure(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("CAOS_TEST_POSTGRES_URL", empty_database)
+    assert check_postgres.main() == 0
+
+    monkeypatch.delenv("CAOS_TEST_POSTGRES_URL")
+    assert check_postgres.main() == 1
+    assert "CAOS_TEST_POSTGRES_URL is required" in capsys.readouterr().out
+
+    sentinel = "database-secret-do-not-print"
+    monkeypatch.setenv("CAOS_TEST_POSTGRES_URL", sentinel)
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise psycopg.OperationalError(sentinel)
+
+    monkeypatch.setattr(psycopg, "connect", refuse)
+    assert check_postgres.main() == 1
+    captured = capsys.readouterr()
+    assert "test PostgreSQL is not reachable" in captured.out
+    assert sentinel not in captured.out + captured.err
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
@@ -107,6 +138,38 @@ def test_changed_lines_accepts_the_exact_threshold(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert "changed lines: 800" in result.stdout
+
+
+def test_size_gate_main_is_measured_in_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, base = _size_repo(tmp_path, 800)
+    monkeypatch.chdir(repo)
+    assert check_pr_size.changed_lines(base) == 800
+
+    monkeypatch.setattr(sys, "argv", ["check_pr_size.py", base])
+    assert check_pr_size.main() == 0
+    assert "changed lines: 800" in capsys.readouterr().out
+
+    (repo / "kept.txt").write_text("x\n" * 801, encoding="utf-8")
+    _git(repo, "add", "kept.txt")
+    _git(repo, "commit", "-qm", "over limit")
+    assert check_pr_size.main() == 1
+    assert "PR too large" in capsys.readouterr().err
+
+    monkeypatch.setattr(sys, "argv", ["check_pr_size.py"])
+    assert check_pr_size.main() == 2
+    assert "PR_BASE is required" in capsys.readouterr().err
+
+    monkeypatch.setattr(sys, "argv", ["check_pr_size.py", "not-a-base"])
+    assert check_pr_size.main() == 2
+    assert "not-a-base" in capsys.readouterr().err
+
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(FileNotFoundError):
+        check_pr_size.changed_lines(base)
 
 
 def test_size_gate_rejects_over_limit_and_invalid_base(tmp_path: Path) -> None:
