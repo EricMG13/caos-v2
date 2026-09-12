@@ -24,11 +24,17 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import GATE_MODULE, ResolvedRoute
+from server.engine.route import GATE_MODULE, ResolvedRoute, predecessors
 from server.engine.runtime import ProviderResult
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Envelope
-from server.methodology.executor import Assignment, deliver, execute_module
+from server.methodology.executor import (
+    Assignment,
+    Upstream,
+    UpstreamClaim,
+    deliver,
+    execute_module,
+)
 from server.provider import CompletionProvider
 from server.store import StoreConnection
 
@@ -37,11 +43,12 @@ from server.store import StoreConnection
 class ModuleProvider:
     """A `runtime.Provider` that runs a real module.
 
-    Holds the six things a module execution needs and the loop does not know
+    Holds the seven things a module execution needs and the loop does not know
     about: the store to read evidence through, the bundle that is authority,
     the blob store the envelope is written to, the provider that answers, the
-    (source_id, block_id) pairs this node is to receive, and the pinned route --
-    which is what tells the gate every other module it must cover.
+    (source_id, block_id) pairs this node is to receive, the pinned route --
+    which is what tells the gate every other module it must cover -- and the
+    run the node belongs to.
     """
 
     conn: StoreConnection
@@ -52,6 +59,10 @@ class ModuleProvider:
     # The pin. The gate needs the module ids it must cover, and Phase 11's
     # chain needs each node's predecessors from the same object.
     route: ResolvedRoute
+    # The run whose accepted artifacts are this node's upstream. The provider
+    # seam is (route_node_id, module_id), so the run the node belongs to has to
+    # be held rather than passed.
+    run_id: UUID
 
     def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
         # Only the gate is asked about the rest of the pinned route; deciding
@@ -66,6 +77,7 @@ class ModuleProvider:
             module_id=module_id,
             delivered=deliver(self.conn, self.delivered),
             gate_expects=gate_expects,
+            upstream=self._upstream(module_id),
         )
         outcome = execute_module(
             self.conn, self.bundle, assignment=assignment, provider=self.completions
@@ -77,6 +89,61 @@ class ModuleProvider:
             model=outcome.model,
             generation_id=outcome.generation_id,
         )
+
+    def _upstream(self, module_id: str) -> tuple[Upstream, ...]:
+        """Each direct predecessor's accepted envelope, as the host stored it.
+
+        Read from the store rather than carried in memory: the host owns
+        identity (invariant 3), and a run resumed in another process has only
+        the store to read -- a caller's copy of what a predecessor said is a
+        claim, not the fact this method needs.
+
+        One round trip regardless of how many predecessors this node has: every
+        accepted artifact of the run is read in the one query below, and which
+        rows answer *this* module's predecessors is decided in Python against
+        `predecessors(self.route, module_id)`. A query per predecessor is
+        exactly the shape `docs/AI_CODE_QUALITY.md` measures at ~8x.
+        """
+        wanted = predecessors(self.route, module_id)
+        if not wanted:
+            return ()
+        nodes = {
+            node.module_id: node.route_node_id
+            for node in self.route.nodes
+            if node.module_id in set(wanted)
+        }
+        rows = self.conn.execute(
+            "SELECT attempts.route_node_id, artifacts.artifact_sha256"
+            " FROM artifacts JOIN run_attempts AS attempts USING (attempt_id)"
+            " WHERE artifacts.run_id = %s",
+            (self.run_id,),
+        ).fetchall()
+        digests = {str(node_id): str(digest) for node_id, digest in rows}
+        upstream: list[Upstream] = []
+        for predecessor in wanted:
+            # Not every predecessor has run: a soft edge's source may never
+            # have been accepted, and that is not an error here -- it is the
+            # same "unmet" this route already tolerates for a RESTRICTED node.
+            digest = digests.get(nodes.get(predecessor, ""))
+            if digest is None:
+                continue
+            stored = json.loads(self.blobs.get(digest))
+            upstream.append(
+                Upstream(
+                    module_id=predecessor,
+                    claims=tuple(
+                        UpstreamClaim(
+                            statement=str(claim["statement"]),
+                            quotes=tuple(
+                                str(citation["matched_text"])
+                                for citation in claim["citations"]
+                            ),
+                        )
+                        for claim in stored["claims"]
+                    ),
+                )
+            )
+        return tuple(upstream)
 
 
 def canonical(envelope: Envelope) -> bytes:

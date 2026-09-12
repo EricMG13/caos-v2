@@ -308,6 +308,7 @@ def _perform_one(
                     completions=harness.completions,
                     delivered=_delivered(conn, source_ids),
                     route=route,
+                    run_id=run_id,
                 ),
                 harness.estimate,
             ),

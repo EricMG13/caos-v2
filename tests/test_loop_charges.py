@@ -29,6 +29,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
 from server.store import RunStatus, StoreConnection
+from server.store.routes import pin_route
 from server.store.runs import run_status, start_run
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
@@ -57,10 +58,13 @@ class _Completions:
     # The identity a real provider carries: what the host configured, which
     # with fallbacks off is what answers.
     model: str = MODEL
-    calls: list[str] = field(default_factory=list)
+    # Whole prompts, not a prefix: Task 7's test reads the upstream section
+    # back out of the second node's prompt, and a truncated copy would not
+    # carry it.
+    prompts: list[str] = field(default_factory=list)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.calls.append(prompt[:40])
+        self.prompts.append(prompt)
         body: dict[str, object] = {
             "claims": [
                 {
@@ -150,8 +154,9 @@ def test_the_loop_charges_what_the_provider_reported(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -191,8 +196,9 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -220,8 +226,9 @@ def test_the_artifact_is_the_envelope_the_host_built(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     run_route(
@@ -255,8 +262,9 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_delivered(conn, source_id),
+        delivered=_every_block(conn, source_id),
         route=route,
+        run_id=run_id,
     )
 
     with pytest.raises(Exception, match="CITATION_NOT_DELIVERED"):
@@ -273,7 +281,41 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
     assert _charges(conn, run_id) == [], "and nothing was accepted"
 
 
-def _delivered(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:
+def test_the_loop_hands_each_node_its_predecessors_results(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """DEEP_RESEARCH is CP-0 then CP-DR: the second node's prompt carries the
+    first node's accepted statement, read from the artifact the host stored."""
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id)
+    pin_route(conn, run_id, route)
+
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(
+            ModuleProvider(
+                conn=conn,
+                bundle=Bundle(root=VENDORED),
+                blobs=blobs,
+                completions=completions,
+                delivered=_every_block(conn, source_id),
+                route=route,
+                run_id=run_id,
+            ),
+            ESTIMATE,
+        ),
+    )
+
+    first, second = completions.prompts
+    assert "--- UPSTREAM" not in first
+    assert "module_id: CP-0" in second
+    assert "Total debt was USD 1,240.0m." in second
+
+
+def _every_block(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:
     rows = conn.execute(
         "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
         (source_id,),

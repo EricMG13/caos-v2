@@ -157,6 +157,7 @@ def ran(
                 completions=_Completions(source_id),
                 delivered=[(source_id, str(row[0])) for row in blocks],
                 route=catalog_route,
+                run_id=run_id,
             ),
             ESTIMATE,
         ),
