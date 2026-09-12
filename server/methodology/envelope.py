@@ -30,7 +30,18 @@ from server.refusals import Refusal, RefusalCode
 # What a module may return, and nothing else.
 CLAIM_KEYS = frozenset({"statement", "citations"})
 CITATION_KEYS = frozenset({"source_id", "page", "matched_text"})
-ENVELOPE_KEYS = frozenset({"claims"})
+ENVELOPE_KEYS = frozenset({"claims", "content_to_module_map"})
+# The gate's row, from the bundle's own payload schema for CP-0, minus the two
+# fields the host has no use for yet (`evidence_demand`,
+# `active_representation_ids` -- docs/REBUILD_PLAN.md Phase 11).
+READINESS_KEYS = frozenset({"module_id", "readiness_status", "readiness_effect"})
+# The bundle's four, unchanged (CP-0__SourceReadiness__payload.schema.txt).
+READINESS_STATUSES = frozenset(
+    {"READY", "READY_WITH_LIMITATIONS", "CONDITIONAL", "BLOCKED"}
+)
+# One sentence about one module. Long enough for a reason, short enough that a
+# map over a nineteen-node route stays a map.
+EFFECT_LIMIT = 512
 
 # A bound on what one module may assert in one run. Not a performance limit: an
 # envelope with a thousand claims is a module that has stopped answering the
@@ -47,6 +58,15 @@ class Claim:
 
 
 @dataclass(frozen=True, slots=True)
+class Readiness:
+    """The gate's verdict on one module of the pinned route."""
+
+    module_id: str
+    readiness_status: str
+    readiness_effect: BoundaryText
+
+
+@dataclass(frozen=True, slots=True)
 class Envelope:
     """What the host stores. Identity is the host's, never the module's."""
 
@@ -54,6 +74,8 @@ class Envelope:
     build_id: str
     authority_digest: str
     claims: tuple[Claim, ...]
+    # The gate's readiness map, empty for every module but the gate.
+    readiness: tuple[Readiness, ...]
 
 
 def parse_claims(
@@ -92,6 +114,58 @@ def _claim(claim: object, delivered: set[UUID]) -> tuple[str, list[Citation]]:
         raise Refusal(RefusalCode.ENVELOPE_UNCITED_CLAIM)
 
     return statement, [_citation(citation, delivered) for citation in citations]
+
+
+def parse_readiness(body: str, *, expected: frozenset[str]) -> list[Readiness]:
+    """The gate's verdict on every module the host asked about, or a refusal.
+
+    `expected` is the pinned route's modules less the gate itself, and it is
+    empty for every other module -- so "did this module return a map it was
+    never asked for" and "did the gate cover the route" are one check with two
+    answers. Nothing here trusts a value: the module ids are the host's, the
+    statuses are the bundle's four, and the effect is boundary text.
+    """
+    decoded = _object(body)
+    rows = decoded.get("content_to_module_map")
+    if rows is None:
+        if expected:
+            raise Refusal(RefusalCode.READINESS_INCOMPLETE)
+        return []
+    if not expected:
+        # The host asked this module for no verdict, so the key is undeclared
+        # for it -- the same answer `_closed` gives any other stray key.
+        raise Refusal(RefusalCode.ENVELOPE_UNDECLARED_FIELD)
+    if not isinstance(rows, list):
+        raise Refusal(RefusalCode.READINESS_INVALID)
+
+    readiness = [_readiness(row, expected) for row in rows]
+    named = {row.module_id for row in readiness}
+    if len(named) != len(readiness):
+        raise Refusal(RefusalCode.READINESS_INVALID)
+    if named != expected:
+        raise Refusal(RefusalCode.READINESS_INCOMPLETE)
+    return readiness
+
+
+def _readiness(row: object, expected: frozenset[str]) -> Readiness:
+    if not isinstance(row, dict):
+        raise Refusal(RefusalCode.READINESS_INVALID)
+    if set(row) != READINESS_KEYS:
+        raise Refusal(RefusalCode.READINESS_INVALID)
+
+    module_id = row["module_id"]
+    status = row["readiness_status"]
+    if module_id not in expected or status not in READINESS_STATUSES:
+        raise Refusal(RefusalCode.READINESS_INVALID)
+
+    effect = row["readiness_effect"]
+    if not isinstance(effect, str) or not effect.strip():
+        raise Refusal(RefusalCode.READINESS_INVALID)
+    return Readiness(
+        module_id=str(module_id),
+        readiness_status=str(status),
+        readiness_effect=BoundaryText.of(effect, limit=EFFECT_LIMIT),
+    )
 
 
 def _citation(citation: object, delivered: set[UUID]) -> Citation:

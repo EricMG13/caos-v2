@@ -28,7 +28,13 @@ from server.boundary_text import BoundaryText
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
-from server.methodology.envelope import Claim, Envelope, parse_claims
+from server.methodology.envelope import (
+    Claim,
+    Envelope,
+    Readiness,
+    parse_claims,
+    parse_readiness,
+)
 from server.methodology.executor import (
     Delivery,
     ModuleOutcome,
@@ -399,3 +405,147 @@ def test_a_delivery_announces_the_page_its_block_sits_on(
     )
     [claim] = outcome.envelope.claims
     assert [citation.page for citation in claim.citations] == [2]
+
+
+ROUTE = frozenset({"CP-0", "CP-1", "CP-2"})
+EXPECTED = frozenset({"CP-1", "CP-2"})
+
+
+def _map(**statuses: str) -> str:
+    return json.dumps(
+        {
+            "claims": [],
+            "content_to_module_map": [
+                {
+                    "module_id": module_id,
+                    "readiness_status": status,
+                    "readiness_effect": f"{module_id} effect",
+                }
+                for module_id, status in statuses.items()
+            ],
+        }
+    )
+
+
+def test_the_gate_returns_a_readiness_row_for_every_module_it_was_asked_about() -> None:
+    rows = parse_readiness(
+        _map(**{"CP-1": "READY", "CP-2": "BLOCKED"}), expected=EXPECTED
+    )
+
+    assert [row.module_id for row in rows] == ["CP-1", "CP-2"]
+    assert isinstance(rows[0], Readiness)
+    assert rows[1].readiness_status == "BLOCKED"
+    assert rows[1].readiness_effect.value == "CP-2 effect"
+
+
+def test_a_gate_answer_missing_a_pinned_module_is_refused() -> None:
+    """Identifying the runnable modules is CP-0's own job (`REBUILD_PLAN.md`
+    Phase 11), so a map that skips one is incomplete rather than permissive."""
+    with pytest.raises(Refusal) as caught:
+        parse_readiness(_map(**{"CP-1": "READY"}), expected=EXPECTED)
+
+    assert caught.value.code is RefusalCode.READINESS_INCOMPLETE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        json.dumps({"claims": [], "content_to_module_map": "READY"}),
+        json.dumps({"claims": [], "content_to_module_map": [{"module_id": "CP-1"}]}),
+        json.dumps(
+            {
+                "claims": [],
+                "content_to_module_map": [
+                    {
+                        "module_id": "CP-1",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                        "confidence": 90,
+                    },
+                    {
+                        "module_id": "CP-2",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                ],
+            }
+        ),
+        json.dumps(
+            {
+                "claims": [],
+                "content_to_module_map": [
+                    {
+                        "module_id": "CP-1",
+                        "readiness_status": "PROBABLY",
+                        "readiness_effect": "e",
+                    },
+                    {
+                        "module_id": "CP-2",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                ],
+            }
+        ),
+        json.dumps(
+            {
+                "claims": [],
+                "content_to_module_map": [
+                    {
+                        "module_id": "CP-9",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                    {
+                        "module_id": "CP-2",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                ],
+            }
+        ),
+        json.dumps(
+            {
+                "claims": [],
+                "content_to_module_map": [
+                    {
+                        "module_id": "CP-1",
+                        "readiness_status": "READY",
+                        "readiness_effect": "e",
+                    },
+                    {
+                        "module_id": "CP-1",
+                        "readiness_status": "BLOCKED",
+                        "readiness_effect": "e",
+                    },
+                ],
+            }
+        ),
+    ],
+    ids=[
+        "not a list",
+        "row missing keys",
+        "undeclared key",
+        "unknown status",
+        "unknown module",
+        "duplicate module",
+    ],
+)
+def test_a_readiness_map_the_host_cannot_bound_is_refused(body: str) -> None:
+    with pytest.raises(Refusal) as caught:
+        parse_readiness(body, expected=EXPECTED)
+
+    assert caught.value.code is RefusalCode.READINESS_INVALID
+
+
+def test_only_the_gate_module_may_return_a_readiness_map() -> None:
+    """A module the host did not ask for a verdict is asked for none: the key is
+    undeclared for it, and an undeclared key refuses the envelope."""
+    with pytest.raises(Refusal) as caught:
+        parse_readiness(_map(**{"CP-1": "READY"}), expected=frozenset())
+
+    assert caught.value.code is RefusalCode.ENVELOPE_UNDECLARED_FIELD
+
+
+def test_a_module_asked_for_no_verdict_and_giving_none_is_accepted() -> None:
+    assert parse_readiness(_body(uuid4()), expected=frozenset()) == []
