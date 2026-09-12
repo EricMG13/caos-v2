@@ -25,7 +25,15 @@ from server.evidence.read import Block, read_block
 from server.methodology.bundle import Bundle, assemble_authority, authority_digest
 from server.methodology.envelope import Claim, Envelope, parse_claims, parse_readiness
 from server.provider import CompletionProvider
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+
+# The two ways a quote fails to anchor. Either costs the claim resting on it and
+# nothing more (docs/DECISIONS.md §26); any other refusal is the module breaking
+# the contract, and refuses the answer.
+QUOTE_MISSES = frozenset(
+    {RefusalCode.CITATION_NOT_LOCATED, RefusalCode.CITATION_AMBIGUOUS}
+)
 
 # The skill is the authority; the reference files are what it may consult. Only
 # the skill goes into the prompt, because the reference set of one module runs to
@@ -177,8 +185,9 @@ def execute_module(
     The order is the contract: authority is verified before the prompt is built,
     the provider is asked once, and every citation is re-derived against the
     token index *before* an envelope exists to be stored. A quote the host
-    cannot locate exactly once refuses the whole envelope, which is invariant 11
-    happening before the artifact rather than after it.
+    cannot locate exactly once refuses the claim resting on it -- invariant 11
+    happening before the artifact rather than after it -- and the envelope
+    counts what it refused. An answer with no claim left is refused (§26).
 
     `assignment` carries the module id, the delivered evidence and the gate
     expectation as one thing rather than three loose arguments, for the same
@@ -208,11 +217,23 @@ def execute_module(
     readiness = parse_readiness(completion.content, expected=assignment.gate_expects)
 
     claims = []
+    misses: list[RefusalCode] = []
     for statement, citations in parse_claims(completion.content, delivered=sources):
-        anchored = verify_citations(conn, delivered=sources, citations=citations)
-        claims.append(
-            Claim(statement=BoundaryText.of(statement), citations=tuple(anchored))
-        )
+        # Before the quotes: a statement the boundary refuses is the module
+        # breaking the contract, which costs the answer rather than the claim.
+        text = BoundaryText.of(statement)
+        try:
+            anchored = verify_citations(conn, delivered=sources, citations=citations)
+        except Refusal as missed:
+            if missed.code not in QUOTE_MISSES:
+                raise
+            misses.append(missed.code)
+            continue
+        claims.append(Claim(statement=text, citations=tuple(anchored)))
+    if not claims:
+        # Nothing the module established survived. Refused with the first
+        # quote's code, as an answer that anchored nothing always was.
+        raise Refusal(misses[0])
 
     envelope = Envelope(
         # The host's, not the module's. Whatever it claimed about its own
@@ -222,6 +243,7 @@ def execute_module(
         authority_digest=authority_digest(authority),
         claims=tuple(claims),
         readiness=tuple(readiness),
+        claims_refused=len(misses),
     )
     return ModuleOutcome(
         envelope=envelope,

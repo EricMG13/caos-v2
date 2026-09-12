@@ -74,6 +74,10 @@ class Envelope:
     build_id: str
     authority_digest: str
     claims: tuple[Claim, ...]
+    # The claims refused because a quote did not anchor (docs/DECISIONS.md §26),
+    # kept beside the ones that survived so the artifact says the module
+    # asserted more than it established.
+    claims_refused: int
     # The gate's readiness map, empty for every module but the gate.
     readiness: tuple[Readiness, ...]
 

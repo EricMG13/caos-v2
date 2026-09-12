@@ -99,6 +99,7 @@ def canonical(envelope: Envelope) -> bytes:
                 }
                 for row in sorted(envelope.readiness, key=lambda row: row.module_id)
             ],
+            "claims_refused": envelope.claims_refused,
             "claims": [
                 {
                     "statement": claim.statement.value,

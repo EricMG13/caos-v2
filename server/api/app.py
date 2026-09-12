@@ -211,6 +211,27 @@ def blob_store() -> BlobStore:
     return BlobStore(Path(root))
 
 
+def actor_from_request(request: Request) -> Actor:
+    """Who is asking. A dependency rather than a line in a route body.
+
+    FastAPI builds a route's dependency list in the order its parameters declare
+    them and solves it sequentially, so declaring this one before `Store` is
+    what keeps identity ahead of the connection. Two things rest on that. An
+    anonymous request is refused without opening one -- a connection is per
+    request and unpooled, and asking in a loop costs the asker nothing. And the
+    answer to a stranger does not depend on the store being reachable: a process
+    that has lost its database still says "I do not know who you are", which is
+    the only one of the two answers that is about the caller.
+
+    It closes the anonymous half and not the whole of it. A request asserting
+    any well-formed subject still reaches the connection, because whether that
+    subject is real is the edge's question rather than this process's
+    (`server/api/identity.py`).
+    """
+    return actor_from_headers(request.headers)
+
+
+Caller = Annotated[Actor, Depends(actor_from_request)]
 Store = Annotated[StoreConnection, Depends(store_connection)]
 Blobs = Annotated[BlobStore, Depends(blob_store)]
 
@@ -248,9 +269,12 @@ async def _malformed_run_id(
 
 
 @app.get("/api/runs/{run_id}", response_model=RunDocument)
-def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDocument:
-    """The run, its pinned route, and each node's state with its reason."""
-    actor = actor_from_headers(request.headers)
+def read_run(run_id: UUID, actor: Caller, conn: Store, blobs: Blobs) -> RunDocument:
+    """The run, its pinned route, and each node's state with its reason.
+
+    `actor` is declared first, and the order is load-bearing: see
+    `actor_from_request`.
+    """
     _case_id, status = _visible(conn, run_id, actor)
 
     route = resolved_route(conn, run_id)
@@ -278,14 +302,17 @@ def read_run(run_id: UUID, request: Request, conn: Store, blobs: Blobs) -> RunDo
 
 
 @app.get("/api/runs/{run_id}/events")
-def read_run_events(run_id: UUID, request: Request, conn: Store) -> StreamingResponse:
+def read_run_events(
+    run_id: UUID, actor: Caller, request: Request, conn: Store
+) -> StreamingResponse:
     """The run's events as `text/event-stream`, resuming after `Last-Event-ID`.
 
     The authority read happens here, before the first byte, so that an
     unauthorised watcher gets the same 404 the run document gives rather than an
     empty 200 -- which would still confirm the id names a run somebody watches.
+    `actor` is declared before `conn` for the reason `actor_from_request` gives;
+    `request` is still taken, for the resume marker alone.
     """
-    actor = actor_from_headers(request.headers)
     case_id, _status = _visible(conn, run_id, actor)
 
     return StreamingResponse(

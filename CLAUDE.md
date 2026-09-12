@@ -105,8 +105,13 @@ Standing rules that back them:
 ## Running
 
 - `make venv` — the two toolchains. `make lock` — recompile every lock.
-- `make dev` — API + worker + Postgres, seeded.
+- `make dev` — the `api` process alone, on port 8000. It needs a Postgres URL
+  in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
+  per request, and applies `schema.sql` at startup. No worker, nothing seeded.
 - `make test` — the suite.
+- `make test-provider` — the live suite against the real model. Needs
+  `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and `CAOS_TEST_POSTGRES_URL`, and
+  fails rather than skips without them.
 - `make check` — lint, types, tests, security, in that order.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
 
@@ -420,6 +425,18 @@ system this size means nobody looked.
 
 **Phase 6.**
 
+- **Identity before the store rests on parameter order.** `read_run` and
+  `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
+  the whole of what refuses an anonymous request before a connection is opened:
+  FastAPI builds a route's dependency list in signature order (`get_dependant`)
+  and solves it sequentially (`solve_dependencies`), so the ordering is a
+  property of a pinned dependency rather than something the code says out loud.
+  `test_an_anonymous_request_opens_no_store_connection` counts the dependency's
+  calls, so a reorder and a FastAPI that stopped doing this both fail there --
+  which is what makes this a limit rather than a defect. *Upgrade:*
+  `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
+  inserts at the front of the list whatever the parameters say; worth taking the
+  day a third route arrives and the order has to be remembered three times.
 - **A run tail polls.** `server/api/app.py` re-reads `run_events` every
   `POLL_INTERVAL` until the run is terminal, standing is lost, or
   `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
@@ -460,6 +477,12 @@ system this size means nobody looked.
   each module's payload schema from the manifest (`docs/DECISIONS.md` §24) is
   where the bundle's own schema starts being enforced; it needs a JSON-schema
   dependency and therefore a decision entry.
+- **A refused claim is counted, not shown.** `claims_refused` travels in the
+  stored envelope (`docs/DECISIONS.md` §26) and nothing renders it: the
+  deliverable prints the claims that survived and says nothing of the ones that
+  did not, so a page can read as complete over a module that asserted twice
+  what it kept. *Upgrade:* the deliverable's provenance line carries the count,
+  the day a reader relies on the page without the store beside it.
 - **Only `SKILL.md` reaches the prompt.** A module's `reference_files` are
   verified and assembled but not sent: one module's reference set runs to tens
   of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
@@ -472,12 +495,23 @@ system this size means nobody looked.
   ledger records; the number reserved *before* the call is still the caller's
   single estimate. *Upgrade:* the price table lands with the module executor
   that knows the prompt's size, and retires the Phase 4 gap below with it.
-- **The `provider` CI job is red until its credential exists.** It runs on a
-  schedule and on dispatch only — never on a pull request — and sets
-  `CAOS_REQUIRE_PROVIDER=1`, so a missing secret fails loudly rather than
-  skipping. Until `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
-  (variable) are set on the repository, every scheduled run fails. That is the
-  intended signal, not a gap to widen.
+- ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
+  2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
+  (variable) were set on the repository — outside the tree, which is why the
+  entry could not close itself. The job still runs on a schedule and on
+  dispatch only, never on a pull request, and it now carries Postgres beside
+  the credential: `CAOS_REQUIRE_PROVIDER=1` and `CAOS_REQUIRE_POSTGRES=1` turn
+  either one missing into a failure rather than a skip.
+- **The nightly live run proves one two-module pathway.**
+  `test_a_live_run_admits_documents_and_completes_its_route` runs
+  `DEEP_RESEARCH` — CP-0 then CP-DR — because two calls cost under a cent and
+  the job exists to prove the chain: documents admitted, a route pinned and
+  run, every citation re-located. Most of `FULL_CREDIT_ASSESSMENT`'s nineteen
+  modules have never answered a live model in CI, and a run there rests on each
+  one quoting its evidence word for word (the Phase 2 gap below).
+  `CAOS_LIVE_PATHWAY=FULL_CREDIT_ASSESSMENT make test-provider` runs them on
+  demand. *Upgrade:* the full pathway in the nightly job, once on-demand runs
+  have said what it costs and how often a quote fails to locate.
 - **`UrllibTransport`'s error path is tested at the director, not over a
   socket.** `test_an_error_status_arrives_as_an_http_error_the_transport_can_type`
   asks the real `_opener()` to convert a non-2xx, which is where the handler set
@@ -561,7 +595,7 @@ system this size means nobody looked.
   whitespace and each word must equal a token, punctuation included. A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
   `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
-  costs a retry, an over-eager match costs a rectangle over text the quote does
+  costs its claim (§26), an over-eager match costs a rectangle over text the quote does
   not contain — but it will refuse quotes a reader would call correct.
   *Upgrade:* Phase 5, when a real module's real quotes say which normalisations
   are needed; anything decided before then is guesswork about a caller that does

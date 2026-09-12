@@ -175,6 +175,71 @@ def test_a_request_with_no_identity_is_401_not_404(
     assert response.json() == {"refusal": "NOT_AUTHENTICATED"}
 
 
+@pytest.mark.parametrize(
+    "database_url",
+    [None, "postgresql://caos@127.0.0.1:1/caos?connect_timeout=2"],
+    ids=["unconfigured", "unreachable"],
+)
+def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, database_url: str | None
+) -> None:
+    """The answer to a stranger does not depend on the database being up.
+
+    Identity checked in the route body is identity checked after FastAPI has
+    already resolved `Store`, so a process that had lost its database answered
+    a caller whose actual problem was that it had not said who it was with a
+    refusal about the store. Both shapes of that refusal are asked for, because
+    they are separate codes and either would do as the wrong answer: the store
+    unconfigured is STORE_NOT_CONFIGURED, the store not answering is
+    STORE_UNAVAILABLE, and 503 tells a caller to come back later when no amount
+    of later will help them.
+    """
+    app.dependency_overrides.pop(store_connection)
+    if database_url is None:
+        monkeypatch.delenv(app_module.DATABASE_URL, raising=False)
+    else:
+        monkeypatch.setenv(app_module.DATABASE_URL, database_url)
+
+    for path in (f"/api/runs/{uuid4()}", f"/api/runs/{uuid4()}/events"):
+        response = client.get(path)
+
+        assert (response.status_code, response.json()) == (
+            401,
+            {"refusal": "NOT_AUTHENTICATED"},
+        ), path
+
+
+def test_an_anonymous_request_opens_no_store_connection(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
+    """`actor_from_request` is declared before `Store`, and FastAPI solves a
+    route's dependencies in the order its parameters declare them.
+
+    The connection is one per request and unpooled, so a stranger asking in a
+    loop for a connection opened before identity is known is a cheap way to
+    exhaust the database. The run here exists and is somebody's, so a 401 alone
+    would not say where the refusal came from -- the count is what does. It is
+    the dependency's own call that is counted rather than the queries it then
+    serves, because opening the connection is the cost.
+    """
+    conn, _case_id = case
+    run_id, _viewer = run
+    opened: list[str] = []
+
+    def counted() -> StoreConnection:
+        opened.append(store_connection.__name__)
+        return conn
+
+    app.dependency_overrides[store_connection] = counted
+
+    for path in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/events"):
+        assert client.get(path).status_code == 401, path
+    assert opened == [], (
+        "an anonymous request resolved the store dependency; identity is "
+        "declared before it so that it does not"
+    )
+
+
 def test_store_connection_refuses_without_a_database_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,7 +313,15 @@ def test_a_store_that_does_not_answer_is_a_server_fault(
     """A configured store that does not answer -- the commonest store fault --
     reached every caller as a bare 500, and the server's log as psycopg's
     message naming the host, port and role. It is refused like any other store
-    fault: 503, and the code alone, with nothing chained behind it."""
+    fault: 503, and the code alone, with nothing chained behind it.
+
+    Both callers are named. A caller with no identity never reaches the store
+    at all, and gets 401 --
+    `test_an_anonymous_request_is_401_whatever_the_store_is_doing` is where that
+    is asserted. What this keeps from the arm that used to be anonymous is the
+    tail route, which is the half of it that was about the route rather than
+    about the caller.
+    """
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     monkeypatch.setenv(app_module.BLOB_ROOT, str(tmp_path))
     with TestClient(app) as opened:
@@ -256,10 +329,10 @@ def test_a_store_that_does_not_answer_is_a_server_fault(
             app_module.DATABASE_URL,
             "postgresql://caos@127.0.0.1:1/caos?connect_timeout=2",
         )
-        named = opened.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
-        anonymous = opened.get(f"/api/runs/{uuid4()}/events")
+        document = opened.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+        tail = opened.get(f"/api/runs/{uuid4()}/events", headers=_as(uuid4()))
 
-    for response in (named, anonymous):
+    for response in (document, tail):
         assert (response.status_code, response.json()) == (
             503,
             {"refusal": "STORE_UNAVAILABLE"},
@@ -287,12 +360,46 @@ def test_only_a_run_id_that_cannot_be_read_is_answered_as_a_missing_run() -> Non
     assert TestClient(other).get("/api/cases/not-a-case").status_code == 422
 
 
+def test_the_malformed_id_handler_derives_identity_of_its_own() -> None:
+    """The handler answers a caller with no identity itself, and this app's
+    routes no longer let it: `actor_from_request` refuses an anonymous caller
+    before FastAPI validates the path, so the anonymous arm of
+    `test_a_malformed_run_id_is_answered_like_any_unknown_run` now passes
+    through the dependency rather than through here.
+
+    The contract belongs to the handler and not to the route, so it is asserted
+    against a route that does not carry the dependency -- which is what the
+    first route to take a run id and forget it would be. Without this the two
+    lines that answer it are reachable from no test at all.
+    """
+    other = FastAPI()
+    other.add_exception_handler(
+        RequestValidationError, app.exception_handlers[RequestValidationError]
+    )
+
+    @other.get("/api/runs/{run_id}")
+    def read_run_without_identity(run_id: UUID) -> str:
+        return str(run_id)
+
+    response = TestClient(other).get("/api/runs/not-a-run")
+
+    assert (response.status_code, response.json()) == (
+        401,
+        {"refusal": "NOT_AUTHENTICATED"},
+    )
+
+
 def test_a_malformed_run_id_is_answered_like_any_unknown_run(
     client: TestClient, run: tuple[UUID, UUID]
 ) -> None:
     """A path that cannot name a run names no run. FastAPI's own 422 answered
     it instead -- before identity, in a body that is not the declared refusal
-    and that quotes the input back."""
+    and that quotes the input back.
+
+    The anonymous arm is now answered by `actor_from_request`, which resolves
+    before FastAPI validates the path; the handler's own answer to it is the
+    same, and is asserted directly in
+    `test_the_malformed_id_handler_derives_identity_of_its_own`."""
     _run_id, viewer = run
     unknown = client.get(f"/api/runs/{uuid4()}", headers=_as(viewer))
 

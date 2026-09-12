@@ -146,6 +146,7 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
     assert envelope.module_id == "CP-1"
     assert envelope.build_id.startswith("a43cb903")
     assert len(envelope.authority_digest) == 64
+    assert envelope.claims_refused == 0
 
 
 def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
@@ -193,11 +194,116 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
     assert not hasattr(outcome.envelope, "charge")
 
 
+def _claims(source_id: UUID, *quotes: tuple[str, ...]) -> str:
+    """A body with one claim per tuple, each citing every quote in it."""
+    return json.dumps(
+        {
+            "claims": [
+                {
+                    "statement": f"Claim {n}.",
+                    "citations": [
+                        {"source_id": str(source_id), "page": 1, "matched_text": q}
+                        for q in claim
+                    ],
+                }
+                for n, claim in enumerate(quotes)
+            ]
+        }
+    )
+
+
+GOOD = "Total debt at 31 December 2026"
+# Not in the report at all.
+MISSING = "Total debt was USD 2,000.0m"
+# On the page twice: the report's title and its debt line both say it.
+TWICE = "2026"
+
+
+@pytest.mark.parametrize("miss", [MISSING, TWICE])
+def test_a_quote_that_does_not_anchor_refuses_its_claim_not_the_answer(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle, miss: str
+) -> None:
+    """§26. Invariant 11 refuses the quote before it reaches the artifact, and
+    the claim resting on it goes with it. The claims beside it that anchored
+    are what the module established, and refusing them too turned one weak
+    quote into a module that said nothing -- which is how a real issuer's
+    CP-1 failed three times over sixteen citations, twelve of them good."""
+    conn, source_id, delivered = admitted
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        provider=_Stub(_claims(source_id, (GOOD,), (miss,))),
+    )
+
+    [kept] = outcome.envelope.claims
+    assert kept.statement.value == "Claim 0."
+    assert outcome.envelope.claims_refused == 1
+
+
+def test_a_claim_survives_only_when_every_citation_anchors(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """A figure keeps all of its evidence or none of it: a claim resting on two
+    quotes where one is missing would reach the page half-supported."""
+    conn, source_id, delivered = admitted
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        provider=_Stub(_claims(source_id, (GOOD, MISSING), (GOOD,))),
+    )
+
+    assert [c.statement.value for c in outcome.envelope.claims] == ["Claim 1."]
+    assert outcome.envelope.claims_refused == 1
+
+
+def test_a_statement_the_boundary_refuses_still_refuses_the_answer(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """Only a quote that fails to anchor costs just its claim. A statement
+    carrying a bidirectional override is the module breaking the contract, not
+    missing a quote, and it refuses the whole answer as it always did."""
+    conn, source_id, delivered = admitted
+    body = json.loads(_claims(source_id, (GOOD,), (GOOD,)))
+    body["claims"][1]["statement"] = "Leverage is \u202efine."
+
+    with pytest.raises(Refusal) as caught:
+        execute_module(
+            conn,
+            bundle,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
+            provider=_Stub(json.dumps(body)),
+        )
+
+    assert caught.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
+
+
+def test_the_stored_artifact_counts_the_claims_it_refused(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """The count travels in the bytes that are content-addressed, so a reader
+    holding only the artifact can see the module said more than it kept."""
+    conn, source_id, delivered = admitted
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        provider=_Stub(_claims(source_id, (GOOD,), (MISSING,))),
+    )
+
+    assert json.loads(canonical(outcome.envelope))["claims_refused"] == 1
+
+
 def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
     admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
 ) -> None:
     """Invariant 11, before the artifact. The module quoted something plausible
-    that is not in the evidence, and no envelope exists as a result."""
+    that is not in the evidence, and with its only claim refused there is no
+    answer left: no envelope exists, and the refusal is the quote's (§26)."""
     conn, source_id, delivered = admitted
 
     with pytest.raises(Refusal) as caught:

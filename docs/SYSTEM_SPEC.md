@@ -196,8 +196,10 @@ is the unit `read_evidence` returns. Matching joins tokens within a line and
 continues only onto the next line of the same region, so a quote cannot be
 assembled across a column gutter: the two columns are different regions and the
 phrase never forms. A quote it cannot re-locate, or cannot locate exactly
-once, is refused before it reaches the artifact. Citations may only name evidence
-actually delivered to that node.
+once, is refused before it reaches the artifact, and the claim resting on it
+with it; the envelope counts the claims refused, and an answer left with none is
+refused (`docs/DECISIONS.md` §26). Citations may only name evidence actually
+delivered to that node.
 
 ---
 

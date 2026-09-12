@@ -625,6 +625,45 @@ entry already calls a binding rather than a fact. This makes the other half a
 fact the store holds, and is the precondition for refusing a verdict that names
 a model the runs behind it never used. That refusal is a separate change.
 
+## 2026-09-11 §26 — A quote that does not anchor refuses its claim, not the module's answer
+
+The first live run over a real issuer — Virgin Media O2's Q4 2025 and Q1 2026
+earnings releases and its Q1 2026 bond report, `FULL_CREDIT_ASSESSMENT` on
+`openai/gpt-4.1-mini` — stopped at CP-1 after three attempts. The answers were
+mostly sound: in the one inspected, twelve of sixteen citations anchored. The
+four that did not were wrapped sentences whose second line the extractor put
+in another region, and table rows assembled from cells that are not adjacent
+in reading order. `execute_module` refused the whole envelope on the first of
+them, so twelve good citations bought nothing — and at one miss in four, a
+module with a dozen claims almost never passes, and nineteen in a row never
+will.
+
+**The claim goes, not the answer.** A citation refused `CITATION_NOT_LOCATED`
+or `CITATION_AMBIGUOUS` refuses the claim resting on it, and a claim survives
+only when every citation it carries anchors: a figure keeps all of its
+evidence or none of it. Invariant 11 is unchanged — the quote is still refused
+before it reaches the artifact, which is all `SYSTEM_SPEC.md` §5 and
+`CLAUDE.md` say. Refusing the whole envelope was `execute_module`'s rule, not
+the invariant's.
+
+**Everything else still refuses the answer.** A statement `BoundaryText`
+refuses, a citation naming undelivered evidence, an undeclared key, a claim
+carrying no citation: those are the module breaking the contract rather than
+missing a quote, and they refuse the envelope as before. An answer left with
+no claim is refused with its first quote's code, which is what a module that
+anchored nothing always got.
+
+**The artifact counts what it refused.** `claims_refused` is the host's fact,
+stored in the canonical envelope and so covered by its digest: a reader
+holding only the artifact can see that the module asserted more than it
+established. A silent drop would have made a thin answer indistinguishable
+from a short one.
+
+**Reason.** The alternatives were a matcher loose enough to accept the rows
+and the wrapped lines — the phrase assembled across a gutter that §5 exists to
+refuse — or re-asking the model, a second call per module to recover claims
+already known not to anchor. Refusing per claim keeps the matcher exactly as
+strict as it was and gives up only what it could never have kept.
 ## 2026-09-12 §27 — The gate's verdict reaches the store, and decides what runs
 
 `server/engine/route.py` has carried `readiness_from` since route resolution

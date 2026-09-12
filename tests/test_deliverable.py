@@ -47,11 +47,16 @@ from server.store.audit import audit_trail
 from server.store.members import Standing, grant
 from server.store.runs import create_case
 
-REVISION = "rev-001"
+REVISION = BoundaryText.of("rev-001")
+# The same visible label in the two Unicode normal forms: composed e-acute,
+# then "e" followed by a combining acute. Written as escapes so the file says
+# which is which rather than relying on how an editor saved it.
+NFC_LABEL = BoundaryText.of("rev-caf\u00e9")
+NFD_SPELLING = "rev-cafe\u0301"
 
 PAYLOAD_DATA: dict[str, Any] = {
     "case_title": "Acme Holdings plc",
-    "revision_id": REVISION,
+    "revision_id": REVISION.value,
     "artifacts": [
         {
             "module_id": "CP-1",
@@ -136,7 +141,7 @@ def test_freezing_without_a_signature_is_refused(
             conn,
             case_id=case_id,
             actor_id=actor,
-            revision_id="rev-unsigned",
+            revision_id=BoundaryText.of("rev-unsigned"),
             payload=PAYLOAD_BYTES,
         )
 
@@ -499,7 +504,7 @@ def test_a_revision_is_filed_once(
     assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FILED
     row = conn.execute(
         "SELECT filed_by FROM deliverable_publications WHERE revision_id = %s",
-        (REVISION,),
+        (REVISION.value,),
     ).fetchone()
     assert row is not None and UUID(str(row[0])) == filer
     filings = [entry for entry in audit_trail(conn, case_id) if "FILED" in entry.action]
@@ -724,7 +729,7 @@ def test_no_signature_lands_between_the_independence_check_and_the_filing(
     read = filing._signatures
 
     def then_sign_elsewhere(
-        connection: StoreConnection, case_id: UUID, revision_id: str
+        connection: StoreConnection, case_id: UUID, revision_id: BoundaryText
     ) -> list[tuple[UUID, str]]:
         seen = read(connection, case_id, revision_id)
         with (
@@ -774,3 +779,81 @@ def test_a_filing_belongs_to_the_case_it_was_frozen_in(
         file_deliverable(conn, case_id=other, actor_id=intruder, revision_id=REVISION)
 
     assert caught.value.code is RefusalCode.DELIVERABLE_NOT_FROZEN
+
+
+def test_a_revision_is_one_revision_however_its_label_is_normalised(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """A revision id is a label somebody approves, not bytes somebody compares.
+
+    The two spellings of `rev-café` render identically and differ in byte
+    string. Carried as a bare `str` they were two revisions: the NFD spelling
+    found no signature at all, and signed under it the case would hold a
+    publication row each for one label -- "a revision is frozen once" holding
+    per byte string rather than per label somebody signed.
+    """
+    conn, case_id = case
+    signer = _approver(conn, case_id)
+    freezer = _approver(conn, case_id)
+    assert NFC_LABEL.value != NFD_SPELLING, "the two spellings differ in bytes"
+    sign_opinion(
+        conn,
+        case_id=case_id,
+        actor_id=signer,
+        revision_id=NFC_LABEL,
+        payload_sha256=_digest(PAYLOAD_BYTES),
+    )
+    freeze(
+        conn,
+        case_id=case_id,
+        actor_id=freezer,
+        revision_id=NFC_LABEL,
+        payload=PAYLOAD_BYTES,
+    )
+
+    with pytest.raises(Refusal) as caught:
+        freeze(
+            conn,
+            case_id=case_id,
+            actor_id=freezer,
+            revision_id=BoundaryText.of(NFD_SPELLING),
+            payload=PAYLOAD_BYTES,
+        )
+
+    assert caught.value.code is RefusalCode.DELIVERABLE_ALREADY_FROZEN
+    rows = conn.execute(
+        "SELECT revision_id FROM deliverable_publications WHERE case_id = %s",
+        (case_id,),
+    ).fetchall()
+    assert [str(row[0]) for row in rows] == [NFC_LABEL.value]
+
+
+def test_a_revision_label_carrying_a_bidi_control_is_refused(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """The other half of what the boundary is for, at the same door.
+
+    U+202E makes a label render as something other than its bytes, so the
+    revision a reviewer reads on screen and the revision the store holds are
+    different things -- the trojan-source class (CVE-2021-42574) that is the
+    reason `BoundaryText` exists rather than a length check. The refusal is the
+    type's, reached through the signature filing now demands; the assertion that
+    no row landed is what would notice a later caller coercing its way past it.
+    """
+    conn, case_id = case
+    actor = _approver(conn, case_id)
+
+    with pytest.raises(Refusal) as caught:
+        sign_opinion(
+            conn,
+            case_id=case_id,
+            actor_id=actor,
+            revision_id=BoundaryText.of("rev-001\u202e"),
+            payload_sha256=_digest(PAYLOAD_BYTES),
+        )
+
+    assert caught.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
+    row = conn.execute(
+        "SELECT count(*) FROM deliverable_opinions WHERE case_id = %s", (case_id,)
+    ).fetchone()
+    assert row is not None and int(row[0]) == 0
