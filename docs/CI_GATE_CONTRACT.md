@@ -82,3 +82,36 @@ at phase completion. User-requested cadence supersedes older blanket skill
 cadence in historical quality documentation. Record risk scope and evidence
 in the execution ledger. Keep external writes and live spend separately
 authorized.
+
+## Complete offline gate
+
+`make check-fast` is partial and intentionally excludes PostgreSQL, browser,
+security and image proof. It must not be described as complete.
+
+```sh
+./frontend/node_modules/.bin/playwright install
+TRIVY=/path/to/trivy IMAGE=caos-workbench:check make check
+PR_BASE=<exact-pr-base> make check-size
+```
+
+The complete command requires the configured test PostgreSQL to be reachable
+and forces skipped database suites to fail. It runs backend lint, types,
+coverage, I/O and security; the separate two-connection race suite; frontend
+lint, types, fixture unit tests, production build/deep links, explicit demo
+build, the full accessibility matrix and workbench; and the repaired image
+gate. These ecosystems run sequentially even under
+`make -j`. Provider credentials are removed and the paid suite is not selected.
+
+The separate PR-only `check-size` gate has no guessed default: `PR_BASE` must be
+the exact caller-supplied PR base. It uses the hosted exclusions and 800-line limit and fails closed for
+an absent or invalid base or failed diff. Splitting an oversized cumulative
+branch into commits does not make it eligible. Local completion cannot post or
+imitate required GitHub or SonarCloud statuses; those remain mandatory on the
+exact future PR head.
+
+Ordinary `npm run dev` proxies `/api` to the real loopback API at port 8000;
+ordinary production preview has no fixture middleware. `dev:demo`, `build:demo`
+and `preview:demo` opt into read-only fixtures and a visible demonstration
+label. Their `dist-demo` artifact is separate from production `dist`. Real
+API/browser/PostgreSQL acceptance remains later-phase work; fixture coverage
+proves presentation only.

@@ -7,7 +7,14 @@ import jsxA11y from "eslint-plugin-jsx-a11y";
 
 export default tseslint.config(
   {
-    ignores: ["dist/", "node_modules/", "playwright-report/", "test-results/", "a11y-results/"],
+    ignores: [
+      "dist/",
+      "dist-demo/",
+      "node_modules/",
+      "playwright-report/",
+      "test-results/",
+      "a11y-results/",
+    ],
   },
   ...tseslint.configs.recommended,
   reactHooks.configs.flat.recommended,

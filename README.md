@@ -46,13 +46,28 @@ locks, installs the pinned local pre-commit runner, and runs
 configuration is present; it never prints values. Live-provider variables are
 optional and should remain absent during ordinary development.
 
-The API and UI are separate processes and remain unconnected until a later
-phase:
+The API and UI are separate processes. The ordinary UI proxies `/api` to the
+real local API on `127.0.0.1:8000`; API/UI route compatibility remains a later
+phase, so an absent or unknown API route fails visibly rather than falling back
+to sample data:
 
 ```sh
 make dev-api  # http://127.0.0.1:8000; `make dev` is an alias
 make dev-ui   # http://127.0.0.1:5173
 ```
+
+Sample screens are available only in explicit demonstration mode. They carry a
+prominent read-only banner and fixture handlers reject commands:
+
+```sh
+make dev-ui-demo
+npm --prefix frontend run build:demo
+npm --prefix frontend run preview:demo
+```
+
+Production and demonstration exports are separate (`frontend/dist` and
+`frontend/dist-demo`). Production preview never serves fixture middleware or a
+stale demonstration build.
 
 The local services are deliberately isolated: the least-privilege application
 database is on `127.0.0.1:55436`, the disposable test-admin instance is on
@@ -61,8 +76,22 @@ visibly. `make dev-down` stops only the `caos-workbench-dev` Compose project and
 preserves the development database volume and blob directory; test database
 storage is ephemeral.
 
-Run `make test` for the current backend suite and `make check` for the binding
-gate order described in [`docs/CI_GATE_CONTRACT.md`](docs/CI_GATE_CONTRACT.md).
-Fixture-mode separation and full frontend gate parity arrive in the next Phase
-1 slice. `make index` uses an installed GitNexus executable with
+`make check-fast` is intentionally partial: it omits PostgreSQL, browser,
+security and image coverage. The complete offline gate requires the disposable
+test PostgreSQL from `make dev-up`, pinned Playwright browsers, and Trivy 0.70.0.
+The separate PR-size gate additionally requires an exact PR base:
+
+```sh
+./frontend/node_modules/.bin/playwright install
+TRIVY=/path/to/trivy IMAGE=caos-workbench:check make check
+PR_BASE=<exact-pr-base> make check-size
+```
+
+`make check` runs backend checks, the explicit two-connection race suite,
+frontend production and fixture checks, security and image scanning
+sequentially. The separate PR-only size command requires the exact proposed
+base. The offline gate removes inherited provider credentials and
+never makes paid calls. It cannot manufacture the hosted Sonar or required
+GitHub statuses described in [`docs/CI_GATE_CONTRACT.md`](docs/CI_GATE_CONTRACT.md).
+`make index` uses an installed GitNexus executable with
 `--index-only`; it never downloads, embeds, injects instructions, or publishes.
