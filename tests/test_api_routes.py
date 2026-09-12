@@ -78,10 +78,17 @@ def catalog() -> dict[str, Any]:
 
 
 @pytest.fixture
+def blobs(tmp_path: Path) -> BlobStore:
+    """The blob store the served app reads. A fixture rather than a local, so a
+    test can write the bytes a request will meet."""
+    return BlobStore(tmp_path / "blobs")
+
+
+@pytest.fixture
 def client(
     case: tuple[StoreConnection, UUID],
     empty_database: str,
-    tmp_path: Path,
+    blobs: BlobStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[TestClient]:
     """The app served against the test's own database and blob root.
@@ -92,7 +99,6 @@ def client(
     the one holding the case these tests set up.
     """
     conn, _case_id = case
-    blobs = BlobStore(tmp_path / "blobs")
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     app.dependency_overrides[store_connection] = lambda: conn
     app.dependency_overrides[blob_store] = lambda: blobs
@@ -556,6 +562,41 @@ def test_the_one_qa_gate_reads_as_a_gate(
     assert by_module["CP-6"]["awaiting_gate"] is True
     assert by_module["CP-1"]["awaiting_gate"] is False
     assert sum(node["awaiting_gate"] for node in body["nodes"]) == 1
+
+
+def test_an_artifact_that_will_not_read_is_a_server_fault_not_a_bad_request(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    blobs: BlobStore,
+    catalog: dict[str, Any],
+) -> None:
+    """CP-0's body is the one artifact this route decodes, and bytes that are not
+    JSON used to leave it as a bare 500 -- with the document's own text in the
+    message the server logged. It is a store fault like the others here: the
+    caller's request was fine, and no request will do better until the bytes are."""
+    conn, _case_id = case
+    run_id, viewer = run
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    pin_route(conn, run_id, route)
+    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
+    attempt_id = start_attempt(conn, run_id, cp0)
+    complete_attempt(
+        conn,
+        attempt_id=attempt_id,
+        accepted=Accepted(
+            artifact_sha256=blobs.put(b"not an envelope"),
+            charge=CHARGE,
+            model=MODEL,
+            generation_id=GENERATION,
+        ),
+    )
+    conn.commit()
+
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+
+    assert response.status_code == 503
+    assert response.json() == {"refusal": "ORCHESTRATION_ARTIFACT_UNREADABLE"}
 
 
 def test_a_run_with_no_pinned_route_has_no_nodes(

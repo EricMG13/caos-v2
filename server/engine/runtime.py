@@ -26,6 +26,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.engine.route import GATE_MODULE, ResolvedRoute, frontier
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
 from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
@@ -132,9 +133,39 @@ def accepted_artifacts(
         node.route_node_id for node in route.nodes if node.module_id == GATE_MODULE
     }
     return {
-        node_id: (json.loads(blobs.get(digest)) if node_id in readiness_nodes else {})
+        node_id: (_body(blobs, digest) if node_id in readiness_nodes else {})
         for node_id, digest in artifact_digests(conn, run_id).items()
     }
+
+
+def _body(blobs: BlobStore, artifact_sha256: str) -> object:
+    """One stored artifact, decoded, or the refusal `proof.py` gives for the same
+    bytes.
+
+    `object` rather than a mapping: whatever JSON produced, unnarrowed. The one
+    caller that reads into it, `readiness_from`, already answers "no readiness"
+    to a body that is not a mapping, and narrowing here would turn that into a
+    refusal -- a different question from whether the bytes can be read at all.
+
+    This read sits on `GET /api/runs/{run_id}`, so an untyped decode error here
+    is a 500 whose logged message quotes the document's own bytes. A blob
+    refusal is folded into the same code because absent, damaged and undecodable
+    bytes are one situation to a caller: the artifact this run accepted cannot
+    be read back.
+
+    Refused after the `except` rather than from inside it, the way
+    `store_connection` refuses an unreachable database: raised outside the
+    handler, the refusal carries neither `__cause__` nor `__context__`, so the
+    decoder's message -- which quotes the bytes it choked on -- is not reachable
+    from what a logger is handed. That is invariant 2's shape, and
+    `test_a_cp0_artifact_that_is_not_json_is_a_typed_refusal` asserts both are
+    `None` rather than trusting the placement.
+    """
+    try:
+        return json.loads(blobs.get(artifact_sha256))
+    except (ValueError, Refusal):
+        pass
+    raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
 
 
 def _run_node(

@@ -35,7 +35,13 @@ from server.engine.runtime import (
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.events import RunEvent, events_of
-from server.store.runs import run_status, start_run
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    run_status,
+    start_attempt,
+    start_run,
+)
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1]
@@ -304,6 +310,35 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
         _node_id(route, module) for module in ("CP-0", "CP-1", "CP-2", "CP-2D")
     }
     assert json.loads(blobs.get(digests[_node_id(route, "CP-0")])) == READY_EVERYWHERE
+
+
+def test_a_cp0_artifact_that_is_not_json_is_a_typed_refusal(
+    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+) -> None:
+    """This read sits on `GET /api/runs/{run_id}`. Bytes that do not decode used
+    to leave it as a `JSONDecodeError` -- a 500 to the caller, and the document's
+    own bytes in the message the server logged."""
+    conn, case_id = case
+    run_id = start_run(conn, case_id)
+    attempt_id = start_attempt(conn, run_id, _node_id(route, "CP-0"))
+    accept_attempt(
+        conn,
+        attempt_id=attempt_id,
+        accepted=Accepted(
+            artifact_sha256=blobs.put(b"not an envelope"),
+            charge=Decimal("0.01"),
+            model="a-model/for-the-test",
+            generation_id="gen-runtime-test",
+        ),
+    )
+    conn.commit()
+
+    with pytest.raises(Refusal) as caught:
+        accepted_artifacts(conn, blobs, route=route, run_id=run_id)
+
+    assert caught.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
+    # Invariant 2's shape: what the bytes were never reaches the refusal.
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
 def _node_id(route: ResolvedRoute, module_id: str) -> str:
