@@ -25,12 +25,10 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute, frontier
+from server.engine.route import GATE_MODULE, ResolvedRoute, frontier
 from server.store import StoreConnection
 from server.store.budget import reserve
 from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
-
-CP0 = "CP-0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +103,7 @@ def accepted_artifacts(
     shape `docs/AI_CODE_QUALITY.md` section 1 measures.
     """
     readiness_nodes = {
-        node.route_node_id for node in route.nodes if node.module_id == CP0
+        node.route_node_id for node in route.nodes if node.module_id == GATE_MODULE
     }
     rows = conn.execute(
         "SELECT attempts.route_node_id, artifacts.artifact_sha256"

@@ -487,6 +487,41 @@ system this size means nobody looked.
   entirely in which handlers the director holds. *Upgrade:* fold it into the
   `provider` job, which already has a real endpoint on the other end, by asking
   the live provider for a status it will refuse.
+- **The gate's evidence demands are dropped.** A readiness row keeps
+  `module_id`, `readiness_status` and `readiness_effect`; CP-0's schema also
+  declares `evidence_demand` and `active_representation_ids`, which say *which*
+  sources a module needs (`docs/DECISIONS.md` §27). Nothing reads them yet, and
+  every module is still handed every block. *Upgrade:* per-module evidence
+  selection, which is the same change that would let a set with a 541-page
+  credit agreement run at all.
+- **The workspace cannot show the cause yet.** `NodeView.gate_verdict` names
+  why the gate blocked a module (`docs/DECISIONS.md` §27), but
+  `frontend/src/wire/run.ts`'s `RouteNode` does not carry the field, so the API
+  sends the reason and the UI has nowhere to put it. *Upgrade:* the
+  workspace's wire type and the section that draws a node —
+  `frontend/src/sections/run/RouteGraph.tsx` and `NodeDetail.tsx`.
+- **The host asks the gate for claims and a map in one answer, and refuses an
+  answer carrying only the map.** `execute_module` calls `parse_claims`, which
+  refuses `ENVELOPE_INVALID` when `claims` is absent or empty — while CP-0's own
+  payload schema declares no claims at all, its output being a register. So a
+  gate answering in its own register terms loses the verdict, and costs the
+  attempt and the reservation that paid for the call. Accepting it is not a
+  guard away: `server/qualification/proof.py` refuses an artifact whose claim
+  list is empty, so what a *gate* artifact is would have to change in the proof
+  and the matrix as well as here — a phase-sized decision about that shape, not
+  a fix. *Upgrade:* a declared gate-artifact shape the proof and the matrix both
+  understand.
+- **A node RESTRICTED by the verdict alone has its cause everywhere but in the
+  engine's answer.** `_state_for` returns RESTRICTED for a
+  READY_WITH_LIMITATIONS module with no unmet edge, and `limitations_of` reports
+  soft edges — so it answers `()`, the one condition its own docstring says must
+  not happen. The cause is not lost: the verdict's `readiness_effect` is stored
+  on the gate artifact and is where the state came from, and the run surface
+  carries the status as `NodeView.gate_verdict`. Widening `limitations_of` is
+  the wrong way to add it — the return is `tuple[Edge, ...]`, a verdict is not
+  an `Edge`, and every caller would ripple for a field none of them asked for.
+  *Upgrade:* the effect travelling with the state, the day a reader works from
+  the engine rather than from the run document.
 
 **Phase 4.**
 

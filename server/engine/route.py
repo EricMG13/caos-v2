@@ -61,6 +61,13 @@ SOFT = frozenset({EdgeType.OPTIONAL, EdgeType.ADVISORY})
 # the schema declares -- CONDITIONAL, BLOCKED -- leave a soft edge soft.
 READY = frozenset({"READY", "READY_WITH_LIMITATIONS"})
 
+# The run's source-readiness gate. Named once here because three callers need it:
+# the reader below, the runtime's artifact fetch, and `ModuleProvider.execute` in
+# `server/methodology/runner.py`, where "only the gate is asked for a verdict" is
+# decided. `executor.py` never names it -- the assignment it is handed already
+# says what this module must cover.
+GATE_MODULE = "CP-0"
+
 # The host's model extension. `SYSTEM_SPEC.md` §6.2: CP-CF is appended at stage
 # 100 with synthesised REQUIRED edges naming every artifact owner it reads, so
 # CP-2G completing alone does not release it. No catalog is edited.
@@ -223,7 +230,7 @@ def node_states(
             states[node.route_node_id] = NodeState.COMPLETE
             continue
         unmet = _unmet(route, node.module_id, complete)
-        states[node.route_node_id] = _state_for(unmet, readiness)
+        states[node.route_node_id] = _state_for(node.module_id, unmet, readiness)
     return states
 
 
@@ -276,20 +283,30 @@ def limitations_of(
 
 
 def readiness_from(route: ResolvedRoute, accepted: Mapping[str, Any]) -> dict[str, str]:
-    """Per-module readiness, read from the accepted CP-0 artifact and nowhere else."""
+    """Per-module readiness, read from the accepted gate artifact and nowhere else."""
     for node in route.nodes:
-        if node.module_id != "CP-0":
+        if node.module_id != GATE_MODULE:
             continue
         artifact = accepted.get(node.route_node_id)
         if not isinstance(artifact, Mapping):
             return {}
         entries = artifact.get("content_to_module_map", [])
-        return {
-            str(entry["module_id"]): str(entry["readiness_status"])
-            for entry in entries
-            if isinstance(entry, Mapping)
-        }
+        if not isinstance(entries, list):
+            raise Refusal(RefusalCode.READINESS_INVALID)
+        return {_verdict_module(entry): _verdict_status(entry) for entry in entries}
     return {}
+
+
+def _verdict_module(entry: object) -> str:
+    if not isinstance(entry, Mapping) or "module_id" not in entry:
+        raise Refusal(RefusalCode.READINESS_INVALID)
+    return str(entry["module_id"])
+
+
+def _verdict_status(entry: object) -> str:
+    if not isinstance(entry, Mapping) or "readiness_status" not in entry:
+        raise Refusal(RefusalCode.READINESS_INVALID)
+    return str(entry["readiness_status"])
 
 
 def route_digest(route: ResolvedRoute) -> str:
@@ -312,8 +329,21 @@ def route_digest(route: ResolvedRoute) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _state_for(unmet: tuple[Edge, ...], readiness: Mapping[str, str]) -> NodeState:
-    """The soft-edge rule, in one place."""
+def _state_for(
+    module_id: str, unmet: tuple[Edge, ...], readiness: Mapping[str, str]
+) -> NodeState:
+    """The gate's verdict first, then the soft-edge rule.
+
+    The gate decides whether a module may run at all: CONDITIONAL and BLOCKED
+    are both "not cleared", and the difference between them is the reason, which
+    the verdict carries and this does not need. READY_WITH_LIMITATIONS runs and
+    carries the limitation forward, which is what RESTRICTED means. A module the
+    verdict does not mention -- every module, until the gate is accepted -- is
+    left to its edges.
+    """
+    own = readiness.get(module_id)
+    if own is not None and own not in READY:
+        return NodeState.BLOCKED
     for edge in unmet:
         if edge.type in BLOCKING:
             return NodeState.BLOCKED
@@ -321,6 +351,8 @@ def _state_for(unmet: tuple[Edge, ...], readiness: Mapping[str, str]) -> NodeSta
             # The evidence this soft edge would have carried exists. Running
             # without it would discard what the case already has.
             return NodeState.BLOCKED
+    if own == "READY_WITH_LIMITATIONS":
+        return NodeState.RESTRICTED
     return NodeState.RESTRICTED if unmet else NodeState.RUNNABLE
 
 

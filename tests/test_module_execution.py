@@ -28,14 +28,22 @@ from server.boundary_text import BoundaryText
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
-from server.methodology.envelope import Claim, Envelope, parse_claims
+from server.methodology.envelope import (
+    Claim,
+    Envelope,
+    Readiness,
+    parse_claims,
+    parse_readiness,
+)
 from server.methodology.executor import (
+    Assignment,
     Delivery,
     ModuleOutcome,
     build_prompt,
     deliver,
     execute_module,
 )
+from server.methodology.runner import canonical
 from server.provider import Completion, OpenRouter
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -129,8 +137,7 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id)),
     )
 
@@ -152,8 +159,7 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id)),
     )
 
@@ -177,8 +183,7 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id)),
     )
 
@@ -199,8 +204,7 @@ def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(_body(source_id, quote="Total debt was USD 2,000.0m")),
         )
 
@@ -216,8 +220,7 @@ def test_a_citation_naming_undelivered_evidence_is_refused(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(_body(uuid4())),
         )
 
@@ -237,8 +240,7 @@ def test_an_undeclared_field_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -256,8 +258,7 @@ def test_an_uncited_claim_is_refused(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -290,7 +291,12 @@ def test_the_prompt_carries_the_authority_and_the_evidence(
     conn, source_id, delivered = admitted
     stub = _Stub(_body(source_id))
 
-    execute_module(conn, bundle, module_id="CP-1", delivered=delivered, provider=stub)
+    execute_module(
+        conn,
+        bundle,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        provider=stub,
+    )
 
     assert "cp-1-canonical-data-foundation" in stub.prompt, "the skill is the authority"
     assert str(source_id) in stub.prompt
@@ -334,8 +340,7 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=OpenRouter(api_key=LIVE_KEY, model=LIVE_MODEL),
     )
 
@@ -393,9 +398,139 @@ def test_a_delivery_announces_the_page_its_block_sits_on(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id, page=2)),
     )
     [claim] = outcome.envelope.claims
     assert [citation.page for citation in claim.citations] == [2]
+
+
+ROUTE = frozenset({"CP-0", "CP-1", "CP-2"})
+EXPECTED = frozenset({"CP-1", "CP-2"})
+
+
+def _answer(rows: object) -> str:
+    """A gate answer whose map is `rows`, whatever shape the case gives it."""
+    return json.dumps({"claims": [], "content_to_module_map": rows})
+
+
+_ROW = {"module_id": "CP-1", "readiness_status": "READY", "readiness_effect": "e"}
+
+
+def _row(**fields: object) -> dict[str, object]:
+    """`_ROW` with whatever the case replaces. Typed `object`, because half the
+    cases below are about a row whose values are not strings."""
+    return {**_ROW, **fields}
+
+
+def _map(**statuses: str) -> str:
+    """The gate's whole answer for the modules named, every row valid."""
+    rows = [
+        _row(module_id=name, readiness_status=status, readiness_effect=f"{name} effect")
+        for name, status in statuses.items()
+    ]
+    return _answer(rows)
+
+
+def test_the_gate_returns_a_readiness_row_for_every_module_it_was_asked_about() -> None:
+    rows = parse_readiness(
+        _map(**{"CP-1": "READY", "CP-2": "BLOCKED"}), expected=EXPECTED
+    )
+
+    assert [row.module_id for row in rows] == ["CP-1", "CP-2"]
+    assert isinstance(rows[0], Readiness)
+    assert rows[1].readiness_status == "BLOCKED"
+    assert rows[1].readiness_effect.value == "CP-2 effect"
+
+
+def test_a_gate_answer_missing_a_pinned_module_is_refused() -> None:
+    """Identifying the runnable modules is CP-0's own job (`REBUILD_PLAN.md`
+    Phase 11), so a map that skips one is incomplete rather than permissive."""
+    with pytest.raises(Refusal) as caught:
+        parse_readiness(_map(**{"CP-1": "READY"}), expected=EXPECTED)
+
+    assert caught.value.code is RefusalCode.READINESS_INCOMPLETE
+
+
+# The other module `EXPECTED` names, answered properly: each case below is about
+# one row, and a map covering only that row would refuse READINESS_INCOMPLETE
+# before the check under test was reached.
+_OK = _row(module_id="CP-2")
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        pytest.param("READY", id="not a list"),
+        pytest.param([{"module_id": "CP-1"}], id="row missing keys"),
+        pytest.param([_row(confidence=90), _OK], id="undeclared key"),
+        pytest.param([_row(readiness_status="PROBABLY"), _OK], id="unknown status"),
+        pytest.param([_row(module_id="CP-9"), _OK], id="unknown module"),
+        pytest.param([_row(), _row(readiness_status="BLOCKED")], id="duplicate module"),
+        pytest.param([_row(module_id=["CP-1"]), _OK], id="non-string module id"),
+        pytest.param(
+            [_row(readiness_effect=90), _OK], id="non-string readiness effect"
+        ),
+    ],
+)
+def test_a_readiness_map_the_host_cannot_bound_is_refused(rows: object) -> None:
+    with pytest.raises(Refusal) as caught:
+        parse_readiness(_answer(rows), expected=EXPECTED)
+
+    assert caught.value.code is RefusalCode.READINESS_INVALID
+
+
+def test_only_the_gate_module_may_return_a_readiness_map() -> None:
+    """A module the host did not ask for a verdict is asked for none: the key is
+    undeclared for it, and an undeclared key refuses the envelope."""
+    with pytest.raises(Refusal) as caught:
+        parse_readiness(_map(**{"CP-1": "READY"}), expected=frozenset())
+
+    assert caught.value.code is RefusalCode.ENVELOPE_UNDECLARED_FIELD
+
+
+def test_a_module_asked_for_no_verdict_and_giving_none_is_accepted() -> None:
+    assert parse_readiness(_body(uuid4()), expected=frozenset()) == []
+
+
+def test_the_gate_is_asked_for_a_verdict_on_every_other_pinned_module() -> None:
+    prompt = build_prompt(
+        "CP-0", b"AUTHORITY BYTES", [], gate_expects=frozenset({"CP-1", "CP-2"})
+    )
+
+    assert "content_to_module_map" in prompt
+    assert "CP-1" in prompt and "CP-2" in prompt
+    assert "READY_WITH_LIMITATIONS" in prompt
+
+
+def test_a_module_that_is_not_the_gate_is_asked_for_no_verdict() -> None:
+    prompt = build_prompt("CP-1", b"AUTHORITY BYTES", [])
+
+    assert "content_to_module_map" not in prompt
+
+
+def test_the_stored_gate_artifact_carries_its_readiness(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+) -> None:
+    """The rows live in the canonical bytes, so the artifact digest covers what
+    the gate decided."""
+    conn, source_id, delivered = admitted
+    verdict = _row(
+        readiness_status="READY_WITH_LIMITATIONS",
+        readiness_effect="no audited statements",
+    )
+    body = json.loads(_body(source_id)) | {"content_to_module_map": [verdict]}
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        assignment=Assignment(
+            module_id="CP-0", delivered=delivered, gate_expects=frozenset({"CP-1"})
+        ),
+        provider=_Stub(json.dumps(body)),
+    )
+
+    [row] = outcome.envelope.readiness
+    assert row.module_id == "CP-1"
+    # The row the module sent, back out of the bytes the digest addresses.
+    assert json.loads(canonical(outcome.envelope))["content_to_module_map"] == [verdict]
