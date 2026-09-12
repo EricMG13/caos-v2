@@ -11,13 +11,14 @@ from uuid import UUID, uuid4
 
 import pytest
 from psycopg.pq import TransactionStatus
+from test_gates import _approval, _pin
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.extract import PlainTextExtractor, Token
 from server.evidence.ingest import Document, admit_pack
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, connect
+from server.store import StoreConnection, connect, gates
 from server.store.audit import GovernedAction, audit_trail, governed_write, verify_chain
 from server.store.cases import lock_case
 from server.store.gates import Gate, GateApproval, approve_gate, withdraw_source
@@ -69,21 +70,101 @@ def member(
     return conn, GovernedAction(case_id, actor_id, "TEST", Standing.APPROVER, {})
 
 
-def test_two_first_approvals_serialize(
-    member: tuple[StoreConnection, GovernedAction], empty_database: str
-) -> None:
+@pytest.fixture
+def gate_approval(
+    member: tuple[StoreConnection, GovernedAction], tmp_path: Path
+) -> tuple[StoreConnection, GovernedAction, GateApproval]:
     conn, action = member
+    admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=action.case_id,
+        documents=[Document(BoundaryText.of("review.txt"), b"Reviewed source.")],
+    )
     run = start_run(conn, action.case_id)
     conn.commit()
+    _pin(conn, action.case_id, run)
+    return conn, action, _approval(conn, run, action.actor_id)
+
+
+def test_two_first_approvals_serialize(
+    gate_approval: tuple[StoreConnection, GovernedAction, GateApproval],
+    empty_database: str,
+) -> None:
+    conn, action, approval = gate_approval
     conn.execute(
         "SELECT case_id FROM cases WHERE case_id = %s FOR UPDATE", (action.case_id,)
     )
-    approval = GateApproval(run, Gate.SOURCE_SET, action.actor_id, "a" * 64, "b" * 64)
     with connect(empty_database) as other:
         with _blocked(conn, other, lambda: approve_gate(other, approval)):
             approve_gate(conn, approval)
     assert [entry.seq for entry in audit_trail(conn, action.case_id)] == [1, 2]
     assert verify_chain(conn, action.case_id)
+
+
+@pytest.mark.parametrize("change", ["revoke", "downgrade"])
+def test_membership_change_first_refuses_waiting_approval(
+    gate_approval: tuple[StoreConnection, GovernedAction, GateApproval],
+    empty_database: str,
+    change: str,
+) -> None:
+    conn, action, approval = gate_approval
+    if change == "revoke":
+        revoke(conn, case_id=action.case_id, user_id=action.actor_id)
+    else:
+        grant(
+            conn,
+            case_id=action.case_id,
+            user_id=action.actor_id,
+            standing=Standing.WRITER,
+        )
+    with connect(empty_database) as other:
+
+        def refused() -> None:
+            with pytest.raises(Refusal, match=r"^NOT_AUTHORISED$"):
+                approve_gate(other, approval)
+            assert other.info.transaction_status is TransactionStatus.IDLE
+
+        with _blocked(conn, other, refused):
+            pass
+    assert audit_trail(conn, action.case_id) == []
+    assert conn.execute("SELECT count(*) FROM run_gates").fetchone() == (0,)
+
+
+def test_approval_first_holds_authority_until_commit(
+    gate_approval: tuple[StoreConnection, GovernedAction, GateApproval],
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, action, approval = gate_approval
+    ready, release = Event(), Event()
+    preview = gates.gate_preview
+
+    def pause(c: StoreConnection, run: UUID, gate: Gate) -> gates.GatePreview:
+        result = preview(c, run, gate)
+        ready.set()
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(gates, "gate_preview", pause)
+    with connect(empty_database) as other, ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(approve_gate, conn, approval)
+        try:
+            assert ready.wait(3)
+            second = pool.submit(
+                revoke, other, case_id=action.case_id, user_id=action.actor_id
+            )
+            _wait_for_blocking(conn, other)
+        finally:
+            release.set()
+        first.result(timeout=6)
+        second.result(timeout=6)
+        other.commit()
+    assert len(audit_trail(conn, action.case_id)) == 1
+    assert verify_chain(conn, action.case_id)
+    assert (
+        gates.gate_state(conn, approval.run_id, approval.gate) is gates.GateState.OPEN
+    )
 
 
 @pytest.mark.parametrize("change", ["revoke", "downgrade"])
