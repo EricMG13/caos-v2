@@ -263,6 +263,7 @@ def execute_module(
         upstream=assignment.upstream,
     )
 
+    bundle.verify_manifest()
     completion = provider.complete(prompt, json_object=True)
 
     sources = {item.source_id for item in assignment.delivered}

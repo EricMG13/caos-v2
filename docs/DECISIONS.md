@@ -941,3 +941,49 @@ least its existing complete membership plus its own row, so even concurrent
 extra insertions fail. Missing headers refuse. This protects normal SQL changes,
 not privileged trigger removal. The row checks cost O(N²) counts over sources,
 not tokens; batch validation is warranted only by measured throughput.
+
+## 2026-09-12 §35 — One immutable raw manifest governs bundle authority
+
+`Bundle` selects its manifest during construction, before sharing with callers.
+It retains only immutable raw bytes: the build ID, manifest SHA-256, selected
+module entry and file hash expectations all derive from that one snapshot.
+Parsed dictionaries returned to callers are fresh copies, never mutable cached
+authority. Every identity/entry/file read verifies the current manifest against
+the snapshot; verification also runs after assembly, immediately before provider
+completion and after qualification matrix rows. A changed manifest refuses; an
+existing Bundle never adopts a replacement, including whitespace-only changes.
+
+The manifest ceiling is exactly 131,072 bytes (128 KiB), above the pinned
+68,657-byte document. Each read requests at most the ceiling plus one byte and
+refuses excess before JSON parsing. The consumed form requires authority
+`DEPLOY_V_INTEGRITY_v1`, schema version `1.0`, a lower-case 64-hex build ID,
+nonempty skills with unique module IDs, single-component folder names, and
+file-hash objects including nonempty `SKILL.md`. Hashes are lower-case 64-hex;
+declared lengths are nonnegative integers (not booleans), positive for the skill.
+Duplicate JSON keys, non-JSON numeric constants, malformed/missing metadata,
+invalid text and decoder failures refuse `AUTHORITY_BYTES_MISMATCH`. The byte
+cap is the only explicit resource ceiling; no independent JSON nesting limit is
+enforced. An absent module in an otherwise valid manifest remains
+`AUTHORITY_MODULE_UNKNOWN`.
+Refusals carry only the existing code, with underlying parse/filesystem errors
+suppressed. Additional legitimate manifest fields remain intact and unconsumed;
+this is no format upgrade or manifest rewrite.
+
+Manifest-supplied paths are canonical relative POSIX names. Absolute paths,
+parent traversal, alternate separator/normalization spellings and resolved
+symlink escapes refuse before reading outside the manifest root, skills root or
+selected module. `Path.resolve`/containment uses the standard library pattern
+already present in the qualification loader without importing that layer.
+Authority reads require resolved targets to be regular files, so static special
+files refuse before open. This assumes host-owned paths are not maliciously
+replaced concurrently between the file-type check and open; it is not a
+privileged filesystem adversary sandbox. Module bytes are still read whole and
+checked against both declared length and SHA-256; this slice introduces no
+general module-file size ceiling.
+
+Whole skill and module reference delivery, host CP-PARSE carve-out and the
+existing `authority_digest` serialization are unchanged. Parsing a fresh copy
+costs O(manifest bytes) per entry lookup; there is no additional cache or lock.
+Persisted run comparisons, source/research/approval bindings, shared root
+reference delivery and the §29 canonical Markdown runtime remain subsequent
+work. This prerequisite does not close F01/F04 or change the claims-only runtime.
