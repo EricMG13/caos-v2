@@ -100,3 +100,15 @@ task.
 
 No rewrite tournament was run because this is test-probe/documentation work;
 no adversarial phase audit was run because the controller owns phase completion.
+
+## Review corrections
+
+The post-task review identified two bounded corrections. The F02 assertion now
+rejects only the demonstrated false `COMPLETE` state; it does not prescribe
+`RUNNING`, because the repaired blocked-state design belongs to Phase 2. Direct
+source links now support the CP-0/CP-PARSE preparation reconciliation and the
+no-Excel/no-Word archived scope.
+
+Focused recheck: Ruff lint and format, Python compile, and `git diff --check`
+passed. The isolated probe still exited `1` with
+`stored_status=COMPLETE accepted_nodes=1/4`, the intended F02 reproduction.
