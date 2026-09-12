@@ -9,6 +9,18 @@
 # scan is a re-pin, the same as a red audit is a recompile.
 FROM python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
+# The official 3.14-slim digest still carried twelve fixable findings across
+# four OS packages on 2026-09-12. These are the exact fixed trixie candidates;
+# --only-upgrade prevents this repair from expanding the image's package set.
+# Provenance: security-tracker.debian.org/tracker/source-package/{gzip,perl,pcre2,sqlite3}
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        gzip=1.13-1+deb13u1 \
+        libpcre2-8-0=10.46-1~deb13u2 \
+        libsqlite3-0=3.46.1-7+deb13u2 \
+        perl-base=5.40.1-6+deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Fail the build rather than the first request: a runtime that silently differs
 # from the locked one is the thing --require-hashes exists to prevent.
 ENV PYTHONDONTWRITEBYTECODE=1 \

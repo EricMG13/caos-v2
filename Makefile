@@ -1,12 +1,15 @@
 # Gate order matches docs/AI_CODE_QUALITY.md: lint, types, tests, security.
 PY  := .venv/bin/python
 SEC := .venv-security/bin
+IMAGE ?= caos-workbench:local
+TRIVY ?= trivy
+TRIVY_VERSION := 0.70.0
 
 -include .env
 export CAOS_DATABASE_URL CAOS_TEST_POSTGRES_URL CAOS_BLOB_ROOT
 export CAOS_TRUST_ROLE_HEADER CAOS_REQUIRE_POSTGRES
 
-.PHONY: bootstrap venv lock lint types test test-provider security check doctor \
+.PHONY: bootstrap venv lock lint types test test-provider security image check doctor \
 	dev dev-up dev-down dev-api dev-ui index
 
 bootstrap: venv  ## exact locked Python and Node development environments
@@ -53,6 +56,14 @@ security:  # the floor is checked first: a report that parsed nothing must fail
 	$(SEC)/pip-audit --require-hashes -r requirements.txt -r requirements-dev.txt \
 		-r requirements-security.txt
 	gitleaks git --no-banner
+
+image:  ## build and run the exact CI Trivy floor and severity gate
+	@command -v "$(TRIVY)" >/dev/null || { echo "Trivy is required; set TRIVY=/path/to/trivy" >&2; exit 1; }
+	@test "$$("$(TRIVY)" --version | sed -n 's/^Version: //p')" = "$(TRIVY_VERSION)" || { echo "Trivy $(TRIVY_VERSION) is required" >&2; exit 1; }
+	docker build -t "$(IMAGE)" .
+	"$(TRIVY)" image --format json --output trivy.json --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 "$(IMAGE)"
+	$(PY) scripts/scan_floors.py trivy.json --trivy
+	"$(TRIVY)" image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$(IMAGE)"
 
 check: lint types test security
 
