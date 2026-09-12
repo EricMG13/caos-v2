@@ -105,7 +105,9 @@ Standing rules that back them:
 ## Running
 
 - `make venv` — the two toolchains. `make lock` — recompile every lock.
-- `make dev` — API + worker + Postgres, seeded.
+- `make dev` — the `api` process alone, on port 8000. It needs a Postgres URL
+  in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
+  per request, and applies `schema.sql` at startup. No worker, nothing seeded.
 - `make test` — the suite.
 - `make check` — lint, types, tests, security, in that order.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
