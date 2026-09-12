@@ -14,9 +14,12 @@ caller.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
+
+import psycopg
 
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
@@ -24,6 +27,12 @@ from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
+from server.store.outcomes import (
+    CallOutcome,
+    _attempt_owner,
+    _locked_attempt,
+    record_outcome,
+)
 
 
 def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
@@ -93,23 +102,13 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
 
 @dataclass(frozen=True, slots=True)
 class Accepted:
-    """What one completed call produced, as the store records it.
-
-    One thing rather than four loose arguments, for the reason `Execution` and
-    `Harness` are one thing each: none of these is meaningful without the
-    others. An artifact with no charge was never paid for, a charge with no
-    producer cannot be reconciled against a bill, and a producer with no
-    artifact is a call that returned nothing.
-
-    `model` is the host's own configuration and `generation_id` is the
-    provider's handle for the call — kept apart because only the first is a
-    fact the host owns (invariant 3).
-    """
+    """Analysis proposed for acceptance, beside independently durable call facts."""
 
     artifact_sha256: str
     charge: Decimal
     model: str
     generation_id: str
+    diagnostic_sha256: str | None = None
 
 
 def accept_attempt(
@@ -118,58 +117,99 @@ def accept_attempt(
     attempt_id: UUID,
     accepted: Accepted,
 ) -> bool:
-    """Accept one attempt's artifact and charge it. Returns whether this call
-    was the one that accepted it.
+    """Commit call facts first, then independently accept eligible analysis.
 
-    Which run and which case are read from the attempt rather than taken from
-    the caller. The store already knows, and a caller that can name them can
-    name the wrong ones -- charging one run's ledger for another run's work
-    (invariant 3: the host owns identity).
-
-    The producer is written with the artifact rather than onto the attempt: the
-    attempt row exists before the call and knows nothing yet, and this insert is
-    already the one that says a call completed. One row, one write, and the
-    replay semantics below unchanged.
-
-    Written to survive being called twice with the same arguments, because a
-    caller that crashed after the commit cannot tell that it committed. The
-    artifact and the charge are keyed by `attempt_id`, so a replay lands on the
-    rows it already wrote; the ATTEMPT_ACCEPTED event rides the artifact insert's
-    row count, so a replay appends nothing.
-
-    A run that has already ended accepts nothing further -- not the artifact and
-    not the charge. Writing them anyway would leave a failed run holding an
-    accepted artifact, and Phase 3 recomputes node states from exactly those.
+    A later refusal/rollback cannot erase a committed bill. Each unit derives
+    and locks current ownership; no lock or mutable status survives the gap.
     """
+    try:
+        inserted = _accept(conn, attempt_id, accepted)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+    return inserted
+
+
+def _accept(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
+    if not isinstance(accepted, Accepted):
+        raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
     validate_spend(accepted.charge)
-
-    run_id, case_id = _attempt_owner(conn, attempt_id)
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        conn.commit()  # nothing changed; release the row lock rather than hold it
+    try:
+        record_outcome(
+            conn,
+            attempt_id=attempt,
+            outcome=CallOutcome(
+                accepted.charge,
+                accepted.model,
+                accepted.generation_id,
+                accepted.diagnostic_sha256,
+            ),
+        )
+    except Refusal as refusal:
+        if refusal.code is not RefusalCode.CALL_OUTCOME_LEGACY:
+            raise
+        _legacy_replay(conn, attempt, accepted)
         return False
+    return _accept_artifact(conn, attempt, accepted)
 
-    inserted = conn.execute(
+
+def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
+    run, case, status = _locked_attempt(conn, attempt)
+    if (
+        not isinstance(accepted.artifact_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", accepted.artifact_sha256) is None
+    ):
+        raise Refusal(RefusalCode.BLOB_ADDRESS_INVALID)
+    values = (
+        accepted.artifact_sha256,
+        run,
+        case,
+        accepted.model,
+        accepted.generation_id,
+    )
+    row = conn.execute(
+        "SELECT artifact_sha256,run_id,case_id,model,generation_id FROM artifacts"
+        " WHERE attempt_id = %s",
+        (attempt,),
+    ).fetchone()
+    if row is not None:
+        if row != values:
+            raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
+        return False
+    if status is not RunStatus.RUNNING:
+        return False
+    conn.execute(
         "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
         " model, generation_id)"
-        " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
-        (
-            attempt_id,
-            accepted.artifact_sha256,
-            run_id,
-            case_id,
-            accepted.model,
-            accepted.generation_id,
-        ),
-    ).rowcount
-    conn.execute(
-        "INSERT INTO budget_ledger (attempt_id, run_id, amount)"
-        " VALUES (%s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
-        (attempt_id, run_id, accepted.charge),
+        " VALUES (%s, %s, %s, %s, %s, %s)",
+        (attempt, *values),
     )
-    if inserted:
-        append(conn, run_id, RunEvent.ATTEMPT_ACCEPTED)
-    conn.commit()
-    return bool(inserted)
+    append(conn, run, RunEvent.ATTEMPT_ACCEPTED)
+    return True
+
+
+def _legacy_replay(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> None:
+    run, case, _status = _locked_attempt(conn, attempt)
+    row = conn.execute(
+        "SELECT a.artifact_sha256,a.run_id,a.case_id,a.model,a.generation_id,"
+        " l.run_id,l.amount FROM artifacts a JOIN budget_ledger l USING (attempt_id)"
+        " WHERE a.attempt_id=%s",
+        (attempt,),
+    ).fetchone()
+    if accepted.diagnostic_sha256 is not None or row != (
+        accepted.artifact_sha256,
+        run,
+        case,
+        accepted.model,
+        accepted.generation_id,
+        run,
+        accepted.charge,
+    ):
+        raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
 
 
 def complete_run(conn: StoreConnection, run_id: UUID) -> bool:
@@ -196,24 +236,6 @@ def fail_run(conn: StoreConnection, run_id: UUID) -> bool:
     """End a run without an artifact. Returns whether this call ended it."""
     lock_run(conn, run_id)
     return _transition(conn, run_id, RunStatus.FAILED, RunEvent.RUN_FAILED)
-
-
-def _attempt_owner(conn: StoreConnection, attempt_id: UUID) -> tuple[UUID, UUID]:
-    """The run and case an attempt belongs to, or `ATTEMPT_NOT_FOUND`.
-
-    Safe to read before the run row lock is taken: `run_attempts` is append-only,
-    so an attempt's owner is fixed the moment the row exists.
-    """
-    row = conn.execute(
-        "SELECT attempts.run_id, runs.case_id"
-        " FROM run_attempts AS attempts"
-        " JOIN runs USING (run_id)"
-        " WHERE attempts.attempt_id = %s",
-        (attempt_id,),
-    ).fetchone()
-    if row is None:
-        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
-    return UUID(str(row[0])), UUID(str(row[1]))
 
 
 def _transition(
