@@ -23,7 +23,46 @@ Starting the build: [`docs/INITIALISATION_PROMPT.md`](docs/INITIALISATION_PROMPT
 
 ## Status
 
-Phase 9 in progress (`frontend/`, `docs/DECISIONS.md` §18–§19). Seeded on 2026-09-10 from the CAOS-Final specification
-(`docs/DECISIONS.md` §12); no application code exists yet. This is deliberate —
-the predecessor tree reached 29k lines of server code before its route
-resolution was found to be reading the wrong table.
+The repository was seeded on 2026-09-10 from the CAOS-Final specification
+(`docs/DECISIONS.md` §12) and now contains the rebuilt application plus the
+Phase 9 workspace. Its gates are being repaired in the ordered slices tracked
+by [`docs/REPAIR_PLAN.md`](docs/REPAIR_PLAN.md); Phase 1 is not yet complete.
+
+## Local development
+
+Python 3.14 and Node 24 run the application toolchain; security tools stay in
+their separately locked Python 3.12 environment. The first setup is:
+
+```sh
+cp .env.example .env
+make bootstrap
+make doctor
+make dev-up
+```
+
+`make bootstrap` installs both Python environments from hashed, wheels-only
+locks, installs the pinned local pre-commit runner, and runs
+`npm ci --ignore-scripts`. `make doctor` reports versions and whether named
+configuration is present; it never prints values. Live-provider variables are
+optional and should remain absent during ordinary development.
+
+The API and UI are separate processes and remain unconnected until a later
+phase:
+
+```sh
+make dev-api  # http://127.0.0.1:8000; `make dev` is an alias
+make dev-ui   # http://127.0.0.1:5173
+```
+
+The local services are deliberately isolated: the least-privilege application
+database is on `127.0.0.1:55436`, the disposable test-admin instance is on
+`127.0.0.1:55437`, and blobs stay under `.dev-data/blobs`. Port collisions fail
+visibly. `make dev-down` stops only the `caos-workbench-dev` Compose project and
+preserves the development database volume and blob directory; test database
+storage is ephemeral.
+
+Run `make test` for the current backend suite and `make check` for the binding
+gate order described in [`docs/CI_GATE_CONTRACT.md`](docs/CI_GATE_CONTRACT.md).
+Fixture-mode separation and full frontend gate parity arrive in the next Phase
+1 slice. `make index` uses an installed GitNexus executable with
+`--index-only`; it never downloads, embeds, injects instructions, or publishes.
