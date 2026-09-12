@@ -14,6 +14,7 @@ frontend/a11y-results/
 .DS_Store
 .env
 bandit.json
+/trivy.json
 coverage.xml
 .coverage
 uv.lock
