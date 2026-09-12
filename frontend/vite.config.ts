@@ -49,7 +49,7 @@ async function serveSection(section: string, fixture: string | null, res: Server
     return send(
       res,
       503,
-      JSON.stringify({ code: "STORE_UNAVAILABLE", clears: "The store answers again." }),
+      JSON.stringify({ code: "STORE_UNAVAILABLE", clears: "the store answers again" }),
     );
   }
   let path = `${section}.json`;

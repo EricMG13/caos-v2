@@ -123,6 +123,25 @@ describe("Upload", () => {
     );
   });
 
+  test("an empty pack says the pack is empty, not that nothing is withdrawn", () => {
+    const { container } = mount({ ...fixture, body: { ...fixture.body, sources: [] } });
+    expect(container).toHaveTextContent("The pack holds no source.");
+    expect(container).not.toHaveTextContent("No source is withdrawn.");
+  });
+
+  test("every refusal names what clears it today, and none asks for a file this page cannot take", () => {
+    for (const document of [fixture, partial]) {
+      const { container, unmount } = mount(document);
+      for (const control of container.querySelectorAll("[aria-disabled='true']")) {
+        expect(control.getAttribute("title")).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
+      }
+      expect(container.querySelector("input[type=file]")).toBeNull();
+      const admit = document.chrome.ribbon.actions.find((a) => a.label === "Admit pack");
+      expect(admit?.refusal?.clears).not.toMatch(/file is selected/);
+      unmount();
+    }
+  });
+
   test("a partial document names the source whose withdrawal check is pending", () => {
     expect(partial.status).toBe("partial");
     expect(partial.notes?.join(" ")).toMatch(/withdrawal check for D-06/);

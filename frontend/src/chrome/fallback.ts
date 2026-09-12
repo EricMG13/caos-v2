@@ -53,6 +53,14 @@ function describe(status: RegionStatus): {
   }
 }
 
+/** One closing mark, whether or not the refusal brought its own -- and its own
+    kept when it is not a full stop. Marks compared by `endsWith`, not a regex
+    of the /\.+$/ shape SonarQube flags (typescript:S8786). */
+function sentenceOf(clause: string): string {
+  const trimmed = clause.trim();
+  return [".", "!", "?"].some((mark) => trimmed.endsWith(mark)) ? trimmed : `${trimmed}.`;
+}
+
 export function fallbackChrome(status: RegionStatus): FallbackChrome {
   const state = describe(status);
   // One sentence per state, in one place: the verdict strip for an observed
@@ -70,7 +78,7 @@ export function fallbackChrome(status: RegionStatus): FallbackChrome {
     brief: {
       change: "Nothing observed.",
       impact: "No conclusion is supported.",
-      action: `Clears when ${state.clears}.`,
+      action: `Clears when ${sentenceOf(state.clears)}`,
       evidence: "Nothing observed.",
       headline: "—",
     },

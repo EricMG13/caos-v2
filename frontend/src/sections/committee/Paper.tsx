@@ -16,13 +16,14 @@ export type PaperScope = "all" | "narrative" | "provenance";
 function Cite({ figure }: { figure: PaperFigure }) {
   const { openCitation, activeChip } = useEvidence();
   const { citation } = figure;
+  const withdrawn = citation.withdrawn_at ?? null;
   return (
     <>
       <span data-figure>{figure.text}</span>
       <button
         type="button"
-        className="rd-cite"
-        aria-label={`Evidence ${citation.chip}`}
+        className={`rd-cite${withdrawn ? " withdrawn" : ""}`}
+        aria-label={`Evidence ${citation.chip}${withdrawn ? " · source withdrawn" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={activeChip === citation.chip}
         data-chip={citation.chip}

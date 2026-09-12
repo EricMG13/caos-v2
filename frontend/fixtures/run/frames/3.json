@@ -38,7 +38,10 @@
         {
           "label": "Events",
           "primary": false,
-          "refusal": null
+          "refusal": {
+            "code": "VIEW_UNPLACED",
+            "clears": "the workspace draws the run's event log — events reach this page only as refetch signals"
+          }
         }
       ]
     },

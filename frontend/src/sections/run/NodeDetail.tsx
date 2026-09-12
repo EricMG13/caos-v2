@@ -93,7 +93,7 @@ export function NodeDetail({
                 <span className="a">attempt {attempt.n}</span>
                 <span>
                   started {attempt.started_at} · charge {attempt.charge ?? "—"} ·{" "}
-                  {attempt.generation_id ?? "gen_—"}
+                  {attempt.generation_id ?? "no generation id"}
                 </span>
                 <span className={`t-${ATTEMPT_TONE[attempt.state]}`}>{attempt.state}</span>
               </div>

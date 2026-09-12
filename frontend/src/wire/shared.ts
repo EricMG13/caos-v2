@@ -36,6 +36,9 @@ export interface Citation {
   observed_at: string;
   /** The host's render of that page, or null when none is served. */
   render_url: string | null;
+  /** When the cited source was withdrawn, if it has been (invariant 1: checked
+      live). The citation stays so the conclusion is explicable; the chip says so. */
+  withdrawn_at?: string | null;
 }
 
 /** A typed refusal and what would clear it. Never an exception. */
@@ -61,6 +64,9 @@ export interface RibbonAction {
   label: string;
   primary: boolean;
   refusal: Refusal | null;
+  /** A tab of this section the action opens. Such an action is performed in the
+      workspace, so it is live unless the document refuses it. */
+  tab?: string;
 }
 export interface Ribbon {
   chips: RibbonChip[];

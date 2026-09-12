@@ -635,7 +635,8 @@
                   ],
                   "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027. Under the amendment, the interest rate was reduced and secured by Carvana LLC vehicle inventory, general intangibles, and cash deposit accounts.",
                   "observed_at": "2026-09-09T14:15:00Z",
-                  "render_url": null
+                  "render_url": null,
+                  "withdrawn_at": "2026-09-09T09:41:00Z"
                 }
               }
             ]
@@ -878,7 +879,8 @@
                   ],
                   "matched_text": "The Company further amended the Floor Plan Facility to renew the line of credit at $1.5 billion until April 30, 2027. Under the amendment, the interest rate was reduced and secured by Carvana LLC vehicle inventory, general intangibles, and cash deposit accounts.",
                   "observed_at": "2026-09-09T14:15:00Z",
-                  "render_url": null
+                  "render_url": null,
+                  "withdrawn_at": "2026-09-09T09:41:00Z"
                 }
               },
               {

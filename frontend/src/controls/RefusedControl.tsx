@@ -5,10 +5,14 @@ import type { ReactNode } from "react";
 import { ActionReason } from "@/ds/ActionReason";
 import type { Refusal } from "@/wire";
 
+/** Why a governed write cannot land from this workspace today. The store calls
+    exist; the HTTP routes that would reach them do not. */
+export const READ_ONLY_API = "this build's API serves only the run document and its event stream";
+
 /** A governed action nothing in this build performs is refused, not simulated. */
 export const ACTION_UNPLACED: Refusal = {
   code: "ACTION_UNPLACED",
-  clears: "the backend phase that owns this action lands (docs/REBUILD_PLAN.md)",
+  clears: `the API serves a route that performs it — ${READ_ONLY_API}`,
 };
 
 export function refusalText(refusal: Refusal): string {
