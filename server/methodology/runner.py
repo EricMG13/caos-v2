@@ -24,11 +24,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute
+from server.engine.route import GATE_MODULE, ResolvedRoute
 from server.engine.runtime import ProviderResult
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Envelope
-from server.methodology.executor import deliver, execute_module
+from server.methodology.executor import Assignment, deliver, execute_module
 from server.provider import CompletionProvider
 from server.store import StoreConnection
 
@@ -37,11 +37,11 @@ from server.store import StoreConnection
 class ModuleProvider:
     """A `runtime.Provider` that runs a real module.
 
-    Holds the five things a module execution needs and the loop does not know
-    about: the store to read evidence through, the bundle that is authority, the
-    blob store the envelope is written to, the provider that answers, and the
-    pinned route -- which is what tells the gate every other module it must
-    cover.
+    Holds the six things a module execution needs and the loop does not know
+    about: the store to read evidence through, the bundle that is authority,
+    the blob store the envelope is written to, the provider that answers, the
+    (source_id, block_id) pairs this node is to receive, and the pinned route --
+    which is what tells the gate every other module it must cover.
     """
 
     conn: StoreConnection
@@ -54,13 +54,21 @@ class ModuleProvider:
     route: ResolvedRoute
 
     def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
-        outcome = execute_module(
-            self.conn,
-            self.bundle,
+        # Only the gate is asked about the rest of the pinned route; deciding
+        # so is this method's job because it is the one holding `route` --
+        # `execute_module` only ever reads what the assignment already says.
+        gate_expects = (
+            frozenset(node.module_id for node in self.route.nodes) - {module_id}
+            if module_id == GATE_MODULE
+            else frozenset()
+        )
+        assignment = Assignment(
             module_id=module_id,
             delivered=deliver(self.conn, self.delivered),
-            provider=self.completions,
-            route_modules=frozenset(node.module_id for node in self.route.nodes),
+            gate_expects=gate_expects,
+        )
+        outcome = execute_module(
+            self.conn, self.bundle, assignment=assignment, provider=self.completions
         )
         return ProviderResult(
             artifact_sha256=self.blobs.put(canonical(outcome.envelope)),

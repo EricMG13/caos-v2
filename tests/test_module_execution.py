@@ -36,6 +36,7 @@ from server.methodology.envelope import (
     parse_readiness,
 )
 from server.methodology.executor import (
+    Assignment,
     Delivery,
     ModuleOutcome,
     build_prompt,
@@ -136,10 +137,8 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id)),
-        route_modules=frozenset({"CP-1"}),
     )
 
     envelope = outcome.envelope
@@ -160,10 +159,8 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id)),
-        route_modules=frozenset({"CP-1"}),
     )
 
     [claim] = outcome.envelope.claims
@@ -186,10 +183,8 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id)),
-        route_modules=frozenset({"CP-1"}),
     )
 
     assert isinstance(outcome, ModuleOutcome)
@@ -209,10 +204,8 @@ def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(_body(source_id, quote="Total debt was USD 2,000.0m")),
-            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
@@ -227,10 +220,8 @@ def test_a_citation_naming_undelivered_evidence_is_refused(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(_body(uuid4())),
-            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.CITATION_NOT_DELIVERED
@@ -249,10 +240,8 @@ def test_an_undeclared_field_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(json.dumps(body)),
-            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.ENVELOPE_UNDECLARED_FIELD
@@ -269,10 +258,8 @@ def test_an_uncited_claim_is_refused(
         execute_module(
             conn,
             bundle,
-            module_id="CP-1",
-            delivered=delivered,
+            assignment=Assignment(module_id="CP-1", delivered=delivered),
             provider=_Stub(json.dumps(body)),
-            route_modules=frozenset({"CP-1"}),
         )
 
     assert caught.value.code is RefusalCode.ENVELOPE_UNCITED_CLAIM
@@ -307,10 +294,8 @@ def test_the_prompt_carries_the_authority_and_the_evidence(
     execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=stub,
-        route_modules=frozenset({"CP-1"}),
     )
 
     assert "cp-1-canonical-data-foundation" in stub.prompt, "the skill is the authority"
@@ -355,10 +340,8 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=OpenRouter(api_key=LIVE_KEY, model=LIVE_MODEL),
-        route_modules=frozenset({"CP-1"}),
     )
 
     envelope = outcome.envelope
@@ -415,10 +398,8 @@ def test_a_delivery_announces_the_page_its_block_sits_on(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-1",
-        delivered=delivered,
+        assignment=Assignment(module_id="CP-1", delivered=delivered),
         provider=_Stub(_body(source_id, page=2)),
-        route_modules=frozenset({"CP-1"}),
     )
     [claim] = outcome.envelope.claims
     assert [citation.page for citation in claim.citations] == [2]
@@ -638,10 +619,10 @@ def test_the_stored_gate_artifact_carries_its_readiness(
     outcome = execute_module(
         conn,
         bundle,
-        module_id="CP-0",
-        delivered=delivered,
+        assignment=Assignment(
+            module_id="CP-0", delivered=delivered, gate_expects=frozenset({"CP-1"})
+        ),
         provider=_Stub(json.dumps(body)),
-        route_modules=frozenset({"CP-0", "CP-1"}),
     )
 
     [row] = outcome.envelope.readiness
