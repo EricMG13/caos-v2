@@ -32,6 +32,10 @@ MIGRATIONS = (
         .with_name("0004_route_integrity.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0005_run_inputs",
+        Path(__file__).with_name("0005_run_inputs.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

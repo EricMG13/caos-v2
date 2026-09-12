@@ -306,7 +306,7 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         assert _catalog(conn) == catalog
 
 
-@pytest.mark.parametrize("prefix", [2, 3])
+@pytest.mark.parametrize("prefix", [2, 3, 4])
 def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
     empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
 ) -> None:
@@ -330,6 +330,7 @@ def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
         assert _records(conn, columns) == before
         apply_schema(conn)
         assert _records(conn, columns) == before
+        assert conn.execute("SELECT count(*) FROM run_inputs").fetchone() == (0,)
         assert blobs.get(digest) == b"synthetic legacy document and artifact"
 
         [run] = conn.execute("SELECT run_id FROM runs").fetchone() or ()
@@ -466,7 +467,7 @@ def test_concurrent_starters_apply_once(
                 _legacy(conn)
             else:
                 with monkeypatch.context() as patch:
-                    patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:3])
+                    patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:4])
                     apply_schema(conn)
             _populate(conn, BlobStore(tmp_path))
     monkeypatch.setattr(

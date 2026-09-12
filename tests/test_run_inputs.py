@@ -1,0 +1,485 @@
+"""Complete immutable input identity on real PostgreSQL, before any execution."""
+
+import json
+from dataclasses import FrozenInstanceError, asdict, replace
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import psycopg
+import pytest
+from conftest import route_fault
+from psycopg.pq import TransactionStatus
+from test_case_ordering import _blocked
+from test_route_pinning import CATALOG_PATH, PROFILE
+from test_source_sets import _admit
+
+from server.boundary_text import BoundaryText
+from server.engine.route import EdgeType, ResolvedRoute, resolve_route, route_digest
+from server.methodology import executor
+from server.methodology.bundle import Bundle
+from server.refusals import Refusal
+from server.store import StoreConnection, connect, run_inputs
+from server.store.cases import lock_case
+from server.store.events import RunEvent, append, events_of
+from server.store.gates import withdraw_source
+from server.store.routes import pin_route
+from server.store.run_inputs import RunInput, load_run_input, pin_run_input
+from server.store.runs import complete_run, create_case, start_attempt, start_run
+from server.store.source_sets import SourceSet, snapshot_source_set
+
+type Prepared = tuple[StoreConnection, UUID, SourceSet, Bundle, ResolvedRoute]
+
+
+def _prepare(
+    conn: StoreConnection, case_id: UUID, path: Path
+) -> tuple[UUID, SourceSet, Bundle, ResolvedRoute]:
+    _admit(conn, case_id, path)
+    conn.commit()
+    source = snapshot_source_set(conn, case_id)
+    run = start_run(conn, case_id)
+    route = resolve_route(
+        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
+    )
+    pin_route(conn, run, route)
+    return run, source, Bundle(CATALOG_PATH.parents[3]), route
+
+
+@pytest.fixture
+def prepared(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Prepared:
+    conn, case_id = case
+    return conn, *_prepare(conn, case_id, tmp_path)
+
+
+def test_complete_input_roundtrip_exact_terminal_replay(prepared: Prepared) -> None:
+    conn, run, source, bundle, route = prepared
+    research = {"questions": ["Café?"], "source_mode": "supplied"}
+    pin = pin_run_input(conn, run, source.version, bundle, research)
+    assert conn.info.transaction_status.name == "IDLE"
+    assert isinstance(pin, RunInput)
+    assert pin.case_id == source.case_id and pin.source_version == source.version
+    assert pin.source_fingerprint == source.fingerprint
+    assert pin.route_digest == route_digest(route)
+    assert pin.build_id == bundle.build_id
+    assert pin.manifest_sha256 == bundle.manifest_sha256
+    assert pin.adapter_version == "claims-json-v1"
+    assert pin.research_json is not None and json.loads(pin.research_json) == research
+    research["source_mode"] = "changed"
+    assert load_run_input(conn, run) == pin
+    assert conn.info.transaction_status is TransactionStatus.INTRANS
+    with pytest.raises(FrozenInstanceError):
+        pin.source_version = 7  # type: ignore[misc]  # frozen model regression
+    complete_run(conn, run)
+    before = events_of(conn, run)
+    assert (
+        pin_run_input(conn, run, source.version, bundle, json.loads(pin.research_json))
+        == pin
+    )
+    assert conn.info.transaction_status.name == "IDLE"
+    assert events_of(conn, run) == before
+    assert [e.name for e in before].count("INPUT_PINNED") == 1
+    assert conn.execute("SELECT count(*) FROM run_inputs").fetchone() == (1,)
+
+
+def test_every_bound_component_changes_fingerprint_with_other_identity_fixed(
+    prepared: Prepared,
+) -> None:
+    conn, run, source, bundle, route = prepared
+    pin = pin_run_input(conn, run, source.version, bundle)
+    fingerprints = {pin.input_fingerprint}
+    for field, value in (
+        ("case_id", uuid4()),
+        ("source_version", 2),
+        ("source_fingerprint", "a" * 64),
+        ("build_id", "b" * 64),
+        ("manifest_sha256", "c" * 64),
+        ("adapter_version", "claims-json-v2"),
+        ("research_json", "{}"),
+        ("research_json", '{"question":"A"}'),
+        ("research_json", '{"question":"B"}'),
+    ):
+        fingerprints.add(
+            run_inputs._fingerprint(RunInput(**{**asdict(pin), field: value}))
+        )
+    assert len(fingerprints) == 10
+    for changed in (
+        replace(route, profile_id="other"),
+        replace(route, selection_id="other"),
+        replace(
+            route,
+            nodes=(replace(route.nodes[0], route_node_id="other"), route.nodes[1]),
+        ),
+        replace(
+            route, nodes=(replace(route.nodes[0], module_id="CP-1"), route.nodes[1])
+        ),
+        replace(route, edges=(replace(route.edges[0], type=EdgeType.OPTIONAL),)),
+        replace(route, predicates=(("question", "changed"),)),
+    ):
+        candidate = replace(pin, route_digest=route_digest(changed))
+        assert run_inputs._fingerprint(candidate) != pin.input_fingerprint
+    assert (
+        run_inputs._fingerprint(replace(pin, run_id=uuid4())) == pin.input_fingerprint
+    )
+
+
+def test_returning_source_content_still_binds_distinct_version(
+    prepared: Prepared, tmp_path: Path
+) -> None:
+    conn, run, first, bundle, _ = prepared
+    pin = pin_run_input(conn, run, first.version, bundle)
+    added = _admit(conn, first.case_id, tmp_path)
+    conn.commit()
+    middle = snapshot_source_set(conn, first.case_id)
+    withdraw_source(
+        conn, case_id=first.case_id, source_id=added, actor_id=first.case_id
+    )
+    later = snapshot_source_set(conn, first.case_id)
+    assert (first.version, middle.version, later.version) == (1, 2, 3)
+    assert later.fingerprint == first.fingerprint != middle.fingerprint
+    assert (
+        run_inputs._fingerprint(replace(pin, source_version=later.version))
+        != pin.input_fingerprint
+    )
+    for selected in (middle, later):
+        with pytest.raises(Refusal, match=r"^RUN_INPUT_ALREADY_PINNED$"):
+            pin_run_input(conn, run, selected.version, bundle)
+    assert load_run_input(conn, run) == pin
+
+
+@pytest.mark.parametrize(
+    "changed", ["build", "manifest", "adapter", "research", "moving"]
+)
+def test_changed_host_or_research_refuses_replay_but_history_is_readable(
+    prepared: Prepared, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
+    conn, run, source, bundle, _ = prepared
+    pin = pin_run_input(conn, run, source.version, bundle, {})
+    if changed in {"build", "manifest", "moving"}:
+        raw = (bundle.root / "DEPLOY_V_INTEGRITY_v1.json").read_text()
+        if changed == "build":
+            raw = raw.replace(bundle.build_id, "d" * 64)
+        (tmp_path / "DEPLOY_V_INTEGRITY_v1.json").write_text(raw + " ")
+        bundle = Bundle(tmp_path)
+        if changed == "moving":
+            (tmp_path / "DEPLOY_V_INTEGRITY_v1.json").write_text(raw + "  ")
+    if changed == "adapter":
+        monkeypatch.setattr(executor, "CLAIMS_ADAPTER_VERSION", "claims-json-v2")
+    assert load_run_input(conn, run) == pin
+    expected = (
+        "AUTHORITY_BYTES_MISMATCH"
+        if changed == "moving"
+        else "RUN_INPUT_ALREADY_PINNED"
+    )
+    with pytest.raises(Refusal, match=f"^{expected}$"):
+        pin_run_input(
+            conn,
+            run,
+            source.version,
+            bundle,
+            {"q": "changed"} if changed == "research" else {},
+        )
+    assert load_run_input(conn, run) == pin
+    assert [e.name for e in events_of(conn, run)] == ["ROUTE_PINNED", "INPUT_PINNED"]
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        [],
+        "private",
+        {1: "private"},
+        {"x": (1,)},
+        {"x": float("nan")},
+        {"x": float("inf")},
+        {"x": 2**63},
+        {"x": b"private"},
+        {"x": "e\u0301"},
+        {"x": "private\u202e"},
+        {"x": "\ud800"},
+        {"x": "x" * 4097},
+        {"x": [0] * 4096},
+        {"x": ["😀" * 4096] * 4},
+    ],
+)
+def test_research_refuses_without_coercion_or_private_diagnostics(
+    invalid: object,
+) -> None:
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        run_inputs._research(invalid)
+
+
+def test_research_exact_ordering_depth_count_and_utf8_size() -> None:
+    assert run_inputs._research(None) is None
+    assert run_inputs._research({}) == "{}"
+    assert run_inputs._research(
+        {"z": [True, None, 1.0], "a": "Café\r\n"}
+    ) == run_inputs._research({"a": "Café\r\n", "z": [True, None, 1.0]})
+    nested: dict[str, object] = {}
+    for _ in range(16):
+        nested = {"x": nested}
+    assert run_inputs._research(nested)
+    with pytest.raises(Refusal):
+        run_inputs._research({"x": nested})
+    assert run_inputs._research({"x": [0] * 4093})
+    with pytest.raises(Refusal):
+        run_inputs._research({"x": [0] * 4094})
+    exact = {str(i): "x" * 4096 for i in range(15)}
+    exact["last"] = "x" * (65536 - len(run_inputs._research(exact) or "") - 10)
+    assert len((run_inputs._research(exact) or "").encode()) == 65536
+    exact["last"] += "x"
+    with pytest.raises(Refusal):
+        run_inputs._research(exact)
+    cycle: dict[str, object] = {}
+    cycle["cycle"] = cycle
+    with pytest.raises(Refusal):
+        run_inputs._research(cycle)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        "missing",
+        "route",
+        "source",
+        "unknown",
+        "complete",
+        "failed",
+        "attempt",
+        "autocommit",
+        "version",
+        "research",
+    ],
+)
+def test_invalid_dependencies_or_late_input_leave_no_partial_history(
+    prepared: Prepared, state: str
+) -> None:
+    conn, run, source, bundle, route = prepared
+    version: object = source.version
+    expected = "RUN_INPUT_INVALID"
+    if state == "missing":
+        run, expected = uuid4(), "RUN_NOT_FOUND"
+    elif state == "route":
+        run = start_run(conn, source.case_id)
+    elif state in {"source", "unknown"}:
+        other_case = create_case(conn, BoundaryText.of("No captured provenance"))
+        run = start_run(conn, other_case)
+        pin_route(conn, run, route)
+        if state == "unknown":
+            conn.execute(
+                "INSERT INTO sources (source_id,case_id,document_sha256,filename)"
+                " VALUES (%s,%s,%s,'legacy')",
+                (uuid4(), other_case, "a" * 64),
+            )
+    elif state in {"complete", "failed"}:
+        conn.execute(
+            "UPDATE runs SET status = %s WHERE run_id = %s", (state.upper(), run)
+        )
+        expected = "RUN_NOT_RUNNING"
+    elif state == "attempt":
+        start_attempt(conn, run, route.nodes[0].route_node_id)
+        expected = "RUN_INPUT_TOO_LATE"
+    elif state == "version":
+        version = True
+    conn.commit()
+    before = events_of(conn, run)
+    conn.commit()
+    if state == "autocommit":
+        conn.autocommit, expected = True, "STORE_NOT_TRANSACTIONAL"
+    with pytest.raises(Refusal, match=f"^{expected}$"):
+        pin_run_input(
+            conn,
+            run,
+            version,  # type: ignore[arg-type]
+            bundle,
+            {1: "private"} if state == "research" else None,
+        )
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    assert load_run_input(conn, run) is None and events_of(conn, run) == before
+
+
+@pytest.mark.parametrize("state", ["corrupt-route", "corrupt-source"])
+def test_load_rechecks_verified_dependencies(prepared: Prepared, state: str) -> None:
+    conn, run, source, bundle, _ = prepared
+    pin_run_input(conn, run, source.version, bundle)
+    if state == "corrupt-route":
+        with route_fault(conn):
+            conn.execute(
+                "UPDATE run_routes SET resolved = '{}' WHERE run_id = %s", (run,)
+            )
+        expected = "ROUTE_IDENTITY_INVALID"
+    else:
+        conn.execute(
+            "ALTER TABLE source_set_members DISABLE TRIGGER source_set_immutable"
+        )
+        conn.execute("UPDATE source_set_members SET filename = 'corrupt'")
+        conn.execute(
+            "ALTER TABLE source_set_members ENABLE TRIGGER source_set_immutable"
+        )
+        expected = "SOURCE_IDENTITY_INVALID"
+    conn.commit()
+    before = events_of(conn, run)
+    with pytest.raises(Refusal, match=f"^{expected}$"):
+        load_run_input(conn, run)
+    with pytest.raises(Refusal, match=f"^{expected}$"):
+        pin_run_input(conn, run, source.version, bundle)
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    assert events_of(conn, run) == before
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "{",
+        "{}",
+        "[]",
+        "null",
+        '{"x":NaN}',
+        '{"x":1e400}',
+        '{"x":1,"x":2}',
+        '{ "x":1}',
+        "[ " * 1000,
+    ],
+)
+def test_stored_research_and_hash_are_reverified(prepared: Prepared, raw: str) -> None:
+    conn, run, source, bundle, _ = prepared
+    pin_run_input(conn, run, source.version, bundle)
+    database = conn.execute("SELECT current_database()").fetchone()
+    assert database is not None and database[0].startswith("caos_test_")
+    conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+    conn.execute("UPDATE run_inputs SET research_json = %s", (raw,))
+    conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        load_run_input(conn, run)
+    assert conn.info.transaction_status is TransactionStatus.INTRANS
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        pin_run_input(conn, run, source.version, bundle)
+    assert conn.info.transaction_status.name == "IDLE"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "UPDATE run_inputs SET build_id = build_id",
+        "DELETE FROM run_inputs",
+        "TRUNCATE run_inputs",
+        "TRUNCATE run_routes",
+        "TRUNCATE runs CASCADE",
+    ],
+)
+def test_native_input_immutability(
+    prepared: Prepared,
+    mutation: str,
+) -> None:
+    conn, run, source, bundle, _ = prepared
+    pin = pin_run_input(conn, run, source.version, bundle)
+    with pytest.raises(psycopg.Error):
+        conn.execute(mutation)
+    conn.rollback()
+    assert load_run_input(conn, run) == pin
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["case_id", "run_id", "source_version", "source_fingerprint", "route_digest"],
+)
+def test_native_foreign_keys_bind_actual_case_source_and_route(
+    prepared: Prepared, field: str
+) -> None:
+    conn, run, source, bundle, route = prepared
+    pin = pin_run_input(conn, run, source.version, bundle)
+    extra = start_run(conn, source.case_id)
+    pin_route(conn, extra, route)
+    values = asdict(replace(pin, run_id=extra))
+    values[field] = (
+        uuid4()
+        if field.endswith("_id")
+        else 99
+        if field == "source_version"
+        else "0" * 64
+    )
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        conn.execute(
+            psycopg.sql.SQL("INSERT INTO run_inputs ({}) VALUES ({})").format(
+                psycopg.sql.SQL(",").join(map(psycopg.sql.Identifier, values)),
+                psycopg.sql.SQL(",").join(psycopg.sql.Placeholder() for _ in values),
+            ),
+            tuple(values.values()),
+        )
+    conn.rollback()
+    assert load_run_input(conn, run) == pin and load_run_input(conn, extra) is None
+
+
+@pytest.mark.parametrize("failure", ["first", "second", "commit", "cancel", "broken"])
+def test_input_failure_rolls_back_both_writes_and_releases_locks(
+    prepared: Prepared,
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    conn, run, source, bundle, _ = prepared
+    if failure in {"first", "second"}:
+        conn.execute(
+            "ALTER TABLE "
+            + (
+                "run_inputs ADD CHECK (source_version < 0)"
+                if failure == "first"
+                else "run_events ADD CHECK (name <> 'INPUT_PINNED')"
+            )
+        )
+    elif failure == "commit":
+        conn.execute(
+            "CREATE FUNCTION input_failure() RETURNS trigger LANGUAGE plpgsql AS $$"
+            " BEGIN RAISE EXCEPTION 'private'; END; $$;"
+            " CREATE CONSTRAINT TRIGGER input_failure AFTER INSERT ON run_inputs"
+            " DEFERRABLE INITIALLY DEFERRED FOR EACH ROW"
+            " EXECUTE FUNCTION input_failure()"
+        )
+    else:
+
+        def fail(*args: object) -> None:
+            append(conn, run, RunEvent.INPUT_PINNED)
+            if failure == "broken":
+                conn.close()
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(run_inputs, "append", fail)
+    conn.commit()
+    with pytest.raises(
+        KeyboardInterrupt if failure in {"cancel", "broken"} else Refusal
+    ):
+        pin_run_input(conn, run, source.version, bundle)
+    assert conn.closed or conn.info.transaction_status is TransactionStatus.IDLE
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '1s'")
+        lock_case(other, source.case_id)
+        assert load_run_input(other, run) is None
+        assert [e.name for e in events_of(other, run)] == ["ROUTE_PINNED"]
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+def test_observed_blocking_first_inputs_and_independent_case(
+    prepared: Prepared, empty_database: str, tmp_path: Path, conflict: bool
+) -> None:
+    conn, run, source, bundle, _ = prepared
+    case2 = create_case(conn, BoundaryText.of("Independent"))
+    independent, source2, _, _ = _prepare(conn, case2, tmp_path)
+    lock_case(conn, source.case_id)
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '1s'")
+        pin_run_input(other, independent, source2.version, bundle)
+
+        def waiting() -> None:
+            if conflict:
+                with pytest.raises(Refusal, match=r"^RUN_INPUT_ALREADY_PINNED$"):
+                    pin_run_input(other, run, source.version, bundle, {})
+            else:
+                assert pin_run_input(
+                    other, run, source.version, bundle
+                ) == load_run_input(other, run)
+                other.rollback()
+            assert other.info.transaction_status is TransactionStatus.IDLE
+
+        with _blocked(conn, other, waiting):
+            pin = pin_run_input(conn, run, source.version, bundle)
+    assert load_run_input(conn, run) == pin
+    assert [e.name for e in events_of(conn, run)] == ["ROUTE_PINNED", "INPUT_PINNED"]
