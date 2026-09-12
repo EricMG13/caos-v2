@@ -108,6 +108,7 @@ _STATUS = {
     # bound is bytes this server wrote -- a store fault like the three above it,
     # and nothing the caller holds could be corrected to avoid it.
     RefusalCode.READINESS_INVALID: 503,
+    RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
 }
 
 
