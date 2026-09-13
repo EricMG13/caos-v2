@@ -1,8 +1,10 @@
-"""Post-transport authority is fresh before analysis or acceptance."""
+"""Post-transport authority is fresh before analysis or acceptance.
+
+On the canonical LITE route through the canonical executor (slice f-1a)."""
 
 from __future__ import annotations
 
-import json
+import hashlib
 import re
 import shutil
 import traceback
@@ -12,7 +14,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
@@ -33,21 +34,19 @@ from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, RouteNode
-from server.engine.runtime import Execution, ProviderResult, run_route
+from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.evidence.ingest import Document, admit_pack
-from server.methodology.bundle import (
-    MANIFEST_NAME,
-    Authority,
-    Bundle,
-    assemble_authority,
-    authority_digest,
+from server.methodology import canonical, handoff, invocation
+from server.methodology.bundle import MANIFEST_NAME, Bundle
+from server.methodology.canonical import execute_handoff
+from server.methodology.executor import Assignment
+from server.methodology.handoff import (
+    Projections,
+    UpstreamRef,
+    _decoded_record,
+    record_bytes,
 )
-from server.methodology.envelope import Envelope
-from server.methodology.executor import (
-    Assignment,
-    execute_module,
-)
-from server.methodology.runner import ModuleProvider, canonical
+from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
@@ -187,9 +186,9 @@ def _counts(harness: _Harness) -> tuple[int, list[Decimal], int, int, int]:
 def test_module_provider_rechecks_authority_after_transport_before_envelope_or_blob(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """OLD-API RED: current code analyzes and stores after a real revocation."""
-    from server.methodology import executor
+    """OLD-API RED: current code analyzes and stores after a real revocation.
 
+    Only the call's diagnostic body is stored (§42.3); no handoff or record."""
     node = harness.route.nodes[0]
     attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
     reserve(harness.conn, attempt, ESTIMATE)
@@ -205,39 +204,34 @@ def test_module_provider_rechecks_authority_after_transport_before_envelope_or_b
         harness.run_id,
     )
     before = {path for path in harness.blobs.root.rglob("*") if path.is_file()}
-    envelopes = 0
-    original = executor._envelope
+    validations = 0
+    original: Callable[..., Projections] = handoff.validate_markdown
 
-    def counted_envelope(
-        conn: StoreConnection,
-        assignment: Assignment,
-        context: executor._Context,
-        authority: Authority,
-        content: str,
-    ) -> Envelope:
-        nonlocal envelopes
-        envelopes += 1
-        return original(conn, assignment, context, authority, content)
+    def counted(*args: object, **kwargs: object) -> Projections:
+        nonlocal validations
+        validations += 1
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(executor, "_envelope", counted_envelope)
+    monkeypatch.setattr(canonical, "validate_markdown", counted)
     code = None
     try:
         provider.execute(node.route_node_id, node.module_id, attempt_id=attempt)
     except Refusal as refused:
         code = refused.code
     added = {path for path in harness.blobs.root.rglob("*") if path.is_file()} - before
+    [body] = completion.delegate.bodies
 
     assert (
         code,
         completion.calls,
-        envelopes,
-        len(added),
+        validations,
+        added,
         _counts(harness),
     ) == (
         RefusalCode.GATE_APPROVAL_MISMATCH,
         1,
         0,
-        0,
+        {harness.blobs.path_of(hashlib.sha256(body.encode()).hexdigest())},
         (1, [REPORTED], 0, 1, 1),
     )
 
@@ -259,16 +253,7 @@ class _ArbitraryProvider:
         )
         assert isinstance(attempt_id, UUID)
         self.calls += 1
-        body: dict[str, Any] = {
-            "content_to_module_map": [
-                {
-                    "module_id": "CP-DR",
-                    "readiness_status": "READY",
-                    "readiness_effect": "ready",
-                }
-            ]
-        }
-        digest = self.harness.blobs.put(json.dumps(body).encode())
+        digest = self.harness.blobs.put(b"arbitrary bytes")
         self.mutate()
         return ProviderResult(digest, REPORTED, MODEL, "gen-arbitrary")
 
@@ -431,7 +416,7 @@ def _mutation(  # noqa: C901
             manifest.write_bytes(manifest.read_bytes() + b" ")
             return
         if name == "adapter_mismatch":
-            monkeypatch.setattr(methodology, "CLAIMS_ADAPTER_VERSION", "changed")
+            monkeypatch.setattr(methodology, "CANONICAL_ADAPTER_VERSION", "changed")
             return
         if name == "input_missing":
             _corrupt_input(harness, remove=True)
@@ -657,7 +642,7 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Unmutated control: transport idle and unlocked; bill committed, then one
-    READ COMMITTED unit holds the lock through identity, input and envelope."""
+    READ COMMITTED unit holds the lock through identity, input and validation."""
     from server.methodology import executor
 
     stamps: list[tuple[str, object]] = []
@@ -672,13 +657,8 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
 
         return inner
 
-    def envelope(
-        conn: StoreConnection,
-        assignment: Assignment,
-        context: executor._Context,
-        authority: Authority,
-        content: str,
-    ) -> Envelope:
+    def validate(*args: object, **kwargs: object) -> Projections:
+        conn = harness.conn
         during.append(
             (
                 conn.info.transaction_status,
@@ -687,12 +667,12 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
                 _lockable(harness),
             )
         )
-        return original(conn, assignment, context, authority, content)
+        return original(*args, **kwargs)
 
-    original = executor._envelope
-    monkeypatch.setattr(executor, "check_attempt", stamp("check", check_attempt))
+    original: Callable[..., Projections] = handoff.validate_markdown
+    monkeypatch.setattr(canonical, "check_attempt", stamp("check", check_attempt))
     monkeypatch.setattr(executor, "execution_input", stamp("input", execution_input))
-    monkeypatch.setattr(executor, "_envelope", envelope)
+    monkeypatch.setattr(canonical, "validate_markdown", validate)
     idle_unlocked: list[tuple[object, tuple[bool, bool]]] = []
     completion = _DuringCompletion(
         _Completions(harness.source_id),
@@ -708,10 +688,11 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
         node.route_node_id, node.module_id, attempt_id=attempt
     )
 
+    # The diagnostic body, the Markdown and the record.
     assert (result.charge, result.model, len(_blob_files(harness) - before)) == (
         REPORTED,
         MODEL,
-        1,
+        3,
     )
     assert idle_unlocked == [(TransactionStatus.IDLE, (True, True))]
     # Pre-call input read, then one post-billing unit: check and input share a
@@ -805,11 +786,11 @@ def test_direct_executor_refuses_a_mismatched_module_before_any_call(
     assignment = _assignment(harness, _reserved(harness))
 
     with pytest.raises(Refusal) as module:
-        execute_module(
+        execute_handoff(
             harness.conn,
             harness.bundle,
             harness.blobs,
-            assignment=replace(assignment, module_id="CP-DR"),
+            assignment=replace(assignment, module_id="CP-L10"),
             provider=completion,
         )
     assert (module.value.code, completion.calls) == (
@@ -828,7 +809,7 @@ def test_direct_executor_refuses_a_moved_node_before_any_call(
     assignment = _assignment(harness, _reserved(harness))
     moved = replace(assignment.node, stage=assignment.node.stage + 7)
     with pytest.raises(Refusal) as node:
-        execute_module(
+        execute_handoff(
             harness.conn,
             harness.bundle,
             harness.blobs,
@@ -950,11 +931,11 @@ def test_rollback_failure_closes_and_keeps_the_typed_refusal(
             raise psycopg.OperationalError
 
         monkeypatch.setattr(harness.conn, "rollback", broken)
-        raise Refusal(RefusalCode.ENVELOPE_INVALID)
+        raise Refusal(RefusalCode.HANDOFF_MALFORMED)
 
     raised = _fail_in_analysis(harness, monkeypatch, refuse_and_break_rollback)
     assert isinstance(raised, Refusal)
-    assert (raised.code, harness.conn.closed) == (RefusalCode.ENVELOPE_INVALID, True)
+    assert (raised.code, harness.conn.closed) == (RefusalCode.HANDOFF_MALFORMED, True)
     assert (_counts(harness), _lockable(harness)) == (
         (1, [REPORTED], 0, 1, 1),
         (True, True),
@@ -976,21 +957,12 @@ class _Charged:
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
         assert self.harness.conn.info.transaction_status is TransactionStatus.IDLE
-        body = {
-            "content_to_module_map": [
-                {
-                    "module_id": "CP-DR",
-                    "readiness_status": "READY",
-                    "readiness_effect": "ready",
-                }
-            ]
-        }
-        digest = self.harness.blobs.put(json.dumps(body).encode())
+        digest = self.harness.blobs.put(b"arbitrary bytes")
         self.mutate()
         return ProviderResult(digest, self.charge, MODEL, f"gen-{route_node_id}")  # type: ignore[arg-type]
 
 
-def _run(harness: _Harness, provider: _Charged) -> RefusalCode | None:
+def _run(harness: _Harness, provider: Provider) -> RefusalCode | None:
     try:
         run_route(
             harness.conn,
@@ -1019,7 +991,8 @@ def test_unknown_charge_is_recorded_without_spend_and_never_accepted(
 def test_zero_charge_is_known_spend_and_replay_never_duplicates(
     harness: _Harness,
 ) -> None:
-    assert _run(harness, _Charged(harness, Decimal("0"))) is None
+    free = _Completions(harness.source_id, charge=Decimal("0"))
+    assert _run(harness, _provider(harness, free)) is None
     nodes = len(harness.route.nodes)
     assert _counts(harness) == (nodes, [Decimal("0")] * nodes, nodes, nodes, nodes)
 
@@ -1028,8 +1001,8 @@ def test_zero_charge_is_known_spend_and_replay_never_duplicates(
     ).fetchone()
     harness.conn.rollback()
     assert attempt is not None
-    first = harness.route.nodes[0].route_node_id
-    replay = CallOutcome(Decimal("0"), MODEL, f"gen-{first}")
+    diagnostic = hashlib.sha256(free.bodies[0].encode()).hexdigest()
+    replay = CallOutcome(Decimal("0"), MODEL, free.generation_id, diagnostic)
     assert record_outcome(harness.conn, attempt_id=attempt[0], outcome=replay) is False
     with pytest.raises(Refusal) as conflict:
         record_outcome(
@@ -1102,7 +1075,9 @@ def test_accept_boundary_refuses_authority_revoked_after_the_runtime_check(
         accept_attempt(
             harness.conn,
             attempt_id=attempt,
-            accepted=Accepted(digest, REPORTED, MODEL, "gen-accept"),
+            accepted=Accepted(
+                digest, REPORTED, MODEL, "gen-accept", record_sha256=digest
+            ),
         )
     assert (refused.value.code, refused.value.__cause__) == (
         RefusalCode.GATE_APPROVAL_MISMATCH,
@@ -1121,7 +1096,9 @@ def _billed(harness: _Harness, node: str | None = None) -> tuple[UUID, Accepted]
     record_outcome(
         harness.conn, attempt_id=attempt, outcome=CallOutcome(REPORTED, MODEL, "gen")
     )
-    return attempt, Accepted(harness.blobs.put(b"{}"), REPORTED, MODEL, "gen")
+    # A canonical pin accepts only with a record; acceptance reads neither blob.
+    accepted = Accepted(harness.blobs.put(b"{}"), REPORTED, MODEL, "gen")
+    return attempt, replace(accepted, record_sha256=harness.blobs.put(b"record"))
 
 
 def _accept_refused(harness: _Harness, attempt: UUID, accepted: Accepted) -> object:
@@ -1350,7 +1327,7 @@ def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) ->
     stored route's other modules: nothing a caller could hand in. (The gate has
     no predecessors; upstream derivation is proven by the identity tests.)"""
     completions = _Completions(harness.source_id)
-    execute_module(
+    execute_handoff(
         harness.conn,
         harness.bundle,
         harness.blobs,
@@ -1359,77 +1336,61 @@ def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) ->
     )
     [prompt] = completions.prompts
     assert str(harness.source_id) in prompt and str(harness.witness_id) in prompt
-    assert "others.\n\nCP-DR\n\nEach object" in prompt
+    assert "no others: CP-5, CP-L10\n" in prompt
 
 
-def _accepted_gate(harness: _Harness, conn: StoreConnection, **identity: object) -> str:
-    """Accept one CP-0 artifact on `conn`; identity fields override the host's."""
+def _accepted_gate(harness: _Harness, **identity: object) -> str:
+    """Run and accept CP-0 for real; identity fields override its record's."""
     gate = harness.route.nodes[0]
-    envelope = Envelope(
-        module_id=str(identity.get("module_id", gate.module_id)),
-        build_id=str(identity.get("build_id", harness.bundle.build_id)),
-        authority_digest=str(
-            identity.get(
-                "authority_digest",
-                authority_digest(assemble_authority(harness.bundle, gate.module_id)),
-            )
-        ),
-        claims=(),
-        claims_refused=int(str(identity.get("claims_refused", 0))),
-        readiness=(),
+    attempt = _reserved(harness)
+    result = _provider(harness, _Completions(harness.source_id)).execute(
+        gate.route_node_id, gate.module_id, attempt_id=attempt
     )
-    digest = harness.blobs.put(canonical(envelope))
-    attempt = start_attempt(conn, harness.run_id, gate.route_node_id)
-    reserve(conn, attempt, ESTIMATE)
-    assert accept_attempt(
-        conn, attempt_id=attempt, accepted=Accepted(digest, REPORTED, MODEL, "gen-up")
+    assert result.record_sha256 is not None
+    record = result.record_sha256
+    if identity:
+        stored = _decoded_record(harness.blobs.get(record))
+        moved = replace(stored.identity, **identity)  # type: ignore[arg-type]
+        foreign = replace(stored, identity=moved)
+        record = harness.blobs.put(record_bytes(foreign))
+    accepted = Accepted(
+        result.artifact_sha256,
+        result.charge,
+        result.model,
+        result.generation_id,
+        diagnostic_sha256=result.diagnostic_sha256,
+        record_sha256=record,
     )
-    return digest
+    assert accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+    return result.artifact_sha256
 
 
 def _rewrite_gate(harness: _Harness, conn: StoreConnection) -> None:
-    """Point CP-0's accepted row at other valid bytes, under the run lock."""
+    """Point CP-0's accepted row at other bytes, under the run lock."""
     gate = harness.route.nodes[0]
-    envelope = Envelope(
-        module_id=gate.module_id,
-        build_id=harness.bundle.build_id,
-        authority_digest=authority_digest(
-            assemble_authority(harness.bundle, gate.module_id)
-        ),
-        claims=(),
-        claims_refused=1,
-        readiness=(),
-    )
     lock_run(conn, harness.run_id)
     conn.execute(
         "UPDATE artifacts SET artifact_sha256 = %s"
         " WHERE run_id = %s AND route_node_id = %s",
-        (harness.blobs.put(canonical(envelope)), harness.run_id, gate.route_node_id),
+        (harness.blobs.put(b"other bytes"), harness.run_id, gate.route_node_id),
     )
     conn.commit()
 
 
 @pytest.mark.parametrize(
-    "identity,expected",
-    [
-        ({"module_id": "CP-9"}, RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE),
-        ({"build_id": "f" * 64}, RefusalCode.ORCHESTRATION_BUILD_MOVED),
-        ({"authority_digest": "0" * 64}, RefusalCode.ORCHESTRATION_BUILD_MOVED),
-    ],
+    "identity",
+    [{"module_id": "CP-L10"}, {"ordinal": 2}, {"authority_bundle_sha256": "0" * 64}],
 )
 def test_upstream_with_foreign_envelope_identity_is_refused_before_any_call(
-    harness: _Harness, identity: dict[str, object], expected: RefusalCode
+    harness: _Harness, identity: dict[str, object]
 ) -> None:
-    _accepted_gate(harness, harness.conn, **identity)
+    """CP-0's record names another invocation: the frontier refuses it before
+    CP-L10 is attempted or called."""
+    _accepted_gate(harness, **identity)
     completions = _DuringCompletion(_Completions(harness.source_id), lambda: None)
-    node = harness.route.nodes[1]
-    attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
-    reserve(harness.conn, attempt, ESTIMATE)
-    with pytest.raises(Refusal) as refused:
-        _provider(harness, completions).execute(
-            node.route_node_id, node.module_id, attempt_id=attempt
-        )
-    assert (refused.value.code, completions.calls) == (expected, 0)
+    code = _run(harness, _provider(harness, completions))
+    assert (code, completions.calls) == (RefusalCode.ARTIFACT_RECORD_MISMATCH, 0)
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
 
 
 def test_upstream_rewritten_during_the_call_is_refused_keeping_the_bill(
@@ -1437,7 +1398,7 @@ def test_upstream_rewritten_during_the_call_is_refused_keeping_the_bill(
 ) -> None:
     """A second acceptance cannot replace CP-0 (`tests/test_accepted_owner.py`);
     a privileged rewrite of its row during the call is still caught."""
-    _accepted_gate(harness, harness.conn)
+    _accepted_gate(harness)
 
     def supersede() -> None:
         with connect(harness.url) as other:
@@ -1471,9 +1432,9 @@ GOOD_QUOTE = "Total debt at 31 December 2026"
 
 
 def _attempt_at(harness: _Harness, index: int) -> tuple[RouteNode, UUID]:
-    """A reserved attempt on route node `index`; CP-DR gets an accepted CP-0."""
+    """A reserved attempt on route node `index`; CP-L10 gets an accepted CP-0."""
     if index == 1:
-        _accepted_gate(harness, harness.conn)
+        _accepted_gate(harness)
     node = harness.route.nodes[index]
     attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
     reserve(harness.conn, attempt, ESTIMATE)
@@ -1501,8 +1462,6 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
     answer is analysed, and refuses it with the bill kept."""
     from test_case_ordering import _wait_for_blocking
 
-    from server.methodology import executor
-
     node, attempt = _attempt_at(harness, int(change == "upstream"))
     before: dict[str, str] = dict(
         harness.conn.execute(
@@ -1513,7 +1472,7 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
     harness.conn.rollback()
     pending: list[Future[None]] = []
     derived: list[dict[str, str]] = []
-    derive = executor._upstream_digests
+    derive = invocation.upstream_markdown
     with connect(harness.url) as other, ThreadPoolExecutor(max_workers=1) as pool:
         other.execute("SET statement_timeout = '5s'")
         other.commit()
@@ -1529,15 +1488,17 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
             else:
                 _rewrite_gate(harness, other)
 
-        def inside(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
-            result = derive(conn, assignment)
-            derived.append(result)
+        def inside(
+            blobs: BlobStore, refs: tuple[UpstreamRef, ...]
+        ) -> tuple[tuple[UpstreamRef, bytes], ...]:
+            result = derive(blobs, refs)
+            derived.append({ref.module_id: ref.sha256 for ref, _ in result})
             if not pending:
                 pending.append(pool.submit(commit_change))
-                _wait_for_blocking(conn, other)
+                _wait_for_blocking(harness.conn, other)
             return result
 
-        monkeypatch.setattr(executor, "_upstream_digests", inside)
+        monkeypatch.setattr(canonical, "upstream_markdown", inside)
         completion = _DuringCompletion(
             _Completions(harness.source_id), lambda: pending[0].result(timeout=6)
         )
@@ -1578,8 +1539,11 @@ def test_failure_while_deriving_context_makes_no_call(
     from server.methodology import executor
 
     node, attempt = _attempt_at(harness, int(stage == "upstream"))
-    name = {"evidence": "read_run_block", "upstream": "_stored_claims"}[stage]
-    real = getattr(executor, name)
+    owner, name = {
+        "evidence": (executor, "read_run_block"),
+        "upstream": (canonical, "upstream_markdown"),
+    }[stage]
+    real = getattr(owner, name)
 
     def failing(*args: object, **kwargs: object) -> object:
         real(*args, **kwargs)
@@ -1588,7 +1552,7 @@ def test_failure_while_deriving_context_makes_no_call(
             harness.conn.execute("SELECT (%s)::int", (GOOD_QUOTE,))
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(executor, name, failing)
+    monkeypatch.setattr(owner, name, failing)
     completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
     with pytest.raises((Refusal, KeyboardInterrupt)) as raised:
         _provider(harness, completion).execute(

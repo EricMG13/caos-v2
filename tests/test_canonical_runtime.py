@@ -3,7 +3,8 @@
 `run_route` accepts a canonical result with its host record, replays the
 executor's diagnostic exactly, reads CP-0 readiness and QA from records
 verified against their Markdown, and ends the run BLOCKED on a validated
-Blocked handoff. The freshness guarantees are proven over both adapters.
+Blocked handoff. The post-call freshness guarantees are proven here too
+(their claims-adapter variants were removed with the claims route in f-1a).
 """
 
 from __future__ import annotations
@@ -19,8 +20,6 @@ import pytest
 from canonical_fixtures import QUOTE, UNANCHORED, CanonicalCompletions
 from conftest import priced
 from test_canonical_execution import (
-    CLAIMS,
-    LITE,
     _accept,
     _node,
     _reserved,
@@ -36,12 +35,12 @@ from test_execution_freshness import (
     _revoke_during_transport,
     _still_running,
 )
-from test_loop_charges import ESTIMATE, MODEL, REPORTED, _Completions
+from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
 from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
-from server.methodology import canonical, executor
+from server.methodology import canonical
 from server.methodology.canonical import accepted_projections, blocked_verdict
 from server.methodology.handoff import (
     Projections,
@@ -60,14 +59,12 @@ from server.store.runs import block_run
 
 __all__ = ["harness", "route"]
 
-BOTH = pytest.mark.parametrize("route", [LITE, CLAIMS], indirect=True)
-
 
 @dataclass
 class _Answers:
-    """Either adapter's deterministic answer, with a hook inside the call."""
+    """A deterministic canonical answer, with a hook inside the call."""
 
-    delegate: CanonicalCompletions | _Completions
+    delegate: CanonicalCompletions
     during: Callable[[], None] = lambda: None
     facts: dict[str, Any] = field(default_factory=dict)
     model: str = MODEL
@@ -86,13 +83,7 @@ def _answers(
     during: Callable[[], None] = lambda: None,
     facts: dict[str, Any] | None = None,
 ) -> _Answers:
-    canonical_pin = harness.route.profile_id == LITE[0]
-    delegate = (
-        CanonicalCompletions(harness.source_id)
-        if canonical_pin
-        else _Completions(harness.source_id)
-    )
-    return _Answers(delegate, during, facts or {})
+    return _Answers(CanonicalCompletions(harness.source_id), during, facts or {})
 
 
 def _module_provider(
@@ -404,7 +395,7 @@ def test_readers_verify_the_record_against_its_markdown(harness: _Harness) -> No
     assert mismatch.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
 
 
-# P2-2: the post-call guarantees, over both adapters through ModuleProvider.
+# P2-2: the post-call guarantees, through ModuleProvider.
 
 
 def _accepted_first(harness: _Harness) -> tuple[str, str]:
@@ -428,7 +419,6 @@ def _execute(
     return refused.value.code, attempt
 
 
-@BOTH
 def test_upstream_rewritten_during_transport_is_refused_keeping_the_bill(
     harness: _Harness,
 ) -> None:
@@ -466,7 +456,6 @@ def test_host_identity_changed_during_transport_is_refused_keeping_the_bill(
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
 
 
-@BOTH
 @pytest.mark.parametrize(
     ("facts", "billed"),
     [({"charge": None}, []), ({"generation_id": "not a handle!"}, [REPORTED])],
@@ -482,7 +471,6 @@ def test_an_unknown_charge_or_generation_is_refused_keeping_the_bill(
     _still_running(harness)
 
 
-@BOTH
 def test_a_known_provider_refusal_keeps_precedence_over_stale_authority(
     harness: _Harness,
 ) -> None:
@@ -494,7 +482,6 @@ def test_a_known_provider_refusal_keeps_precedence_over_stale_authority(
     _still_running(harness)
 
 
-@BOTH
 @pytest.mark.parametrize("failure", ["sql", "interrupt"])
 @pytest.mark.parametrize("stage", ["evidence", "upstream"])
 def test_a_failure_while_deriving_context_makes_no_call(
@@ -503,13 +490,8 @@ def test_a_failure_while_deriving_context_makes_no_call(
     module_id = harness.route.nodes[0].module_id
     if stage == "upstream":
         _node_id, module_id = _accepted_first(harness)
-    lite = harness.route.profile_id == LITE[0]
-    owner, name = {
-        (False, "evidence"): (executor, "read_run_block"),
-        (False, "upstream"): (executor, "_stored_claims"),
-        (True, "evidence"): (canonical, "_delivered"),
-        (True, "upstream"): (canonical, "upstream_markdown"),
-    }[(lite, stage)]
+    owner = canonical
+    name = {"evidence": "_delivered", "upstream": "upstream_markdown"}[stage]
     real = getattr(owner, name)
 
     def failing(*args: object, **kwargs: object) -> object:

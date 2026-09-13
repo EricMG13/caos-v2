@@ -53,8 +53,13 @@ def _billed(harness: _Harness, conn: StoreConnection | None = None) -> UUID:
 def _accept(
     harness: _Harness, attempt: UUID, conn: StoreConnection | None = None
 ) -> object:
+    # The canonical LITE pin accepts only with a record (§42.1).
     accepted = Accepted(
-        harness.blobs.put(attempt.bytes), REPORTED, MODEL, f"g{attempt.hex}"
+        harness.blobs.put(attempt.bytes),
+        REPORTED,
+        MODEL,
+        f"g{attempt.hex}",
+        record_sha256=harness.blobs.put(b"record" + attempt.bytes),
     )
     try:
         return accept_attempt(
