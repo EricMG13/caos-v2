@@ -198,6 +198,9 @@ def _run_node(
     module_id = next(
         node.module_id for node in route.nodes if node.route_node_id == route_node_id
     )
+    # Per call as well as per run: a provider whose model moved is unpriced.
+    if execution.price.model != getattr(execution.provider, "model", None):
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     attempt_id = start_attempt(conn, run_id, route_node_id)
     reserve(conn, attempt_id, worst_case(execution.price))
 

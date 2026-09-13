@@ -67,7 +67,7 @@ from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
-from server.pricing import ModelPrice
+from server.pricing import ModelPrice, worst_case
 from server.provider import CompletionProvider
 from server.qualification.matrix import (
     Matrix,
@@ -380,6 +380,9 @@ def _affordable(qualification: QualificationSet, harness: Harness) -> None:
     """
     validate_spend(harness.ceiling)
     if Fraction(CEILING) * len(qualification.cases) > Fraction(harness.ceiling):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
+    # One call's worst case must fit a run's ceiling, or every run refuses late.
+    if worst_case(harness.price) > CEILING:
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 

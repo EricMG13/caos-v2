@@ -567,9 +567,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   every byte of the largest request (§38) as an input token plus the output cap
   -- and `run_route` refuses a price for any model but the provider's configured
   one before an attempt exists. Nothing in the tree says what the live model
-  costs, so `tests/test_live_run.py` still prices it from its flat estimate, and
-  the byte bound makes a real model's reservation large against the $5 default
-  ceiling. *Upgrade:* a user-confirmed dated price for the configured live model,
+  costs, so `tests/test_live_run.py` still prices it from its flat estimate. The
+  byte bound is severe for a real model: at about $3/M input and $15/M output one
+  call reserves about $3.64, so under the $5 default ceiling a two-node route
+  cannot finish and a qualification harness refuses such a price up front. *Upgrade:* a user-confirmed dated price for the configured live model,
   and pricing the actual encoded request once the prompt is built before the
   reservation.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on

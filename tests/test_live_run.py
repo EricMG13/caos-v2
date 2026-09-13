@@ -124,8 +124,8 @@ def test_a_live_run_admits_documents_and_completes_its_route(
         route=route,
         execution=Execution(
             module_provider,
-            # ponytail: live pricing needs a user-supplied dated price for the
-            # configured model; until then the nightly run reserves ESTIMATE.
+            # No dated price for the live model is in the tree yet (CLAUDE.md
+            # known gaps, Phase 5): this reserves ESTIMATE, not a real worst case.
             priced(ESTIMATE, completions.model),
             bundle,
         ),
