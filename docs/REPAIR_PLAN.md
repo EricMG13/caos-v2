@@ -369,6 +369,12 @@ Phase-close order: implementation → normal tests → confidence review (`xhigh
 
 ### Phase 3 — Execute real module handoffs on one bounded route
 
+The complementary Phase 3–6 task breakdown and Claude reasoning-mode policy is
+tracked in
+[`docs/superpowers/plans/2026-09-13-post-phase-2-complementary-plan.md`](superpowers/plans/2026-09-13-post-phase-2-complementary-plan.md).
+It is subordinate to this plan and becomes executable only after Phase 2 is
+accepted.
+
 **Fixes:** F04/F07, methodology gap, F02/F03 semantic acceptance.
 
 **Work**
