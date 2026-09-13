@@ -32,7 +32,6 @@ from server.methodology.executor import (
     Assignment,
     Upstream,
     UpstreamClaim,
-    deliver,
     execute_module,
 )
 from server.provider import CompletionProvider
@@ -46,18 +45,17 @@ class ModuleProvider:
     """A `runtime.Provider` that runs a real module.
 
     Holds the seven things a module execution needs and the loop does not know
-    about: the store to read evidence through, the bundle that is authority,
-    the blob store the envelope is written to, the provider that answers, the
-    (source_id, block_id) pairs this node is to receive, the pinned route --
+    about: the store, the bundle that is authority, the blob store the
+    envelope is written to, the provider that answers, the pinned route --
     which is what tells the gate every other module it must cover -- and the
-    run the node belongs to.
+    run the node belongs to. The evidence is the run's captured blocks, derived
+    by `execute_module` from the pin rather than chosen here.
     """
 
     conn: StoreConnection
     bundle: Bundle
     blobs: BlobStore
     completions: CompletionProvider
-    delivered: list[tuple[UUID, str]]
     # The pin. The gate needs the module ids it must cover, and Phase 11's
     # chain needs each node's predecessors from the same object.
     route: ResolvedRoute
@@ -110,7 +108,6 @@ class ModuleProvider:
         )
         return Assignment(
             module_id=module_id,
-            delivered=deliver(self.conn, self.delivered),
             run_id=self.run_id,
             node=node,
             route=self.route,

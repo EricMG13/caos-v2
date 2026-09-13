@@ -25,7 +25,6 @@ from test_loop_charges import (
     REPORTED,
     VENDORED,
     _Completions,
-    _every_block,
     route,
 )
 
@@ -37,7 +36,7 @@ from server.engine.runtime import Execution, ProviderResult, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import MANIFEST_NAME, Authority, Bundle
 from server.methodology.envelope import Envelope
-from server.methodology.executor import Assignment, execute_module
+from server.methodology.executor import Assignment, Delivery, execute_module
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
@@ -64,6 +63,7 @@ from server.store.runs import (
     Accepted,
     accept_attempt,
     complete_run,
+    create_case,
     fail_run,
     start_attempt,
     start_run,
@@ -192,7 +192,6 @@ def test_module_provider_rechecks_authority_after_transport_before_envelope_or_b
         harness.bundle,
         harness.blobs,
         completion,
-        _every_block(harness.conn, harness.source_id),
         harness.route,
         harness.run_id,
     )
@@ -203,12 +202,13 @@ def test_module_provider_rechecks_authority_after_transport_before_envelope_or_b
     def counted_envelope(
         conn: StoreConnection,
         assignment: Assignment,
+        delivered: list[Delivery],
         authority: Authority,
         content: str,
     ) -> Envelope:
         nonlocal envelopes
         envelopes += 1
-        return original(conn, assignment, authority, content)
+        return original(conn, assignment, delivered, authority, content)
 
     monkeypatch.setattr(executor, "_envelope", counted_envelope)
     code = None
@@ -493,7 +493,6 @@ def _invoke_after_transport(
             harness.bundle,
             harness.blobs,
             completion,
-            _every_block(harness.conn, harness.source_id),
             harness.route,
             harness.run_id,
         )
@@ -628,7 +627,6 @@ def _provider(
         harness.bundle,
         harness.blobs,
         completions,
-        _every_block(harness.conn, harness.source_id),
         route or harness.route,
         harness.run_id,
     )
@@ -667,6 +665,7 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
     def envelope(
         conn: StoreConnection,
         assignment: Assignment,
+        delivered: list[Delivery],
         authority: Authority,
         content: str,
     ) -> Envelope:
@@ -678,7 +677,7 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
                 _lockable(harness),
             )
         )
-        return original(conn, assignment, authority, content)
+        return original(conn, assignment, delivered, authority, content)
 
     original = executor._envelope
     monkeypatch.setattr(executor, "check_attempt", stamp("check", check_attempt))
@@ -1299,3 +1298,52 @@ def test_accept_refuses_a_node_outside_the_stored_route(harness: _Harness) -> No
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert _events(harness, "ATTEMPT_ACCEPTED") == 0
     _still_running(harness)
+
+
+# Task17e: the host derives delivered evidence from the run's pins.
+
+
+def _admit_unpinned(harness: _Harness, *, other_case: bool) -> None:
+    """A document admitted after the run was pinned, here or in another case."""
+    case_id = (
+        create_case(harness.conn, BoundaryText.of("Another case"))
+        if other_case
+        else harness.case_id
+    )
+    admit_pack(
+        harness.conn,
+        harness.blobs,
+        case_id=case_id,
+        documents=[Document(filename=BoundaryText.of("late.txt"), data=b"UNPINNED\n")],
+    )
+    harness.conn.commit()
+
+
+@pytest.mark.parametrize("other_case", [False, True])
+def test_module_provider_never_delivers_a_block_outside_the_captured_set(
+    harness: _Harness, other_case: bool
+) -> None:
+    _admit_unpinned(harness, other_case=other_case)
+    completions = _Completions(harness.source_id)
+    node = harness.route.nodes[0]
+    attempt = _reserved(harness)
+    _provider(harness, completions).execute(
+        node.route_node_id, node.module_id, attempt_id=attempt
+    )
+    [prompt] = completions.prompts
+    assert "UNPINNED" not in prompt
+
+
+def test_direct_executor_delivers_every_captured_block(harness: _Harness) -> None:
+    """Both captured documents reach the prompt, whatever the caller holds."""
+    completions = _Completions(harness.source_id)
+    assignment = _assignment(harness, _provider(harness, completions))
+    execute_module(
+        harness.conn,
+        harness.bundle,
+        attempt_id=_reserved(harness),
+        assignment=assignment,
+        provider=completions,
+    )
+    [prompt] = completions.prompts
+    assert str(harness.source_id) in prompt and str(harness.witness_id) in prompt

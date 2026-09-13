@@ -167,7 +167,6 @@ def test_the_loop_charges_what_the_provider_reported(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -209,7 +208,6 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -243,7 +241,6 @@ def test_the_artifact_is_the_envelope_the_host_built(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -283,7 +280,6 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -320,7 +316,6 @@ def test_the_loop_hands_each_node_its_predecessors_results(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -371,7 +366,6 @@ def test_a_predecessor_artifact_of_another_shape_is_refused_not_raised(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -407,7 +401,6 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
         bundle=Bundle(root=VENDORED),
         blobs=blobs,
         completions=completions,
-        delivered=_every_block(conn, source_id),
         route=route,
         run_id=run_id,
     )
@@ -436,12 +429,3 @@ def _attempted(conn: StoreConnection, run_id: UUID) -> list[str]:
         (run_id,),
     ).fetchall()
     return [str(row[0]) for row in rows]
-
-
-def _every_block(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str]]:
-    rows = conn.execute(
-        "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
-        (source_id,),
-    ).fetchall()
-    conn.rollback()
-    return [(source_id, str(row[0])) for row in rows]

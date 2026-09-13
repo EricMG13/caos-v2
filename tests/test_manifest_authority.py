@@ -421,7 +421,7 @@ def test_execute_module_refuses_changed_authority_before_completion(
             conn,
             bundle,
             attempt_id=attempt_id,
-            assignment=Assignment("CP-1", [], run, node, route),
+            assignment=Assignment("CP-1", run, node, route),
             provider=provider,
         )
     )

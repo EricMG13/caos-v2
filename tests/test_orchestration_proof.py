@@ -153,14 +153,12 @@ def ran(
         route=catalog_route,
         bundle=bundle,
     )
-    delivered = [(source_id, block) for block in _blocks(conn, source_id)]
     conn.rollback()
     provider = ModuleProvider(
         conn=conn,
         bundle=bundle,
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=delivered,
         route=catalog_route,
         run_id=run_id,
     )
@@ -176,14 +174,6 @@ def ran(
         ),
     )
     return Ran(conn, blobs, run_id, case_id, source_id, catalog_route)
-
-
-def _blocks(conn: StoreConnection, source_id: UUID) -> list[str]:
-    rows = conn.execute(
-        "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
-        (source_id,),
-    ).fetchall()
-    return [str(row[0]) for row in rows]
 
 
 def _prove(ran: Ran) -> OrchestrationProof:

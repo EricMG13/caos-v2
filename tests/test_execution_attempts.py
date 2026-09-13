@@ -15,7 +15,6 @@ from test_loop_charges import (
     REPORTED,
     VENDORED,
     _Completions,
-    _every_block,
     ready,
     route,
 )
@@ -47,7 +46,6 @@ def provider(
         Bundle(VENDORED),
         blobs,
         _Completions(source),
-        _every_block(conn, source),
         route,
         run,
     )
@@ -82,7 +80,7 @@ def _invoke(
             provider.conn,
             provider.bundle,
             attempt_id=attempt,
-            assignment=Assignment(module, [], provider.run_id, node, provider.route),
+            assignment=Assignment(module, provider.run_id, node, provider.route),
             provider=provider.completions,
         )
 
@@ -233,12 +231,12 @@ def test_invalid_or_used_attempt_cannot_reach_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """check_call refuses before either evidence or upstream context is read."""
-    from server.methodology import runner
+    from server.methodology import executor, runner
 
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("invalid attempt reached evidence or upstream reads")
 
-    monkeypatch.setattr(runner, "deliver", forbidden)
+    monkeypatch.setattr(executor, "read_run_block", forbidden)
     monkeypatch.setattr(runner.ModuleProvider, "_upstream", forbidden)
     node = provider.route.nodes[0]
     attempt = _reserve(provider, node)
@@ -328,7 +326,7 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
 ) -> None:
     """execution_reads releases its unit or closes when its own cleanup fails."""
     from server.engine import runtime
-    from server.methodology import runner
+    from server.methodology import executor, runner
 
     dsn = _url_for(provider.conn.info.dbname)
 
@@ -342,7 +340,7 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
         raise psycopg.OperationalError("private")
 
     owner, name = {
-        "delivery": (runner, "deliver"),
+        "delivery": (executor, "read_run_block"),
         "upstream": (runner.ModuleProvider, "_upstream"),
         "frontier": (runtime, "accepted_artifacts"),
     }[stage]
