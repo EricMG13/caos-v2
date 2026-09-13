@@ -392,7 +392,7 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     reads it, the frontier offers RUNNABLE and RESTRICTED -- and nothing put a
     real loop behind a real gate answer. CP-0 answers BLOCKED for the one other
     node here, so it is never offered: one call, one reservation, one charge, no
-    attempt row, and a COMPLETE run reporting it unrun. A loop that ran it
+    attempt row, and a BLOCKED run (§39) reporting it unrun. A loop that ran it
     anyway would pay a provider for an answer the gate had already refused.
     """
     conn, run_id, source_id, blobs = ready

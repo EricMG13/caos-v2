@@ -163,6 +163,31 @@ plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Repair Phase 2.**
+
+- **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
+  with unfinished required work recoverably blocked, and `run_route` now ends
+  such a run `BLOCKED` with one `RUN_BLOCKED` (migration 0010). Nothing moves a
+  BLOCKED run back to RUNNING: every spend guard refuses it and its stream
+  closes. "Recoverable" means nothing failed and the reason is re-derived from
+  the pins and accepted artifacts, not stored. *Upgrade:* a governed resume --
+  a CAS back to RUNNING with its own event, taken by an authorized actor when
+  an input that could release the node has changed -- arrives with Phase 4's
+  commands and worker.
+- **The terminal decision reads outside the run lock, and the store does not
+  check it.** `run_route` decides COMPLETE or BLOCKED from a snapshot taken after
+  its last pass, and `complete_run`/`complete_attempt` still let a direct store
+  caller complete a run with unrun nodes (only tests do). Sound for the one
+  sequential loop Phase 2 has. *Upgrade:* with Phase 4's concurrent workers,
+  decide under `lock_run` in `_transition`, requiring an accepted artifact for
+  every pinned node before COMPLETE.
+- **Two workers can pay for one node.** Migration 0009 lets exactly one attempt
+  own a node's accepted result, but two attempts can each reserve and call
+  before either accepts; both bills are kept. *Upgrade:* Phase 4's PostgreSQL
+  claims/leases (§39) take the node before the call. `artifacts` rows are also
+  not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
+  a refusal trigger like 0007's is the upgrade.
+
 **Phase 0.**
 
 - ~~**No `image` CI job.**~~ Closed in Phase 7, and recorded here late. The

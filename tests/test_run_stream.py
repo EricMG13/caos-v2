@@ -26,12 +26,13 @@ from test_run_events import approved_nodes
 from server.api.stream import IO_BUDGET, StreamEvent, tail
 from server.refusals import Refusal
 from server.store import StoreConnection
-from server.store.events import RunEvent
+from server.store.events import RunEvent, events_of
 from server.store.members import Standing, grant, revoke
 from server.store.runs import (
     Accepted,
     block_run,
     complete_attempt,
+    complete_run,
     fail_run,
     start_attempt,
     start_run,
@@ -144,6 +145,9 @@ def test_a_blocked_run_refuses_new_attempts(
     block_run(conn, run_id)
     with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
         start_attempt(conn, run_id, "CP-1")
+    # Blocked is not a way station to success: completion adds nothing.
+    assert not complete_run(conn, run_id)
+    assert [e.name for e in events_of(conn, run_id)] == [RunEvent.RUN_BLOCKED.value]
 
 
 def test_a_running_run_delivers_what_there_is_and_stops(
