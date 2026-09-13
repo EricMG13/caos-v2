@@ -30,7 +30,6 @@ from server.engine.route import (
     RouteNode,
     predecessors,
 )
-from server.engine.runtime import artifact_digests
 from server.evidence.citations import verify_citations
 from server.evidence.read import read_run_block
 from server.methodology import CLAIMS_ADAPTER_VERSION as CLAIMS_ADAPTER_VERSION
@@ -53,6 +52,7 @@ from server.store import StoreConnection
 from server.store.gates import execution_input
 from server.store.outcomes import (
     CallOutcome,
+    artifact_digests,
     check_attempt,
     check_call,
     execution_reads,

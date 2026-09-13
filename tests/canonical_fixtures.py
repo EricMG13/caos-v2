@@ -214,6 +214,12 @@ UNANCHORED = "Leverage was unchanged"
 # The authored fields a validated `qa_status` must agree with.
 AUTHORED = {
     "Passed": {},
+    "Restricted": {
+        "confidence_score": 50,
+        "confidence_band": "Low",
+        "committee_status": "Restricted",
+        "limitation_flags": ["Only one source report was delivered"],
+    },
     "Blocked": {
         "confidence_score": 30,
         "confidence_band": "Insufficient Information",
@@ -228,13 +234,15 @@ class CanonicalCompletions:
 
     `mutate` edits the copied fields (identity tampering); `content` replaces the
     whole answer; `during` runs inside the call, before the answer.
+    `qa_by_module` overrides `qa_status` per module on a whole route.
     """
 
     source_id: UUID
-    charge: Decimal = Decimal("0.0000041")
+    charge: Decimal | None = Decimal("0.0000041")
     model: str = "a-model/for-the-test"
     generation_id: str = "gen-canonical-test"
     qa_status: str = "Passed"
+    qa_by_module: dict[str, str] = field(default_factory=dict)
     readiness: dict[str, str] = field(default_factory=dict)
     quotes: tuple[str, ...] = (QUOTE,)
     mutate: Callable[[dict[str, Any]], dict[str, Any]] | None = None
@@ -253,10 +261,12 @@ class CanonicalCompletions:
         fields = fields_from_prompt(prompt)
         if self.mutate is not None:
             fields = self.mutate(fields)
+        module_id = str(fields["module_id"])
+        qa = self.qa_by_module.get(module_id, self.qa_status)
         markdown = handoff_markdown(
-            identity(str(fields["module_id"])),
+            identity(module_id),
             fields=fields,
-            authored={**AUTHORED[self.qa_status], "qa_status": self.qa_status},
+            authored={**AUTHORED[qa], "qa_status": qa},
             readiness=self.readiness,
             body_note=f"{QUOTE} was recorded. {UNANCHORED} here.",
         )
