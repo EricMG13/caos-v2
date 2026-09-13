@@ -31,7 +31,12 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
 from server.store.gates import execution_input
-from server.store.outcomes import execution_reads, require_idle
+from server.store.outcomes import (
+    CallOutcome,
+    execution_reads,
+    record_outcome,
+    require_idle,
+)
 from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
 
 
@@ -169,6 +174,13 @@ def _run_node(
     _execution_route(conn, run_id, route, execution.bundle)
     result = execution.provider.execute(route_node_id, module_id, attempt_id=attempt_id)
 
+    require_idle(conn)
+    record_outcome(
+        conn,
+        attempt_id=attempt_id,
+        outcome=CallOutcome(result.charge, result.model, result.generation_id),
+    )
+    _execution_route(conn, run_id, route, execution.bundle)
     accept_attempt(
         conn,
         attempt_id=attempt_id,

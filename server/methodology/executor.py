@@ -21,7 +21,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
-from server.engine.route import RouteNode
+from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import verify_citations
 from server.evidence.read import Block, read_block
 from server.methodology import CLAIMS_ADAPTER_VERSION as CLAIMS_ADAPTER_VERSION
@@ -35,8 +35,10 @@ from server.methodology.envelope import Claim, Envelope, parse_claims, parse_rea
 from server.provider import CompletionProvider, _reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.gates import execution_input
 from server.store.outcomes import (
     CallOutcome,
+    check_attempt,
     check_call,
     execution_reads,
     producer_identifier,
@@ -155,6 +157,7 @@ class Assignment:
     delivered: list[Delivery]
     run_id: UUID
     node: RouteNode
+    route: ResolvedRoute
     # The modules this one must return a readiness verdict for: the pinned
     # route less itself when it is the gate, and empty for everyone else.
     gate_expects: frozenset[str] = frozenset()
@@ -317,6 +320,19 @@ def execute_module(
     if not isinstance(completion.content, str) or charge is None or generation is None:
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
     with execution_reads(conn):
+        check_attempt(
+            conn,
+            attempt_id=attempt_id,
+            run_id=assignment.run_id,
+            route_node_id=assignment.node.route_node_id,
+        )
+        _input, stored_route = execution_input(conn, assignment.run_id, bundle)
+        if (
+            stored_route != assignment.route
+            or assignment.node not in stored_route.nodes
+            or assignment.node.module_id != assignment.module_id
+        ):
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         envelope = _envelope(conn, assignment, authority, completion.content)
     return ModuleOutcome(
         envelope=envelope,

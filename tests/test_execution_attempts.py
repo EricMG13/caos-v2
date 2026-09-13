@@ -82,7 +82,7 @@ def _invoke(
             provider.conn,
             provider.bundle,
             attempt_id=attempt,
-            assignment=Assignment(module, [], provider.run_id, node),
+            assignment=Assignment(module, [], provider.run_id, node, provider.route),
             provider=provider.completions,
         )
 

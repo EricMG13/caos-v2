@@ -23,11 +23,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from conftest import _url_for
+from conftest import _url_for, approve_run
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import RouteNode
+from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
@@ -145,8 +145,17 @@ def _attempt(
     """Commit this test's setup, then reserve one explicitly named execution."""
     row = conn.execute("SELECT case_id FROM cases").fetchone()
     assert row is not None
+    route = _catalog_route()
+    node = next(node for node in route.nodes if node.module_id == module_id)
     run = start_run(conn, row[0])
-    node = RouteNode("test-node", module_id, 1)
+    conn.commit()
+    approve_run(
+        conn,
+        case_id=row[0],
+        run_id=run,
+        route=route,
+        bundle=Bundle(VENDORED),
+    )
     attempt = start_attempt(conn, run, node.route_node_id)
     reserve(conn, attempt, Decimal("0.5"))
     return {
@@ -156,10 +165,22 @@ def _attempt(
             delivered,
             run,
             node,
+            route,
             gate_expects,
             upstream,
         ),
     }
+
+
+def _catalog_route() -> ResolvedRoute:
+    catalog = json.loads(
+        (
+            VENDORED
+            / "skills/cp-os-credit-os/references"
+            / "CREDIT_OS_V_MODULE_CATALOG_v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    return resolve_route(catalog, "FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
 
 
 def test_the_envelope_carries_the_hosts_identity_not_the_modules(

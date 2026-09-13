@@ -43,13 +43,10 @@ def _read_committed(conn: StoreConnection) -> None:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
 
 
-def check_call(
+def check_attempt(
     conn: StoreConnection, *, attempt_id: UUID, run_id: UUID, route_node_id: str
 ) -> None:
-    """Require this unused reserved attempt. Caller owns the read transaction.
-
-    Absence checks are not a concurrent call claim or crash/retry certainty.
-    """
+    """Require the attempt's current run/node identity and RUNNING owner."""
     if not isinstance(attempt_id, UUID) or conn.execute(
         "SELECT run_id,route_node_id FROM run_attempts WHERE attempt_id=%s",
         (attempt_id,),
@@ -63,6 +60,21 @@ def check_call(
         raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
     if status is not RunStatus.RUNNING:
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+
+
+def check_call(
+    conn: StoreConnection, *, attempt_id: UUID, run_id: UUID, route_node_id: str
+) -> None:
+    """Require this unused reserved attempt. Caller owns the read transaction.
+
+    Absence checks are not a concurrent call claim or crash/retry certainty.
+    """
+    check_attempt(
+        conn,
+        attempt_id=attempt_id,
+        run_id=run_id,
+        route_node_id=route_node_id,
+    )
     if reserved_for(conn, attempt_id) is None:
         raise Refusal(RefusalCode.BUDGET_NOT_RESERVED)
     if conn.execute(

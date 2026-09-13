@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
+from decimal import Decimal
 from hashlib import sha256
 from io import BytesIO
 from os import mkfifo
@@ -20,10 +21,12 @@ from server.methodology.bundle import (
     authority_digest,
     verified_bytes,
 )
-from server.methodology.executor import Delivery, Upstream, execute_module
+from server.methodology.executor import Assignment, Delivery, Upstream, execute_module
 from server.provider import Completion
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.budget import reserve
+from server.store.runs import start_attempt, start_run
 
 LIMIT = 128 * 1024
 BUILD = "a" * 64
@@ -401,14 +404,21 @@ def test_execute_module_refuses_changed_authority_before_completion(
     else:
         manifest.write_bytes(manifest.read_bytes() + b" ")
     provider = _NeverCalled()
-    from test_module_execution import _attempt
+    from test_module_execution import _catalog_route
 
-    attempt = _attempt(case[0], [])
+    conn, case_id = case
+    route = _catalog_route()
+    node = next(node for node in route.nodes if node.module_id == "CP-1")
+    run = start_run(conn, case_id)
+    conn.commit()
+    attempt_id = start_attempt(conn, run, node.route_node_id)
+    reserve(conn, attempt_id, Decimal("0.5"))
     _refuses(
         lambda: execute_module(
-            case[0],
+            conn,
             bundle,
-            **attempt,
+            attempt_id=attempt_id,
+            assignment=Assignment("CP-1", [], run, node, route),
             provider=provider,
         )
     )
