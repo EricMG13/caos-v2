@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -341,7 +343,10 @@ def test_a_withdrawn_source_takes_the_proof_with_it(ran: Ran) -> None:
 def test_the_proof_refuses_a_quote_it_can_no_longer_locate(ran: Ran) -> None:
     """Invariant 11 re-checked. The source is still live and still cited; its
     coordinate index no longer holds the quote, so the citation is not one."""
-    ran.conn.execute("DELETE FROM source_tokens WHERE source_id = %s", (ran.source_id,))
+    with _token_fault(ran.conn):
+        ran.conn.execute(
+            "DELETE FROM source_tokens WHERE source_id = %s", (ran.source_id,)
+        )
     ran.conn.commit()
 
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_CITATION_LOST
@@ -354,13 +359,25 @@ def test_the_proof_refuses_a_rectangle_that_moved_under_it(ran: Ran) -> None:
     rectangle drawn over different text, which is invariant 11 with the
     coordinates taken out.
     """
-    ran.conn.execute(
-        "UPDATE source_tokens SET x0 = x0 + 17.0, x1 = x1 + 17.0 WHERE source_id = %s",
-        (ran.source_id,),
-    )
+    with _token_fault(ran.conn):
+        ran.conn.execute(
+            "UPDATE source_tokens SET x0 = x0 + 17.0, x1 = x1 + 17.0"
+            " WHERE source_id = %s",
+            (ran.source_id,),
+        )
     ran.conn.commit()
 
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_CITATION_LOST
+
+
+@contextmanager
+def _token_fault(conn: StoreConnection) -> Iterator[None]:
+    """Privileged fault setup; transactional DDL restores the guard on failure."""
+    assert conn.info.dbname.startswith("caos_test_")
+    with conn.transaction():
+        conn.execute("ALTER TABLE source_tokens DISABLE TRIGGER evidence_immutable")
+        yield
+        conn.execute("ALTER TABLE source_tokens ENABLE TRIGGER evidence_immutable")
 
 
 def test_the_proof_refuses_an_artifact_it_cannot_read(ran: Ran) -> None:
