@@ -19,7 +19,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import _url_for, approve_run, gate_verdict
+from conftest import _url_for, approve_run, gate_verdict, priced
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -177,7 +177,7 @@ def test_the_loop_charges_what_the_provider_reported(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE, provider.bundle),
+        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
     )
 
     assert run_status(conn, run_id) is RunStatus.COMPLETE
@@ -218,7 +218,7 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE, provider.bundle),
+        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
     )
 
     recorded = conn.execute(
@@ -251,7 +251,7 @@ def test_the_artifact_is_the_envelope_the_host_built(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE, provider.bundle),
+        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
     )
 
     row = conn.execute(
@@ -291,7 +291,7 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, provider.bundle),
+            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
         )
 
     with connect(_url_for(conn.info.dbname)) as observer:
@@ -327,7 +327,7 @@ def test_the_loop_hands_each_node_its_predecessors_results(
         route=route,
         execution=Execution(
             module_provider,
-            ESTIMATE,
+            priced(ESTIMATE),
             module_provider.bundle,
         ),
     )
@@ -377,7 +377,7 @@ def test_a_predecessor_artifact_of_another_shape_is_refused_not_raised(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, provider.bundle),
+            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
         )
 
     assert caught.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
@@ -411,7 +411,7 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE, provider.bundle),
+        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
     )
 
     nodes = {node.module_id: node.route_node_id for node in route.nodes}
