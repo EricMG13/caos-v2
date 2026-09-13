@@ -2,6 +2,13 @@
 
 Reviewed 12 September 2026. Target: `/Users/ericguei/Documents/caos-v2`.
 
+> **Execution status, 13 September 2026.** The findings and original paths below
+> are baseline evidence, not a description of the current workbench. Phase 2 is
+> being repaired in `/Users/ericguei/Documents/caos-workbench` on
+> `codex/execute-repair-plan`. Application checkpoint `f8cd738` is a green but
+> incomplete Task17d2 checkpoint. Resume only from
+> [`CLAUDE_CODE_HANDOFF.md`](CLAUDE_CODE_HANDOFF.md).
+
 ## Recommendation
 
 Keep this codebase and finish its connections. Do not start another rebuild.
@@ -254,12 +261,17 @@ Each phase should be completed and demonstrated before its dependent phase start
 
 ### Task-specific indexing and review policy
 
-Updated at the user's latest request: confidence review replaces rewrite tournaments, including pending implementation. No further tournament roles, candidates or winner-selection gates are required. This supersedes earlier tournament requirements; completed tournament records remain historical evidence. Ordinary tests, static/security checks and phase-completion-only adversarial audits remain required.
+Updated at the user's latest request: confidence review replaces rewrite
+tournaments and runs only at the end of a whole phase. No further tournament
+roles, candidates or winner-selection gates are required. This supersedes
+earlier tournament and per-edit confidence requirements; completed tournament
+records remain historical evidence. Ordinary task review, tests, static/security
+checks and the phase-completion-only specialist reviews remain required.
 
 | Activity | Trigger and scope | Reasoning / completion evidence |
 |---|---|---|
 | GitNexus indexing | Index the selected implementation checkout in Phase 0 before code changes. Check freshness before each phase and refresh after material dependency changes and at phase completion | Record indexed commit/worktree state, tool version, exclusions and parser failures; inspect repository context and relevant symbol/caller relationships |
-| `confidence-review` | After code changes and before completion or commit, over the changed code and affected callers. Prioritize changed, non-trivial high-risk sections | Enumerate and rank uncertainties, investigate actual paths, try to refute suspected bugs, patch confirmed root causes and rerun affected checks. Use **extra high (`xhigh`) reasoning** for confidence review |
+| `confidence-review` | **Phase completion only**, after every task and ordinary task review has passed. Review the full phase diff and affected callers, prioritizing high-risk sections | Enumerate and rank uncertainties, investigate actual paths, try to refute suspected bugs, patch confirmed root causes and rerun affected/full checks. Use **extra high (`xhigh`) reasoning** |
 | `adversarial-reviewer` code audit | **Phase completion only**, after the phase's implementation, confidence review and normal checks. Audit the full phase diff plus affected callers, not just the final PR | **extra high (`xhigh`) reasoning**; Saboteur, New Hire and Security Auditor passes, deduplicated evidence-backed findings and a phase verdict |
 
 **High-risk means consequence, not file size.** Qualifying sections include authorization/revocation and cross-case isolation; source/route/approval identity; readiness/QA/terminal transitions; attempt fencing and concurrent writes; budget/provider billing; financial arithmetic; untrusted-input/citation acceptance; UI snapshot/evidence authority; and signing/freezing/filing/qualification. Identify the exact changed symbols and failure consequence in each phase's risk register. A whole UI section is not high-risk merely because one authority function inside it is.
@@ -521,7 +533,7 @@ These are proposed completion rules, retaining the useful existing controls. Cur
 | UI behavior | All frontend units, build/deep-link exports, existing accessibility/workbench matrix, plus real API integration journey | Fixture-only tests cannot satisfy integration; no severe accessibility or authority-isolation regression |
 | Scan coverage/security | Bandit on 3.12 with no parse errors and claimed-file coverage, locked dependency audit, gitleaks, Trivy/scanner floor | A scan of zero files is a failure. Existing Trivy policy rejects fixable HIGH/CRITICAL findings; unfixed risks still need triage |
 | Measured performance | Actual query/call counts on affected endpoints and collection-size cases, bounded inputs, cancellation/timeouts | A declaration such as `IO_BUDGET = None` is not measured evidence |
-| Review/diff | `confidence-review` after code changes, with **extra high (`xhigh`) reasoning**; no rewrite tournaments; ordinary PR review; existing 800-counted-line PR ceiling | Record ranked uncertainties and evidence-backed dispositions, fix confirmed root causes, rerun affected checks, and split oversized concerns |
+| Review/diff | Ordinary exact-range task review at each accepted slice; no rewrite tournaments; existing 800-counted-line PR ceiling | Record evidence-backed findings, fix confirmed root causes, rerun affected checks, and split oversized concerns. Defer `confidence-review` to the whole-phase gate below |
 | Phase-completion audit | **`adversarial-reviewer` only at phase completion, at extra high (`xhigh`) reasoning**, over the full phase diff and affected callers | No intermediate/per-PR adversarial audit requirement; confirmed blockers must be fixed and reverified before accepting the phase |
 | Production smoke | Boot built artifact; health/readiness, auth edge, static routes, real section reads/commands, fixtures absent | A Docker build or image scan alone is insufficient |
 | Release qualification | Exact build/adapter/model/set identity, current authenticated verdict, explicit capped paid evaluation when authorized | A unit-green build is not automatically credit-qualified |
@@ -553,9 +565,18 @@ Source withdrawal is an immediate safety event. Keep historical artifacts/audit 
 1. The reproduction fails against the pre-fix implementation for the stated cause.
 2. The shared root cause is fixed, and sibling callers are checked.
 3. The regression and relevant integration/race/error-path tests pass.
-4. `confidence-review` has run after code changes, with extra high (`xhigh`) reasoning. Ranked uncertainties have evidence-backed dispositions; confirmed new issues are patched and retested. Rewrite tournaments are no longer required. An individual repair does not trigger an adversarial audit: the full `xhigh`-reasoning adversarial code audit runs only at phase completion, as specified in section 5.
+4. An ordinary task review has checked the exact repair range. Neither
+   specialist review runs for an individual repair: one full-phase
+   `confidence-review`, then one full-phase adversarial code audit, run only at
+   phase completion with actual `xhigh` reasoning. Rewrite tournaments are no
+   longer required.
 5. No unrelated source, vendor or user changes are lost. Gate/contract changes have an explicit decision and migration where needed.
-6. Handoff names the exact commit, GitNexus index identity/freshness, commands/results, risk classifications, confidence-review scope/results and actual reasoning settings, remaining limitations and enabled/disabled feature scope. At phase completion, also attach the adversarial audit verdict and remediation evidence. “All tests pass” never substitutes for “the requested user journey works.”
+6. Handoff names the exact commit, GitNexus index identity/freshness,
+   commands/results, risk classifications, ordinary review result, remaining
+   limitations and enabled/disabled feature scope. At phase completion, also
+   attach both specialist-review scopes/results, actual reasoning settings,
+   verdicts and remediation evidence. “All tests pass” never substitutes for
+   “the requested user journey works.”
 
 ## 8. Smallest useful delivery order
 

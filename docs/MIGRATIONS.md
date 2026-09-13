@@ -1,6 +1,7 @@
 # Migration and recovery procedure
 
-The declared version is `len(server.store.MIGRATIONS)` (currently **4**).
+The declared version is always `len(server.store.MIGRATIONS)`; the registry is
+the authority, so this procedure does not copy a count that can become stale.
 `server/store/schema.sql` is immutable migration `0001_legacy`; its original
 bytes remain unchanged. Add the next reviewed SQL file under `server/store/`
 and append its stable name and UTF-8 body to `MIGRATIONS`. Do not edit, reorder,

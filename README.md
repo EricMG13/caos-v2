@@ -11,6 +11,7 @@ a page of a pinned document, not a text match.
 | | |
 |---|---|
 | [`CLAUDE.md`](CLAUDE.md) | the engineering contract and the eleven invariants |
+| [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md) | the exact Phase 2 continuation checkpoint, gates and review timing |
 | [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md) | what gets built, in what order, and what "done" means per phase |
 | [`docs/SYSTEM_SPEC.md`](docs/SYSTEM_SPEC.md) | components, data model, route resolution, publication |
 | [`docs/IA_SPEC.md`](docs/IA_SPEC.md) | one workspace, nine sections, and their contracts |
@@ -28,7 +29,8 @@ The repository was seeded on 2026-09-10 from the CAOS-Final specification
 Phase 9 workspace. Its gates are being repaired in the ordered slices tracked
 by [`docs/REPAIR_PLAN.md`](docs/REPAIR_PLAN.md). Phase 1 was accepted at
 `e3964e6ec1d64a7d7059eef4211b251e1a2fe9e9`; Phase 2 is in progress.
-This is not application or release acceptance.
+Its current application-code checkpoint is `f8cd738` (Task17d2 incomplete).
+This is not task, phase, application or release acceptance.
 
 ## Local development
 
