@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from server.methodology.bundle import Bundle
-from server.methodology.vendor import load_vendor_contract
+from server.methodology.vendor import VendorContract, load_vendor_contract
 from server.refusals import Refusal, RefusalCode
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
@@ -35,6 +35,7 @@ def test_vendor_loader_leaves_sys_path_untouched() -> None:
     before = _import_state()
     contract = load_vendor_contract(Bundle(VENDORED))
     assert _import_state() == before
+    assert isinstance(contract, VendorContract)
     # Standard-library imports the vendor code makes are ordinary; no vendor
     # module, generic or privately named, is left registered.
     assert not any(
