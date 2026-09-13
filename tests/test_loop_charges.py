@@ -31,6 +31,7 @@ from server.methodology.runner import ModuleProvider
 from server.provider import Completion
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
+from server.store.events import events_of
 from server.store.routes import pin_route
 from server.store.runs import (
     Accepted,
@@ -414,7 +415,10 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     )
 
     nodes = {node.module_id: node.route_node_id for node in route.nodes}
-    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    # §39: an empty frontier with unfinished required work is blocked, not done.
+    assert run_status(conn, run_id) is RunStatus.BLOCKED
+    assert [e.name for e in events_of(conn, run_id)].count("RUN_BLOCKED") == 1
+    assert "RUN_COMPLETE" not in [e.name for e in events_of(conn, run_id)]
     assert len(completions.prompts) == 1, "the gate was asked; what it blocked was not"
     assert _charges(conn, run_id) == [REPORTED], "one charge, for the one call"
     assert _reserved(conn, run_id) == [ESTIMATE], "and one reservation behind it"

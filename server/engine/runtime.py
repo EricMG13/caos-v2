@@ -25,7 +25,13 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import GATE_MODULE, ResolvedRoute, frontier
+from server.engine.route import (
+    GATE_MODULE,
+    NodeState,
+    ResolvedRoute,
+    frontier,
+    node_states,
+)
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -37,7 +43,13 @@ from server.store.outcomes import (
     record_outcome,
     require_idle,
 )
-from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    block_run,
+    complete_run,
+    start_attempt,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +120,14 @@ def run_route(
                 route_node_id=route_node_id,
                 execution=execution,
             )
-    complete_run(conn, run_id)
+    # §39: success only when every pinned node was accepted; an empty frontier
+    # with unfinished required work ends the run blocked.
+    with execution_reads(conn):
+        states = node_states(route, accepted_artifacts(conn, blobs, route, run_id))
+    if all(state is NodeState.COMPLETE for state in states.values()):
+        complete_run(conn, run_id)
+    else:
+        block_run(conn, run_id)
 
 
 def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
