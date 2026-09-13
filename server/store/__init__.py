@@ -50,6 +50,10 @@ MIGRATIONS = (
         .with_name("0008_frozen_evidence.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0009_accepted_owner",
+        Path(__file__).with_name("0009_accepted_owner.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

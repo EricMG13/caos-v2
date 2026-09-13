@@ -115,23 +115,16 @@ def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
     """Every accepted artifact of the run, keyed by route node id.
 
     One join, read in one place. `accepted_artifacts` below and
-    `server.methodology.runner.ModuleProvider._upstream` both need exactly this
+    `server.methodology.executor._upstream_digests` both need exactly this
     row set -- the first to decide which nodes are COMPLETE and which body
     to read, the second to read a node's predecessors' bodies -- and a query
     string kept twice is a join two callers can silently drift out of step on
     the day the schema moves under one of them and not the other.
     """
-    # Ordered, because the rows collapse into a dict and a node may hold more
-    # than one accepted attempt: the latest wins, which is a rule rather than
-    # whatever order the planner returned. Presence was all `node_states`
-    # needed; Phase 11's chain reads the winning artifact's *contents* into the
-    # next node's prompt, so which one wins is now part of the answer.
+    # One row per node: `artifacts UNIQUE (run_id, route_node_id)` makes the
+    # accepted owner a database fact, so no ordering picks a winner.
     rows = conn.execute(
-        "SELECT attempts.route_node_id, artifacts.artifact_sha256"
-        " FROM artifacts"
-        " JOIN run_attempts AS attempts USING (attempt_id)"
-        " WHERE artifacts.run_id = %s"
-        " ORDER BY artifacts.created_at",
+        "SELECT route_node_id, artifact_sha256 FROM artifacts WHERE run_id = %s",
         (run_id,),
     ).fetchall()
     return {str(route_node_id): str(digest) for route_node_id, digest in rows}
