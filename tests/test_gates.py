@@ -120,6 +120,24 @@ def test_a_gate_starts_open(
     assert gate_state(conn, run_id, Gate.SOURCE_SET) is GateState.OPEN
 
 
+def test_changed_live_document_identity_reopens_both_gates(
+    gated: tuple[StoreConnection, UUID, UUID, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id, source_id, approver = gated
+    previews = {gate: gates.gate_preview(conn, run_id, gate) for gate in Gate}
+    for gate in Gate:
+        approve_gate(conn, _approval(conn, run_id, approver, gate))
+        assert gate_state(conn, run_id, gate) is GateState.RELEASED
+    conn.execute(
+        "UPDATE sources SET document_sha256 = %s WHERE source_id = %s",
+        ("0" * 64, source_id),
+    )
+    conn.commit()
+    for gate in Gate:
+        assert gates.gate_preview(conn, run_id, gate) == previews[gate]
+        assert gate_state(conn, run_id, gate) is GateState.OPEN
+
+
 @pytest.mark.parametrize("gate", list(Gate))
 def test_an_approval_releases_the_gate_it_was_given_for(
     gated: tuple[StoreConnection, UUID, UUID, UUID, UUID],
@@ -329,6 +347,9 @@ def test_preview_is_exact_immutable_captured_content(
             == sha256(preview.content.encode("utf-8")).hexdigest()
         )
         data = json.loads(preview.content)
+        assert preview.content == json.dumps(
+            data, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2
+        )
         assert data["input"] == {
             **asdict(pin),
             "run_id": str(run),
