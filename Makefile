@@ -42,7 +42,7 @@ types:
 
 test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarqube job
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
-		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 $(PY) -m pytest
+		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 $(PY) -m pytest -n auto
 	$(PY) scripts/scan_floors.py coverage.xml --cobertura
 	$(PY) scripts/io_budget.py --assert
 

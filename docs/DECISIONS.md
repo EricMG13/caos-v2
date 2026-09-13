@@ -1312,3 +1312,33 @@ must be addressed before validation.
 
 **Rollback.** Before f-1 each slice reverts alone, and migration 0012 only adds
 a nullable column. After f-1 rollback is a revert of commits, never a switch.
+
+## 2026-09-14 §43 — The suite runs across processes, and CI caches image layers
+
+**Decision.** Two build-time additions, neither reaching the runtime image:
+
+1. **`pytest-xdist==3.8.0`** (bringing `execnet==2.1.2`) joins the development
+   lock, hashed and wheels-only. `make test` and the `test` CI job run
+   `pytest -n auto`. Each worker builds its own migrated template and every
+   test still mints a uniquely named database, so no worker shares state with
+   another. `test-fast`, `test-postgres-races`, the `postgres` job and the live
+   provider suite stay single-process. Parametrize ids must be deterministic,
+   since every worker must collect the same tests.
+2. **`docker/setup-buildx-action` v4.3.0 and `docker/build-push-action`
+   v7.3.0**, commit-pinned, build the `image` job's image with
+   `cache-from/to: type=gha` and `load: true`. Nothing is pushed. Local
+   `make image` keeps the plain `docker build`.
+
+**Reason.** Measured locally on 2026-09-14 (10 cores): the full suite took
+5:45 serially without coverage and 1:43 with `-n auto` and coverage, 2,199
+passed, 97% coverage, and the Cobertura floor held. The serial run used about
+a third of one CPU: its time is PostgreSQL round trips, which parallel workers
+spread. The image job rebuilt the apt and pip layers on every run.
+
+**Cost.** A test that depends on another test's side effects or on global
+ordering can now fail intermittently; none did. The GitHub cache is a mutable
+input to the image build, but every layer it restores is keyed on the pinned
+base digest and hashed lock, and Trivy scans the loaded result either way.
+
+**Rollback.** Drop `-n auto` from the two call sites (the dependency can stay
+unused), or restore `docker build -t caos:ci .` in the `image` job.

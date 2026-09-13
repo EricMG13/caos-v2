@@ -14,7 +14,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import BUNDLE, CATALOG, CONTRACT, PINNED, skill, wire
@@ -36,7 +36,9 @@ from server.methodology.invocation import record_authority_matches
 from server.refusals import Refusal, RefusalCode
 
 SECRET = "Confidential covenant headroom 7.3x"
-SOURCE = uuid4()
+# Fixed, not uuid4(): it reaches parametrize ids, which pytest-xdist workers
+# must collect identically.
+SOURCE = UUID("6da212c6-65a1-46b3-9e5c-7ed56acccd18")
 DELIVERED = frozenset({SOURCE})
 CP0 = _identity("CP-0")
 CP0_MD = _markdown(CP0, body_note="Recorded source p1. " + SECRET)

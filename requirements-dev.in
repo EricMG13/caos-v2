@@ -3,6 +3,8 @@ ruff==0.14.0
 mypy==1.18.2
 pytest==9.0.3
 pytest-cov==7.0.0
+# Runs the suite across processes; each worker mints its own databases (docs/DECISIONS.md 43).
+pytest-xdist==3.8.0
 pre-commit==4.6.2
 # Shared with the separately pinned Python 3.12 security toolchain; keep the
 # combined dependency audit resolvable without upgrading that lock.
