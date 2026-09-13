@@ -1076,9 +1076,8 @@ def test_guard_is_restored_when_the_guarded_change_fails(harness: _Harness) -> N
 def test_accept_boundary_refuses_authority_revoked_after_the_runtime_check(
     harness: _Harness,
 ) -> None:
-    """Task17d3a RED: acceptance inserts after a committed revocation."""
+    """A revocation committed after the runtime check refuses at acceptance."""
     attempt = _reserved(harness)
-    node = harness.route.nodes[0]
     record_outcome(
         harness.conn,
         attempt_id=attempt,
@@ -1096,7 +1095,6 @@ def test_accept_boundary_refuses_authority_revoked_after_the_runtime_check(
         RefusalCode.GATE_APPROVAL_MISMATCH,
         None,
     )
-    assert node.route_node_id in {n.route_node_id for n in harness.route.nodes}
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert _events(harness, "ATTEMPT_ACCEPTED") == 0
     _still_running(harness)
