@@ -4,8 +4,8 @@ its host record, or a typed refusal (Task 3.1 slice c-5a; §41, §42).
 The claims path's guarantees carry over unchanged -- the attempt, the stored
 identity and the upstream are rechecked after transport -- and three are new:
 the Markdown is the vendor's conforming handoff for exactly this invocation,
-every citation anchors or the whole handoff is refused, and the Markdown of
-every answer is addressed as the call's diagnostic before analysis.
+every citation anchors or the whole handoff is refused, and every answer's
+exact response body is addressed as the call's diagnostic before analysis.
 """
 
 from __future__ import annotations
@@ -95,6 +95,10 @@ def _refused(
     return refused.value.code
 
 
+def _body(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def _diagnostic(harness: _Harness) -> str | None:
     row = harness.conn.execute("SELECT diagnostic_sha256 FROM call_outcomes").fetchone()
     harness.conn.rollback()
@@ -176,7 +180,10 @@ def test_the_executor_produces_a_validated_handoff_and_its_record(
     # The runner stores exactly the executor's two blobs.
     assert harness.blobs.get(gate.artifact_sha256) == outcomes[0].markdown
     assert gate.record_sha256 == hashlib.sha256(outcomes[0].record).hexdigest()
-    assert gate.diagnostic_sha256 == gate.artifact_sha256 == _diagnostic(harness)
+    assert (
+        gate.diagnostic_sha256 == _body(completions.bodies[0]) == _diagnostic(harness)
+    )
+    assert gate.artifact_sha256 == hashlib.sha256(completions.answers[0]).hexdigest()
     assert (gate.charge, gate.generation_id) == (REPORTED, "gen-canonical-test")
     gate_markdown = _verified(harness, "CP-0", gate_attempt, gate)
     assert gate_markdown == completions.answers[0]
@@ -197,14 +204,16 @@ def test_provider_claimed_identity_never_survives(harness: _Harness) -> None:
         RefusalCode.HANDOFF_IDENTITY_MISMATCH
     )
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
-    assert _diagnostic(harness) == hashlib.sha256(tampered.answers[0]).hexdigest()
+    assert _diagnostic(harness) == _body(tampered.bodies[0])
 
 
 def test_a_wrong_adapter_cannot_become_authority(harness: _Harness) -> None:
     claims = _Completions(harness.source_id)
     assert _refused(harness, "CP-0", claims) is RefusalCode.HANDOFF_MALFORMED
-    # Not a transport the Markdown could be read out of: no diagnostic.
-    assert _diagnostic(harness) is None
+    # Not a canonical transport, but still exactly what was said.
+    said = _Completions(harness.source_id).complete(claims.prompts[0], json_object=True)
+    assert isinstance(said.content, str)
+    assert _diagnostic(harness) == _body(said.content)
     # A canonical pin never runs as claims, whoever calls the claims executor.
     attempt = _reserved(harness, "CP-0")
     with pytest.raises(Refusal) as refused:
@@ -256,9 +265,10 @@ def test_a_blocked_handoff_is_billed_and_kept_as_a_diagnostic(
 ) -> None:
     blocked = CanonicalCompletions(harness.source_id, qa_status="Blocked")
     assert _refused(harness, "CP-0", blocked) is RefusalCode.HANDOFF_BLOCKED
-    digest = hashlib.sha256(blocked.answers[0]).hexdigest()
+    digest = _body(blocked.bodies[0])
     assert _diagnostic(harness) == digest
-    assert harness.blobs.get(digest) == blocked.answers[0]
+    # The whole closed transport, so the verdict can be re-derived (§42.3).
+    assert harness.blobs.get(digest) == blocked.bodies[0].encode("utf-8")
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
 
 
@@ -290,5 +300,4 @@ def test_billing_survives_every_analytical_refusal(
     completions = CanonicalCompletions(harness.source_id, **knobs)
     assert _refused(harness, "CP-0", completions) is RefusalCode(code)
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
-    expected = [hashlib.sha256(a).hexdigest() for a in completions.answers]
-    assert _diagnostic(harness) == (expected[0] if expected else None)
+    assert _diagnostic(harness) == _body(completions.bodies[0])

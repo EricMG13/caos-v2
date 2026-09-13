@@ -4,12 +4,13 @@ The claims executor's unit structure with the canonical adapter's contract. The
 attempt, the stored input, the pinned route and node, the pinned adapter and
 the host identity are read in one unit before the call and again after it;
 the upstream the prompt named must be unchanged. The call is billed before any
-analysis, with the Markdown of the answer addressed as the call's diagnostic
-whenever the transport yields one (§42.3), so a refused or Blocked handoff
-still says what was said. Then the handoff must be the vendor's conforming
-Markdown for exactly this invocation, and every citation must anchor in the
-delivered evidence: one that does not refuses the whole handoff, since the
-Markdown cannot be edited to drop what rests on it (§41.3).
+analysis, with the exact response body addressed as the call's diagnostic
+(§42.3), so a refused or Blocked handoff still says what was said -- and a
+Blocked verdict can be re-derived from it after a crash (`blocked_verdict`).
+Then the handoff must be the vendor's conforming Markdown for exactly this
+invocation, and every citation must anchor in the delivered evidence: one that
+does not refuses the whole handoff, since the Markdown cannot be edited to drop
+what rests on it (§41.3).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
@@ -26,7 +27,7 @@ from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute
+from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import verify_citations
 from server.methodology.bundle import (
     Bundle,
@@ -42,7 +43,6 @@ from server.methodology.executor import (
 )
 from server.methodology.handoff import (
     GATE_MODULE,
-    MAX_FILE_BYTES,
     MAX_TRANSPORT_CHARS,
     CanonicalRecord,
     HostIdentity,
@@ -90,7 +90,7 @@ class HandoffOutcome:
     charge: Decimal
     model: str
     generation_id: str
-    # What `record_outcome` stored as the call's diagnostic Markdown address.
+    # What `record_outcome` stored as the call's diagnostic body address.
     diagnostic_sha256: str | None
 
 
@@ -113,26 +113,19 @@ def _catalog(bundle: Bundle) -> dict[str, Any]:
 
 
 def _diagnostic(blobs: BlobStore, content: object) -> str | None:
-    """The answer's Markdown as a blob address, or None when there is none.
+    """The exact response body as a blob address, or None when there is none.
 
+    The whole closed transport, not only its Markdown, so `blocked_verdict` can
+    re-run the complete verdict -- citations included -- from stored facts.
     Lenient on purpose: this is what was said, not what is accepted. A blob
     that cannot be written is also None, because the bill must still commit.
     The bytes are untrusted provider text, never `BoundaryText`: no reader may
-    render them or read them as analysis.
+    render them, and only `blocked_verdict`'s full re-validation reads them.
     """
-    text = None
-    if isinstance(content, str) and len(content) <= MAX_TRANSPORT_CHARS:
-        with suppress(ValueError, RecursionError):
-            wire = json.loads(content)
-            text = wire.get("canonical_markdown") if isinstance(wire, dict) else None
-    markdown = None
-    if isinstance(text, str):
-        with suppress(UnicodeEncodeError):
-            markdown = text.encode("utf-8")
-    if markdown is None or len(markdown) > MAX_FILE_BYTES:
+    if not isinstance(content, str) or len(content) > MAX_TRANSPORT_CHARS:
         return None
-    with suppress(OSError, Refusal):
-        return blobs.put(markdown)
+    with suppress(UnicodeEncodeError, OSError, Refusal):
+        return blobs.put(content.encode("utf-8"))
     return None
 
 
@@ -263,6 +256,100 @@ def _unless_blocked(validate: Callable[[], Projections]) -> Projections | None:
     return None
 
 
+# Refusals that say the store, not the answer, failed: never read as a verdict.
+_STORE_FAULTS = frozenset(
+    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+)
+
+
+def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    route_node_ids: Collection[str],
+) -> bool:
+    """Whether a billed attempt of one of these nodes answered a validated Blocked.
+
+    Brief correction 6 re-derived from committed facts, inside the caller's read
+    unit, so the live path and crash recovery decide alike: an unaccepted
+    attempt with a known charge and generation whose stored response body
+    re-validates -- identity rebuilt for that attempt, vendor validation, every
+    citation anchored -- to `HANDOFF_BLOCKED`. Any other refusal means that
+    attempt was an ordinary refusal. One query when nothing was billed.
+    """
+    rows = conn.execute(
+        "SELECT t.route_node_id, o.attempt_id, o.diagnostic_sha256"
+        " FROM call_outcomes o JOIN run_attempts t USING (attempt_id)"
+        " WHERE t.run_id = %s AND t.route_node_id = ANY(%s)"
+        " AND o.charged_attempt_id IS NOT NULL AND o.generation_id IS NOT NULL"
+        " AND o.diagnostic_sha256 IS NOT NULL AND NOT EXISTS"
+        " (SELECT 1 FROM artifacts a WHERE a.attempt_id = o.attempt_id)"
+        " ORDER BY t.route_node_id, t.ordinal",
+        (run_id, list(route_node_ids)),
+    ).fetchall()
+    nodes = {node.route_node_id: node for node in route.nodes}
+    for route_node_id, attempt, diagnostic in rows:
+        node = nodes.get(str(route_node_id))
+        if node is not None and _answered_blocked(
+            conn,
+            blobs,
+            bundle,
+            route,
+            node,
+            run_id=run_id,
+            attempt_id=UUID(str(attempt)),
+            diagnostic_sha256=str(diagnostic),
+        ):
+            return True
+    return False
+
+
+def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    node: RouteNode,
+    *,
+    run_id: UUID,
+    attempt_id: UUID,
+    diagnostic_sha256: str,
+) -> bool:
+    try:
+        body = blobs.get(diagnostic_sha256).decode("utf-8")
+        # The same identity rule as `accepted_projections`: see the note there.
+        identity = host_identity(
+            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
+        )
+        sources = {item.source_id for item in _delivered(conn, run_id)}
+        markdown, citations = parse_response(body, delivered=frozenset(sources))
+        authority = assemble_authority(bundle, node.module_id)
+        projections = _unless_blocked(
+            lambda: validate_markdown(
+                _contract(bundle),
+                _catalog(bundle),
+                authority.files[SKILL],
+                markdown,
+                identity=identity,
+                gate_expects=_gate_expects(route, node.module_id),
+            )
+        )
+        if projections is not None:
+            return False
+        # Anchored before Blocked is honoured, exactly as on the live path.
+        verify_citations(conn, delivered=sources, citations=citations)
+    except Refusal as refusal:
+        if refusal.code in _STORE_FAULTS:
+            raise
+        return False
+    except (OSError, UnicodeDecodeError):
+        return False
+    return True
+
+
 def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
@@ -281,6 +368,16 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     facts, the record must bind this Markdown and that identity, and the
     projections re-parsed from the Markdown must equal the record's (§42.4).
     Citations are not re-anchored here; the proof and freezing do that.
+
+    The identity is rebuilt from the upstream accepted *now*, which equals the
+    call-time upstream because no direct input can be accepted after its
+    target: a blocking edge waits for its source, and `route._state_for`
+    BLOCKS a soft edge whose unaccepted source the gate called READY or
+    READY_WITH_LIMITATIONS. On the canonical routes every module waits on a
+    REQUIRED edge from the gate, the gate must name every route module
+    (`_gate_expects`), and a module it does not clear never runs. Were that
+    rule to loosen, this refuses and `blocked_verdict` reads "not blocked"
+    rather than misread.
     """
     node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
     if node is None:
