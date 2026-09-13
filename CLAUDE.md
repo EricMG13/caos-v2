@@ -16,15 +16,15 @@ first commit.
 Claude Code resumes from
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
 Task17d2 is accepted on `codex/execute-repair-plan` (Task17d2a
-`f8cd738`, Task17d2b `ceabf9f`), and so is Task17d3a at `829d863` plus its
-review remediation (reports in `.superpowers/sdd/`). Next is proof-only
-Task17d3b. Phase 2 is **not** complete. Work only in
+`f8cd738`, Task17d2b `ceabf9f`), and so is Task17d3 (Task17d3a `829d863`,
+proof-only Task17d3b `17645f3`, each with review remediation; reports in
+`.superpowers/sdd/`). Next is Task17e. Phase 2 is **not** complete. Work only in
 `/Users/ericguei/Documents/caos-workbench`; the original
 `/Users/ericguei/Documents/caos-v2` checkout stays read-only.
 
 Before changing code, read the tracked handoff and the local binding records
 `.superpowers/sdd/task-17d3-brief.md` and
-`.superpowers/sdd/task-17d3a-report.md`, then rebuild the local GitNexus index as
+`.superpowers/sdd/task-17d3b-report.md`, then rebuild the local GitNexus index as
 the handoff specifies. Every shell command starts by unsetting
 `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and
 `CAOS_REQUIRE_PROVIDER`. Never invoke a live provider without separate explicit
