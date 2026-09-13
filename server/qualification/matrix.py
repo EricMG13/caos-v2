@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
@@ -46,11 +46,11 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import BLOCKING, ResolvedRoute
+from server.engine.route import ResolvedRoute
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.methodology.handoff import HostIdentity, read_record
-from server.methodology.invocation import host_identity
+from server.methodology.handoff import read_record
+from server.methodology.invocation import call_time_identity, host_identity
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -350,7 +350,13 @@ def _recorded(  # noqa: PLR0913 -- one accepted artifact of one pinned run
             blobs,
             artifact_sha256=artifact_sha256,
             record_sha256=str(record_sha256),
-            expected=_call_time(blobs, route, host, str(record_sha256)),
+            expected=call_time_identity(
+                conn,
+                route,
+                host,
+                attempt_id=attempt_id,
+                record=_stored(blobs, str(record_sha256)),
+            ),
         )
     if record is None:
         raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
@@ -360,28 +366,12 @@ def _recorded(  # noqa: PLR0913 -- one accepted artifact of one pinned run
     }
 
 
-def _call_time(
-    blobs: BlobStore, route: ResolvedRoute, host: HostIdentity, record_sha: str
-) -> HostIdentity:
-    """The host's identity narrowed to the upstream the call could have named.
-
-    The rule `server/deliverable/canonical.py` and the proof apply, restated
-    because theirs is private: a soft input accepted after the call is named now
-    and was not then, so refs narrow to those the record names -- except a
-    blocking one, which is never optional. The record adds nothing to them.
-    """
-    named: set[str] = set()
-    with suppress(Exception):  # an unreadable record is `read_record`'s refusal
-        document = json.loads(blobs.get(record_sha))
-        named = {ref["route_node_id"] for ref in document["identity"]["upstream"]}
-    by_module = {n.module_id: n.route_node_id for n in route.nodes}
-    named |= {
-        str(by_module.get(edge.source))
-        for edge in route.edges
-        if edge.target == host.module_id and edge.type in BLOCKING
-    }
-    kept = tuple(ref for ref in host.upstream if ref.route_node_id in named)
-    return replace(host, upstream=kept)
+def _stored(blobs: BlobStore, record_sha256: str) -> bytes | None:
+    """The record's bytes, or None: an unreadable record is `read_record`'s refusal."""
+    try:
+        return blobs.get(record_sha256)
+    except (Refusal, OSError):
+        return None
 
 
 def _quotes(
