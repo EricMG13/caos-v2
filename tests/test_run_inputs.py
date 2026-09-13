@@ -31,15 +31,18 @@ type Prepared = tuple[StoreConnection, UUID, SourceSet, Bundle, ResolvedRoute]
 
 
 def _prepare(
-    conn: StoreConnection, case_id: UUID, path: Path
+    conn: StoreConnection,
+    case_id: UUID,
+    path: Path,
+    selection: tuple[str, str] = (PROFILE, "DEEP_RESEARCH"),
 ) -> tuple[UUID, SourceSet, Bundle, ResolvedRoute]:
+    """A run on `selection`, pinned but not yet input-pinned. The default is a
+    route the adapter does not execute: pinning stays general (§42.2)."""
     _admit(conn, case_id, path)
     conn.commit()
     source = snapshot_source_set(conn, case_id)
     run = start_run(conn, case_id)
-    route = resolve_route(
-        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
-    )
+    route = resolve_route(json.loads(CATALOG_PATH.read_text()), *selection)
     pin_route(conn, run, route)
     return run, source, Bundle(CATALOG_PATH.parents[3]), route
 

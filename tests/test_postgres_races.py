@@ -14,7 +14,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from test_run_events import approved_nodes
+from test_run_events import RECORD, approved_nodes
 
 from server.boundary_text import BoundaryText
 from server.store import RunStatus, apply_schema, connect
@@ -97,6 +97,7 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
                     charge=CHARGE,
                     model=MODEL,
                     generation_id=GENERATION,
+                    record_sha256=RECORD,
                 ),
             )
 

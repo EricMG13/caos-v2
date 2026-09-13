@@ -17,7 +17,9 @@ from server.store import RunStatus, StoreConnection, connect, outcomes, runs
 from server.store.budget import remaining, reserve, reserved_for
 from server.store.events import events_of, lock_run
 
-ACCEPTED = runs.Accepted("a" * 64, Decimal("0.25"), "test/model", "generation")
+ACCEPTED = runs.Accepted(
+    "a" * 64, Decimal("0.25"), "test/model", "generation", record_sha256="c" * 64
+)
 OUTCOME_EVENT = "CALL_OUTCOME_RECORDED"
 money_run = _money_run
 
@@ -364,7 +366,8 @@ def test_legacy_acceptance_replay_never_invents_an_outcome(
     legacy: str,
 ) -> None:
     conn, run, attempt = money_run
-    accepted = replace(ACCEPTED, model="legacy model")
+    # A pre-0012 artifact carries no record; its replay names none either.
+    accepted = replace(ACCEPTED, model="legacy model", record_sha256=None)
     if legacy != "artifact":
         conn.execute(
             "INSERT INTO budget_ledger (attempt_id,run_id,amount) VALUES (%s,%s,%s)",

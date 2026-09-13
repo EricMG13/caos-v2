@@ -17,6 +17,7 @@ import psycopg
 from server import methodology
 from server.engine.route import ResolvedRoute
 from server.methodology.bundle import Bundle
+from server.methodology.handoff import ADAPTER_MODULES
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
@@ -241,7 +242,13 @@ def approved_run_input(
 def execution_input(
     conn: StoreConnection, run_id: UUID, bundle: Bundle
 ) -> tuple[RunInput, ResolvedRoute]:
-    """Require the actual executing Bundle/host adapter beside live authority."""
+    """Require the actual executing Bundle/host adapter beside live authority.
+
+    `RUN_INPUT_INVALID` for a pin of another build, manifest or adapter (a
+    `claims-json-v1` pin among them); `HANDOFF_MODULE_UNSUPPORTED` for a route
+    with a module the adapter does not own (§42.2) -- before any attempt,
+    reservation or call, since every executing caller reads this first.
+    """
     pin, route = approved_run_input(conn, run_id)
     if not isinstance(bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
@@ -251,7 +258,17 @@ def execution_input(
         methodology.adapter_for(route),
     ):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    require_adapter_route(route)
     return pin, route
+
+
+def require_adapter_route(route: ResolvedRoute) -> None:
+    """Refuse a route the canonical adapter does not own every module of (§42.2).
+
+    Pinning, gates and resolution stay general; execution and acceptance do not.
+    """
+    if any(node.module_id not in ADAPTER_MODULES for node in route.nodes):
+        raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
 
 
 def source_set_fingerprint(conn: StoreConnection, case_id: UUID) -> str:

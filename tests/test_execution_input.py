@@ -12,7 +12,8 @@ from conftest import route_fault
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked
 from test_gates import _approval
-from test_run_inputs import Prepared, _prepare, prepared
+from test_run_inputs import Prepared, _prepare
+from test_run_subject import SUBJECT
 from test_source_sets import _admit
 
 from server import methodology
@@ -31,14 +32,26 @@ from server.store.runs import create_case, start_run
 
 type Approved = tuple[Prepared, RunInput, tuple[UUID, UUID]]
 
-__all__ = ["prepared"]
+# Execution authority is only ever read for a route the adapter executes (§42.2).
+LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
+
+
+@pytest.fixture
+def prepared(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Prepared:
+    conn, case_id = case
+    return conn, *_prepare(conn, case_id, tmp_path, LITE)
 
 
 @pytest.fixture
 def approved(prepared: Prepared) -> Approved:
     conn, run, source, bundle, _route = prepared
     pin = pin_run_input(
-        conn, run, source.version, bundle, {"questions": ["Café?\r\nExact."]}
+        conn,
+        run,
+        source.version,
+        bundle,
+        {"questions": ["Café?\r\nExact."]},
+        subject=SUBJECT,
     )
     actors = (uuid4(), uuid4())
     for gate, actor in zip(Gate, actors, strict=True):
@@ -173,7 +186,9 @@ def test_current_bundle_and_adapter_are_distinct_from_historical_readability(
         )
         current = Bundle(tmp_path)
     elif change == "adapter":
-        monkeypatch.setattr(methodology, "CLAIMS_ADAPTER_VERSION", "claims-json-v2")
+        monkeypatch.setattr(
+            methodology, "CANONICAL_ADAPTER_VERSION", "canonical-markdown-v2"
+        )
     elif change == "moving":
         path.write_text(raw + " ")
     else:
@@ -302,8 +317,8 @@ def test_read_unit_excludes_revocation_but_not_an_independent_case(
 ) -> None:
     (conn, run, source, bundle, route), pin, actors = approved
     independent_case = create_case(conn, BoundaryText.of("Independent"))
-    other_run, other_source, _, _ = _prepare(conn, independent_case, tmp_path)
-    pin_run_input(conn, other_run, other_source.version, bundle)
+    other_run, other_source, _, _ = _prepare(conn, independent_case, tmp_path, LITE)
+    pin_run_input(conn, other_run, other_source.version, bundle, subject=SUBJECT)
     grant(conn, case_id=independent_case, user_id=actors[0], standing=Standing.APPROVER)
     conn.commit()
     for gate in Gate:
