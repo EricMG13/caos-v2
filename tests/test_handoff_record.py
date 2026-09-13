@@ -258,3 +258,39 @@ def test_the_record_carries_no_model_authored_claims() -> None:
         "projections",
         "citations",
     }
+
+
+@pytest.mark.parametrize(
+    "quote",
+    ["Example", "credit_os_run_id:", "ecorded sour", "Recorded source p"],
+)
+def test_a_quote_must_be_whole_words_of_the_body(quote: str) -> None:
+    # Front matter is host identity, and a quote matches whole tokens.
+    body = wire(CP0_MD, [_citation(matched_text=quote)])
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+@pytest.mark.parametrize(
+    "citations",
+    [[_citation(page=2**31)], [_citation(), _citation()]],
+)
+def test_an_unbounded_page_or_a_repeated_citation_refuses(
+    citations: list[dict[str, object]],
+) -> None:
+    assert _parse_refused(wire(CP0_MD, citations)) is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_an_oversized_transport_refuses_before_parsing() -> None:
+    body = " " * (2 * 26_214_400 + 1)
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_a_record_contradicting_its_own_identity_refuses(tmp_path: Path) -> None:
+    blobs, artifact, sha = _stored(tmp_path, _record(authority_bundle_sha256="e" * 64))
+    _mismatch(blobs, artifact, sha, CP0)
+
+
+def test_a_record_not_in_canonical_form_refuses(tmp_path: Path) -> None:
+    blobs, artifact, _ = _stored(tmp_path, _record())
+    spaced = record_bytes(_record()).replace(b'":', b'": ', 1)
+    _mismatch(blobs, artifact, blobs.put(spaced), CP0)
