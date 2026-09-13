@@ -113,16 +113,36 @@ class Harness:
 
 
 @dataclass(frozen=True, slots=True)
+class Attempted:
+    """One stored attempt at a node, exactly as the store recorded it.
+
+    `outcome` False is a reservation whose call may have been made and left no
+    record: possible spend. `charged` is a known charge on the ledger; an outcome
+    without one is unknown exposure. `model` and `generation_id` are the recorded
+    call's, None when it recorded none -- never the configured provider's name.
+    """
+
+    attempt_id: UUID
+    outcome: bool
+    charged: bool
+    model: str | None
+    generation_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class Unrun:
-    """A pinned node that produced no artifact, and the state explaining it.
+    """A pinned node that produced no artifact, the state explaining it, and
+    what was tried.
 
     The state matters as much as the name: BLOCKED is the route's own rules
     being applied, RUNNABLE is a run that stopped with work still in front of
-    it. A list of bare node ids would read the same either way.
+    it. `attempts` separates a node never reached (empty) from one whose calls
+    were attempted, with or without a record or a known charge.
     """
 
     route_node_id: str
     state: NodeState
+    attempts: tuple[Attempted, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -471,8 +491,22 @@ def _unrun(conn: StoreConnection, blobs: BlobStore, run_id: UUID) -> tuple[Unrun
     if route is None:
         return ()
     states = node_states(route, _accepted(conn, blobs, route, run_id))
+    tried: dict[str, list[Attempted]] = {}
+    for node_id, *fact in conn.execute(
+        "SELECT t.route_node_id, t.attempt_id, o.attempt_id IS NOT NULL,"
+        " l.attempt_id IS NOT NULL, o.model, o.generation_id FROM run_attempts t"
+        " LEFT JOIN call_outcomes o ON o.attempt_id = t.attempt_id"
+        " LEFT JOIN budget_ledger l ON l.attempt_id = t.attempt_id"
+        " WHERE t.run_id = %s ORDER BY t.started_at, t.attempt_id",
+        (run_id,),
+    ).fetchall():
+        tried.setdefault(str(node_id), []).append(Attempted(*fact))
     return tuple(
-        Unrun(route_node_id=node.route_node_id, state=states[node.route_node_id])
+        Unrun(
+            route_node_id=node.route_node_id,
+            state=states[node.route_node_id],
+            attempts=tuple(tried.get(node.route_node_id, ())),
+        )
         for node in route.nodes
         if states[node.route_node_id] is not NodeState.COMPLETE
     )

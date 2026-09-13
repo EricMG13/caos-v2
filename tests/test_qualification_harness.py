@@ -50,6 +50,7 @@ from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
 from server.provider import Completion
 from server.qualification.harness import (
+    Attempted,
     Harness,
     Performed,
     PerformedSet,
@@ -578,13 +579,18 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
         assert record.proof is not None
         assert record.proof.run_id == record.run_id
         assert record.proof.artifacts == 1
-        # And this is what the proof could not say.
-        assert record.unrun == (
-            Unrun(
-                route_node_id=f"RN-{PROFILE}-{SELECTION}-02-CP-DR",
-                state=NodeState.RUNNABLE,
-            ),
+        # And this is what the proof could not say: CP-DR was attempted, its
+        # call was recorded with no known charge, and the producer is the one
+        # the call recorded -- no generation, not a configured stand-in.
+        [unrun] = record.unrun
+        [attempt] = unrun.attempts
+        assert isinstance(attempt, Attempted)
+        assert (unrun.route_node_id, unrun.state) == (
+            f"RN-{PROFILE}-{SELECTION}-02-CP-DR",
+            NodeState.RUNNABLE,
         )
+        assert (attempt.outcome, attempt.charged) == (True, False)
+        assert (attempt.model, attempt.generation_id) == ("a-model/for-the-test", None)
 
         # A set that stopped is not a measurement: the records are kept, the
         # matrix is withheld rather than built over the cases that happened to
@@ -635,6 +641,10 @@ def test_a_case_that_stops_ends_the_set_without_discarding_it(
             f"RN-{PROFILE}-{SELECTION}-01-CP-0",
             f"RN-{PROFILE}-{SELECTION}-02-CP-DR",
         ]
+        # Attempted with unknown exposure, against never reached at all.
+        gate, research = record.unrun
+        assert [(a.outcome, a.charged) for a in gate.attempts] == [(True, False)]
+        assert research.attempts == ()
         assert performed.matrix is None
 
         # Both inputs exist; the second case purchased nothing.
