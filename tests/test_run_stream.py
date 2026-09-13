@@ -24,11 +24,13 @@ import pytest
 from test_run_events import approved_nodes
 
 from server.api.stream import IO_BUDGET, StreamEvent, tail
+from server.refusals import Refusal
 from server.store import StoreConnection
 from server.store.events import RunEvent
 from server.store.members import Standing, grant, revoke
 from server.store.runs import (
     Accepted,
+    block_run,
     complete_attempt,
     fail_run,
     start_attempt,
@@ -121,6 +123,27 @@ def test_a_failed_run_closes_the_stream_too(
     delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
 
     assert _names(delivered) == [RunEvent.RUN_FAILED.value]
+
+
+def test_a_blocked_run_closes_the_stream_too(
+    watched: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, viewer = watched
+    assert block_run(conn, run_id)
+    assert not block_run(conn, run_id), "the terminal event is exactly-once"
+
+    delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
+
+    assert _names(delivered) == [RunEvent.RUN_BLOCKED.value]
+
+
+def test_a_blocked_run_refuses_new_attempts(
+    watched: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, _viewer = watched
+    block_run(conn, run_id)
+    with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+        start_attempt(conn, run_id, "CP-1")
 
 
 def test_a_running_run_delivers_what_there_is_and_stops(

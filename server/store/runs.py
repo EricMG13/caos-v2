@@ -249,6 +249,16 @@ def complete_attempt(
     return complete_run(conn, _attempt_owner(conn, attempt_id)[0])
 
 
+def block_run(conn: StoreConnection, run_id: UUID) -> bool:
+    """End a run whose route has required work nothing can release (§39).
+
+    Returns whether this call ended it. No further attempt or reservation is
+    possible; the reason is re-derived from the pins and accepted artifacts.
+    """
+    lock_run(conn, run_id)
+    return _transition(conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED)
+
+
 def fail_run(conn: StoreConnection, run_id: UUID) -> bool:
     """End a run without an artifact. Returns whether this call ended it."""
     lock_run(conn, run_id)
