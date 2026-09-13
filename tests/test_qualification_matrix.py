@@ -142,17 +142,12 @@ def ran(
         route=catalog_route,
         bundle=bundle,
     )
-    blocks = conn.execute(
-        "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
-        (source_id,),
-    ).fetchall()
     conn.rollback()
     provider = ModuleProvider(
         conn=conn,
         bundle=bundle,
         blobs=blobs,
         completions=_Completions(source_id),
-        delivered=[(source_id, str(row[0])) for row in blocks],
         route=catalog_route,
         run_id=run_id,
     )

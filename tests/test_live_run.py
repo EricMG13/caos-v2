@@ -107,7 +107,6 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     run_id = start_run(conn, case_id)
     conn.commit()
     approve_run(conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle)
-    delivered = _every_block(conn, source_ids)
     conn.rollback()
 
     module_provider = ModuleProvider(
@@ -115,7 +114,6 @@ def test_a_live_run_admits_documents_and_completes_its_route(
         bundle=bundle,
         blobs=blobs,
         completions=completions,
-        delivered=delivered,
         route=route,
         run_id=run_id,
     )
@@ -148,16 +146,3 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     ).fetchall()
     assert len(charges) == len(route.nodes)
     assert all(isinstance(row[0], Decimal) and row[0] >= 0 for row in charges)
-
-
-def _every_block(
-    conn: StoreConnection, source_ids: list[UUID]
-) -> list[tuple[UUID, str]]:
-    """Every block of every admitted document, delivered to every node: what the
-    qualification harness delivers, for the same reason."""
-    rows = conn.execute(
-        "SELECT source_id, block_id FROM source_blocks"
-        " WHERE source_id = ANY(%s) ORDER BY source_id, block_id",
-        (source_ids,),
-    ).fetchall()
-    return [(UUID(str(row[0])), str(row[1])) for row in rows]
