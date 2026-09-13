@@ -22,6 +22,8 @@ and this file has to render the same in ten years.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from html import escape
 from typing import Any
@@ -31,6 +33,8 @@ from server.refusals import Refusal, RefusalCode
 # Every approved copy says so on its face. The bytes that carry an opinion are
 # not the bytes that carry a filing (`SYSTEM_SPEC.md` §7).
 PENDING = "PENDING APPROVAL"
+# A pathway scope that is a screen, never committee clearance (`handoff.py`).
+SCREENING_ONLY = "SCREENING_ONLY"
 
 
 def render(payload: Mapping[str, Any]) -> bytes:
@@ -46,9 +50,22 @@ def render(payload: Mapping[str, Any]) -> bytes:
     if not isinstance(artifacts, list) or not artifacts:
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
 
-    body = "\n".join(_artifact(artifact) for artifact in artifacts)
+    # A canonical artifact's page facts come from its record (§41), claims'
+    # from the artifact itself; both reach the same provenance index.
+    views = [
+        _canonical(artifact)
+        if isinstance(artifact, Mapping) and "markdown" in artifact
+        else artifact
+        for artifact in artifacts
+    ]
+    body = "\n".join(
+        _handoff(view) if isinstance(view, _Handoff) else _artifact(view)
+        for view in views
+    )
     narrative = _narrative(payload.get("narrative"))
-    provenance = _provenance(artifacts)
+    provenance = _provenance(
+        [view.provenance if isinstance(view, _Handoff) else view for view in views]
+    )
 
     return (
         "<!doctype html>\n"
@@ -63,6 +80,7 @@ def render(payload: Mapping[str, Any]) -> bytes:
         "blockquote{border-left:3px solid #999;margin:.6em 0;\n"
         "padding:.2em 1em;color:#333}\n"
         ".cite{font-size:9pt;color:#555}\n"
+        "pre{white-space:pre-wrap;font:9pt/1.35 Menlo,monospace}\n"
         "@media print{body{margin:0;max-width:none}}\n"
         "</style>\n</head>\n<body>\n"
         f"<h1>{escape(case)}</h1>\n"
@@ -101,6 +119,92 @@ def _artifact(artifact: object) -> str:
         )
 
     return f"<h2>{escape(module_id)}</h2>\n" + "\n".join(rows)
+
+
+class _Handoff:
+    """One canonical artifact as the page shows it, read from its record."""
+
+    __slots__ = ("citations", "markdown", "projections", "provenance")
+
+    def __init__(self, markdown: str, record: Mapping[str, Any]) -> None:
+        self.markdown = markdown
+        projections = record.get("projections")
+        citations = record.get("citations")
+        if not isinstance(projections, Mapping) or not isinstance(citations, list):
+            raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        self.projections = projections
+        self.citations = citations
+        self.provenance = {
+            "module_id": _text(projections, "module_id"),
+            "build_id": _text(record, "build_id"),
+            "authority_digest": _text(record, "authority_digest"),
+        }
+
+
+def canonical_bound(artifact: Mapping[str, Any]) -> bool:
+    """Whether the Markdown and record text hash to the pair the payload binds,
+    and the record names that Markdown. Standard library only, like the package.
+    """
+    markdown, record = artifact.get("markdown"), artifact.get("record")
+    if not isinstance(markdown, str) or not isinstance(record, str):
+        return False
+    try:
+        document = json.loads(record)
+    except ValueError:
+        return False
+    digest = artifact.get("artifact_sha256")
+    return (
+        hashlib.sha256(markdown.encode("utf-8")).hexdigest() == digest
+        and hashlib.sha256(record.encode("utf-8")).hexdigest()
+        == artifact.get("record_sha256")
+        and isinstance(document, dict)
+        and document.get("artifact_sha256") == digest
+    )
+
+
+def _canonical(artifact: Mapping[str, Any]) -> _Handoff:
+    if not canonical_bound(artifact):
+        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+    return _Handoff(str(artifact["markdown"]), json.loads(str(artifact["record"])))
+
+
+def _handoff(view: _Handoff) -> str:
+    """The Markdown as text, never markup, beside what qualifies it.
+
+    A `Restricted` handoff keeps its limitations on the page, and a
+    `SCREENING_ONLY` scope is labelled a screen whatever committee status the
+    module wrote: the vendor maps no status to that scope, so the page must.
+    """
+    facts = view.projections
+    qa = escape(_text(facts, "qa_status"))
+    committee = escape(_text(facts, "committee_status"))
+    scope = _text(facts, "decision_scope")
+    flags = facts.get("limitation_flags")
+    if not isinstance(flags, list) or not all(isinstance(f, str) for f in flags):
+        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+    if not view.citations:
+        raise Refusal(RefusalCode.DELIVERABLE_UNCITED_FIGURE)
+    screen = (
+        '<p class="status">SCREENING ONLY: a screen, not committee clearance</p>\n'
+        if scope == SCREENING_ONLY
+        else ""
+    )
+    limitations = (
+        "<h3>Limitations</h3>\n<ul>\n"
+        + "\n".join(f"<li>{escape(flag)}</li>" for flag in flags)
+        + "\n</ul>\n"
+        if flags
+        else ""
+    )
+    return (
+        f"<h2>{escape(view.provenance['module_id'])}</h2>\n"
+        f'<p class="status">QA status: {qa}</p>\n'
+        f"<p>Committee status as written: {committee} · "
+        f"decision scope {escape(scope)}</p>\n"
+        f"{screen}{limitations}"
+        f"<pre>{escape(view.markdown)}</pre>\n"
+        + "\n".join(_citation(citation) for citation in view.citations)
+    )
 
 
 def _citation(citation: object) -> str:
