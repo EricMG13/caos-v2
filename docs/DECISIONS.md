@@ -1271,3 +1271,41 @@ Markdown to add them is forbidden, so quotes travel beside it.
 **Not decided here.** Vendor rules with no Python implementation are not
 reimplemented by the host; they are recorded as known gaps when the adapter
 lands.
+
+## 2026-09-13 §42 — Migrating to the canonical adapter without a lasting bypass
+
+**Decision.** Task 3.1 replaces the claims-JSON carrier in bounded, gate-green
+slices (the binding re-slice in the Task 3.1 brief):
+
+1. **Temporary dispatch from pinned facts.** Until slice f-1, the adapter
+   version pinned in a run input is derived from the pinned route alone:
+   `canonical-markdown-v1` when every node's module is a canonical adapter
+   module, `claims-json-v1` otherwise. No flag, environment value or caller
+   argument chooses it, and a canonical route cannot run as claims. Acceptance
+   requires `artifacts.record_sha256` exactly when the pin is canonical. Slice
+   f-1 makes the adapter a single constant and removes every claims branch;
+   Task 3.1 is not accepted while `claims-json-v1` execution exists.
+2. **Other routes are disabled at execution, not at pinning.** After f-1,
+   `execution_input` and acceptance refuse a route with a non-adapter module,
+   before any attempt, reservation or call. Route resolution, pinning and gates
+   stay general, because they are governance proven independently and Phase 5
+   extends the adapter to further owners.
+3. **Blocked handoffs are diagnostics.** The canonical Markdown of every
+   response is stored as a blob before validation and its hash recorded as the
+   attempt's `diagnostic_sha256` with the call outcome; a response that
+   validates with `qa_status: Blocked` ends the run `BLOCKED` and is never an
+   accepted artifact.
+4. **Where citations are re-anchored.** Every reader verifies both blobs, their
+   binding and the re-parsed projections. Citations are re-anchored against the
+   token index by the proof, the qualification matrix and deliverable freezing,
+   not on every frontier pass or API read, whose I/O budgets stay fixed.
+
+**Why.** Moving tests first has nothing to run against, and one switch commit
+would exceed 3,000 changed lines. Deriving the adapter from the pinned route
+keeps each intermediate commit correct and replayable; the dated expiry and
+acceptance blocker keep the dispatch from becoming a compatibility path.
+`call_outcomes` is written before analysis and is immutable, so diagnostic bytes
+must be addressed before validation.
+
+**Rollback.** Before f-1 each slice reverts alone, and migration 0012 only adds
+a nullable column. After f-1 rollback is a revert of commits, never a switch.
