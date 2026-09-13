@@ -193,6 +193,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   c-5a/c-5b remove the execution refusal, write both blobs and accept with the
   record; d-2 proves canonical artifacts; f-1 makes readers refuse a NULL
   record and removes the dispatch.
+- **Canonical upstream refs ignore readiness and predicates.**
+  `server/methodology/invocation.py` names every accepted direct input and
+  refuses a blocking one that is missing, as the vendor's
+  `expected_upstream_digests` does, but omits two of its inputs: a CONDITIONAL
+  edge always blocks (no predicate is evaluated, the Phase 3 gap below), and a
+  soft edge whose unaccepted source CP-0 reported READY is omitted where the
+  vendor refuses. The route engine already BLOCKS such a node, so the runtime
+  never asks for its identity. `module_name` is read from the verified catalog
+  at call time rather than pinned, and the prompt is bounded on its UTF-8 bytes;
+  the provider still re-checks the encoded request. Slice c-4 is not yet wired
+  into the executor. *Upgrade:* c-5a calls it; readiness joins the refs when a
+  reader of the canonical CP-0 T8 exists (d-2).
 
 **Repair Phase 2.**
 
