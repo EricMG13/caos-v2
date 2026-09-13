@@ -133,4 +133,7 @@ settings command deciding with and without the repo venv.
   checksums): exit 0. Backend 1892 passed and races 2 passed; security clean;
   frontend 157 unit tests; accessibility; 90 browser workbench tests; image built
   and scanned with no fixable HIGH/CRITICAL findings.
-- Whole-phase confidence review and adversarial audit at actual `xhigh`: **open.**
+- Whole-phase confidence review and adversarial audit at actual `xhigh`:
+  complete, remediated in `118c685` and `b4298dc`, and the complete gate rerun
+  green at `b4298dc` (see the handoff's Phase 2 acceptance record and
+  `docs/reviews/`).
