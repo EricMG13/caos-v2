@@ -412,3 +412,15 @@ def test_a_canonical_case_without_a_valid_subject_leaves_no_setup(
     assert _count(conn, "SELECT count(*) FROM cases") == 0
     assert not blobs.root.exists()
     _unapproved_and_unspent(conn, harness)
+
+
+def test_a_claims_case_declaring_a_subject_leaves_no_setup(ready: Fixture) -> None:
+    conn, blobs, harness, qualification = ready
+    first, second = qualification.cases
+    declared = replace(second, subject=LITE_SUBJECT)
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        subject.prepare(
+            conn, blobs, harness, qualification=QualificationSet((first, declared))
+        )
+    assert _count(conn, "SELECT count(*) FROM cases") == 0
+    _unapproved_and_unspent(conn, harness)

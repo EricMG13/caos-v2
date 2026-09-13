@@ -417,10 +417,11 @@ def _subjects(qualification: QualificationSet, routes: Sequence[ResolvedRoute]) 
     so a set that cannot be pinned writes nothing.
     """
     for case, route in zip(qualification.cases, routes, strict=True):
-        if case.subject is None:
-            if adapter_for(route) == CANONICAL_ADAPTER_VERSION:
-                raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-        elif not valid_subject(case.subject):
+        canonical = adapter_for(route) == CANONICAL_ADAPTER_VERSION
+        # A subject on a claims route would be signed and never used.
+        if (case.subject is None) == canonical or (
+            case.subject is not None and not valid_subject(case.subject)
+        ):
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
 
 
