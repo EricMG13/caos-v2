@@ -20,6 +20,7 @@ from server.methodology.handoff import (
     HostIdentity,
     Projections,
     UpstreamRef,
+    expected_filename,
     invocation_fields,
     validate_markdown,
 )
@@ -345,3 +346,9 @@ def test_invisible_separators_are_refused_not_normalised(character: str) -> None
 
 def test_non_utf8_bytes_are_refused() -> None:
     assert _refused(L10, L10_MD + b"\xff").code is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_expected_filename_is_the_vendor_canonical_name() -> None:
+    fields = invocation_fields(CONTRACT, L10)
+    vendor_name = CONTRACT.validate_handoff.canonical_markdown_filename(fields)
+    assert expected_filename(L10) == vendor_name == "EXAMPLE_CP-L10_20260908.md"
