@@ -33,6 +33,7 @@ from test_run_events import approved_nodes
 from server.api import app as app_module
 from server.api.app import (
     IO_BUDGET,
+    RUN_READ_IO,
     TAIL_DEADLINE,
     EdgeView,
     NodeView,
@@ -777,7 +778,7 @@ def test_each_request_path_declares_what_it_costs_the_store(
 
     assert client.get(f"/api/runs/{run_id}", headers=_as(viewer)).status_code == 200
 
-    assert counter.executed == IO_BUDGET, (
+    assert counter.executed == RUN_READ_IO <= IO_BUDGET, (
         "the run document costs what it says it costs; a read that grew with "
         "the size of the route would show up here first"
     )

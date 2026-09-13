@@ -892,14 +892,16 @@ def test_a_late_invalid_pin_clears_proof_and_preserves_the_stopped_record(
         blobs = BlobStore(tmp_path / "blobs")
         original = subject._unrun
 
-        def corrupt(c: StoreConnection, b: BlobStore, run: UUID) -> tuple[Unrun, ...]:
+        def corrupt(
+            c: StoreConnection, b: BlobStore, bundle: Bundle, run: UUID
+        ) -> tuple[Unrun, ...]:
             with route_fault(c):
                 c.execute(
                     "UPDATE run_routes SET resolved = '{}' WHERE run_id = %s",
                     (run,),
                 )
             c.commit()
-            return original(c, b, run)
+            return original(c, b, bundle, run)
 
         monkeypatch.setattr(subject, "_unrun", corrupt)
         [record] = _perform(
@@ -974,7 +976,7 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
             conn, attempt_id=charged, outcome=CallOutcome(Decimal("0.01"), None, None)
         )
         with execution_reads(conn):
-            [unrun] = _unrun(conn, blobs, record.run_id)
+            [unrun] = _unrun(conn, blobs, Bundle(VENDORED), record.run_id)
 
     assert [
         (a.reserved, a.outcome, a.charged, a.model, a.generation_id)
