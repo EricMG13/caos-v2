@@ -278,6 +278,16 @@ checks and the phase-completion-only specialist reviews remain required.
 | `confidence-review` | **Phase completion only**, after every task and ordinary task review has passed. Review the full phase diff and affected callers, prioritizing high-risk sections | Enumerate and rank uncertainties, investigate actual paths, try to refute suspected bugs, patch confirmed root causes and rerun affected/full checks. Use **extra high (`xhigh`) reasoning** |
 | `adversarial-reviewer` code audit | **Phase completion only**, after the phase's implementation, confidence review and normal checks. Audit the full phase diff plus affected callers, not just the final PR | **extra high (`xhigh`) reasoning**; Saboteur, New Hire and Security Auditor passes, deduplicated evidence-backed findings and a phase verdict |
 
+**Concurrent implementation.** A coordinator may use up to three implementers
+to reduce elapsed time only for independently scoped concerns, in isolated
+worktrees/branches with separate UUID-owned test databases and blob roots. Each
+assignment records its base, owned files, migration ownership, tests and review
+range. Do not overlap a file, migration, fixture, provider authority or the
+integration branch. Implementers test and commit their concern; ordinary review
+applies to that exact range. The coordinator resolves review findings, serially
+integrates reviewed commits and runs all cross-task/phase gates. Branch-local
+green checks do not prove the integrated candidate, size limit or phase exit.
+
 **High-risk means consequence, not file size.** Qualifying sections include authorization/revocation and cross-case isolation; source/route/approval identity; readiness/QA/terminal transitions; attempt fencing and concurrent writes; budget/provider billing; financial arithmetic; untrusted-input/citation acceptance; UI snapshot/evidence authority; and signing/freezing/filing/qualification. Identify the exact changed symbols and failure consequence in each phase's risk register. A whole UI section is not high-risk merely because one authority function inside it is.
 
 Confidence review covers the actual change, including boundary, concurrency, error-path and integration assumptions; high-risk sections receive the deepest investigation. Do not generate competing rewrites or refactor merely to produce a candidate. Build the impact set with GitNexus symbol context and upstream caller impact, then verify actual source references/types/tests—an index is discovery evidence, not a correctness oracle. Report verified behavior, deliberate limits and unresolved questions with evidence.

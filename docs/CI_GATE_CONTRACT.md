@@ -88,6 +88,12 @@ max-reasoning requirements. Record risk scope, executor settings and evidence
 in the execution ledger. Keep external writes and live spend separately
 authorized.
 
+Parallel implementers may run focused checks in isolated worktrees with
+separate test databases/blob roots, but CI evidence is accepted only for the
+coordinator's serially integrated candidate. Re-run affected integration checks
+after combining reviewed commits; the 800-line gate and hosted statuses apply
+to the actual integrated PR range, never to independent branch ranges.
+
 ## Complete offline gate
 
 `make check-fast` is partial and intentionally excludes PostgreSQL, browser,
