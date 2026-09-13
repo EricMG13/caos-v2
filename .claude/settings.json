@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.venv/bin/python\" \"$CLAUDE_PROJECT_DIR/scripts/claude_hook.py\" format"
+            "command": "P=\"$CLAUDE_PROJECT_DIR/.venv/bin/python\"; [ -x \"$P\" ] || P=python3; \"$P\" \"$CLAUDE_PROJECT_DIR/scripts/claude_hook.py\" format"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.venv/bin/python\" \"$CLAUDE_PROJECT_DIR/scripts/claude_hook.py\" guard || exit 2"
+            "command": "P=\"$CLAUDE_PROJECT_DIR/.venv/bin/python\"; [ -x \"$P\" ] || P=python3; \"$P\" \"$CLAUDE_PROJECT_DIR/scripts/claude_hook.py\" guard || exit 2"
           }
         ]
       }

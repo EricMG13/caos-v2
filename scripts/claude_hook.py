@@ -18,6 +18,7 @@ paths, files outside the repository and other suffixes are left byte for byte.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess  # nosec B404
 import sys
@@ -36,6 +37,8 @@ CREDENTIALS = (
 DOTENV = (
     "refused: .env is read by the process, never by a command (docs/DECISIONS.md 16)"
 )
+# A `.env` path, not `os.environ`, `process.env` or `.env.example`.
+_DOTENV = re.compile(r"(?<![\w.])\.env(?!\.example)(?![A-Za-z0-9_])")
 _OPERATORS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "(", ")"})
 _SKIPPED = ("vendor", ".claude")
 _PYTHON = frozenset({".py"})
@@ -65,33 +68,51 @@ def guard_reason(command: str) -> str | None:
         return NO_VERIFY
     if "printenv" in command or "$OPENROUTER" in command or "${OPENROUTER" in command:
         return CREDENTIALS
-    if ".env" in command.replace(".env.example", ""):
+    if _DOTENV.search(command):
         return DOTENV
+    # A newline ends a command as `;` does.
+    lines = command.replace("\n", " ; ")
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(lines, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        # ponytail: an unbalanced quote (often prose in a heredoc) keeps only the
-        # substring screen above; the token rules below need a split.
-        return None
+        # An unbalanced quote (often prose in a heredoc): err toward refusing by
+        # applying the token rules to a plain split rather than skipping them.
+        tokens = lines.split()
     return _token_reason(tokens)
 
 
 def _token_reason(words: Sequence[str]) -> str | None:
     for index, word in enumerate(words):
-        after = words[index + 1 :]
-        until = _segment(after)
-        if word == "push" and {"-f", "--force", "--force-with-lease"} & set(until):
+        before = words[index - 1] if index else ";"
+        until = _segment(words[index + 1 :])
+        if before == "git" and word == "push" and _forced(until):
             return FORCE_PUSH
-        if word == "commit" and "-n" in until:
+        if before == "git" and word == "commit" and _flag(until, "n"):
             return NO_VERIFY
-        if word == "install" and index and words[index - 1] == "pip":
-            if "--require-hashes" not in until:
-                return UNPINNED
-        if word == "env" and (not after or after[0] in _OPERATORS):
+        if before == "pip" and word == "install" and "--require-hashes" not in until:
+            return UNPINNED
+        # `env` as a command word with nothing to run prints the environment.
+        if word == "env" and before in _OPERATORS and not until:
             return CREDENTIALS
     return None
+
+
+def _forced(arguments: Sequence[str]) -> bool:
+    return (
+        bool({"--force", "--force-with-lease"} & set(arguments))
+        or _flag(arguments, "f")
+        or any(a.startswith("+") for a in arguments)
+    )
+
+
+def _flag(arguments: Sequence[str], letter: str) -> bool:
+    """A short flag, alone or inside a cluster such as `-nm`."""
+    return any(
+        a.startswith("-") and not a.startswith("--") and letter in a[1:]
+        for a in arguments
+    )
 
 
 def _segment(words: Sequence[str]) -> list[str]:
@@ -111,9 +132,11 @@ def format_target(file_path: str, repo: Path = REPO) -> Path | None:
     if not path.is_relative_to(root) or not path.is_file():
         return None
     relative = path.relative_to(root)
-    if relative.parts[0] in _SKIPPED or path.suffix not in _PYTHON | _FRONTEND:
+    # Case-folded: a case-insensitive filesystem reaches `vendor` as `Vendor` too.
+    top = relative.parts[0].casefold()
+    if top in _SKIPPED or path.suffix not in _PYTHON | _FRONTEND:
         return None
-    if path.suffix in _FRONTEND and relative.parts[0] != "frontend":
+    if path.suffix in _FRONTEND and top != "frontend":
         return None
     return path
 
@@ -125,12 +148,20 @@ def format_file(
 ) -> int:
     """Run the pinned formatter on one target. Returns its exit code."""
     if path.suffix in _PYTHON:
-        argv = [str(repo / ".venv/bin/ruff"), "format", "--force-exclude", str(path)]
+        # Beside the running interpreter: the repo venv locally, the CI Python.
+        ruff = Path(sys.executable).parent / "ruff"
+        argv = [str(ruff), "format", "--force-exclude", str(path)]
+        cwd = repo
     else:
         prettier = repo / "frontend/node_modules/.bin/prettier"
         argv = [str(prettier), "--write", str(path)]
-    # Fixed executable and argv, no shell; the path was resolved inside the repo.
-    return run(argv, capture_output=True, check=False).returncode
+        # From `frontend/`, so `frontend/.prettierignore` applies.
+        cwd = repo / "frontend"
+    try:
+        # Fixed executable and argv, no shell; the path was resolved in the repo.
+        return run(argv, cwd=cwd, capture_output=True, check=False).returncode
+    except OSError:
+        return 2
 
 
 def main(argv: Sequence[str], stdin: TextIO, stderr: TextIO) -> int:
