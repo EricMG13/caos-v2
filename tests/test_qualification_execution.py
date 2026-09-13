@@ -1,11 +1,14 @@
 """Qualification execution requires current stored identity and external approval."""
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import psycopg
@@ -16,6 +19,7 @@ from test_qualification_harness import (
     _case,
     _Completions,
     _count,
+    _without_route,
 )
 from test_qualification_prepare import Fixture, ready
 
@@ -26,15 +30,20 @@ from server.provider import Completion
 from server.qualification import harness as subject
 from server.qualification.matrix import QualificationSet
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, connect
 from server.store.gates import Gate, gate_preview, withdraw_source
 from server.store.members import Standing, grant, revoke
+from server.store.outcomes import execution_reads
 from server.store.routes import pin_route, resolved_route
 from server.store.run_inputs import RunInput, load_run_input, pin_run_input
-from server.store.runs import start_run
+from server.store.runs import create_case, start_run
 from server.store.source_sets import snapshot_source_set
 
 __all__ = ["ready"]
+
+_MEMBERS = "SELECT m.filename,m.document_sha256 FROM source_set_members m"
+_BLOCKS = "SELECT b.source_id,b.block_id FROM run_inputs i"
+_PROOF = "SELECT a.artifact_sha256, t.route_node_id, a.case_id"
 
 
 def test_legacy_perform_refuses_without_spending(ready: Fixture) -> None:
@@ -414,3 +423,304 @@ def test_current_authority_is_rechecked_before_each_case(
         assert conn.info.transaction_status.name == "IDLE"
         assert cast(_Completions, harness.completions).prompts == []
         _unspent(conn)
+
+
+@pytest.mark.parametrize(
+    "mode", ["pending", "autocommit", "repeatable", "serializable"]
+)
+def test_execution_preserves_caller_transaction_and_settings(
+    ready: Fixture, empty_database: str, mode: str
+) -> None:
+    conn, _, harness, _ = ready
+    prepared = _prepared(ready)
+    _approve(conn, prepared)
+    pending = None
+    if mode == "pending":
+        pending = create_case(conn, BoundaryText.of("caller work"))
+    elif mode == "autocommit":
+        conn.autocommit = True
+    else:
+        conn.isolation_level = (
+            psycopg.IsolationLevel.REPEATABLE_READ
+            if mode == "repeatable"
+            else psycopg.IsolationLevel.SERIALIZABLE
+        )
+    settings = conn.autocommit, conn.isolation_level
+    try:
+        with pytest.raises(Refusal, match=r"^STORE_NOT_TRANSACTIONAL$"):
+            _run(ready, prepared)
+        assert (conn.autocommit, conn.isolation_level) == settings
+        if pending is not None:
+            assert conn.info.transaction_status.name == "INTRANS"
+            assert conn.execute(
+                "SELECT title FROM cases WHERE case_id=%s", (pending,)
+            ).fetchone() == ("caller work",)
+            with connect(empty_database) as observer:
+                assert (
+                    observer.execute(
+                        "SELECT 1 FROM cases WHERE case_id=%s", (pending,)
+                    ).fetchone()
+                    is None
+                )
+            for table in (
+                "run_attempts",
+                "budget_reservations",
+                "call_outcomes",
+                "budget_ledger",
+                "artifacts",
+            ):
+                assert _count(conn, "SELECT count(*) FROM " + table) == 0, table
+            assert conn.info.transaction_status.name == "INTRANS"
+        else:
+            assert conn.info.transaction_status.name == "IDLE"
+    finally:
+        conn.rollback()
+        conn.autocommit = False
+        conn.isolation_level = None
+    assert cast(_Completions, harness.completions).prompts == []
+    _unspent(conn)
+
+
+def test_execution_reads_share_native_transactions_and_reports_own_theirs(
+    ready: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn, _, harness, _ = ready
+    prepared = _prepared(ready)
+    _approve(conn, prepared)
+    execute = psycopg.Connection.execute
+    observed: list[tuple[str, int]] = []
+
+    def transaction(c: StoreConnection) -> int:
+        assert c is conn and c.info.transaction_status.name == "INTRANS"
+        assert execute(c, "SHOW transaction_isolation").fetchone() == (
+            "read committed",
+        )
+        row = execute(c, "SELECT txid_current()").fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def boundary(name: str, read: Callable[..., object]) -> Callable[..., object]:
+        def checked(c: StoreConnection, *args: object, **kwargs: object) -> object:
+            unit = transaction(c)
+            observed.append((name, unit))
+            result = read(c, *args, **kwargs)
+            assert transaction(c) == unit
+            return result
+
+        return checked
+
+    def sql(c: StoreConnection, query: str, *args: object, **kwargs: object) -> object:
+        if c is conn and isinstance(query, str):
+            for prefix, name in ((_MEMBERS, "members"), (_BLOCKS, "blocks")):
+                if query.startswith(prefix):
+                    observed.append((name, transaction(c)))
+        return execute(c, query, *args, **kwargs)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patch:
+        for name, label in (
+            ("execution_input", "input"),
+            ("_record", "record"),
+            ("build_matrix", "matrix"),
+        ):
+            patch.setattr(subject, name, boundary(label, getattr(subject, name)))
+        patch.setattr(psycopg.Connection, "execute", sql)
+        result = _run(ready, prepared)
+    assert [name for name, _ in observed] == [
+        "input",
+        "members",
+        "input",
+        "members",
+        "input",
+        "members",
+        "blocks",
+        "record",
+        "input",
+        "members",
+        "blocks",
+        "record",
+        "matrix",
+    ]
+    for start, length in ((0, 2), (2, 2), (4, 3), (8, 3)):
+        assert len({unit for _, unit in observed[start : start + length]}) == 1
+    assert len({observed[i][1] for i in (0, 2, 4, 7, 8, 11, 12)}) == 7
+    assert conn.info.transaction_status.name == "IDLE"
+    assert result.matrix is not None and len(result.matrix.rows) == 2
+    assert len(cast(_Completions, harness.completions).prompts) == 4
+
+
+@pytest.mark.parametrize(
+    "fault", ["initial_members", "members", "blocks", "report", "matrix", "rollback"]
+)
+def test_native_execution_read_failures_clean_owned_work_and_retain_purchases(
+    ready: Fixture, empty_database: str, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    conn, blobs, harness, _ = ready
+    prepared = _prepared(ready)
+    _approve(conn, prepared)
+    prefix, occurrence, paid = {
+        "initial_members": (_MEMBERS, 2, 0),
+        "members": (_MEMBERS, 3, 0),
+        "blocks": (_BLOCKS, 1, 0),
+        "report": (_PROOF, 1, 2),
+        "matrix": (_PROOF, 3, 4),
+        "rollback": (_BLOCKS, 1, 0),
+    }[fault]
+    execute, rollback = psycopg.Connection.execute, psycopg.Connection.rollback
+    hits = 0
+    injected = False
+    cleanup_failed = False
+
+    def fail(c: StoreConnection, query: str, *args: object, **kwargs: object) -> object:
+        nonlocal hits, injected
+        matches = c is conn and isinstance(query, str) and query.startswith(prefix)
+        hits += int(matches)
+        if matches and hits == occurrence:
+            injected = True
+            return execute(c, "SELECT qualification_private_column")
+        return execute(c, query, *args, **kwargs)  # type: ignore[arg-type]
+
+    def failed_rollback(c: StoreConnection) -> None:
+        nonlocal cleanup_failed
+        if (
+            fault == "rollback"
+            and c is conn
+            and c.info.transaction_status.name == "INERROR"
+        ):
+            cleanup_failed = True
+            raise psycopg.OperationalError("private")
+        rollback(c)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg.Connection, "execute", fail)
+        patch.setattr(psycopg.Connection, "rollback", failed_rollback)
+        if fault in {"members", "blocks"}:
+            result = _run(ready, prepared)
+            assert result.matrix is None and len(result.performed) == 1
+            record = result.performed[0]
+            assert record.run_id == prepared[0].input.run_id
+            assert record.stopped is RefusalCode.STORE_UNAVAILABLE
+            assert "qualification_private_column" not in repr(result)
+        else:
+            with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$") as caught:
+                _run(ready, prepared)
+            assert caught.value.__cause__ is None
+            assert caught.value.__suppress_context__
+    assert injected and hits >= occurrence
+    assert cleanup_failed == (fault == "rollback")
+    assert (
+        conn.closed
+        if fault == "rollback"
+        else conn.info.transaction_status.name == "IDLE"
+    )
+    assert len(cast(_Completions, harness.completions).prompts) == paid
+    with connect(empty_database) as observer:
+        for item in prepared:
+            assert observer.execute(
+                "SELECT case_id FROM cases WHERE case_id=%s FOR UPDATE NOWAIT",
+                (item.input.case_id,),
+            ).fetchone() == (item.input.case_id,)
+            assert observer.execute(
+                "SELECT run_id FROM runs WHERE run_id=%s FOR UPDATE NOWAIT",
+                (item.input.run_id,),
+            ).fetchone() == (item.input.run_id,)
+        for table in (
+            "run_attempts",
+            "budget_reservations",
+            "call_outcomes",
+            "budget_ledger",
+            "artifacts",
+        ):
+            assert _count(observer, "SELECT count(*) FROM " + table) == paid
+        for [digest] in observer.execute("SELECT artifact_sha256 FROM artifacts"):
+            assert blobs.get(digest)
+        if paid == 2:
+            _unspent(observer, prepared[1].input.run_id)
+
+
+@pytest.mark.parametrize("fault", ["body", "restore", "wrong_database"])
+def test_route_fault_restores_rows_and_all_triggers_on_failure(
+    ready: Fixture, empty_database: str, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    conn = ready[0]
+    run = _prepared(ready)[0].input.run_id
+    database = urlsplit(empty_database).path.lstrip("/")
+    trigger_query = (
+        "SELECT tgname,tgenabled FROM pg_trigger"
+        " WHERE tgrelid='run_routes'::regclass ORDER BY tgname"
+    )
+    route_query = "SELECT * FROM run_routes WHERE run_id=%s"
+    triggers = conn.execute(trigger_query).fetchall()
+    route = conn.execute(route_query, (run,)).fetchone()
+    assert triggers and route is not None
+    conn.rollback()
+    execute = psycopg.Connection.execute
+    ddl: list[str] = []
+    injected = False
+    entered = False
+
+    def fail_restore(
+        c: StoreConnection,
+        query: str | psycopg.sql.Composable,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        nonlocal injected
+        text = query if isinstance(query, str) else query.as_string(c)
+        if c is conn and text.startswith("ALTER TABLE run_routes"):
+            ddl.append(text)
+            if fault == "restore" and " ENABLE TRIGGER " in text:
+                injected = True
+                return execute(c, "SELECT qualification_private_column")
+        return execute(c, query, *args, **kwargs)  # type: ignore[arg-type]
+
+    target = "caos_test_" + uuid4().hex if fault == "wrong_database" else database
+    expected = (
+        AssertionError if fault == "wrong_database" else psycopg.errors.UndefinedColumn
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg.Connection, "execute", fail_restore)
+        with pytest.raises(expected):
+            with _without_route(conn, target, run):
+                entered = True
+                assert conn.execute(route_query, (run,)).fetchone() is None
+                if fault == "body":
+                    conn.execute("SELECT qualification_private_column")
+    assert injected == (fault == "restore")
+    assert entered == (fault != "wrong_database")
+    assert ddl == [] if fault == "wrong_database" else len(ddl) >= 3
+    assert conn.info.transaction_status.name == "IDLE"
+    assert conn.execute(trigger_query).fetchall() == triggers
+    assert conn.execute(route_query, (run,)).fetchone() == route
+    conn.rollback()
+
+
+def test_first_case_rechecks_separate_approver_after_whole_set_pass(
+    ready: Fixture, empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn, _, harness, _ = ready
+    prepared = _prepared(ready)
+    _approve(conn, prepared)
+    actor = _approve(conn, prepared[:1], gates=(Gate.RESEARCH_PLAN,))[0]
+    original = execution_reads
+    units = 0
+
+    @contextmanager
+    def reads(c: StoreConnection) -> Iterator[None]:
+        nonlocal units
+        with original(c):
+            yield
+        units += 1
+        if units == len(prepared):
+            with connect(empty_database) as independent:
+                revoke(independent, case_id=prepared[0].input.case_id, user_id=actor)
+                independent.commit()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(subject, "execution_reads", reads)
+        result = _run(ready, prepared)
+    assert conn.info.transaction_status.name == "IDLE"
+    assert result.matrix is None and len(result.performed) == 1
+    assert result.performed[0].run_id == prepared[0].input.run_id
+    assert result.performed[0].stopped is RefusalCode.GATE_APPROVAL_MISMATCH
+    assert cast(_Completions, harness.completions).prompts == []
+    _unspent(conn)
