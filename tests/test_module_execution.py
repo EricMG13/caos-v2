@@ -904,6 +904,7 @@ def test_the_qa_module_is_asked_for_a_qa_status_and_stores_it(
     [
         ("CP-1", {"qa_status": "Passed"}, RefusalCode.ENVELOPE_UNDECLARED_FIELD),
         ("CP-5", {}, RefusalCode.ENVELOPE_INVALID),
+        ("CP-5", {"qa_status": "Not Reviewed"}, RefusalCode.ENVELOPE_INVALID),
         ("CP-5", {"qa_status": "Probably"}, RefusalCode.ENVELOPE_INVALID),
         ("CP-5", {"qa_status": ["Passed"]}, RefusalCode.ENVELOPE_INVALID),
     ],

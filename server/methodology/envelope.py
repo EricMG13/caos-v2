@@ -99,7 +99,9 @@ def parse_qa(body: str, *, expected: bool) -> str | None:
         if "qa_status" in decoded:
             raise Refusal(RefusalCode.ENVELOPE_UNDECLARED_FIELD)
         return None
-    if not isinstance(status, str) or status not in QA_STATUSES:
+    # `Not Reviewed` is the bundle's starting state, not a verdict: accepting it
+    # would complete CP-5 and strand the gate. Refused, the attempt can retry.
+    if not isinstance(status, str) or status not in QA_STATUSES - {"Not Reviewed"}:
         raise Refusal(RefusalCode.ENVELOPE_INVALID)
     return status
 
