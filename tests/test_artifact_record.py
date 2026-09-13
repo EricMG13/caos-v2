@@ -22,6 +22,7 @@ from server.engine.route import ResolvedRoute, resolve_route
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.events import events_of
+from server.store.gates import execution_input
 from server.store.routes import pin_route
 from server.store.run_inputs import load_run_input, pin_run_input
 from server.store.runs import Accepted, accept_attempt, create_case, start_run
@@ -80,6 +81,16 @@ def test_a_canonical_route_pins_the_canonical_adapter_and_requires_a_subject(
     assert load_run_input(conn, lite) == pin
 
 
+@pytest.mark.parametrize("route", [CANONICAL], indirect=True)
+def test_a_canonical_pin_cannot_execute_before_its_executor(
+    harness: _Harness,
+) -> None:
+    with pytest.raises(Refusal) as refused:
+        execution_input(harness.conn, harness.run_id, harness.bundle)
+    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
+    harness.conn.rollback()
+
+
 def test_a_claims_route_keeps_its_adapter_and_bytes(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
@@ -110,7 +121,9 @@ def test_acceptance_requires_a_record_exactly_for_a_canonical_pin(
     harness: _Harness, record: str | None
 ) -> None:
     attempt = _billed(harness)
+    before = events_of(harness.conn, harness.run_id)
     assert _refused(harness, attempt, record) is RefusalCode.ARTIFACT_RECORD_MISMATCH
+    assert events_of(harness.conn, harness.run_id) == before
     assert _count(harness, "artifacts") == 0
     # The bill committed first survives; only the analysis was refused.
     assert _count(harness, "budget_ledger") == 1
