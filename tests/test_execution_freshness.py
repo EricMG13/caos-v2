@@ -1339,8 +1339,14 @@ def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) ->
     assert "no others: CP-5, CP-L10\n" in prompt
 
 
-def _accepted_gate(harness: _Harness, **identity: object) -> str:
-    """Run and accept CP-0 for real; identity fields override its record's."""
+def _accepted_gate(
+    harness: _Harness,
+    record_fields: dict[str, str] | None = None,
+    /,
+    **identity: object,
+) -> str:
+    """Run and accept CP-0 for real; identity and record fields override its
+    record's."""
     gate = harness.route.nodes[0]
     attempt = _reserved(harness)
     result = _provider(harness, _Completions(harness.source_id)).execute(
@@ -1348,10 +1354,10 @@ def _accepted_gate(harness: _Harness, **identity: object) -> str:
     )
     assert result.record_sha256 is not None
     record = result.record_sha256
-    if identity:
+    if identity or record_fields:
         stored = _decoded_record(harness.blobs.get(record))
         moved = replace(stored.identity, **identity)  # type: ignore[arg-type]
-        foreign = replace(stored, identity=moved)
+        foreign = replace(stored, identity=moved, **(record_fields or {}))  # type: ignore[arg-type]
         record = harness.blobs.put(record_bytes(foreign))
     accepted = Accepted(
         result.artifact_sha256,
@@ -1377,20 +1383,58 @@ def _rewrite_gate(harness: _Harness, conn: StoreConnection) -> None:
     conn.commit()
 
 
+def _refused_before_cp_l10_call(harness: _Harness, entry: str) -> RefusalCode:
+    """CP-L10 run through the frontier or entered directly; no call either way.
+
+    The frontier refuses before CP-L10 is attempted; the executor, entered
+    directly, refuses in its pre-call unit with the reservation kept."""
+    completions = _DuringCompletion(_Completions(harness.source_id), lambda: None)
+    if entry == "frontier":
+        code = _run(harness, _provider(harness, completions))
+        assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    else:
+        node = harness.route.nodes[1]
+        attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
+        reserve(harness.conn, attempt, ESTIMATE)
+        with pytest.raises(Refusal) as refused:
+            _provider(harness, completions).execute(
+                node.route_node_id, node.module_id, attempt_id=attempt
+            )
+        assert refused.value.__cause__ is None
+        code = refused.value.code
+        _unbilled(harness, attempt)
+    assert completions.calls == 0
+    assert code is not None
+    return code
+
+
+@pytest.mark.parametrize("entry", ["frontier", "module"])
 @pytest.mark.parametrize(
     "identity",
     [{"module_id": "CP-L10"}, {"ordinal": 2}, {"authority_bundle_sha256": "0" * 64}],
 )
 def test_upstream_with_foreign_envelope_identity_is_refused_before_any_call(
-    harness: _Harness, identity: dict[str, object]
+    harness: _Harness, identity: dict[str, object], entry: str
 ) -> None:
-    """CP-0's record names another invocation: the frontier refuses it before
-    CP-L10 is attempted or called."""
+    """CP-0's record names another invocation: refused before CP-L10's call."""
     _accepted_gate(harness, **identity)
-    completions = _DuringCompletion(_Completions(harness.source_id), lambda: None)
-    code = _run(harness, _provider(harness, completions))
-    assert (code, completions.calls) == (RefusalCode.ARTIFACT_RECORD_MISMATCH, 0)
-    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    code = _refused_before_cp_l10_call(harness, entry)
+    assert code is RefusalCode.ARTIFACT_RECORD_MISMATCH
+
+
+@pytest.mark.parametrize("entry", ["frontier", "module"])
+@pytest.mark.parametrize(
+    "field", ["build_id", "manifest_sha256", "authority_digest", "adapter_version"]
+)
+def test_upstream_record_from_another_build_is_refused_before_any_call(
+    harness: _Harness, field: str, entry: str
+) -> None:
+    """CP-0's record binds its invocation but names another build, manifest,
+    authority or adapter (invariant 4): nothing it says may feed CP-L10's
+    prompt, whichever way CP-L10 is entered."""
+    _accepted_gate(harness, {field: "0" * 64})
+    code = _refused_before_cp_l10_call(harness, entry)
+    assert code is RefusalCode.ORCHESTRATION_BUILD_MOVED
 
 
 def test_upstream_rewritten_during_the_call_is_refused_keeping_the_bill(

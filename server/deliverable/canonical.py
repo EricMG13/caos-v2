@@ -24,20 +24,18 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.deliverable.filing import freeze
 from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import Citation, verify_citations
-from server.methodology.bundle import (
-    Bundle,
-    assemble_authority,
-    authority_digest,
-    verified_bytes,
-)
+from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
-from server.methodology.invocation import call_time_identity, host_identity
+from server.methodology.invocation import (
+    call_time_identity,
+    host_identity,
+    record_authority_matches,
+)
 from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -160,13 +158,9 @@ class _Reader:
             self.blobs, artifact_sha256=artifact, record_sha256=sha, expected=expected
         )
         mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        authority = authority_digest(assemble_authority(bundle, node.module_id))
-        if (
-            record.adapter_version != methodology.CANONICAL_ADAPTER_VERSION
-            or (record.build_id, record.manifest_sha256, record.authority_digest)
-            != (bundle.build_id, bundle.manifest_sha256, authority)
-            or any(c.document_sha256 not in pinned for c in record.citations)
-        ):
+        if not record_authority_matches(
+            record, bundle=bundle, module_id=node.module_id
+        ) or any(c.document_sha256 not in pinned for c in record.citations):
             raise mismatch
         markdown = self.blobs.get(artifact)
         gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}

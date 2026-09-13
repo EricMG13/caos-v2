@@ -248,13 +248,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
-  by the cached validator (every other read still is). No HTTP test covers a
-  canonical `read_run` over a QA_GATE verdict other than `Passed`, because the
-  catalog's only QA_GATE (CP-5 -> CP-6) sits on a route the canonical adapter
-  does not execute (§42.2); the view function that projects a stored
-  `qa_status` is tested directly instead. *Upgrade:* f-1 makes readers refuse
-  a NULL record and removes the dispatch, and the HTTP gap closes the day
-  Phase 5 extends the canonical adapter to a route carrying that QA_GATE.
+  by the cached validator (every other read still is). The executor's pre-call
+  unit binds every upstream record it will put in the prompt to that
+  upstream's call-time identity and this build (`record_authority_matches`,
+  shared with the proof and the deliverable), costing the host identity's
+  queries per upstream under the case lock; the record is not re-checked after
+  the call (only the digests are). Since f-1a the shared loop fixtures run
+  LITE, so the claims executor has no freshness tests left while it still
+  ships. No HTTP test covers a canonical `read_run` over a QA_GATE verdict
+  other than `Passed`, because the catalog's only QA_GATE (CP-5 -> CP-6) sits
+  on a route the canonical adapter does not execute (§42.2); the view function
+  that projects a stored `qa_status` is tested directly instead. *Upgrade:*
+  f-1c makes readers refuse a NULL record and removes the dispatch and the
+  claims executor, and the HTTP gap closes the day Phase 5 extends the
+  canonical adapter to a route carrying that QA_GATE.
 - **The orchestration proof over a canonical run proves it now, not
   continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
   binds the record to the identity rebuilt from the store, requires the pin's

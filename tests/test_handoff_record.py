@@ -17,12 +17,13 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from canonical_fixtures import CATALOG, CONTRACT, PINNED, skill, wire
+from canonical_fixtures import BUNDLE, CATALOG, CONTRACT, PINNED, skill, wire
 from canonical_fixtures import handoff_markdown as _markdown
 from canonical_fixtures import identity as _identity
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, Rect
+from server.methodology.bundle import assemble_authority, authority_digest
 from server.methodology.handoff import (
     RECORD_FORMAT,
     CanonicalRecord,
@@ -31,6 +32,7 @@ from server.methodology.handoff import (
     record_bytes,
     validate_markdown,
 )
+from server.methodology.invocation import record_authority_matches
 from server.refusals import Refusal, RefusalCode
 
 SECRET = "Confidential covenant headroom 7.3x"
@@ -147,6 +149,29 @@ def _stored(tmp_path: Path, record: CanonicalRecord) -> tuple[BlobStore, str, st
     blobs = BlobStore(tmp_path / "blobs")
     artifact = blobs.put(CP0_MD)
     return blobs, artifact, blobs.put(record_bytes(record))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [None, "adapter_version", "build_id", "manifest_sha256", "authority_digest"],
+)
+def test_record_authority_matches_only_this_build_and_pinned_module(
+    field: str | None,
+) -> None:
+    """Invariant 4: the one check the executor, the runtime, the proof and the
+    deliverable share. The module is the caller's (the pin's), never the
+    record's."""
+    this_build: dict[str, object] = {
+        "build_id": BUNDLE.build_id,
+        "manifest_sha256": BUNDLE.manifest_sha256,
+        "authority_digest": authority_digest(assemble_authority(BUNDLE, "CP-0")),
+    }
+    if field is not None:
+        this_build[field] = "0" * 64
+    record = _record(**this_build)
+    matches = record_authority_matches(record, bundle=BUNDLE, module_id="CP-0")
+    assert matches is (field is None)
+    assert not record_authority_matches(record, bundle=BUNDLE, module_id="CP-L10")
 
 
 def test_a_record_round_trips_exactly(tmp_path: Path) -> None:

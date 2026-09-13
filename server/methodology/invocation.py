@@ -23,11 +23,17 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import BLOCKING, ResolvedRoute, RouteNode
-from server.methodology.bundle import Bundle, verified_bytes
+from server.methodology.bundle import (
+    Bundle,
+    assemble_authority,
+    authority_digest,
+    verified_bytes,
+)
 from server.methodology.executor import Delivery
 from server.methodology.handoff import (
     ADAPTER_MODULES,
     GATE_MODULE,
+    CanonicalRecord,
     HostIdentity,
     UpstreamRef,
     expected_filename,
@@ -157,6 +163,30 @@ def call_time_identity(
         if ref.route_node_id in named or ref.route_node_id not in later
     )
     return replace(host, upstream=kept)
+
+
+def record_authority_matches(
+    record: CanonicalRecord, *, bundle: Bundle, module_id: str
+) -> bool:
+    """Whether a record was written under this bundle for this pinned module.
+
+    The one comparison every reader of an accepted record makes (invariant 4):
+    the canonical adapter, and the bundle's build, manifest and the module's
+    authority digest, re-derived from the bytes here now. `read_record` binds
+    the invocation; this binds the methodology. `module_id` is the pin's, never
+    the record's. Each caller raises its own code on False.
+    """
+    return (
+        record.adapter_version,
+        record.build_id,
+        record.manifest_sha256,
+        record.authority_digest,
+    ) == (
+        methodology.CANONICAL_ADAPTER_VERSION,
+        bundle.build_id,
+        bundle.manifest_sha256,
+        authority_digest(assemble_authority(bundle, module_id)),
+    )
 
 
 def _module_name(bundle: Bundle, route: ResolvedRoute, node: RouteNode) -> str:

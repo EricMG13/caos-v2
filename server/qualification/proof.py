@@ -53,7 +53,11 @@ from server.methodology.bundle import (
     verified_bytes,
 )
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
-from server.methodology.invocation import call_time_identity, host_identity
+from server.methodology.invocation import (
+    call_time_identity,
+    host_identity,
+    record_authority_matches,
+)
 from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
@@ -267,17 +271,8 @@ class _CanonicalReader:
         )
         if record is None:
             raise mismatch
-        authority = authority_digest(assemble_authority(bundle, node.module_id))
-        if (
-            record.adapter_version,
-            record.build_id,
-            record.manifest_sha256,
-            record.authority_digest,
-        ) != (
-            methodology.CANONICAL_ADAPTER_VERSION,
-            bundle.build_id,
-            bundle.manifest_sha256,
-            authority,
+        if not record_authority_matches(
+            record, bundle=bundle, module_id=node.module_id
         ):
             raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
         skill = verified_bytes(bundle, node.module_id, "SKILL.md")
