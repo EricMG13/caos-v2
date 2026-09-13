@@ -106,7 +106,9 @@ def assert_orchestration_proof(
         bundle.build_id,
         bundle.manifest_sha256,
         methodology.adapter_for(route),
-    ):
+    ) or pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION:
+        # Canonical artifacts are proven by the record reader (Task 3.1 d-2),
+        # never parsed here as claims.
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 
     live = _pinned_sources(conn, run_id)
