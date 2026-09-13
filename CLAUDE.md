@@ -204,6 +204,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   claims/leases (§39) take the node before the call. `artifacts` rows are also
   not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
   a refusal trigger like 0007's is the upgrade.
+- **Acceptance does not recompare upstream, and context reads hold the case
+  lock.** `_accept_artifact` checks authority and ownership under the lock but
+  not the predecessor digests the post-call unit compared; with Phase 2's one
+  sequential loop no writer can accept a predecessor in between. The pre-call
+  unit also reads every captured block one query at a time under the case lock,
+  so a large pack holds governed writes on that case for the whole read.
+  *Upgrade:* Phase 4 rechecks upstream digests inside the accept unit (or fences
+  predecessors with the node's lease), and a batched block query when the first
+  large PDF pack measures the hold.
 
 **Phase 0.**
 
@@ -570,9 +579,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   costs, so `tests/test_live_run.py` still prices it from its flat estimate. The
   byte bound is severe for a real model: at about $3/M input and $15/M output one
   call reserves about $3.64, so under the $5 default ceiling a two-node route
-  cannot finish and a qualification harness refuses such a price up front. *Upgrade:* a user-confirmed dated price for the configured live model,
-  and pricing the actual encoded request once the prompt is built before the
-  reservation.
+  cannot finish; the qualification harness refuses a set whose route length
+  times that worst case exceeds a run's ceiling before any case is prepared.
+  `ModelPrice.as_of` is carried but not stored beside the reservation, so a
+  reservation row does not say which price produced it. *Upgrade:* a
+  user-confirmed dated price for the configured live model, recorded with the
+  reservation, and pricing the actual encoded request once the prompt is built
+  before the reservation.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the

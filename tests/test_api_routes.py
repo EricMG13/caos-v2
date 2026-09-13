@@ -53,6 +53,7 @@ from server.store.routes import pin_route, pinned_route
 from server.store.runs import (
     Accepted,
     accept_attempt,
+    block_run,
     complete_attempt,
     start_attempt,
     start_run,
@@ -589,6 +590,50 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     )
     assert {"source": "CP-5", "type": "QA_GATE"} in by_module["CP-6"]["waiting_on"]
     assert by_module["CP-5"]["waiting_on"] == []
+
+
+def test_nothing_is_awaited_on_a_run_that_is_no_longer_running(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+) -> None:
+    conn, _case_id = case
+    run_id, viewer = run
+    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
+    block_run(conn, run_id)
+
+    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+
+    assert body["status"] == "BLOCKED"
+    assert not any(node["awaiting_gate"] for node in body["nodes"])
+
+
+def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    conn, _case_id = case
+    run_id, viewer = run
+    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
+    approved_nodes(conn, run_id, tmp_path / "blobs", route=route)
+    cp0 = next(n.route_node_id for n in route.nodes if n.module_id == "CP-0")
+    digest = BlobStore(tmp_path / "blobs").put(b"not json")
+    accept_attempt(
+        conn,
+        attempt_id=start_attempt(conn, run_id, cp0),
+        accepted=Accepted(digest, CHARGE, MODEL, GENERATION),
+    )
+
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+
+    assert (response.status_code, response.json()) == (
+        503,
+        {"refusal": "ORCHESTRATION_ARTIFACT_UNREADABLE"},
+    )
 
 
 def test_a_run_with_no_pinned_route_has_no_nodes(

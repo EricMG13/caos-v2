@@ -28,6 +28,8 @@ from typing import TextIO
 
 REPO = Path(__file__).resolve().parents[1]
 MALFORMED = "HOOK_INPUT_MALFORMED"
+# `format_file`: the pinned formatter is not installed here.
+SKIPPED = -1
 FORCE_PUSH = "refused: force push"
 NO_VERIFY = "refused: --no-verify bypasses the gates in docs/AI_CODE_QUALITY.md"
 UNPINNED = "refused: install from the hashed lock only"
@@ -39,6 +41,10 @@ DOTENV = (
 )
 # A `.env` path, not `os.environ`, `process.env` or `.env.example`.
 _DOTENV = re.compile(r"(?<![\w.])\.env(?!\.example)(?![A-Za-z0-9_])")
+# git global options that take a separate value (`git -C dir push`).
+_GIT_VALUED = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+)
 _OPERATORS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "(", ")"})
 _SKIPPED = ("vendor", ".claude")
 _PYTHON = frozenset({".py"})
@@ -87,21 +93,53 @@ def _token_reason(words: Sequence[str]) -> str | None:
     for index, word in enumerate(words):
         before = words[index - 1] if index else ";"
         until = _segment(words[index + 1 :])
-        if before == "git" and word == "push" and _forced(until):
-            return FORCE_PUSH
-        if before == "git" and word == "commit" and _flag(until, "n"):
-            return NO_VERIFY
+        if Path(word).name == "git":
+            subcommand, rest = _git_subcommand(until)
+            if subcommand == "push" and _forced(rest):
+                return FORCE_PUSH
+            if subcommand == "commit" and _flag(rest, "n"):
+                return NO_VERIFY
         if before == "pip" and word == "install" and "--require-hashes" not in until:
             return UNPINNED
-        # `env` as a command word with nothing to run prints the environment.
-        if word == "env" and before in _OPERATORS and not until:
+        # `env` as a command word with nothing left to run prints the environment.
+        if (
+            Path(word).name == "env"
+            and before in _OPERATORS
+            and not _env_command(until)
+        ):
             return CREDENTIALS
     return None
 
 
+def _git_subcommand(arguments: Sequence[str]) -> tuple[str, Sequence[str]]:
+    """git's subcommand and its arguments, past git's own global options."""
+    index = 0
+    while index < len(arguments) and arguments[index].startswith("-"):
+        index += 2 if arguments[index] in _GIT_VALUED else 1
+    if index >= len(arguments):
+        return "", ()
+    return arguments[index], arguments[index + 1 :]
+
+
+def _env_command(arguments: Sequence[str]) -> list[str]:
+    """What `env` would run: its arguments less options and assignments."""
+    left: list[str] = []
+    skip = False
+    for argument in arguments:
+        if skip:
+            skip = False
+        elif argument in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}:
+            skip = True
+        elif not left and (argument.startswith("-") or "=" in argument):
+            continue
+        else:
+            left.append(argument)
+    return left
+
+
 def _forced(arguments: Sequence[str]) -> bool:
     return (
-        bool({"--force", "--force-with-lease"} & set(arguments))
+        any(a.startswith(("--force", "--mirror")) for a in arguments)
         or _flag(arguments, "f")
         or any(a.startswith("+") for a in arguments)
     )
@@ -157,6 +195,10 @@ def format_file(
         argv = [str(prettier), "--write", str(path)]
         # From `frontend/`, so `frontend/.prettierignore` applies.
         cwd = repo / "frontend"
+    if not Path(argv[0]).is_file():
+        # A fresh worktree has no venv or node_modules: nothing to format with,
+        # which is not a formatting failure. Lint still checks the file later.
+        return SKIPPED
     try:
         # Fixed executable and argv, no shell; the path was resolved in the repo.
         return run(argv, cwd=cwd, capture_output=True, check=False).returncode
@@ -175,7 +217,11 @@ def main(argv: Sequence[str], stdin: TextIO, stderr: TextIO) -> int:
             return 2
         if mode == "format":
             target = format_target(parse_event(stdin.read(), "file_path"))
-            if target is not None and format_file(target) != 0:
+            code = 0 if target is None else format_file(target)
+            if code == SKIPPED:
+                print("HOOK_FORMAT_SKIPPED", file=stderr)
+                return 0
+            if code != 0:
                 print("HOOK_FORMAT_FAILED", file=stderr)
                 return 2
             return 0
