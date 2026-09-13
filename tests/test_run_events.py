@@ -15,11 +15,18 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from conftest import approve_run
+from test_module_execution import VENDORED, _catalog_route
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute
+from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect
 from server.store.events import Event, RunEvent, events_of, lock_run
@@ -55,6 +62,37 @@ def run(empty_database: str) -> Iterator[tuple[StoreConnection, UUID, UUID]]:
         yield conn, case_id, run_id
 
 
+def approved_nodes(
+    conn: StoreConnection,
+    run_id: UUID,
+    blobs: Path,
+    bundle: Bundle | None = None,
+    route: ResolvedRoute | None = None,
+) -> dict[str, str]:
+    """Admit evidence, then pin and govern this run on the real catalog route;
+    acceptance checks that authority at the store boundary."""
+    row = conn.execute(
+        "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
+    ).fetchone()
+    assert row is not None
+    case_id = row[0]
+    admit_pack(
+        conn,
+        BlobStore(blobs),
+        case_id=case_id,
+        documents=[Document(filename=BoundaryText.of("pack.txt"), data=b"Pack.\n")],
+    )
+    route = route or _catalog_route()
+    approve_run(
+        conn,
+        case_id=case_id,
+        run_id=run_id,
+        route=route,
+        bundle=bundle or Bundle(VENDORED),
+    )
+    return {node.module_id: node.route_node_id for node in route.nodes}
+
+
 def _names(conn: StoreConnection, run_id: UUID) -> list[str]:
     return [event.name for event in events_of(conn, run_id)]
 
@@ -70,7 +108,7 @@ def _count(conn: StoreConnection, table: str, run_id: UUID) -> int:
 
 
 def test_terminal_event_is_exactly_once(
-    run: tuple[StoreConnection, UUID, UUID], empty_database: str
+    run: tuple[StoreConnection, UUID, UUID], empty_database: str, tmp_path: Path
 ) -> None:
     """The Phase 1 exit test.
 
@@ -79,7 +117,8 @@ def test_terminal_event_is_exactly_once(
     replays it. One artifact, one charge, one terminal event.
     """
     conn, _case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    attempt_id = start_attempt(conn, run_id, nodes["CP-1"])
     conn.commit()
 
     completed = complete_attempt(
@@ -117,6 +156,8 @@ def test_terminal_event_is_exactly_once(
     assert names.count(RunEvent.CALL_OUTCOME_RECORDED.value) == 1
     assert names.count(RunEvent.ATTEMPT_ACCEPTED.value) == 1
     assert names == [
+        RunEvent.ROUTE_PINNED.value,
+        RunEvent.INPUT_PINNED.value,
         RunEvent.ATTEMPT_STARTED.value,
         RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
@@ -126,7 +167,7 @@ def test_terminal_event_is_exactly_once(
 
 
 def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
-    run: tuple[StoreConnection, UUID, UUID], empty_database: str
+    run: tuple[StoreConnection, UUID, UUID], empty_database: str, tmp_path: Path
 ) -> None:
     """The other side of the gap. The work happened; the transaction did not.
 
@@ -134,7 +175,8 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
     outcome would retain its bill even if the process died before acceptance.
     """
     conn, case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    attempt_id = start_attempt(conn, run_id, nodes["CP-1"])
     conn.commit()
 
     with connect(empty_database) as dying:
@@ -148,7 +190,11 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
 
     assert _count(conn, "artifacts", run_id) == 0
     assert _count(conn, "budget_ledger", run_id) == 0
-    assert _names(conn, run_id) == [RunEvent.ATTEMPT_STARTED.value]
+    assert _names(conn, run_id) == [
+        RunEvent.ROUTE_PINNED.value,
+        RunEvent.INPUT_PINNED.value,
+        RunEvent.ATTEMPT_STARTED.value,
+    ]
 
     assert (
         complete_attempt(
@@ -210,11 +256,12 @@ def test_an_event_carries_its_position_name_and_an_aware_time(
 
 
 def test_events_of_a_run_are_numbered_from_one_without_gaps(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     conn, _case_id, run_id = run
-    start_attempt(conn, run_id, "CP-0")
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    start_attempt(conn, run_id, nodes["CP-0"])
+    attempt_id = start_attempt(conn, run_id, nodes["CP-1"])
     complete_attempt(
         conn,
         attempt_id=attempt_id,
@@ -226,17 +273,20 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
         ),
     )
 
-    # CP-0 started, CP-1 started, outcome recorded, CP-1 accepted, run complete.
-    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4, 5]
+    # Route and input pinned, CP-0 started, CP-1 started, outcome recorded, CP-1
+    # accepted, run complete.
+    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4, 5, 6, 7]
 
 
 def test_accept_attempt_records_the_artifact_without_ending_the_run(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     """A route has many nodes and only the last one ends the run. Accepting is
     therefore its own operation, and a replay of it appends no second event."""
     conn, _case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    attempt_id = start_attempt(
+        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-1"]
+    )
 
     assert (
         accept_attempt(
@@ -384,10 +434,12 @@ def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
 
 
 def test_the_charge_survives_as_the_decimal_it_was_given(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     conn, _case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    attempt_id = start_attempt(
+        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-1"]
+    )
     complete_attempt(
         conn,
         attempt_id=attempt_id,

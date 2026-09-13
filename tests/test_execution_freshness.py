@@ -57,7 +57,14 @@ from server.store.outcomes import (
     execution_reads,
     record_outcome,
 )
-from server.store.runs import complete_run, fail_run, start_attempt, start_run
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    complete_run,
+    fail_run,
+    start_attempt,
+    start_run,
+)
 
 __all__ = ["route"]
 
@@ -695,8 +702,10 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
         1,
     )
     assert idle_unlocked == [(TransactionStatus.IDLE, (True, True))]
-    assert [name for name, _ in stamps] == ["check", "input"]
-    assert stamps[0][1] == stamps[1][1]
+    # Pre-call input read, then one post-billing unit: check and input share a
+    # transaction the pre-call read did not.
+    assert [name for name, _ in stamps] == ["input", "check", "input"]
+    assert stamps[1][1] == stamps[2][1] != stamps[0][1]
     assert during == [
         (
             TransactionStatus.INTRANS,
@@ -749,9 +758,9 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
         )
     assert (module.value.code, completion.calls) == (
         RefusalCode.ROUTE_IDENTITY_INVALID,
-        1,
+        0,
     )
-    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _counts(harness) == (0, [], 0, 1, 1)
 
     arbitrary = _ArbitraryProvider(harness, lambda: None)
     with pytest.raises(Refusal) as runtime:
@@ -766,7 +775,7 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
         RefusalCode.ROUTE_IDENTITY_INVALID,
         0,
     )
-    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _counts(harness) == (0, [], 0, 1, 1)
     _still_running(harness)
 
 
@@ -775,7 +784,7 @@ def _assignment(harness: _Harness, provider: ModuleProvider) -> Assignment:
         return provider._assignment(harness.route.nodes[0])
 
 
-def test_direct_executor_refuses_module_before_the_call_and_node_before_analysis(
+def test_direct_executor_refuses_a_mismatched_module_before_any_call(
     harness: _Harness,
 ) -> None:
     completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
@@ -796,32 +805,10 @@ def test_direct_executor_refuses_module_before_the_call_and_node_before_analysis
         0,
     )
     assert _counts(harness) == (0, [], 0, 1, 1)
-
-    moved = replace(assignment.node, stage=assignment.node.stage + 7)
-    with pytest.raises(Refusal) as node:
-        execute_module(
-            harness.conn,
-            harness.bundle,
-            attempt_id=attempt,
-            assignment=replace(assignment, node=moved),
-            provider=completion,
-        )
-    assert (node.value.code, completion.calls) == (
-        RefusalCode.ROUTE_IDENTITY_INVALID,
-        1,
-    )
-    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert harness.conn.info.transaction_status is TransactionStatus.IDLE
     _still_running(harness)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="RED for Task17d3: pre-call identity compares node id and module, "
-    "not the whole pinned node, so a moved node is billed before refusal "
-    "(invariant 8)",
-)
 def test_direct_executor_refuses_a_moved_node_before_any_call(
     harness: _Harness,
 ) -> None:
@@ -887,9 +874,14 @@ def _fail_in_analysis(
 
     original = execution_input
 
+    reads = 0
+
     def failing(conn: StoreConnection, run_id: UUID, bundle: Bundle) -> object:
+        nonlocal reads
+        reads += 1
         result = original(conn, run_id, bundle)
-        failure()
+        if reads == 2:  # The post-billing read, not the pre-call one.
+            failure()
         return result
 
     monkeypatch.setattr(executor, "execution_input", failing)
@@ -1079,3 +1071,32 @@ def test_guard_is_restored_when_the_guarded_change_fails(harness: _Harness) -> N
                 "UPDATE run_routes SET resolved='{}' WHERE run_id=%s",
                 (harness.run_id,),
             )
+
+
+def test_accept_boundary_refuses_authority_revoked_after_the_runtime_check(
+    harness: _Harness,
+) -> None:
+    """Task17d3a RED: acceptance inserts after a committed revocation."""
+    attempt = _reserved(harness)
+    node = harness.route.nodes[0]
+    record_outcome(
+        harness.conn,
+        attempt_id=attempt,
+        outcome=CallOutcome(REPORTED, MODEL, "gen-accept"),
+    )
+    _revoke_during_transport(harness)
+    digest = harness.blobs.put(b"{}")
+    with pytest.raises(Refusal) as refused:
+        accept_attempt(
+            harness.conn,
+            attempt_id=attempt,
+            accepted=Accepted(digest, REPORTED, MODEL, "gen-accept"),
+        )
+    assert (refused.value.code, refused.value.__cause__) == (
+        RefusalCode.GATE_APPROVAL_MISMATCH,
+        None,
+    )
+    assert node.route_node_id in {n.route_node_id for n in harness.route.nodes}
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
+    _still_running(harness)

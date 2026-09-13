@@ -399,20 +399,23 @@ def test_execute_module_refuses_changed_authority_before_completion(
         manifest.write_bytes(manifest.read_bytes() + b" ")
         return prompt
 
-    if during_prompt:
-        monkeypatch.setattr(executor, "build_prompt", mutate)
-    else:
-        manifest.write_bytes(manifest.read_bytes() + b" ")
     provider = _NeverCalled()
     from test_module_execution import _catalog_route
+    from test_run_events import approved_nodes
 
     conn, case_id = case
     route = _catalog_route()
     node = next(node for node in route.nodes if node.module_id == "CP-1")
     run = start_run(conn, case_id)
     conn.commit()
+    # A governed run pinned to this build, so only the authority change refuses.
+    approved_nodes(conn, run, manifest.parent / "blobs", bundle)
     attempt_id = start_attempt(conn, run, node.route_node_id)
     reserve(conn, attempt_id, Decimal("0.5"))
+    if during_prompt:
+        monkeypatch.setattr(executor, "build_prompt", mutate)
+    else:
+        manifest.write_bytes(manifest.read_bytes() + b" ")
     _refuses(
         lambda: execute_module(
             conn,
