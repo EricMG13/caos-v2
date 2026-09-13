@@ -672,7 +672,7 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
     blobs: BlobStore,
     bundle: Bundle,
 ) -> None:
-    """The join `accepted_artifacts` above and `runner.ModuleProvider._upstream`
+    """The join `accepted_artifacts` above and `executor._upstream_digests`
     both read now lives in this one function -- proved here in isolation from
     either caller, since a test that only ever saw it through one of them could
     not tell a coincidence from the shared row set the fix depends on."""

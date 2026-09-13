@@ -224,8 +224,7 @@ def _upstream_digests(conn: StoreConnection, assignment: Assignment) -> dict[str
     A predecessor with no accepted artifact is skipped: a soft edge's source may
     never have run, the same "unmet" a RESTRICTED node already tolerates.
     """
-    # ponytail: the latest accepted artifact per node; one owner per generation
-    # is the later fencing task, which retires this rule.
+    # One accepted owner per node is a store constraint (migration 0009).
     accepted = artifact_digests(conn, assignment.run_id)
     nodes = {node.module_id: node.route_node_id for node in assignment.route.nodes}
     return {

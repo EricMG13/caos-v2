@@ -856,7 +856,7 @@ def test_migration_reads_only_after_waiting_for_all_old_writers(
             if not commit:
                 conn.rollback()
     assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
-        7 if commit else 8,
+        7 if commit else len(store.MIGRATIONS),
     )
 
 
@@ -980,7 +980,9 @@ def test_migration_deadlock_refuses_and_releases_its_partial_locks(
         future.result(timeout=6)
         migration.execute("SET lock_timeout = '1s'")
         apply_schema(migration)
-    assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (8,)
+    assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
+        len(store.MIGRATIONS),
+    )
 
 
 def test_reordered_contiguous_tokens_refuse_upgrade(
