@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import traceback
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -1437,6 +1438,8 @@ def test_upstream_superseded_during_the_call_is_refused_keeping_the_bill(
 
 # Task17e-b: context derivation under real locks and failures.
 
+GOOD_QUOTE = "Total debt at 31 December 2026"
+
 
 def _attempt_at(harness: _Harness, index: int) -> tuple[RouteNode, UUID]:
     """A reserved attempt on route node `index`; CP-DR gets an accepted CP-0."""
@@ -1472,7 +1475,15 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
     from server.methodology import executor
 
     node, attempt = _attempt_at(harness, int(change == "upstream"))
+    before: dict[str, str] = dict(
+        harness.conn.execute(
+            "SELECT t.route_node_id, a.artifact_sha256 FROM artifacts a"
+            " JOIN run_attempts t USING (attempt_id)"
+        ).fetchall()
+    )
+    harness.conn.rollback()
     pending: list[Future[None]] = []
+    derived: list[dict[str, str]] = []
     derive = executor._upstream_digests
     with connect(harness.url) as other, ThreadPoolExecutor(max_workers=1) as pool:
         other.execute("SET statement_timeout = '5s'")
@@ -1491,6 +1502,7 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
 
         def inside(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
             result = derive(conn, assignment)
+            derived.append(result)
             if not pending:
                 pending.append(pool.submit(commit_change))
                 _wait_for_blocking(conn, other)
@@ -1515,6 +1527,10 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
     )
     # The call saw the state before the change: it could not land inside the unit.
     assert str(harness.witness_id) in completion.delegate.prompts[0]
+    gate = harness.route.nodes[0]
+    assert derived[0] == (
+        {gate.module_id: before[gate.route_node_id]} if change == "upstream" else {}
+    )
     with connect(harness.url) as observer:
         row = observer.execute(
             "SELECT (SELECT count(*) FROM call_outcomes WHERE attempt_id=%s),"
@@ -1539,7 +1555,8 @@ def test_failure_while_deriving_context_makes_no_call(
     def failing(*args: object, **kwargs: object) -> object:
         real(*args, **kwargs)
         if failure == "sql":
-            harness.conn.execute("SELECT 1/0")
+            # A native error whose message quotes document text.
+            harness.conn.execute("SELECT (%s)::int", (GOOD_QUOTE,))
         raise KeyboardInterrupt
 
     monkeypatch.setattr(executor, name, failing)
@@ -1554,7 +1571,7 @@ def test_failure_while_deriving_context_makes_no_call(
             "STORE_UNAVAILABLE",
             None,
         )
-        assert raised.value.__suppress_context__
+        assert GOOD_QUOTE not in "".join(traceback.format_exception(raised.value))
     else:
         assert type(raised.value) is KeyboardInterrupt
     assert completion.calls == 0
