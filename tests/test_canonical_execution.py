@@ -272,6 +272,21 @@ def test_canonical_wire_on_a_claims_pin_is_refused(harness: _Harness) -> None:
     assert canonical.prompts == []
 
 
+def test_an_upstream_statement_is_not_citable_evidence(harness: _Harness) -> None:
+    """Invariant 11 does not soften for the chain (REBUILD_PLAN Phase 11 exit,
+    on the canonical adapter since f-1c): CP-L10 quoting a sentence that only
+    CP-0's accepted handoff carries is refused, although that handoff reached
+    its prompt verbatim."""
+    attempt, gate = _run(harness, "CP-0", CanonicalCompletions(harness.source_id))
+    _accept(harness, attempt, gate)
+    upstream = harness.blobs.get(gate.artifact_sha256).decode("utf-8")
+    assert UNANCHORED in upstream
+    quoting = CanonicalCompletions(harness.source_id, quotes=(UNANCHORED,))
+    assert _refused(harness, "CP-L10", quoting) is RefusalCode.CITATION_NOT_LOCATED
+    [prompt] = quoting.prompts
+    assert upstream in prompt
+
+
 def test_one_unanchorable_quote_refuses_the_whole_handoff(harness: _Harness) -> None:
     both = CanonicalCompletions(harness.source_id, quotes=(QUOTE, UNANCHORED))
     assert _refused(harness, "CP-0", both) is RefusalCode.CITATION_NOT_LOCATED

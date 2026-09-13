@@ -16,43 +16,40 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from conftest import _url_for, approve_run
+from conftest import approve_run
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute, predecessors, resolve_route
-from server.evidence.extract import LINES_PER_PAGE
+from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.ingest import Document, admit_pack
-from server.methodology.bundle import Bundle, assemble_authority, authority_digest
+from server.methodology.bundle import Bundle
 from server.methodology.envelope import (
     Claim,
     Envelope,
     Readiness,
     parse_claims,
+    parse_qa,
     parse_readiness,
 )
 from server.methodology.executor import (
     Assignment,
     Delivery,
-    ModuleOutcome,
     Upstream,
     UpstreamClaim,
     build_prompt,
     execute_module,
 )
-from server.methodology.runner import canonical
-from server.provider import Completion, OpenRouter
+from server.provider import OpenRouter
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, connect
+from server.store import StoreConnection
 from server.store.budget import reserve
-from server.store.runs import Accepted, accept_attempt, start_attempt, start_run
+from server.store.runs import start_attempt, start_run
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 
@@ -66,22 +63,6 @@ REPORT = b"""Acme Holdings plc annual report 2026
 Total debt at 31 December 2026 was USD 1,240.0m
 Cash and equivalents stood at USD 310.5m
 """
-
-
-@dataclass
-class _Stub:
-    """Answers with whatever body the test wants to put through the host."""
-
-    body: str
-
-    # What the host configured; with fallbacks off it is what answers.
-    model: str = "a-model/for-the-test"
-
-    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.prompt = prompt
-        return Completion(
-            content=self.body, charge=Decimal("0.001"), generation_id="gen-stub"
-        )
 
 
 @pytest.fixture
@@ -153,6 +134,38 @@ def _attempt(
     }
 
 
+def test_the_retired_envelope_still_serialises_canonically() -> None:
+    """Pure: a `ModuleOutcome`'s claims `Envelope` (retired by f-1c, gone in f-2b)
+    serialises to one byte string whatever order it was built in."""
+    from server.methodology.runner import canonical
+
+    claim = Claim(statement=BoundaryText.of("Debt was stated."), citations=())
+    envelope = Envelope("CP-1", "b" * 64, "a" * 64, (claim,), 0, (), "Passed")
+    rebuilt = Envelope("CP-1", "b" * 64, "a" * 64, (claim,), 0, (), "Passed")
+    assert canonical(envelope) == canonical(rebuilt)
+    assert json.loads(canonical(envelope))["qa_status"] == "Passed"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected", "result"),
+    [
+        ('{"qa_status": "Passed"}', True, "Passed"),
+        ("{}", False, None),
+        ('{"qa_status": "Not Reviewed"}', True, RefusalCode.ENVELOPE_INVALID),
+        ('{"qa_status": "Passed"}', False, RefusalCode.ENVELOPE_UNDECLARED_FIELD),
+    ],
+)
+def test_parse_qa_bounds_the_qa_verdict(
+    body: str, expected: bool, result: object
+) -> None:
+    if isinstance(result, RefusalCode):
+        with pytest.raises(Refusal) as refused:
+            parse_qa(body, expected=expected)
+        assert refused.value.code is result
+    else:
+        assert parse_qa(body, expected=expected) == result
+
+
 def _catalog_route() -> ResolvedRoute:
     catalog = json.loads(
         (
@@ -162,357 +175,6 @@ def _catalog_route() -> ResolvedRoute:
         ).read_text(encoding="utf-8")
     )
     return resolve_route(catalog, "FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
-
-
-def test_the_envelope_carries_the_hosts_identity_not_the_modules(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """Invariant 3. The module is asked for CP-1 and the envelope says CP-1,
-    whatever the module put in its own body."""
-    conn, source_id, blobs = admitted
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=_Stub(_body(source_id)),
-    )
-
-    envelope = outcome.envelope
-    assert isinstance(envelope, Envelope)
-    assert envelope.module_id == "CP-1"
-    assert envelope.build_id.startswith("a43cb903")
-    assert len(envelope.authority_digest) == 64
-    assert envelope.claims_refused == 0
-
-
-def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """A `Claim` pairs the statement with what the *host* derived. The module
-    sent a page and a phrase; what the claim holds is a document digest and a
-    rectangle it never saw (invariant 11)."""
-    conn, source_id, blobs = admitted
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=_Stub(_body(source_id)),
-    )
-
-    [claim] = outcome.envelope.claims
-    assert isinstance(claim, Claim)
-    assert claim.statement.value.startswith("Total debt")
-    [citation] = claim.citations
-    assert citation.document_sha256
-    assert citation.bboxes
-
-
-def test_the_outcome_keeps_the_charge_out_of_the_envelope(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """Two things, not one. The envelope is the module's output under invariant
-    9; the charge is the provider's reported cost under invariant 8. Folding the
-    charge into the envelope would put a figure inside a document the host
-    claims to have derived from evidence."""
-    conn, source_id, blobs = admitted
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=_Stub(_body(source_id)),
-    )
-
-    assert isinstance(outcome, ModuleOutcome)
-    assert outcome.charge == Decimal("0.001")
-    assert outcome.generation_id == "gen-stub"
-    assert not hasattr(outcome.envelope, "charge")
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("charge", True),
-        ("charge", "0.1"),
-        ("charge", 0.1),
-        ("charge", 0),
-        ("charge", 1),
-        ("charge", None),
-        ("charge", Decimal("-1")),
-        ("charge", Decimal("NaN")),
-        ("charge", Decimal("sNaN")),
-        ("charge", Decimal("Infinity")),
-        ("charge", Decimal("1e131072")),
-        ("charge", Decimal("1e-16384")),
-        ("generation_id", None),
-        ("generation_id", {}),
-        ("generation_id", "bad\n"),
-        ("content", None),
-        ("refusal", "private response text"),
-    ],
-)
-def test_executor_refuses_malformed_completion_facts(
-    admitted: tuple[StoreConnection, UUID, BlobStore],
-    bundle: Bundle,
-    field: str,
-    value: object,
-) -> None:
-    conn, source_id, blobs = admitted
-
-    class _Malformed(_Stub):
-        def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-            return replace(
-                super().complete(prompt, json_object=json_object),
-                **{field: value},  # type: ignore[arg-type]
-            )
-
-    with pytest.raises(Refusal, match=r"^PROVIDER_RESPONSE_INVALID$") as caught:
-        execute_module(
-            conn,
-            bundle,
-            **_attempt(conn, blobs),
-            provider=_Malformed(_body(source_id)),
-        )
-    assert "private response text" not in repr(caught.value)
-    assert caught.value.__cause__ is None
-    with connect(_url_for(conn.info.dbname)) as observer:
-        assert observer.execute("SELECT count(*) FROM call_outcomes").fetchone() == (1,)
-        expected = [] if field == "charge" else [(Decimal("0.001"),)]
-        assert (
-            observer.execute("SELECT amount FROM budget_ledger").fetchall() == expected
-        )
-        generation = None if field == "generation_id" else "gen-stub"
-        assert observer.execute(
-            "SELECT generation_id FROM call_outcomes"
-        ).fetchone() == (generation,)
-        assert observer.execute(
-            "SELECT count(*) FROM budget_reservations"
-        ).fetchone() == (1,)
-        assert observer.execute("SELECT count(*) FROM artifacts").fetchone() == (0,)
-        assert observer.execute("SELECT status FROM runs").fetchone() == ("RUNNING",)
-
-
-@pytest.mark.parametrize("charge", [Decimal("0"), Decimal("0.001")])
-def test_executor_captures_host_model_before_completion(
-    admitted: tuple[StoreConnection, UUID, BlobStore],
-    bundle: Bundle,
-    charge: Decimal,
-) -> None:
-    conn, source_id, blobs = admitted
-
-    class _ChangesModel:
-        reads = 0
-        configured = "a-model/for-the-test"
-
-        @property
-        def model(self) -> str:
-            self.reads += 1
-            return self.configured
-
-        def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-            assert self.reads == 1
-            self.configured = "a-different/model"
-            return replace(
-                _Stub(_body(source_id)).complete(prompt, json_object=json_object),
-                charge=charge,
-            )
-
-    provider = _ChangesModel()
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=provider,
-    )
-    assert outcome.model == "a-model/for-the-test"
-    assert outcome.charge == charge
-    assert provider.reads == 1
-    with connect(_url_for(conn.info.dbname)) as observer:
-        assert observer.execute("SELECT model FROM call_outcomes").fetchone() == (
-            outcome.model,
-        )
-        assert observer.execute("SELECT amount FROM budget_ledger").fetchone() == (
-            charge,
-        )
-
-
-def _claims(source_id: UUID, *quotes: tuple[str, ...]) -> str:
-    """A body with one claim per tuple, each citing every quote in it."""
-    return json.dumps(
-        {
-            "claims": [
-                {
-                    "statement": f"Claim {n}.",
-                    "citations": [
-                        {"source_id": str(source_id), "page": 1, "matched_text": q}
-                        for q in claim
-                    ],
-                }
-                for n, claim in enumerate(quotes)
-            ]
-        }
-    )
-
-
-GOOD = "Total debt at 31 December 2026"
-# Not in the report at all.
-MISSING = "Total debt was USD 2,000.0m"
-# On the page twice: the report's title and its debt line both say it.
-TWICE = "2026"
-
-
-@pytest.mark.parametrize("miss", [MISSING, TWICE])
-def test_a_quote_that_does_not_anchor_refuses_its_claim_not_the_answer(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle, miss: str
-) -> None:
-    """§26. Invariant 11 refuses the quote before it reaches the artifact, and
-    the claim resting on it goes with it. The claims beside it that anchored
-    are what the module established, and refusing them too turned one weak
-    quote into a module that said nothing -- which is how a real issuer's
-    CP-1 failed three times over sixteen citations, twelve of them good."""
-    conn, source_id, blobs = admitted
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=_Stub(_claims(source_id, (GOOD,), (miss,))),
-    )
-
-    [kept] = outcome.envelope.claims
-    assert kept.statement.value == "Claim 0."
-    assert outcome.envelope.claims_refused == 1
-
-
-def test_a_claim_survives_only_when_every_citation_anchors(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """A figure keeps all of its evidence or none of it: a claim resting on two
-    quotes where one is missing would reach the page half-supported."""
-    conn, source_id, blobs = admitted
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=_Stub(_claims(source_id, (GOOD, MISSING), (GOOD,))),
-    )
-
-    assert [c.statement.value for c in outcome.envelope.claims] == ["Claim 1."]
-    assert outcome.envelope.claims_refused == 1
-
-
-def test_a_statement_the_boundary_refuses_still_refuses_the_answer(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """Only a quote that fails to anchor costs just its claim. A statement
-    carrying a bidirectional override is the module breaking the contract, not
-    missing a quote, and it refuses the whole answer as it always did."""
-    conn, source_id, blobs = admitted
-    body = json.loads(_claims(source_id, (GOOD,), (GOOD,)))
-    body["claims"][1]["statement"] = "Leverage is \u202efine."
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(
-            conn,
-            bundle,
-            **_attempt(conn, blobs),
-            provider=_Stub(json.dumps(body)),
-        )
-
-    assert caught.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
-
-
-def test_the_stored_artifact_counts_the_claims_it_refused(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """The count travels in the bytes that are content-addressed, so a reader
-    holding only the artifact can see the module said more than it kept."""
-    conn, source_id, blobs = admitted
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=_Stub(_claims(source_id, (GOOD,), (MISSING,))),
-    )
-
-    assert json.loads(canonical(outcome.envelope))["claims_refused"] == 1
-
-
-def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """Invariant 11, before the artifact. The module quoted something plausible
-    that is not in the evidence, and with its only claim refused there is no
-    answer left: no envelope exists, and the refusal is the quote's (§26)."""
-    conn, source_id, blobs = admitted
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(
-            conn,
-            bundle,
-            **_attempt(conn, blobs),
-            provider=_Stub(_body(source_id, quote="Total debt was USD 2,000.0m")),
-        )
-
-    assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
-
-
-def test_a_citation_naming_undelivered_evidence_is_refused(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    conn, _source_id, blobs = admitted
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(
-            conn,
-            bundle,
-            **_attempt(conn, blobs),
-            provider=_Stub(_body(uuid4())),
-        )
-
-    assert caught.value.code is RefusalCode.CITATION_NOT_DELIVERED
-
-
-def test_an_undeclared_field_refuses_the_envelope(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """`extra="forbid"`. Dropping the key instead is how a module carries state
-    past a reviewer reading the declared shape."""
-    conn, source_id, blobs = admitted
-    body = json.loads(_body(source_id))
-    body["claims"][0]["confidence"] = 0.9
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(
-            conn,
-            bundle,
-            **_attempt(conn, blobs),
-            provider=_Stub(json.dumps(body)),
-        )
-
-    assert caught.value.code is RefusalCode.ENVELOPE_UNDECLARED_FIELD
-
-
-def test_an_uncited_claim_is_refused(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """This system does not store assertions."""
-    conn, _source_id, blobs = admitted
-    body = {"claims": [{"statement": "Leverage looks fine.", "citations": []}]}
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(
-            conn,
-            bundle,
-            **_attempt(conn, blobs),
-            provider=_Stub(json.dumps(body)),
-        )
-
-    assert caught.value.code is RefusalCode.ENVELOPE_UNCITED_CLAIM
 
 
 @pytest.mark.parametrize(
@@ -533,24 +195,6 @@ def test_the_refusal_carries_none_of_the_module_output() -> None:
 
     leaked = str(caught.value) + repr(caught.value) + repr(caught.value.__cause__)
     assert "Total debt" not in leaked
-
-
-def test_the_prompt_carries_the_authority_and_the_evidence(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    conn, source_id, blobs = admitted
-    stub = _Stub(_body(source_id))
-
-    execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs),
-        provider=stub,
-    )
-
-    assert "cp-1-canonical-data-foundation" in stub.prompt, "the skill is the authority"
-    assert str(source_id) in stub.prompt
-    assert "Total debt at 31 December 2026" in stub.prompt
 
 
 def test_build_prompt_names_every_delivered_source() -> None:
@@ -606,45 +250,6 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
             assert citation.bboxes, "the host derived a rectangle for the quote"
             for box in citation.bboxes:
                 assert box.x0 < box.x1 and box.y0 < box.y1
-
-
-def test_a_delivery_announces_the_page_its_block_sits_on(
-    case: tuple[StoreConnection, UUID], tmp_path: Path, bundle: Bundle
-) -> None:
-    """The prompt names the page the host read the block from.
-
-    A module can only cite the page it was told. Announcing every block as page
-    one made every quote past the first page a citation invariant 11 refuses --
-    `CITATION_NOT_LOCATED` for a quote that is on the page, under a number
-    nobody gave the module a way to know.
-    """
-    conn, case_id = case
-    blobs = BlobStore(tmp_path / "blobs")
-    filler = "\n".join(f"filler line {n}" for n in range(LINES_PER_PAGE))
-    [source_id] = admit_pack(
-        conn,
-        blobs,
-        case_id=case_id,
-        documents=[
-            Document(
-                filename=BoundaryText.of("report.txt"),
-                data=f"{filler}\nTotal debt at 31 December 2026\n".encode(),
-            )
-        ],
-    )
-    last = conn.execute(
-        "SELECT block_id, page FROM source_blocks WHERE source_id = %s"
-        " ORDER BY block_id DESC",
-        (source_id,),
-    ).fetchone()
-    assert last is not None and last[1] == 2
-    stub = _Stub(_body(source_id, page=2))
-
-    # And the citation a module makes from that prompt anchors.
-    outcome = execute_module(conn, bundle, **_attempt(conn, blobs), provider=stub)
-    assert "page: 2\nTotal debt at 31 December 2026" in stub.prompt
-    [claim] = outcome.envelope.claims
-    assert [citation.page for citation in claim.citations] == [2]
 
 
 ROUTE = frozenset({"CP-0", "CP-1", "CP-2"})
@@ -751,39 +356,6 @@ def test_a_module_that_is_not_the_gate_is_asked_for_no_verdict() -> None:
     assert "content_to_module_map" not in prompt
 
 
-def test_the_stored_gate_artifact_carries_its_readiness(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """The rows live in the canonical bytes, so the artifact digest covers what
-    the gate decided."""
-    conn, source_id, blobs = admitted
-    # The host asks the gate about every other module of the stored route.
-    verdicts = sorted(
-        (
-            _row(
-                module_id=node.module_id,
-                readiness_status="READY_WITH_LIMITATIONS",
-                readiness_effect="no audited statements",
-            )
-            for node in _catalog_route().nodes
-            if node.module_id != "CP-0"
-        ),
-        key=lambda row: str(row["module_id"]),
-    )
-    body = json.loads(_body(source_id)) | {"content_to_module_map": verdicts}
-
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, blobs, "CP-0"),
-        provider=_Stub(json.dumps(body)),
-    )
-
-    assert len(outcome.envelope.readiness) == len(verdicts)
-    # The rows the module sent, back out of the bytes the digest addresses.
-    assert json.loads(canonical(outcome.envelope))["content_to_module_map"] == verdicts
-
-
 def test_a_node_receives_its_direct_predecessors_accepted_claims() -> None:
     """The chain: what CP-1 established reaches CP-2's prompt as context, ahead
     of the evidence and marked as not being any.
@@ -829,99 +401,3 @@ def test_the_upstream_section_says_it_is_not_evidence() -> None:
     )
 
     assert "not evidence" in prompt
-
-
-def _accept_predecessor(
-    conn: StoreConnection,
-    blobs: BlobStore,
-    bundle: Bundle,
-    assignment: Assignment,
-    sentence: str,
-) -> None:
-    """Accept a real artifact for the assignment's first predecessor in its run."""
-    [module_id, *_] = predecessors(assignment.route, assignment.module_id)
-    node = next(n for n in assignment.route.nodes if n.module_id == module_id)
-    envelope = Envelope(
-        module_id=module_id,
-        build_id=bundle.build_id,
-        authority_digest=authority_digest(assemble_authority(bundle, module_id)),
-        claims=(Claim(statement=BoundaryText.of(sentence), citations=()),),
-        claims_refused=0,
-        readiness=(),
-    )
-    attempt = start_attempt(conn, assignment.run_id, node.route_node_id)
-    reserve(conn, attempt, Decimal("0.5"))
-    accepted = Accepted(blobs.put(canonical(envelope)), Decimal("0"), "m", "g")
-    assert accept_attempt(conn, attempt_id=attempt, accepted=accepted)
-
-
-def test_an_upstream_statement_is_not_citable_evidence(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """Invariant 11 does not soften for the chain: a module quoting an earlier
-    module's sentence rather than the document is refused. On this tree that
-    refuses the module's whole answer; §26 is what narrows it to the claim the
-    quote rests on."""
-    conn, source_id, blobs = admitted
-    sentence = "Leverage stood at 4.0x on the agreed basis."
-    stub = _Stub(_body(source_id, quote=sentence))
-
-    attempt = _attempt(conn, blobs, "CP-2")
-    _accept_predecessor(conn, blobs, bundle, attempt["assignment"], sentence)
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(conn, bundle, **attempt, provider=stub)
-
-    assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
-    # The same refusal would fire if `execute_module` simply never gave the
-    # module an upstream section to quote from -- the sentence is absent from
-    # the delivered evidence either way. Asserting on the prompt the stub
-    # captured is what tells the two apart: the section reached the module
-    # and was refused as context, not silently dropped before it got there.
-    assert "--- UPSTREAM" in stub.prompt
-    assert sentence in stub.prompt
-
-
-def test_the_qa_module_is_asked_for_a_qa_status_and_stores_it(
-    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
-) -> None:
-    """F03: CP-5's clearance, read by `parse_qa`, travels in the envelope the
-    digest covers."""
-    conn, source_id, blobs = admitted
-    stub = _Stub(json.dumps(json.loads(_body(source_id)) | {"qa_status": "Blocked"}))
-
-    outcome = execute_module(
-        conn, bundle, **_attempt(conn, blobs, "CP-5"), provider=stub
-    )
-
-    assert "qa_status" in stub.prompt
-    assert outcome.envelope.qa_status == "Blocked"
-    assert json.loads(canonical(outcome.envelope))["qa_status"] == "Blocked"
-
-
-@pytest.mark.parametrize(
-    "module_id,qa,code",
-    [
-        ("CP-1", {"qa_status": "Passed"}, RefusalCode.ENVELOPE_UNDECLARED_FIELD),
-        ("CP-5", {}, RefusalCode.ENVELOPE_INVALID),
-        ("CP-5", {"qa_status": "Not Reviewed"}, RefusalCode.ENVELOPE_INVALID),
-        ("CP-5", {"qa_status": "Probably"}, RefusalCode.ENVELOPE_INVALID),
-        ("CP-5", {"qa_status": ["Passed"]}, RefusalCode.ENVELOPE_INVALID),
-    ],
-)
-def test_a_qa_status_the_host_did_not_ask_for_or_cannot_bound_is_refused(
-    admitted: tuple[StoreConnection, UUID, BlobStore],
-    bundle: Bundle,
-    module_id: str,
-    qa: dict[str, object],
-    code: RefusalCode,
-) -> None:
-    conn, source_id, blobs = admitted
-    body = json.dumps(json.loads(_body(source_id)) | qa)
-
-    with pytest.raises(Refusal) as caught:
-        execute_module(
-            conn, bundle, **_attempt(conn, blobs, module_id), provider=_Stub(body)
-        )
-
-    assert caught.value.code is code
