@@ -281,7 +281,8 @@ system this size means nobody looked.
   it were paid for.**~~ Closed by `prepare`, which resolves every route, creates
   every case, admits every document and pins every input before `perform` may
   spend anything: `SOURCE_HAS_NO_TEXT` on the last case of ten now refuses the
-  set while nothing has been bought.
+  set before any provider call, with the earlier cases' prepared rows committed
+  and unspent.
 - **An unrun node's state is a weaker reading when the artifacts cannot be
   read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
   soft edge's readiness comes from, and bytes that will not load would raise out
@@ -292,10 +293,11 @@ system this size means nobody looked.
   *Upgrade:* none — a run whose artifacts are unreadable has a worse problem
   than the precision of this field.
 - ~~**`Unrun` does not say whether a node was attempted.**~~ Closed in Task17f-b:
-  each `Unrun` carries its stored `Attempted` rows -- whether a call was
-  recorded (none is possible spend), whether a known charge was billed (none is
-  unknown exposure), and the recorded model and generation, `None` when the call
-  recorded none rather than a configured name.
+  each `Unrun` carries its stored `Attempted` rows -- whether the attempt was
+  reserved, whether its call was recorded (reserved and unrecorded is possible
+  spend), whether a known charge was billed (a recorded call without one is
+  unknown exposure), and the recorded model and generation, read from the store
+  and `None` when the call recorded none.
 - **A proof is held and not stored.** `perform` now holds each case's
   `OrchestrationProof` beside the run id it covers — and only for as long as the
   caller does. There is no table and no route that serves one, so a proof still
