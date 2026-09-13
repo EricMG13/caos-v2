@@ -21,7 +21,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from test_run_events import approved_nodes
+from test_run_events import RECORD, approved_nodes
 
 from server.api.stream import IO_BUDGET, StreamEvent, tail
 from server.refusals import Refusal
@@ -88,6 +88,7 @@ def test_sse_closes_after_terminal_delivery(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -184,6 +185,7 @@ def test_a_tail_resumes_after_last_event_id(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
     first = list(tail(conn, run_id=run_id, actor_id=viewer))

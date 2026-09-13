@@ -1,5 +1,6 @@
-"""The adapter a run pins is derived from its route, and acceptance carries the
-host record exactly when that adapter is canonical (Task 3.1 slice c-2; §42.1)."""
+"""Every run pins the one canonical adapter, and acceptance always carries the
+host record (Task 3.1 slices c-2 and f-1c; §42.1). Disabled routes are
+`tests/test_disabled_routes.py`."""
 
 from __future__ import annotations
 
@@ -36,7 +37,6 @@ CATALOG = json.loads(
     ).read_text(encoding="utf-8")
 )
 CANONICAL = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
-CLAIMS = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 
 
 @pytest.fixture
@@ -51,15 +51,6 @@ def _accepted(harness: _Harness, attempt: UUID, record: str | None) -> Accepted:
         MODEL,
         f"g{attempt.hex}",
         record_sha256=record,
-    )
-
-
-def test_the_adapter_is_derived_from_the_route_alone() -> None:
-    assert methodology.adapter_for(resolve_route(CATALOG, *CANONICAL)) == (
-        methodology.CANONICAL_ADAPTER_VERSION
-    )
-    assert methodology.adapter_for(resolve_route(CATALOG, *CLAIMS)) == (
-        methodology.CLAIMS_ADAPTER_VERSION
     )
 
 
@@ -88,15 +79,6 @@ def test_a_canonical_pin_passes_execution_input(harness: _Harness) -> None:
     assert route == harness.route
 
 
-def test_a_claims_route_keeps_its_adapter_and_bytes(
-    case: tuple[StoreConnection, UUID], tmp_path: Path
-) -> None:
-    conn, case_id = case
-    run, source, bundle, _route = _prepare(conn, case_id, tmp_path)
-    pin = pin_run_input(conn, run, source.version, bundle)
-    assert (pin.adapter_version, pin.format_version) == ("claims-json-v1", 1)
-
-
 def _refused(harness: _Harness, attempt: UUID, record: str | None) -> object:
     try:
         return accept_attempt(
@@ -109,17 +91,10 @@ def _refused(harness: _Harness, attempt: UUID, record: str | None) -> object:
         return refusal.code
 
 
-@pytest.mark.parametrize(
-    ("route", "record"),
-    [(CLAIMS, "e" * 64), (CANONICAL, None)],
-    indirect=["route"],
-)
-def test_acceptance_requires_a_record_exactly_for_a_canonical_pin(
-    harness: _Harness, record: str | None
-) -> None:
+def test_acceptance_without_a_record_refuses(harness: _Harness) -> None:
     attempt = _billed(harness)
     before = events_of(harness.conn, harness.run_id)
-    assert _refused(harness, attempt, record) is RefusalCode.ARTIFACT_RECORD_MISMATCH
+    assert _refused(harness, attempt, None) is RefusalCode.ARTIFACT_RECORD_MISMATCH
     assert events_of(harness.conn, harness.run_id) == before
     assert _count(harness, "artifacts") == 0
     # The bill committed first survives; only the analysis was refused.
@@ -128,6 +103,7 @@ def test_acceptance_requires_a_record_exactly_for_a_canonical_pin(
 
 def test_a_replay_with_another_record_is_refused(harness: _Harness) -> None:
     attempt = _billed(harness)
+    assert _refused(harness, attempt, "E" * 64) is RefusalCode.BLOB_ADDRESS_INVALID
     assert _refused(harness, attempt, "e" * 64) is True
     stored = harness.conn.execute(
         "SELECT record_sha256 FROM artifacts WHERE attempt_id = %s", (attempt,)
@@ -138,14 +114,6 @@ def test_a_replay_with_another_record_is_refused(harness: _Harness) -> None:
     assert _refused(harness, attempt, "f" * 64) is RefusalCode.CALL_OUTCOME_CONFLICT
     assert _refused(harness, attempt, None) is RefusalCode.CALL_OUTCOME_CONFLICT
     assert _count(harness, "artifacts") == 1
-
-
-@pytest.mark.parametrize("route", [CLAIMS], indirect=True)  # claims-only: f-2
-def test_a_claims_replay_carries_no_record(harness: _Harness) -> None:
-    attempt = _billed(harness)
-    assert _refused(harness, attempt, "E" * 64) is RefusalCode.BLOB_ADDRESS_INVALID
-    assert _refused(harness, attempt, None) is True
-    assert _refused(harness, attempt, "e" * 64) is RefusalCode.CALL_OUTCOME_CONFLICT
 
 
 def test_version_twelve_adds_an_empty_record_column(

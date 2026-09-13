@@ -248,15 +248,14 @@ def test_a_wrong_adapter_cannot_become_authority(harness: _Harness) -> None:
     assert _counts(harness) == (1, [REPORTED], 0, 2, 2)
 
 
-@pytest.mark.parametrize("route", [CLAIMS], indirect=True)  # claims-only: f-2
-def test_canonical_wire_on_a_claims_pin_is_refused(harness: _Harness) -> None:
+@pytest.mark.parametrize("route", [CLAIMS], indirect=True)
+def test_canonical_wire_on_a_disabled_route_is_refused(harness: _Harness) -> None:
+    """Even its adapter module (CP-0) never reaches the provider (§42.2)."""
     node = harness.route.nodes[0]
     canonical = CanonicalCompletions(harness.source_id)
-    lite = CanonicalCompletions(
-        harness.source_id,
-        content='{"canonical_markdown": "---\\n---\\n", "citations": []}',
+    assert _refused(harness, node.module_id, canonical) is (
+        RefusalCode.HANDOFF_MODULE_UNSUPPORTED
     )
-    assert _refused(harness, node.module_id, lite) is RefusalCode.READINESS_INCOMPLETE
     attempt = _reserved(harness, node.module_id)
     with pytest.raises(Refusal) as refused:
         execute_handoff(
@@ -268,7 +267,7 @@ def test_canonical_wire_on_a_claims_pin_is_refused(harness: _Harness) -> None:
             ),
             provider=canonical,
         )
-    assert refused.value.code is RefusalCode.RUN_INPUT_INVALID
+    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
     assert canonical.prompts == []
 
 

@@ -25,12 +25,13 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked, _wait_for_blocking
-from test_module_execution import _catalog_route
-from test_run_events import approved_nodes
+from test_run_events import RECORD, approved_nodes
 
 from server.boundary_text import BoundaryText
+from server.engine.route import resolve_route
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, budget, connect
 from server.store.budget import CEILING, remaining, reserve, reserved_for
@@ -53,7 +54,10 @@ GENERATION = "gen-for-the-test"
 CEILING_FOR_TEST = Decimal("1.00")
 HALF = Decimal("0.60")
 # Acceptance requires a governed run on the real route (Task17d3a).
-NODES = [node.route_node_id for node in _catalog_route().nodes]
+NODES = [
+    node.route_node_id
+    for node in resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION).nodes
+]
 
 
 def _run_with_ceiling(conn: StoreConnection, case_id: UUID) -> UUID:
@@ -258,7 +262,7 @@ def _accept(conn: StoreConnection, attempt: UUID, charge: Decimal) -> None:
     accept_attempt(
         conn,
         attempt_id=attempt,
-        accepted=Accepted("b" * 64, charge, MODEL, GENERATION),
+        accepted=Accepted("b" * 64, charge, MODEL, GENERATION, record_sha256=RECORD),
     )
 
 

@@ -28,7 +28,7 @@ from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
-from server.store.gates import approved_run_input
+from server.store.gates import approved_run_input, require_adapter_route
 from server.store.outcomes import (
     CallOutcome,
     _attempt_owner,
@@ -225,8 +225,11 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
     # Fresh authority in this locked unit: governed writes take the case lock
     # first, so nothing can commit between this check and the insert.
     pin, route = approved_run_input(conn, run)
-    canonical = pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
-    if canonical is (accepted.record_sha256 is None):
+    require_adapter_route(route)
+    if pin.adapter_version != methodology.CANONICAL_ADAPTER_VERSION:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    # Every accepted artifact is a canonical Markdown bound by its host record.
+    if accepted.record_sha256 is None:
         raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
     node = conn.execute(
         "SELECT route_node_id FROM run_attempts WHERE attempt_id = %s", (attempt,)
