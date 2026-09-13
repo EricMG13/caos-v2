@@ -67,6 +67,12 @@ def verify_package(archive_bytes: bytes) -> Verification:
     Deliberately importing nothing from this repository except the render, which
     is pure. A verifier that needed the store would only work where the store is,
     which is the one place a package does not need verifying.
+
+    For a canonical artifact this proves the package agrees with itself: the
+    Markdown and record text hash to the pair the payload names. The page's QA
+    status, scope and limitations come from that record and are not re-derived
+    from the Markdown here, and the archived receipt is not signed; only
+    `server.deliverable.canonical.verify_frozen` binds a revision to the store.
     """
     try:
         with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
