@@ -8,28 +8,34 @@ no text in the exception chain.
 
 from __future__ import annotations
 
+import ast
+import json
+import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CanonicalCompletions
-from conftest import approve_run, priced
+from conftest import approve_run, priced, route_fault
 from test_canonical_execution import _node, harness, route
 from test_deliverable_canonical import RESTRICTED, _accept
-from test_execution_freshness import _Harness
+from test_execution_freshness import _guard_disabled, _Harness
 from test_loop_charges import ESTIMATE, REPORT
-from test_orchestration_proof import _token_fault
+from tracked import tracked_python
 
 from server import methodology
 from server.boundary_text import BoundaryText
 from server.deliverable.canonical import Revision, canonical_payload
+from server.engine.route import route_digest
 from server.engine.runtime import Execution, run_route
 from server.evidence.citations import Citation, verify_citations
 from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.methodology.handoff import CanonicalRecord, _decoded_record, record_bytes
 from server.methodology.invocation import call_time_identity, host_identity
 from server.methodology.runner import ModuleProvider
@@ -39,12 +45,45 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant
+from server.store.routes import _canonical
 from server.store.runs import start_run
 from server.store.source_sets import pinned_live_sources
 
 __all__ = ["harness", "route"]
 
+REPO = Path(__file__).resolve().parents[1]
 MISMATCH = RefusalCode.ARTIFACT_RECORD_MISMATCH
+
+
+@contextmanager
+def _token_fault(conn: StoreConnection) -> Iterator[None]:
+    """Privileged fault setup; transactional DDL restores the guard on failure."""
+    assert conn.info.dbname.startswith("caos_test_")
+    with conn.transaction():
+        conn.execute("ALTER TABLE source_tokens DISABLE TRIGGER evidence_immutable")
+        yield
+        conn.execute("ALTER TABLE source_tokens ENABLE TRIGGER evidence_immutable")
+
+
+def names_qualified() -> set[str]:
+    """Every tracked module outside `tests/` whose source names QUALIFIED.
+
+    Read from the AST, so a mention in a comment or docstring -- which mints
+    nothing -- is not a code path; a gate script is one, so `scripts/` counts.
+    """
+    naming: set[str] = set()
+    for path in tracked_python(REPO):
+        if path.is_relative_to(REPO / "tests"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            spoken = (isinstance(node, ast.Attribute) and node.attr == "QUALIFIED") or (
+                isinstance(node, ast.Name) and node.id == "QUALIFIED"
+            )
+            declared = isinstance(node, ast.Constant) and node.value == "QUALIFIED"
+            if spoken or declared:
+                naming.add(str(path.relative_to(REPO)))
+    return naming
 
 
 def _run(harness: _Harness) -> _Harness:
@@ -121,6 +160,127 @@ def test_a_lite_run_completed_through_the_runtime_proves(ran: _Harness) -> None:
     assert proof.assurance is Assurance.ORCHESTRATION_PROOF
     assert (proof.run_id, proof.build_id) == (ran.run_id, ran.bundle.build_id)
     assert (proof.artifacts, proof.citations) == (3, 3)
+
+
+def test_a_host_control_reads_orchestration_proof_never_qualified(
+    ran: _Harness,
+) -> None:
+    """Phase 10's named exit, over a canonical run.
+
+    Behaviourally the control returns ORCHESTRATION_PROOF over a run that did
+    something; structurally `QUALIFIED` is named only by the enum that declares
+    it and the reader that relays a reviewer's signed verdict.
+    """
+    proof = _prove(ran)
+    assert proof.assurance is Assurance.ORCHESTRATION_PROOF
+    assert proof.build_id.startswith("a43cb903")
+    assert proof.route_digest == route_digest(ran.route)
+    assert proof.artifacts == len(ran.route.nodes)
+    assert names_qualified() == {
+        "server/qualification/__init__.py",
+        "server/qualification/verdict.py",
+    }
+
+
+def test_a_run_that_accepted_nothing_has_nothing_to_prove(harness: _Harness) -> None:
+    """Three claims about no artifacts hold vacuously, so they are refused."""
+    assert _refusal(harness) is RefusalCode.ORCHESTRATION_NOTHING_TO_PROVE
+    run_id = start_run(harness.conn, harness.case_id)
+    harness.conn.commit()
+    assert _refusal(replace(harness, run_id=run_id)) is (
+        RefusalCode.ORCHESTRATION_NOTHING_TO_PROVE
+    )
+
+
+def test_a_run_whose_route_is_no_longer_pinned_refuses(ran: _Harness) -> None:
+    with route_fault(ran.conn):
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED
+
+
+def test_an_accepted_node_the_pin_does_not_carry_refuses(ran: _Harness) -> None:
+    """Invariant 10: execution that did not read the pin."""
+    truncated = replace(ran.route, nodes=ran.route.nodes[:1], edges=())
+    digest = route_digest(truncated)
+    with route_fault(ran.conn):
+        # ALL: the pin's foreign key to the route is a trigger too.
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER ALL")
+        ran.conn.execute(
+            "UPDATE run_inputs SET route_digest = %s WHERE run_id = %s",
+            (digest, ran.run_id),
+        )
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER ALL")
+        ran.conn.execute(
+            "UPDATE run_routes SET resolved = %s, route_digest = %s WHERE run_id = %s",
+            (_canonical(truncated), digest, ran.run_id),
+        )
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE
+
+
+def test_a_run_with_no_stored_input_refuses(ran: _Harness) -> None:
+    with _guard_disabled(ran.conn, "run_inputs", "input_immutable"):
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.RUN_INPUT_INVALID
+
+
+def test_an_artifact_whose_producer_differs_from_its_call_refuses(
+    ran: _Harness,
+) -> None:
+    for column in ("model", "generation_id"):
+        attempt, _artifact, _record = _stored(ran, "CP-L10")
+        ran.conn.execute(
+            f"UPDATE artifacts SET {column} = 'another' WHERE attempt_id = %s",
+            (attempt,),
+        )
+        ran.conn.commit()
+        assert _refusal(ran) is RefusalCode.CALL_OUTCOME_CONFLICT
+        ran.conn.execute(
+            f"UPDATE artifacts SET {column} = o.{column} FROM call_outcomes o"
+            " WHERE o.attempt_id = artifacts.attempt_id"
+            " AND artifacts.attempt_id = %s",
+            (attempt,),
+        )
+        ran.conn.commit()
+        assert _prove(ran).artifacts == 3
+
+
+def test_an_artifact_with_no_recorded_call_refuses(ran: _Harness) -> None:
+    with _guard_disabled(ran.conn, "call_outcomes", "outcome_immutable"):
+        ran.conn.execute("DELETE FROM call_outcomes WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.CALL_OUTCOME_LEGACY
+
+
+def test_a_proof_under_another_bundle_build_refuses(
+    ran: _Harness, tmp_path: Path
+) -> None:
+    """Invariant 4 at proof time: the bundle here now, not the one remembered."""
+    root = tmp_path / "another-build"
+    shutil.copytree(ran.bundle.root, root)
+    manifest = json.loads((root / MANIFEST_NAME).read_bytes())
+    manifest["build_id"] = "b" * 64
+    (root / MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(Refusal) as caught:
+        assert_orchestration_proof(ran.conn, ran.blobs, Bundle(root), run_id=ran.run_id)
+    ran.conn.rollback()
+    assert caught.value.code is RefusalCode.ORCHESTRATION_BUILD_MOVED
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_a_record_naming_another_module_than_the_pin_refuses(ran: _Harness) -> None:
+    """Invariant 3: the module is the pin's, never the record's own claim."""
+    _rewrite(
+        ran,
+        "CP-L10",
+        lambda r: replace(r, identity=replace(r.identity, module_id="CP-5")),
+    )
+    assert _refusal(ran) is MISMATCH
 
 
 def test_a_changed_markdown_blob_refuses(ran: _Harness) -> None:
@@ -277,6 +437,25 @@ def test_a_withdrawn_source_refuses_the_proof_and_the_deliverable(
     )
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
     assert _delivered(ran) is MISMATCH
+
+
+def test_a_readmitted_copy_of_a_withdrawn_source_does_not_revive_the_proof(
+    ran: _Harness,
+) -> None:
+    actor = uuid4()
+    grant(ran.conn, case_id=ran.case_id, user_id=actor, standing=Standing.APPROVER)
+    ran.conn.commit()
+    withdraw_source(
+        ran.conn, case_id=ran.case_id, actor_id=actor, source_id=ran.source_id
+    )
+    admit_pack(
+        ran.conn,
+        ran.blobs,
+        case_id=ran.case_id,
+        documents=[Document(filename=BoundaryText.of("again.txt"), data=REPORT)],
+    )
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
 
 
 @contextmanager
