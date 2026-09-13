@@ -32,6 +32,11 @@ from server.refusals import Refusal, RefusalCode
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 TIMEOUT_SECONDS = 120.0
+# Host resource ceilings, not guarantees that every canonical handoff fits.
+# Oversized requests/responses refuse; no prefix is accepted as a whole answer.
+MAX_REQUEST_BYTES = 1_048_576
+MAX_RESPONSE_BYTES = 4_194_304
+MAX_COMPLETION_TOKENS = 32_768
 
 # A call that cannot succeed by being repeated. Retrying one of these spends a
 # second reservation on the same certain failure.
@@ -109,16 +114,38 @@ class UrllibTransport:
     def post(
         self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
     ) -> tuple[int, bytes]:
-        if urllib.parse.urlsplit(url).scheme not in ALLOWED_SCHEMES:
-            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
-        request = urllib.request.Request(
-            url, data=body, headers=dict(headers), method="POST"
-        )
+        if not isinstance(body, bytes) or len(body) > MAX_REQUEST_BYTES:
+            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
+        try:
+            if urllib.parse.urlsplit(url).scheme not in ALLOWED_SCHEMES:
+                raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+            request = urllib.request.Request(
+                url, data=body, headers=dict(headers), method="POST"
+            )
+        except ValueError:
+            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED) from None
         try:
             with _opener().open(request, timeout=timeout) as response:
-                return int(response.status), bytes(response.read())
+                return int(response.status), _read_body(response)
         except urllib.error.HTTPError as error:
-            return int(error.code), bytes(error.read())
+            with error:
+                return int(error.code), _read_body(error)
+
+
+def _read_body(response: http.client.HTTPResponse | urllib.error.HTTPError) -> bytes:
+    body = _response_bytes(response.read(MAX_RESPONSE_BYTES + 1))
+    # HTTPResponse.read(size) tolerates early EOF with Content-Length remaining.
+    # HTTPError delegates this native framing state to its underlying response.
+    remaining = getattr(response, "length", None)
+    if remaining is not None and remaining > 0:
+        raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE) from None
+    return body
+
+
+def _response_bytes(body: bytes) -> bytes:
+    if not isinstance(body, bytes) or len(body) > MAX_RESPONSE_BYTES:
+        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID) from None
+    return body
 
 
 class CompletionProvider(Protocol):
@@ -202,20 +229,28 @@ class OpenRouter:
         return _completion(_decode(body))
 
     def _post(self, prompt: str, *, json_object: bool = False) -> tuple[int, bytes]:
+        if not isinstance(prompt, str) or len(prompt) > MAX_REQUEST_BYTES:
+            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
         request: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "max_completion_tokens": MAX_COMPLETION_TOKENS,
             # One run, one provider identity. A fallback would move the run
             # to a model its charges were never priced against.
-            "provider": {"allow_fallbacks": False},
+            "provider": {"allow_fallbacks": False, "require_parameters": True},
         }
         if json_object:
             request["response_format"] = {"type": "json_object"}
         payload = json.dumps(request).encode("utf-8")
+        if len(payload) > MAX_REQUEST_BYTES:
+            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
         try:
-            return self.transport.post(
-                f"{self.base_url}/chat/completions",
+            url = f"{self.base_url}/chat/completions"
+            if urllib.parse.urlsplit(url).scheme not in ALLOWED_SCHEMES:
+                raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+            status, body = self.transport.post(
+                url,
                 payload,
                 {
                     "Authorization": f"Bearer {self.api_key}",
@@ -240,6 +275,7 @@ class OpenRouter:
             # indeterminate -- nothing was sent -- and the message is the header
             # itself, `Bearer` and the key.
             raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED) from None
+        return status, _response_bytes(body)
 
 
 def _decode(body: bytes) -> Mapping[str, Any]:
