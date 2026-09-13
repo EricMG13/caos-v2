@@ -82,13 +82,11 @@ def test_a_canonical_route_pins_the_canonical_adapter_and_requires_a_subject(
 
 
 @pytest.mark.parametrize("route", [CANONICAL], indirect=True)
-def test_a_canonical_pin_cannot_execute_before_its_executor(
-    harness: _Harness,
-) -> None:
-    with pytest.raises(Refusal) as refused:
-        execution_input(harness.conn, harness.run_id, harness.bundle)
-    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
+def test_a_canonical_pin_passes_execution_input(harness: _Harness) -> None:
+    pin, route = execution_input(harness.conn, harness.run_id, harness.bundle)
     harness.conn.rollback()
+    assert pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
+    assert route == harness.route
 
 
 def test_a_claims_route_keeps_its_adapter_and_bytes(

@@ -183,16 +183,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
   day the vendor ships it, or by a dated decision that the host owns it; readers
   (3.1d) must label a screening-only record whatever its committee status.
-- **A canonical-adapter run pins but cannot execute yet.** Slice c-2 derives
-  the pinned adapter from the route (§42.1), so a `LITE_CREDIT_22` run pins
-  `canonical-markdown-v1`, and acceptance requires `artifacts.record_sha256`
-  for it. Until the canonical executor exists, `execution_input` refuses such a
-  pin `HANDOFF_MODULE_UNSUPPORTED` before any attempt, reservation or call, and
-  the orchestration proof refuses it rather than parse Markdown as claims. The
-  record's blob is shape-checked at acceptance, not read. *Upgrade:* slices
-  c-5a/c-5b remove the execution refusal, write both blobs and accept with the
-  record; d-2 proves canonical artifacts; f-1 makes readers refuse a NULL
-  record and removes the dispatch.
+- **A canonical run executes one node at a time but `run_route` cannot yet
+  accept it.** Slice c-5a's `server/methodology/canonical.py` runs a canonical
+  pin end to end -- billing with the diagnostic Markdown first, then vendor
+  validation, host identity, all-or-nothing anchoring and the host record --
+  and `ModuleProvider` stores both blobs, choosing the executor from the
+  pinned adapter (§42.1); each executor refuses the other adapter's pin
+  `RUN_INPUT_INVALID`. `ProviderResult` now carries `record_sha256` and
+  `diagnostic_sha256`, but `run_route` still records and accepts without them,
+  so a LITE route refuses at its first acceptance and a Blocked handoff is an
+  ordinary refusal rather than a BLOCKED run. The orchestration proof still
+  refuses canonical pins, and acceptance shape-checks the record, never reads
+  it. The compiled vendor contract is cached per manifest digest, so a vendor
+  script changed on disk under an unchanged manifest is not re-verified by the
+  cached validator (every other read still is). *Upgrade:* c-5b accepts with
+  the record and diagnostic and ends a Blocked node's run BLOCKED; d-2 proves
+  canonical artifacts; f-1 makes readers refuse a NULL record and removes the
+  dispatch.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
@@ -202,9 +209,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   vendor refuses. The route engine already BLOCKS such a node, so the runtime
   never asks for its identity. `module_name` is read from the verified catalog
   at call time rather than pinned, and the prompt is bounded on its UTF-8 bytes;
-  the provider still re-checks the encoded request. Slice c-4 is not yet wired
-  into the executor. *Upgrade:* c-5a calls it; readiness joins the refs when a
-  reader of the canonical CP-0 T8 exists (d-2).
+  the provider still re-checks the encoded request. *Upgrade:* readiness joins
+  the refs when a reader of the canonical CP-0 T8 exists (d-2).
 
 **Repair Phase 2.**
 

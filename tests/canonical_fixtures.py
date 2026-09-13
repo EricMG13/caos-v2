@@ -9,12 +9,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.handoff import HostIdentity, UpstreamRef, invocation_fields
 from server.methodology.vendor import authority_bundle_sha256, load_vendor_contract
+from server.provider import Completion
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 BUNDLE = Bundle(VENDORED)
@@ -185,3 +191,78 @@ def wire(markdown: bytes, citations: list[dict[str, object]]) -> str:
     return json.dumps(
         {"canonical_markdown": markdown.decode("utf-8"), "citations": citations}
     )
+
+
+def fields_from_prompt(prompt: str) -> dict[str, Any]:
+    """The host-owned front matter a prompt handed over, parsed by the vendor."""
+    found = re.search(
+        r"--- HOST-OWNED FRONT MATTER ([0-9a-f]{16}) \(copy exactly\) ---\n", prompt
+    )
+    assert found is not None
+    end = prompt.index(f"\n--- END HOST-OWNED FRONT MATTER {found.group(1)} ---")
+    block = prompt[found.end() : end]
+    parsed, _body = CONTRACT.validate_handoff.parse_restricted_frontmatter(
+        "---\n" + block + "\n---\n"
+    )
+    return dict(parsed)
+
+
+# Whole words of the harness report's page 1, repeated in every handoff body.
+QUOTE = "Total debt at 31 December 2026"
+# Whole words of the body that no evidence carries.
+UNANCHORED = "Leverage was unchanged"
+# The authored fields a validated `qa_status` must agree with.
+AUTHORED = {
+    "Passed": {},
+    "Blocked": {
+        "confidence_score": 30,
+        "confidence_band": "Insufficient Information",
+        "committee_status": "Blocked",
+    },
+}
+
+
+@dataclass
+class CanonicalCompletions:
+    """A provider that copies the prompt's host front matter into a handoff.
+
+    `mutate` edits the copied fields (identity tampering); `content` replaces the
+    whole answer; `during` runs inside the call, before the answer.
+    """
+
+    source_id: UUID
+    charge: Decimal = Decimal("0.0000041")
+    model: str = "a-model/for-the-test"
+    generation_id: str = "gen-canonical-test"
+    qa_status: str = "Passed"
+    readiness: dict[str, str] = field(default_factory=dict)
+    quotes: tuple[str, ...] = (QUOTE,)
+    mutate: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    content: str | None = None
+    during: Callable[[], None] | None = None
+    prompts: list[str] = field(default_factory=list)
+    answers: list[bytes] = field(default_factory=list)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        assert json_object
+        self.prompts.append(prompt)
+        if self.during is not None:
+            self.during()
+        if self.content is not None:
+            return Completion(self.content, self.charge, self.generation_id)
+        fields = fields_from_prompt(prompt)
+        if self.mutate is not None:
+            fields = self.mutate(fields)
+        markdown = handoff_markdown(
+            identity(str(fields["module_id"])),
+            fields=fields,
+            authored={**AUTHORED[self.qa_status], "qa_status": self.qa_status},
+            readiness=self.readiness,
+            body_note=f"{QUOTE} was recorded. {UNANCHORED} here.",
+        )
+        self.answers.append(markdown)
+        citations: list[dict[str, object]] = [
+            {"source_id": str(self.source_id), "page": 1, "matched_text": quote}
+            for quote in self.quotes
+        ]
+        return Completion(wire(markdown, citations), self.charge, self.generation_id)
