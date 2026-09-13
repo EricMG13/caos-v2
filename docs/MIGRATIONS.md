@@ -187,3 +187,20 @@ store without its own authorized, backed-up change. Version 10
 (`0010_blocked_runs`) only widens two CHECK constraints and cannot refuse
 existing rows. The restore probe (`tests/probes/migration_restore.py`) passes in
 all three modes at version 10.
+
+## Version 11 — run subject and attempt ordinal — 2026-09-13
+
+Version 11 (`0011_run_subject`) is additive. It adds five nullable columns to
+`run_inputs` (`issuer_id`, `issuer_name`, `reporting_period`, `analysis_date`,
+`cos_run_id`) and replaces the `format_version = 1` CHECK with one that ties the
+columns to the format: version 1 rows hold all five NULL, version 2 rows hold
+all five, shape-checked. Nothing is backfilled, so every version-1 row, its
+input fingerprint and its gate preview keep their exact bytes, and the
+immutability trigger (UPDATE/DELETE/TRUNCATE only) never fires. It also adds
+`run_attempts.ordinal` (1–256) with `UNIQUE (run_id, route_node_id, ordinal)`;
+attempts written before it keep a NULL ordinal, which no canonical handoff can
+name, and later attempts are numbered after them. No existing row can violate
+either constraint, so the upgrade cannot refuse a populated store. The restore
+probe passes in all three modes at version 11, its prefix-seven mode now
+carrying a pre-ordinal attempt and its reservation across restore and upgrade.
+

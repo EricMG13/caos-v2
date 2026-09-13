@@ -23,7 +23,7 @@ from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_evidence
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, connect, gates
+from server.store import StoreConnection, connect, gates, run_inputs
 from server.store.audit import audit_trail, verify_chain
 from server.store.cases import lock_case
 from server.store.gates import (
@@ -351,7 +351,7 @@ def test_preview_is_exact_immutable_captured_content(
             data, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2
         )
         assert data["input"] == {
-            **asdict(pin),
+            **run_inputs.input_fields(pin),
             "run_id": str(run),
             "case_id": str(case_id),
         }
