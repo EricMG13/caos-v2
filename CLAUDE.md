@@ -196,7 +196,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   validation and anchoring; it rebuilds identity from the upstream accepted
   now, which holds only while no direct input is accepted after its target.
   A billed attempt refused for another reason is re-validated on every pass
-  until the node is accepted. `accepted_artifacts`
+  until the node is accepted. A stored body that will not read is a store
+  fault, never "not blocked", and a body that cannot be stored refuses the
+  attempt after its bill. The re-derivation checks current state: once a
+  captured source is withdrawn no verdict can be re-derived, so a Blocked node
+  is neither blocked nor re-paid (the pre-call read refuses) and each resume
+  adds an attempt row until the 256 ordinal cap. `accepted_artifacts`
   reads CP-0 readiness and `qa_status` of a canonical row from its record,
   verified against its Markdown and the identity rebuilt from the store
   (§42.4, no re-anchoring), and refuses such a row without a bundle -- which
@@ -262,7 +267,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   every pinned node before COMPLETE.
 - **Two workers can pay for one node.** Migration 0009 lets exactly one attempt
   own a node's accepted result, but two attempts can each reserve and call
-  before either accepts; both bills are kept. *Upgrade:* Phase 4's PostgreSQL
+  before either accepts; both bills are kept. The same window lets a second
+  worker that checked `blocked_verdict` before the first worker's Blocked bill
+  committed call again. *Upgrade:* Phase 4's PostgreSQL
   claims/leases (§39) take the node before the call. `artifacts` rows are also
   not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
   a refusal trigger like 0007's is the upgrade.

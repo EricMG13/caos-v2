@@ -38,6 +38,7 @@ from test_execution_freshness import (
 )
 from test_loop_charges import ESTIMATE, MODEL, REPORTED, _Completions
 
+from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.methodology import canonical, executor
@@ -282,6 +283,46 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     assert len(answers.prompts) == 3
     assert _counts(harness) == (3, [REPORTED] * 3, 2, 3, 3)
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+
+
+def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A diagnostic blob that will not read never counts as "not blocked"."""
+    crashes = [RefusalCode.STORE_UNAVAILABLE]
+
+    def crashing(conn: StoreConnection, run_id: UUID) -> bool:
+        if crashes:
+            raise Refusal(crashes.pop())
+        return block_run(conn, run_id)
+
+    monkeypatch.setattr(runtime, "block_run", crashing)
+    answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
+    provider = _module_provider(harness, answers)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    blocked = hashlib.sha256(answers.bodies[2].encode()).hexdigest()
+    harness.blobs.path_of(blocked).unlink()
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    assert len(answers.prompts) == 3
+    _still_running(harness)
+
+
+def test_a_body_that_cannot_be_stored_refuses_after_its_bill(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = CanonicalCompletions(harness.source_id)
+    provider = _module_provider(harness, answers)
+    real_put = BlobStore.put
+
+    def failing(self: BlobStore, data: bytes) -> str:
+        if answers.bodies and data == answers.bodies[-1].encode():
+            raise OSError
+        return real_put(self, data)
+
+    monkeypatch.setattr(BlobStore, "put", failing)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    assert _counts(harness)[:2] == (1, [REPORTED])
+    _still_running(harness)
 
 
 @dataclass

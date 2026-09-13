@@ -112,21 +112,28 @@ def _catalog(bundle: Bundle) -> dict[str, Any]:
     return catalog
 
 
-def _diagnostic(blobs: BlobStore, content: object) -> str | None:
-    """The exact response body as a blob address, or None when there is none.
+def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:
+    """The exact response body as a blob address (None when there is none), and
+    whether a body that exists could not be stored.
 
     The whole closed transport, not only its Markdown, so `blocked_verdict` can
     re-run the complete verdict -- citations included -- from stored facts.
     Lenient on purpose: this is what was said, not what is accepted. A blob
-    that cannot be written is also None, because the bill must still commit.
+    that cannot be written leaves the address None so the bill still commits,
+    and the attempt then refuses as a store fault: a verdict that was never
+    stored cannot be honoured on recovery, so it must not be silently lost.
     The bytes are untrusted provider text, never `BoundaryText`: no reader may
     render them, and only `blocked_verdict`'s full re-validation reads them.
     """
     if not isinstance(content, str) or len(content) > MAX_TRANSPORT_CHARS:
-        return None
-    with suppress(UnicodeEncodeError, OSError, Refusal):
-        return blobs.put(content.encode("utf-8"))
-    return None
+        return None, False
+    try:
+        data = content.encode("utf-8")
+    except UnicodeEncodeError:
+        return None, False  # a lone surrogate: no body the host could store
+    with suppress(OSError, Refusal):
+        return blobs.put(data), False
+    return None, True
 
 
 def execute_handoff(
@@ -179,13 +186,15 @@ def execute_handoff(
     )
     generation = producer_identifier(completion.generation_id, limit=512)
     content = completion.content if completion.refusal is None else None
-    diagnostic = _diagnostic(blobs, content)
+    diagnostic, unstored = _diagnostic(blobs, content)
     require_idle(conn)
     record_outcome(
         conn,
         attempt_id=attempt,
         outcome=CallOutcome(charge, model, generation, diagnostic),
     )
+    if unstored:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
     if completion.refusal is not None:
         code = completion.refusal
         if not isinstance(code, RefusalCode):
@@ -291,41 +300,66 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
         (run_id, list(route_node_ids)),
     ).fetchall()
     nodes = {node.route_node_id: node for node in route.nodes}
+    sources: frozenset[UUID] | None = None
     for route_node_id, attempt, diagnostic in rows:
         node = nodes.get(str(route_node_id))
-        if node is not None and _answered_blocked(
+        if node is None:
+            continue
+        body = _stored_body(blobs, str(diagnostic))
+        if sources is None:
+            # Once per call: every captured block, whatever the attempts.
+            try:
+                sources = frozenset(i.source_id for i in _delivered(conn, run_id))
+            except Refusal as refusal:
+                if refusal.code in _STORE_FAULTS:
+                    raise
+                return False  # e.g. a withdrawn source: no verdict can be re-derived
+        if body is not None and _answered_blocked(
             conn,
-            blobs,
             bundle,
             route,
             node,
             run_id=run_id,
             attempt_id=UUID(str(attempt)),
-            diagnostic_sha256=str(diagnostic),
+            body=body,
+            sources=sources,
         ):
             return True
     return False
 
 
+def _stored_body(blobs: BlobStore, diagnostic_sha256: str) -> str | None:
+    """A billed attempt's stored body. A blob that will not read is a store
+    fault, never "not blocked": reading it as an answer would pay again."""
+    try:
+        data = blobs.get(diagnostic_sha256)
+    except (OSError, Refusal):
+        data = None
+    if data is None:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
     conn: StoreConnection,
-    blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
     node: RouteNode,
     *,
     run_id: UUID,
     attempt_id: UUID,
-    diagnostic_sha256: str,
+    body: str,
+    sources: frozenset[UUID],
 ) -> bool:
     try:
-        body = blobs.get(diagnostic_sha256).decode("utf-8")
         # The same identity rule as `accepted_projections`: see the note there.
         identity = host_identity(
             conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
         )
-        sources = {item.source_id for item in _delivered(conn, run_id)}
-        markdown, citations = parse_response(body, delivered=frozenset(sources))
+        markdown, citations = parse_response(body, delivered=sources)
         authority = assemble_authority(bundle, node.module_id)
         projections = _unless_blocked(
             lambda: validate_markdown(
@@ -340,12 +374,10 @@ def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
         if projections is not None:
             return False
         # Anchored before Blocked is honoured, exactly as on the live path.
-        verify_citations(conn, delivered=sources, citations=citations)
+        verify_citations(conn, delivered=set(sources), citations=citations)
     except Refusal as refusal:
         if refusal.code in _STORE_FAULTS:
             raise
-        return False
-    except (OSError, UnicodeDecodeError):
         return False
     return True
 
