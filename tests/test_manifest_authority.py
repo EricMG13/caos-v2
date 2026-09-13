@@ -14,6 +14,7 @@ from uuid import UUID
 
 import pytest
 
+from server.blobs import BlobStore
 from server.methodology.bundle import (
     MANIFEST_NAME,
     Bundle,
@@ -420,8 +421,8 @@ def test_execute_module_refuses_changed_authority_before_completion(
         lambda: execute_module(
             conn,
             bundle,
-            attempt_id=attempt_id,
-            assignment=Assignment("CP-1", run, node, route),
+            BlobStore(manifest.parent / "blobs"),
+            assignment=Assignment("CP-1", run, node, route, attempt_id),
             provider=provider,
         )
     )
