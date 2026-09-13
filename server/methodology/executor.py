@@ -24,6 +24,7 @@ from server.boundary_text import BoundaryText
 from server.engine.route import RouteNode
 from server.evidence.citations import verify_citations
 from server.evidence.read import Block, read_block
+from server.methodology import CLAIMS_ADAPTER_VERSION as CLAIMS_ADAPTER_VERSION
 from server.methodology.bundle import (
     Authority,
     Bundle,
@@ -54,7 +55,6 @@ QUOTE_MISSES = frozenset(
 # the skill goes into the prompt, because the reference set of one module runs to
 # tens of thousands of tokens and the budget is invariant 8's, not a suggestion.
 SKILL = "SKILL.md"
-CLAIMS_ADAPTER_VERSION = "claims-json-v1"
 
 _INSTRUCTION = """\
 You are executing methodology module {module_id}. The authority for this module
