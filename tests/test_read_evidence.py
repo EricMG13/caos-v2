@@ -16,10 +16,13 @@ trips rather than trusting the shape.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from psycopg.pq import TransactionStatus
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -34,7 +37,7 @@ from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import IO_BUDGET, Block, read_block, read_evidence
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, connect
 
 # Line 0 and line 1 are one paragraph, so a quote may wrap between them.
 # Line 3 is a second paragraph -- a region a quote from the first may not enter.
@@ -398,3 +401,115 @@ def test_read_block_refuses_what_read_evidence_refuses(
         read_block(conn, source_id=source_id, block_id=block_id)
 
     assert caught.value.code is RefusalCode.EVIDENCE_NOT_AVAILABLE
+
+
+@pytest.mark.parametrize("reader", [read_block, read_evidence])
+@pytest.mark.parametrize(
+    "source,block",
+    [
+        (None, "b000000"),
+        (str(UUID(int=0)), "b000000"),
+        (1, "b000000"),
+        (UUID(int=0), None),
+        (UUID(int=0), b"b000000"),
+        (UUID(int=0), "b\u0661\u0662\u0663\u0664\u0665\u0666"),
+        (UUID(int=0), "b0000000"),
+    ],
+)
+def test_invalid_evidence_arguments_refuse_before_sql(
+    case: tuple[StoreConnection, UUID],
+    reader: Callable[..., object],
+    source: object,
+    block: object,
+) -> None:
+    counter = _CountingConnection(case[0])
+    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$") as caught:
+        reader(
+            cast(StoreConnection, counter),
+            source_id=cast(UUID, source),
+            block_id=cast(str, block),
+        )
+    assert caught.value.__cause__ is None
+    assert counter.executed == 0
+
+
+@pytest.mark.parametrize(
+    "block_id,text,code",
+    [
+        ("b000000", "legacy", None),
+        ("b999999", "legacy", None),
+        ("b1000000", "legacy", None),
+        ("b000000", "private\x01", "BOUNDARY_TEXT_INVALID"),
+        ("b000000", "private" * 600, "BOUNDARY_TEXT_TOO_LONG"),
+    ],
+)
+def test_unknown_evidence_retains_minted_ids_and_boundary_text_refusals(
+    case: tuple[StoreConnection, UUID], block_id: str, text: str, code: str | None
+) -> None:
+    conn, case_id = case
+    source = uuid4()
+    conn.execute(
+        "INSERT INTO sources (source_id,case_id,document_sha256,filename)"
+        " VALUES (%s,%s,%s,%s)",
+        (source, case_id, "0" * 64, "legacy"),
+    )
+    # UNKNOWN historical rows retain native insert/immutability guards.
+    conn.execute(
+        "INSERT INTO source_blocks VALUES (%s,%s,2,%s)", (source, block_id, text)
+    )
+    counter = _CountingConnection(conn)
+    if code is None:
+        block = read_block(
+            cast(StoreConnection, counter), source_id=source, block_id=block_id
+        )
+        assert block == Block(page=2, text=BoundaryText.of(text))
+    else:
+        with pytest.raises(Refusal, match=f"^{code}$") as caught:
+            read_block(
+                cast(StoreConnection, counter), source_id=source, block_id=block_id
+            )
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__
+        assert "private" not in repr(caught.value)
+    assert counter.executed == IO_BUDGET == 1
+
+
+@pytest.mark.parametrize("reader", [read_block, read_evidence])
+@pytest.mark.parametrize("failure", [False, True])
+def test_generic_read_preserves_caller_work_and_sanitizes_native_failure(
+    case: tuple[StoreConnection, UUID],
+    blobs: BlobStore,
+    empty_database: str,
+    reader: Callable[..., object],
+    failure: bool,
+) -> None:
+    conn, case_id = case
+    source = _admit(conn, case_id, blobs, REPORT)
+    conn.commit()
+    conn.execute(
+        "UPDATE cases SET title = 'pending caller work' WHERE case_id = %s", (case_id,)
+    )
+    conn.execute("SAVEPOINT evidence_read")
+    if failure:
+        conn.execute("ALTER TABLE source_blocks RENAME TO private_evidence")
+        with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$") as caught:
+            reader(conn, source_id=source, block_id="b000000")
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__
+        assert "private" not in repr(caught.value)
+        assert conn.info.transaction_status is TransactionStatus.INERROR
+        conn.execute("ROLLBACK TO SAVEPOINT evidence_read")
+    else:
+        assert reader(conn, source_id=source, block_id="b000000")
+        assert conn.info.transaction_status is TransactionStatus.INTRANS
+    assert conn.execute(
+        "SELECT title FROM cases WHERE case_id = %s", (case_id,)
+    ).fetchone() == ("pending caller work",)
+    with connect(empty_database) as observer:
+        assert observer.execute(
+            "SELECT title FROM cases WHERE case_id = %s", (case_id,)
+        ).fetchone() != ("pending caller work",)
+    conn.rollback()
+    assert conn.execute(
+        "SELECT title FROM cases WHERE case_id = %s", (case_id,)
+    ).fetchone() != ("pending caller work",)
