@@ -305,6 +305,9 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
 WIRE_KEYS = frozenset({"canonical_markdown", "citations"})
 WIRE_CITATION_KEYS = frozenset({"source_id", "page", "matched_text"})
 RECORD_FORMAT = "caos-canonical-record-v1"
+# A body may carry the largest Markdown the vendor reads plus its citations.
+MAX_TRANSPORT_CHARS = 2 * MAX_FILE_BYTES
+MAX_PAGE = 2**31 - 1  # the store's integer page
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,7 +359,7 @@ def _requested(item: object) -> Citation:
     # accepts braces, a URN prefix and upper case, none of which the host wrote.
     if not isinstance(source_id, str) or str(UUID(source_id)) != source_id:
         raise ValueError
-    if type(page) is not int or page < 1:
+    if type(page) is not int or not 1 <= page <= MAX_PAGE:
         raise ValueError
     if not isinstance(quote, str) or not quote.strip():
         raise ValueError
@@ -364,12 +367,38 @@ def _requested(item: object) -> Citation:
 
 
 def _transport(body: str) -> tuple[bytes, str, tuple[Citation, ...]]:
+    if len(body) > MAX_TRANSPORT_CHARS:
+        raise ValueError
     wire = _closed(_strict_json(body), WIRE_KEYS)
     text, citations = wire["canonical_markdown"], wire["citations"]
     if not isinstance(text, str) or not isinstance(citations, list) or not citations:
         raise ValueError
     # A lone surrogate survives `json.loads` and fails here, inside the guard.
-    return text.encode("utf-8"), text, tuple(_requested(c) for c in citations)
+    requested = tuple(_requested(c) for c in citations)
+    if len(frozenset(requested)) != len(requested):
+        raise ValueError  # the same citation twice is not two citations
+    return text.encode("utf-8"), text, requested
+
+
+def _body_words(text: str) -> list[str]:
+    """The Markdown after its front matter, as whitespace tokens.
+
+    The front matter is host identity, not analysis, so no quote may rest on it;
+    and a quote matches whole tokens, as anchoring in the evidence does.
+    """
+    lines = text.split("\n")
+    has_front = lines[:1] == ["---"] and "---" in lines[1:]
+    closing = lines.index("---", 1) if has_front else 0
+    return "\n".join(lines[closing + 1 :]).split()
+
+
+def _quoted(words: list[str], quote: str) -> bool:
+    # ponytail: linear scan per citation; an index when bodies grow large.
+    wanted = quote.split()
+    return any(
+        words[i : i + len(wanted)] == wanted
+        for i in range(len(words) - len(wanted) + 1)
+    )
 
 
 def parse_response(
@@ -388,7 +417,8 @@ def parse_response(
     )
     if any(citation.source_id not in delivered for citation in citations):
         raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
-    if any(citation.matched_text not in text for citation in citations):
+    words = _body_words(text)
+    if any(not _quoted(words, citation.matched_text) for citation in citations):
         raise Refusal(RefusalCode.HANDOFF_MALFORMED)
     return markdown, citations
 
@@ -505,6 +535,7 @@ def read_record(
             record_bytes(record) != data
             or record.artifact_sha256 != artifact_sha256
             or record.identity != expected
+            or record.authority_bundle_sha256 != expected.authority_bundle_sha256
         ):
             raise ValueError
         return record
