@@ -132,8 +132,8 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     )
 
     assert run_status(conn, run_id) is RunStatus.COMPLETE
-    # A run whose frontier emptied with nodes still BLOCKED is COMPLETE too, so
-    # the count is what says every pinned node was accepted.
+    # COMPLETE now means every pinned node was accepted (§39); the count says so
+    # again from the proof's side.
     proof = assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
     assert proof.artifacts == len(route.nodes)
 
