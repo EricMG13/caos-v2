@@ -12,8 +12,7 @@ from conftest import route_fault
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked
 from test_gates import _approval
-from test_run_inputs import Prepared, _prepare
-from test_run_subject import SUBJECT
+from test_run_inputs import SUBJECT, Prepared, _prepare
 from test_source_sets import _admit
 
 from server import methodology

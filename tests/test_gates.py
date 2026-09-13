@@ -37,7 +37,7 @@ from server.store.gates import (
 )
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route, resolved_route
-from server.store.run_inputs import load_run_input, pin_run_input
+from server.store.run_inputs import RunSubject, load_run_input, pin_run_input
 from server.store.runs import start_run
 from server.store.source_sets import snapshot_source_set
 
@@ -77,7 +77,12 @@ def _pin(
     )
     pin_route(conn, run_id, route)
     pin_run_input(
-        conn, run_id, source.version, Bundle(CATALOG_PATH.parents[3]), research
+        conn,
+        run_id,
+        source.version,
+        Bundle(CATALOG_PATH.parents[3]),
+        research,
+        subject=RunSubject("EXAMPLE", "Example Holdings plc", "FY2025", "2026-09-08"),
     )
 
 
@@ -398,9 +403,11 @@ def test_approval_cannot_be_transplanted(
         target = start_run(conn, target_case)
         _pin(conn, target_case, target)
         if changed == "run":
+            # A version-2 pin binds its run through the COS run id, so even the
+            # fingerprint differs; the preview digest binds it as well.
             assert (
                 _approval(conn, target, actor).input_fingerprint
-                == approval.input_fingerprint
+                != approval.input_fingerprint
             )
         conn.commit()
         foreign = replace(approval, run_id=target)

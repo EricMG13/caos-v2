@@ -22,8 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_frozen_evidence import _insert
-from test_run_inputs import _prepare, pin_version_one
-from test_run_subject import SUBJECT
+from test_run_inputs import SUBJECT, _prepare, pin_version_one
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 
 import server.store as store

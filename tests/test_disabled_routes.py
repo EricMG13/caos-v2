@@ -4,15 +4,16 @@ REPAIR_PLAN Phase 3 work item 6: "Keep other routes disabled until equivalent
 contract tests exist." Task 3.1 slice f-1c makes the adapter one constant, so a
 route whose modules the adapter does not own is refused at execution -- before
 any attempt, reservation or provider call -- and at acceptance, while pinning,
-gates and resolution stay general. No reader takes an artifact without its
-host record.
+gates and resolution stay general. A claims pin written before the switch
+refuses execution, and no reader takes an artifact without its host record.
 Both refusal points share `require_adapter_route`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from uuid import UUID
+from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import (
@@ -26,9 +27,14 @@ from fastapi.testclient import TestClient
 from test_accepted_owner import _billed, _count
 from test_canonical_readers import _reader, _run, client
 from test_execution_freshness import _Harness, harness
+from test_gates import _approval
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
+from test_run_inputs import SUBJECT, pin_version_one
+from test_source_sets import _admit
 
+from server import methodology
 from server.api.app import app, store_connection
+from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, resolve_route
 from server.engine.runtime import (
     Execution,
@@ -36,14 +42,19 @@ from server.engine.runtime import (
     accepted_artifacts,
     run_route,
 )
+from server.methodology.bundle import Bundle
 from server.methodology.executor import Assignment, ModuleOutcome, execute_module
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection
 from server.store.budget import reserve
-from server.store.gates import approved_run_input, execution_input
+from server.store.gates import Gate, approve_gate, approved_run_input, execution_input
+from server.store.members import Standing, grant
 from server.store.outcomes import execution_reads
-from server.store.run_inputs import RunInput
-from server.store.runs import Accepted, accept_attempt, start_attempt
+from server.store.routes import pin_route
+from server.store.run_inputs import RunInput, pin_run_input
+from server.store.runs import Accepted, accept_attempt, start_attempt, start_run
+from server.store.source_sets import snapshot_source_set
 
 __all__ = ["client", "harness"]
 
@@ -89,8 +100,9 @@ def _no_work(harness: _Harness) -> None:
 def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
     harness: _Harness,
 ) -> None:
-    """Approved end to end, the route still never executes."""
-    _pin, _route = _authority(harness)
+    """Approved end to end with a subject, the route still never executes."""
+    pin, _route = _authority(harness)
+    assert pin.adapter_version == "canonical-markdown-v1"
     with pytest.raises(Refusal) as refused:
         with execution_reads(harness.conn):
             execution_input(harness.conn, harness.run_id, harness.bundle)
@@ -131,6 +143,70 @@ def test_acceptance_refuses_a_disabled_route(harness: _Harness) -> None:
         accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
     assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
     assert _count(harness, "artifacts") == 0
+
+
+def test_every_route_pins_the_one_adapter_and_a_subject(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    conn, case_id = case
+    _admit(conn, case_id, tmp_path)
+    conn.commit()
+    source = snapshot_source_set(conn, case_id)
+    bundle = Bundle(Path(__file__).resolve().parents[1] / "vendor/deploy-v")
+    assert not hasattr(methodology, "adapter_for")
+    assert not hasattr(methodology, "CLAIMS_ADAPTER_VERSION")
+    for selection in (LITE, FULL, DEEP):
+        run = start_run(conn, case_id)
+        pin_route(conn, run, resolve_route(CATALOG, *selection))
+        conn.commit()
+        assert _refusal(
+            lambda run=run: pin_run_input(conn, run, source.version, bundle)
+        ) is (RefusalCode.RUN_INPUT_INVALID)
+        pin = pin_run_input(conn, run, source.version, bundle, subject=SUBJECT)
+        assert pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
+
+
+@pytest.mark.parametrize("selection", [LITE, DEEP])
+def test_an_existing_claims_pin_refuses_execution(
+    case: tuple[StoreConnection, UUID], tmp_path: Path, selection: tuple[str, str]
+) -> None:
+    """A version-1 `claims-json-v1` pin, fully approved, is authority no longer
+    executable: the build/adapter check refuses it before any attempt."""
+    conn, case_id = case
+    _admit(conn, case_id, tmp_path)
+    conn.commit()
+    source = snapshot_source_set(conn, case_id)
+    bundle = Bundle(Path(__file__).resolve().parents[1] / "vendor/deploy-v")
+    route = resolve_route(CATALOG, *selection)
+    run = start_run(conn, case_id)
+    pin_route(conn, run, route)
+    pin = pin_version_one(conn, run, source, bundle, route)
+    assert pin.adapter_version == "claims-json-v1"
+    approver = uuid4()
+    grant(conn, case_id=case_id, user_id=approver, standing=Standing.APPROVER)
+    conn.commit()
+    for gate in Gate:
+        approve_gate(conn, _approval(conn, run, approver, gate))
+    with execution_reads(conn):
+        assert approved_run_input(conn, run) == (pin, route)
+    with pytest.raises(Refusal) as refused:
+        with execution_reads(conn):
+            execution_input(conn, run, bundle)
+    assert refused.value.code is RefusalCode.RUN_INPUT_INVALID
+    provider = _Counting()
+    with pytest.raises(Refusal) as ran:
+        run_route(
+            conn,
+            BlobStore(tmp_path / "blobs"),
+            run_id=run,
+            route=route,
+            execution=Execution(provider, priced(ESTIMATE), bundle),
+        )
+    assert ran.value.code is RefusalCode.RUN_INPUT_INVALID
+    assert provider.calls == []
+    assert conn.execute(
+        "SELECT count(*) FROM run_attempts WHERE run_id = %s", (run,)
+    ).fetchone() == (0,)
 
 
 @dataclass

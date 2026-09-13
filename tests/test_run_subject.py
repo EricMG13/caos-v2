@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from test_run_inputs import Prepared, _prepare, pin_version_one
+from test_run_inputs import SUBJECT, Prepared, _prepare, pin_version_one
 
 import server.store as store
 from server.boundary_text import BoundaryText
@@ -25,7 +25,6 @@ from server.store.run_inputs import (
 )
 from server.store.runs import attempt_ordinal, create_case, start_attempt
 
-SUBJECT = RunSubject("EXAMPLE", "Example Holdings plc", "FY2025", "2026-09-08")
 NODE = "RN-FULL_CREDIT_32-DEEP_RESEARCH-01-CP-0"
 # `_fingerprint` of this exact version-1 pin before version 2 existed.
 V1 = RunInput(
@@ -65,8 +64,9 @@ def test_version_one_fingerprint_and_preview_bytes_are_unchanged(
     prepared: Prepared,
 ) -> None:
     assert _fingerprint(V1) == V1_FINGERPRINT
-    conn, run, source, bundle, _route = prepared
-    pin = pin_run_input(conn, run, source.version, bundle)
+    conn, run, source, bundle, route = prepared
+    # No new pin is version 1 (§42.1); one written before 0011 still previews.
+    pin = pin_version_one(conn, run, source, bundle, route)
     assert (pin.subject, pin.cos_run_id) == (None, None)
     content = json.loads(gate_preview(conn, run, Gate.SOURCE_SET).content)
     assert content["format_version"] == 1 and set(content["input"]) == V1_INPUT_KEYS
@@ -139,7 +139,7 @@ def test_the_database_refuses_a_subject_that_disagrees_with_its_format(
     prepared: Prepared,
 ) -> None:
     conn, run, source, bundle, _route = prepared
-    pin = pin_run_input(conn, run, source.version, bundle)
+    pin = pin_run_input(conn, run, source.version, bundle, subject=SUBJECT)
     with pytest.raises(psycopg.errors.CheckViolation):
         conn.execute(
             "INSERT INTO run_inputs (run_id, case_id, source_version,"

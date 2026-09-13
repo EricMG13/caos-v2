@@ -1285,11 +1285,21 @@ slices (the binding re-slice in the Task 3.1 brief):
    requires `artifacts.record_sha256` exactly when the pin is canonical. Slice
    f-1 makes the adapter a single constant and removes every claims branch;
    Task 3.1 is not accepted while `claims-json-v1` execution exists.
+   *Retired 2026-09-13 (slice f-1c):* `adapter_for` is gone; every new pin is
+   `canonical-markdown-v1` with a subject, a stored `claims-json-v1` pin
+   refuses `RUN_INPUT_INVALID` at `execution_input`, runner and acceptance,
+   acceptance always requires `record_sha256`, and the runtime, API, proof and
+   matrix refuse a NULL record `ARTIFACT_RECORD_MISMATCH` rather than read a
+   claims body. The unreachable claims executor and envelope parser remain for
+   deletion in f-2a/f-2b.
 2. **Other routes are disabled at execution, not at pinning.** After f-1,
    `execution_input` and acceptance refuse a route with a non-adapter module,
    before any attempt, reservation or call. Route resolution, pinning and gates
    stay general, because they are governance proven independently and Phase 5
-   extends the adapter to further owners.
+   extends the adapter to further owners. *Implemented in f-1c:* both points
+   call `gates.require_adapter_route` and refuse
+   `HANDOFF_MODULE_UNSUPPORTED`; `run_route` reads `execution_input` before its
+   first attempt.
 3. **Blocked handoffs are diagnostics.** The canonical Markdown of every
    response is stored as a blob before validation and its hash recorded as the
    attempt's `diagnostic_sha256` with the call outcome; a response that
