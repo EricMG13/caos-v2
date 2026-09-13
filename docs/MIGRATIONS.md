@@ -204,3 +204,17 @@ either constraint, so the upgrade cannot refuse a populated store. The restore
 probe passes in all three modes at version 11, its prefix-seven mode now
 carrying a pre-ordinal attempt and its reservation across restore and upgrade.
 
+
+## Version 12 — artifact record — 2026-09-13
+
+Version 12 (`0012_artifact_record`) is additive. It adds one nullable column,
+`artifacts.record_sha256`, shape-checked as a lowercase SHA-256 address of the
+host record blob a canonical handoff is accepted with (`docs/DECISIONS.md`
+§41.2). Nothing is backfilled: every artifact accepted before it, and every
+artifact of a `claims-json-v1` run, keeps NULL, so no existing row can violate
+the CHECK and the upgrade cannot refuse a populated store. The database does
+not decide when the column is required; acceptance does, under the run lock,
+from the run's pinned adapter (§42.1), and the accept replay compares it with
+the other stored facts. Readers that refuse a NULL record arrive with slice
+f-1. The restore probe carries only claims-route artifacts, whose record stays
+NULL across restore and upgrade.
