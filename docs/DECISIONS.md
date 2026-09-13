@@ -1101,3 +1101,30 @@ probe additionally restored a complete input with real captured provenance.
 See MIGRATIONS.md and the task report for executed gate details. Approval/API/
 runtime/evidence integration remains sequential work. F01 is still open, and
 route-only legacy runs receive no invented complete input or execution bypass.
+
+## 2026-09-13 §38 — Provider transport resource ceilings
+
+The host permits at most 1,048,576 bytes in the complete encoded UTF-8 JSON
+request and 4,194,304 bytes in a response body. Non-string prompts and non-byte
+transport bodies refuse. Oversized requests make no transport call; successful
+and HTTP-error streams read at most the response ceiling plus one byte and close
+on every path. Oversized responses refuse before JSON parsing; no prefix is
+accepted as a complete answer. Injected transports face the same byte checks.
+Incomplete native HTTP framing refuses `PROVIDER_UNAVAILABLE`, including when
+the received prefix happens to be valid JSON; bounded reads retain this check.
+
+Every request sets `max_completion_tokens: 32768`, `allow_fallbacks: false`, and
+`require_parameters: true`. The current [OpenRouter chat contract](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion)
+names `max_completion_tokens` and deprecates `max_tokens`; its [routing contract](https://openrouter.ai/docs/guides/routing/provider-selection)
+documents the required-parameter restriction. HTTPS-only, no redirects or retries,
+and the existing 120-second transport/socket timeout remain. That timeout is not
+a newly guaranteed end-to-end deadline. Malformed URL errors remain code-only.
+
+These are host resource ceilings, not vendor-mandated values or a guarantee that
+every canonical handoff fits. The bundle requires complete Markdown and appendix
+registers; its 90–150-word opening is expressly not a token budget. A handoff may
+not be shortened to fit. Phase 3 must prove the selected canonical route fits or
+deliberately revise the host policy. No live compatibility or pricing claim is
+made. Attempt-bound billing propagation, ending database read transactions before
+calls, conservative priced reservations, runtime authority/evidence binding,
+generation fencing, and blocked/QA terminal semantics remain separate repairs.

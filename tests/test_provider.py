@@ -19,8 +19,11 @@ suite that never called the provider is the vacuous pass
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
+import socket
+import traceback
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
@@ -28,9 +31,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from email.message import Message
 from io import BytesIO
+from typing import cast
 
 import pytest
 
+import server.provider as provider_module
 from server.provider import (
     DEFAULT_BASE_URL,
     Completion,
@@ -84,11 +89,13 @@ class _Transport:
 
     def __post_init__(self) -> None:
         self.calls = 0
+        self.requests: list[bytes] = []
 
     def post(
         self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
     ) -> tuple[int, bytes]:
         self.calls += 1
+        self.requests.append(body)
         if self.raises is not None:
             raise self.raises
         return self.status, self.payload
@@ -137,9 +144,271 @@ def test_the_call_forbids_provider_fallbacks() -> None:
 
     _provider(_Recorder()).complete(PROMPT)
 
-    assert sent["provider"] == {"allow_fallbacks": False}
+    assert sent["provider"] == {"allow_fallbacks": False, "require_parameters": True}
+    assert sent["max_completion_tokens"] == 32_768
+    assert "max_tokens" not in sent
     assert sent["stream"] is False
     assert str(sent["_url"]).endswith("/chat/completions")
+
+
+def _assert_safe(refusal: Refusal) -> None:
+    public = f"{refusal!s} {refusal!r} {refusal.__cause__!r}"
+    public += "".join(traceback.format_exception(refusal))
+    assert SECRET_ECHO not in public
+    assert "not-a-real-key" not in public
+    assert refusal.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        SECRET_ECHO + "x" * 1_048_576,
+        "\U0001f642" * 100_000,
+        '"' * 600_000,
+        None,
+        17,
+        {},
+    ],
+    ids=["raw-overflow", "unicode-expansion", "escaping", "none", "int", "dict"],
+)
+def test_an_invalid_or_oversized_prompt_costs_no_transport_call(prompt: object) -> None:
+    transport = _Transport()
+    with pytest.raises(Refusal) as caught:
+        _provider(transport).complete(cast(str, prompt))
+    assert caught.value.code is RefusalCode.PROVIDER_CALL_INVALID
+    assert transport.calls == 0
+    _assert_safe(caught.value)
+
+
+def test_the_request_ceiling_counts_the_complete_encoded_body() -> None:
+    transport = _Transport()
+    provider = _provider(transport)
+    provider.complete('\U0001f642"')
+    room = 1_048_576 - len(transport.requests[-1])
+    prompt = '\U0001f642"' + "x" * room
+    provider.complete(prompt)
+    assert len(transport.requests[-1]) == 1_048_576
+    assert json.loads(transport.requests[-1])["messages"][0]["content"] == prompt
+    with pytest.raises(Refusal) as caught:
+        provider.complete(prompt + "x")
+    assert caught.value.code is RefusalCode.PROVIDER_CALL_INVALID
+    assert transport.calls == 2
+
+
+@pytest.mark.parametrize(
+    "body",
+    [None, "text", bytearray(b"x"), b"x" * 1_048_577],
+    ids=["none", "text", "bytearray", "overflow"],
+)
+def test_the_native_transport_refuses_bad_request_bytes_before_opening(
+    monkeypatch: pytest.MonkeyPatch, body: object
+) -> None:
+    monkeypatch.setattr(
+        provider_module, "_opener", lambda: pytest.fail("unexpected native opener")
+    )
+    with pytest.raises(Refusal) as caught:
+        UrllibTransport().post(DEFAULT_BASE_URL, cast(bytes, body), {}, 120.0)
+    assert caught.value.code is RefusalCode.PROVIDER_CALL_INVALID
+
+
+@pytest.mark.parametrize(
+    "url", ["http://example.invalid", "file:///example", "https://[" + SECRET_ECHO]
+)
+def test_an_injected_transport_cannot_bypass_https_configuration(url: str) -> None:
+    transport = _Transport()
+    provider = OpenRouter(
+        api_key="not-a-real-key", model="m", base_url=url, transport=transport
+    )
+    with pytest.raises(Refusal) as caught:
+        provider.complete(PROMPT)
+    assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+    assert transport.calls == 0
+    _assert_safe(caught.value)
+
+
+def test_native_url_configuration_errors_do_not_quote_the_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_module, "_opener", lambda: pytest.fail("unexpected native opener")
+    )
+    url = "https://[not-a-real-key]"
+    with pytest.raises(Refusal) as caught:
+        UrllibTransport().post(url, b"{}", {}, 120.0)
+    assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+    _assert_safe(caught.value)
+
+
+@pytest.mark.parametrize("status", [200, 429, 500])
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        _body(content=SECRET_ECHO).decode(),
+        bytearray(_body()),
+        _body() + b" " * 4_194_304,
+    ],
+    ids=["none", "text", "bytearray", "overflow"],
+)
+def test_injected_response_bytes_are_checked_before_parsing(
+    status: int, body: object
+) -> None:
+    """_response_bytes checks the transport seam before JSON can accept a string."""
+    transport = _Transport(status=status, payload=cast(bytes, body))
+    with pytest.raises(Refusal) as caught:
+        _provider(transport).complete(PROMPT)
+    assert caught.value.code is RefusalCode.PROVIDER_RESPONSE_INVALID
+    assert transport.calls == 1
+    _assert_safe(caught.value)
+
+
+def test_an_injected_response_at_the_byte_ceiling_is_not_truncated() -> None:
+    body = _body(content=SECRET_ECHO)
+    transport = _Transport(payload=body + b" " * (4_194_304 - len(body)))
+    assert _provider(transport).complete(PROMPT).content == SECRET_ECHO
+    assert transport.calls == 1
+
+
+class _ReadStream(BytesIO):
+    status = 200
+
+    def __init__(self, body: bytes, *, fails: bool) -> None:
+        super().__init__(body)
+        self.sizes: list[int | None] = []
+        self.fails = fails
+        self.consumed = 0
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        self.sizes.append(size)
+        if self.fails:
+            raise TimeoutError(SECRET_ECHO)
+        body = super().read(size)
+        self.consumed += len(body)
+        return body
+
+
+@pytest.mark.parametrize("status", [200, 429])
+@pytest.mark.parametrize(
+    "extra,fails", [(0, False), (1, False), (1024, False), (0, True)]
+)
+def test_native_success_and_error_streams_are_bounded_and_always_closed(
+    monkeypatch: pytest.MonkeyPatch, status: int, extra: int, fails: bool
+) -> None:
+    body = _body(content=SECRET_ECHO)
+    stream = _ReadStream(body + b" " * (4_194_304 + extra - len(body)), fails=fails)
+    calls: list[tuple[bytes, float]] = []
+    errors: list[urllib.error.HTTPError] = []
+
+    class _Director:
+        def open(
+            self, request: urllib.request.Request, *, timeout: float
+        ) -> _ReadStream:
+            assert isinstance(request.data, bytes)
+            calls.append((request.data, timeout))
+            if status != 200:
+                error = urllib.error.HTTPError(
+                    request.full_url, status, SECRET_ECHO, Message(), stream
+                )
+                errors.append(error)
+                raise error
+            return stream
+
+    monkeypatch.setattr(provider_module, "_opener", _Director)
+    provider = OpenRouter(api_key="not-a-real-key", model="m")
+    capture = _Transport()
+    OpenRouter(api_key="k", model="m", transport=capture).complete("")
+    prompt = "x" * (1_048_576 - len(capture.requests[0]))
+    if status == 200 and not extra and not fails:
+        assert provider.complete(prompt).content == SECRET_ECHO
+    else:
+        with pytest.raises(Refusal) as caught:
+            provider.complete(prompt)
+        expected = (
+            RefusalCode.PROVIDER_RESPONSE_INVALID
+            if extra
+            else RefusalCode.PROVIDER_UNAVAILABLE
+        )
+        assert caught.value.code is expected
+        _assert_safe(caught.value)
+    assert len(calls) == 1
+    assert len(calls[0][0]) == 1_048_576
+    assert calls[0][1] == 120.0
+    assert stream.closed
+    assert stream.sizes == [4_194_305]
+    assert stream.consumed <= 4_194_305
+
+
+@pytest.mark.parametrize("status", [200, 400])
+@pytest.mark.parametrize(
+    "framing,expected",
+    [
+        ("fixed", None),
+        ("short", RefusalCode.PROVIDER_UNAVAILABLE),
+        ("zero", RefusalCode.PROVIDER_RESPONSE_INVALID),
+        ("close", None),
+        ("chunked", None),
+        ("chunked-short", RefusalCode.PROVIDER_UNAVAILABLE),
+        ("chunked-no-end", RefusalCode.PROVIDER_UNAVAILABLE),
+    ],
+)
+def test_read_body_preserves_native_http_framing(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    framing: str,
+    expected: RefusalCode | None,
+) -> None:
+    """_read_body must reject a JSON-valid prefix when HTTP promises more bytes."""
+    body = _body(content=SECRET_ECHO)
+    length = {"fixed": len(body), "short": len(body) + 10, "zero": 0}.get(framing)
+    header = f"Content-Length: {length}\r\n".encode() if length is not None else b""
+    if framing.startswith("chunked"):
+        header = b"Transfer-Encoding: chunked\r\n"
+        size = len(body) + (10 if framing == "chunked-short" else 0)
+        body = f"{size:x}\r\n".encode() + body + b"\r\n"
+        if framing != "chunked-no-end":
+            body += b"0\r\n\r\n"
+    if framing == "zero":
+        body = b""
+    wire = BytesIO(
+        f"HTTP/1.1 {status} synthetic\r\n".encode() + header + b"\r\n" + body
+    )
+
+    class _Socket:
+        def makefile(self, mode: str) -> BytesIO:
+            assert mode == "rb"
+            return wire
+
+    response = http.client.HTTPResponse(cast(socket.socket, _Socket()))
+    response.begin()
+    calls: list[float] = []
+    errors: list[urllib.error.HTTPError] = []
+
+    class _Director:
+        def open(
+            self, request: urllib.request.Request, *, timeout: float
+        ) -> http.client.HTTPResponse:
+            calls.append(timeout)
+            if status != 200:
+                error = urllib.error.HTTPError(
+                    request.full_url, status, SECRET_ECHO, response.headers, response
+                )
+                errors.append(error)
+                raise error
+            return response
+
+    monkeypatch.setattr(provider_module, "_opener", _Director)
+    if status == 400 and expected is not RefusalCode.PROVIDER_UNAVAILABLE:
+        expected = RefusalCode.PROVIDER_CALL_INVALID
+    provider = OpenRouter(api_key="not-a-real-key", model="m")
+    if expected is None:
+        assert provider.complete(PROMPT).content == SECRET_ECHO
+    else:
+        with pytest.raises(Refusal) as caught:
+            provider.complete(PROMPT)
+        assert caught.value.code is expected
+        _assert_safe(caught.value)
+    assert calls == [120.0]
+    assert response.closed and wire.closed
 
 
 def test_json_object_mode_is_asked_for_only_when_wanted() -> None:
