@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -42,6 +43,7 @@ from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.budget import reserve
+from server.store.events import RunEvent, append
 from server.store.gates import (
     Gate,
     GateApproval,
@@ -1136,14 +1138,14 @@ _AT_ACCEPT = [
 
 
 @pytest.mark.parametrize("change,expected", _AT_ACCEPT)
-def test_accept_refuses_what_changed_between_the_runtime_check_and_insert(
+def test_accept_refuses_what_changed_after_the_bill_committed(
     harness: _Harness,
     monkeypatch: pytest.MonkeyPatch,
     change: str,
     expected: object,
 ) -> None:
-    """Governed and terminal changes committed after the runtime check never
-    reach an artifact; the bill stays."""
+    """Governed and terminal changes committed after the bill never reach an
+    artifact; the bill stays."""
     attempt, accepted = _billed(harness)
     _mutation(harness, change, monkeypatch)()
     assert _accept_refused(harness, attempt, accepted) == expected
@@ -1153,7 +1155,14 @@ def test_accept_refuses_what_changed_between_the_runtime_check_and_insert(
         (True, True),
     )
     assert _events(harness, "ATTEMPT_ACCEPTED") == 0
-    if change not in {"failed", "complete"}:
+    if change in {"failed", "complete"}:
+        with connect(harness.url) as observer:
+            status = observer.execute(
+                "SELECT status FROM runs WHERE run_id=%s", (harness.run_id,)
+            ).fetchone()
+        assert status == (change.upper(),)
+        assert _events(harness, "RUN_" + change.upper()) == 1
+    else:
         _still_running(harness)
 
 
@@ -1179,27 +1188,79 @@ def test_exact_replay_never_rechecks_authority_or_duplicates(
 
 
 def test_accept_waits_for_a_case_lock_holder_then_sees_its_revocation(
-    harness: _Harness,
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from test_case_ordering import _blocked
+    """The holder takes the case lock after the bill commits, so the wait lands
+    on acceptance's own lock rather than the bill replay."""
+    from test_case_ordering import _wait_for_blocking
 
     attempt, accepted = _billed(harness)
-    seen: list[object] = []
-    with connect(harness.url) as holder:
-        revoke(holder, case_id=harness.case_id, user_id=harness.approver)
-        with _blocked(
-            holder,
-            harness.conn,
-            lambda: seen.append(_accept_refused(harness, attempt, accepted)),
-        ):
-            assert seen == []
-    assert seen == [RefusalCode.GATE_APPROVAL_MISMATCH]
+    harness.conn.execute("SET statement_timeout = '5s'")
+    harness.conn.commit()
+    released: list[Future[None]] = []
+
+    def release(holder: StoreConnection) -> None:
+        _wait_for_blocking(holder, harness.conn)
+        holder.commit()
+
+    with connect(harness.url) as holder, ThreadPoolExecutor(max_workers=1) as pool:
+
+        def billed(
+            conn: StoreConnection, *, attempt_id: UUID, outcome: CallOutcome
+        ) -> bool:
+            result = record_outcome(conn, attempt_id=attempt_id, outcome=outcome)
+            revoke(holder, case_id=harness.case_id, user_id=harness.approver)
+            released.append(pool.submit(release, holder))
+            return result
+
+        monkeypatch.setattr("server.store.runs.record_outcome", billed)
+        seen = _accept_refused(harness, attempt, accepted)
+        released[0].result(timeout=6)
+    assert seen == RefusalCode.GATE_APPROVAL_MISMATCH
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert _events(harness, "ATTEMPT_ACCEPTED") == 0
     _still_running(harness)
 
 
-@pytest.mark.parametrize("failure", ["sql", "cancel"])
+def test_accept_holds_the_case_lock_from_the_authority_check_to_the_insert(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A revocation started after the check waits, and the insert shares the
+    check's transaction, so it cannot commit in between."""
+    from test_case_ordering import _wait_for_blocking
+
+    attempt, accepted = _billed(harness)
+    revoking: list[Future[None]] = []
+    unit: list[object] = []
+    with connect(harness.url) as other, ThreadPoolExecutor(max_workers=1) as pool:
+        other.execute("SET statement_timeout = '5s'")
+        other.commit()
+
+        def revoke_now() -> None:
+            revoke(other, case_id=harness.case_id, user_id=harness.approver)
+            other.commit()
+
+        def checked(conn: StoreConnection, run_id: UUID) -> object:
+            result = approved_run_input(conn, run_id)
+            unit.append(conn.execute("SELECT pg_current_xact_id()").fetchone())
+            revoking.append(pool.submit(revoke_now))
+            _wait_for_blocking(conn, other)
+            return result
+
+        def inserted(conn: StoreConnection, run_id: UUID, event: RunEvent) -> None:
+            # Same transaction as the check, so its lock was never released.
+            assert unit == [conn.execute("SELECT pg_current_xact_id()").fetchone()]
+            append(conn, run_id, event)
+
+        monkeypatch.setattr("server.store.runs.approved_run_input", checked)
+        monkeypatch.setattr("server.store.runs.append", inserted)
+        assert accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+        revoking[0].result(timeout=6)
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 1
+
+
+@pytest.mark.parametrize("failure", ["sql", "interrupt"])
 def test_failure_inside_accept_leaves_the_bill_and_no_artifact(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -1226,6 +1287,7 @@ def test_failure_inside_accept_leaves_the_bill_and_no_artifact(
         (1, [REPORTED], 0, 1, 1),
         (True, True),
     )
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
     _still_running(harness)
 
 
