@@ -133,3 +133,6 @@ def test_an_overrun_charge_stops_the_next_node_before_its_call(
     assert caught.value.code is RefusalCode.BUDGET_CEILING_REACHED
     assert provider.calls == ["CP-0"]
     assert len(provider.answers.prompts) == 1
+    assert conn.execute(
+        "SELECT amount FROM budget_ledger WHERE run_id = %s", (run.run_id,)
+    ).fetchall() == [(Decimal("1.00"),)]

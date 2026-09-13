@@ -16,6 +16,7 @@ real `ModuleProvider`, answered by `CanonicalCompletions` (Task 3.1 slice e-2).
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -215,6 +216,10 @@ def test_the_fake_provider_satisfies_the_protocol(
     provider: Provider = _started(conn, case_id, route, bundle, blobs).provider()
 
     assert provider.model == "a-model/for-the-test"
+    assert callable(provider.execute)
+    execute_params = list(inspect.signature(provider.execute).parameters)
+    protocol_params = list(inspect.signature(Provider.execute).parameters)[1:]
+    assert execute_params == protocol_params
 
 
 def test_an_unapproved_run_never_reaches_the_provider(
@@ -608,9 +613,12 @@ def test_accepted_artifacts_reads_cp0s_payload_and_no_other(
 
     accepted = accepted_artifacts(conn, blobs, route, run.run_id, bundle=bundle)
 
-    assert accepted[_node_id(route, "CP-0")].readiness == (
-        ("CP-5", "READY"),
-        ("CP-L10", "READY"),
+    assert accepted[_node_id(route, "CP-0")] == NodeResult(
+        readiness=(
+            ("CP-5", "READY"),
+            ("CP-L10", "READY"),
+        ),
+        qa_status="Passed",
     )
     assert accepted[_node_id(route, "CP-L10")] == NodeResult()
     assert accepted[_node_id(route, "CP-5")] == NodeResult()

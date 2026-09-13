@@ -31,6 +31,7 @@ from canonical_fixtures import (  # noqa: E402
     QUOTE,
     VENDORED,
     CanonicalCompletions,
+    fields_from_prompt,
 )
 from conftest import approve_run, priced  # noqa: E402
 
@@ -106,6 +107,13 @@ def main() -> None:
                 "F02: blocked downstream nodes wrongly allowed terminal COMPLETE"
             )
             assert accepted < len(route.nodes)
+            called_modules = {
+                str(fields_from_prompt(prompt)["module_id"])
+                for prompt in answers.prompts
+            }
+            assert "CP-L10" not in called_modules, (
+                "F02: CP-L10 must never be called once CP-0 marks it BLOCKED"
+            )
     finally:
         with psycopg.connect(base, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
