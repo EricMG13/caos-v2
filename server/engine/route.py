@@ -223,13 +223,14 @@ def node_states(
     complete = {
         node.module_id for node in route.nodes if node.route_node_id in accepted
     }
+    passed = _qa_passed(route, accepted)
 
     states = {}
     for node in route.nodes:
         if node.module_id in complete:
             states[node.route_node_id] = NodeState.COMPLETE
             continue
-        unmet = _unmet(route, node.module_id, complete)
+        unmet = _unmet(route, node.module_id, complete, passed)
         states[node.route_node_id] = _state_for(node.module_id, unmet, readiness)
     return states
 
@@ -266,7 +267,7 @@ def waiting_on(
     node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
     if node is None:
         raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
-    return _unmet(route, node.module_id, complete)
+    return _unmet(route, node.module_id, complete, _qa_passed(route, accepted))
 
 
 def limitations_of(
@@ -370,13 +371,30 @@ def _state_for(
 
 
 def _unmet(
-    route: ResolvedRoute, module_id: str, complete: set[str]
+    route: ResolvedRoute, module_id: str, complete: set[str], passed: set[str]
 ) -> tuple[Edge, ...]:
+    """Edges into this module not yet met. A QA_GATE edge is met by its
+    source's validated `Passed`, never by the source merely being accepted (F03).
+    """
     return tuple(
         edge
         for edge in route.edges
-        if edge.target == module_id and edge.source not in complete
+        if edge.target == module_id
+        and (
+            edge.source not in complete
+            or (edge.type is EdgeType.QA_GATE and edge.source not in passed)
+        )
     )
+
+
+def _qa_passed(route: ResolvedRoute, accepted: Mapping[str, Any]) -> set[str]:
+    """Modules whose accepted artifact carries the QA outcome `Passed`."""
+    return {
+        node.module_id
+        for node in route.nodes
+        if isinstance(body := accepted.get(node.route_node_id), Mapping)
+        and body.get("qa_status") == "Passed"
+    }
 
 
 def _profile(catalog: Mapping[str, Any], profile_id: str) -> Mapping[str, Any]:

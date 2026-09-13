@@ -30,7 +30,9 @@ from server.refusals import Refusal, RefusalCode
 # What a module may return, and nothing else.
 CLAIM_KEYS = frozenset({"statement", "citations"})
 CITATION_KEYS = frozenset({"source_id", "page", "matched_text"})
-ENVELOPE_KEYS = frozenset({"claims", "content_to_module_map"})
+ENVELOPE_KEYS = frozenset({"claims", "content_to_module_map", "qa_status"})
+# The bundle's four QA outcomes (CANON_SHARED.md). Only PASSED clears the gate.
+QA_STATUSES = frozenset({"Not Reviewed", "Passed", "Restricted", "Blocked"})
 # The gate's row, from the bundle's own payload schema for CP-0, minus the two
 # fields the host has no use for yet (`evidence_demand`,
 # `active_representation_ids` -- docs/REBUILD_PLAN.md Phase 11).
@@ -80,6 +82,26 @@ class Envelope:
     claims_refused: int
     # The gate's readiness map, empty for every module but the gate.
     readiness: tuple[Readiness, ...]
+    # The QA gate source's clearance (F03); None for every other module.
+    qa_status: str | None = None
+
+
+def parse_qa(body: str, *, expected: bool) -> str | None:
+    """The QA gate source's clearance, or a refusal.
+
+    Asked of the module a QA_GATE edge leaves and of no other: a module not
+    asked that returns one is carrying an undeclared field, and the one asked
+    must return exactly one of the bundle's four values.
+    """
+    decoded = _object(body)
+    status = decoded.get("qa_status")
+    if not expected:
+        if "qa_status" in decoded:
+            raise Refusal(RefusalCode.ENVELOPE_UNDECLARED_FIELD)
+        return None
+    if not isinstance(status, str) or status not in QA_STATUSES:
+        raise Refusal(RefusalCode.ENVELOPE_INVALID)
+    return status
 
 
 def parse_claims(

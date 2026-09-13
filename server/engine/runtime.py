@@ -27,6 +27,7 @@ from uuid import UUID
 from server.blobs import BlobStore
 from server.engine.route import (
     GATE_MODULE,
+    EdgeType,
     NodeState,
     ResolvedRoute,
     frontier,
@@ -154,13 +155,17 @@ def accepted_artifacts(
 ) -> dict[str, Any]:
     """The run's accepted attempts, keyed by route node.
 
-    Only CP-0's body is fetched. `node_states` reads readiness from that artifact
-    and needs nothing but presence from the others, so fetching every payload
+    Only CP-0's and the QA gate source's bodies are fetched. `node_states` reads
+    readiness and QA clearance from those and needs nothing but presence from the
+    others, so fetching every payload
     would be a blob read per node per pass for data nobody looks at -- the ~8x
     shape `docs/AI_CODE_QUALITY.md` section 1 measures.
     """
+    qa_sources = {e.source for e in route.edges if e.type is EdgeType.QA_GATE}
     readiness_nodes = {
-        node.route_node_id for node in route.nodes if node.module_id == GATE_MODULE
+        node.route_node_id
+        for node in route.nodes
+        if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
     return {
         node_id: (json.loads(blobs.get(digest)) if node_id in readiness_nodes else {})

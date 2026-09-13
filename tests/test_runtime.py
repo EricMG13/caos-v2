@@ -79,6 +79,7 @@ class _Provider:
 
     blobs: BlobStore
     die_on: str | None = None
+    qa_status: str = "Passed"
     at_call: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
@@ -88,13 +89,14 @@ class _Provider:
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
         self.calls.append(module_id)
+        payload: dict[str, Any]
         if self.at_call is not None:
             self.at_call()
         if module_id == self.die_on:
             raise _Boom(module_id)
-        payload: dict[str, Any] = (
-            READY_EVERYWHERE if module_id == "CP-0" else {"module_id": module_id}
-        )
+        payload = READY_EVERYWHERE if module_id == "CP-0" else {"module_id": module_id}
+        if module_id == "CP-5":
+            payload = {"module_id": module_id, "qa_status": self.qa_status}
         digest = self.blobs.put(json.dumps(payload).encode("utf-8"))
         return ProviderResult(
             artifact_sha256=digest,
@@ -699,3 +701,33 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
 
 def _node_id(route: ResolvedRoute, module_id: str) -> str:
     return next(n.route_node_id for n in route.nodes if n.module_id == module_id)
+
+
+@pytest.mark.parametrize("qa_status", ["Blocked", "Passed"])
+def test_a_blocked_cp5_does_not_release_cp6(
+    case: tuple[StoreConnection, UUID],
+    blobs: BlobStore,
+    bundle: Bundle,
+    qa_status: str,
+) -> None:
+    """REPAIR_PLAN Phase 2 exit: blocked CP-5 does not release CP-6, and the
+    run ends blocked rather than complete."""
+    conn, case_id = case
+    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    run_id = _approved_run(conn, case_id, full, bundle, blobs)
+    provider = _Provider(blobs, qa_status=qa_status)
+
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=full,
+        execution=Execution(provider, ESTIMATE, bundle),
+    )
+
+    assert "CP-5" in provider.calls
+    assert ("CP-6" in provider.calls) is (qa_status == "Passed")
+    assert run_status(conn, run_id) is (
+        RunStatus.COMPLETE if qa_status == "Passed" else RunStatus.BLOCKED
+    )
