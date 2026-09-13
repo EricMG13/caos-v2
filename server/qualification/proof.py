@@ -225,7 +225,8 @@ def _pinned_sources(conn: StoreConnection, run_id: UUID) -> dict[str, UUID]:
     The captured member, not whatever the case holds now: a source admitted
     after the pin, or a re-admitted copy of a withdrawn one, is a different
     source id and never supports this run (invariant 1). A member whose document
-    or extraction identity moved is absent too, as it is at execution.
+    or extraction identity moved is absent too, as it is at execution. Liveness
+    is checked per cited document, the proof's use; the gate checks every member.
     """
     rows = conn.execute(
         "SELECT m.document_sha256, m.source_id FROM run_inputs i"
@@ -235,7 +236,10 @@ def _pinned_sources(conn: StoreConnection, run_id: UUID) -> dict[str, UUID]:
         " JOIN source_extractions e ON e.source_id = s.source_id"
         " WHERE i.run_id = %s AND (s.document_sha256, e.extractor_identity,"
         " e.output_sha256, e.extraction_sha256) = (m.document_sha256,"
-        " m.extractor_identity, m.output_sha256, m.extraction_sha256)",
+        " m.extractor_identity, m.output_sha256, m.extraction_sha256)"
+        # ponytail: two captured members with the same bytes resolve to one,
+        # deterministically; the envelope cites by digest, not by source id.
+        " ORDER BY m.source_id DESC",
         (run_id,),
     ).fetchall()
     return {str(row[0]): UUID(str(row[1])) for row in rows}
