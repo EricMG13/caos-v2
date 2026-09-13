@@ -181,8 +181,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a
   LITE handoff saying `Committee Ready` validates; the host projects the scope
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
-  day the vendor ships it, or by a dated decision that the host owns it; readers
-  (3.1d) must label a screening-only record whatever its committee status.
+  day the vendor ships it, or by a dated decision that the host owns it. The
+  deliverable (d-4) labels a screening-only record a screen whatever its
+  committee status; the proof and matrix readers (d-2, d-3b) still owe it.
+- **The canonical deliverable proves the store at freeze and verification, not
+  continuously.** `server/deliverable/canonical.py` re-derives the payload --
+  both blobs, identity, projections, rectangles -- when it is built, frozen and
+  verified. It is derived in its own read unit before `freeze`'s governed write,
+  and `artifacts` rows are mutable (the Phase 2 entry below), so a pair moved in
+  that gap freezes and is caught by `verify_frozen`, not by the freeze. Proof is
+  re-derived under the bundle and live sources present now: a bundle upgrade
+  (as for the proof, Phase 10) or a withdrawn source makes a filed revision
+  refuse verification. The payload needs every pinned node accepted; the
+  Markdown renders as escaped preformatted text, not formatted Markdown; and a
+  soft upstream ref may be absent from a record, since a call may precede that
+  input's acceptance, and nothing checks that it did. The claims payload still renders beside it until f-2.
+  *Upgrade:* derive inside the freeze's lock once artifact rows are immutable,
+  and a Markdown renderer with a closed element set when committee layout needs
+  one.
 - **A canonical run executes one node at a time but `run_route` cannot yet
   accept it.** Slice c-5a's `server/methodology/canonical.py` runs a canonical
   pin end to end -- billing with the diagnostic Markdown first, then vendor

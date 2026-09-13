@@ -1,0 +1,285 @@
+"""The deliverable's canonical payload, read from the store and bound to it.
+
+`docs/DECISIONS.md` §41.2 and §42.4. A canonical artifact's identity is the pair
+(`artifact_sha256`, `record_sha256`), and the record is never read back as fact.
+Every accepted artifact of the pinned route is read in route order through
+`read_record` against the identity the host rebuilds from its pins; its Markdown
+is re-validated and must project exactly what the record says; every recorded
+citation is re-anchored in the run's pinned evidence and must land on exactly
+the recorded rectangles.
+
+The payload carries each pair beside the exact Markdown and record text, so its
+digest -- what an opinion signs and a freeze binds -- binds both hashes, and
+`verify_package` checks each pair with the standard library alone. Freezing and
+verifying re-derive the payload from the store, so a moved hash refuses. The
+render stays pure: nothing here is reachable from it.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from contextlib import suppress
+from dataclasses import dataclass, replace
+from typing import Any
+from uuid import UUID
+
+from server import methodology
+from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
+from server.deliverable.filing import freeze
+from server.engine.route import BLOCKING, ResolvedRoute, RouteNode
+from server.evidence.citations import Citation, verify_citations
+from server.methodology.bundle import (
+    Bundle,
+    assemble_authority,
+    authority_digest,
+    verified_bytes,
+)
+from server.methodology.handoff import (
+    GATE_MODULE,
+    HostIdentity,
+    read_record,
+    validate_markdown,
+)
+from server.methodology.invocation import host_identity
+from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
+from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection
+from server.store.outcomes import execution_reads
+from server.store.routes import resolved_route
+
+_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
+# Every member of the run's pinned source-set version, never the case's live set.
+_PINNED = (
+    "SELECT m.source_id, m.document_sha256 FROM run_inputs i"
+    " JOIN source_set_members m"
+    " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
+    " WHERE i.run_id = %s"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Revision:
+    """What the payload says beyond the store: the case, run and analyst text."""
+
+    case_id: UUID
+    run_id: UUID
+    case_title: BoundaryText
+    revision_id: BoundaryText
+    narrative: BoundaryText | None = None
+
+
+def payload_bytes(payload: dict[str, Any]) -> bytes:
+    """The payload's one canonical serialisation; its digest is what is signed."""
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def canonical_payload(
+    conn: StoreConnection, blobs: BlobStore, bundle: Bundle, revision: Revision
+) -> dict[str, Any]:
+    """Every accepted canonical artifact of the run, proven, in route order.
+
+    Owns one read unit. Refuses `RUN_NOT_FOUND` for a run of another case;
+    `DELIVERABLE_PAYLOAD_INVALID` for an unpinned route or a pinned node with no
+    accepted artifact; `ARTIFACT_RECORD_MISMATCH` when a blob, the binding, a
+    projection or a rectangle disagrees; a citation's own code when it no longer
+    anchors; and whatever `host_identity` refuses. No refusal carries text.
+    """
+    run_id = revision.run_id
+    with execution_reads(conn):
+        owner = conn.execute("SELECT case_id FROM runs WHERE run_id = %s", (run_id,))
+        if owner.fetchone() != (revision.case_id,):
+            raise Refusal(RefusalCode.RUN_NOT_FOUND)
+        route = resolved_route(conn, run_id)
+        rows = {
+            str(node): (UUID(str(attempt)), str(artifact), record)
+            for node, attempt, artifact, record in conn.execute(
+                "SELECT route_node_id, attempt_id, artifact_sha256, record_sha256"
+                " FROM artifacts WHERE run_id = %s",
+                (run_id,),
+            ).fetchall()
+        }
+        if route is None or any(n.route_node_id not in rows for n in route.nodes):
+            raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        pinned: dict[str, list[UUID]] = {}
+        for source, document in conn.execute(_PINNED, (run_id,)).fetchall():
+            pinned.setdefault(str(document), []).append(UUID(str(source)))
+        reader = _Reader(conn, blobs, bundle, route, pinned)
+        artifacts = []
+        for node in route.nodes:
+            attempt, artifact, record_sha = rows[node.route_node_id]
+            if record_sha is None:
+                raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+            markdown = reader.proven(run_id, node, attempt, artifact, str(record_sha))
+            artifacts.append(
+                {
+                    "route_node_id": node.route_node_id,
+                    "artifact_sha256": artifact,
+                    "record_sha256": str(record_sha),
+                    "markdown": markdown.decode("utf-8"),
+                    "record": blobs.get(str(record_sha)).decode("utf-8"),
+                }
+            )
+    payload: dict[str, Any] = {
+        "case_title": revision.case_title.value,
+        "revision_id": revision.revision_id.value,
+        "run_id": str(run_id),
+        "artifacts": artifacts,
+    }
+    if revision.narrative is not None:
+        payload["narrative"] = revision.narrative.value
+    return payload
+
+
+class _Reader:
+    """One payload's shared authority: contract, catalog and pinned evidence."""
+
+    def __init__(
+        self,
+        conn: StoreConnection,
+        blobs: BlobStore,
+        bundle: Bundle,
+        route: ResolvedRoute,
+        pinned: dict[str, list[UUID]],
+    ) -> None:
+        self.conn, self.blobs, self.bundle, self.route = conn, blobs, bundle, route
+        self.contract = load_vendor_contract(bundle)
+        self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
+        # A document pinned twice cannot say which source a citation meant.
+        self.pinned = {doc: ids[0] for doc, ids in pinned.items() if len(ids) == 1}
+
+    def proven(
+        self, run_id: UUID, node: RouteNode, attempt: UUID, artifact: str, sha: str
+    ) -> bytes:
+        bundle, route, pinned = self.bundle, self.route, self.pinned
+        host = host_identity(
+            self.conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt
+        )
+        expected = _call_time(self.blobs, route, host, sha)
+        record = read_record(
+            self.blobs, artifact_sha256=artifact, record_sha256=sha, expected=expected
+        )
+        mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+        authority = authority_digest(assemble_authority(bundle, node.module_id))
+        if (
+            record.adapter_version != methodology.CANONICAL_ADAPTER_VERSION
+            or (record.build_id, record.manifest_sha256, record.authority_digest)
+            != (bundle.build_id, bundle.manifest_sha256, authority)
+            or any(c.document_sha256 not in pinned for c in record.citations)
+        ):
+            raise mismatch
+        markdown = self.blobs.get(artifact)
+        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+        projections = None
+        with suppress(Refusal):  # a stored handoff that no longer validates
+            projections = validate_markdown(
+                self.contract,
+                self.catalog,
+                verified_bytes(bundle, node.module_id, "SKILL.md"),
+                markdown,
+                identity=expected,
+                gate_expects=gate if node.module_id == GATE_MODULE else frozenset(),
+            )
+        # Raised outside the handler, so the refusal's context is empty.
+        if projections is None or projections != record.projections:
+            raise mismatch
+        anchored = verify_citations(
+            self.conn,
+            delivered=set(pinned.values()),
+            citations=[
+                Citation(pinned[c.document_sha256], c.page, c.matched_text)
+                for c in record.citations
+            ],
+        )
+        if tuple(anchored) != record.citations:
+            raise mismatch
+        return markdown
+
+
+def _call_time(
+    blobs: BlobStore, route: ResolvedRoute, host: HostIdentity, record_sha: str
+) -> HostIdentity:
+    """The host's identity with the upstream the call could have named.
+
+    A soft input accepted after this node was called is named now and was not
+    then, so the host's refs narrow to those the record names -- except a
+    blocking one, which is never optional. The record adds nothing to them.
+    """
+    named: set[str] = set()
+    with suppress(Exception):  # an unreadable record is `read_record`'s refusal
+        document = json.loads(blobs.get(record_sha))
+        named = {ref["route_node_id"] for ref in document["identity"]["upstream"]}
+    by_module = {n.module_id: n.route_node_id for n in route.nodes}
+    named |= {
+        str(by_module.get(edge.source))
+        for edge in route.edges
+        if edge.target == host.module_id and edge.type in BLOCKING
+    }
+    kept = tuple(ref for ref in host.upstream if ref.route_node_id in named)
+    return replace(host, upstream=kept)
+
+
+def freeze_canonical(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    revision: Revision,
+    *,
+    actor_id: UUID,
+) -> str:
+    """Freeze the payload the store proves now, never a caller's bytes.
+
+    A pair moved since signing re-derives other bytes, so `freeze` refuses
+    `DELIVERABLE_MOVED_SINCE_SIGNING` (or the read refuses with its own code).
+    """
+    payload = payload_bytes(canonical_payload(conn, blobs, bundle, revision))
+    return freeze(
+        conn,
+        case_id=revision.case_id,
+        actor_id=actor_id,
+        revision_id=revision.revision_id,
+        payload=payload,
+    )
+
+
+def verify_frozen(  # noqa: PLR0913 -- the revision and the bytes held for it
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case_id: UUID,
+    revision_id: BoundaryText,
+    payload: bytes,
+) -> None:
+    """Refuse unless `payload` is this frozen revision and the store still proves it.
+
+    `DELIVERABLE_NOT_FROZEN` without a freeze; `DELIVERABLE_MOVED_SINCE_SIGNING`
+    when the bytes are not the frozen digest or no longer re-derive; the read's
+    own code when a pair it binds has moved.
+    """
+    with execution_reads(conn):
+        row = conn.execute(
+            "SELECT payload_sha256 FROM deliverable_publications"
+            " WHERE case_id = %s AND revision_id = %s",
+            (case_id, revision_id.value),
+        ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
+    held = None
+    with suppress(Exception):  # any shape but a payload is bytes that moved
+        decoded = json.loads(payload)
+        told = decoded.get("narrative")
+        held = Revision(
+            case_id=case_id,
+            run_id=UUID(decoded["run_id"]),
+            case_title=BoundaryText.of(decoded["case_title"]),
+            revision_id=revision_id,
+            narrative=None if told is None else BoundaryText.of(told),
+        )
+    if held is None or hashlib.sha256(payload).hexdigest() != row[0]:
+        raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
+    if payload_bytes(canonical_payload(conn, blobs, bundle, held)) != payload:
+        raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)

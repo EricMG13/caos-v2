@@ -93,9 +93,23 @@ def verify_package(archive_bytes: bytes) -> Verification:
     if len({str(actor).strip() for actor in named}) != 3:
         return Verification(False, "the receipt names fewer than three people")
 
-    from server.deliverable.render import render
+    from server.deliverable.render import canonical_bound, render
 
-    if render(json.loads(payload)) != export:
+    # A canonical artifact carries its pair (§41): the Markdown and record text
+    # must hash to it, which needs nothing but `hashlib`.
+    decoded = json.loads(payload)
+    held = decoded.get("artifacts") if isinstance(decoded, dict) else None
+    if isinstance(held, list) and any(
+        isinstance(artifact, dict)
+        and "markdown" in artifact
+        and not canonical_bound(artifact)
+        for artifact in held
+    ):
+        return Verification(
+            False, "a handoff does not hash to the pair the payload binds"
+        )
+
+    if render(decoded) != export:
         return Verification(False, "the export does not re-render from the payload")
 
     return Verification(True)
