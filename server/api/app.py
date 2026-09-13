@@ -130,6 +130,16 @@ _STATUS = {
     RefusalCode.ARTIFACT_RECORD_MISMATCH: 503,
     RefusalCode.RUN_INPUT_INVALID: 503,
     RefusalCode.AUTHORITY_BYTES_MISMATCH: 503,
+    # Re-validating an accepted handoff: it passed these under the same pin,
+    # so failing now is stored bytes or authority moving, never the request.
+    RefusalCode.HANDOFF_MALFORMED: 503,
+    RefusalCode.HANDOFF_BLOCKED: 503,
+    RefusalCode.HANDOFF_IDENTITY_MISMATCH: 503,
+    RefusalCode.HANDOFF_INCOMPLETE: 503,
+    RefusalCode.HANDOFF_UNDECLARED_FIELD: 503,
+    RefusalCode.HANDOFF_MODULE_UNSUPPORTED: 503,
+    RefusalCode.ATTEMPT_NOT_FOUND: 503,
+    RefusalCode.AUTHORITY_MODULE_UNKNOWN: 503,
 }
 
 
