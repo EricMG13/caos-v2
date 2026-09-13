@@ -44,7 +44,7 @@ from server.store.outcomes import check_call, execution_reads
 class ModuleProvider:
     """A `runtime.Provider` that runs a real module.
 
-    Holds the seven things a module execution needs and the loop does not know
+    Holds the six things a module execution needs and the loop does not know
     about: the store, the bundle that is authority, the blob store the
     envelope is written to, the provider that answers, the pinned route --
     which is what tells the gate every other module it must cover -- and the
