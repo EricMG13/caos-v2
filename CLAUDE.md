@@ -30,6 +30,14 @@ Every shell command starts by unsetting `OPENROUTER_API_KEY`,
 Never invoke a live provider without explicit authorization. Index the current
 checkout with GitNexus and verify affected callers in source.
 
+The coordinator may use up to three concurrent implementers only in isolated
+worktrees with disjoint owned files, migrations and test resources. Each agent
+gets an exact base and task brief, commits its own tested concern, and receives
+ordinary exact-range review. The coordinator alone integrates reviewed commits,
+runs integration/phase gates and updates the handoff. Never share a branch,
+database/blob root or provider authority; an independently green branch is not
+task or phase acceptance.
+
 Ordinary review closes each task. One `confidence-review` and then one separate
 adversarial code audit close the whole phase, both at actual `xhigh` reasoning,
 with remediation/reverification between them. No per-task specialist review or

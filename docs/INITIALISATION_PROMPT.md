@@ -30,6 +30,12 @@ each implementation slice:
      from a prompt word. State the accepted base, allowed paths, size budget and
      exit assertion. Index that checkout with GitNexus and verify callers in
      source.
+     A coordinator may dispatch up to three independent implementers only in
+     isolated worktrees with disjoint files, migrations and test resources.
+     Each receives an exact base/brief and reports a tested commit for ordinary
+     review; only the coordinator integrates, runs cross-task gates and records
+     acceptance. Never share a branch, test database/blob root or provider
+     authority.
   2. Write the failing test first. Run it. Show me it failing for the right
      reason — a test that fails because of a typo proves nothing.
   3. Implement the smallest thing that makes it pass.

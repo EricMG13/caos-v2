@@ -18,7 +18,7 @@ a tool, not by intention. A control nobody runs is not a control.
 | **Readability** | 3× | Function length and complexity ceilings; ordinary task review rejects needless complexity | `ruff` (C901, PLR0912/0913/0915); exact-range task review |
 | **Error handling** | ~2× | Typed refusals only. No bare `except`, no `except Exception` without re-raise, no `str(exc)` reaching a log or a wire response | `ruff` (BLE, TRY); the observability test that drives a sentinel document through real ingestion |
 | **Security** | 2.74× | Static analysis, dependency audit, image scan, and a route-level actor matrix that drives every endpoint as nine different actors | `bandit` (pinned 3.12 — see §4), `pip-audit`, Trivy, `gitleaks`; extend the HTTP actor matrix with repaired endpoints in repair Phase 4 |
-| **Formatting** | 2.66× | Format authored files and verify before acceptance | `ruff format` in pre-commit/CI; `prettier --check` in frontend lint/CI; automatic Claude hook currently requires repair |
+| **Formatting** | 2.66× | Format authored files and verify before acceptance | `ruff format` in pre-commit/CI; `prettier --check` in frontend lint/CI; automatic Claude hook on edit (`scripts/claude_hook.py`) |
 | **Naming inconsistency** | ~2× | One glossary. Every domain term in `CONTEXT.md`; a check that new identifiers do not introduce a synonym for an existing term | `CONTEXT.md` + `scripts/check_vocabulary.py` |
 | **Concurrency & dependencies** | ~2× | No new dependency without a dated decision entry. Fully pinned, hashed locks. Every governed race proven on two independent Postgres connections | `test_dependency_pins.py`, `--require-hashes`, `test_postgres_races.py` |
 | **Performance — excessive I/O** | **~8×** | A declared I/O budget per request path, asserted in tests. N+1 detection on every list endpoint | `scripts/io_budget.py` + `test_io_budget.py` |
@@ -36,21 +36,27 @@ budget test is what stops it coming back.
 
 ## 2. Repository controls
 
-### `.claude/settings.json` — repair required
+### `.claude/settings.json` — hooks read the event on stdin
 
-The current hook commands do not read Claude's JSON-stdin event contract.
-They read `CLAUDE_FILE_PATHS` and `CLAUDE_TOOL_INPUT_command` instead.
-A harmless invocation probe returned success for forbidden-command JSON.
-Consequently, neither formatting-on-edit nor the listed command guard is
-certified enforcement. The tracked handoff makes hook repair a Phase 2 exit
-prerequisite; [PLAN_ADVERSARIAL_REVIEW.md](PLAN_ADVERSARIAL_REVIEW.md) records
-the evidence and required checks.
+Both hooks run `scripts/claude_hook.py`, which reads the JSON event Claude Code
+passes on stdin (`tool_input.command` / `tool_input.file_path`). The earlier
+inline commands read `CLAUDE_FILE_PATHS` and `CLAUDE_TOOL_INPUT_command`, which
+are never set, so they enforced nothing
+([PLAN_ADVERSARIAL_REVIEW.md](PLAN_ADVERSARIAL_REVIEW.md) R2).
 
-The intended hooks format only authored Python/TS/CSS files, exclude vendor
-paths, and reject forbidden commands such as force pushes, hook-bypassing
-commits and unpinned installs. Repair them against the documented event input,
-with invocation-level regression tests, before describing them as working.
-Pre-commit and CI checks remain separate obligations.
+- **Guard (PreToolUse, Bash).** Refuses force pushes, hook-bypassing commits
+  (the long flag or `commit -n`), unpinned `pip install`, `printenv`, a bare
+  `env`, `$OPENROUTER…` and any `.env` other than `.env.example`. A malformed
+  event refuses, and the settings command turns a crash or a missing
+  interpreter into a refusal (`|| exit 2`). It is a pattern screen, not a
+  sandbox: a command built to hide its intent at run time passes, and one
+  `shlex` cannot split gets only the substring rules.
+- **Formatter (PostToolUse, Write/Edit/MultiEdit).** `ruff format
+  --force-exclude` for authored Python and the pinned `prettier` for frontend
+  TS/CSS; vendor, `.claude`, out-of-repo and other files are untouched.
+
+`tests/test_claude_hooks.py` drives both, including through the real settings
+command. Pre-commit and CI checks remain separate obligations.
 
 - **No `Stop` hook.** An earlier draft of this page promised one that ran the
   changed-file tests; it was never built, and a hook that runs the suite would
@@ -95,6 +101,7 @@ control nobody runs.
 |---|---|
 | `superpowers:test-driven-development` | before implementing any feature or fix |
 | `superpowers:systematic-debugging` | before proposing a fix for any failure |
+| coordinator + isolated implementers | up to three only for disjoint task scopes; coordinator integrates and owns acceptance |
 | ordinary task review | after each local implementation commit, before task acceptance |
 | `confidence-review` | once at whole-phase completion, actual `xhigh` reasoning |
 | `adversarial-reviewer` | once at whole-phase completion after confidence remediation, actual `xhigh` reasoning |
@@ -107,6 +114,12 @@ control nobody runs.
 For Opus 5 planning, briefing and execution settings, use the complementary
 plan's **Reasoning Modes** section. Plan stress tests and blueprint drafting do
 not trigger the whole-phase code-review gates.
+
+Parallelism reduces elapsed time, not accountability: each implementer uses an
+isolated worktree and test resources, receives exact ownership, and submits a
+commit for ordinary range review. The coordinator serially integrates reviewed
+commits and reruns affected integration gates; independent green branches are
+not CI or phase evidence.
 
 The historical workspace was designed in Claude Design (project `69d37748-8595-4309-9b06-bc5f9529a29c`,
 `DESIGN.md`) with its `hifi-design` workflow. Repair work reuses that design;

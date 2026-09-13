@@ -1187,6 +1187,14 @@ preferences are recorded in the complementary plan's Reasoning Modes section:
 `low` for faithful formatting, and targeted `ultrathink` for plan stress tests.
 Planning modes do not change code-review cadence.
 
+**Coordinated implementation.** The coordinator may use at most three
+concurrent implementers for disjoint concerns in isolated worktrees. Each has
+an exact base, ownership boundary and isolated test resources; it cannot edit
+the integration branch or invoke a provider. Task review follows each exact
+concern range. The coordinator alone resolves findings, serially integrates,
+runs cross-task/phase gates and records acceptance. Independent branch results
+cannot satisfy an integrated task, PR or phase gate.
+
 **Gate evidence.** Final size checks run after the candidate commit and review
 remediation, over the actual proposed PR range, at the existing 800-line limit.
 Pre-commit estimates cannot certify a committed-only size check. The documented

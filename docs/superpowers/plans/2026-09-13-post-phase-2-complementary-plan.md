@@ -1,9 +1,9 @@
 # Post-Phase-2 Complementary Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` (recommended) or
-> `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** A coordinator may use up to three implementers in
+> parallel only after partitioning independent tasks. Prefer native isolated
+> worktrees; fall back to Git worktrees only when native isolation is absent.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Complete repair Phases 3–6 without re-planning the product, widening
 an unfinished phase, or carrying stale interfaces across phase boundaries.
@@ -42,6 +42,15 @@ Playwright, Docker, Trivy 0.70.0, and installed GitNexus 1.6.9.
 - Use TDD. A semantic failure must be observed before production code changes.
 - One task is one reviewable concern. The hosted size limit is 800 additions
   plus removals cumulatively from the actual PR base, not per commit.
+- Parallel work is opt-in and bounded: the coordinator assigns each agent an
+  exact base, branch/worktree, owned files, migration ownership, isolated test
+  database/blob root, tests and report path. Do not run concurrent implementers
+  on overlapping files, migrations, fixtures, provider authority or an
+  integration branch. Read-only exploration may run in parallel.
+- An implementer commits only its isolated concern. It runs focused tests and
+  reports its commit/risk evidence. A task reviewer checks that exact range;
+  the coordinator resolves findings, serially integrates reviewed commits and
+  runs integration gates. No independent green branch is phase acceptance.
 - GitNexus is discovery evidence. Verify every affected definition and caller
   in current source, types, and tests.
 - Run ordinary exact-range review for every accepted task. Do not run a rewrite
@@ -105,6 +114,10 @@ Every phase starts with this sequence:
 - [ ] Use the Reasoning Modes table for drafting; keep implementation at
       `medium`. Stress-test the completed brief with the named `ultrathink`
       prompt before beginning its code, without reopening settled scope.
+- [ ] Map task dependencies and launch at most three implementers only for
+      disjoint ownership. Give every worktree its own UUID-owned test database
+      and blob root; the coordinator alone updates the handoff and integration
+      branch.
 
 Every implementation task exits through focused tests, then the serial backend
 gate using the private test URL supplied to both the process and Make:
@@ -113,8 +126,10 @@ gate using the private test URL supplied to both the process and Make:
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
 ```
 
-Commit the tested candidate, complete ordinary review and remediation, then
-run the final size gate before acceptance. The script reads only committed
+Each implementer commits its tested concern, then a task reviewer completes
+ordinary review/remediation for that exact range. The coordinator integrates
+only reviewed commits, runs affected integration checks, then runs the final
+size gate before acceptance. The script reads only committed
 `base...HEAD`; a pre-commit run misses pending edits. Set `PR_BASE` to the
 actual target base and record the candidate HEAD. A task's accepted base may
 be used only if it is also the intended PR base; otherwise prove both ranges.
@@ -137,7 +152,8 @@ remediate and rerun gates, refresh GitNexus, run the separate `xhigh`
 adversarial audit, remediate/reverify within that checkpoint, and freeze final
 evidence. Commit a tracked acceptance record with exact implementation and
 review-remediation commits, source/index identities, actual modes, commands,
-results and remaining limits. Recheck the final committed size, then stop.
+results and remaining limits. Recheck the final committed size, then continue
+to the next authorized phase until Phases 3–6 are complete.
 Local checks cannot manufacture hosted GitHub/Sonar statuses. Any review
 change invalidates evidence tied to the previous candidate; refresh affected
 tests, build/qualification identities and verdicts before accepting it.
@@ -670,6 +686,9 @@ blocked. Never attach an older verdict to a repaired build.
 - [ ] No task started before its predecessor phase was accepted.
 - [ ] Every phase brief records exact bases, paths, APIs, REDs, sizes, commands,
       and ordinary review evidence from the current checkout.
+- [ ] Concurrent implementers had isolated worktrees/resources and disjoint
+      ownership; the coordinator reviewed and integrated their exact commits
+      before any task or phase acceptance.
 - [ ] No `claims-json-v1` artifact is described as canonical Markdown.
 - [ ] No fixture/demo, provider claim, browser digest, detached hash, latest-row
       query, or stale worker becomes authority.
