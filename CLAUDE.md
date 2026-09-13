@@ -235,10 +235,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `methodology_bundle`) and the harness's `_unrun` (the harness bundle) pass
   one (slice d-1). Every frontier pass and every run-document read re-runs the
   vendor validators on each readiness node's Markdown, costing the host
-  identity's nine queries and two blob reads per such node; `read_run`'s
+  identity's ten queries (with the call-time narrowing every reader shares) and
+  three blob reads per such node; `read_run`'s
   `IO_BUDGET` is the bound for two such rows (the gate and the catalog's one
   QA_GATE source), measured on LITE's one. The harness still falls back to
-  presence when a record will not verify. Diagnostic blobs are
+  presence when a record will not verify. The call-time narrowing infers from
+  `now()` (transaction start) which soft inputs an attempt could name, sound
+  for one sequential loop but able to refuse a valid record once concurrent
+  workers interleave accepts (Phase 4 records visibility instead); and a
+  document pinned twice under different extractions resolves to no source, so
+  its citations can never be proven. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified

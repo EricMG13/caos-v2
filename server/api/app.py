@@ -71,9 +71,10 @@ from server.store.routes import resolved_route
 RUN_READ_IO = 4
 # A canonical readiness row (§42.4) is read from its record under the host
 # identity the store rebuilds: the run input, the pinned route, the attempt's
-# owner and ordinal, and the accepted digests. Measured on a LITE run
+# owner and ordinal, the accepted digests, and the call-time narrowing's
+# artifact read. Measured on a LITE run
 # (`tests/test_canonical_readers.py`), per such row; a claims row costs none.
-CANONICAL_READINESS_IO = 9
+CANONICAL_READINESS_IO = 10
 # Readiness rows are the gate's and each QA_GATE source's. The catalog carries
 # one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a
 # constant, not a function of route length.

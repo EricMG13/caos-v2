@@ -34,6 +34,7 @@ from server.deliverable.render import canonical_bound, render
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import assemble_authority, authority_digest
+from server.methodology.canonical import accepted_projections
 from server.methodology.handoff import CanonicalRecord, record_bytes, validate_markdown
 from server.methodology.invocation import host_identity
 from server.methodology.vendor import authority_bundle_sha256
@@ -245,6 +246,27 @@ def test_a_soft_input_accepted_after_the_call_does_not_break_the_record(
     _accept(harness, "CP-L10", **RESTRICTED)
     record = json.loads(_payload(harness)["artifacts"][2]["record"])
     assert [ref["module_id"] for ref in record["identity"]["upstream"]] == ["CP-0"]
+    # The runtime's reader applies the same call-time rule and accepts it too.
+    final = next(n.route_node_id for n in harness.route.nodes if n.module_id == "CP-5")
+    row = harness.conn.execute(
+        "SELECT attempt_id, artifact_sha256, record_sha256 FROM artifacts"
+        " WHERE run_id = %s AND route_node_id = %s",
+        (harness.run_id, final),
+    ).fetchone()
+    assert row is not None
+    projections = accepted_projections(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        harness.route,
+        run_id=harness.run_id,
+        route_node_id=final,
+        attempt_id=row[0],
+        artifact_sha256=row[1],
+        record_sha256=row[2],
+    )
+    assert projections.qa_status == record["projections"]["qa_status"]
+    harness.conn.rollback()
 
 
 def test_an_incomplete_run_has_no_canonical_payload(harness: _Harness) -> None:
