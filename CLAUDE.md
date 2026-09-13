@@ -237,8 +237,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **The canonical orchestration proof binds the accepted record to live proof.**
   Slice d-2 re-reads both blobs, rebuilds identity, validates projections and
   citations against pinned live sources, and requires the pin's adapter and
-  bundle authority. It returns counts only, so the matrix cannot yet surface
-  canonical quotes. *Upgrade:* d-3b reads proven canonical citations.
+  bundle authority. It returns the re-anchored citations, so the matrix scores
+  exactly what the proof proved without a second record read. *Upgrade:* read
+  proof and scoring in one repeatable-read transaction when a reviewer needs a
+  single snapshot.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
