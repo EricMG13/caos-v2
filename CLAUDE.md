@@ -223,9 +223,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   read them as analysis. The orchestration proof still refuses canonical
   pins. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
-  by the cached validator (every other read still is). *Upgrade:* d-2 proves
-  canonical artifacts; f-1 makes readers refuse a NULL record and removes the
-  dispatch.
+  by the cached validator (every other read still is). No HTTP test covers a
+  canonical `read_run` over a QA_GATE verdict other than `Passed`, because the
+  catalog's only QA_GATE (CP-5 -> CP-6) sits on a route the canonical adapter
+  does not execute; the view function that projects a stored `qa_status` is
+  tested directly instead. *Upgrade:* this gap closes when the canonical
+  adapter reaches a route carrying that QA_GATE.
 - **A frozen canonical deliverable binds its source record and Markdown.**
   Slice d-4 re-derives the package payload, records, identity, projections,
   and rectangles from the store before freezing and verifies those hashes and
