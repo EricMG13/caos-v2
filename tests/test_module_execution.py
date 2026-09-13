@@ -23,6 +23,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from conftest import _url_for
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -50,7 +51,7 @@ from server.methodology.executor import (
 from server.methodology.runner import canonical
 from server.provider import Completion, OpenRouter
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, connect
 from server.store.budget import reserve
 from server.store.runs import start_attempt, start_run
 
@@ -274,6 +275,21 @@ def test_executor_refuses_malformed_completion_facts(
         )
     assert "private response text" not in repr(caught.value)
     assert caught.value.__cause__ is None
+    with connect(_url_for(conn.info.dbname)) as observer:
+        assert observer.execute("SELECT count(*) FROM call_outcomes").fetchone() == (1,)
+        expected = [] if field == "charge" else [(Decimal("0.001"),)]
+        assert (
+            observer.execute("SELECT amount FROM budget_ledger").fetchall() == expected
+        )
+        generation = None if field == "generation_id" else "gen-stub"
+        assert observer.execute(
+            "SELECT generation_id FROM call_outcomes"
+        ).fetchone() == (generation,)
+        assert observer.execute(
+            "SELECT count(*) FROM budget_reservations"
+        ).fetchone() == (1,)
+        assert observer.execute("SELECT count(*) FROM artifacts").fetchone() == (0,)
+        assert observer.execute("SELECT status FROM runs").fetchone() == ("RUNNING",)
 
 
 @pytest.mark.parametrize("charge", [Decimal("0"), Decimal("0.001")])
@@ -284,21 +300,40 @@ def test_executor_captures_host_model_before_completion(
 ) -> None:
     conn, source_id, delivered = admitted
 
-    class _ChangesModel(_Stub):
+    class _ChangesModel:
+        reads = 0
+        configured = "a-model/for-the-test"
+
+        @property
+        def model(self) -> str:
+            self.reads += 1
+            return self.configured
+
         def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-            self.model = "a-different/model"
+            assert self.reads == 1
+            self.configured = "a-different/model"
             return replace(
-                super().complete(prompt, json_object=json_object), charge=charge
+                _Stub(_body(source_id)).complete(prompt, json_object=json_object),
+                charge=charge,
             )
 
+    provider = _ChangesModel()
     outcome = execute_module(
         conn,
         bundle,
         **_attempt(conn, delivered),
-        provider=_ChangesModel(_body(source_id)),
+        provider=provider,
     )
     assert outcome.model == "a-model/for-the-test"
     assert outcome.charge == charge
+    assert provider.reads == 1
+    with connect(_url_for(conn.info.dbname)) as observer:
+        assert observer.execute("SELECT model FROM call_outcomes").fetchone() == (
+            outcome.model,
+        )
+        assert observer.execute("SELECT amount FROM budget_ledger").fetchone() == (
+            charge,
+        )
 
 
 def _claims(source_id: UUID, *quotes: tuple[str, ...]) -> str:

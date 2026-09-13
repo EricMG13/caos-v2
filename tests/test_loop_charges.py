@@ -19,7 +19,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import gate_verdict
+from conftest import _url_for, gate_verdict
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -30,7 +30,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, connect
 from server.store.routes import pin_route
 from server.store.runs import (
     Accepted,
@@ -273,7 +273,7 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
         run_id=run_id,
     )
 
-    with pytest.raises(Exception, match="CITATION_NOT_DELIVERED"):
+    with pytest.raises(Refusal, match=r"^CITATION_NOT_DELIVERED$"):
         run_route(
             conn,
             blobs,
@@ -282,9 +282,13 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
             execution=Execution(provider, ESTIMATE),
         )
 
-    assert run_status(conn, run_id) is RunStatus.RUNNING
-    assert _reserved(conn, run_id) == [ESTIMATE], "the call was paid for regardless"
-    assert _charges(conn, run_id) == [], "and nothing was accepted"
+    with connect(_url_for(conn.info.dbname)) as observer:
+        assert run_status(observer, run_id) is RunStatus.RUNNING
+        assert _reserved(observer, run_id) == [ESTIMATE]
+        assert _charges(observer, run_id) == [REPORTED]
+        assert observer.execute("SELECT count(*) FROM call_outcomes").fetchone() == (1,)
+        assert observer.execute("SELECT count(*) FROM artifacts").fetchone() == (0,)
+    assert len(completions.prompts) == 1
 
 
 def test_the_loop_hands_each_node_its_predecessors_results(
