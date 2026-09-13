@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from server import methodology
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, verify_citations
 from server.methodology.bundle import Bundle, assemble_authority, authority_digest
@@ -38,6 +39,7 @@ from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.routes import resolved_route
+from server.store.run_inputs import load_run_input
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,8 +81,10 @@ def assert_orchestration_proof(
     # nothing satisfies all three claims trivially, and "it has no pin" would be
     # the less useful of two true answers about a run that never ran.
     accepted = conn.execute(
-        "SELECT a.artifact_sha256, t.route_node_id, a.case_id"
+        "SELECT a.artifact_sha256, t.route_node_id, (a.model, a.generation_id),"
+        " (o.model, o.generation_id), o.attempt_id IS NOT NULL"
         " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+        " LEFT JOIN call_outcomes o ON o.attempt_id = a.attempt_id"
         " WHERE a.run_id = %s ORDER BY a.created_at",
         (run_id,),
     ).fetchall()
@@ -91,15 +95,29 @@ def assert_orchestration_proof(
     if route is None:
         raise Refusal(RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED)
     module_of = {node.route_node_id: node.module_id for node in route.nodes}
+    if any(str(row[1]) not in module_of for row in accepted):
+        # Execution reached a node the pin does not carry: the one thing
+        # invariant 10 exists to make impossible.
+        raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
+    pin = load_run_input(conn, run_id)
+    if pin is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if (pin.build_id, pin.manifest_sha256, pin.adapter_version) != (
+        bundle.build_id,
+        bundle.manifest_sha256,
+        methodology.CLAIMS_ADAPTER_VERSION,
+    ):
+        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 
-    live = _live_sources(conn, UUID(str(accepted[0][2])))
+    live = _pinned_sources(conn, run_id)
     citations = 0
-    for artifact_sha256, route_node_id, _ in accepted:
-        module_id = module_of.get(str(route_node_id))
-        if module_id is None:
-            # Execution reached a node the pin does not carry: the one thing
-            # invariant 10 exists to make impossible.
-            raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
+    for artifact_sha256, route_node_id, produced, called, recorded in accepted:
+        module_id = module_of[str(route_node_id)]
+        # The producer is the stored call's, never a configured name.
+        if not recorded:
+            raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
+        if produced != called:
+            raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
         envelope = _envelope(blobs, str(artifact_sha256))
         _ran_as_pinned(envelope, bundle, module_id)
         citations += _citations_relocate(conn, envelope, live)
@@ -137,9 +155,9 @@ def _citations_relocate(
     """Claims two and three: pinned sources, and every quote re-located.
 
     They are one pass because they are one lookup. A citation names its document
-    by digest; resolving that digest through `live_sources` is what makes a
-    withdrawn source unprovable, and the resolved id is what the token index is
-    then asked to find the quote in.
+    by digest; resolving that digest through the run's captured, still-live
+    members is what makes a withdrawn or post-pin source unprovable, and the
+    resolved id is what the token index is then asked to find the quote in.
     """
     claims = envelope.get("claims")
     if not isinstance(claims, list) or not claims:
@@ -172,8 +190,8 @@ def _relocates(conn: StoreConnection, citation: object, live: dict[str, UUID]) -
 
     source_id = live.get(document_sha256)
     if source_id is None:
-        # Withdrawn, or never this case's. Invariant 1 is checked live at every
-        # use, and a proof is a use.
+        # Withdrawn, admitted after the pin, or never this run's. Invariant 1 is
+        # checked live at every use, and a proof is a use.
         raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
 
     try:
@@ -201,15 +219,24 @@ def _rectangles(anchored: AnchoredCitation) -> list[list[float]]:
     return [[box.page, box.x0, box.y0, box.x1, box.y1] for box in anchored.bboxes]
 
 
-def _live_sources(conn: StoreConnection, case_id: UUID) -> dict[str, UUID]:
-    """Document digest to source id, for the sources this case still holds.
+def _pinned_sources(conn: StoreConnection, run_id: UUID) -> dict[str, UUID]:
+    """Document digest to source id, for the run's captured sources still live.
 
-    Read through `live_sources`, so a withdrawn source is simply absent rather
-    than something this function has to remember to exclude.
+    The captured member, not whatever the case holds now: a source admitted
+    after the pin, or a re-admitted copy of a withdrawn one, is a different
+    source id and never supports this run (invariant 1). A member whose document
+    or extraction identity moved is absent too, as it is at execution.
     """
     rows = conn.execute(
-        "SELECT document_sha256, source_id FROM live_sources WHERE case_id = %s",
-        (case_id,),
+        "SELECT m.document_sha256, m.source_id FROM run_inputs i"
+        " JOIN source_set_members m"
+        " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
+        " JOIN live_sources s ON (s.case_id, s.source_id) = (m.case_id, m.source_id)"
+        " JOIN source_extractions e ON e.source_id = s.source_id"
+        " WHERE i.run_id = %s AND (s.document_sha256, e.extractor_identity,"
+        " e.output_sha256, e.extraction_sha256) = (m.document_sha256,"
+        " m.extractor_identity, m.output_sha256, m.extraction_sha256)",
+        (run_id,),
     ).fetchall()
     return {str(row[0]): UUID(str(row[1])) for row in rows}
 

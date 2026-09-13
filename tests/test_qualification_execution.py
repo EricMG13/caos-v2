@@ -44,7 +44,7 @@ __all__ = ["ready"]
 
 _MEMBERS = "SELECT m.filename,m.document_sha256 FROM source_set_members m"
 _BLOCKS = "SELECT b.source_id, b.block_id FROM run_inputs i"
-_PROOF = "SELECT a.artifact_sha256, t.route_node_id, a.case_id"
+_PROOF = "SELECT a.artifact_sha256, t.route_node_id, (a.model, a.generation_id)"
 
 
 def test_legacy_perform_refuses_without_spending(ready: Fixture) -> None:
