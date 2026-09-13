@@ -29,14 +29,18 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from canonical_fixtures import LITE_PROFILE, LITE_SELECTION, CanonicalCompletions
 from conftest import approve_run, gate_verdict, priced, route_fault
+from test_orchestration_proof import _token_fault
 
+from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import MANIFEST_NAME, Bundle
+from server.methodology.handoff import Projections
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
 from server.qualification.matrix import (
@@ -54,8 +58,10 @@ from server.store.runs import start_run
 
 REPO = Path(__file__).resolve().parents[1]
 VENDORED = REPO / "vendor/deploy-v"
-PROFILE = "FULL_CREDIT_32"
-SELECTION = "DEEP_RESEARCH"
+PROFILE = LITE_PROFILE
+SELECTION = LITE_SELECTION
+# The claims route, kept only where a test reads a claims envelope's shape.
+CLAIMS = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 ESTIMATE = Decimal("0.50")
 
 QUOTE = "Total debt at 31 December 2026"
@@ -90,7 +96,7 @@ class _Completions:
                         }
                     ],
                     # A verdict on the rest of the route, when the prompt is the
-                    # gate's. `catalog_route` below is CP-0 and CP-DR alone.
+                    # gate's: only on the `CLAIMS` route, CP-0 and CP-DR.
                     **gate_verdict(prompt),
                 }
             ),
@@ -109,14 +115,14 @@ class Ran:
 
 
 @pytest.fixture
-def catalog_route() -> ResolvedRoute:
+def catalog_route(request: pytest.FixtureRequest) -> ResolvedRoute:
     catalog = json.loads(
         (
             VENDORED / "skills/cp-os-credit-os/references"
             "/CREDIT_OS_V_MODULE_CATALOG_v2.json"
         ).read_text(encoding="utf-8")
     )
-    return resolve_route(catalog, PROFILE, SELECTION)
+    return resolve_route(catalog, *getattr(request, "param", (PROFILE, SELECTION)))
 
 
 @pytest.fixture
@@ -147,7 +153,12 @@ def ran(
         conn=conn,
         bundle=bundle,
         blobs=blobs,
-        completions=_Completions(source_id),
+        completions=(
+            CanonicalCompletions(source_id)
+            if methodology.adapter_for(catalog_route)
+            == methodology.CANONICAL_ADAPTER_VERSION
+            else _Completions(source_id)
+        ),
         route=catalog_route,
         run_id=run_id,
     )
@@ -213,10 +224,8 @@ def test_matrix_refuses_manifest_changed_after_its_last_proof(
     bundle = Bundle(root)
     original = matrix._cited
 
-    def mutate(
-        conn: StoreConnection, blobs: BlobStore, run_id: UUID
-    ) -> set[tuple[str, str, str]]:
-        cited = original(conn, blobs, run_id)
+    def mutate(*args: object, **kwargs: bool) -> set[tuple[str, str, str]]:
+        cited = original(*args, **kwargs)  # type: ignore[arg-type]
         manifest = root / MANIFEST_NAME
         manifest.write_bytes(manifest.read_bytes() + b" ")
         return cited
@@ -255,7 +264,10 @@ def test_the_matrix_reports_every_case_and_concludes_nothing(ran: Ran) -> None:
 
     # The structural half, from this side: no field on the matrix or its rows
     # answers "is it qualified". A reviewer reads the rows.
+    # Nor any status a record projects: a SCREENING_ONLY record's committee
+    # status must never reach a reviewer through the matrix as clearance.
     forbidden = {"qualified", "verdict", "passed", "score", "assurance"}
+    forbidden |= {f.lower() for f in Projections.__dataclass_fields__} | {"status"}
     for holder in (matrix, row):
         named = {name.lower() for name in type(holder).__dataclass_fields__}
         assert not (named & forbidden), f"{type(holder).__name__} concludes: {named}"
@@ -328,7 +340,7 @@ _SECONDARY_REFUSALS = (
 def test_refusal(ran: Ran, monkeypatch: pytest.MonkeyPatch, code: RefusalCode) -> None:
     from server.qualification import matrix
 
-    def refuse(*_args: object) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
         raise Refusal(code)
 
     monkeypatch.setattr(matrix, "_cited", refuse)
@@ -457,6 +469,7 @@ UNREADABLE: list[bytes] = [
 ]
 
 
+@pytest.mark.parametrize("catalog_route", [CLAIMS], indirect=True)
 @pytest.mark.parametrize("stored", UNREADABLE)
 def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     ran: Ran, stored: bytes
@@ -486,3 +499,43 @@ def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     assert row.refusal is not None
     assert row.met == ()
     assert row.missed == key.expects
+
+
+def test_a_canonical_run_is_scored_on_its_records_anchored_citations(ran: Ran) -> None:
+    """Every node's record cites under the module the pin names (§42.4)."""
+    keys = tuple(
+        ExpectedCitation(module, ran.document_sha256, QUOTE)
+        for module in ("CP-0", "CP-L10", "CP-5")
+    )
+    case = replace(_one_case(ran), expects=keys)
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert (row.proven, row.refusal, row.met, row.missed) == (True, None, keys, ())
+
+
+def test_a_canonical_run_that_does_not_prove_scores_nothing(ran: Ran) -> None:
+    """A record is read only after the proof holds: an unproven quote is no answer."""
+    with _token_fault(ran.conn):
+        ran.conn.execute("DELETE FROM source_tokens")
+    ran.conn.commit()
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is RefusalCode.ORCHESTRATION_CITATION_LOST
+    assert (row.proven, row.met, row.missed) == (False, (), key.expects)
+
+
+def test_a_record_that_moves_after_the_proof_refuses_the_row(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.qualification import matrix
+    from server.qualification.proof import assert_orchestration_proof as proof
+
+    def then_move(*args: object, **kwargs: object) -> object:
+        proven = proof(*args, **kwargs)  # type: ignore[arg-type]
+        ran.conn.execute("UPDATE run_attempts SET ordinal = ordinal + 1")
+        return proven
+
+    monkeypatch.setattr(matrix, "assert_orchestration_proof", then_move)
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is RefusalCode.ARTIFACT_RECORD_MISMATCH
+    assert (row.proven, row.met, row.missed) == (False, (), key.expects)
