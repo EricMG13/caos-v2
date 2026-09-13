@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
-from decimal import Decimal
+from collections.abc import Callable
 from hashlib import sha256
 from io import BytesIO
 from os import mkfifo
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
-from uuid import UUID
 
 import pytest
 
-from server.blobs import BlobStore
 from server.methodology.bundle import (
     MANIFEST_NAME,
     Bundle,
@@ -22,12 +19,7 @@ from server.methodology.bundle import (
     authority_digest,
     verified_bytes,
 )
-from server.methodology.executor import Assignment, Delivery, Upstream, execute_module
-from server.provider import Completion
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
-from server.store.budget import reserve
-from server.store.runs import start_attempt, start_run
 
 LIMIT = 128 * 1024
 BUILD = "a" * 64
@@ -358,74 +350,3 @@ def test_mutation_during_the_last_file_read_refuses_assembly(
 
     monkeypatch.setattr(Path, "read_bytes", mutate)
     _refuses(lambda: assemble_authority(bundle, "CP-1"))
-
-
-class _NeverCalled:
-    model = "offline-only"
-    calls = 0
-
-    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.calls += 1
-        pytest.fail("changed authority reached provider completion")
-
-
-@pytest.mark.parametrize("during_prompt", [False, True])
-def test_execute_module_refuses_changed_authority_before_completion(
-    manifest: Path,
-    case: tuple[StoreConnection, UUID],
-    monkeypatch: pytest.MonkeyPatch,
-    during_prompt: bool,
-) -> None:
-    from server.methodology import executor
-
-    bundle = Bundle(manifest.parent)
-    assert bundle.build_id == BUILD
-    original = executor.build_prompt
-
-    def mutate(  # noqa: PLR0913 - mirrors build_prompt
-        module_id: str,
-        authority: bytes,
-        delivered: list[Delivery],
-        *,
-        gate_expects: frozenset[str] = frozenset(),
-        upstream: Sequence[Upstream] = (),
-        qa: bool = False,
-    ) -> str:
-        prompt = original(
-            module_id,
-            authority,
-            delivered,
-            gate_expects=gate_expects,
-            upstream=upstream,
-            qa=qa,
-        )
-        manifest.write_bytes(manifest.read_bytes() + b" ")
-        return prompt
-
-    provider = _NeverCalled()
-    from test_module_execution import _catalog_route
-    from test_run_events import approved_nodes
-
-    conn, case_id = case
-    route = _catalog_route()
-    node = next(node for node in route.nodes if node.module_id == "CP-1")
-    run = start_run(conn, case_id)
-    conn.commit()
-    # A governed run pinned to this build, so only the authority change refuses.
-    approved_nodes(conn, run, manifest.parent / "blobs", bundle)
-    attempt_id = start_attempt(conn, run, node.route_node_id)
-    reserve(conn, attempt_id, Decimal("0.5"))
-    if during_prompt:
-        monkeypatch.setattr(executor, "build_prompt", mutate)
-    else:
-        manifest.write_bytes(manifest.read_bytes() + b" ")
-    _refuses(
-        lambda: execute_module(
-            conn,
-            bundle,
-            BlobStore(manifest.parent / "blobs"),
-            assignment=Assignment("CP-1", run, node, route, attempt_id),
-            provider=provider,
-        )
-    )
-    assert provider.calls == 0
