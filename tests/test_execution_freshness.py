@@ -1340,9 +1340,9 @@ def test_module_provider_never_delivers_a_block_outside_the_captured_set(
 
 
 def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) -> None:
-    """Evidence is every captured block, the gate is asked about the stored
-    route's other modules, and a node with no accepted predecessor gets no
-    upstream: nothing a caller could hand in."""
+    """Evidence is every captured block and the gate is asked about exactly the
+    stored route's other modules: nothing a caller could hand in. (The gate has
+    no predecessors; upstream derivation is proven by the identity tests.)"""
     completions = _Completions(harness.source_id)
     execute_module(
         harness.conn,
@@ -1353,8 +1353,7 @@ def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) ->
     )
     [prompt] = completions.prompts
     assert str(harness.source_id) in prompt and str(harness.witness_id) in prompt
-    assert "\nCP-DR\n" in prompt
-    assert "--- UPSTREAM" not in prompt
+    assert "others.\n\nCP-DR\n\nEach object" in prompt
 
 
 def _accepted_gate(harness: _Harness, conn: StoreConnection, **identity: object) -> str:
@@ -1363,8 +1362,11 @@ def _accepted_gate(harness: _Harness, conn: StoreConnection, **identity: object)
     envelope = Envelope(
         module_id=str(identity.get("module_id", gate.module_id)),
         build_id=str(identity.get("build_id", harness.bundle.build_id)),
-        authority_digest=authority_digest(
-            assemble_authority(harness.bundle, gate.module_id)
+        authority_digest=str(
+            identity.get(
+                "authority_digest",
+                authority_digest(assemble_authority(harness.bundle, gate.module_id)),
+            )
         ),
         claims=(),
         claims_refused=int(str(identity.get("claims_refused", 0))),
@@ -1384,6 +1386,7 @@ def _accepted_gate(harness: _Harness, conn: StoreConnection, **identity: object)
     [
         ({"module_id": "CP-9"}, RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE),
         ({"build_id": "f" * 64}, RefusalCode.ORCHESTRATION_BUILD_MOVED),
+        ({"authority_digest": "0" * 64}, RefusalCode.ORCHESTRATION_BUILD_MOVED),
     ],
 )
 def test_upstream_with_foreign_envelope_identity_is_refused_before_any_call(
