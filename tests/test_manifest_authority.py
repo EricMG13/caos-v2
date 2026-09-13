@@ -20,7 +20,7 @@ from server.methodology.bundle import (
     authority_digest,
     verified_bytes,
 )
-from server.methodology.executor import Assignment, Delivery, Upstream, execute_module
+from server.methodology.executor import Delivery, Upstream, execute_module
 from server.provider import Completion
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -401,9 +401,15 @@ def test_execute_module_refuses_changed_authority_before_completion(
     else:
         manifest.write_bytes(manifest.read_bytes() + b" ")
     provider = _NeverCalled()
+    from test_module_execution import _attempt
+
+    attempt = _attempt(case[0], [])
     _refuses(
         lambda: execute_module(
-            case[0], bundle, assignment=Assignment("CP-1", []), provider=provider
+            case[0],
+            bundle,
+            **attempt,
+            provider=provider,
         )
     )
     assert provider.calls == 0

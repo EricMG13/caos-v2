@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -71,7 +71,9 @@ class _Provider:
     def __post_init__(self) -> None:
         self.calls: list[str] = []
 
-    def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
         self.calls.append(module_id)
         if module_id == self.die_on:
             raise _Boom(module_id)
@@ -93,7 +95,7 @@ def test_the_fake_provider_satisfies_the_protocol(blobs: BlobStore) -> None:
     the real provider will not have."""
     provider: Provider = _Provider(blobs)
 
-    result = provider.execute("RN-x", "CP-1")
+    result = provider.execute("RN-x", "CP-1", attempt_id=uuid4())
 
     assert result.artifact_sha256
     assert result.charge == Decimal("0.01")
@@ -164,6 +166,7 @@ def test_recovery_is_recomputation(
     # The restart. Nothing was restored: node_states is recomputed over the rows
     # that survived, and the frontier falls out of them.
     restarted = _Provider(blobs)
+    conn.rollback()
     run_route(
         conn,
         blobs,
@@ -290,6 +293,7 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
     conn.commit()
 
     assert artifact_digests(conn, run_id) == {}, "nothing accepted yet"
+    conn.rollback()
 
     run_route(
         conn,

@@ -418,4 +418,5 @@ def _every_block(conn: StoreConnection, source_id: UUID) -> list[tuple[UUID, str
         "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
         (source_id,),
     ).fetchall()
+    conn.rollback()
     return [(source_id, str(row[0])) for row in rows]

@@ -107,6 +107,8 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     run_id = start_run(conn, case_id)
     conn.commit()
     pin_route(conn, run_id, route)
+    delivered = _every_block(conn, source_ids)
+    conn.rollback()
 
     run_route(
         conn,
@@ -119,7 +121,7 @@ def test_a_live_run_admits_documents_and_completes_its_route(
                 bundle=bundle,
                 blobs=blobs,
                 completions=completions,
-                delivered=_every_block(conn, source_ids),
+                delivered=delivered,
                 route=route,
                 run_id=run_id,
             ),

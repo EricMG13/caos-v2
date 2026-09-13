@@ -292,6 +292,8 @@ def _perform_one(
     # would make the pin and the execution two answers that merely happen to
     # agree.
     pin_route(conn, run_id, route)
+    delivered = _delivered(conn, source_ids)
+    conn.rollback()
 
     stopped: RefusalCode | None = None
     try:
@@ -306,7 +308,7 @@ def _perform_one(
                     bundle=harness.bundle,
                     blobs=blobs,
                     completions=harness.completions,
-                    delivered=_delivered(conn, source_ids),
+                    delivered=delivered,
                     route=route,
                     run_id=run_id,
                 ),

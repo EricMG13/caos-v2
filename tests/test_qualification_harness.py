@@ -171,6 +171,7 @@ class _DamagesWhatWasAccepted:
         else:
             for [digest] in self.conn.execute("SELECT artifact_sha256 FROM artifacts"):
                 self.blobs.path_of(str(digest)).write_bytes(b"not an envelope")
+            self.conn.rollback()
         return Completion(None, None, None, RefusalCode.PROVIDER_UNAVAILABLE)
 
 
