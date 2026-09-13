@@ -31,7 +31,7 @@ from test_loop_charges import (
 from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute
+from server.engine.route import ResolvedRoute, RouteNode
 from server.engine.runtime import Execution, ProviderResult, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import (
@@ -1433,3 +1433,159 @@ def test_upstream_superseded_during_the_call_is_refused_keeping_the_bill(
             "SELECT count(*) FROM artifacts WHERE attempt_id=%s", (attempt,)
         ).fetchone()
     assert (billed, artifact) == ((1,), (0,))
+
+
+# Task17e-b: context derivation under real locks and failures.
+
+
+def _attempt_at(harness: _Harness, index: int) -> tuple[RouteNode, UUID]:
+    """A reserved attempt on route node `index`; CP-DR gets an accepted CP-0."""
+    if index == 1:
+        _accepted_gate(harness, harness.conn)
+    node = harness.route.nodes[index]
+    attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
+    reserve(harness.conn, attempt, ESTIMATE)
+    return node, attempt
+
+
+def _unbilled(harness: _Harness, attempt: UUID) -> None:
+    """No call reached the store: reservation kept, no outcome, run RUNNING."""
+    with connect(harness.url) as observer:
+        row = observer.execute(
+            "SELECT (SELECT count(*) FROM call_outcomes WHERE attempt_id=%s),"
+            " (SELECT count(*) FROM budget_reservations WHERE attempt_id=%s)",
+            (attempt, attempt),
+        ).fetchone()
+    assert (row, _lockable(harness)) == ((0, 1), (True, True))
+    _still_running(harness)
+
+
+@pytest.mark.parametrize("change", ["withdraw", "upstream"])
+def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    """The context unit holds the case lock: a withdrawal or a superseding
+    predecessor acceptance started inside it waits, lands before the answer is
+    analysed, and refuses it with the bill kept."""
+    from test_case_ordering import _wait_for_blocking
+
+    from server.methodology import executor
+
+    node, attempt = _attempt_at(harness, int(change == "upstream"))
+    pending: list[Future[None]] = []
+    derive = executor._upstream_digests
+    with connect(harness.url) as other, ThreadPoolExecutor(max_workers=1) as pool:
+        other.execute("SET statement_timeout = '5s'")
+        other.commit()
+
+        def commit_change() -> None:
+            if change == "withdraw":
+                withdraw_source(
+                    other,
+                    case_id=harness.case_id,
+                    source_id=harness.witness_id,
+                    actor_id=harness.approver,
+                )
+            else:
+                _accepted_gate(harness, other, claims_refused=1)
+
+        def inside(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
+            result = derive(conn, assignment)
+            if not pending:
+                pending.append(pool.submit(commit_change))
+                _wait_for_blocking(conn, other)
+            return result
+
+        monkeypatch.setattr(executor, "_upstream_digests", inside)
+        completion = _DuringCompletion(
+            _Completions(harness.source_id), lambda: pending[0].result(timeout=6)
+        )
+        with pytest.raises(Refusal) as refused:
+            _provider(harness, completion).execute(
+                node.route_node_id, node.module_id, attempt_id=attempt
+            )
+    expected = {
+        "withdraw": RefusalCode.EVIDENCE_NOT_AVAILABLE,
+        "upstream": RefusalCode.ROUTE_IDENTITY_INVALID,
+    }[change]
+    assert (refused.value.code, refused.value.__cause__, completion.calls) == (
+        expected,
+        None,
+        1,
+    )
+    # The call saw the state before the change: it could not land inside the unit.
+    assert str(harness.witness_id) in completion.delegate.prompts[0]
+    with connect(harness.url) as observer:
+        row = observer.execute(
+            "SELECT (SELECT count(*) FROM call_outcomes WHERE attempt_id=%s),"
+            " (SELECT count(*) FROM artifacts WHERE attempt_id=%s)",
+            (attempt, attempt),
+        ).fetchone()
+    assert (row, _lockable(harness)) == ((1, 0), (True, True))
+    _still_running(harness)
+
+
+@pytest.mark.parametrize("failure", ["sql", "interrupt"])
+@pytest.mark.parametrize("stage", ["evidence", "upstream"])
+def test_failure_while_deriving_context_makes_no_call(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, stage: str, failure: str
+) -> None:
+    from server.methodology import executor
+
+    node, attempt = _attempt_at(harness, int(stage == "upstream"))
+    name = {"evidence": "read_run_block", "upstream": "_stored_claims"}[stage]
+    real = getattr(executor, name)
+
+    def failing(*args: object, **kwargs: object) -> object:
+        real(*args, **kwargs)
+        if failure == "sql":
+            harness.conn.execute("SELECT 1/0")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(executor, name, failing)
+    completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
+    with pytest.raises((Refusal, KeyboardInterrupt)) as raised:
+        _provider(harness, completion).execute(
+            node.route_node_id, node.module_id, attempt_id=attempt
+        )
+    if failure == "sql":
+        assert isinstance(raised.value, Refusal)
+        assert (str(raised.value), raised.value.__cause__) == (
+            "STORE_UNAVAILABLE",
+            None,
+        )
+        assert raised.value.__suppress_context__
+    else:
+        assert type(raised.value) is KeyboardInterrupt
+    assert completion.calls == 0
+    assert harness.conn.closed or (
+        harness.conn.info.transaction_status is TransactionStatus.IDLE
+    )
+    _unbilled(harness, attempt)
+
+
+@pytest.mark.parametrize("fault", ["missing", "altered"])
+def test_an_unreadable_upstream_blob_is_refused_before_any_call(
+    harness: _Harness, fault: str
+) -> None:
+    node, attempt = _attempt_at(harness, 1)
+    [digest] = [
+        row[0] for row in harness.conn.execute("SELECT artifact_sha256 FROM artifacts")
+    ]
+    harness.conn.rollback()
+    path = harness.blobs.path_of(digest)
+    if fault == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b'{"module_id": "CP-0"}')
+    completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
+    with pytest.raises(Refusal) as refused:
+        _provider(harness, completion).execute(
+            node.route_node_id, node.module_id, attempt_id=attempt
+        )
+    assert (refused.value.code, refused.value.__cause__, completion.calls) == (
+        RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE,
+        None,
+        0,
+    )
+    _unbilled(harness, attempt)
