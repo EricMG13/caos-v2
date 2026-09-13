@@ -38,8 +38,10 @@ acceptance, the hook warning and the original-plan pointer. The repository's
 pre-commit checks passed for these files; Python formatting hooks correctly
 skipped this docs-only change. The first run hit a sandbox permission limit in
 the EOF hook; the approved retry passed. No application changes belong to
-this documentation patch. Final committed-range size must still be measured
-after saving the checkpoint, and the eventual actual PR range remains binding.
+this documentation patch. Checkpoint `5986b60` was committed locally. Its
+final committed concern range `2f12a2c...5986b60` passed `make check-size` at
+68 counted lines; Git inspection confirmed only the 15 documentation paths.
+The eventual actual PR range and hosted checks remain binding and unverified.
 Formal phase code reviews remain pending and require actual `xhigh`.
 The attached guides are user-selected preferences, not independent proof that
 a prompt keyword selects a particular token budget.
