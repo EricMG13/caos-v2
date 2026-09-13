@@ -589,7 +589,11 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
             f"RN-{PROFILE}-{SELECTION}-02-CP-DR",
             NodeState.RUNNABLE,
         )
-        assert (attempt.outcome, attempt.charged) == (True, False)
+        assert (attempt.reserved, attempt.outcome, attempt.charged) == (
+            True,
+            True,
+            False,
+        )
         assert (attempt.model, attempt.generation_id) == ("a-model/for-the-test", None)
 
         # A set that stopped is not a measurement: the records are kept, the
@@ -934,3 +938,48 @@ def test_a_performed_set_concludes_nothing() -> None:
         named = {name.lower() for name in holder.__dataclass_fields__}
         assert not (named & forbidden), f"{holder.__name__} concludes: {named}"
         assert not hasattr(holder, "assurance")
+
+
+def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """Every kind of attempt a stopped node can hold, read back from the store."""
+    from server.qualification.harness import _unrun
+    from server.store import apply_schema, connect
+    from server.store.budget import reserve
+    from server.store.outcomes import CallOutcome, execution_reads, record_outcome
+    from server.store.runs import start_attempt
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.commit()
+        blobs = BlobStore(tmp_path / "blobs")
+        [record] = _perform(
+            conn,
+            blobs,
+            QualificationSet(cases=(_case("acme-2026", REPORT),)),
+            completions=_Completions(refuses_call=2),
+        ).performed
+        node = f"RN-{PROFILE}-{SELECTION}-02-CP-DR"
+        # Reserved and never recorded: the call may have happened.
+        reserve(conn, start_attempt(conn, record.run_id, node), ESTIMATE)
+        # Never reserved: no call was possible.
+        start_attempt(conn, record.run_id, node)
+        # A known charge recorded with no producer, and no artifact.
+        charged = start_attempt(conn, record.run_id, node)
+        reserve(conn, charged, ESTIMATE)
+        record_outcome(
+            conn, attempt_id=charged, outcome=CallOutcome(Decimal("0.01"), None, None)
+        )
+        with execution_reads(conn):
+            [unrun] = _unrun(conn, blobs, record.run_id)
+
+    assert [
+        (a.reserved, a.outcome, a.charged, a.model, a.generation_id)
+        for a in unrun.attempts
+    ] == [
+        (True, True, False, "a-model/for-the-test", None),
+        (True, False, False, None, None),
+        (False, False, False, None, None),
+        (True, True, True, None, None),
+    ]
