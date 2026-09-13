@@ -28,7 +28,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import approve_run
+from conftest import approve_run, priced
 from test_pdf_extraction import minimal_pdf
 
 from server.blobs import BlobStore
@@ -124,7 +124,9 @@ def test_a_live_run_admits_documents_and_completes_its_route(
         route=route,
         execution=Execution(
             module_provider,
-            ESTIMATE,
+            # ponytail: live pricing needs a user-supplied dated price for the
+            # configured model; until then the nightly run reserves ESTIMATE.
+            priced(ESTIMATE, completions.model),
             bundle,
         ),
     )

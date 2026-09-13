@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from conftest import _url_for, approve_run
+from conftest import _url_for, approve_run, priced
 from psycopg.pq import TransactionStatus
 from test_loop_charges import (
     ESTIMATE,
@@ -247,6 +247,7 @@ class _ArbitraryProvider:
     harness: _Harness
     mutate: Callable[[], None]
     calls: int = 0
+    model: str = MODEL
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -284,7 +285,7 @@ def test_runtime_rechecks_authority_after_transport_before_acceptance(
             harness.blobs,
             run_id=harness.run_id,
             route=harness.route,
-            execution=Execution(provider, ESTIMATE, harness.bundle),
+            execution=Execution(provider, priced(ESTIMATE), harness.bundle),
         )
     except Refusal as refused:
         code = refused.code
@@ -517,7 +518,7 @@ def _invoke_after_transport(
             harness.blobs,
             run_id=harness.run_id,
             route=harness.route,
-            execution=Execution(arbitrary, ESTIMATE, harness.bundle),
+            execution=Execution(arbitrary, priced(ESTIMATE), harness.bundle),
         )
     except Refusal as refused:
         return refused, arbitrary.calls
@@ -742,7 +743,9 @@ def test_runtime_control_accepts_every_node_without_duplicating_outcomes(
         harness.blobs,
         run_id=harness.run_id,
         route=harness.route,
-        execution=Execution(_provider(harness, completions), ESTIMATE, harness.bundle),
+        execution=Execution(
+            _provider(harness, completions), priced(ESTIMATE), harness.bundle
+        ),
     )
 
     nodes = len(harness.route.nodes)
@@ -780,7 +783,7 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
             harness.blobs,
             run_id=harness.run_id,
             route=other,
-            execution=Execution(arbitrary, ESTIMATE, harness.bundle),
+            execution=Execution(arbitrary, priced(ESTIMATE), harness.bundle),
         )
     assert (runtime.value.code, arbitrary.calls) == (
         RefusalCode.ROUTE_IDENTITY_INVALID,
@@ -963,6 +966,8 @@ def test_rollback_failure_closes_and_keeps_the_typed_refusal(
 class _Charged:
     """An arbitrary Provider answering every node with one fixed call fact."""
 
+    model = "a-model/for-the-test"
+
     harness: _Harness
     charge: Decimal | None
     mutate: Callable[[], None] = lambda: None
@@ -992,7 +997,7 @@ def _run(harness: _Harness, provider: _Charged) -> RefusalCode | None:
             harness.blobs,
             run_id=harness.run_id,
             route=harness.route,
-            execution=Execution(provider, ESTIMATE, harness.bundle),
+            execution=Execution(provider, priced(ESTIMATE), harness.bundle),
         )
     except Refusal as refused:
         assert refused.__cause__ is None

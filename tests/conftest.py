@@ -7,11 +7,16 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import pytest
+
+if TYPE_CHECKING:
+    from decimal import Decimal
+
+    from server.pricing import ModelPrice
 
 REPO = Path(__file__).resolve().parents[1]
 # The gate scripts are executables, not a package; import them by path.
@@ -220,3 +225,23 @@ def empty_database(request: pytest.FixtureRequest) -> Iterator[str]:
     finally:
         with psycopg.connect(POSTGRES_URL, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+def priced(estimate: Decimal, model: str = "a-model/for-the-test") -> ModelPrice:
+    """A dated price whose worst case (F06) is exactly `estimate`, for `model`.
+
+    Input is priced at zero and output at `estimate / MAX_COMPLETION_TOKENS`, which
+    divides exactly because the cap is a power of two.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from server.pricing import ModelPrice
+    from server.provider import MAX_COMPLETION_TOKENS
+
+    return ModelPrice(
+        model,
+        Decimal(0),
+        estimate / MAX_COMPLETION_TOKENS,
+        date(2026, 9, 13),
+    )

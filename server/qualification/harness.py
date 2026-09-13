@@ -67,6 +67,7 @@ from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
+from server.pricing import ModelPrice
 from server.provider import CompletionProvider
 from server.qualification.matrix import (
     Matrix,
@@ -98,14 +99,14 @@ class Harness:
     One thing rather than four loose arguments, for the reason `Execution` is
     one thing rather than two: none of these is meaningful without the others.
     A catalog with no provider resolves routes nobody runs; a provider with no
-    estimate is a call invariant 8 forbids; and a bundle that differed between
+    price is a call invariant 8 forbids; and a bundle that differed between
     cases would make the matrix a comparison of two systems.
     """
 
     bundle: Bundle
     catalog: Mapping[str, Any]
     completions: CompletionProvider
-    estimate: Decimal
+    price: ModelPrice
     # What the whole set may cost. Each run has its own ceiling (invariant 8);
     # nothing bounded the set until this, and two hundred cases were two
     # hundred routes' worth of calls, each individually within budget.
@@ -422,7 +423,7 @@ def _perform_one(
                     route=route,
                     run_id=run_id,
                 ),
-                harness.estimate,
+                harness.price,
                 harness.bundle,
             ),
         )

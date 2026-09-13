@@ -53,6 +53,11 @@ class ModuleProvider:
     route: ResolvedRoute
     run_id: UUID
 
+    @property
+    def model(self) -> str:
+        """The configured model identity this provider's calls are billed as."""
+        return self.completions.model
+
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:

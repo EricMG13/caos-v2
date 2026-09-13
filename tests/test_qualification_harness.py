@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from conftest import gate_verdict, route_fault
+from conftest import gate_verdict, priced, route_fault
 from test_gates import _approval
 
 from server.blobs import BlobStore
@@ -282,7 +282,7 @@ def _perform(
         bundle=Bundle(root=VENDORED),
         catalog=CATALOG,
         completions=completions or _Completions(),
-        estimate=ESTIMATE,
+        price=priced(ESTIMATE),
         ceiling=ceiling,
     )
     prepared = prepare(conn, blobs, harness, qualification=qualification)
@@ -817,7 +817,7 @@ def test_an_unreadable_artifact_does_not_take_the_set_down_with_it(
             Bundle(VENDORED),
             CATALOG,
             _DamagesWhatWasAccepted(conn, blobs, _Completions()),
-            ESTIMATE,
+            priced(ESTIMATE),
             SET_CEILING,
         )
         qualification = QualificationSet(cases=(_case("acme-2026", REPORT),))
@@ -860,7 +860,9 @@ def test_a_run_whose_pin_is_gone_reports_no_pinned_nodes(
         provider = _DamagesWhatWasAccepted(
             conn, blobs, _Completions(), loses_the_pin=True
         )
-        harness = Harness(Bundle(VENDORED), CATALOG, provider, ESTIMATE, SET_CEILING)
+        harness = Harness(
+            Bundle(VENDORED), CATALOG, provider, priced(ESTIMATE), SET_CEILING
+        )
         qualification = QualificationSet(cases=(_case("acme-2026", REPORT),))
         prepared = prepare(conn, blobs, harness, qualification=qualification)
         _approve(conn, prepared)

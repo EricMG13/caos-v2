@@ -29,7 +29,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import approve_run, gate_verdict, route_fault
+from conftest import approve_run, gate_verdict, priced, route_fault
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -158,7 +158,7 @@ def ran(
         route=catalog_route,
         execution=Execution(
             provider,
-            ESTIMATE,
+            priced(ESTIMATE),
             bundle,
         ),
     )

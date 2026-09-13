@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from conftest import _url_for
+from conftest import _url_for, priced
 from psycopg.pq import TransactionStatus
 from test_loop_charges import (
     ESTIMATE,
@@ -71,7 +71,7 @@ def _invoke(
             provider.blobs,
             run_id=provider.run_id,
             route=provider.route,
-            execution=Execution(provider, ESTIMATE, provider.bundle),
+            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
         )
     elif entry == "module":
         provider.execute(node.route_node_id, module, attempt_id=attempt)
