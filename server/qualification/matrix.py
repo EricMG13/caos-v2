@@ -24,21 +24,33 @@ statements and citations and not typed figures (`server/methodology/envelope.py`
 A key saying "net leverage is 4.2x" has nothing to compare against until the
 envelope carries the figure as a number, which is the known-gaps entry this
 module ships with.
+
+**A canonical run is scored on its records** (`docs/DECISIONS.md` §42.4), and
+only once the proof has proven it: each accepted artifact's record is read
+through `read_record` against the identity the host rebuilds from the store,
+and its anchored citations are the run's. An unproven canonical run cites
+nothing. The matrix reports no status a record projects, so a SCREENING_ONLY
+record can never reach a reviewer through it as committee clearance.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
+from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import BLOCKING, ResolvedRoute
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
+from server.methodology.handoff import HostIdentity, read_record
+from server.methodology.invocation import host_identity
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -226,9 +238,9 @@ def _row(
         refusal = failed.code
 
     try:
-        cited = _cited(conn, blobs, run_id)
+        cited = _cited(conn, blobs, bundle, run_id, proven=refusal is None)
     except Refusal as unattributed:
-        if unattributed.code is not RefusalCode.ROUTE_IDENTITY_INVALID:
+        if unattributed.code not in _ROW_REFUSALS:
             raise
         refusal = unattributed.code
         cited = set()
@@ -249,8 +261,20 @@ def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool
     return (expect.module_id, expect.document_sha256, expect.matched_text) in cited
 
 
+# A row's own uncertainty, not a reason to end the matrix: a pin that no longer
+# reads, or a record that no longer binds after its run was proven.
+_ROW_REFUSALS = frozenset(
+    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ARTIFACT_RECORD_MISMATCH}
+)
+
+
 def _cited(
-    conn: StoreConnection, blobs: BlobStore, run_id: UUID
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    run_id: UUID,
+    *,
+    proven: bool,
 ) -> set[tuple[str, str, str]]:
     """Every (module, document, quote) this run's accepted artifacts carry.
 
@@ -258,25 +282,106 @@ def _cited(
     — the same reason `proof.py` does (invariant 3: the host owns identity). A
     run with no pin cites nothing this function can attribute, which is a row
     that misses every key; an invalid pin refuses so `_row` records uncertainty.
+    A canonical run cites nothing unless `proven`, and otherwise cites its
+    records' anchored citations.
     """
     route = resolved_route(conn, run_id)
+    canonical = (
+        route is not None
+        and methodology.adapter_for(route) == methodology.CANONICAL_ADAPTER_VERSION
+    )
+    if canonical and not proven:
+        return set()
     module_of = (
         {} if route is None else {n.route_node_id: n.module_id for n in route.nodes}
     )
     rows = conn.execute(
-        "SELECT a.artifact_sha256, t.route_node_id"
+        "SELECT a.artifact_sha256, t.route_node_id, a.attempt_id, a.record_sha256"
         " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
         " WHERE a.run_id = %s",
         (run_id,),
     ).fetchall()
 
     cited: set[tuple[str, str, str]] = set()
-    for artifact_sha256, route_node_id in rows:
+    for artifact_sha256, route_node_id, attempt_id, record_sha256 in rows:
         module_id = module_of.get(str(route_node_id))
         if module_id is None:
             continue
-        cited |= _quotes(blobs, str(artifact_sha256), module_id)
+        if route is not None and canonical:
+            cited |= _recorded(
+                conn,
+                blobs,
+                bundle,
+                route,
+                run_id,
+                (str(route_node_id), UUID(str(attempt_id))),
+                (str(artifact_sha256), record_sha256),
+            )
+        else:
+            cited |= _quotes(blobs, str(artifact_sha256), module_id)
     return cited
+
+
+def _recorded(  # noqa: PLR0913 -- one accepted artifact of one pinned run
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    run_id: UUID,
+    attempt: tuple[str, UUID],
+    pair: tuple[str, object],
+) -> set[tuple[str, str, str]]:
+    """One proven canonical artifact's anchored citations, read from its record.
+
+    Read through `read_record` against the identity rebuilt from the store, so a
+    record that moved since the proof refuses `ARTIFACT_RECORD_MISMATCH` rather
+    than being scored. The refusal carries no text from the one it replaced.
+    """
+    route_node_id, attempt_id = attempt
+    artifact_sha256, record_sha256 = pair
+    node = next(n for n in route.nodes if n.route_node_id == route_node_id)
+    record = None
+    # A missing record is no address, so `read_record` refuses it as a mismatch.
+    with suppress(Refusal):
+        host = host_identity(
+            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
+        )
+        record = read_record(
+            blobs,
+            artifact_sha256=artifact_sha256,
+            record_sha256=str(record_sha256),
+            expected=_call_time(blobs, route, host, str(record_sha256)),
+        )
+    if record is None:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    return {
+        (node.module_id, citation.document_sha256, citation.matched_text)
+        for citation in record.citations
+    }
+
+
+def _call_time(
+    blobs: BlobStore, route: ResolvedRoute, host: HostIdentity, record_sha: str
+) -> HostIdentity:
+    """The host's identity narrowed to the upstream the call could have named.
+
+    The rule `server/deliverable/canonical.py` and the proof apply, restated
+    because theirs is private: a soft input accepted after the call is named now
+    and was not then, so refs narrow to those the record names -- except a
+    blocking one, which is never optional. The record adds nothing to them.
+    """
+    named: set[str] = set()
+    with suppress(Exception):  # an unreadable record is `read_record`'s refusal
+        document = json.loads(blobs.get(record_sha))
+        named = {ref["route_node_id"] for ref in document["identity"]["upstream"]}
+    by_module = {n.module_id: n.route_node_id for n in route.nodes}
+    named |= {
+        str(by_module.get(edge.source))
+        for edge in route.edges
+        if edge.target == host.module_id and edge.type in BLOCKING
+    }
+    kept = tuple(ref for ref in host.upstream if ref.route_node_id in named)
+    return replace(host, upstream=kept)
 
 
 def _quotes(

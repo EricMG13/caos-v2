@@ -30,6 +30,7 @@ recorded, not swallowed, in a typed field beside the proof.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -40,7 +41,8 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from conftest import gate_verdict, priced, route_fault
+from canonical_fixtures import LITE_PROFILE, LITE_SELECTION, CanonicalCompletions
+from conftest import priced, route_fault
 from test_gates import _approval
 
 from server.blobs import BlobStore
@@ -71,6 +73,7 @@ from server.store import RunStatus, StoreConnection
 from server.store.budget import CEILING
 from server.store.gates import Gate, approve_gate
 from server.store.members import Standing, grant
+from server.store.run_inputs import RunSubject
 from server.store.runs import run_status
 
 REPO = Path(__file__).resolve().parents[1]
@@ -81,8 +84,10 @@ CATALOG = json.loads(
         "/CREDIT_OS_V_MODULE_CATALOG_v2.json"
     ).read_text(encoding="utf-8")
 )
-PROFILE = "FULL_CREDIT_32"
-SELECTION = "DEEP_RESEARCH"
+PROFILE = LITE_PROFILE
+SELECTION = LITE_SELECTION
+SUBJECT = RunSubject("ACME", "Acme Holdings plc", "FY2026", "2026-09-13")
+L10, CP5 = f"RN-{PROFILE}-{SELECTION}-02-CP-L10", f"RN-{PROFILE}-{SELECTION}-03-CP-5"
 ESTIMATE = Decimal("0.50")
 # Enough for any set these tests build: the per-run ceiling times ten.
 SET_CEILING = CEILING * 10
@@ -98,7 +103,7 @@ Total debt at 31 December 2026 was USD 880.0m
 
 @dataclass
 class _Completions:
-    """Answers every module with one claim, cited to whatever it was delivered.
+    """Answers every module with a canonical handoff, cited to what it was given.
 
     Deliberately not told which source to cite: it reads the prompt the host
     built, which is what makes the run a real one rather than a rehearsal.
@@ -113,35 +118,19 @@ class _Completions:
 
     # What the host configured; with fallbacks off it is what answers.
     model: str = "a-model/for-the-test"
+    qa_by_module: dict[str, str] = field(default_factory=dict)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.prompts.append(prompt)
         if len(self.prompts) == self.refuses_call:
             return Completion(None, None, None, RefusalCode.PROVIDER_UNAVAILABLE)
-        source_id = prompt.split("source_id: ")[1].split("\n")[0].strip()
-        return Completion(
-            content=json.dumps(
-                {
-                    "claims": [
-                        {
-                            "statement": "Total debt was reported.",
-                            "citations": [
-                                {
-                                    "source_id": source_id,
-                                    "page": 1,
-                                    "matched_text": QUOTE,
-                                }
-                            ],
-                        }
-                    ],
-                    # A verdict on the rest of the route, when the prompt is the
-                    # gate's. Every case here runs CP-0 and CP-DR alone.
-                    **gate_verdict(prompt),
-                }
-            ),
-            charge=Decimal("0.0000041"),
+        # The evidence section is last, so its source is the last one named.
+        source_id = re.findall(r"^source_id: (\S+)$", prompt, re.MULTILINE)[-1]
+        return CanonicalCompletions(
+            UUID(source_id),
             generation_id="gen-harness-test",
-        )
+            qa_by_module=self.qa_by_module,
+        ).complete(prompt, json_object=json_object)
 
 
 @dataclass
@@ -259,6 +248,7 @@ def _case(label: str, data: bytes, *, quote: str = QUOTE) -> QualificationCase:
                 matched_text=quote,
             ),
         ),
+        subject=SUBJECT,
     )
 
 
@@ -316,7 +306,8 @@ def test_the_harness_performs_every_case_and_reports_one_row_each(
             cases=(_case("acme-2026", REPORT), _case("borealis-2026", OTHER))
         )
 
-        matrix = _perform(conn, blobs, qualification).matrix
+        performed = _perform(conn, blobs, qualification)
+        matrix = performed.matrix
         assert matrix is not None, "a set that finished has a matrix"
 
         assert matrix.qualification_set_sha256 == qualification_set_digest(
@@ -330,6 +321,7 @@ def test_the_harness_performs_every_case_and_reports_one_row_each(
             assert row.proven is True, row.refusal
             assert row.missed == ()
             assert len(row.met) == 1
+        assert [record.unrun for record in performed.performed] == [(), ()]
         # Each case is its own case row and its own run: a harness that reused
         # one would let one case's evidence answer another's key.
         assert _count(conn, "SELECT count(*) FROM cases") == 2
@@ -358,9 +350,9 @@ def test_the_harness_runs_through_the_same_loop_as_everything_else(
         _perform(conn, blobs, QualificationSet(cases=(_case("acme-2026", REPORT),)))
 
         assert _count(conn, "SELECT count(*) FROM run_routes") == 1
-        # Two nodes of the pathway: an attempt, a reservation and a charge each.
+        # Three nodes of the pathway: an attempt, a reservation and a charge each.
         for table in ("run_attempts", "budget_reservations", "budget_ledger"):
-            assert _count(conn, f"SELECT count(*) FROM {table}") == 2, table
+            assert _count(conn, f"SELECT count(*) FROM {table}") == 3, table
         reserved = conn.execute("SELECT DISTINCT amount FROM budget_reservations")
         assert [row[0] for row in reserved.fetchall()] == [ESTIMATE]
 
@@ -546,7 +538,7 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
 ) -> None:
     """The narrow proof, and the fact it does not carry.
 
-    CP-0 is accepted and CP-DR never runs. `assert_orchestration_proof` proves
+    CP-0 is accepted and CP-L10 and CP-5 never run. `assert_orchestration_proof` proves
     the artifact that exists, because that is the true claim it makes from a run
     id alone -- and the matrix row it feeds reads `proven`. A reader could take
     that for "the route ran".
@@ -579,15 +571,17 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
         assert record.proof is not None
         assert record.proof.run_id == record.run_id
         assert record.proof.artifacts == 1
-        # And this is what the proof could not say: CP-DR was attempted, its
+        # And this is what the proof could not say: CP-L10 was attempted, its
         # call was recorded with no known charge, and the producer is the one
         # the call recorded -- no generation, not a configured stand-in.
-        [unrun] = record.unrun
+        unrun, after = record.unrun
         [attempt] = unrun.attempts
         assert isinstance(attempt, Attempted)
-        assert (unrun.route_node_id, unrun.state) == (
-            f"RN-{PROFILE}-{SELECTION}-02-CP-DR",
-            NodeState.RUNNABLE,
+        assert (unrun.route_node_id, unrun.state) == (L10, NodeState.RUNNABLE)
+        assert (after.route_node_id, after.state, after.attempts) == (
+            CP5,
+            NodeState.BLOCKED,
+            (),
         )
         assert (attempt.reserved, attempt.outcome, attempt.charged) == (
             True,
@@ -643,12 +637,13 @@ def test_a_case_that_stops_ends_the_set_without_discarding_it(
         assert record.refusal is RefusalCode.ORCHESTRATION_NOTHING_TO_PROVE
         assert [entry.route_node_id for entry in record.unrun] == [
             f"RN-{PROFILE}-{SELECTION}-01-CP-0",
-            f"RN-{PROFILE}-{SELECTION}-02-CP-DR",
+            L10,
+            CP5,
         ]
         # Attempted with unknown exposure, against never reached at all.
-        gate, research = record.unrun
+        gate, *later = record.unrun
         assert [(a.outcome, a.charged) for a in gate.attempts] == [(True, False)]
-        assert research.attempts == ()
+        assert [entry.attempts for entry in later] == [(), ()]
         assert performed.matrix is None
 
         # Both inputs exist; the second case purchased nothing.
@@ -832,10 +827,8 @@ def test_an_unreadable_artifact_does_not_take_the_set_down_with_it(
         assert record.stopped is RefusalCode.PROVIDER_UNAVAILABLE
         assert record.proof is None
         assert record.refusal is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
-        # CP-0 has its artifact row and stays COMPLETE; CP-DR never ran.
-        assert [entry.route_node_id for entry in record.unrun] == [
-            f"RN-{PROFILE}-{SELECTION}-02-CP-DR"
-        ]
+        # CP-0 has its artifact row and stays COMPLETE; the rest never ran.
+        assert [entry.route_node_id for entry in record.unrun] == [L10, CP5]
 
 
 def test_a_run_whose_pin_is_gone_reports_no_pinned_nodes(
@@ -964,7 +957,7 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
             QualificationSet(cases=(_case("acme-2026", REPORT),)),
             completions=_Completions(refuses_call=2),
         ).performed
-        node = f"RN-{PROFILE}-{SELECTION}-02-CP-DR"
+        node = L10
         # Reserved and never recorded: the call may have happened.
         reserve(conn, start_attempt(conn, record.run_id, node), ESTIMATE)
         # Never reserved: no call was possible.
@@ -976,7 +969,7 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
             conn, attempt_id=charged, outcome=CallOutcome(Decimal("0.01"), None, None)
         )
         with execution_reads(conn):
-            [unrun] = _unrun(conn, blobs, Bundle(VENDORED), record.run_id)
+            unrun, _ = _unrun(conn, blobs, Bundle(VENDORED), record.run_id)
 
     assert [
         (a.reserved, a.outcome, a.charged, a.model, a.generation_id)
@@ -987,3 +980,45 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
         (False, False, False, None, None),
         (True, True, True, None, None),
     ]
+
+
+def test_a_blocked_qa_verdict_ends_the_case_blocked_and_the_matrix_still_scores(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """A validated CP-5 `Blocked` is the route's own rule applied, not a stop.
+
+    The run ends BLOCKED with CP-5 unrun and attempted; the proof holds over what
+    was accepted, and the matrix scores those proven records -- CP-L10's quote is
+    met, the CP-5 key missed.
+    """
+    from hashlib import sha256
+
+    from server.store import apply_schema, connect
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.commit()
+        document = sha256(REPORT).hexdigest()
+        keys = tuple(
+            ExpectedCitation(module, document, QUOTE) for module in ("CP-L10", "CP-5")
+        )
+        case = replace(_case("blocked-2026", REPORT), expects=keys)
+        performed = _perform(
+            conn,
+            BlobStore(tmp_path / "blobs"),
+            QualificationSet(cases=(case,)),
+            completions=_Completions(qa_by_module={"CP-5": "Blocked"}),
+        )
+
+        [record] = performed.performed
+        assert (record.status, record.stopped, record.refusal) == (
+            RunStatus.BLOCKED,
+            None,
+            None,
+        )
+        assert record.proof is not None and record.proof.artifacts == 2
+        [unrun] = record.unrun
+        assert unrun.route_node_id == CP5 and len(unrun.attempts) == 1
+        assert performed.matrix is not None
+        [row] = performed.matrix.rows
+        assert (row.proven, row.met, row.missed) == (True, keys[:1], keys[1:])

@@ -183,8 +183,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
   day the vendor ships it, or by a dated decision that the host owns it. The
   deliverable (d-4) labels a screening-only record a screen whatever its
-  committee status; the proof (d-2) reports no status, so has nothing to
-  label, and the matrix reader (d-3b) still owes it.
+  committee status; the proof (d-2) and the matrix (d-3b) report no status a
+  record projects, so neither has anything to label.
 - **The canonical deliverable proves the store at freeze and verification, not
   continuously.** `server/deliverable/canonical.py` re-derives the payload --
   both blobs, identity, projections, rectangles -- when it is built, frozen and
@@ -261,10 +261,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   source, or a doubly captured document, gets one verdict from both. A
   `host_identity` refusal keeps its own code. It proves a BLOCKED run's
   accepted artifacts and says nothing of the node that never ran. It returns
-  counts only, as for claims, so the matrix still reads quotes from claims
-  envelopes and scores a canonical run as citing nothing, and like every proof
-  it holds only for the bundle and sources present now. *Upgrade:* d-3b reads
-  the proven record's anchored citations for the matrix.
+  counts only, as for claims, so the matrix (d-3b) takes quotes from a second
+  read: only once the proof holds, it reads each record through `read_record`
+  against the same call-time identity and scores its anchored citations under
+  the pinned module (an unproven canonical run cites nothing; a record that
+  moved in between refuses the row `ARTIFACT_RECORD_MISMATCH`). That second
+  read does not re-anchor. Like every proof it holds only for the bundle and
+  sources present now. *Upgrade:* a proof that hands the matrix its proven
+  records.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's

@@ -139,11 +139,11 @@ def test_approved_captured_inputs_survive_later_catalog_and_source_changes(
     assert conn.info.transaction_status.name == "IDLE"
     assert result.matrix is not None and len(result.matrix.rows) == 2
     assert all(
-        record.proof is not None and record.proof.artifacts == 2
+        record.proof is not None and record.proof.artifacts == 3
         for record in result.performed
     )
     prompts = cast(_Completions, harness.completions).prompts
-    assert len(prompts) == 4 and all(str(added[0]) not in prompt for prompt in prompts)
+    assert len(prompts) == 6 and all(str(added[0]) not in prompt for prompt in prompts)
 
 
 @pytest.mark.parametrize("field", list(RunInput.__dataclass_fields__))
@@ -289,6 +289,7 @@ def test_real_approved_input_transplants_are_refused(
                 a.input.source_version,
                 harness.bundle,
                 {} if fault == "research" else None,
+                subject=original.subject,
             ),
         )
     _approve(conn, (a, b))
@@ -395,7 +396,7 @@ def test_current_authority_is_rechecked_before_each_case(
         first, second = result.performed
         assert (
             first.proof is not None
-            and first.proof.artifacts == 2
+            and first.proof.artifacts == 3
             and first.stopped is None
         )
         assert second.run_id == pin.run_id and second.stopped is code
@@ -404,10 +405,10 @@ def test_current_authority_is_rechecked_before_each_case(
             second.proof is None
             and second.refusal is RefusalCode.ORCHESTRATION_NOTHING_TO_PROVE
         )
-        assert len(second.unrun) == 2 and result.matrix is None
-        assert _count(conn, "SELECT count(*) FROM budget_ledger") == 2
-        assert _count(conn, "SELECT count(*) FROM artifacts") == 2
-        assert len(cast(_Completions, harness.completions).prompts) == 2
+        assert len(second.unrun) == 3 and result.matrix is None
+        assert _count(conn, "SELECT count(*) FROM budget_ledger") == 3
+        assert _count(conn, "SELECT count(*) FROM artifacts") == 3
+        assert len(cast(_Completions, harness.completions).prompts) == 3
         sources = conn.execute(
             "SELECT source_id FROM source_set_members WHERE case_id=%s", (pin.case_id,)
         ).fetchall()
@@ -531,21 +532,21 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
     # Per node: evidence is read in the pre-call authority unit, then the
     # post-call unit rechecks input.
     node = ["node", "blocks", "node"]
-    case = ["input", "members", *node, *node, "record"]
+    case = ["input", "members", *node * 3, "record"]
     assert [name for name, _ in observed] == [
         *["input", "members"] * 2,
         *case,
         *case,
         "matrix",
     ]
-    shared = (0, 2, 4, 6, 9, 13, 15, 18)
+    shared = (0, 2, 4, 6, 9, 12, 16, 18, 21, 24)
     for start in shared:
         assert observed[start][1] == observed[start + 1][1]
-    units = (*shared, 8, 11, 12, 17, 20, 21, 22)
+    units = (*shared, 8, 11, 14, 15, 20, 23, 26, 27, 28)
     assert len({observed[i][1] for i in units}) == len(units)
     assert conn.info.transaction_status.name == "IDLE"
     assert result.matrix is not None and len(result.matrix.rows) == 2
-    assert len(cast(_Completions, harness.completions).prompts) == 4
+    assert len(cast(_Completions, harness.completions).prompts) == 6
 
 
 @pytest.mark.parametrize(
@@ -561,8 +562,8 @@ def test_native_execution_read_failures_clean_owned_work_and_retain_purchases(
         "initial_members": (_MEMBERS, 2, 0),
         "members": (_MEMBERS, 3, 0),
         "blocks": (_BLOCKS, 1, 0),
-        "report": (_PROOF, 1, 2),
-        "matrix": (_PROOF, 3, 4),
+        "report": (_PROOF, 1, 3),
+        "matrix": (_PROOF, 3, 6),
         "rollback": (_BLOCKS, 1, 0),
     }[fault]
     execute, rollback = psycopg.Connection.execute, psycopg.Connection.rollback
@@ -639,7 +640,7 @@ def test_native_execution_read_failures_clean_owned_work_and_retain_purchases(
             assert _count(observer, "SELECT count(*) FROM " + table) == paid + held
         for [digest] in observer.execute("SELECT artifact_sha256 FROM artifacts"):
             assert blobs.get(digest)
-        if paid == 2:
+        if paid == 3:
             _unspent(observer, prepared[1].input.run_id)
 
 
