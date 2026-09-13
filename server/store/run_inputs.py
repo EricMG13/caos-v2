@@ -100,6 +100,12 @@ def _subject_valid(subject: RunSubject) -> bool:
     )
 
 
+def valid_subject(subject: object) -> bool:
+    """Whether `subject` is a `RunSubject` a pin would accept, checked before any
+    write so a caller preparing many runs can refuse the whole batch up front."""
+    return type(subject) is RunSubject and _subject_valid(subject)
+
+
 _V1_COLUMNS = (
     "run_id",
     "case_id",

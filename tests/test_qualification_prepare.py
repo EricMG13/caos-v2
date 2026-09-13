@@ -11,6 +11,7 @@ from typing import cast
 
 import psycopg
 import pytest
+from canonical_fixtures import LITE_PROFILE, LITE_SELECTION
 from conftest import priced
 from test_qualification_harness import (
     CATALOG,
@@ -24,12 +25,13 @@ from test_qualification_harness import (
     _count,
 )
 
+from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
 from server.methodology.bundle import Bundle
 from server.qualification import harness as subject
-from server.qualification.matrix import QualificationSet
+from server.qualification.matrix import QualificationCase, QualificationSet
 from server.refusals import Refusal
 from server.store import StoreConnection, apply_schema, connect, run_inputs
 from server.store.budget import CEILING
@@ -341,4 +343,72 @@ def test_later_preparation_failure_keeps_prior_commits(
     assert _count(conn, "SELECT count(*) FROM run_inputs") == 1
     if stage != "extraction":
         assert blobs.get(sha256(OTHER).hexdigest()) == OTHER
+    _unapproved_and_unspent(conn, harness)
+
+
+LITE_SUBJECT = run_inputs.RunSubject(
+    issuer_id="BOREALIS",
+    issuer_name="Borealis Industries plc",
+    reporting_period="FY2026",
+    analysis_date="2026-09-13",
+)
+
+
+def _lite(case: QualificationCase, subject_: object) -> QualificationCase:
+    return replace(
+        case,
+        profile_id=LITE_PROFILE,
+        selection_id=LITE_SELECTION,
+        subject=cast(run_inputs.RunSubject, subject_),
+    )
+
+
+def test_a_canonical_case_pins_its_declared_subject(ready: Fixture) -> None:
+    conn, blobs, harness, qualification = ready
+    first, second = qualification.cases
+    mixed = QualificationSet((first, _lite(second, LITE_SUBJECT)))
+
+    claims, canonical = subject.prepare(conn, blobs, harness, qualification=mixed)
+
+    assert claims.input.format_version == 1 and claims.input.subject is None
+    assert claims.input.adapter_version == methodology.CLAIMS_ADAPTER_VERSION
+    assert canonical.input.format_version == 2
+    assert canonical.input.subject == LITE_SUBJECT
+    assert canonical.input.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
+    assert canonical.input == load_run_input(conn, canonical.input.run_id)
+    assert conn.execute(
+        "SELECT issuer_id, issuer_name, reporting_period, analysis_date,"
+        " format_version FROM run_inputs WHERE run_id=%s",
+        (canonical.input.run_id,),
+    ).fetchone() == (*asdict(LITE_SUBJECT).values(), 2)
+    _unapproved_and_unspent(conn, harness)
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        None,
+        asdict(LITE_SUBJECT),
+        replace(LITE_SUBJECT, analysis_date="13/09/2026"),
+        replace(LITE_SUBJECT, issuer_id="not a key"),
+        replace(LITE_SUBJECT, issuer_name=" padded"),
+    ],
+)
+def test_a_canonical_case_without_a_valid_subject_leaves_no_setup(
+    ready: Fixture, declared: object
+) -> None:
+    """Refused whole-set, before the claims case ahead of it is written."""
+    conn, blobs, harness, qualification = ready
+    first, second = qualification.cases
+    assert not run_inputs.valid_subject(declared)
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        subject.prepare(
+            conn,
+            blobs,
+            harness,
+            qualification=QualificationSet((first, _lite(second, declared))),
+        )
+    assert conn.info.transaction_status.name == "IDLE"
+    assert _count(conn, "SELECT count(*) FROM cases") == 0
+    assert not blobs.root.exists()
     _unapproved_and_unspent(conn, harness)
