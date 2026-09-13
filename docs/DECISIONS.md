@@ -1245,15 +1245,20 @@ CP-L10 and CP-5 only):
    Provider-claimed identity never survives (invariant 3).
 2. **Storage.** The accepted artifact's `artifact_sha256` is the SHA-256 of the
    exact Markdown bytes, which are the only analytical authority and what
-   downstream modules receive. A host sidecar blob, referenced by
-   `artifacts.record_sha256`, holds only derived data — adapter/build/authority
-   identity, typed projections and anchored citations — and every authority
-   read re-derives and compares it; it is never read back as fact.
+   downstream modules receive. A host record blob, referenced by
+   `artifacts.record_sha256` and written in the same acceptance transaction,
+   holds adapter/build/authority identity, the attempt ordinal, call-time
+   upstream digests, typed projections and verified citations. Readers verify
+   both blobs and their binding, re-parse projections from the Markdown and
+   compare them; the record is never read back as fact.
 3. **Citations.** The provider answers on a closed transport
    `{"canonical_markdown": ..., "citations": [{source_id, page, matched_text}]}`.
-   The host anchors each quote in its token index (invariant 11); an unanchored
-   quote is refused and counted, and a handoff with no anchored citation is
-   refused. This refines §26 for Markdown. The transport is not JSON inside the
+   Each quote must occur verbatim in the Markdown and anchor exactly once in
+   the delivered evidence (invariant 11); any citation that fails refuses the
+   whole handoff, since the Markdown cannot be edited, and a handoff with no
+   citation is refused. The accepted identity is the pair of the Markdown hash
+   and the host record hash; citations are a host-verified attachment bound by
+   the record, not derived data. This refines §26 for Markdown. The transport is not JSON inside the
    Markdown, which the vendor forbids.
 
 **Why.** §29 makes the exact Markdown the authority and names run, route,
