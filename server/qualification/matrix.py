@@ -26,18 +26,18 @@ envelope carries the figure as a number, which is the known-gaps entry this
 module ships with.
 
 **A canonical run is scored on its records** (`docs/DECISIONS.md` §42.4), and
-only once the proof has proven it: each accepted artifact's record is read
-through `read_record` against the identity the host rebuilds from the store,
-and its anchored citations are the run's. An unproven canonical run cites
-nothing. The matrix reports no status a record projects, so a SCREENING_ONLY
-record can never reach a reviewer through it as committee clearance.
+only on what the proof proved: the proof returns the citations it re-anchored
+under the pinned modules, and those are the run's -- nothing is read again, so
+an artifact accepted after the proof is not scored, and a source withdrawn since
+refuses the row. An unproven canonical run cites nothing. The matrix reports no
+status a record projects, so a SCREENING_ONLY record can never reach a reviewer
+through it as committee clearance.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -46,16 +46,14 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.methodology.handoff import read_record
-from server.methodology.invocation import call_time_identity, host_identity
-from server.qualification.proof import assert_orchestration_proof
+from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.routes import resolved_route
 from server.store.run_inputs import RunSubject
+from server.store.source_sets import pinned_live_sources
 
 # A case label is authored and reaches a digest; it is a name, not prose.
 _LABEL_LIMIT = 128
@@ -232,13 +230,14 @@ def _row(
     see whether it found the right evidence.
     """
     refusal: RefusalCode | None = None
+    proof: OrchestrationProof | None = None
     try:
-        assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
+        proof = assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
     except Refusal as failed:
         refusal = failed.code
 
     try:
-        cited = _cited(conn, blobs, bundle, run_id, proven=refusal is None)
+        cited = _cited(conn, blobs, run_id, proof=proof)
     except Refusal as unattributed:
         if unattributed.code not in _ROW_REFUSALS:
             raise
@@ -262,19 +261,18 @@ def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool
 
 
 # A row's own uncertainty, not a reason to end the matrix: a pin that no longer
-# reads, or a record that no longer binds after its run was proven.
+# reads, or a proven source withdrawn before its quotes were scored.
 _ROW_REFUSALS = frozenset(
-    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ARTIFACT_RECORD_MISMATCH}
+    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED}
 )
 
 
 def _cited(
     conn: StoreConnection,
     blobs: BlobStore,
-    bundle: Bundle,
     run_id: UUID,
     *,
-    proven: bool,
+    proof: OrchestrationProof | None,
 ) -> set[tuple[str, str, str]]:
     """Every (module, document, quote) this run's accepted artifacts carry.
 
@@ -282,96 +280,47 @@ def _cited(
     — the same reason `proof.py` does (invariant 3: the host owns identity). A
     run with no pin cites nothing this function can attribute, which is a row
     that misses every key; an invalid pin refuses so `_row` records uncertainty.
-    A canonical run cites nothing unless `proven`, and otherwise cites its
-    records' anchored citations.
+    A canonical run cites exactly what its `proof` re-anchored, and nothing
+    without one: no second read of artifacts the proof never saw.
     """
     route = resolved_route(conn, run_id)
-    canonical = (
+    if (
         route is not None
         and methodology.adapter_for(route) == methodology.CANONICAL_ADAPTER_VERSION
-    )
-    if canonical and not proven:
-        return set()
+    ):
+        return _proven(conn, run_id, proof)
     module_of = (
         {} if route is None else {n.route_node_id: n.module_id for n in route.nodes}
     )
     rows = conn.execute(
-        "SELECT a.artifact_sha256, t.route_node_id, a.attempt_id, a.record_sha256"
+        "SELECT a.artifact_sha256, t.route_node_id"
         " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
         " WHERE a.run_id = %s",
         (run_id,),
     ).fetchall()
 
     cited: set[tuple[str, str, str]] = set()
-    for artifact_sha256, route_node_id, attempt_id, record_sha256 in rows:
+    for artifact_sha256, route_node_id in rows:
         module_id = module_of.get(str(route_node_id))
-        if module_id is None:
-            continue
-        if route is not None and canonical:
-            cited |= _recorded(
-                conn,
-                blobs,
-                bundle,
-                route,
-                run_id,
-                (str(route_node_id), UUID(str(attempt_id))),
-                (str(artifact_sha256), record_sha256),
-            )
-        else:
+        if module_id is not None:
             cited |= _quotes(blobs, str(artifact_sha256), module_id)
     return cited
 
 
-def _recorded(  # noqa: PLR0913 -- one accepted artifact of one pinned run
-    conn: StoreConnection,
-    blobs: BlobStore,
-    bundle: Bundle,
-    route: ResolvedRoute,
-    run_id: UUID,
-    attempt: tuple[str, UUID],
-    pair: tuple[str, object],
+def _proven(
+    conn: StoreConnection, run_id: UUID, proof: OrchestrationProof | None
 ) -> set[tuple[str, str, str]]:
-    """One proven canonical artifact's anchored citations, read from its record.
+    """A proven canonical run's anchored quotes, each document still live now.
 
-    Read through `read_record` against the identity rebuilt from the store, so a
-    record that moved since the proof refuses `ARTIFACT_RECORD_MISMATCH` rather
-    than being scored. The refusal carries no text from the one it replaced.
+    Scoring is a use, so a source withdrawn since the proof refuses the row
+    `ORCHESTRATION_SOURCE_NOT_PINNED`, as the proof itself would (invariant 1).
     """
-    route_node_id, attempt_id = attempt
-    artifact_sha256, record_sha256 = pair
-    node = next(n for n in route.nodes if n.route_node_id == route_node_id)
-    record = None
-    # A missing record is no address, so `read_record` refuses it as a mismatch.
-    with suppress(Refusal):
-        host = host_identity(
-            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
-        )
-        record = read_record(
-            blobs,
-            artifact_sha256=artifact_sha256,
-            record_sha256=str(record_sha256),
-            expected=call_time_identity(
-                conn,
-                route,
-                host,
-                attempt_id=attempt_id,
-                record=_stored(blobs, str(record_sha256)),
-            ),
-        )
-    if record is None:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    return {
-        (node.module_id, citation.document_sha256, citation.matched_text)
-        for citation in record.citations
-    }
-
-
-def _stored(blobs: BlobStore, record_sha256: str) -> bytes | None:
-    """The record's bytes, or None: an unreadable record is `read_record`'s refusal."""
-    try:
-        return blobs.get(record_sha256)
-    except (Refusal, OSError):
-        return None
+    if proof is None:
+        return set()
+    live = pinned_live_sources(conn, run_id)
+    if any(document not in live for _module, document, _quote in proof.anchored):
+        raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
+    return set(proof.anchored)
 
 
 def _quotes(

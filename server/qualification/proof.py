@@ -77,6 +77,11 @@ class OrchestrationProof:
     build_id: str
     artifacts: int
     citations: int
+    # A canonical run's re-anchored `(module_id, document_sha256, matched_text)`,
+    # the module taken from the pin: exactly what this proof proved, so the
+    # matrix scores it without a second read the proof never saw. Empty for a
+    # claims run, whose envelopes the matrix reads as it always has.
+    anchored: frozenset[tuple[str, str, str]] = frozenset()
 
     @property
     def assurance(self) -> Assurance:
@@ -137,18 +142,21 @@ def assert_orchestration_proof(
         reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live)
     nodes = {node.route_node_id: node for node in route.nodes}
     citations = 0
+    anchored: set[tuple[str, str, str]] = set()
     for row in accepted:
         artifact_sha256, route_node_id, produced, called, recorded = row[:5]
         module_id = module_of[str(route_node_id)]
         _produced_by_its_call(recorded=recorded, produced=produced, called=called)
         if reader is not None:
             attempt_id, record_sha256 = row[5], row[6]
-            citations += reader.proven(
+            proven = reader.proven(
                 nodes[str(route_node_id)],
                 UUID(str(attempt_id)),
                 str(artifact_sha256),
                 None if record_sha256 is None else str(record_sha256),
             )
+            citations += len(proven)
+            anchored |= {(module_id, c.document_sha256, c.matched_text) for c in proven}
             continue
         envelope = _envelope(blobs, str(artifact_sha256))
         _ran_as_pinned(envelope, bundle, module_id)
@@ -165,6 +173,7 @@ def assert_orchestration_proof(
         build_id=bundle.build_id,
         artifacts=len(accepted),
         citations=citations,
+        anchored=frozenset(anchored),
     )
 
 
@@ -214,8 +223,8 @@ class _CanonicalReader:
         attempt_id: UUID,
         artifact_sha256: str,
         record_sha256: str | None,
-    ) -> int:
-        """Prove one accepted canonical artifact; its citation count.
+    ) -> tuple[AnchoredCitation, ...]:
+        """Prove one accepted canonical artifact; the citations it re-anchored.
 
         `ORCHESTRATION_ARTIFACT_UNREADABLE` for a blob whose bytes no longer
         hash to their address; `ORCHESTRATION_BUILD_MOVED` for a record written
@@ -291,7 +300,7 @@ class _CanonicalReader:
                 raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
             if not _anchors_as_recorded(self.conn, source_id, citation):
                 raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
-        return len(record.citations)
+        return tuple(record.citations)
 
 
 def _anchors_as_recorded(

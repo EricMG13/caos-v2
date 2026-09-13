@@ -250,8 +250,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   vendor script changed on disk under an unchanged manifest is not re-verified
   by the cached validator (every other read still is). *Upgrade:* f-1 makes
   readers refuse a NULL record and removes the dispatch.
-- **The orchestration proof over a canonical run proves it and names no
-  quote.** `server/qualification/proof.py` (slice d-2) reads both blobs,
+- **The orchestration proof over a canonical run proves it now, not
+  continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
   binds the record to the identity rebuilt from the store, requires the pin's
   adapter and the bundle's build, manifest and authority, re-validates the
   Markdown against the record's projections and re-anchors every recorded
@@ -260,15 +260,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`pinned_live_sources`, `call_time_identity`): a withdrawn or re-extracted
   source, or a doubly captured document, gets one verdict from both. A
   `host_identity` refusal keeps its own code. It proves a BLOCKED run's
-  accepted artifacts and says nothing of the node that never ran. It returns
-  counts only, as for claims, so the matrix (d-3b) takes quotes from a second
-  read: only once the proof holds, it reads each record through `read_record`
-  against the same call-time identity and scores its anchored citations under
-  the pinned module (an unproven canonical run cites nothing; a record that
-  moved in between refuses the row `ARTIFACT_RECORD_MISMATCH`). That second
-  read does not re-anchor. Like every proof it holds only for the bundle and
-  sources present now. *Upgrade:* a proof that hands the matrix its proven
-  records.
+  accepted artifacts and says nothing of the node that never ran. Beside its
+  counts it returns `anchored`, the `(module_id, document_sha256,
+  matched_text)` it re-anchored under the pinned modules (empty for claims),
+  and the matrix (d-3b) scores exactly that set with no second artifact or
+  record read: an artifact accepted after the proof is not scored, an unproven
+  canonical run cites nothing, and a proven document no longer among
+  `pinned_live_sources` at scoring refuses the row
+  `ORCHESTRATION_SOURCE_NOT_PINNED`. Under READ COMMITTED the proof's own
+  statements can still see different snapshots, and a withdrawal committed
+  after the matrix's live check is not seen by that row. Like every proof it
+  holds only for the bundle and sources present now. *Upgrade:* the proof and
+  scoring in one REPEATABLE READ unit, the day a reviewer relies on the matrix
+  as one consistent snapshot.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
@@ -477,7 +481,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   reader that can be handed one.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
-  re-deriving the proof and re-reading every artifact for its citations. Two of
+  re-deriving the proof (and, for a claims run only, re-reading every artifact
+  for its citations; a canonical run is scored from its proof). Two of
   those are deliberate: the matrix stands alone, and reading a proof back from
   the harness would make it trust a caller's copy of what the store said
   (invariant 3). Against a provider call per node none of it shows. *Upgrade:*

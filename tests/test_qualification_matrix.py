@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import LITE_PROFILE, LITE_SELECTION, CanonicalCompletions
@@ -52,8 +53,12 @@ from server.qualification.matrix import (
     build_matrix,
     qualification_set_digest,
 )
+from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.gates import withdraw_source
+from server.store.members import Standing, grant
+from server.store.routes import resolved_route
 from server.store.runs import start_run
 
 REPO = Path(__file__).resolve().parents[1]
@@ -523,19 +528,128 @@ def test_a_canonical_run_that_does_not_prove_scores_nothing(ran: Ran) -> None:
     assert (row.proven, row.met, row.missed) == (False, (), key.expects)
 
 
-def test_a_record_that_moves_after_the_proof_refuses_the_row(
-    ran: Ran, monkeypatch: pytest.MonkeyPatch
+def _after_proof(
+    monkeypatch: pytest.MonkeyPatch,
+    before: Callable[[], object],
+    after: Callable[[], object],
 ) -> None:
+    """Run `before`, the real proof, then `after`, inside the matrix's row."""
     from server.qualification import matrix
     from server.qualification.proof import assert_orchestration_proof as proof
 
-    def then_move(*args: object, **kwargs: object) -> object:
+    def around(*args: object, **kwargs: object) -> object:
+        before()
         proven = proof(*args, **kwargs)  # type: ignore[arg-type]
-        ran.conn.execute("UPDATE run_attempts SET ordinal = ordinal + 1")
+        after()
         return proven
 
-    monkeypatch.setattr(matrix, "assert_orchestration_proof", then_move)
+    monkeypatch.setattr(matrix, "assert_orchestration_proof", around)
+
+
+def test_a_record_that_moves_after_the_proof_does_not_change_the_score(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The matrix scores what the proof proved; it reads no record again."""
+    _after_proof(
+        monkeypatch,
+        lambda: None,
+        lambda: ran.conn.execute("UPDATE run_attempts SET ordinal = ordinal + 1"),
+    )
     key = _one_case(ran)
     [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
-    assert row.refusal is RefusalCode.ARTIFACT_RECORD_MISMATCH
+    assert (row.proven, row.refusal, row.met, row.missed) == (
+        True,
+        None,
+        key.expects,
+        (),
+    )
+
+
+def test_a_source_withdrawn_after_the_proof_is_not_scored(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant 1: scoring is a use, so withdrawal is checked at it too."""
+    actor = uuid4()
+    grant(ran.conn, case_id=ran.case_id, user_id=actor, standing=Standing.APPROVER)
+    ran.conn.commit()
+    [source_id] = [
+        UUID(str(r[0]))
+        for r in ran.conn.execute(
+            "SELECT source_id FROM live_sources WHERE case_id = %s", (ran.case_id,)
+        ).fetchall()
+    ]
+    ran.conn.rollback()
+    _after_proof(
+        monkeypatch,
+        lambda: None,
+        lambda: withdraw_source(
+            ran.conn, case_id=ran.case_id, actor_id=actor, source_id=source_id
+        ),
+    )
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
     assert (row.proven, row.met, row.missed) == (False, (), key.expects)
+
+
+def test_an_artifact_accepted_after_the_proof_is_not_scored(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CP-5 is held out of the store while the proof runs and returns after it:
+    a second read would score a record the proof never saw."""
+    held = "SELECT * FROM artifacts WHERE run_id = %s AND route_node_id = %s"
+    [cp5] = [n.route_node_id for n in _route_of(ran).nodes if n.module_id == "CP-5"]
+
+    def hold() -> None:
+        ran.conn.execute("CREATE TEMP TABLE held_cp5 AS " + held, (ran.run_id, cp5))
+        ran.conn.execute(
+            "DELETE FROM artifacts"
+            " WHERE attempt_id IN (SELECT attempt_id FROM held_cp5)"
+        )
+
+    def accept() -> None:
+        ran.conn.execute("INSERT INTO artifacts SELECT * FROM held_cp5")
+
+    _after_proof(monkeypatch, hold, accept)
+    keys = tuple(
+        ExpectedCitation(module, ran.document_sha256, QUOTE)
+        for module in ("CP-0", "CP-L10", "CP-5")
+    )
+    case = replace(_one_case(ran), expects=keys)
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert (row.proven, row.refusal) == (True, None)
+    assert (row.met, row.missed) == (keys[:2], keys[2:])
+
+
+def _route_of(ran: Ran) -> ResolvedRoute:
+    route = resolved_route(ran.conn, ran.run_id)
+    ran.conn.rollback()
+    assert route is not None
+    return route
+
+
+@pytest.mark.parametrize("catalog_route", [CLAIMS], indirect=True)
+def test_a_claims_run_scores_its_envelopes_as_before(ran: Ran) -> None:
+    """A claims proof names no quote; the matrix reads its envelopes unchanged."""
+    proof = assert_orchestration_proof(
+        ran.conn, ran.blobs, Bundle(root=VENDORED), run_id=ran.run_id
+    )
+    ran.conn.rollback()
+    assert proof.anchored == frozenset()
+    keys = tuple(
+        ExpectedCitation(module, ran.document_sha256, QUOTE)
+        for module in ("CP-0", "CP-DR")
+    )
+    case = replace(_one_case(ran), expects=keys)
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert (row.proven, row.refusal, row.met, row.missed) == (True, None, keys, ())
+
+
+def test_a_canonical_proof_names_exactly_the_quotes_it_anchored(ran: Ran) -> None:
+    proof = assert_orchestration_proof(
+        ran.conn, ran.blobs, Bundle(root=VENDORED), run_id=ran.run_id
+    )
+    ran.conn.rollback()
+    assert proof.anchored == {
+        (module, ran.document_sha256, QUOTE) for module in ("CP-0", "CP-L10", "CP-5")
+    }
