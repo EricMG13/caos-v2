@@ -15,10 +15,11 @@ first commit.
 
 Claude Code resumes from
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
-Task17d2 is split (`.superpowers/sdd/task-17d2-split.md`). Task17d2a is
-accepted at application commit `f8cd7382441587b5aa357542e20bb526a0f01533`
-on `codex/execute-repair-plan` (base `59d31457`); next is the proof-only
-Task17d2b on that accepted slice. Phase 2 is **not** complete. Work only in
+Task17d2 is accepted on `codex/execute-repair-plan`: Task17d2a at
+application commit `f8cd7382441587b5aa357542e20bb526a0f01533`, proof-only
+Task17d2b at `ceabf9f` (reports in `.superpowers/sdd/`). Next is Task17d3,
+whose strict XFAIL RED is recorded in `tests/test_execution_freshness.py`.
+Phase 2 is **not** complete. Work only in
 `/Users/ericguei/Documents/caos-workbench`; the original
 `/Users/ericguei/Documents/caos-v2` checkout stays read-only.
 
