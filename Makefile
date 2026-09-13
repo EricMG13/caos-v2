@@ -104,6 +104,7 @@ check:
 	@$(MAKE) --no-print-directory lint
 	@$(MAKE) --no-print-directory types
 	@$(MAKE) --no-print-directory test
+	@$(MAKE) --no-print-directory test-postgres-races
 	@$(MAKE) --no-print-directory security
 	@$(MAKE) --no-print-directory frontend-check
 	@$(MAKE) --no-print-directory image
