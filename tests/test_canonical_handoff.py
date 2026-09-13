@@ -217,6 +217,17 @@ def test_expected_filename_is_the_vendor_canonical_name() -> None:
     assert expected_filename(L10) == vendor_name == "EXAMPLE_CP-L10_20260908.md"
 
 
+@pytest.mark.parametrize("status", ["NOT-A-STATUS", "", "READY|BLOCKED"])
+def test_a_malformed_readiness_map_refuses_rather_than_raising(status: str) -> None:
+    """REBUILD_PLAN Phase 11 exit, on CP-0's T8 register since f-1c: a status
+    the vendor does not know refuses typed, with no context carried."""
+    refused = _refused(
+        CP0, _markdown(CP0, readiness={"CP-L10": status}), gate_expects=PINNED
+    )
+    assert refused.code is RefusalCode.HANDOFF_INCOMPLETE
+    assert refused.__context__ is None and refused.__cause__ is None
+
+
 def test_gate_readiness_projects_each_pinned_module_status() -> None:
     blocked = _markdown(CP0, readiness={"CP-L10": "BLOCKED"})
     gate = _validate(CP0, blocked)

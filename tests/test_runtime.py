@@ -17,12 +17,10 @@ real `ModuleProvider`, answered by `CanonicalCompletions` (Task 3.1 slice e-2).
 from __future__ import annotations
 
 import inspect
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -652,61 +650,3 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
 
 def _node_id(route: ResolvedRoute, module_id: str) -> str:
     return next(n.route_node_id for n in route.nodes if n.module_id == module_id)
-
-
-@dataclass
-class _ClaimsProvider:
-    """A claims-shaped answer per module, for the one FULL-route run left here."""
-
-    blobs: BlobStore
-    qa_status: str
-    model: str = "a-model/for-the-test"
-    calls: list[str] = field(default_factory=list)
-
-    def execute(
-        self, route_node_id: str, module_id: str, *, attempt_id: UUID
-    ) -> ProviderResult:
-        self.calls.append(module_id)
-        payload: dict[str, Any] = {"module_id": module_id, "qa_status": self.qa_status}
-        if module_id == "CP-0":
-            payload = {
-                "content_to_module_map": [
-                    {"module_id": module, "readiness_status": "READY"}
-                    for module in ("CP-1", "CP-2", "CP-2D")
-                ]
-            }
-        return ProviderResult(
-            artifact_sha256=self.blobs.put(json.dumps(payload).encode("utf-8")),
-            charge=Decimal("0.01"),
-            model=self.model,
-            generation_id="gen-runtime-test",
-        )
-
-
-@pytest.mark.parametrize("qa_status", ["Blocked", "Passed"])
-def test_a_blocked_cp5_does_not_release_cp6(
-    case: tuple[StoreConnection, UUID],
-    blobs: BlobStore,
-    bundle: Bundle,
-    qa_status: str,
-) -> None:
-    """REPAIR_PLAN Phase 2 exit: blocked CP-5 does not release CP-6, and the
-    run ends blocked rather than complete.
-
-    The one QA_GATE is on the FULL route, which still runs under the temporary
-    claims dispatch (§42.1). The pure `test_qa_gate_blocks_cp6_until_cp5_accepted`
-    proves the rule itself; this is the runtime half until f-1 disables the
-    route and replaces it with that route's refusal test.
-    """
-    conn, case_id = case
-    full = resolve_route(CATALOG, "FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
-    run = _approved_run(conn, case_id, full, bundle, blobs)
-    provider = _ClaimsProvider(blobs, qa_status)
-
-    run.run(provider)
-
-    assert "CP-5" in provider.calls
-    assert ("CP-6" in provider.calls) is (qa_status == "Passed")
-    assert run_status(conn, run.run_id) is (
-        RunStatus.COMPLETE if qa_status == "Passed" else RunStatus.BLOCKED
-    )

@@ -73,7 +73,8 @@ RUN_READ_IO = 4
 # identity the store rebuilds: the run input, the pinned route, the attempt's
 # owner and ordinal, the accepted digests, and the call-time narrowing's
 # artifact read. Measured on a LITE run
-# (`tests/test_canonical_readers.py`), per such row; a claims row costs none.
+# (`tests/test_canonical_readers.py`), per such row. A row without its record
+# refuses `ARTIFACT_RECORD_MISMATCH` (503) at no further cost.
 CANONICAL_READINESS_IO = 10
 # Readiness rows are the gate's and each QA_GATE source's. The catalog carries
 # one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a

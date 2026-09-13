@@ -23,12 +23,14 @@ artifacts all hold vacuously, and the strongest-looking proof this module could
 ever return would be one about a run that never ran. `CLAUDE.md`: a change that
 makes an invariant pass vacuously is wrong even with a green suite.
 
-**Canonical runs** (`docs/DECISIONS.md` §42.4) are proven through their host
-record, never parsed as claims: both blobs are read, the record must bind this
-Markdown and the identity rebuilt from the store, its adapter, build, manifest
-and authority must be the pin's and the bundle's, the Markdown re-validated must
-project exactly what the record says, and every recorded citation must re-anchor
-in the run's pinned, live sources on exactly the recorded rectangles. The
+**Every run is canonical** (`docs/DECISIONS.md` §42): an artifact is proven
+through its host record and nothing else -- an artifact without one refuses
+`ARTIFACT_RECORD_MISMATCH`, and none is parsed as claims. Both blobs are read,
+the record must bind this Markdown and the identity rebuilt from the store, its
+adapter, build, manifest and authority must be the pin's and the bundle's, the
+Markdown re-validated must project exactly what the record says, and every
+recorded citation must re-anchor in the run's pinned, live sources on exactly
+the recorded rectangles. The
 sources (`pinned_live_sources`) and the call-time identity (`call_time_identity`)
 are the ones `server/deliverable/canonical.py` reads, so both reach the same
 verdict, under the proof's codes.
@@ -39,19 +41,13 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import AnchoredCitation, Citation, verify_citations
-from server.methodology.bundle import (
-    Bundle,
-    assemble_authority,
-    authority_digest,
-    verified_bytes,
-)
+from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
 from server.methodology.invocation import (
     call_time_identity,
@@ -83,8 +79,7 @@ class OrchestrationProof:
     citations: int
     # A canonical run's re-anchored `(module_id, document_sha256, matched_text)`,
     # the module taken from the pin: exactly what this proof proved, so the
-    # matrix scores it without a second read the proof never saw. Empty for a
-    # claims run, whose envelopes the matrix reads as it always has.
+    # matrix scores it without a second read the proof never saw.
     anchored: frozenset[tuple[str, str, str]] = frozenset()
 
     @property
@@ -141,9 +136,7 @@ def assert_orchestration_proof(
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 
     live = pinned_live_sources(conn, run_id)
-    reader = None
-    if pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION:
-        reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live)
+    reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live)
     nodes = {node.route_node_id: node for node in route.nodes}
     citations = 0
     anchored: set[tuple[str, str, str]] = set()
@@ -151,26 +144,19 @@ def assert_orchestration_proof(
         artifact_sha256, route_node_id, produced, called, recorded = row[:5]
         module_id = module_of[str(route_node_id)]
         _produced_by_its_call(recorded=recorded, produced=produced, called=called)
-        if reader is not None:
-            attempt_id, record_sha256 = row[5], row[6]
-            proven = reader.proven(
-                nodes[str(route_node_id)],
-                UUID(str(attempt_id)),
-                str(artifact_sha256),
-                None if record_sha256 is None else str(record_sha256),
-            )
-            citations += len(proven)
-            anchored |= {(module_id, c.document_sha256, c.matched_text) for c in proven}
-            continue
-        envelope = _envelope(blobs, str(artifact_sha256))
-        _ran_as_pinned(envelope, bundle, module_id)
-        citations += _citations_relocate(conn, envelope, live)
+        attempt_id, record_sha256 = row[5], row[6]
+        proven = reader.proven(
+            nodes[str(route_node_id)],
+            UUID(str(attempt_id)),
+            str(artifact_sha256),
+            None if record_sha256 is None else str(record_sha256),
+        )
+        citations += len(proven)
+        anchored |= {(module_id, c.document_sha256, c.matched_text) for c in proven}
 
-    # No second vacuity guard here: `_citations_relocate` refuses a claim list
-    # that is empty and a claim carrying no citations, and a canonical record
-    # without citations does not decode, so by this line the count cannot be
-    # zero. A guard that can never fire reads like a check and is not
-    # one.
+    # No second vacuity guard here: a record without citations does not
+    # decode, so by this line the count cannot be zero. A guard that can never
+    # fire reads like a check and is not one.
     return OrchestrationProof(
         run_id=run_id,
         route_digest=_pinned_digest(conn, run_id),
@@ -309,90 +295,6 @@ def _anchors_as_recorded(
     return anchored == [citation]
 
 
-def _ran_as_pinned(envelope: dict[str, Any], bundle: Bundle, module_id: str) -> None:
-    """Claim one: this artifact was produced under the methodology that is here.
-
-    `module_id` comes from the route pin, never from the envelope — an artifact
-    naming its own module could name one whose authority happens to match
-    (invariant 3: the host owns identity).
-    """
-    expected = authority_digest(assemble_authority(bundle, module_id))
-    if envelope.get("build_id") != bundle.build_id:
-        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
-    if envelope.get("authority_digest") != expected:
-        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
-
-
-def _citations_relocate(
-    conn: StoreConnection, envelope: dict[str, Any], live: dict[str, UUID]
-) -> int:
-    """Claims two and three: pinned sources, and every quote re-located.
-
-    They are one pass because they are one lookup. A citation names its document
-    by digest; resolving that digest through the run's captured, still-live
-    members is what makes a withdrawn or post-pin source unprovable, and the
-    resolved id is what the token index is then asked to find the quote in.
-    """
-    claims = envelope.get("claims")
-    if not isinstance(claims, list) or not claims:
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-
-    found = 0
-    for claim in claims:
-        if not isinstance(claim, dict):
-            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-        recorded = claim.get("citations")
-        if not isinstance(recorded, list) or not recorded:
-            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-        for citation in recorded:
-            _relocates(conn, citation, live)
-            found += 1
-    return found
-
-
-def _relocates(conn: StoreConnection, citation: object, live: dict[str, UUID]) -> None:
-    """One citation, re-derived and compared with what the artifact carries."""
-    if not isinstance(citation, dict):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-    document_sha256 = citation.get("document_sha256")
-    matched_text = citation.get("matched_text")
-    page = citation.get("page")
-    if not isinstance(document_sha256, str) or not isinstance(matched_text, str):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-    if not isinstance(page, int):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-
-    source_id = live.get(document_sha256)
-    if source_id is None:
-        # Withdrawn, admitted after the pin, or never this run's. Invariant 1 is
-        # checked live at every use, and a proof is a use.
-        raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
-
-    try:
-        [anchored] = verify_citations(
-            conn,
-            delivered={source_id},
-            citations=[
-                Citation(source_id=source_id, page=page, matched_text=matched_text)
-            ],
-        )
-    except Refusal:
-        # The quote no longer sits where the index can find it. The typed code
-        # travels; the quote does not (`CLAUDE.md`: never log document text).
-        raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST) from None
-
-    if _rectangles(anchored) != citation.get("bboxes"):
-        # Located, but not where the artifact says. A proof that stopped at
-        # "the quote is on this page" would accept a rectangle drawn over
-        # different text, which is invariant 11 with the coordinates removed.
-        raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
-
-
-def _rectangles(anchored: AnchoredCitation) -> list[list[float]]:
-    """The re-derived rectangles in the shape the stored envelope uses."""
-    return [[box.page, box.x0, box.y0, box.x1, box.y1] for box in anchored.bboxes]
-
-
 def _pinned_digest(conn: StoreConnection, run_id: UUID) -> str:
     row = conn.execute(
         "SELECT route_digest FROM run_routes WHERE run_id = %s", (run_id,)
@@ -400,15 +302,3 @@ def _pinned_digest(conn: StoreConnection, run_id: UUID) -> str:
     if row is None:  # pragma: no cover - read once above, under the same lock
         raise Refusal(RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED)
     return str(row[0])
-
-
-def _envelope(blobs: BlobStore, artifact_sha256: str) -> dict[str, Any]:
-    """The stored artifact, as the host wrote it. Bytes that are not an envelope
-    prove nothing, and their content never reaches the refusal."""
-    try:
-        decoded = json.loads(blobs.get(artifact_sha256))
-    except (ValueError, Refusal):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
-    if not isinstance(decoded, dict):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-    return decoded

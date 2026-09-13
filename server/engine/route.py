@@ -103,35 +103,12 @@ class NodeResult:
     value carries the two facts some nodes' artifacts add. `readiness` is the
     gate's `(module_id, readiness_status)` rows, read only from the CP-0 node;
     `qa_status` is the module's own QA verdict, which meets a QA_GATE edge only
-    when it is `Passed` (F03). Both a claims body and a canonical record reduce
-    to this, so the engine never reads either format.
+    when it is `Passed` (F03). A canonical record reduces to this, so the
+    engine never reads the Markdown.
     """
 
     readiness: tuple[tuple[str, str], ...] = ()
     qa_status: str | None = None
-
-
-def claims_result(body: object, *, gate: bool) -> NodeResult:
-    """A claims-JSON artifact body as a typed result. Pure.
-
-    A body that is not an object carries nothing. Readiness is read only from
-    the gate's own body (`gate`), so a map in any other artifact is not
-    readiness and is not read. In the gate's body, a map that is not a list of
-    `{module_id, readiness_status}` objects refuses `READINESS_INVALID` rather
-    than raising.
-    """
-    if not isinstance(body, Mapping):
-        return NodeResult()
-    entries = body.get("content_to_module_map", []) if gate else []
-    if not isinstance(entries, list):
-        raise Refusal(RefusalCode.READINESS_INVALID)
-    qa_status = body.get("qa_status")
-    return NodeResult(
-        readiness=tuple(
-            (_verdict_module(entry), _verdict_status(entry)) for entry in entries
-        ),
-        qa_status=qa_status if isinstance(qa_status, str) else None,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,18 +322,6 @@ def readiness_from(
         result = accepted.get(node.route_node_id)
         return {} if result is None else dict(result.readiness)
     return {}
-
-
-def _verdict_module(entry: object) -> str:
-    if not isinstance(entry, Mapping) or "module_id" not in entry:
-        raise Refusal(RefusalCode.READINESS_INVALID)
-    return str(entry["module_id"])
-
-
-def _verdict_status(entry: object) -> str:
-    if not isinstance(entry, Mapping) or "readiness_status" not in entry:
-        raise Refusal(RefusalCode.READINESS_INVALID)
-    return str(entry["readiness_status"])
 
 
 def route_digest(route: ResolvedRoute) -> str:
