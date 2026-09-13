@@ -114,7 +114,7 @@ def run_route(
 def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
     """Every accepted artifact of the run, keyed by route node id.
 
-    One join, read in one place. `accepted_artifacts` below and
+    One query, read in one place. `accepted_artifacts` below and
     `server.methodology.executor._upstream_digests` both need exactly this
     row set -- the first to decide which nodes are COMPLETE and which body
     to read, the second to read a node's predecessors' bodies -- and a query

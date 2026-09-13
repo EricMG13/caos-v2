@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import monotonic
 from uuid import UUID
 
 import psycopg
@@ -107,17 +108,43 @@ def test_an_attempt_whose_node_was_accepted_meanwhile_makes_no_call(
     )
 
 
+def _waiting_on_locks(holder: StoreConnection, *waiters: StoreConnection) -> None:
+    deadline = monotonic() + 3
+    pids = [waiter.info.backend_pid for waiter in waiters]
+    while monotonic() < deadline:
+        row = holder.execute(
+            "SELECT count(*) FROM pg_stat_activity"
+            " WHERE pid = ANY(%s) AND wait_event_type = 'Lock'",
+            (pids,),
+        ).fetchone()
+        if row == (len(pids),):
+            return
+    pytest.fail("acceptors did not both wait on the run lock")
+
+
 def test_two_racing_connections_accept_exactly_one_result_and_keep_both_bills(
     harness: _Harness,
 ) -> None:
+    """Both acceptors are provably waiting on the run lock before either runs."""
+    from server.store.events import lock_run
+
     attempts = [_billed(harness), _billed(harness)]
-
-    def accept(attempt: UUID) -> object:
-        with connect(harness.url) as conn:
-            return _accept(harness, attempt, conn)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = sorted(map(str, pool.map(accept, attempts)))
+    with (
+        connect(harness.url) as holder,
+        connect(harness.url) as left,
+        connect(harness.url) as right,
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        lock_run(holder, harness.run_id)
+        futures = [
+            pool.submit(_accept, harness, attempt, conn)
+            for attempt, conn in zip(attempts, (left, right), strict=True)
+        ]
+        try:
+            _waiting_on_locks(holder, left, right)
+        finally:
+            holder.commit()
+        results = sorted(str(future.result(timeout=6)) for future in futures)
     assert results == ["NODE_ALREADY_ACCEPTED", "True"]
     assert [_count(harness, t) for t in ("artifacts", "budget_ledger")] == [1, 2]
 
