@@ -32,6 +32,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Any
 from uuid import UUID
 
 from server.blobs import BlobStore
@@ -42,6 +43,7 @@ from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.routes import resolved_route
+from server.store.run_inputs import RunSubject
 
 # A case label is authored and reaches a digest; it is a name, not prose.
 _LABEL_LIMIT = 128
@@ -80,6 +82,9 @@ class QualificationCase:
     profile_id: str
     selection_id: str
     expects: tuple[ExpectedCitation, ...]
+    # Who and when the run is about. A canonical-adapter route requires one
+    # (`pin_run_input`); a claims route leaves it None, as every case did before.
+    subject: RunSubject | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,27 +133,42 @@ def qualification_set_digest(qualification: QualificationSet) -> str:
     they become pinned state.
     """
     assert_measurable(qualification)
-    canonical = sorted(
-        [
-            BoundaryText.of(case.label.strip(), limit=_LABEL_LIMIT).value,
-            [case.profile_id, case.selection_id],
-            # The inputs, not only the answers. Two sets with identical keys
-            # over different documents are different sets, and a verdict binding
-            # one must not read as binding the other.
-            sorted(
-                [document.filename.value, sha256(document.data).hexdigest()]
-                for document in case.documents
-            ),
-            sorted(
-                [expect.module_id, expect.document_sha256, expect.matched_text]
-                for expect in case.expects
-            ),
-        ]
-        for case in qualification.cases
-    )
+    canonical = sorted(_digested(case) for case in qualification.cases)
     return sha256(
         json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _digested(case: QualificationCase) -> list[object]:
+    """One case's digested form. A subject is appended only when declared, so a
+    set of subject-free cases binds exactly the digest it bound before cases
+    could carry one."""
+    entry: list[Any] = [
+        BoundaryText.of(case.label.strip(), limit=_LABEL_LIMIT).value,
+        [case.profile_id, case.selection_id],
+        # The inputs, not only the answers. Two sets with identical keys
+        # over different documents are different sets, and a verdict binding
+        # one must not read as binding the other.
+        sorted(
+            [document.filename.value, sha256(document.data).hexdigest()]
+            for document in case.documents
+        ),
+        sorted(
+            [expect.module_id, expect.document_sha256, expect.matched_text]
+            for expect in case.expects
+        ),
+    ]
+    if case.subject is not None:
+        subject = case.subject
+        entry.append(
+            [
+                subject.issuer_id,
+                subject.issuer_name,
+                subject.reporting_period,
+                subject.analysis_date,
+            ]
+        )
+    return entry
 
 
 def build_matrix(
