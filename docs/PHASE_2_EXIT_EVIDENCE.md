@@ -91,6 +91,10 @@ CP-6.**
 `test_run_stream.py`: `test_a_blocked_run_refuses_new_attempts`,
 `test_a_blocked_run_closes_the_stream_too`.
 `tests/probes/f02_false_completion.py` reports `BLOCKED`.
+*Phase 3 (slice e-2):* the named `test_runtime.py` and `test_pricing.py` run
+tests above and in checks 1 and 7 keep their names and now run the canonical
+LITE route; the probe blocks CP-L10 through CP-0's T8 register. The CP-5 ->
+CP-6 runtime test stays on FULL under the temporary claims dispatch (§42.1).
 
 **6. Two workers/retries cannot accept different authoritative results for the
 same node generation; late responses after cancellation are recorded as
