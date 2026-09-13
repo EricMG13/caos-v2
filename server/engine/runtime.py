@@ -18,7 +18,6 @@ lived to record it (`server/store/budget.py`).
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
@@ -31,7 +30,6 @@ from server.engine.route import (
     NodeResult,
     NodeState,
     ResolvedRoute,
-    claims_result,
     frontier,
     node_states,
 )
@@ -183,13 +181,12 @@ def accepted_artifacts(
     would be a blob read per node per pass for data nobody looks at -- the ~8x
     shape `docs/AI_CODE_QUALITY.md` section 1 measures.
 
-    One query for the rows, then per readiness node: a claims row
-    (`record_sha256` NULL) is one blob read of its JSON body (`claims_result`);
-    a canonical row's
-    readiness and `qa_status` come from its record, verified against its
-    Markdown under `bundle` (§42.4) -- the host identity's queries, two blob
-    reads and the vendor validators, per pass. Without a bundle such a row
-    refuses rather than be read as JSON.
+    One query for the rows. A row without its host record refuses
+    `ARTIFACT_RECORD_MISMATCH`: no artifact is read as a claims body (§42.1).
+    Per readiness node, readiness and `qa_status` come from its record,
+    verified against its Markdown under `bundle` (§42.4) -- the host
+    identity's queries, two blob reads and the vendor validators, per pass.
+    Without a bundle such a row refuses `ORCHESTRATION_ARTIFACT_UNREADABLE`.
     """
     qa_sources = {e.source for e in route.edges if e.type is EdgeType.QA_GATE}
     readiness_nodes = {
@@ -197,15 +194,12 @@ def accepted_artifacts(
         for node in route.nodes
         if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
-    gates = {n.route_node_id for n in route.nodes if n.module_id == GATE_MODULE}
     accepted: dict[str, NodeResult] = {}
     for node_id, attempt, digest, record in accepted_rows(conn, run_id):
+        if record is None:
+            raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
         if node_id not in readiness_nodes:
             accepted[node_id] = NodeResult()
-        elif record is None:
-            accepted[node_id] = claims_result(
-                _claims_body(blobs, digest), gate=node_id in gates
-            )
         elif bundle is None:
             raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
         else:
@@ -225,13 +219,6 @@ def accepted_artifacts(
                 qa_status=projections.qa_status,
             )
     return accepted
-
-
-def _claims_body(blobs: BlobStore, digest: str) -> object:
-    try:
-        return json.loads(blobs.get(digest))
-    except ValueError:
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
 
 
 def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only

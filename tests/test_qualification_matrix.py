@@ -24,17 +24,16 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import LITE_PROFILE, LITE_SELECTION, CanonicalCompletions
-from conftest import approve_run, gate_verdict, priced, route_fault
+from conftest import approve_run, priced, route_fault
 from test_canonical_proof import _token_fault
 
-from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, resolve_route
@@ -43,7 +42,6 @@ from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.methodology.handoff import Projections
 from server.methodology.runner import ModuleProvider
-from server.provider import Completion
 from server.qualification.matrix import (
     ExpectedCitation,
     Matrix,
@@ -65,49 +63,12 @@ REPO = Path(__file__).resolve().parents[1]
 VENDORED = REPO / "vendor/deploy-v"
 PROFILE = LITE_PROFILE
 SELECTION = LITE_SELECTION
-# The claims route, kept only where a test reads a claims envelope's shape.
-CLAIMS = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 ESTIMATE = Decimal("0.50")
 
 QUOTE = "Total debt at 31 December 2026"
 REPORT = b"""Acme Holdings plc annual report 2026
 Total debt at 31 December 2026 was USD 1,240.0m
 """
-
-
-@dataclass
-class _Completions:
-    source_id: UUID
-    calls: list[str] = field(default_factory=list)
-
-    # What the host configured; with fallbacks off it is what answers.
-    model: str = "a-model/for-the-test"
-
-    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.calls.append(prompt[:24])
-        return Completion(
-            content=json.dumps(
-                {
-                    "claims": [
-                        {
-                            "statement": "Total debt was USD 1,240.0m.",
-                            "citations": [
-                                {
-                                    "source_id": str(self.source_id),
-                                    "page": 1,
-                                    "matched_text": QUOTE,
-                                }
-                            ],
-                        }
-                    ],
-                    # A verdict on the rest of the route, when the prompt is the
-                    # gate's: only on the `CLAIMS` route, CP-0 and CP-DR.
-                    **gate_verdict(prompt),
-                }
-            ),
-            charge=Decimal("0.0000041"),
-            generation_id="gen-matrix-test",
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,12 +119,7 @@ def ran(
         conn=conn,
         bundle=bundle,
         blobs=blobs,
-        completions=(
-            CanonicalCompletions(source_id)
-            if methodology.adapter_for(catalog_route)
-            == methodology.CANONICAL_ADAPTER_VERSION
-            else _Completions(source_id)
-        ),
+        completions=CanonicalCompletions(source_id),
         route=catalog_route,
         run_id=run_id,
     )
@@ -460,24 +416,8 @@ def test_a_case_label_crosses_the_boundary_where_it_is_digested(ran: Ran) -> Non
     assert refused.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
 
 
-# Every shape a stored artifact can take that is not a readable envelope. The
-# matrix must survive each: the proof is what judges an artifact, and it has
-# already run for the row by the time the comparison reads it.
-UNREADABLE: list[bytes] = [
-    b"{]not json at all",
-    b'"a string, validly encoded"',
-    b'{"claims": "not a list"}',
-    b'{"claims": [["not a mapping"]]}',
-    b'{"claims": [{"citations": "not a list"}]}',
-    b'{"claims": [{"citations": ["not a mapping"]}]}',
-    b'{"claims": [{"citations": [{"document_sha256": 7, "matched_text": 7}]}]}',
-]
-
-
-@pytest.mark.parametrize("catalog_route", [CLAIMS], indirect=True)
-@pytest.mark.parametrize("stored", UNREADABLE)
 def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
-    ran: Ran, stored: bytes
+    ran: Ran,
 ) -> None:
     """The comparison reads artifacts it did not write, at every depth.
 
@@ -486,7 +426,8 @@ def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     says what is true: the host could not prove this case, and it cites nothing
     this key asked for.
     """
-    digest = ran.blobs.put(stored)
+    # Bytes no record binds: the proof refuses, and nothing is read as claims.
+    digest = ran.blobs.put(b"{]not json at all")
     ran.conn.execute(
         "UPDATE artifacts SET artifact_sha256 = %s WHERE run_id = %s",
         (digest, ran.run_id),
@@ -496,12 +437,7 @@ def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     key = _one_case(ran)
     [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
     assert row.proven is False
-    # Which code fires depends on which of the proof's checks the shape trips
-    # first -- a valid JSON object with no `build_id` is a moved build before it
-    # is an unreadable claim list. `tests/test_orchestration_proof.py` pins that
-    # ordering; what matters here is that the row carries *a* reason and the
-    # comparison still ran.
-    assert row.refusal is not None
+    assert row.refusal is RefusalCode.ARTIFACT_RECORD_MISMATCH
     assert row.met == ()
     assert row.missed == key.expects
 
@@ -626,23 +562,6 @@ def _route_of(ran: Ran) -> ResolvedRoute:
     ran.conn.rollback()
     assert route is not None
     return route
-
-
-@pytest.mark.parametrize("catalog_route", [CLAIMS], indirect=True)
-def test_a_claims_run_scores_its_envelopes_as_before(ran: Ran) -> None:
-    """A claims proof names no quote; the matrix reads its envelopes unchanged."""
-    proof = assert_orchestration_proof(
-        ran.conn, ran.blobs, Bundle(root=VENDORED), run_id=ran.run_id
-    )
-    ran.conn.rollback()
-    assert proof.anchored == frozenset()
-    keys = tuple(
-        ExpectedCitation(module, ran.document_sha256, QUOTE)
-        for module in ("CP-0", "CP-DR")
-    )
-    case = replace(_one_case(ran), expects=keys)
-    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
-    assert (row.proven, row.refusal, row.met, row.missed) == (True, None, keys, ())
 
 
 def test_a_canonical_proof_names_exactly_the_quotes_it_anchored(ran: Ran) -> None:
