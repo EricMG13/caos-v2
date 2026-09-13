@@ -22,7 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_frozen_evidence import _insert
-from test_run_inputs import _prepare
+from test_run_inputs import _prepare, pin_version_one
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 
 import server.store as store
@@ -30,13 +30,20 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute
 from server.evidence.read import read_block
+from server.refusals import Refusal, RefusalCode
 from server.store import MIGRATIONS, StoreConnection, apply_schema, connect
 from server.store.budget import remaining, reserve
 from server.store.extraction_integrity import _verify_extractions_v1
 from server.store.gates import Gate, GateApproval, approve_gate, gate_preview
 from server.store.members import Standing, grant
 from server.store.run_inputs import load_run_input, pin_run_input
-from server.store.runs import Accepted, accept_attempt, create_case, start_attempt
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    attempt_ordinal,
+    create_case,
+    start_attempt,
+)
 
 _ADMIN = "postgresql://postgres:local-test-admin-only@127.0.0.1:55437/postgres"
 _CONTAINER = "caos-workbench-dev-test-postgres-1"
@@ -85,6 +92,20 @@ def _approve(
     return next(n.route_node_id for n in route.nodes if n.module_id == "CP-DR")
 
 
+def _check_early_attempt(
+    conn: StoreConnection, run: UUID, attempt: UUID, route: ResolvedRoute
+) -> None:
+    """A version-1 pin and a pre-ordinal attempt, after upgrading past 0011."""
+    assert conn.execute(
+        "SELECT format_version, cos_run_id FROM run_inputs"
+    ).fetchall() == [(1, None)]
+    with pytest.raises(Refusal) as refused:
+        attempt_ordinal(conn, attempt)
+    assert refused.value.code is RefusalCode.ATTEMPT_NOT_FOUND
+    node = route.nodes[0].route_node_id
+    assert attempt_ordinal(conn, start_attempt(conn, run, node)) == 2
+
+
 def _backup_schema(conn: StoreConnection, prefix_seven: bool) -> None:
     with patch.object(
         store, "MIGRATIONS", MIGRATIONS[:7] if prefix_seven else MIGRATIONS
@@ -92,7 +113,7 @@ def _backup_schema(conn: StoreConnection, prefix_seven: bool) -> None:
         apply_schema(conn)
 
 
-def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:
+def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa: PLR0915
     docker = shutil.which("docker")
     assert docker is not None, "Docker CLI required for this manual proof"
     env = {
@@ -128,20 +149,33 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:
                         conn, BoundaryText.of("complete input restore")
                     )
                     run, sources, bundle, route = _prepare(conn, case_id, blobs.root)
-                    pin = pin_run_input(
-                        conn, run, sources.version, bundle, {"q": "Café?"}
-                    )
-                    attempt = start_attempt(
-                        conn, run, _approve(conn, case_id, run, route)
-                    )
-                    reserve(conn, attempt, Decimal("0.25"))
-                    accept_attempt(
-                        conn,
-                        attempt_id=attempt,
-                        accepted=Accepted(
-                            digest, Decimal("0.75"), "synthetic", "restore"
-                        ),
-                    )
+                    if prefix_seven:
+                        # Today's pin and attempt writers need columns a prefix-7
+                        # schema lacks: both are written as that code wrote them.
+                        pin = pin_version_one(conn, run, sources, bundle, route)
+                        attempt = uuid4()
+                        conn.execute(
+                            "INSERT INTO run_attempts"
+                            " (attempt_id, run_id, route_node_id) VALUES (%s, %s, %s)",
+                            (attempt, run, route.nodes[0].route_node_id),
+                        )
+                        conn.commit()
+                        reserve(conn, attempt, Decimal("0.25"))
+                    else:
+                        pin = pin_run_input(
+                            conn, run, sources.version, bundle, {"q": "Café?"}
+                        )
+                        attempt = start_attempt(
+                            conn, run, _approve(conn, case_id, run, route)
+                        )
+                        reserve(conn, attempt, Decimal("0.25"))
+                        accept_attempt(
+                            conn,
+                            attempt_id=attempt,
+                            accepted=Accepted(
+                                digest, Decimal("0.75"), "synthetic", "restore"
+                            ),
+                        )
                 columns = _columns(conn)
                 before = _records(conn, columns)
                 catalog = _catalog(conn)
@@ -202,10 +236,13 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:
                 ).fetchone() == (1 if migrated else 0,)
                 assert conn.execute(
                     "SELECT count(*) FROM call_outcomes"
-                ).fetchone() == (1 if migrated else 0,)
+                ).fetchone() == (1 if migrated and not prefix_seven else 0,)
                 if migrated:
                     assert load_run_input(conn, run) == pin
-                    assert remaining(conn, run) == Decimal("4.25")
+                    spent = Decimal("4.75") if prefix_seven else Decimal("4.25")
+                    assert remaining(conn, run) == spent
+                if prefix_seven:
+                    _check_early_attempt(conn, run, attempt, route)
                 _check_frozen(conn, sources.members[0].source_id if migrated else None)
                 for (source,) in conn.execute(
                     "SELECT source_id FROM sources"

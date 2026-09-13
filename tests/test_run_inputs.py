@@ -20,7 +20,7 @@ from server.methodology.bundle import Bundle
 from server.refusals import Refusal
 from server.store import StoreConnection, connect, run_inputs
 from server.store.cases import lock_case
-from server.store.events import RunEvent, append, events_of
+from server.store.events import RunEvent, append, events_of, lock_run
 from server.store.gates import withdraw_source
 from server.store.routes import pin_route
 from server.store.run_inputs import RunInput, load_run_input, pin_run_input
@@ -42,6 +42,42 @@ def _prepare(
     )
     pin_route(conn, run, route)
     return run, source, Bundle(CATALOG_PATH.parents[3]), route
+
+
+def pin_version_one(
+    conn: StoreConnection,
+    run: UUID,
+    source: SourceSet,
+    bundle: Bundle,
+    route: ResolvedRoute,
+) -> RunInput:
+    """A version-1 pin written exactly as the pre-0011 code wrote it, so a
+    database at an older migration prefix can hold one."""
+    lock_run(conn, run)
+    pin = RunInput(
+        run,
+        source.case_id,
+        source.version,
+        source.fingerprint,
+        route_digest(route),
+        bundle.build_id,
+        bundle.manifest_sha256,
+        methodology.CLAIMS_ADAPTER_VERSION,
+        run_inputs._research({"q": "Café?"}),
+        "",
+    )
+    pin = replace(pin, input_fingerprint=run_inputs._fingerprint(pin))
+    fields = run_inputs.input_fields(pin)
+    conn.execute(
+        psycopg.sql.SQL("INSERT INTO run_inputs ({}) VALUES ({})").format(
+            psycopg.sql.SQL(",").join(map(psycopg.sql.Identifier, fields)),
+            psycopg.sql.SQL(",").join(psycopg.sql.Placeholder() for _ in fields),
+        ),
+        tuple(fields.values()),
+    )
+    append(conn, run, RunEvent.INPUT_PINNED)
+    conn.commit()
+    return pin
 
 
 @pytest.fixture
@@ -389,7 +425,7 @@ def test_native_foreign_keys_bind_actual_case_source_and_route(
     pin = pin_run_input(conn, run, source.version, bundle)
     extra = start_run(conn, source.case_id)
     pin_route(conn, extra, route)
-    values = asdict(replace(pin, run_id=extra))
+    values = run_inputs.input_fields(replace(pin, run_id=extra))
     values[field] = (
         uuid4()
         if field.endswith("_id")

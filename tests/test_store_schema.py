@@ -27,7 +27,7 @@ import psycopg
 import pytest
 from test_case_ordering import _blocked, _wait_for_blocking
 from test_extraction_provenance import Reader
-from test_run_inputs import Prepared, _prepare
+from test_run_inputs import Prepared, _prepare, pin_version_one
 
 import server.store as store
 from server.blobs import BlobStore
@@ -38,7 +38,7 @@ from server.evidence.read import read_block
 from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
 from server.store.routes import resolved_route
-from server.store.run_inputs import load_run_input, pin_run_input
+from server.store.run_inputs import RunInput, load_run_input
 from server.store.runs import create_case, run_status, start_run
 
 # A declared schema that differs from the repository's by one table -- the shape
@@ -704,6 +704,11 @@ def test_invalid_populated_money_upgrade_refuses_atomically(
             )
 
 
+# The version-1 pin each prefix-7 fixture wrote; an older schema cannot be
+# read back through today's loader.
+_PINNED: dict[UUID, RunInput] = {}
+
+
 @pytest.fixture
 def known_prefix(
     empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -714,7 +719,7 @@ def known_prefix(
             apply_schema(conn)
         case_id = create_case(conn, BoundaryText.of("prefix seven"))
         run, sources, bundle, route = _prepare(conn, case_id, tmp_path)
-        pin_run_input(conn, run, sources.version, bundle)
+        _PINNED[run] = pin_version_one(conn, run, sources, bundle, route)
         yield conn, run, sources, bundle, route
 
 
@@ -791,7 +796,7 @@ def test_exact_historical_unicode_float_output_and_complete_pin_upgrade(
     known_prefix: Prepared, tmp_path: Path, digits: int
 ) -> None:
     conn, run, sources, _, _ = known_prefix
-    pin = load_run_input(conn, run)
+    pin = _PINNED[run]
     identity = ExtractorIdentity("retired-custom", "historical-v1", {"signed": -0.0})
     coordinate = 0.12345678901234566
     reader = Reader(
@@ -809,11 +814,13 @@ def test_exact_historical_unicode_float_output_and_complete_pin_upgrade(
         extractor=cast(Extractor, reader),
     )
     conn.commit()
-    before = repr(_records(conn))
+    # Later migrations add columns; the rows that existed must not move.
+    columns = _columns(conn)
+    before = repr(_records(conn, columns))
     conn.execute(f"SET extra_float_digits = {digits}")
     apply_schema(conn)
     conn.execute("SET extra_float_digits = 3")
-    assert repr(_records(conn)) == before
+    assert repr(_records(conn, columns)) == before
     assert load_run_input(conn, run) == pin
     assert conn.execute("SELECT count(*) FROM source_extractions").fetchone() == (2,)
     catalog = _catalog(conn)

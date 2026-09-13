@@ -36,6 +36,9 @@ from server.store.outcomes import (
     record_outcome,
 )
 
+# The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
+MAX_ATTEMPT_ORDINAL = 256
+
 
 def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
     """Open a case. Its title crossed the boundary before it got here."""
@@ -94,15 +97,39 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
+    # Under the run lock, so two starts cannot take one ordinal. Counting rows
+    # rather than reading the maximum keeps attempts that predate ordinals.
+    counted = conn.execute(
+        "SELECT count(*) FROM run_attempts WHERE run_id = %s AND route_node_id = %s",
+        (run_id, route_node_id),
+    ).fetchone()
+    ordinal = (counted[0] if counted else 0) + 1
+    if ordinal > MAX_ATTEMPT_ORDINAL:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.ATTEMPT_LIMIT_REACHED)
     attempt_id = uuid4()
     conn.execute(
-        "INSERT INTO run_attempts (attempt_id, run_id, route_node_id)"
-        " VALUES (%s, %s, %s)",
-        (attempt_id, run_id, route_node_id),
+        "INSERT INTO run_attempts (attempt_id, run_id, route_node_id, ordinal)"
+        " VALUES (%s, %s, %s, %s)",
+        (attempt_id, run_id, route_node_id, ordinal),
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
     conn.commit()
     return attempt_id
+
+
+def attempt_ordinal(conn: StoreConnection, attempt_id: UUID) -> int:
+    """The stored ordinal the vendor attempt id is derived from, never recovered.
+
+    Refuses `ATTEMPT_NOT_FOUND` for an unknown attempt and for one that predates
+    ordinals, which no canonical handoff can name.
+    """
+    row = conn.execute(
+        "SELECT ordinal FROM run_attempts WHERE attempt_id = %s", (attempt_id,)
+    ).fetchone()
+    if row is None or row[0] is None:
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    return int(row[0])
 
 
 @dataclass(frozen=True, slots=True)
