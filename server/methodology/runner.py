@@ -30,7 +30,7 @@ from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import execute_handoff
 from server.methodology.envelope import Envelope
-from server.methodology.executor import Assignment, execute_module
+from server.methodology.executor import Assignment
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -81,49 +81,37 @@ class ModuleProvider:
         ]
         if len(nodes) != 1 or pin is None:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        # One adapter executes (§42.1): any other pin refuses before the call,
+        # and `execute_handoff` refuses it again under its own read unit.
+        if pin.adapter_version != CANONICAL_ADAPTER_VERSION:
+            raise Refusal(RefusalCode.RUN_INPUT_INVALID)
         assignment = Assignment(
             module_id, self.run_id, nodes[0], self.route, attempt_id
         )
-        # The pinned adapter chooses the executor (§42.1); each executor
-        # refuses a pin of the other adapter again under its own read unit.
-        if pin.adapter_version == CANONICAL_ADAPTER_VERSION:
-            handoff = execute_handoff(
-                self.conn,
-                self.bundle,
-                self.blobs,
-                assignment=assignment,
-                provider=self.completions,
-            )
-            # Billed before analysis; a write failing here accepts nothing.
-            stored: tuple[str, str] | None = None
-            try:
-                markdown = self.blobs.put(handoff.markdown)
-                stored = markdown, self.blobs.put(handoff.record)
-            except (OSError, Refusal):
-                pass  # raised below, outside the handler: no context carried
-            if stored is None:
-                raise Refusal(RefusalCode.STORE_UNAVAILABLE)
-            artifact, record = stored
-            return ProviderResult(
-                artifact_sha256=artifact,
-                charge=handoff.charge,
-                model=handoff.model,
-                generation_id=handoff.generation_id,
-                record_sha256=record,
-                diagnostic_sha256=handoff.diagnostic_sha256,
-            )
-        outcome = execute_module(
+        handoff = execute_handoff(
             self.conn,
             self.bundle,
             self.blobs,
             assignment=assignment,
             provider=self.completions,
         )
+        # Billed before analysis; a write failing here accepts nothing.
+        stored: tuple[str, str] | None = None
+        try:
+            markdown = self.blobs.put(handoff.markdown)
+            stored = markdown, self.blobs.put(handoff.record)
+        except (OSError, Refusal):
+            pass  # raised below, outside the handler: no context carried
+        if stored is None:
+            raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+        artifact, record = stored
         return ProviderResult(
-            artifact_sha256=self.blobs.put(canonical(outcome.envelope)),
-            charge=outcome.charge,
-            model=outcome.model,
-            generation_id=outcome.generation_id,
+            artifact_sha256=artifact,
+            charge=handoff.charge,
+            model=handoff.model,
+            generation_id=handoff.generation_id,
+            record_sha256=record,
+            diagnostic_sha256=handoff.diagnostic_sha256,
         )
 
 

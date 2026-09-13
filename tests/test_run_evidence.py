@@ -11,7 +11,7 @@ import pytest
 from psycopg.pq import TransactionStatus
 from test_extraction_provenance import Reader
 from test_read_evidence import _CountingConnection
-from test_run_inputs import Prepared, prepared
+from test_run_inputs import SUBJECT, Prepared, prepared
 from test_source_sets import _admit
 
 from server.boundary_text import BoundaryText
@@ -30,7 +30,7 @@ __all__ = ["prepared"]
 @pytest.fixture
 def pinned(prepared: Prepared) -> Prepared:
     conn, run, sources, bundle, _ = prepared
-    pin_run_input(conn, run, sources.version, bundle)
+    pin_run_input(conn, run, sources.version, bundle, subject=SUBJECT)
     return prepared
 
 

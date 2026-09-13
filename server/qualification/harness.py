@@ -71,7 +71,6 @@ from server.engine.route import (
 )
 from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
-from server.methodology import CANONICAL_ADAPTER_VERSION, adapter_for
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.pricing import ModelPrice, worst_case
@@ -237,7 +236,7 @@ def prepare(
     _affordable(qualification, harness, routes)
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-    _subjects(qualification, routes)
+    _subjects(qualification)
     require_idle(conn)
     prepared = []
     try:
@@ -408,20 +407,16 @@ def _affordable(
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 
-def _subjects(qualification: QualificationSet, routes: Sequence[ResolvedRoute]) -> None:
+def _subjects(qualification: QualificationSet) -> None:
     """Every case's subject is one its pin would accept, checked before any write.
 
-    `pin_run_input` refuses a canonical-adapter route without a subject, and an
-    invalid subject, but only as the last step of each case -- after the cases
-    ahead of it were created, admitted and pinned. Asked here of the whole set,
-    so a set that cannot be pinned writes nothing.
+    `pin_run_input` refuses a missing or invalid subject on every route, but
+    only as the last step of each case -- after the cases ahead of it were
+    created, admitted and pinned. Asked here of the whole set, so a set that
+    cannot be pinned writes nothing.
     """
-    for case, route in zip(qualification.cases, routes, strict=True):
-        canonical = adapter_for(route) == CANONICAL_ADAPTER_VERSION
-        # A subject on a claims route would be signed and never used.
-        if (case.subject is None) == canonical or (
-            case.subject is not None and not valid_subject(case.subject)
-        ):
+    for case in qualification.cases:
+        if not valid_subject(case.subject):
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
 
 
@@ -571,8 +566,8 @@ def _accepted(
 ) -> dict[str, NodeResult]:
     """What the run accepted, and never a reason to end the set.
 
-    `accepted_artifacts` reads CP-0's readiness -- a claims body, or a canonical
-    record verified under the harness's bundle -- to recover the
+    `accepted_artifacts` reads CP-0's readiness -- a record verified under the
+    harness's bundle -- to recover the
     readiness a soft edge turns on, and bytes that will not load raise — which,
     left unguarded here, would take down the whole set from inside the function
     added to keep one bad case from doing that. A run whose artifacts cannot be

@@ -32,7 +32,6 @@ from server.engine.route import (
 )
 from server.evidence.citations import verify_citations
 from server.evidence.read import read_run_block
-from server.methodology import CLAIMS_ADAPTER_VERSION as CLAIMS_ADAPTER_VERSION
 from server.methodology.bundle import (
     Authority,
     Bundle,
@@ -60,6 +59,10 @@ from server.store.outcomes import (
     record_outcome,
     require_idle,
 )
+
+# The retired claims adapter (§42.1). No run pins it and `execution_input`
+# refuses any pin that does, so `execute_module` is unreachable; f-2b deletes it.
+CLAIMS_ADAPTER_VERSION = "claims-json-v1"
 
 # The two ways a quote fails to anchor. Either costs the claim resting on it and
 # nothing more (docs/DECISIONS.md §26); any other refusal is the module breaking

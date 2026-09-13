@@ -40,7 +40,6 @@ from server.engine.route import resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.pdf import PdfExtractor
-from server.methodology import CANONICAL_ADAPTER_VERSION, adapter_for
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import OpenRouter
@@ -147,8 +146,7 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     ).fetchall()
     assert {row[0] for row in producers} == {completions.model}
     assert all(row[1] for row in producers), "a call left no handle for the bill"
-    if adapter_for(route) == CANONICAL_ADAPTER_VERSION:
-        assert all(row[2] for row in producers), "a canonical node has no record"
+    assert all(row[2] for row in producers), "an accepted node has no record"
 
     charges = conn.execute(
         "SELECT amount FROM budget_ledger WHERE run_id = %s", (run_id,)

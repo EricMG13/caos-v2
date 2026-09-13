@@ -258,10 +258,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   ships. No HTTP test covers a canonical `read_run` over a QA_GATE verdict
   other than `Passed`, because the catalog's only QA_GATE (CP-5 -> CP-6) sits
   on a route the canonical adapter does not execute (§42.2); the view function
-  that projects a stored `qa_status` is tested directly instead. *Upgrade:*
-  f-1c makes readers refuse a NULL record and removes the dispatch and the
-  claims executor, and the HTTP gap closes the day Phase 5 extends the
-  canonical adapter to a route carrying that QA_GATE.
+  that projects a stored `qa_status` is tested directly instead. Since f-1c
+  the adapter is one constant: every reader refuses a row without its record
+  `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
+  `RUN_INPUT_INVALID`, and every route with a module outside CP-0, CP-L10 and
+  CP-5 -- FULL, DEEP and every other catalog pathway -- pins and passes its
+  gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
+  before any attempt, reservation or call) and at acceptance. A harness case
+  on such a route still prepares and is refused only when performed. The
+  claims executor, `envelope.py` and the claims deliverable render remain,
+  unreachable from any pin. *Upgrade:* f-2a/f-2b delete that dead code, and
+  the HTTP gap closes the day Phase 5 extends the canonical adapter (and its
+  contract tests) to a route carrying that QA_GATE.
 - **The orchestration proof over a canonical run proves it now, not
   continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
   binds the record to the identity rebuilt from the store, requires the pin's
@@ -274,8 +282,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `host_identity` refusal keeps its own code. It proves a BLOCKED run's
   accepted artifacts and says nothing of the node that never ran. Beside its
   counts it returns `anchored`, the `(module_id, document_sha256,
-  matched_text)` it re-anchored under the pinned modules (empty for claims),
-  and the matrix (d-3b) scores exactly that set with no second artifact or
+  matched_text)` it re-anchored under the pinned modules, and the matrix (d-3b) scores exactly that set with no second artifact or
   record read: an artifact accepted after the proof is not scored, an unproven
   canonical run cites nothing, and a proven document no longer among
   `pinned_live_sources` at scoring refuses the row
@@ -493,8 +500,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   reader that can be handed one.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
-  re-deriving the proof (and, for a claims run only, re-reading every artifact
-  for its citations; a canonical run is scored from its proof). Two of
+  re-deriving the proof (a run is scored from its proof, not by re-reading
+  artifacts). Two of
   those are deliberate: the matrix stands alone, and reading a proof back from
   the harness would make it trust a caller's copy of what the store said
   (invariant 3). Against a provider call per node none of it shows. *Upgrade:*
