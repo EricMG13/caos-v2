@@ -575,23 +575,37 @@ def _events(harness: _Harness, name: str) -> int:
     return int(row[0])
 
 
-def _lockable(harness: _Harness) -> bool:
-    """Whether an independent connection can take case and run locks now."""
+def _free(harness: _Harness, table: str) -> bool:
+    """Whether an independent connection can lock this case or run row now."""
+    column = {"cases": "case_id", "runs": "run_id"}[table]
+    key = harness.case_id if table == "cases" else harness.run_id
     with connect(harness.url) as other:
         try:
             other.execute(
-                "SELECT 1 FROM cases WHERE case_id=%s FOR UPDATE NOWAIT",
-                (harness.case_id,),
-            )
-            other.execute(
-                "SELECT 1 FROM runs WHERE run_id=%s FOR UPDATE NOWAIT",
-                (harness.run_id,),
+                psycopg.sql.SQL(
+                    "SELECT 1 FROM {} WHERE {}=%s FOR UPDATE NOWAIT"
+                ).format(psycopg.sql.Identifier(table), psycopg.sql.Identifier(column)),
+                (key,),
             )
         except psycopg.errors.LockNotAvailable:
             return False
         finally:
             other.rollback()
     return True
+
+
+def _lockable(harness: _Harness) -> tuple[bool, bool]:
+    """(case lock free, run lock free), each probed on its own connection."""
+    return _free(harness, "cases"), _free(harness, "runs")
+
+
+def _still_running(harness: _Harness) -> None:
+    """F02: a refused post-call path leaves the run RUNNING, never COMPLETE."""
+    with connect(harness.url) as observer:
+        status = observer.execute(
+            "SELECT status FROM runs WHERE run_id=%s", (harness.run_id,)
+        ).fetchone()
+    assert (status, _events(harness, "RUN_COMPLETE")) == (("RUNNING",), 0)
 
 
 def _provider(
@@ -660,7 +674,7 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
     monkeypatch.setattr(executor, "check_attempt", stamp("check", check_attempt))
     monkeypatch.setattr(executor, "execution_input", stamp("input", execution_input))
     monkeypatch.setattr(executor, "_envelope", envelope)
-    idle_unlocked: list[tuple[object, bool]] = []
+    idle_unlocked: list[tuple[object, tuple[bool, bool]]] = []
     completion = _DuringCompletion(
         _Completions(harness.source_id),
         lambda: idle_unlocked.append(
@@ -680,15 +694,20 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
         MODEL,
         1,
     )
-    assert idle_unlocked == [(TransactionStatus.IDLE, True)]
+    assert idle_unlocked == [(TransactionStatus.IDLE, (True, True))]
     assert [name for name, _ in stamps] == ["check", "input"]
     assert stamps[0][1] == stamps[1][1]
     assert during == [
-        (TransactionStatus.INTRANS, ("read committed",), (1, [REPORTED]), False)
+        (
+            TransactionStatus.INTRANS,
+            ("read committed",),
+            (1, [REPORTED]),
+            (False, False),
+        )
     ]
     assert (harness.conn.info.transaction_status, _lockable(harness)) == (
         TransactionStatus.IDLE,
-        True,
+        (True, True),
     )
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
 
@@ -748,6 +767,7 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
         0,
     )
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    _still_running(harness)
 
 
 def _assignment(harness: _Harness, provider: ModuleProvider) -> Assignment:
@@ -755,7 +775,7 @@ def _assignment(harness: _Harness, provider: ModuleProvider) -> Assignment:
         return provider._assignment(harness.route.nodes[0])
 
 
-def test_direct_executor_refuses_module_before_and_node_after_the_call(
+def test_direct_executor_refuses_module_before_the_call_and_node_before_analysis(
     harness: _Harness,
 ) -> None:
     completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
@@ -792,6 +812,36 @@ def test_direct_executor_refuses_module_before_and_node_after_the_call(
     )
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert harness.conn.info.transaction_status is TransactionStatus.IDLE
+    _still_running(harness)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="RED for Task17d3: pre-call identity compares node id and module, "
+    "not the whole pinned node, so a moved node is billed before refusal "
+    "(invariant 8)",
+)
+def test_direct_executor_refuses_a_moved_node_before_any_call(
+    harness: _Harness,
+) -> None:
+    completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
+    assignment = _assignment(harness, _provider(harness, completion))
+    moved = replace(assignment.node, stage=assignment.node.stage + 7)
+    attempt = _reserved(harness)
+    with pytest.raises(Refusal) as node:
+        execute_module(
+            harness.conn,
+            harness.bundle,
+            attempt_id=attempt,
+            assignment=replace(assignment, node=moved),
+            provider=completion,
+        )
+    assert (node.value.code, completion.calls, _counts(harness)) == (
+        RefusalCode.ROUTE_IDENTITY_INVALID,
+        0,
+        (0, [], 0, 1, 1),
+    )
 
 
 @dataclass
@@ -827,6 +877,7 @@ def test_known_provider_refusal_keeps_precedence_over_stale_authority(
         1,
     )
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    _still_running(harness)
 
 
 def _fail_in_analysis(
@@ -865,7 +916,11 @@ def test_native_sql_error_after_billing_is_sanitized_and_leaves_the_bill(
         None,
         TransactionStatus.IDLE,
     )
-    assert (_counts(harness), _lockable(harness)) == ((1, [REPORTED], 0, 1, 1), True)
+    assert (_counts(harness), _lockable(harness)) == (
+        (1, [REPORTED], 0, 1, 1),
+        (True, True),
+    )
+    _still_running(harness)
 
 
 def test_cancellation_in_analysis_propagates_and_leaves_the_bill(
@@ -877,7 +932,11 @@ def test_cancellation_in_analysis_propagates_and_leaves_the_bill(
     raised = _fail_in_analysis(harness, monkeypatch, cancel)
     assert type(raised) is KeyboardInterrupt
     assert harness.conn.info.transaction_status is TransactionStatus.IDLE
-    assert (_counts(harness), _lockable(harness)) == ((1, [REPORTED], 0, 1, 1), True)
+    assert (_counts(harness), _lockable(harness)) == (
+        (1, [REPORTED], 0, 1, 1),
+        (True, True),
+    )
+    _still_running(harness)
 
 
 def test_rollback_failure_closes_and_keeps_the_typed_refusal(
@@ -893,7 +952,11 @@ def test_rollback_failure_closes_and_keeps_the_typed_refusal(
     raised = _fail_in_analysis(harness, monkeypatch, refuse_and_break_rollback)
     assert isinstance(raised, Refusal)
     assert (raised.code, harness.conn.closed) == (RefusalCode.ENVELOPE_INVALID, True)
-    assert (_counts(harness), _lockable(harness)) == ((1, [REPORTED], 0, 1, 1), True)
+    assert (_counts(harness), _lockable(harness)) == (
+        (1, [REPORTED], 0, 1, 1),
+        (True, True),
+    )
+    _still_running(harness)
 
 
 @dataclass
@@ -983,10 +1046,12 @@ def test_outcome_persistence_failure_accepts_nothing_and_keeps_the_reservation(
             other.execute("ALTER TABLE call_outcomes RENAME TO call_outcomes_hidden")
             other.commit()
 
-    code = _run(harness, _Charged(harness, REPORTED, hide_outcomes))
-    with connect(harness.url) as other:
-        other.execute("ALTER TABLE call_outcomes_hidden RENAME TO call_outcomes")
-        other.commit()
+    try:
+        code = _run(harness, _Charged(harness, REPORTED, hide_outcomes))
+    finally:
+        with connect(harness.url) as other:
+            other.execute("ALTER TABLE call_outcomes_hidden RENAME TO call_outcomes")
+            other.commit()
 
     assert (code, harness.conn.info.transaction_status) == (
         RefusalCode.STORE_UNAVAILABLE,
@@ -996,6 +1061,7 @@ def test_outcome_persistence_failure_accepts_nothing_and_keeps_the_reservation(
     assert [
         _events(harness, n) for n in ("CALL_OUTCOME_RECORDED", "ATTEMPT_ACCEPTED")
     ] == [0, 0]
+    _still_running(harness)
 
 
 def test_guard_is_restored_when_the_guarded_change_fails(harness: _Harness) -> None:
