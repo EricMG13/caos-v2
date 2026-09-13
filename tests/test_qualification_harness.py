@@ -107,7 +107,7 @@ class _Completions:
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.prompts.append(prompt)
         if len(self.prompts) == self.refuses_call:
-            raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE)
+            return Completion(None, None, None, RefusalCode.PROVIDER_UNAVAILABLE)
         source_id = prompt.split("source_id: ")[1].split("\n")[0].strip()
         return Completion(
             content=json.dumps(
@@ -171,7 +171,7 @@ class _DamagesWhatWasAccepted:
         else:
             for [digest] in self.conn.execute("SELECT artifact_sha256 FROM artifacts"):
                 self.blobs.path_of(str(digest)).write_bytes(b"not an envelope")
-        raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE)
+        return Completion(None, None, None, RefusalCode.PROVIDER_UNAVAILABLE)
 
 
 def _case(label: str, data: bytes, *, quote: str = QUOTE) -> QualificationCase:

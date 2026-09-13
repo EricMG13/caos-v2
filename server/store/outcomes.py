@@ -93,20 +93,30 @@ def _record(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
     return True
 
 
+def producer_identifier(value: object, *, limit: int) -> str | None:
+    """An exact producer identifier, or unknown; never coerce response fields."""
+    if (
+        isinstance(value, str)
+        and len(value) <= limit
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]*", value) is not None
+    ):
+        return value
+    return None
+
+
 def _validate(outcome: CallOutcome) -> None:
     if not isinstance(outcome, CallOutcome):
         raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
     if outcome.charge is not None:
         validate_spend(outcome.charge)
-    for value, pattern in (
-        (outcome.model, r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}"),
-        (outcome.generation_id, r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}"),
-        (outcome.diagnostic_sha256, r"[0-9a-f]{64}"),
-    ):
-        if value is not None and (
-            not isinstance(value, str) or re.fullmatch(pattern, value) is None
-        ):
+    for value, limit in ((outcome.model, 256), (outcome.generation_id, 512)):
+        if value is not None and producer_identifier(value, limit=limit) is None:
             raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
+    digest = outcome.diagnostic_sha256
+    if digest is not None and (
+        not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
+        raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
 
 
 def _attempt_owner(conn: StoreConnection, attempt_id: UUID) -> tuple[UUID, UUID]:

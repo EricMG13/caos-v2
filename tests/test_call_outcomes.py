@@ -22,6 +22,19 @@ OUTCOME_EVENT = "CALL_OUTCOME_RECORDED"
 money_run = _money_run
 
 
+@pytest.mark.parametrize("limit", [256, 512])
+@pytest.mark.parametrize(
+    "value", ["a", "A0._:/@+-", "", "_bad", "bad\n", "é", {}, True]
+)
+def test_producer_identifier_retains_the_exact_storage_grammar(
+    limit: int, value: object
+) -> None:
+    expected = value if value in ("a", "A0._:/@+-") else None
+    assert outcomes.producer_identifier(value, limit=limit) == expected
+    assert outcomes.producer_identifier("x" * limit, limit=limit) == "x" * limit
+    assert outcomes.producer_identifier("x" * (limit + 1), limit=limit) is None
+
+
 def _outcome(**changes: object) -> outcomes.CallOutcome:
     return replace(
         outcomes.CallOutcome(ACCEPTED.charge, ACCEPTED.model, ACCEPTED.generation_id),
