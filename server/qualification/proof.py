@@ -28,8 +28,10 @@ record, never parsed as claims: both blobs are read, the record must bind this
 Markdown and the identity rebuilt from the store, its adapter, build, manifest
 and authority must be the pin's and the bundle's, the Markdown re-validated must
 project exactly what the record says, and every recorded citation must re-anchor
-in the run's pinned, live sources on exactly the recorded rectangles. These are
-the verdicts `server/deliverable/canonical.py` reaches, under the proof's codes.
+in the run's pinned, live sources on exactly the recorded rectangles. The
+sources (`pinned_live_sources`) and the call-time identity (`call_time_identity`)
+are the ones `server/deliverable/canonical.py` reads, so both reach the same
+verdict, under the proof's codes.
 """
 
 from __future__ import annotations
@@ -42,7 +44,6 @@ from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
-from server.deliverable.canonical import _call_time
 from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import AnchoredCitation, Citation, verify_citations
 from server.methodology.bundle import (
@@ -52,13 +53,14 @@ from server.methodology.bundle import (
     verified_bytes,
 )
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
-from server.methodology.invocation import host_identity
+from server.methodology.invocation import call_time_identity, host_identity
 from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.routes import resolved_route
 from server.store.run_inputs import load_run_input
+from server.store.source_sets import pinned_live_sources
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +131,7 @@ def assert_orchestration_proof(
     ):
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 
-    live = _pinned_sources(conn, run_id)
+    live = pinned_live_sources(conn, run_id)
     reader = None
     if pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION:
         reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live)
@@ -219,8 +221,13 @@ class _CanonicalReader:
         hash to their address; `ORCHESTRATION_BUILD_MOVED` for a record written
         under another adapter, build, manifest or authority;
         `ORCHESTRATION_SOURCE_NOT_PINNED` and `ORCHESTRATION_CITATION_LOST` as
-        for claims; `ARTIFACT_RECORD_MISMATCH` for everything else that does not
-        bind -- a missing record, the identity, the projections.
+        for claims; `host_identity`'s own code when the store cannot rebuild the
+        identity at all (`ATTEMPT_NOT_FOUND` for an attempt without its ordinal,
+        `ROUTE_IDENTITY_INVALID` for a blocking input with no accepted artifact),
+        raised by it outside any handler and meaning what it means at the call;
+        `ARTIFACT_RECORD_MISMATCH` for everything else that does not bind -- a
+        missing record, a rebuilt identity the record does not carry, the
+        projections.
         """
         mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
         if record_sha256 is None:
@@ -230,19 +237,17 @@ class _CanonicalReader:
         if markdown is None or stored is None:
             raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
         bundle, route = self.bundle, self.route
-        host = _unless_refused(
-            lambda: host_identity(
-                self.conn,
-                bundle,
-                run_id=self.run_id,
-                route=route,
-                node=node,
-                attempt_id=attempt_id,
-            )
+        host = host_identity(
+            self.conn,
+            bundle,
+            run_id=self.run_id,
+            route=route,
+            node=node,
+            attempt_id=attempt_id,
         )
-        if host is None:
-            raise mismatch
-        expected = _call_time(self.blobs, route, host, record_sha256)
+        expected = call_time_identity(
+            self.conn, route, host, attempt_id=attempt_id, record=stored
+        )
         record = _unless_refused(
             lambda: read_record(
                 self.blobs,
@@ -382,32 +387,6 @@ def _relocates(conn: StoreConnection, citation: object, live: dict[str, UUID]) -
 def _rectangles(anchored: AnchoredCitation) -> list[list[float]]:
     """The re-derived rectangles in the shape the stored envelope uses."""
     return [[box.page, box.x0, box.y0, box.x1, box.y1] for box in anchored.bboxes]
-
-
-def _pinned_sources(conn: StoreConnection, run_id: UUID) -> dict[str, UUID]:
-    """Document digest to source id, for the run's captured sources still live.
-
-    The captured member, not whatever the case holds now: a source admitted
-    after the pin, or a re-admitted copy of a withdrawn one, is a different
-    source id and never supports this run (invariant 1). A member whose document
-    or extraction identity moved is absent too, as it is at execution. Liveness
-    is checked per cited document, the proof's use; the gate checks every member.
-    """
-    rows = conn.execute(
-        "SELECT m.document_sha256, m.source_id FROM run_inputs i"
-        " JOIN source_set_members m"
-        " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
-        " JOIN live_sources s ON (s.case_id, s.source_id) = (m.case_id, m.source_id)"
-        " JOIN source_extractions e ON e.source_id = s.source_id"
-        " WHERE i.run_id = %s AND (s.document_sha256, e.extractor_identity,"
-        " e.output_sha256, e.extraction_sha256) = (m.document_sha256,"
-        " m.extractor_identity, m.output_sha256, m.extraction_sha256)"
-        # ponytail: two captured members with the same bytes resolve to one,
-        # deterministically; the envelope cites by digest, not by source id.
-        " ORDER BY m.source_id DESC",
-        (run_id,),
-    ).fetchall()
-    return {str(row[0]): UUID(str(row[1])) for row in rows}
 
 
 def _pinned_digest(conn: StoreConnection, run_id: UUID) -> str:

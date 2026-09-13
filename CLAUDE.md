@@ -193,10 +193,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   that gap freezes and is caught by `verify_frozen`, not by the freeze. Proof is
   re-derived under the bundle and live sources present now: a bundle upgrade
   (as for the proof, Phase 10) or a withdrawn source makes a filed revision
-  refuse verification. The payload needs every pinned node accepted; the
-  Markdown renders as escaped preformatted text, not formatted Markdown; and a
-  soft upstream ref may be absent from a record, since a call may precede that
-  input's acceptance, and nothing checks that it did. The claims payload still renders beside it until f-2.
+  refuse verification. The payload needs every pinned node accepted, and the
+  Markdown renders as escaped preformatted text, not formatted Markdown. A soft
+  upstream ref may be absent from a record only if that input's artifact was
+  accepted after the attempt started (`call_time_identity`); the comparison is
+  `artifacts.created_at > run_attempts.started_at`, both transaction-start
+  times, so an acceptance whose transaction began before the attempt's and
+  committed after it is refused -- impossible in the one sequential loop,
+  fail-closed under Phase 4's concurrent workers, which should order by event
+  or lease instead. Sources are `pinned_live_sources`, which the proof reads
+  too: a document captured under several live members resolves to the lowest
+  source id when they share one extraction output and to none when they do
+  not. The claims payload still renders beside it until f-2.
   *Upgrade:* derive inside the freeze's lock once artifact rows are immutable,
   and a Markdown renderer with a closed element set when committee layout needs
   one.
@@ -242,10 +250,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   adapter and the bundle's build, manifest and authority, re-validates the
   Markdown against the record's projections and re-anchors every recorded
   citation in the run's pinned live sources on identical rectangles -- the
-  deliverable's verdicts, under the proof's codes. It returns counts only, as
-  for claims, so the matrix still reads quotes from claims envelopes and scores
-  a canonical run as citing nothing. It inherits the deliverable's call-time
-  narrowing of soft upstream refs, which nothing checks, and like every proof
+  deliverable's verdicts, under the proof's codes, through the same two readers
+  (`pinned_live_sources`, `call_time_identity`): a withdrawn or re-extracted
+  source, or a doubly captured document, gets one verdict from both. A
+  `host_identity` refusal keeps its own code. It proves a BLOCKED run's
+  accepted artifacts and says nothing of the node that never ran. It returns
+  counts only, as for claims, so the matrix still reads quotes from claims
+  envelopes and scores a canonical run as citing nothing, and like every proof
   it holds only for the bundle and sources present now. *Upgrade:* d-3b reads
   the proven record's anchored citations for the matrix.
 - **Canonical upstream refs ignore readiness and predicates.**

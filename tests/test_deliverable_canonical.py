@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -62,14 +63,22 @@ def route() -> ResolvedRoute:
     return LITE
 
 
-def _accept(harness: _Harness, module_id: str, **authored: object) -> str:
-    """Accept one canonical handoff with its host record, as c-5 will."""
+def _accept(
+    harness: _Harness, module_id: str, omit_soft: bool = False, /, **authored: object
+) -> str:
+    """Accept one canonical handoff with its host record, as c-5 will.
+
+    `omit_soft` names only CP-0 upstream, as a call made before CP-L10 would.
+    """
     conn, bundle = harness.conn, harness.bundle
     node = next(n for n in harness.route.nodes if n.module_id == module_id)
     attempt = start_attempt(conn, harness.run_id, node.route_node_id)
     identity = host_identity(
         conn, bundle, run_id=harness.run_id, route=LITE, node=node, attempt_id=attempt
     )
+    if omit_soft:
+        kept = tuple(ref for ref in identity.upstream if ref.module_id == "CP-0")
+        identity = replace(identity, upstream=kept)
     markdown = handoff_markdown(
         identity, authored=authored, body_note=f"{QUOTE} <b>held</b> & noted."
     )
