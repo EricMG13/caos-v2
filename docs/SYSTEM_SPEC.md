@@ -1,7 +1,13 @@
 # CAOS v2 — system spec
 
-Structure only. Scope and decisions live in `docs/REBUILD_PLAN.md`; the
-workspace and its sections live in `docs/IA_SPEC.md`.
+Repair target structure. Scope and phase acceptance live in
+`docs/REPAIR_PLAN.md`; decisions §39 reconciles the historical rebuild plan.
+The workspace and its sections live in `docs/IA_SPEC.md`. The tracked handoff
+records what is implemented; a target described here is not an acceptance claim.
+
+Older inherited decision numbers (including §§18, 24, 25, 38, 45 and 48)
+refer to CAOS-Final and resolve through the mapping in decisions §12, not the
+same-numbered local entries. Repair decision §39 governs current phase order.
 
 ---
 
@@ -19,7 +25,7 @@ workspace and its sections live in `docs/IA_SPEC.md`.
    anchoring        + pinning       loop            │          + filing
         └──────────────────┴─────────┼──────────────┴──────────────┘
                           ┌──────────┴───────────┐        ┌─────────────┐
-                          │    PostgreSQL 16     │        │  blob store │
+                          │    PostgreSQL 17     │        │  blob store │
                           │  domain · runs ·     │        │  CAS, sha256│
                           │  events · audit      │        │  bytes only │
                           └──────────────────────┘        └─────────────┘
@@ -29,12 +35,14 @@ workspace and its sections live in `docs/IA_SPEC.md`.
                           └──────────────────────┘
 ```
 
-One process, `api`, one instance (`docs/DECISIONS.md` §48). The run loop is the
-only long-running work and it runs there; the deliverable renders in the
-request. The worker went with the model builds and publication jobs it existed
-to poll for.
+The current host has one API process. Repair Phase 3 proves the shared runtime
+and canonical validator without a worker. Repair Phase 4 adds one worker beside
+the API, with PostgreSQL claims/leases, a shared blob root and the same runtime.
+The API enqueues governed work; disconnecting a browser does not cancel a
+provider operation. Decision §39 supersedes the historical no-worker limit.
 
-No worker, no checkpointer, no second database, no message broker.
+No checkpointer, second database, message broker or restored publication/model
+build service. Worker deployment is a Phase 4 target, not implemented status.
 
 ---
 
@@ -52,9 +60,10 @@ blob store keyed by `sha256`; the database holds the digest, never the bytes.
 | Deliverable | `deliverable_drafts`, `deliverable_opinions`, `deliverable_publications` |
 | Audit | `audit_events`, `audit_chain_heads` |
 
-The target set. `server/store/schema.sql` is what exists; a table arrives there
-in the phase that first writes it, and the tables of phases not yet reached are
-not there.
+This is the target table set. `server/store/schema.sql` is the immutable legacy
+migration; `server.store.MIGRATIONS` defines the current applied schema prefix.
+Tables arrive through append-only migrations with the feature that first writes
+them. Follow `docs/MIGRATIONS.md`; do not edit an applied SQL file.
 
 Rules that do not bend:
 
@@ -90,10 +99,10 @@ host can re-locate a quote and refuse one it cannot.
 The vendored Deploy V bundle is the authority. It is read-only at runtime and
 verified on the bytes at use, not at startup only.
 
-- **Registry** (`methodology/registry.py`) is the only seam. One `ModuleSpec` per
-  live module: `module_id`, execution mode, `skill_slug`, `reference_files`,
-  `max_output_tokens`, `derived_projections`, `source_mode`, `plan_approval`.
-  The live set and each module's files are derived from the catalog and the
+- **Module lookup** is `Bundle.skill_of` in `server/methodology/bundle.py`.
+  Reuse that manifest-backed seam; there is no separate `registry.py` or
+  `ModuleSpec` to implement against. The live set and each module's files come
+  from the catalog and the
   manifest, never written out (`docs/DECISIONS.md` §24); which calculator a
   module may select is a rule, not a field (§25). The host's one declaration
   is `_CARVE_OUTS`: CP-PARSE (§5).
@@ -119,8 +128,7 @@ The full argument is `docs/DECISIONS.md` §2. The contract:
 ```python
 # resolution — pure, no I/O
 resolve_route(catalog, profile_id, selection_id, *,
-              module_order=None,        # CP-0's plan, or None for the whole pathway
-              research_brief=None,      # appends CP-DR at stage 99
+              extensions=None,          # RouteExtensions: research_brief/model_extension
               predicates=None,          # freezes CONDITIONAL edges
              ) -> ResolvedRoute         # nodes (dependency order), typed edges, predicates
 
@@ -142,12 +150,12 @@ Edge types and their meaning are the bundle's, read from `profile["edges"]`:
 `RESTRICTED` — unless the source's readiness is `READY` or
 `READY_WITH_LIMITATIONS`, in which case they block.
 
-The execution loop:
-
-```python
-while ready := frontier(route, attempts, readiness):
-    await gather(*(run_node(n) for n in ready))  # one attempt row per node per try
-```
+The current runtime processes the ready frontier sequentially and recomputes it
+from stored accepted artifacts. Concurrency is not an acceptance prerequisite.
+Repair Phase 2 must additionally derive terminal success from fulfilled
+required obligations: an empty frontier alone cannot mean COMPLETE (§39).
+A blocked route retains its reason and can resume when its permitted inputs or
+approvals change through the governed version/generation mechanism.
 
 - `run_node` reserves budget, resolves the provider, executes, validates the
   envelope, verifies citations, and commits the accepted attempt with its
@@ -427,9 +435,10 @@ arrives with the first logger (`docs/DECISIONS.md` §45).
 
 ## 11. Deployment and failure
 
-Single instance of `api`, one PostgreSQL, one blob store, one reverse proxy.
-Request ceilings are per instance and the instance ceiling is enforced, not
-assumed.
+Repair Phase 4 target: one API instance, one worker, one PostgreSQL, one blob
+store and one reverse proxy. API and worker use the same verified schema/bundle
+and blob configuration. Bound request and worker concurrency explicitly; do not
+assume an instance ceiling without enforcing it.
 
 `GET /api/health` serves liveness and readiness on one strict model — store,
 bundle, blob store — 200 when all hold, 503 otherwise. The

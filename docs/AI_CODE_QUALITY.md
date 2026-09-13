@@ -17,8 +17,8 @@ a tool, not by intention. A control nobody runs is not a control.
 | **Logic & correctness** | +75 % | Test-first for every calculator, state transition and money path. A failing test exists before the implementation. | `superpowers:test-driven-development`; CI refuses a PR whose new public function has no test |
 | **Readability** | 3× | Function length and complexity ceilings; ordinary task review rejects needless complexity | `ruff` (C901, PLR0912/0913/0915); exact-range task review |
 | **Error handling** | ~2× | Typed refusals only. No bare `except`, no `except Exception` without re-raise, no `str(exc)` reaching a log or a wire response | `ruff` (BLE, TRY); the observability test that drives a sentinel document through real ingestion |
-| **Security** | 2.74× | Static analysis, dependency audit, image scan, and a route-level actor matrix that drives every endpoint as nine different actors | `bandit` (pinned 3.12 — see §4), `pip-audit`, Trivy, the actor-matrix test that arrives with the first HTTP route (Phase 6), `gitleaks` |
-| **Formatting** | 2.66× | Formatter runs on write, not on review | `ruff format` + `prettier` in a `PostToolUse` hook and in CI |
+| **Security** | 2.74× | Static analysis, dependency audit, image scan, and a route-level actor matrix that drives every endpoint as nine different actors | `bandit` (pinned 3.12 — see §4), `pip-audit`, Trivy, `gitleaks`; extend the HTTP actor matrix with repaired endpoints in repair Phase 4 |
+| **Formatting** | 2.66× | Format authored files and verify before acceptance | `ruff format` in pre-commit/CI; `prettier --check` in frontend lint/CI; automatic Claude hook currently requires repair |
 | **Naming inconsistency** | ~2× | One glossary. Every domain term in `CONTEXT.md`; a check that new identifiers do not introduce a synonym for an existing term | `CONTEXT.md` + `scripts/check_vocabulary.py` |
 | **Concurrency & dependencies** | ~2× | No new dependency without a dated decision entry. Fully pinned, hashed locks. Every governed race proven on two independent Postgres connections | `test_dependency_pins.py`, `--require-hashes`, `test_postgres_races.py` |
 | **Performance — excessive I/O** | **~8×** | A declared I/O budget per request path, asserted in tests. N+1 detection on every list endpoint | `scripts/io_budget.py` + `test_io_budget.py` |
@@ -36,14 +36,22 @@ budget test is what stops it coming back.
 
 ## 2. Repository controls
 
-### `.claude/settings.json`
+### `.claude/settings.json` — repair required
 
-- **`PostToolUse` on Write|Edit** → `ruff format` + `ruff check --fix` for
-  Python, `prettier` for TS/CSS. Formatting never reaches review.
-- **`PreToolUse` on Bash** → refuse `git push --force`, `git commit --no-verify`,
-  any `pip install` outside the hashed lock, any command that names `.env`
-  (other than `.env.example`), and `printenv`. Credentials are read by the
-  process, never by a command (`docs/DECISIONS.md` §16).
+The current hook commands do not read Claude's JSON-stdin event contract.
+They read `CLAUDE_FILE_PATHS` and `CLAUDE_TOOL_INPUT_command` instead.
+A harmless invocation probe returned success for forbidden-command JSON.
+Consequently, neither formatting-on-edit nor the listed command guard is
+certified enforcement. The tracked handoff makes hook repair a Phase 2 exit
+prerequisite; [PLAN_ADVERSARIAL_REVIEW.md](PLAN_ADVERSARIAL_REVIEW.md) records
+the evidence and required checks.
+
+The intended hooks format only authored Python/TS/CSS files, exclude vendor
+paths, and reject forbidden commands such as force pushes, hook-bypassing
+commits and unpinned installs. Repair them against the documented event input,
+with invocation-level regression tests, before describing them as working.
+Pre-commit and CI checks remain separate obligations.
+
 - **No `Stop` hook.** An earlier draft of this page promised one that ran the
   changed-file tests; it was never built, and a hook that runs the suite would
   need Postgres from Phase 1 on. The gates run in pre-commit and CI instead.
@@ -57,6 +65,9 @@ vocabulary check, the untested-definition check and the I/O-budget floor.
 
 ### CI jobs
 
+Phase numbers in this historical inventory are rebuild phases, not repair
+phases. Current workflow obligations are in `CI_GATE_CONTRACT.md`.
+
 Phase 0 ships `lint` · `types` · `test` · `security` (bandit + pip-audit +
 gitleaks) · `size`. A job arrives with the code it scans (`docs/DECISIONS.md`
 §11): `postgres` (two-connection races, Phase 1) · `sonarqube` (CI analysis
@@ -68,10 +79,10 @@ declares `timeout-minutes`, and a superseded run is cancelled
 
 ### Review
 
-SonarQube Cloud on every PR (`docs/DECISIONS.md` §15) — automatic analysis
-until Phase 1 brings a coverage report into a CI-side analysis. Plus the two
-agent passes above. Three reviewers with different blind spots beats one
-careful one.
+SonarQube Cloud analyzes PRs through the CI-side analysis and coverage import
+(`docs/DECISIONS.md` §15); the hosted quality gate is required. Ordinary review
+closes tasks. The two specialist reviews run only at the phase boundary as
+specified below; historical rebuild timing is not the current cadence.
 
 ---
 
@@ -91,10 +102,15 @@ control nobody runs.
 | `senior-architect` | on a specification or phase-boundary change |
 | `ponytail:ponytail-review` | when a diff grows past its concern |
 | `superpowers:verification-before-completion` | before reporting completion |
-| `impeccable` | Phase 9 only: `critique` the predecessor before designing, `audit` and `polish` the workspace |
+| `impeccable` | Audit/polish changed UI in repair Phases 4–5 when needed; reuse the accepted design, with no new redesign requirement |
 
-The workspace is designed in Claude Design (project `69d37748-8595-4309-9b06-bc5f9529a29c`,
-`DESIGN.md`) with its `hifi-design` workflow before Phase 9 writes a component.
+For Opus 5 planning, briefing and execution settings, use the complementary
+plan's **Reasoning Modes** section. Plan stress tests and blueprint drafting do
+not trigger the whole-phase code-review gates.
+
+The historical workspace was designed in Claude Design (project `69d37748-8595-4309-9b06-bc5f9529a29c`,
+`DESIGN.md`) with its `hifi-design` workflow. Repair work reuses that design;
+a redesign is not a prerequisite.
 
 ---
 

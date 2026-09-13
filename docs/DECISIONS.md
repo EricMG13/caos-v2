@@ -217,7 +217,9 @@ file the host renders from the frozen snapshot — the accepted artifacts in
 route order, every figure carrying its citation — never overwriting, printing
 to paper. The host's chain around it is unchanged: opinion on the exact
 revision, freeze, filing that refuses the signer and the freezer, the detached
-receipt, the package verifiable with the standard library. One process.
+receipt, the package verifiable with the standard library. The original
+one-process deployment is superseded for repair Phase 4 by §39's single API
+plus one PostgreSQL-backed worker; no workbook/publication service is restored.
 Nothing installs LibreOffice or poppler. The Model section shows CP-CF's
 projection, read-only. The workbook and publication contracts are archived
 verbatim under `docs/archive/` for a build that brings them back; `make
@@ -727,7 +729,9 @@ about a module would be a gate that cleared it by omission.
 **A module's own verdict decides its state.** CONDITIONAL and BLOCKED are both
 "not cleared"; READY_WITH_LIMITATIONS is RESTRICTED, which runs and carries the
 limitation; READY leaves the edges in charge. A blocked node costs no call and
-no charge, and the run completes with it reported unrun. The run surface carries
+no charge. Repair decision §39 supersedes the original blocked-but-complete
+rule: unresolved required obligations keep the run recoverably blocked. This
+is a repair target until its implementation and phase exit tests are accepted. The run surface carries
 the verdict as `NodeView.gate_verdict`, because a node the gate blocked has no
 unmet edge for `waiting_on` to name — and a state with no cause is the thing
 `NodeView` ("a node's state and the reason for it") and `waiting_on` ("a surface
@@ -1128,6 +1132,72 @@ deliberately revise the host policy. No live compatibility or pricing claim is
 made. Attempt-bound billing propagation, ending database read transactions before
 calls, conservative priced reservations, runtime authority/evidence binding,
 generation fencing, and blocked/QA terminal semantics remain separate repairs.
+
+## 2026-09-13 §39 — Reconcile the repair plan, acceptance and continuation
+
+The user requested correction of the plan and supporting documents after an
+adversarial documentation review. This entry records the already-requested
+repair target; it does not certify implementation or expand enabled routes.
+
+**Authority.** The user's current instructions govern. This decision record
+resolves design choices; `docs/REPAIR_PLAN.md` owns repair phases 0–6.
+`docs/REBUILD_PLAN.md` and its phase labels remain historical baseline/test
+records. System and IA specifications describe the target, with unfinished
+repairs labelled. `docs/CLAUDE_CODE_HANDOFF.md` alone owns current task status
+and exact accepted checkpoints; other entry documents link to it. Tracked
+task briefs contain enough scope and evidence to resume without ignored logs.
+An implementation commit is not task acceptance. A saved copy of the plan
+points to the maintained repository document.
+
+**Terminal semantics, superseding §27's old completion rule.** A run is
+successful only when all required selected obligations and gates are satisfied.
+An empty frontier with unfinished required work is recoverably blocked.
+Validated `RESTRICTED` output remains usable within its declared limitations;
+it is not inherently malformed, blocked or QA-cleared. CP-5 clearance is
+validated independently. These are pending Phase 2/3 implementation gates,
+not statements that the existing loop already enforces them.
+
+**Execution shape, superseding §14's one-process limit.** Phase 3 proves one
+canonical route through the existing runtime/validation boundary using a
+deterministic provider. Phase 4 adds one durable worker beside the API, using
+PostgreSQL claims/leases and the same runtime/validator; no new broker,
+checkpointer or database. Worker crash/restart and deployed authentication
+proof belong to Phase 4. There is no Phase 3 dependency on that future worker.
+
+**Phase acceptance.** Phase 3 engineering acceptance is offline and distinct
+from live qualification. Every dependent phase still requires its predecessor's
+recorded acceptance and the user's applicable authorization. Phase 6 release
+acceptance requires capped, separately authorized live evaluation of the final
+candidate and authenticated verdicts. Review-driven changes to candidate
+identities invalidate affected evidence: rerun relevant engineering/hosted
+checks, and repeat affected live qualification only within explicit spend
+authorization. Without that evidence, release acceptance remains blocked.
+
+**Forecast prerequisite.** Before enabling CP-CF in Phase 5, choose a catalog
+route containing CP-1, CP-2G and CP-4 and prove their canonical contracts and
+required predecessors. The LITE earnings route cannot supply those owners.
+Do not invent upstream artifacts or weaken the extension's owner checks.
+
+**Process.** Ordinary review closes each task. One confidence review, then one
+separate adversarial code audit, close each whole phase with actual `xhigh`
+reasoning. Neither runs per edit/task; rewrite tournaments are disabled.
+Requested document audits do not certify those code gates. Opus planning-mode
+preferences are recorded in the complementary plan's Reasoning Modes section:
+`max` for an initial complex blueprint, `medium` for task/runbook drafting,
+`low` for faithful formatting, and targeted `ultrathink` for plan stress tests.
+Planning modes do not change code-review cadence.
+
+**Gate evidence.** Final size checks run after the candidate commit and review
+remediation, over the actual proposed PR range, at the existing 800-line limit.
+Pre-commit estimates cannot certify a committed-only size check. The documented
+Claude hooks have an unresolved JSON-stdin input defect: repair and test them
+in a dedicated Phase 2 prerequisite; do not treat prose as enforcement.
+
+**Reason.** The audit found diverging plan copies, incompatible completion and
+worker rules, restricted-output rejection, missing forecast predecessors,
+untracked continuation records, and a size check run before its commit existed.
+One maintained authority and explicit phase inputs/outputs prevent repeating
+those mistakes without introducing a second build system.
 
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 

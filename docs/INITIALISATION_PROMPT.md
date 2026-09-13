@@ -23,7 +23,11 @@ file that exists upstream; additions go in new skill folders.
 Resume only the active task and phase named by CLAUDE.md and the handoff. For
 each implementation slice:
 
-  1. State the exact accepted base, task, allowed paths, hard size budget and
+  1. Use the Opus modes in the complementary plan: medium for task briefs and
+     implementation, low for faithful formatting, targeted ultrathink for plan
+     stress tests, max only for a new complex blueprint, then back to medium.
+     Keep formal phase code reviews at actual xhigh; never infer the setting
+     from a prompt word. State the accepted base, allowed paths, size budget and
      exit assertion. Index that checkout with GitNexus and verify callers in
      source.
   2. Write the failing test first. Run it. Show me it failing for the right
@@ -32,8 +36,10 @@ each implementation slice:
   4. Run focused checks, freeze hashes and size, then run the exact required
      PostgreSQL/static/security gates. Run the complete `make check` at the
      phase boundary.
-  5. Commit locally and run an ordinary exact-range task review. Do not push,
-     open a PR, merge or deploy without separate authorization.
+  5. Commit locally and run ordinary exact-range task review. After remediation
+     commits, run the final size gate against the actual PR base (the script
+     counts committed base...HEAD only). Save tracked acceptance evidence.
+     Do not push, open a PR, merge or deploy without separate authorization.
   6. Only after every task in the phase passes, run one confidence-review at
      actual xhigh reasoning, remediate and retest, then one separate adversarial
      code audit at actual xhigh reasoning. Never run a rewrite tournament.
@@ -49,12 +55,14 @@ Non-negotiable while you work:
     that creates it.
   - A scanner that scanned nothing is a failure, not a pass.
 
-If the spec is wrong, say so and stop. Do not build around it, and do not
-weaken an invariant to make a test pass. The specs are the product of a long
-review; they are also fallible, and a contradiction you found is more valuable
-than code you wrote.
+Resolve historical contradictions through DECISIONS section 39 and the current
+repair plan. If a new unresolved conflict changes product scope or weakens an
+invariant, record it and stop that affected task; continue independent checks.
+Never invent authority or weaken a test to make a contradiction disappear.
 
-Begin at the exact checkpoint in docs/CLAUDE_CODE_HANDOFF.md.
+Begin at the current tracked checkpoint in docs/CLAUDE_CODE_HANDOFF.md.
+For Phase 3 onwards, use docs/PHASE_3_ONWARDS_GOAL_PROMPT.md only once its
+Phase 2 acceptance and user-authorization conditions are met.
 ```
 
 ---
@@ -72,7 +80,7 @@ density rises with diff size. The cap is the cheapest control available.
 **"Stop and report."** Ten phases executed without a checkpoint is one long
 uninterrupted opportunity to drift from the spec.
 
-**"If the spec is wrong, say so and stop."** The predecessor's most expensive
+**Resolve historical contradictions before escalating a new scope conflict.** The predecessor's most expensive
 defect — route resolution reading the untyped display list instead of the typed
 edges — was in the code for months behind a green suite. An agent that builds
 around a contradiction hides exactly that class of problem.
