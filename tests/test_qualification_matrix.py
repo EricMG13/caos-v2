@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 import pytest
 from canonical_fixtures import LITE_PROFILE, LITE_SELECTION, CanonicalCompletions
 from conftest import approve_run, gate_verdict, priced, route_fault
-from test_orchestration_proof import _token_fault
+from test_canonical_proof import _token_fault
 
 from server import methodology
 from server.blobs import BlobStore
