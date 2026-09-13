@@ -277,19 +277,11 @@ system this size means nobody looked.
   async store connection Phase 5's gap already owes; over a synchronous one a
   concurrent harness would serialise on the connection, for the same wall clock
   and harder reasoning.
-- **A document that will not admit still ends the set, after the cases before
-  it were paid for.** `perform` records a `Refusal` from `run_route` in
-  `Performed.stopped` and stops; what it cannot record is a refusal raised
-  before there is a run to record it against. Route resolution has left that
-  category — every case's route is now resolved in the pass over the whole set,
-  before anything is admitted, because resolution is pure and an unknown pathway
-  on the last case of ten was knowable from the catalog and the set alone. What
-  remains is `admit_pack` refusing `SOURCE_HAS_NO_TEXT` on a document whose
-  bytes carry none, which needs the extractor and therefore the case row, and so
-  cannot be answered before the earlier cases have run. *Upgrade:* extract once,
-  up front, and hand `admit_pack` what it already produced — which is worth
-  doing the day extraction is the expensive half, and is today a second pass
-  over bytes to answer a question about a set someone assembled badly.
+- ~~**A document that will not admit still ends the set, after the cases before
+  it were paid for.**~~ Closed by `prepare`, which resolves every route, creates
+  every case, admits every document and pins every input before `perform` may
+  spend anything: `SOURCE_HAS_NO_TEXT` on the last case of ten now refuses the
+  set while nothing has been bought.
 - **An unrun node's state is a weaker reading when the artifacts cannot be
   read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
   soft edge's readiness comes from, and bytes that will not load would raise out
@@ -299,13 +291,11 @@ system this size means nobody looked.
   The run has already refused its proof by then, so the signal is not lost.
   *Upgrade:* none — a run whose artifacts are unreadable has a worse problem
   than the precision of this field.
-- **`Unrun` does not say whether a node was attempted.** A node the provider was
-  asked for and refused and a node execution never reached both come back
-  RUNNABLE, although `run_attempts` holds the difference: the first has a
-  started, unaccepted row and a reservation, the second has nothing. With the
-  frontier running its ready nodes in order this is at most one node per run.
-  *Upgrade:* read the attempt rows alongside the states, the day a wide frontier
-  runs concurrently and more than one node can be mid-flight.
+- ~~**`Unrun` does not say whether a node was attempted.**~~ Closed in Task17f-b:
+  each `Unrun` carries its stored `Attempted` rows -- whether a call was
+  recorded (none is possible spend), whether a known charge was billed (none is
+  unknown exposure), and the recorded model and generation, `None` when the call
+  recorded none rather than a configured name.
 - **A proof is held and not stored.** `perform` now holds each case's
   `OrchestrationProof` beside the run id it covers — and only for as long as the
   caller does. There is no table and no route that serves one, so a proof still
@@ -325,13 +315,10 @@ system this size means nobody looked.
   hand the accepted mapping from `_perform_one` to the matrix the day a set is
   large enough for the reads to be measurable — which is the same day the
   per-set budget above starts to bite.
-- **`perform` returns with a read transaction open.** Its last writes commit
-  inside the store calls, and the proof, the status read, `_unrun` and the
-  matrix all read after them without committing or rolling back. Under the
-  `with connect(...)` every caller uses today the connection closes immediately
-  after; a caller that held one would leave a session idle-in-transaction,
-  pinning a snapshot. *Upgrade:* end the transaction on the way out, in the
-  phase that first gives this a caller which outlives one set.
+- ~~**`perform` returns with a read transaction open.**~~ Closed when
+  `_perform_one` and the matrix began reading inside `execution_reads`, which
+  rolls its unit back on the way out, so `perform` returns with the connection
+  idle.
 - **A bundle upgrade invalidates every earlier run's proof.** The authority is
   re-derived from the bundle that is here now, so after an upgrade a run that
   was correct under the old build refuses `ORCHESTRATION_BUILD_MOVED`. That is
