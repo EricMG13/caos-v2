@@ -102,8 +102,14 @@ runs the LITE route through the canonical executor. The gate blocks both
 other LITE modules through T8, and
 `test_upstream_with_foreign_envelope_identity_is_refused_before_any_call` now
 gives CP-0 a record naming another invocation (module, ordinal, authority
-bundle), refused `ARTIFACT_RECORD_MISMATCH` by the frontier before CP-L10 is
-attempted.
+bundle), refused `ARTIFACT_RECORD_MISMATCH` before CP-L10 is called, both by
+the frontier (no CP-L10 attempt) and by `ModuleProvider.execute` entered
+directly (pre-call unit, reservation kept).
+`test_upstream_record_from_another_build_is_refused_before_any_call` gives
+CP-0's record another build, manifest, authority digest or adapter, refused
+`ORCHESTRATION_BUILD_MOVED` on both entries through the one
+`record_authority_matches` check the proof and the deliverable share. The
+claims executor has no freshness tests left until f-1c removes it.
 
 **6. Two workers/retries cannot accept different authoritative results for the
 same node generation; late responses after cancellation are recorded as

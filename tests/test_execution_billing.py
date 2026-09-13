@@ -152,6 +152,37 @@ def test_analysis_failure_preserves_bill_and_exact_replay(
     assert _bill(dsn, provider.run_id, REPORTED) == attempt
 
 
+@pytest.mark.parametrize("stored", ["markdown", "record"])
+def test_a_blob_write_failing_after_analysis_keeps_the_bill_and_accepts_nothing(
+    provider: ModuleProvider, monkeypatch: pytest.MonkeyPatch, stored: str
+) -> None:
+    """The runner stores the accepted Markdown and its record after the whole
+    analysis passed: a write that fails there is a typed store fault, with the
+    bill and diagnostic already committed and nothing accepted."""
+    real = BlobStore.put
+    marker = b"---\n" if stored == "markdown" else b'"format":"caos-canonical-record'
+
+    def put(self: BlobStore, data: bytes) -> str:
+        if data.startswith(marker) or (stored == "record" and marker in data):
+            raise OSError("synthetic")
+        return real(self, data)
+
+    monkeypatch.setattr(BlobStore, "put", put)
+    with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$") as caught:
+        _invoke(provider, uuid4(), "runtime", provider.route.nodes[0])
+    assert caught.value.__cause__ is None
+    assert provider.conn.info.transaction_status is TransactionStatus.IDLE
+    completions = provider.completions
+    assert isinstance(completions, _Completions)
+    assert len(completions.prompts) == 1
+    attempt = _bill(_url_for(provider.conn.info.dbname), provider.run_id, REPORTED)
+    [body] = completions.bodies
+    facts = CallOutcome(
+        REPORTED, MODEL, "gen-loop-test", hashlib.sha256(body.encode()).hexdigest()
+    )
+    assert not record_outcome(provider.conn, attempt_id=attempt, outcome=facts)
+
+
 @pytest.mark.parametrize(
     "failure,broken_cleanup,code",
     [

@@ -244,6 +244,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   exactly what the proof proved without a second record read. *Upgrade:* read
   proof and scoring in one repeatable-read transaction when a reviewer needs a
   single snapshot.
+- **Every upstream carried into a canonical prompt is bound to this build.**
+  Before the call, each accepted upstream record is validated against its
+  call-time identity and current authority; a mismatch refuses the call.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
