@@ -248,7 +248,7 @@ def execution_input(
     if (pin.build_id, pin.manifest_sha256, pin.adapter_version) != (
         bundle.build_id,
         bundle.manifest_sha256,
-        methodology.CLAIMS_ADAPTER_VERSION,
+        methodology.adapter_for(route),
     ):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     return pin, route
