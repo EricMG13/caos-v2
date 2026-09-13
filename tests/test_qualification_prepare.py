@@ -82,8 +82,22 @@ def test_aggregate_ceiling_is_exact_under_decimal_context(precision: int) -> Non
     with localcontext() as context:
         context.prec, context.rounding = precision, ROUND_DOWN
         with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_OVER_CEILING$"):
-            subject._affordable(qualification, harness)
-        subject._affordable(qualification, replace(harness, ceiling=Decimal("15")))
+            subject._affordable(qualification, harness, ())
+        subject._affordable(qualification, replace(harness, ceiling=Decimal("15")), ())
+
+
+def test_a_price_whose_route_cannot_fit_a_run_is_refused_before_any_case(
+    ready: Fixture,
+) -> None:
+    """Every node reserves one worst case against its run's ceiling, so a
+    two-node route priced above half the ceiling would pay for a call it could
+    never finish (the whole-phase confidence review's F-1)."""
+    conn, blobs, harness, qualification = ready
+    half = replace(harness, price=priced(CEILING / 2 + Decimal("0.01")))
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_OVER_CEILING$"):
+        subject.prepare(conn, blobs, half, qualification=qualification)
+    assert _count(conn, "SELECT count(*) FROM cases") == 0
+    _unapproved_and_unspent(conn, half)
 
 
 @pytest.mark.parametrize(

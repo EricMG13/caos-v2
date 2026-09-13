@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from claude_hook import (  # noqa: E402
     MALFORMED,
+    SKIPPED,
     HookInputError,
     format_file,
     format_target,
@@ -61,6 +62,13 @@ def _main(mode: str, raw: str) -> tuple[int, str]:
         "git push origin +main",
         "echo ok\ngit push -f origin x\n: '",
         "git commit -n -F- <<EOF\nit's\nEOF",
+        "git -C /repo push --force origin x",
+        "git -c core.hooksPath=/dev/null commit -n -m x",
+        "git push --force-with-lease=main:abc origin main",
+        "/usr/bin/git push -f",
+        "git push --mirror",
+        "env -u CAOS_REQUIRE_PROVIDER",
+        "env -0",
     ],
 )
 def test_the_guard_refuses_forbidden_commands(command: str) -> None:
@@ -83,6 +91,8 @@ def test_the_guard_refuses_forbidden_commands(command: str) -> None:
         "git log --grep commit -n 3",
         "git commit -m msg\nhead -n 5 file",
         "grep -r foo env",
+        "git -C /repo log --oneline -3",
+        "env -u OPENROUTER_API_KEY FOO=1 python script.py",
     ],
 )
 def test_the_guard_allows_ordinary_commands(command: str) -> None:
@@ -139,6 +149,9 @@ def test_format_file_runs_the_pinned_formatter_on_one_path(tmp_path: Path) -> No
     def missing(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
         raise FileNotFoundError
 
+    prettier = tmp_path / "frontend/node_modules/.bin/prettier"
+    prettier.parent.mkdir(parents=True)
+    prettier.write_text("")
     assert format_file(tmp_path / "a.py", tmp_path, run) == 0
     assert format_file(tmp_path / "frontend/d.tsx", tmp_path, run) == 0
     assert calls == [
@@ -225,3 +238,18 @@ def test_the_wired_guard_blocks_through_the_shell(tmp_path: Path) -> None:
 def test_the_dotenv_rule_matches_a_path_not_a_word(text: str) -> None:
     assert guard_reason(f"python -c 'print({text!r})'") is None
     assert guard_reason("cat ./.env.local") is not None
+
+
+def test_a_missing_formatter_skips_rather_than_failing(tmp_path: Path) -> None:
+    """A fresh worktree has no node_modules: the edit is not a format failure."""
+    (tmp_path / "frontend").mkdir()
+    styled = tmp_path / "frontend/d.css"
+    styled.write_text("a{}\n")
+    assert format_file(styled, tmp_path) == SKIPPED
+    stderr = io.StringIO()
+    code = main(
+        ["claude_hook.py", "format"],
+        io.StringIO(_event(file_path=str(REPO / "frontend/package.json"))),
+        stderr,
+    )
+    assert code == 0

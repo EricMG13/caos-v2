@@ -50,7 +50,7 @@ that omits the cases after the stop reads as complete.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from decimal import Decimal
 from fractions import Fraction
@@ -227,7 +227,7 @@ def prepare(
     titles = [
         BoundaryText.of(case.label, limit=_LABEL_LIMIT) for case in qualification.cases
     ]
-    _affordable(qualification, harness)
+    _affordable(qualification, harness, routes)
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     require_idle(conn)
@@ -278,7 +278,6 @@ def perform(
     assert_measurable(qualification)
     _distinct(qualification)
     _answerable(qualification)
-    _affordable(qualification, harness)
     if len(prepared) != len(qualification.cases) or any(
         type(item) is not PreparedCase
         or type(item.input) is not RunInput
@@ -293,9 +292,11 @@ def perform(
         {item.input.case_id for item in prepared}
     ) != len(prepared):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    routes = []
     for case, item in zip(qualification.cases, prepared, strict=True):
         with execution_reads(conn):
-            _eligible(conn, harness, case, item)
+            routes.append(_eligible(conn, harness, case, item))
+    _affordable(qualification, harness, routes)
 
     # Each turn can purchase work; preserve its stopped record before returning.
     performed: list[Performed] = []
@@ -364,7 +365,11 @@ def _eligible(
     return route
 
 
-def _affordable(qualification: QualificationSet, harness: Harness) -> None:
+def _affordable(
+    qualification: QualificationSet,
+    harness: Harness,
+    routes: Sequence[ResolvedRoute],
+) -> None:
     """The set's ceiling against the sum of the per-run ceilings.
 
     Invariant 8 one level up, and the same shape: a ceiling refuses the
@@ -381,8 +386,11 @@ def _affordable(qualification: QualificationSet, harness: Harness) -> None:
     validate_spend(harness.ceiling)
     if Fraction(CEILING) * len(qualification.cases) > Fraction(harness.ceiling):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
-    # One call's worst case must fit a run's ceiling, or every run refuses late.
-    if worst_case(harness.price) > CEILING:
+    # Every node of a case's route reserves one worst case against that run's
+    # ceiling; a route that cannot fit would pay for calls it cannot finish.
+    # A floor, not a bound: a refused analysis reserves again.
+    call = worst_case(harness.price)
+    if any(call * len(route.nodes) > CEILING for route in routes):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 

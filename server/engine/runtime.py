@@ -180,10 +180,15 @@ def accepted_artifacts(
         for node in route.nodes
         if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
-    return {
-        node_id: (json.loads(blobs.get(digest)) if node_id in readiness_nodes else {})
-        for node_id, digest in artifact_digests(conn, run_id).items()
-    }
+    try:
+        return {
+            node_id: (
+                json.loads(blobs.get(digest)) if node_id in readiness_nodes else {}
+            )
+            for node_id, digest in artifact_digests(conn, run_id).items()
+        }
+    except ValueError:
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
 
 
 def _run_node(
