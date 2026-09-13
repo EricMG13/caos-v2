@@ -1,0 +1,7 @@
+# The image copies only these (Dockerfile); everything else -- .venv*, node_modules,
+# .dev-data, reports -- would only slow the build context upload.
+*
+!requirements.txt
+!server/
+!vendor/
+**/__pycache__
