@@ -7,6 +7,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
@@ -95,6 +96,51 @@ def gate_verdict(prompt: str, status: str = "READY") -> dict[str, object]:
             }
         ]
     }
+
+
+def approve_run(
+    conn: object,
+    *,
+    case_id: UUID,
+    run_id: UUID,
+    route: object,
+    bundle: object,
+) -> UUID:
+    """Pin and govern one real test run, returning its synthetic approver."""
+    from server.engine.route import ResolvedRoute
+    from server.methodology.bundle import Bundle
+    from server.store import StoreConnection
+    from server.store.gates import Gate, GateApproval, approve_gate, gate_preview
+    from server.store.members import Standing, grant
+    from server.store.routes import pin_route
+    from server.store.run_inputs import pin_run_input
+    from server.store.source_sets import snapshot_source_set
+
+    connection = cast(StoreConnection, conn)
+    source = snapshot_source_set(connection, case_id)
+    pin_route(connection, run_id, cast(ResolvedRoute, route))
+    pin_run_input(connection, run_id, source.version, cast(Bundle, bundle))
+    approver = uuid4()
+    grant(
+        connection,
+        case_id=case_id,
+        user_id=approver,
+        standing=Standing.APPROVER,
+    )
+    connection.commit()
+    for gate in Gate:
+        preview = gate_preview(connection, run_id, gate)
+        approve_gate(
+            connection,
+            GateApproval(
+                run_id=run_id,
+                gate=gate,
+                actor_id=approver,
+                preview_sha256=preview.preview_sha256,
+                input_fingerprint=preview.input_fingerprint,
+            ),
+        )
+    return approver
 
 
 @pytest.fixture
