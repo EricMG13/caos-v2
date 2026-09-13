@@ -22,7 +22,6 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import BLOCKING, ResolvedRoute, RouteNode
-from server.engine.runtime import artifact_digests
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import Delivery
 from server.methodology.handoff import (
@@ -41,6 +40,7 @@ from server.methodology.vendor import (
 from server.provider import MAX_REQUEST_BYTES
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.outcomes import artifact_digests
 from server.store.routes import resolved_route
 from server.store.run_inputs import load_run_input
 from server.store.runs import attempt_ordinal

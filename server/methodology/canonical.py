@@ -17,13 +17,16 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
+from server.engine.route import ResolvedRoute
 from server.evidence.citations import verify_citations
 from server.methodology.bundle import (
     Bundle,
@@ -36,7 +39,6 @@ from server.methodology.executor import (
     Assignment,
     _delivered,
     _stored_identity,
-    _upstream_digests,
 )
 from server.methodology.handoff import (
     GATE_MODULE,
@@ -44,7 +46,9 @@ from server.methodology.handoff import (
     MAX_TRANSPORT_CHARS,
     CanonicalRecord,
     HostIdentity,
+    Projections,
     parse_response,
+    read_record,
     record_bytes,
     validate_markdown,
 )
@@ -113,6 +117,8 @@ def _diagnostic(blobs: BlobStore, content: object) -> str | None:
 
     Lenient on purpose: this is what was said, not what is accepted. A blob
     that cannot be written is also None, because the bill must still commit.
+    The bytes are untrusted provider text, never `BoundaryText`: no reader may
+    render them or read them as analysis.
     """
     text = None
     if isinstance(content, str) and len(content) <= MAX_TRANSPORT_CHARS:
@@ -143,7 +149,7 @@ def execute_handoff(
     Refuses `RUN_INPUT_INVALID` for a pin of any other adapter before the call.
     Billing, with the diagnostic address, commits before any analytical
     refusal. A validated `qa_status: Blocked` refuses `HANDOFF_BLOCKED` only
-    once the host identity has held.
+    once the host identity has held and every citation has anchored.
     """
     adapter = methodology.CANONICAL_ADAPTER_VERSION
     attempt, route_node_id = assignment.attempt_id, assignment.node.route_node_id
@@ -157,7 +163,6 @@ def execute_handoff(
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
         delivered = _delivered(conn, assignment.run_id)
-        digests = _upstream_digests(conn, assignment)
         upstream = upstream_markdown(blobs, identity.upstream)
     contract = _contract(bundle)
     authority = assemble_authority(bundle, assignment.module_id)
@@ -198,11 +203,7 @@ def execute_handoff(
 
     catalog = _catalog(bundle)
     sources = {item.source_id for item in delivered}
-    gate_expects = (
-        frozenset(n.module_id for n in assignment.route.nodes) - {GATE_MODULE}
-        if assignment.module_id == GATE_MODULE
-        else frozenset()
-    )
+    gate_expects = _gate_expects(assignment.route, assignment.module_id)
     with execution_reads(conn):
         check_attempt(
             conn,
@@ -211,21 +212,26 @@ def execute_handoff(
             route_node_id=route_node_id,
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
-        if (
-            _upstream_digests(conn, assignment) != digests
-            or _identity(conn, bundle, assignment) != identity
-        ):
+        # The identity carries every accepted upstream digest, so this one
+        # comparison also catches an upstream rewritten during the call.
+        if _identity(conn, bundle, assignment) != identity:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         markdown, citations = parse_response(content, delivered=frozenset(sources))
-        projections = validate_markdown(
-            contract,
-            catalog,
-            authority.files[SKILL],
-            markdown,
-            identity=identity,
-            gate_expects=gate_expects,
+        projections = _unless_blocked(
+            lambda: validate_markdown(
+                contract,
+                catalog,
+                authority.files[SKILL],
+                markdown,
+                identity=identity,
+                gate_expects=gate_expects,
+            )
         )
+        # A Blocked verdict ends the run only once its quotes are verified: an
+        # unanchorable Blocked handoff is an ordinary refusal (c-5b, P3-2).
         anchored = verify_citations(conn, delivered=sources, citations=citations)
+        if projections is None:
+            raise Refusal(RefusalCode.HANDOFF_BLOCKED)
     record = CanonicalRecord(
         artifact_sha256=hashlib.sha256(markdown).hexdigest(),
         adapter_version=adapter,
@@ -245,6 +251,73 @@ def execute_handoff(
         generation_id=generation,
         diagnostic_sha256=diagnostic,
     )
+
+
+def _unless_blocked(validate: Callable[[], Projections]) -> Projections | None:
+    """The projections, or None for a validated Blocked handoff."""
+    try:
+        return validate()
+    except Refusal as refusal:
+        if refusal.code is not RefusalCode.HANDOFF_BLOCKED:
+            raise
+    return None
+
+
+def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    *,
+    run_id: UUID,
+    route_node_id: str,
+    attempt_id: UUID,
+    artifact_sha256: str,
+    record_sha256: str,
+) -> Projections:
+    """An accepted canonical artifact's projections, re-derived and compared.
+
+    Inside the caller's read unit: the host identity is rebuilt from the stored
+    facts, the record must bind this Markdown and that identity, and the
+    projections re-parsed from the Markdown must equal the record's (§42.4).
+    Citations are not re-anchored here; the proof and freezing do that.
+    """
+    node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
+    if node is None:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    identity = host_identity(
+        conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
+    )
+    record = read_record(
+        blobs,
+        artifact_sha256=artifact_sha256,
+        record_sha256=record_sha256,
+        expected=identity,
+    )
+    try:
+        markdown = blobs.get(artifact_sha256)
+    except (Refusal, OSError):
+        markdown = None
+    if markdown is None:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    authority = assemble_authority(bundle, node.module_id)
+    projections = validate_markdown(
+        _contract(bundle),
+        _catalog(bundle),
+        authority.files[SKILL],
+        markdown,
+        identity=identity,
+        gate_expects=_gate_expects(route, node.module_id),
+    )
+    if projections != record.projections:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    return projections
+
+
+def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
+    if module_id != GATE_MODULE:
+        return frozenset()
+    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
 
 
 def _identity(
