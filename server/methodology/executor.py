@@ -28,6 +28,8 @@ from server.methodology.envelope import Claim, Envelope, parse_claims, parse_rea
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.budget import validate_spend
+from server.store.outcomes import producer_identifier
 
 # The two ways a quote fails to anchor. Either costs the claim resting on it and
 # nothing more (docs/DECISIONS.md §26); any other refusal is the module breaking
@@ -265,7 +267,26 @@ def execute_module(
     )
 
     bundle.verify_manifest()
+    model = producer_identifier(provider.model, limit=256)
+    if model is None:
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     completion = provider.complete(prompt, json_object=True)
+    if completion.refusal is not None:
+        code = completion.refusal
+        if not isinstance(code, RefusalCode):
+            code = RefusalCode.PROVIDER_RESPONSE_INVALID
+        raise Refusal(code) from None
+    generation = producer_identifier(completion.generation_id, limit=512)
+    if (
+        not isinstance(completion.content, str)
+        or not isinstance(completion.charge, Decimal)
+        or generation is None
+    ):
+        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
+    try:
+        validate_spend(completion.charge)
+    except Refusal:
+        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID) from None
 
     sources = {item.source_id for item in assignment.delivered}
     # The map first: it is a pure read of the same body, and a map the host
@@ -309,6 +330,6 @@ def execute_module(
         # What the host asked, and what the provider called the call. The first
         # is a fact the host holds, the second is the provider's own handle and
         # is kept for reconciling a bill rather than for trusting.
-        model=provider.model,
-        generation_id=completion.generation_id,
+        model=model,
+        generation_id=generation,
     )
