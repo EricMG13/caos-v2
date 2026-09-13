@@ -138,9 +138,22 @@ def test_both_ready_statuses_harden_a_soft_edge(
     assert _state(route, accepted, "CP-2") is NodeState.BLOCKED
 
 
-def test_qa_gate_blocks_cp6_until_cp5_accepted(catalog: dict[str, Any]) -> None:
+@pytest.mark.parametrize(
+    "cp5,released",
+    [
+        ({}, False),
+        ({"qa_status": "Not Reviewed"}, False),
+        ({"qa_status": "Restricted"}, False),
+        ({"qa_status": "Blocked"}, False),
+        ({"qa_status": "Passed"}, True),
+    ],
+)
+def test_qa_gate_blocks_cp6_until_cp5_accepted(
+    catalog: dict[str, Any], cp5: dict[str, Any], released: bool
+) -> None:
     """The one QA_GATE in this build, CP-5 -> CP-6. Under the predecessor it did
-    not gate, because the untyped list it read had no QA_GATE in it."""
+    not gate, because the untyped list it read had no QA_GATE in it; and an
+    accepted CP-5 is not clearance (F03) -- only its validated `Passed` is."""
     route = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
     everything_but_cp5 = [
         node.module_id for node in route.nodes if node.module_id not in {"CP-5", "CP-6"}
@@ -149,8 +162,10 @@ def test_qa_gate_blocks_cp6_until_cp5_accepted(catalog: dict[str, Any]) -> None:
 
     assert _state(route, accepted, "CP-6") is NodeState.BLOCKED
 
-    accepted[_node_id(route, "CP-5")] = {}
-    assert _state(route, accepted, "CP-6") is NodeState.RUNNABLE
+    accepted[_node_id(route, "CP-5")] = cp5
+    assert _state(route, accepted, "CP-6") is (
+        NodeState.RUNNABLE if released else NodeState.BLOCKED
+    )
 
 
 def test_restricted_node_runs_and_carries_limitation(catalog: dict[str, Any]) -> None:
