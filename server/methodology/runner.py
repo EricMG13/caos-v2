@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import GATE_MODULE, ResolvedRoute, predecessors
+from server.engine.route import GATE_MODULE, ResolvedRoute, RouteNode, predecessors
 from server.engine.runtime import ProviderResult, artifact_digests
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Envelope
@@ -38,6 +38,7 @@ from server.methodology.executor import (
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.outcomes import check_call, execution_reads
 
 
 @dataclass(frozen=True)
@@ -61,11 +62,44 @@ class ModuleProvider:
     # chain needs each node's predecessors from the same object.
     route: ResolvedRoute
     # The run whose accepted artifacts are this node's upstream. The provider
-    # seam is (route_node_id, module_id), so the run the node belongs to has to
-    # be held rather than passed.
+    # attempt must belong to this run before any of its evidence is read.
     run_id: UUID
 
-    def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        """Check attempt identity and own bounded reads from idle entry."""
+        with execution_reads(self.conn):
+            check_call(
+                self.conn,
+                attempt_id=attempt_id,
+                run_id=self.run_id,
+                route_node_id=route_node_id,
+            )
+            nodes = [
+                n
+                for n in self.route.nodes
+                if (n.route_node_id, n.module_id) == (route_node_id, module_id)
+            ]
+            if len(nodes) != 1:
+                raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+            assignment = self._assignment(nodes[0])
+        outcome = execute_module(
+            self.conn,
+            self.bundle,
+            attempt_id=attempt_id,
+            assignment=assignment,
+            provider=self.completions,
+        )
+        return ProviderResult(
+            artifact_sha256=self.blobs.put(canonical(outcome.envelope)),
+            charge=outcome.charge,
+            model=outcome.model,
+            generation_id=outcome.generation_id,
+        )
+
+    def _assignment(self, node: RouteNode) -> Assignment:
+        module_id = node.module_id
         # Only the gate is asked about the rest of the pinned route; deciding
         # so is this method's job because it is the one holding `route` --
         # `execute_module` only ever reads what the assignment already says.
@@ -74,21 +108,13 @@ class ModuleProvider:
             if module_id == GATE_MODULE
             else frozenset()
         )
-        assignment = Assignment(
+        return Assignment(
             module_id=module_id,
             delivered=deliver(self.conn, self.delivered),
+            run_id=self.run_id,
+            node=node,
             gate_expects=gate_expects,
             upstream=self._upstream(module_id),
-        )
-        outcome = execute_module(
-            self.conn, self.bundle, assignment=assignment, provider=self.completions
-        )
-        return ProviderResult(
-            artifact_sha256=self.blobs.put(canonical(outcome.envelope)),
-            # What the call reported, not what the run set aside for it.
-            charge=outcome.charge,
-            model=outcome.model,
-            generation_id=outcome.generation_id,
         )
 
     def _upstream(self, module_id: str) -> tuple[Upstream, ...]:

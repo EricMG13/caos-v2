@@ -21,15 +21,26 @@ from decimal import Decimal
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
+from server.engine.route import RouteNode
 from server.evidence.citations import verify_citations
 from server.evidence.read import Block, read_block
-from server.methodology.bundle import Bundle, assemble_authority, authority_digest
+from server.methodology.bundle import (
+    Authority,
+    Bundle,
+    assemble_authority,
+    authority_digest,
+)
 from server.methodology.envelope import Claim, Envelope, parse_claims, parse_readiness
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import validate_spend
-from server.store.outcomes import producer_identifier
+from server.store.outcomes import (
+    check_call,
+    execution_reads,
+    producer_identifier,
+    require_idle,
+)
 
 # The two ways a quote fails to anchor. Either costs the claim resting on it and
 # nothing more (docs/DECISIONS.md §26); any other refusal is the module breaking
@@ -141,6 +152,8 @@ class Assignment:
 
     module_id: str
     delivered: list[Delivery]
+    run_id: UUID
+    node: RouteNode
     # The modules this one must return a readiness verdict for: the pinned
     # route less itself when it is the gate, and empty for everyone else.
     gate_expects: frozenset[str] = frozenset()
@@ -232,10 +245,15 @@ def execute_module(
     conn: StoreConnection,
     bundle: Bundle,
     *,
+    attempt_id: UUID,
     assignment: Assignment,
     provider: CompletionProvider,
 ) -> ModuleOutcome:
-    """Run one module and return the envelope the host is willing to store.
+    """Run one reserved attempt from idle entry, owning bounded read units.
+
+    Supplied run/node identity must match the actual attempt; the node's module
+    must match the assignment. Stored route/input authority remains a separate
+    runtime obligation.
 
     The order is the contract: authority is verified before the prompt is built,
     the provider is asked once, and every citation is re-derived against the
@@ -257,6 +275,15 @@ def execute_module(
     evidence is `verify_citations` refusing a quote that is not in
     `assignment.delivered`, not anything this function does.
     """
+    with execution_reads(conn):
+        check_call(
+            conn,
+            attempt_id=attempt_id,
+            run_id=assignment.run_id,
+            route_node_id=assignment.node.route_node_id,
+        )
+        if assignment.node.module_id != assignment.module_id:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_prompt(
         assignment.module_id,
@@ -270,7 +297,9 @@ def execute_module(
     model = producer_identifier(provider.model, limit=256)
     if model is None:
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    require_idle(conn)
     completion = provider.complete(prompt, json_object=True)
+    require_idle(conn)
     if completion.refusal is not None:
         code = completion.refusal
         if not isinstance(code, RefusalCode):
@@ -287,17 +316,29 @@ def execute_module(
         validate_spend(completion.charge)
     except Refusal:
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID) from None
+    with execution_reads(conn):
+        envelope = _envelope(conn, assignment, authority, completion.content)
+    return ModuleOutcome(
+        envelope=envelope,
+        charge=completion.charge,
+        model=model,
+        generation_id=generation,
+    )
 
+
+def _envelope(
+    conn: StoreConnection, assignment: Assignment, authority: Authority, content: str
+) -> Envelope:
     sources = {item.source_id for item in assignment.delivered}
     # The map first: it is a pure read of the same body, and a map the host
     # cannot bound refuses this answer whatever the claims say. After the loop it
     # was reached only once every quote had been anchored against the token index
     # -- a query per citation spent on an answer already refused.
-    readiness = parse_readiness(completion.content, expected=assignment.gate_expects)
+    readiness = parse_readiness(content, expected=assignment.gate_expects)
 
     claims = []
     misses: list[RefusalCode] = []
-    for statement, citations in parse_claims(completion.content, delivered=sources):
+    for statement, citations in parse_claims(content, delivered=sources):
         # Before the quotes: a statement the boundary refuses is the module
         # breaking the contract, which costs the answer rather than the claim.
         text = BoundaryText.of(statement)
@@ -314,7 +355,7 @@ def execute_module(
         # quote's code, as an answer that anchored nothing always was.
         raise Refusal(misses[0])
 
-    envelope = Envelope(
+    return Envelope(
         # The host's, not the module's. Whatever it claimed about its own
         # identity did not survive this line (invariant 3).
         module_id=assignment.module_id,
@@ -323,13 +364,4 @@ def execute_module(
         claims=tuple(claims),
         readiness=tuple(readiness),
         claims_refused=len(misses),
-    )
-    return ModuleOutcome(
-        envelope=envelope,
-        charge=completion.charge,
-        # What the host asked, and what the provider called the call. The first
-        # is a fact the host holds, the second is the provider's own handle and
-        # is kept for reconciling a bill rather than for trusting.
-        model=model,
-        generation_id=generation,
     )

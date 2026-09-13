@@ -145,6 +145,7 @@ def ran(
 
     pin_route(conn, run_id, catalog_route)
     delivered = [(source_id, block) for block in _blocks(conn, source_id)]
+    conn.rollback()
     run_route(
         conn,
         blobs,
