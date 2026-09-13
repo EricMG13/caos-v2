@@ -702,16 +702,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   dispatch only, never on a pull request, and it now carries Postgres beside
   the credential: `CAOS_REQUIRE_PROVIDER=1` and `CAOS_REQUIRE_POSTGRES=1` turn
   either one missing into a failure rather than a skip.
-- **The nightly live run proves one two-module pathway.**
+- **The nightly live run proves one three-module canonical pathway.**
   `test_a_live_run_admits_documents_and_completes_its_route` runs
-  `DEEP_RESEARCH` — CP-0 then CP-DR — because two calls cost under a cent and
-  the job exists to prove the chain: documents admitted, a route pinned and
-  run, every citation re-located. Most of `FULL_CREDIT_ASSESSMENT`'s nineteen
-  modules have never answered a live model in CI, and a run there rests on each
-  one quoting its evidence word for word (the Phase 2 gap below).
-  `CAOS_LIVE_PATHWAY=FULL_CREDIT_ASSESSMENT make test-provider` runs them on
-  demand. *Upgrade:* the full pathway in the nightly job, once on-demand runs
-  have said what it costs and how often a quote fails to locate.
+  `LITE_CREDIT_22`/`LITE_EARNINGS_UPDATE` — CP-0, CP-L10, CP-5 — the canonical
+  route (slice e-2): documents admitted, a subject and route pinned and run,
+  every node accepted with its host record, every citation re-located. The
+  retarget was made statically and has not yet answered a live model: whether
+  a real model returns vendor-valid handoffs with whole-token quotes is
+  unmeasured, and a validated `Blocked` ends the run BLOCKED and fails the
+  test. Most of `FULL_CREDIT_ASSESSMENT`'s modules have never answered a live
+  model in CI; `CAOS_LIVE_PROFILE`/`CAOS_LIVE_PATHWAY` name another route on
+  demand. *Upgrade:* a first authorized nightly run to measure the canonical
+  pathway, then the larger pathways once on-demand runs have said what they
+  cost and how often a quote fails to locate.
 - **`UrllibTransport`'s error path is tested at the director, not over a
   socket.** `test_an_error_status_arrives_as_an_http_error_the_transport_can_type`
   asks the real `_opener()` to convert a non-2xx, which is where the handler set

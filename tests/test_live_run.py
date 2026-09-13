@@ -8,15 +8,18 @@ This does, with the provider built the way the application builds it: from the
 environment (`OpenRouter.from_environment`, `docs/DECISIONS.md` §16).
 
 Two documents, one per extractor, so the case holds a PDF as well as text. The
-pathway is `DEEP_RESEARCH` -- CP-0 then CP-DR, the smallest route with an edge
-in it -- because two calls cost under a cent and a nightly job exists to prove
-the chain, not the catalog. `CAOS_LIVE_PATHWAY` names a larger one on demand.
+pathway is `LITE_EARNINGS_UPDATE` on `LITE_CREDIT_22` -- CP-0, CP-L10, CP-5 --
+the canonical route (§41, §42): each module answers a vendor-validated Markdown
+handoff for the host-owned subject `approve_run` pins, and the host anchors its
+citations. Three calls, because a nightly job exists to prove the canonical
+chain, not the catalog. `CAOS_LIVE_PROFILE` and `CAOS_LIVE_PATHWAY` name
+another route on demand.
 
 What is asserted is what the host can prove, never the model's wording: the run
-finished, every pinned node was accepted, and the proof re-derived every
-citation against the documents (`server/qualification/proof.py`). It skips with
-its reason without a credential, and `CAOS_REQUIRE_PROVIDER=1` turns the skip
-into a failure.
+finished, every pinned node was accepted with its host record, and the proof
+re-derived every record and citation against the documents
+(`server/qualification/proof.py`). It skips with its reason without a
+credential, and `CAOS_REQUIRE_PROVIDER=1` turns the skip into a failure.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from server.engine.route import resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.pdf import PdfExtractor
+from server.methodology import CANONICAL_ADAPTER_VERSION, adapter_for
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import OpenRouter
@@ -49,8 +53,8 @@ VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 CATALOG = (
     VENDORED / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
-PROFILE = "FULL_CREDIT_32"
-PATHWAY = os.environ.get("CAOS_LIVE_PATHWAY", "DEEP_RESEARCH")
+PROFILE = os.environ.get("CAOS_LIVE_PROFILE", "LITE_CREDIT_22")
+PATHWAY = os.environ.get("CAOS_LIVE_PATHWAY", "LITE_EARNINGS_UPDATE")
 # The flat per-node reservation (CLAUDE.md, Phase 4). Nineteen of them -- the
 # full assessment -- fit `server/store/budget.py`'s five-dollar `CEILING`, and a
 # call on gpt-4o-mini costs about a tenth of a cent. It is what is set aside,
@@ -138,10 +142,13 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     assert proof.artifacts == len(route.nodes)
 
     producers = conn.execute(
-        "SELECT model, generation_id FROM artifacts WHERE run_id = %s", (run_id,)
+        "SELECT model, generation_id, record_sha256 FROM artifacts WHERE run_id = %s",
+        (run_id,),
     ).fetchall()
     assert {row[0] for row in producers} == {completions.model}
     assert all(row[1] for row in producers), "a call left no handle for the bill"
+    if adapter_for(route) == CANONICAL_ADAPTER_VERSION:
+        assert all(row[2] for row in producers), "a canonical node has no record"
 
     charges = conn.execute(
         "SELECT amount FROM budget_ledger WHERE run_id = %s", (run_id,)
