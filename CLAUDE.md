@@ -11,7 +11,7 @@ Most of this repository is written by an agent. `docs/AI_CODE_QUALITY.md` says
 what that costs and which tool stops each failure mode. Read it before your
 first commit.
 
-## Active continuation — Phase 2 repair
+## Active continuation — Phase 3 repair
 
 The sole current task/checkpoint record is
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
@@ -19,10 +19,10 @@ Read its tracked scope and acceptance evidence before editing; ignored local
 reports are supplemental. Work only in `/Users/ericguei/Documents/caos-workbench`;
 the original `/Users/ericguei/Documents/caos-v2` stays read-only.
 
-Decision §39 reconciles the repair plan with older specifications. Phase 2
-remains incomplete until the handoff records its full exit evidence. After its
-acceptance and applicable user authorization, use
-[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md).
+Decision §39 reconciles the repair plan with older specifications. Phase 2 is
+accepted (the handoff's acceptance record); Phase 3 runs under
+[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md)
+and its tracked task briefs in `docs/superpowers/plans/`.
 The complementary plan's Reasoning Modes section records both Opus 5 guides.
 
 Every shell command starts by unsetting `OPENROUTER_API_KEY`,
