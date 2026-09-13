@@ -26,13 +26,16 @@ from uuid import UUID
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute
 from server.engine.runtime import ProviderResult
+from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.bundle import Bundle
+from server.methodology.canonical import execute_handoff
 from server.methodology.envelope import Envelope
 from server.methodology.executor import Assignment, execute_module
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import check_call, execution_reads
+from server.store.run_inputs import load_run_input
 
 
 @dataclass(frozen=True)
@@ -70,20 +73,40 @@ class ModuleProvider:
                 run_id=self.run_id,
                 route_node_id=route_node_id,
             )
+            pin = load_run_input(self.conn, self.run_id)
         nodes = [
             n
             for n in self.route.nodes
             if (n.route_node_id, n.module_id) == (route_node_id, module_id)
         ]
-        if len(nodes) != 1:
+        if len(nodes) != 1 or pin is None:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        assignment = Assignment(
+            module_id, self.run_id, nodes[0], self.route, attempt_id
+        )
+        # The pinned adapter chooses the executor (§42.1); each executor
+        # refuses a pin of the other adapter again under its own read unit.
+        if pin.adapter_version == CANONICAL_ADAPTER_VERSION:
+            handoff = execute_handoff(
+                self.conn,
+                self.bundle,
+                self.blobs,
+                assignment=assignment,
+                provider=self.completions,
+            )
+            return ProviderResult(
+                artifact_sha256=self.blobs.put(handoff.markdown),
+                charge=handoff.charge,
+                model=handoff.model,
+                generation_id=handoff.generation_id,
+                record_sha256=self.blobs.put(handoff.record),
+                diagnostic_sha256=handoff.diagnostic_sha256,
+            )
         outcome = execute_module(
             self.conn,
             self.bundle,
             self.blobs,
-            assignment=Assignment(
-                module_id, self.run_id, nodes[0], self.route, attempt_id
-            ),
+            assignment=assignment,
             provider=self.completions,
         )
         return ProviderResult(

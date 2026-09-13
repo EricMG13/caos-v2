@@ -251,11 +251,6 @@ def execution_input(
         methodology.adapter_for(route),
     ):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-    # Until the canonical executor lands (Task 3.1 c-5), a canonical pin cannot
-    # produce an acceptable artifact: refuse before any attempt, reservation or
-    # call rather than after paying for one.
-    if pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION:
-        raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
     return pin, route
 
 
