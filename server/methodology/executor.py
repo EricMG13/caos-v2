@@ -255,9 +255,9 @@ def execute_module(
 ) -> ModuleOutcome:
     """Run one reserved attempt from idle entry, owning bounded read units.
 
-    Supplied run/node identity must match the actual attempt; the node's module
-    must match the assignment. Stored route/input authority remains a separate
-    runtime obligation.
+    Supplied run/node identity must match the actual attempt, and the complete
+    current input, whole stored route, node and module must match the
+    assignment both before the call and again before analysis.
     Billing commits before any analytical refusal and survives later cleanup.
 
     The order is the contract: authority is verified before the prompt is built,
@@ -287,8 +287,7 @@ def execute_module(
             run_id=assignment.run_id,
             route_node_id=assignment.node.route_node_id,
         )
-        if assignment.node.module_id != assignment.module_id:
-            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        _stored_identity(conn, assignment, bundle)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_prompt(
         assignment.module_id,
@@ -326,13 +325,7 @@ def execute_module(
             run_id=assignment.run_id,
             route_node_id=assignment.node.route_node_id,
         )
-        _input, stored_route = execution_input(conn, assignment.run_id, bundle)
-        if (
-            stored_route != assignment.route
-            or assignment.node not in stored_route.nodes
-            or assignment.node.module_id != assignment.module_id
-        ):
-            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        _stored_identity(conn, assignment, bundle)
         envelope = _envelope(conn, assignment, authority, completion.content)
     return ModuleOutcome(
         envelope=envelope,
@@ -340,6 +333,19 @@ def execute_module(
         model=model,
         generation_id=generation,
     )
+
+
+def _stored_identity(
+    conn: StoreConnection, assignment: Assignment, bundle: Bundle
+) -> None:
+    """Current input with the actual Bundle, and the exact pinned route/node."""
+    _input, stored = execution_input(conn, assignment.run_id, bundle)
+    if (
+        stored != assignment.route
+        or assignment.node not in stored.nodes
+        or assignment.node.module_id != assignment.module_id
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
 
 
 def _envelope(

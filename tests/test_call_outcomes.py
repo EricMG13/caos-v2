@@ -72,6 +72,8 @@ def test_late_outcome_is_durable_without_analytical_acceptance(
     assert _records(conn) == before
     assert _counts(conn) == (1, 1, 0)
     assert [e.name for e in events_of(conn, run)] == [
+        "ROUTE_PINNED",
+        "INPUT_PINNED",
         "ATTEMPT_STARTED",
         "RUN_" + runs.run_status(conn, run).value,
         OUTCOME_EVENT,
@@ -197,7 +199,11 @@ def test_outcome_failure_rolls_back_owned_unit_and_releases_locks(
         other.execute("SET lock_timeout = '1s'")
         lock_run(other, run)
         assert _counts(other) == (0, 0, 0)
-        assert [e.name for e in events_of(other, run)] == ["ATTEMPT_STARTED"]
+        assert [e.name for e in events_of(other, run)] == [
+            "ROUTE_PINNED",
+            "INPUT_PINNED",
+            "ATTEMPT_STARTED",
+        ]
 
 
 @pytest.mark.parametrize("failure", ["artifact", "event", "digest", "conflict"])
