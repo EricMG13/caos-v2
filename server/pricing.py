@@ -13,7 +13,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, Inexact, localcontext
+from decimal import (
+    MAX_EMAX,
+    MIN_EMIN,
+    Context,
+    Decimal,
+    DecimalException,
+    Inexact,
+    InvalidOperation,
+    Overflow,
+)
 
 from server.provider import MAX_COMPLETION_TOKENS, MAX_REQUEST_BYTES
 from server.refusals import Refusal, RefusalCode
@@ -36,12 +45,23 @@ def worst_case(price: ModelPrice) -> Decimal:
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     validate_spend(price.input_per_token)
     validate_spend(price.output_per_token)
-    with localcontext() as context:
-        context.prec = 200
-        context.traps[Inexact] = True
-        amount = (
-            price.input_per_token * MAX_REQUEST_BYTES
-            + price.output_per_token * MAX_COMPLETION_TOKENS
+    # An explicit context, not the caller's: exact or refused, never rounded.
+    exact = Context(
+        prec=1000,
+        Emax=MAX_EMAX,
+        Emin=MIN_EMIN,
+        traps=[Inexact, Overflow, InvalidOperation],
+    )
+    try:
+        amount = exact.add(
+            exact.multiply(price.input_per_token, MAX_REQUEST_BYTES),
+            exact.multiply(price.output_per_token, MAX_COMPLETION_TOKENS),
         )
+    except DecimalException:
+        raise Refusal(RefusalCode.MONEY_INVALID) from None
     validate_spend(amount)
+    # A free price would reserve nothing, and a ceiling spent to exactly zero
+    # admits a zero reservation: the call it pays for could overspend.
+    if not amount:
+        raise Refusal(RefusalCode.MONEY_INVALID)
     return amount
