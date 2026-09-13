@@ -13,30 +13,27 @@ first commit.
 
 ## Active continuation — Phase 2 repair
 
-Claude Code resumes from
+The sole current task/checkpoint record is
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
-Task17d2 is accepted on `codex/execute-repair-plan` (Task17d2a
-`f8cd738`, Task17d2b `ceabf9f`), and so is Task17d3 (Task17d3a `829d863`,
-proof-only Task17d3b `17645f3`, each with review remediation; reports in
-`.superpowers/sdd/`) and Task17e (a1 `9f299a4`, a2 `209b0ef`, proof-only b
-`c88c579`). Next is Task17f. Phase 2 is **not** complete. Work only in
-`/Users/ericguei/Documents/caos-workbench`; the original
-`/Users/ericguei/Documents/caos-v2` checkout stays read-only.
+Read its tracked scope and acceptance evidence before editing; ignored local
+reports are supplemental. Work only in `/Users/ericguei/Documents/caos-workbench`;
+the original `/Users/ericguei/Documents/caos-v2` stays read-only.
 
-Before changing code, read the tracked handoff and the local binding records
-`.superpowers/sdd/task-17e-brief.md` and
-`.superpowers/sdd/task-17e-b-report.md`, then rebuild the local GitNexus index as
-the handoff specifies. Every shell command starts by unsetting
-`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and
-`CAOS_REQUIRE_PROVIDER`. Never invoke a live provider without separate explicit
-authorization.
+Decision §39 reconciles the repair plan with older specifications. Phase 2
+remains incomplete until the handoff records its full exit evidence. After its
+acceptance and applicable user authorization, use
+[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md).
+The complementary plan's Reasoning Modes section records both Opus 5 guides.
 
-The current review cadence overrides older repository text and historical task
-records: ordinary task review remains required at each accepted slice; no
-rewrite tournament runs; one `confidence-review` runs only after every Phase 2
-task passes, using actual `xhigh` reasoning; a separate adversarial code audit
-runs only after that whole-phase confidence review and remediation, also using
-actual `xhigh`. Stop before Phase 3.
+Every shell command starts by unsetting `OPENROUTER_API_KEY`,
+`OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `CAOS_REQUIRE_PROVIDER`.
+Never invoke a live provider without explicit authorization. Index the current
+checkout with GitNexus and verify affected callers in source.
+
+Ordinary review closes each task. One `confidence-review` and then one separate
+adversarial code audit close the whole phase, both at actual `xhigh` reasoning,
+with remediation/reverification between them. No per-task specialist review or
+rewrite tournament. Requested document reviews do not certify these code gates.
 
 ## The eleven invariants (never weaken)
 
@@ -159,6 +156,12 @@ Standing rules that back them:
 Every accepted limitation gets an entry here with its reason and its upgrade
 path, in the same breath as the code that creates it. An empty ledger on a
 system this size means nobody looked.
+
+The phase labels below are historical **rebuild** labels, not current repair
+phase numbers. Entries are not evidence of completion; the handoff and repair
+plan govern present work. Correct a stale entry when its owning task proves
+the replacement behavior. The legacy hook claims are currently unverified
+controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 0.**
 

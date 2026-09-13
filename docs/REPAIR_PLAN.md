@@ -5,10 +5,13 @@ Reviewed 12 September 2026. Target: `/Users/ericguei/Documents/caos-v2`.
 > **Execution status, 13 September 2026.** The findings and original paths below
 > are baseline evidence, not a description of the current workbench. Phase 2 is
 > being repaired in `/Users/ericguei/Documents/caos-workbench` on
-> `codex/execute-repair-plan`. Task17d2 is accepted: application checkpoint
-> `f8cd738` plus proof-only checkpoint `ceabf9f`; Task17d3 is next. Phase 2
-> remains incomplete. Resume only from
-> [`CLAUDE_CODE_HANDOFF.md`](CLAUDE_CODE_HANDOFF.md).
+> `codex/execute-repair-plan`. Phase 2 remains incomplete. The sole current
+> task/checkpoint record is [`CLAUDE_CODE_HANDOFF.md`](CLAUDE_CODE_HANDOFF.md).
+> Sections 1–4 and 9 preserve the dated review baseline; their defect/status
+> claims are historical. Sections 5–8 specify the repair target. Decision §39
+> reconciles that target with older specifications and phase labels.
+> Use the [Phase 3–6 goal prompt](PHASE_3_ONWARDS_GOAL_PROMPT.md) only after the
+> Phase 2 acceptance and authorization conditions it names.
 
 ## Recommendation
 
@@ -45,7 +48,7 @@ The review covered the authored server, frontend, gate scripts and configuration
 
 The full Python command used `-o addopts='' -p no:cacheprovider`, `PYTHONDONTWRITEBYTECODE=1`, `RUFF_NO_CACHE=true`, `CAOS_REQUIRE_POSTGRES=1`, and a disposable database URL. `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `CAOS_REQUIRE_PROVIDER` were removed from that command's environment. Coverage output was disabled to keep the checkout unchanged, so this was **not** a full coverage/security/merge-gate certification.
 
-The first database attempt was blocked by the sandbox's loopback restriction, not by product behavior. The approved retry completed. The temporary PostgreSQL container and its synthetic test data were removed afterward; no existing database was used. The temporary locked Python environment remains at `/private/tmp/caos-review-env.5pfvcQ`. Frontend regression probes are available in [review.test.tsx](/private/tmp/caos-frontend-review.eVI4XF/review.test.tsx).
+The first database attempt was blocked by the sandbox's loopback restriction, not by product behavior. The approved retry completed. The temporary PostgreSQL container and its synthetic test data were removed afterward; no existing database was used. The original report used `/private/tmp/caos-review-env.5pfvcQ` and frontend probes at `/private/tmp/caos-frontend-review.eVI4XF/review.test.tsx`. The frontend probe file is no longer present as of 13 September; these are historical observations, not portable acceptance evidence. Recreate the semantic regressions in tracked tests for their owning repair tasks.
 
 Not performed: live LLM qualification, GUI/browser inspection, production-image boot, authentication deployment testing, external GitHub ruleset inspection, a fresh vulnerability scan, or an exhaustive proof that no other bugs exist. Two dependency deprecation warnings occurred in the passing Python suite; they are maintenance items, not reasons to add another dependency during this review.
 
@@ -219,7 +222,7 @@ Repair the declared contract or explicitly reject unsupported inputs. Required m
 
 Evidence: [filing.py:109](/Users/ericguei/Documents/caos-v2/server/deliverable/filing.py:109), [render.py](/Users/ericguei/Documents/caos-v2/server/deliverable/render.py), [package.py:63](/Users/ericguei/Documents/caos-v2/server/deliverable/package.py:63), [write_package](/Users/ericguei/Documents/caos-v2/server/deliverable/package.py:104).
 
-Repair: freeze an existing validated immutable revision, including accepted-artifact hashes and limitations. Persist its bytes in the existing blob store; bind the receipt to the exact filing event. Bound and validate every archive member, return verification failures for malformed inputs, use exclusive file creation, and include a versioned standalone verifier if that portability promise is retained. This checks consistency; it is not proof of externally authenticated signatures without a separate trust anchor.
+Repair: freeze an existing validated immutable revision, including accepted-artifact hashes and limitations. Persist its bytes in the existing blob store; bind the receipt to the exact filing event. Bound and validate every archive member, return verification failures for malformed inputs, use exclusive file creation, and include the versioned standalone verifier required by decision §14 unless the user explicitly changes that portability scope. This checks consistency; it is not proof of externally authenticated signatures without a separate trust anchor.
 
 ### F16 — SSE reconnection and marker parsing have edge-case failures [P2]
 
@@ -295,7 +298,7 @@ Phase-close order: implementation → normal tests → confidence review (`xhigh
 2. Record the host adaptation: canonical Markdown remains the exact analytical handoff; typed structured findings are validated projections; host-generated metadata identifies run, bundle, source set, adapter and upstream artifacts. The UI/report is a host presentation, not a second model-authored canonical artifact.
 3. Reconcile the CP-PARSE carve-out with CP-0 preparation. Prefer the current catalog-selected CP-0 route unless a distinct host parse artifact truly requires a separate executable stage. Do not silently double-run preparation.
 4. Keep the current no-Excel/no-Word scope. Preserve the archived contracts for a later explicit request.
-5. Index the chosen CAOS v2 implementation checkout with GitNexus before modifying source. On 12 September the local CLI was available but `.gitnexus/` was absent. Its installed help confirms `gitnexus analyze --index-only`, which builds the index without injecting AGENTS.md, CLAUDE.md or skill files. Run from `/Users/ericguei/Documents/caos-v2`; record the tool version and resulting index identity. Use `gitnexus status` to check freshness; if the generated local runner exists, its equivalent is `node .gitnexus/run.cjs status` and `node .gitnexus/run.cjs analyze --index-only`. Do not bootstrap a floating `npx` package when the installed executable is available.
+5. Index the chosen CAOS v2 implementation checkout with GitNexus before modifying source. On 12 September the local CLI was available but `.gitnexus/` was absent. Its installed help confirms `gitnexus analyze --index-only`, which builds the index without injecting AGENTS.md, CLAUDE.md or skill files. Run from `/Users/ericguei/Documents/caos-workbench`; keep the original checkout read-only and record the tool version and resulting index identity. Use `gitnexus status` to check freshness; if the generated local runner exists, its equivalent is `node .gitnexus/run.cjs status` and `node .gitnexus/run.cjs analyze --index-only`. Do not bootstrap a floating `npx` package when the installed executable is available.
 6. Read the indexed repository context and inspect representative runtime, evidence and frontend call paths. Record exclusions/oversized files/parser failures and verify any missing critical paths directly with source searches. Leave embeddings, LLM wiki generation, public publishing and generated community skills off. Inspect Git status after indexing and preserve project instruction/vendor files; allow only the intended local index/registry metadata changes. If indexing fails, investigate and report the gap—do not claim the indexing gate passed.
 
 **Allowed APIs and copy-ready patterns**
@@ -327,6 +330,7 @@ Phase-close order: implementation → normal tests → confidence review (`xhigh
 3. Separate fixture preview, real development mode, offline tests and explicit paid-provider tests. Make fixture middleware opt-in; it must never satisfy a real integration test.
 4. Exclude vendor files from every mutating formatter/autofix hook while retaining read-only bundle verification. Repair the sequential concurrency test.
 5. Add explicit fast and complete check commands. The complete command must require PostgreSQL and include frontend lint/types/unit/build/accessibility/workbench checks, not just vocabulary.
+6. Verify Claude hooks against their actual JSON-stdin invocation contract. The documentation audit found the current command guard and formatter read unsupported input variables. Repair with invocation-level tests and vendor exclusions before Phase 2 closes; Phase 1's prior acceptance does not certify these hooks.
 
 **References:** [Makefile](/Users/ericguei/Documents/caos-v2/Makefile), [CI workflow](/Users/ericguei/Documents/caos-v2/.github/workflows/ci.yml), [conftest](/Users/ericguei/Documents/caos-v2/tests/conftest.py), [Vite fixture middleware](/Users/ericguei/Documents/caos-v2/frontend/vite.config.ts), [quality controls](/Users/ericguei/Documents/caos-v2/docs/AI_CODE_QUALITY.md).
 
@@ -395,8 +399,8 @@ accepted.
 - Spaced glyphs, wrapped quotes, columns, repeated quotes, page rotation and crop coordinates are covered.
 - Module B receives the exact accepted data/lineage needed from module A; a missing/changed predecessor prevents acceptance. Undelivered pages of a delivered source cannot be cited.
 - Blocked/invalid output is retained only as diagnostic attempt evidence, never as usable downstream analysis.
-- A deterministic fake provider completes the route with realistic valid handoffs; malformed, restricted, blocked, contradictory and prompt-injection cases fail appropriately.
-- One separately authorized paid run uses the same worker and validation path. No test-only analytical success path.
+- A deterministic provider completes the route through the real runtime and validator with realistic handoffs. Valid restricted results retain their limitations and may proceed only where the contract permits; blocked/invalid results cannot clear downstream gates. Preserve disclosed conflicts without inventing a resolution.
+- Phase 3 engineering acceptance requires no paid call or worker. Phase 4 introduces and proves the worker through this same runtime/validator; Phase 6 requires separately authorized live qualification. An earlier authorized live diagnostic does not qualify a release or waive later checks.
 
 **Guardrails:** no JSON-only “conformance” claim, no model-authored rectangles/identity, no universal per-module claims template, no mandatory paid calls in default tests, no hardcoded replacement DAG, no automatic source-driven web browsing.
 
@@ -436,9 +440,9 @@ accepted.
 
 1. Finish or explicitly narrow the forecast input contract. Required missing fields produce unavailable results; unsupported policy/contractual fields are refused until implemented. Implement declared supported cash/debt behavior with independent expected-value tests, not a model-generated balancing figure.
 2. Use fixed local Decimal precision/rounding, finite/magnitude bounds, exact period/case identities and unique driver rows. Preserve unavailable periods/reasons; carry scenario/perimeter/units and explicit zero-denominator reasons.
-3. Wire CP-CF only through its declared host extension and allowlisted calculator. The current orphan function is not a completed Model workflow.
+3. Before CP-CF, select a catalog route containing CP-1, CP-2G and CP-4; implement and prove those owners' canonical contracts and required predecessors to the Phase 3 standard. Then wire CP-CF through its declared host extension and allowlisted calculator. Never splice it into the LITE earnings route or fabricate missing owners. The current orphan function is not a completed Model workflow.
 4. Construct a saved deliverable revision from validated accepted artifacts in route order, typed figure references, exact narrative and explicit limitations/partial refusals. Sign/freeze/file that immutable object rather than accepting arbitrary caller bytes or a detached hash.
-5. Make rendering deterministic, receipt/event identity exact, archive verification bounded and total for malformed input, and package creation exclusive. Bundle a versioned stdlib-only verifier if repository-independent verification remains required.
+5. Make rendering deterministic, receipt/event identity exact, archive verification bounded and total for malformed input, and package creation exclusive. Bundle the versioned stdlib-only verifier required by decision §14; prove repository-independent verification.
 
 **References:** [forecast specification](/Users/ericguei/Documents/caos-v2/docs/SYSTEM_SPEC.md:216), [cash_flow.py](/Users/ericguei/Documents/caos-v2/server/calculators/cash_flow.py), [existing forecast tests](/Users/ericguei/Documents/caos-v2/tests/test_cash_flow_forecast.py), [deliverable libraries](/Users/ericguei/Documents/caos-v2/server/deliverable), [filing tests](/Users/ericguei/Documents/caos-v2/tests/test_deliverable.py).
 
@@ -449,7 +453,7 @@ accepted.
 - A narrative cannot insert or alter a financial figure without a validated reference. Partial/refused claims and restrictions remain visible in the report.
 - Wrong case/revision/upstream hash, changed source authority, unsigned content and non-independent filing refuse before publication.
 - Freeze persists the exact signed payload; two simultaneous file creations cannot overwrite one another; malformed/oversized/duplicate-member archives return a failed verification rather than crashing.
-- A package verifies in a clean environment with no project checkout if that portability contract is retained.
+- A package verifies in a clean environment with no project checkout, as decision §14 requires.
 
 **Guardrails:** no automatic missing-to-zero conversion, no float money, no generic “complete” label for unsupported calculations, no report-specific second LLM to invent narrative facts, no restoring LibreOffice/Word unless explicitly requested.
 
@@ -481,6 +485,11 @@ accepted.
 
 ### Required local setup
 
+The table records the target and dated baseline. Current implemented commands
+and prerequisites are in [README](../README.md#local-development) and
+[CI_GATE_CONTRACT.md](CI_GATE_CONTRACT.md); do not repeat accepted environment
+work because an original finding below uses present tense.
+
 | Component | Baseline / proposed rule |
 |---|---|
 | Application Python | Python 3.14; review used 3.14.6. Runtime/dev packages from existing hash-locked `requirements*.txt` |
@@ -507,7 +516,11 @@ Document at least these environment variables, with non-secret examples and clea
 
 ### Command contract to implement
 
-Names in the “proposed” column are planned Make/package targets, **not commands already available**.
+This is the original proposal, not a current command inventory. Bootstrap,
+doctor, index, dev-up/down, dev-api/ui, check-fast and check now exist. The
+fixture target is `make dev-ui-demo`; `make demo` was not adopted. Worker and
+production-smoke work remain Phase 4 obligations. Use the current README and
+Makefile for executable commands.
 
 | Purpose | Existing building blocks | Proposed command |
 |---|---|---|
@@ -529,7 +542,10 @@ A small Compose file is sufficient for repeatable local services if used; no dev
 
 ### A. Engineering and merge gates
 
-These are proposed completion rules, retaining the useful existing controls. Current external branch-protection/Sonar settings were not inspected and must not be assumed from workflow comments.
+These are completion rules, retaining existing controls. The dated hosted
+ruleset/Sonar observations and current local command contract are recorded in
+[CI_GATE_CONTRACT.md](CI_GATE_CONTRACT.md). Verify hosted status against each
+actual authorized PR head; baseline observations are not current certification.
 
 | Gate | Must pass | Failure rule |
 |---|---|---|
@@ -541,7 +557,7 @@ These are proposed completion rules, retaining the useful existing controls. Cur
 | Scan coverage/security | Bandit on 3.12 with no parse errors and claimed-file coverage, locked dependency audit, gitleaks, Trivy/scanner floor | A scan of zero files is a failure. Existing Trivy policy rejects fixable HIGH/CRITICAL findings; unfixed risks still need triage |
 | Measured performance | Actual query/call counts on affected endpoints and collection-size cases, bounded inputs, cancellation/timeouts | A declaration such as `IO_BUDGET = None` is not measured evidence |
 | Review/diff | Ordinary exact-range task review at each accepted slice; no rewrite tournaments; existing 800-counted-line PR ceiling | Record evidence-backed findings, fix confirmed root causes, rerun affected checks, and split oversized concerns. Defer `confidence-review` to the whole-phase gate below |
-| Phase-completion audit | **`adversarial-reviewer` only at phase completion, at extra high (`xhigh`) reasoning**, over the full phase diff and affected callers | No intermediate/per-PR adversarial audit requirement; confirmed blockers must be fixed and reverified before accepting the phase |
+| Phase-completion reviews | One `confidence-review`, then one separate `adversarial-reviewer` audit after remediation, both only at phase completion with actual `xhigh` reasoning, over the full phase diff and affected callers | No per-edit/per-task specialist review. Reverify remediation in the same checkpoint; no phase acceptance with unresolved blockers |
 | Production smoke | Boot built artifact; health/readiness, auth edge, static routes, real section reads/commands, fixtures absent | A Docker build or image scan alone is insufficient |
 | Release qualification | Exact build/adapter/model/set identity, current authenticated verdict, explicit capped paid evaluation when authorized | A unit-green build is not automatically credit-qualified |
 
@@ -577,10 +593,11 @@ Source withdrawal is an immediate safety event. Keep historical artifacts/audit 
    `confidence-review`, then one full-phase adversarial code audit, run only at
    phase completion with actual `xhigh` reasoning. Rewrite tournaments are no
    longer required.
-5. No unrelated source, vendor or user changes are lost. Gate/contract changes have an explicit decision and migration where needed.
-6. Handoff names the exact commit, GitNexus index identity/freshness,
+5. No unrelated source, vendor or user changes are lost. Gate/contract changes have an explicit decision and migration where needed. After committing the candidate and any review remediation, run the final 800-line gate against its actual PR base; the existing size script measures committed `base...HEAD`, not staged or unstaged work.
+6. A tracked handoff names the exact accepted commit, GitNexus index identity/freshness,
    commands/results, risk classifications, ordinary review result, remaining
-   limitations and enabled/disabled feature scope. At phase completion, also
+   limitations and enabled/disabled feature scope. Ignored logs are optional
+   supporting evidence, never the only binding task brief. At phase completion, also
    attach both specialist-review scopes/results, actual reasoning settings,
    verdicts and remediation evidence. “All tests pass” never substitutes for
    “the requested user journey works.”
