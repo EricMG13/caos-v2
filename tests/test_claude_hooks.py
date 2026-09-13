@@ -69,6 +69,15 @@ def _main(mode: str, raw: str) -> tuple[int, str]:
         "git push --mirror",
         "env -u CAOS_REQUIRE_PROVIDER",
         "env -0",
+        ".venv/bin/pip install requests",
+        "pip3 install requests",
+        "export",
+        "export -p",
+        "set",
+        "declare -x",
+        "command env",
+        "git --config-env=x=Y push -f",
+        "git --attr-source HEAD push --force",
     ],
 )
 def test_the_guard_refuses_forbidden_commands(command: str) -> None:
@@ -93,6 +102,9 @@ def test_the_guard_refuses_forbidden_commands(command: str) -> None:
         "grep -r foo env",
         "git -C /repo log --oneline -3",
         "env -u OPENROUTER_API_KEY FOO=1 python script.py",
+        "set -euo pipefail",
+        "export FOO=1",
+        ".venv/bin/pip install --require-hashes -r requirements.txt",
     ],
 )
 def test_the_guard_allows_ordinary_commands(command: str) -> None:

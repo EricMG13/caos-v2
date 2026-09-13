@@ -171,3 +171,19 @@ Executed with the provider-scrubbed command above against test port 55437:
 `caos_restore_47f3896a12c7445c900229dad9d7457e`. All four owned databases and
 temporary synthetic blob roots were removed and can be regenerated. Existing
 development databases, containers, volumes and blobs were untouched.
+
+## Versions 9 and 10 — accepted owner and blocked runs — 2026-09-13
+
+Version 9 (`0009_accepted_owner`) records each artifact's route node and makes
+`(run_id, route_node_id)` unique. A populated database that already holds two
+accepted artifacts for one run node cannot satisfy that constraint: the upgrade
+rolls back whole and startup refuses `STORE_SCHEMA_DRIFT`, which does not name
+the cause. To diagnose, on a restored copy, list the duplicates with
+`SELECT a.run_id, t.route_node_id, count(*) FROM artifacts a JOIN run_attempts t
+USING (attempt_id) GROUP BY 1, 2 HAVING count(*) > 1`. Which artifact is the
+authoritative owner is an analytical decision about that run, not a migration
+step; no automatic cleanup exists, and nothing may be deleted from a production
+store without its own authorized, backed-up change. Version 10
+(`0010_blocked_runs`) only widens two CHECK constraints and cannot refuse
+existing rows. The restore probe (`tests/probes/migration_restore.py`) passes in
+all three modes at version 10.

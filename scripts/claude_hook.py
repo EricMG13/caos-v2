@@ -28,8 +28,9 @@ from typing import TextIO
 
 REPO = Path(__file__).resolve().parents[1]
 MALFORMED = "HOOK_INPUT_MALFORMED"
-# `format_file`: the pinned formatter is not installed here.
-SKIPPED = -1
+# `format_file`: the pinned formatter is not installed here. Not a return code
+# a process can produce (a signal death is -1 to -64).
+SKIPPED = -1000
 FORCE_PUSH = "refused: force push"
 NO_VERIFY = "refused: --no-verify bypasses the gates in docs/AI_CODE_QUALITY.md"
 UNPINNED = "refused: install from the hashed lock only"
@@ -43,8 +44,20 @@ DOTENV = (
 _DOTENV = re.compile(r"(?<![\w.])\.env(?!\.example)(?![A-Za-z0-9_])")
 # git global options that take a separate value (`git -C dir push`).
 _GIT_VALUED = frozenset(
-    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+    {
+        "-C",
+        "-c",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--config-env",
+        "--attr-source",
+        "--super-prefix",
+        "--list-cmds",
+    }
 )
+_PIP = re.compile(r"pip(3(\.\d+)?)?")
 _OPERATORS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "(", ")"})
 _SKIPPED = ("vendor", ".claude")
 _PYTHON = frozenset({".py"})
@@ -99,8 +112,15 @@ def _token_reason(words: Sequence[str]) -> str | None:
                 return FORCE_PUSH
             if subcommand == "commit" and _flag(rest, "n"):
                 return NO_VERIFY
-        if before == "pip" and word == "install" and "--require-hashes" not in until:
+        if (
+            _PIP.fullmatch(Path(before).name)
+            and word == "install"
+            and "--require-hashes" not in until
+        ):
             return UNPINNED
+        # Shell builtins that list exported variables when given nothing else.
+        if before in _OPERATORS and _lists_environment(word, until):
+            return CREDENTIALS
         # `env` as a command word with nothing left to run prints the environment.
         if (
             Path(word).name == "env"
@@ -135,6 +155,19 @@ def _env_command(arguments: Sequence[str]) -> list[str]:
         else:
             left.append(argument)
     return left
+
+
+def _lists_environment(word: str, arguments: Sequence[str]) -> bool:
+    if word == "set":
+        return not arguments  # `set -e` sets options; bare `set` lists variables
+    if word in {"export", "declare", "typeset"}:
+        return not [a for a in arguments if not a.startswith("-")]
+    return (
+        word == "command"
+        and bool(arguments)
+        and arguments[0] == "env"
+        and not (_env_command(arguments[1:]))
+    )
 
 
 def _forced(arguments: Sequence[str]) -> bool:
