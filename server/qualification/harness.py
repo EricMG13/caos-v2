@@ -53,9 +53,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from fractions import Fraction
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
+
+import psycopg
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -74,10 +77,13 @@ from server.qualification.matrix import (
 )
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
-from server.store.budget import CEILING
+from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store.budget import CEILING, validate_spend
+from server.store.outcomes import execution_reads, require_idle
 from server.store.routes import pin_route, resolved_route
+from server.store.run_inputs import RunInput, pin_run_input
 from server.store.runs import create_case, run_status, start_run
+from server.store.source_sets import snapshot_source_set
 
 # The label a case is admitted under. A qualification case is a case like any
 # other in the store, which is what lets the proof read it like any other.
@@ -166,6 +172,66 @@ class PerformedSet:
     matrix: Matrix | None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedCase:
+    """Expected stored identity; this carrier grants no execution authority."""
+
+    case_label: str
+    input: RunInput
+
+
+def prepare(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    harness: Harness,
+    *,
+    qualification: QualificationSet,
+) -> tuple[PreparedCase, ...]:
+    """Prepare committed inputs for external exact-preview gate approval.
+
+    Preparation never provisions actors, approves gates or executes a run.
+    Existing helpers commit separately; earlier preparations survive later failure.
+    """
+    assert_measurable(qualification)
+    _distinct(qualification)
+    _answerable(qualification)
+    routes = [
+        resolve_route(harness.catalog, case.profile_id, case.selection_id)
+        for case in qualification.cases
+    ]
+    titles = [
+        BoundaryText.of(case.label, limit=_LABEL_LIMIT) for case in qualification.cases
+    ]
+    _affordable(qualification, harness)
+    if not isinstance(harness.bundle, Bundle):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    require_idle(conn)
+    prepared = []
+    try:
+        with execution_reads(conn):
+            pass  # Verify READ COMMITTED before any durable setup.
+        for case, title, route in zip(qualification.cases, titles, routes, strict=True):
+            case_id = create_case(conn, title)
+            admit_pack(conn, blobs, case_id=case_id, documents=list(case.documents))
+            run_id = start_run(conn, case_id)
+            conn.commit()
+            source = snapshot_source_set(conn, case_id)
+            pin_route(conn, run_id, route)
+            prepared.append(
+                PreparedCase(
+                    case.label,
+                    pin_run_input(conn, run_id, source.version, harness.bundle),
+                )
+            )
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+    return tuple(prepared)
+
+
 def perform(
     conn: StoreConnection,
     blobs: BlobStore,
@@ -246,7 +312,8 @@ def _affordable(qualification: QualificationSet, harness: Harness) -> None:
     reason the reservation exists is that the call is billable whether or not
     the guess was good.
     """
-    if CEILING * len(qualification.cases) > harness.ceiling:
+    validate_spend(harness.ceiling)
+    if Fraction(CEILING) * len(qualification.cases) > Fraction(harness.ceiling):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 
