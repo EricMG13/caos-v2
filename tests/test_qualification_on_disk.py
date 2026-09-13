@@ -356,6 +356,8 @@ def test_a_declared_subject_round_trips_and_is_digested(tmp_path: Path) -> None:
         {**SUBJECT, "cos_run_id": "COS-1"},
         {**SUBJECT, "issuer_id": 7},
         {**SUBJECT, "issuer_name": ""},
+        {**SUBJECT, "issuer_name": " padded"},
+        {**SUBJECT, "analysis_date": "2026-02-30"},
         [SUBJECT["issuer_id"]],
         None,
     ],
