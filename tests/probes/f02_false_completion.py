@@ -24,9 +24,19 @@ from server.blobs import BlobStore  # noqa: E402
 from server.boundary_text import BoundaryText  # noqa: E402
 from server.engine.route import resolve_route  # noqa: E402
 from server.engine.runtime import Execution, ProviderResult, run_route  # noqa: E402
+from server.evidence.ingest import Document, admit_pack  # noqa: E402
+from server.methodology.bundle import Bundle  # noqa: E402
 from server.store import RunStatus, apply_schema, connect  # noqa: E402
 from server.store.budget import reserve  # noqa: E402
+from server.store.gates import (  # noqa: E402
+    Gate,
+    GateApproval,
+    approve_gate,
+    gate_preview,
+)
+from server.store.members import Standing, grant  # noqa: E402
 from server.store.routes import pin_route  # noqa: E402
+from server.store.run_inputs import pin_run_input  # noqa: E402
 from server.store.runs import (  # noqa: E402
     Accepted,
     accept_attempt,
@@ -35,6 +45,7 @@ from server.store.runs import (  # noqa: E402
     start_attempt,
     start_run,
 )
+from server.store.source_sets import snapshot_source_set  # noqa: E402
 
 CATALOG = REPO / (
     "vendor/deploy-v/skills/cp-os-credit-os/references/"
@@ -75,9 +86,41 @@ def main() -> None:
         ):
             apply_schema(conn)
             case_id = create_case(conn, BoundaryText.of("F02 isolated probe"))
+            blobs = BlobStore(Path(tmp) / "blobs")
+            admit_pack(
+                conn,
+                blobs,
+                case_id=case_id,
+                documents=[
+                    Document(filename=BoundaryText.of("f02.txt"), data=b"F02 input\n")
+                ],
+            )
             run_id = start_run(conn, case_id)
-            pin_route(conn, run_id, route)
             conn.commit()
+            source = snapshot_source_set(conn, case_id)
+            bundle = Bundle(REPO / "vendor/deploy-v")
+            pin_route(conn, run_id, route)
+            pin_run_input(conn, run_id, source.version, bundle)
+            approver = uuid4()
+            grant(
+                conn,
+                case_id=case_id,
+                user_id=approver,
+                standing=Standing.APPROVER,
+            )
+            conn.commit()
+            for gate in Gate:
+                preview = gate_preview(conn, run_id, gate)
+                approve_gate(
+                    conn,
+                    GateApproval(
+                        run_id=run_id,
+                        gate=gate,
+                        actor_id=approver,
+                        preview_sha256=preview.preview_sha256,
+                        input_fingerprint=preview.input_fingerprint,
+                    ),
+                )
 
             cp0 = next(node for node in route.nodes if node.module_id == "CP-0")
             body = {
@@ -89,7 +132,6 @@ def main() -> None:
                     for module in ("CP-1", "CP-2", "CP-2D")
                 ]
             }
-            blobs = BlobStore(Path(tmp) / "blobs")
             digest = blobs.put(json.dumps(body).encode())
             attempt_id = start_attempt(conn, run_id, cp0.route_node_id)
             reserve(conn, attempt_id, Decimal("0.01"))
@@ -104,7 +146,7 @@ def main() -> None:
                 blobs,
                 run_id=run_id,
                 route=route,
-                execution=Execution(NoProvider(), Decimal("0.01")),
+                execution=Execution(NoProvider(), Decimal("0.01"), bundle),
             )
             status = run_status(conn, run_id)
             accepted_row = conn.execute(

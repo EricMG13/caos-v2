@@ -19,7 +19,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import _url_for, gate_verdict
+from conftest import _url_for, approve_run, gate_verdict
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -114,7 +114,7 @@ def route() -> ResolvedRoute:
 
 @pytest.fixture
 def ready(
-    case: tuple[StoreConnection, UUID], tmp_path: Path
+    case: tuple[StoreConnection, UUID], tmp_path: Path, route: ResolvedRoute
 ) -> tuple[StoreConnection, UUID, UUID, BlobStore]:
     conn, case_id = case
     blobs = BlobStore(tmp_path / "blobs")
@@ -126,6 +126,13 @@ def ready(
     )
     run_id = start_run(conn, case_id)
     conn.commit()
+    approve_run(
+        conn,
+        case_id=case_id,
+        run_id=run_id,
+        route=route,
+        bundle=Bundle(root=VENDORED),
+    )
     return conn, run_id, source_id, blobs
 
 
@@ -170,7 +177,7 @@ def test_the_loop_charges_what_the_provider_reported(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE),
+        execution=Execution(provider, ESTIMATE, provider.bundle),
     )
 
     assert run_status(conn, run_id) is RunStatus.COMPLETE
@@ -208,7 +215,11 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
     )
 
     run_route(
-        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(provider, ESTIMATE, provider.bundle),
     )
 
     recorded = conn.execute(
@@ -238,7 +249,11 @@ def test_the_artifact_is_the_envelope_the_host_built(
     )
 
     run_route(
-        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(provider, ESTIMATE, provider.bundle),
     )
 
     row = conn.execute(
@@ -279,7 +294,7 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE),
+            execution=Execution(provider, ESTIMATE, provider.bundle),
         )
 
     with connect(_url_for(conn.info.dbname)) as observer:
@@ -300,22 +315,24 @@ def test_the_loop_hands_each_node_its_predecessors_results(
     completions = _Completions(source_id)
     pin_route(conn, run_id, route)
 
+    module_provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        delivered=_every_block(conn, source_id),
+        route=route,
+        run_id=run_id,
+    )
     run_route(
         conn,
         blobs,
         run_id=run_id,
         route=route,
         execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=Bundle(root=VENDORED),
-                blobs=blobs,
-                completions=completions,
-                delivered=_every_block(conn, source_id),
-                route=route,
-                run_id=run_id,
-            ),
+            module_provider,
             ESTIMATE,
+            module_provider.bundle,
         ),
     )
 
@@ -365,7 +382,7 @@ def test_a_predecessor_artifact_of_another_shape_is_refused_not_raised(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE),
+            execution=Execution(provider, ESTIMATE, provider.bundle),
         )
 
     assert caught.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
@@ -396,7 +413,11 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     )
 
     run_route(
-        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(provider, ESTIMATE, provider.bundle),
     )
 
     nodes = {node.module_id: node.route_node_id for node in route.nodes}

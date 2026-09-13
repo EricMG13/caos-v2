@@ -73,7 +73,7 @@ def _invoke(
             provider.blobs,
             run_id=provider.run_id,
             route=provider.route,
-            execution=Execution(provider, ESTIMATE),
+            execution=Execution(provider, ESTIMATE, provider.bundle),
         )
     elif entry == "module":
         provider.execute(node.route_node_id, module, attempt_id=attempt)

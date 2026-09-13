@@ -402,6 +402,7 @@ def _perform_one(
                     run_id=run_id,
                 ),
                 harness.estimate,
+                harness.bundle,
             ),
         )
     except Refusal as failed:

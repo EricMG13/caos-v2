@@ -28,6 +28,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import approve_run
 from test_pdf_extraction import minimal_pdf
 
 from server.blobs import BlobStore
@@ -42,7 +43,6 @@ from server.provider import OpenRouter
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal
 from server.store import RunStatus, StoreConnection
-from server.store.routes import pin_route
 from server.store.runs import run_status, start_run
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
@@ -106,26 +106,28 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     )
     run_id = start_run(conn, case_id)
     conn.commit()
-    pin_route(conn, run_id, route)
+    approve_run(conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle)
     delivered = _every_block(conn, source_ids)
     conn.rollback()
 
+    module_provider = ModuleProvider(
+        conn=conn,
+        bundle=bundle,
+        blobs=blobs,
+        completions=completions,
+        delivered=delivered,
+        route=route,
+        run_id=run_id,
+    )
     run_route(
         conn,
         blobs,
         run_id=run_id,
         route=route,
         execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=bundle,
-                blobs=blobs,
-                completions=completions,
-                delivered=delivered,
-                route=route,
-                run_id=run_id,
-            ),
+            module_provider,
             ESTIMATE,
+            bundle,
         ),
     )
 
