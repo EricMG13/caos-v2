@@ -183,7 +183,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
   day the vendor ships it, or by a dated decision that the host owns it. The
   deliverable (d-4) labels a screening-only record a screen whatever its
-  committee status; the proof and matrix readers (d-2, d-3b) still owe it.
+  committee status; the proof (d-2) reports no status, so has nothing to
+  label, and the matrix reader (d-3b) still owes it.
 - **The canonical deliverable proves the store at freeze and verification, not
   continuously.** `server/deliverable/canonical.py` re-derives the payload --
   both blobs, identity, projections, rectangles -- when it is built, frozen and
@@ -227,13 +228,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   re-runs the vendor validators on each readiness node's Markdown, costing the
   host identity's queries and two blob reads per such node. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
-  read them as analysis. The orchestration proof still refuses canonical
-  pins. The compiled vendor contract is cached per manifest digest, so a
+  read them as analysis. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
   by the cached validator (every other read still is). *Upgrade:* d-1 hands
-  the API and harness the bundle with typed node results; d-2 proves
-  canonical artifacts; f-1 makes readers refuse a NULL record and removes the
-  dispatch.
+  the API and harness the bundle with typed node results; f-1 makes readers
+  refuse a NULL record and removes the dispatch.
+- **The orchestration proof over a canonical run proves it and names no
+  quote.** `server/qualification/proof.py` (slice d-2) reads both blobs,
+  binds the record to the identity rebuilt from the store, requires the pin's
+  adapter and the bundle's build, manifest and authority, re-validates the
+  Markdown against the record's projections and re-anchors every recorded
+  citation in the run's pinned live sources on identical rectangles -- the
+  deliverable's verdicts, under the proof's codes. It returns counts only, as
+  for claims, so the matrix still reads quotes from claims envelopes and scores
+  a canonical run as citing nothing. It inherits the deliverable's call-time
+  narrowing of soft upstream refs, which nothing checks, and like every proof
+  it holds only for the bundle and sources present now. *Upgrade:* d-3b reads
+  the proven record's anchored citations for the matrix.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's

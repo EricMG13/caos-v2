@@ -22,19 +22,38 @@ route pin rather than from the artifact that claims it.
 artifacts all hold vacuously, and the strongest-looking proof this module could
 ever return would be one about a run that never ran. `CLAUDE.md`: a change that
 makes an invariant pass vacuously is wrong even with a green suite.
+
+**Canonical runs** (`docs/DECISIONS.md` §42.4) are proven through their host
+record, never parsed as claims: both blobs are read, the record must bind this
+Markdown and the identity rebuilt from the store, its adapter, build, manifest
+and authority must be the pin's and the bundle's, the Markdown re-validated must
+project exactly what the record says, and every recorded citation must re-anchor
+in the run's pinned, live sources on exactly the recorded rectangles. These are
+the verdicts `server/deliverable/canonical.py` reaches, under the proof's codes.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
+from server.deliverable.canonical import _call_time
+from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import AnchoredCitation, Citation, verify_citations
-from server.methodology.bundle import Bundle, assemble_authority, authority_digest
+from server.methodology.bundle import (
+    Bundle,
+    assemble_authority,
+    authority_digest,
+    verified_bytes,
+)
+from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
+from server.methodology.invocation import host_identity
+from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -82,7 +101,8 @@ def assert_orchestration_proof(
     # the less useful of two true answers about a run that never ran.
     accepted = conn.execute(
         "SELECT a.artifact_sha256, t.route_node_id, (a.model, a.generation_id),"
-        " (o.model, o.generation_id), o.attempt_id IS NOT NULL"
+        " (o.model, o.generation_id), o.attempt_id IS NOT NULL,"
+        " a.attempt_id, a.record_sha256"
         " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
         " LEFT JOIN call_outcomes o ON o.attempt_id = a.attempt_id"
         " WHERE a.run_id = %s ORDER BY a.created_at",
@@ -106,27 +126,36 @@ def assert_orchestration_proof(
         bundle.build_id,
         bundle.manifest_sha256,
         methodology.adapter_for(route),
-    ) or pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION:
-        # Canonical artifacts are proven by the record reader (Task 3.1 d-2),
-        # never parsed here as claims.
+    ):
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 
     live = _pinned_sources(conn, run_id)
+    reader = None
+    if pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION:
+        reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live)
+    nodes = {node.route_node_id: node for node in route.nodes}
     citations = 0
-    for artifact_sha256, route_node_id, produced, called, recorded in accepted:
+    for row in accepted:
+        artifact_sha256, route_node_id, produced, called, recorded = row[:5]
         module_id = module_of[str(route_node_id)]
-        # The producer is the stored call's, never a configured name.
-        if not recorded:
-            raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
-        if produced != called:
-            raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
+        _produced_by_its_call(recorded=recorded, produced=produced, called=called)
+        if reader is not None:
+            attempt_id, record_sha256 = row[5], row[6]
+            citations += reader.proven(
+                nodes[str(route_node_id)],
+                UUID(str(attempt_id)),
+                str(artifact_sha256),
+                None if record_sha256 is None else str(record_sha256),
+            )
+            continue
         envelope = _envelope(blobs, str(artifact_sha256))
         _ran_as_pinned(envelope, bundle, module_id)
         citations += _citations_relocate(conn, envelope, live)
 
     # No second vacuity guard here: `_citations_relocate` refuses a claim list
-    # that is empty and a claim carrying no citations, so by this line the count
-    # cannot be zero. A guard that can never fire reads like a check and is not
+    # that is empty and a claim carrying no citations, and a canonical record
+    # without citations does not decode, so by this line the count cannot be
+    # zero. A guard that can never fire reads like a check and is not
     # one.
     return OrchestrationProof(
         run_id=run_id,
@@ -135,6 +164,140 @@ def assert_orchestration_proof(
         artifacts=len(accepted),
         citations=citations,
     )
+
+
+def _produced_by_its_call(*, recorded: bool, produced: object, called: object) -> None:
+    """The producer is the stored call's, never a configured name."""
+    if not recorded:
+        raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
+    if produced != called:
+        raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
+
+
+def _unless_refused[T](call: Callable[[], T]) -> T | None:
+    """`call`'s answer, or None when it refused.
+
+    The caller raises its own code outside this handler, so the proof's refusal
+    carries no context and no text from the one it replaced.
+    """
+    try:
+        return call()
+    except Refusal:
+        return None
+
+
+_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
+
+
+class _CanonicalReader:
+    """One canonical run's shared authority: contract, catalog, pinned sources."""
+
+    def __init__(  # noqa: PLR0913 -- one run's store, bundle, pin and sources
+        self,
+        conn: StoreConnection,
+        blobs: BlobStore,
+        bundle: Bundle,
+        route: ResolvedRoute,
+        run_id: UUID,
+        live: dict[str, UUID],
+    ) -> None:
+        self.conn, self.blobs, self.bundle = conn, blobs, bundle
+        self.route, self.run_id, self.live = route, run_id, live
+        self.contract = load_vendor_contract(bundle)
+        self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
+
+    def proven(
+        self,
+        node: RouteNode,
+        attempt_id: UUID,
+        artifact_sha256: str,
+        record_sha256: str | None,
+    ) -> int:
+        """Prove one accepted canonical artifact; its citation count.
+
+        `ORCHESTRATION_ARTIFACT_UNREADABLE` for a blob whose bytes no longer
+        hash to their address; `ORCHESTRATION_BUILD_MOVED` for a record written
+        under another adapter, build, manifest or authority;
+        `ORCHESTRATION_SOURCE_NOT_PINNED` and `ORCHESTRATION_CITATION_LOST` as
+        for claims; `ARTIFACT_RECORD_MISMATCH` for everything else that does not
+        bind -- a missing record, the identity, the projections.
+        """
+        mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+        if record_sha256 is None:
+            raise mismatch
+        markdown = _unless_refused(lambda: self.blobs.get(artifact_sha256))
+        stored = _unless_refused(lambda: self.blobs.get(record_sha256))
+        if markdown is None or stored is None:
+            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+        bundle, route = self.bundle, self.route
+        host = _unless_refused(
+            lambda: host_identity(
+                self.conn,
+                bundle,
+                run_id=self.run_id,
+                route=route,
+                node=node,
+                attempt_id=attempt_id,
+            )
+        )
+        if host is None:
+            raise mismatch
+        expected = _call_time(self.blobs, route, host, record_sha256)
+        record = _unless_refused(
+            lambda: read_record(
+                self.blobs,
+                artifact_sha256=artifact_sha256,
+                record_sha256=record_sha256,
+                expected=expected,
+            )
+        )
+        if record is None:
+            raise mismatch
+        authority = authority_digest(assemble_authority(bundle, node.module_id))
+        if (
+            record.adapter_version,
+            record.build_id,
+            record.manifest_sha256,
+            record.authority_digest,
+        ) != (
+            methodology.CANONICAL_ADAPTER_VERSION,
+            bundle.build_id,
+            bundle.manifest_sha256,
+            authority,
+        ):
+            raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
+        skill = verified_bytes(bundle, node.module_id, "SKILL.md")
+        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+        projections = _unless_refused(
+            lambda: validate_markdown(
+                self.contract,
+                self.catalog,
+                skill,
+                markdown,
+                identity=expected,
+                gate_expects=gate if node.module_id == GATE_MODULE else frozenset(),
+            )
+        )
+        if projections is None or projections != record.projections:
+            raise mismatch
+        for citation in record.citations:
+            source_id = self.live.get(citation.document_sha256)
+            if source_id is None:
+                raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
+            if not _anchors_as_recorded(self.conn, source_id, citation):
+                raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
+        return len(record.citations)
+
+
+def _anchors_as_recorded(
+    conn: StoreConnection, source_id: UUID, citation: AnchoredCitation
+) -> bool:
+    """The recorded citation re-anchors to itself: same quote, same rectangles."""
+    request = Citation(source_id, citation.page, citation.matched_text)
+    anchored = _unless_refused(
+        lambda: verify_citations(conn, delivered={source_id}, citations=[request])
+    )
+    return anchored == [citation]
 
 
 def _ran_as_pinned(envelope: dict[str, Any], bundle: Bundle, module_id: str) -> None:
