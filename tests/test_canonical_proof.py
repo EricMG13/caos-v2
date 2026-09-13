@@ -8,7 +8,8 @@ no text in the exception chain.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from hashlib import sha256
 from typing import Any
@@ -16,31 +17,37 @@ from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CanonicalCompletions
-from conftest import priced
+from conftest import approve_run, priced
 from test_canonical_execution import _node, harness, route
+from test_deliverable_canonical import RESTRICTED, _accept
 from test_execution_freshness import _Harness
-from test_loop_charges import ESTIMATE
+from test_loop_charges import ESTIMATE, REPORT
 from test_orchestration_proof import _token_fault
 
 from server import methodology
 from server.boundary_text import BoundaryText
+from server.deliverable.canonical import Revision, canonical_payload
 from server.engine.runtime import Execution, run_route
+from server.evidence.citations import Citation, verify_citations
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.handoff import CanonicalRecord, _decoded_record, record_bytes
+from server.methodology.invocation import call_time_identity, host_identity
 from server.methodology.runner import ModuleProvider
 from server.qualification import Assurance
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant
+from server.store.runs import start_run
+from server.store.source_sets import pinned_live_sources
 
 __all__ = ["harness", "route"]
 
 MISMATCH = RefusalCode.ARTIFACT_RECORD_MISMATCH
 
 
-@pytest.fixture
-def ran(harness: _Harness) -> _Harness:
+def _run(harness: _Harness) -> _Harness:
     provider = ModuleProvider(
         harness.conn,
         harness.bundle,
@@ -57,6 +64,11 @@ def ran(harness: _Harness) -> _Harness:
         execution=Execution(provider, priced(ESTIMATE), harness.bundle),
     )
     return harness
+
+
+@pytest.fixture
+def ran(harness: _Harness) -> _Harness:
+    return _run(harness)
 
 
 def _prove(ran: _Harness) -> OrchestrationProof:
@@ -152,46 +164,59 @@ def test_a_projection_the_markdown_does_not_say_refuses(ran: _Harness) -> None:
 
 
 def test_an_identity_the_store_no_longer_holds_refuses(ran: _Harness) -> None:
-    attempt, _artifact, _record = _stored(ran, "CP-5")
+    attempt, _artifact, record = _stored(ran, "CP-5")
     ran.conn.execute(
         "UPDATE run_attempts SET ordinal = ordinal + 1 WHERE attempt_id = %s",
         (attempt,),
     )
     ran.conn.commit()
+    # The host still rebuilds an identity; it is the record that no longer binds.
+    rebuilt = host_identity(
+        ran.conn,
+        ran.bundle,
+        run_id=ran.run_id,
+        route=ran.route,
+        node=_node(ran, "CP-5"),
+        attempt_id=attempt,
+    )
+    ran.conn.rollback()
+    assert rebuilt.ordinal != _decoded_record(ran.blobs.get(record)).identity.ordinal
     assert _refusal(ran) is MISMATCH
 
 
-def test_a_withdrawn_pinned_source_takes_the_proof_with_it(ran: _Harness) -> None:
-    actor = uuid4()
-    grant(ran.conn, case_id=ran.case_id, user_id=actor, standing=Standing.APPROVER)
-    ran.conn.commit()
-    withdraw_source(
-        ran.conn, case_id=ran.case_id, actor_id=actor, source_id=ran.source_id
+def test_an_identity_the_host_cannot_rebuild_keeps_its_own_code(ran: _Harness) -> None:
+    attempt, _artifact, _record = _stored(ran, "CP-5")
+    ran.conn.execute(
+        "UPDATE run_attempts SET ordinal = NULL WHERE attempt_id = %s", (attempt,)
     )
-    assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.ATTEMPT_NOT_FOUND
 
 
 def test_a_source_admitted_after_the_pin_cannot_support_the_proof(
     ran: _Harness,
 ) -> None:
-    late = b"Total debt at 31 December 2026 was admitted late\n"
-    admit_pack(
+    # The same quote on the same line: it anchors on the recorded rectangles.
+    late = REPORT + b"Admitted after the pin\n"
+    [late_id] = admit_pack(
         ran.conn,
         ran.blobs,
         case_id=ran.case_id,
         documents=[Document(filename=BoundaryText.of("late.txt"), data=late)],
     )
     ran.conn.commit()
+    _attempt, _artifact, record = _stored(ran, "CP-5")
+    [cited] = _decoded_record(ran.blobs.get(record)).citations
+    moved = replace(cited, document_sha256=sha256(late).hexdigest())
+    request = Citation(late_id, cited.page, cited.matched_text)
+    assert verify_citations(ran.conn, delivered={late_id}, citations=[request]) == [
+        moved
+    ]
+    ran.conn.rollback()
 
-    def moved(record: CanonicalRecord) -> CanonicalRecord:
-        cited = tuple(
-            replace(c, document_sha256=sha256(late).hexdigest())
-            for c in record.citations
-        )
-        return replace(record, citations=cited)
-
-    _rewrite(ran, "CP-5", moved)
+    _rewrite(ran, "CP-5", lambda r: replace(r, citations=(moved,)))
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+    assert _delivered(ran) is MISMATCH
 
 
 @pytest.mark.parametrize(
@@ -222,3 +247,152 @@ def test_a_run_pinned_under_another_adapter_refuses(
 ) -> None:
     monkeypatch.setattr(methodology, "CANONICAL_ADAPTER_VERSION", "another-adapter")
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_BUILD_MOVED
+
+
+def _delivered(ran: _Harness) -> RefusalCode | None:
+    """The deliverable's verdict on the same store: None when it proves."""
+    title, revision = BoundaryText.of("Acme Holdings plc"), BoundaryText.of("rev-1")
+    try:
+        canonical_payload(
+            ran.conn,
+            ran.blobs,
+            ran.bundle,
+            Revision(ran.case_id, ran.run_id, title, revision),
+        )
+    except Refusal as refused:
+        assert refused.__cause__ is None and refused.__context__ is None
+        return refused.code
+    return None
+
+
+def test_a_withdrawn_source_refuses_the_proof_and_the_deliverable(
+    ran: _Harness,
+) -> None:
+    assert _delivered(ran) is None
+    actor = uuid4()
+    grant(ran.conn, case_id=ran.case_id, user_id=actor, standing=Standing.APPROVER)
+    ran.conn.commit()
+    withdraw_source(
+        ran.conn, case_id=ran.case_id, actor_id=actor, source_id=ran.source_id
+    )
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+    assert _delivered(ran) is MISMATCH
+
+
+@contextmanager
+def _extraction_fault(conn: StoreConnection, table: str) -> Iterator[None]:
+    """Privileged fault setup; transactional DDL restores the guard on failure."""
+    assert conn.info.dbname.startswith("caos_test_")
+    trigger = {
+        "source_extractions": "extraction_is_immutable",
+        "source_set_members": "source_set_immutable",
+    }[table]
+    with conn.transaction():
+        conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}")
+        yield
+        conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER {trigger}")
+
+
+def test_a_changed_extraction_refuses_the_proof_and_the_deliverable(
+    ran: _Harness,
+) -> None:
+    with _extraction_fault(ran.conn, "source_extractions"):
+        ran.conn.execute(
+            "UPDATE source_extractions SET output_sha256 = %s WHERE source_id = %s",
+            ("e" * 64, ran.source_id),
+        )
+    ran.conn.commit()
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+    assert _delivered(ran) is MISMATCH
+
+
+@pytest.fixture
+def twice(harness: _Harness) -> tuple[_Harness, UUID]:
+    """A second run whose pin captures the cited document under two sources."""
+    conn = harness.conn
+    [copy] = admit_pack(
+        conn,
+        harness.blobs,
+        case_id=harness.case_id,
+        documents=[Document(filename=BoundaryText.of("copy.txt"), data=REPORT)],
+    )
+    run_id = start_run(conn, harness.case_id)
+    conn.commit()
+    approver = approve_run(
+        conn,
+        case_id=harness.case_id,
+        run_id=run_id,
+        route=harness.route,
+        bundle=harness.bundle,
+    )
+    return _run(replace(harness, run_id=run_id, approver=approver)), copy
+
+
+def test_a_document_pinned_twice_proves_in_the_proof_and_the_deliverable(
+    twice: tuple[_Harness, UUID],
+) -> None:
+    ran, copy = twice
+    digest = sha256(REPORT).hexdigest()
+    # One extraction: the lower source id stands for the document.
+    assert pinned_live_sources(ran.conn, ran.run_id)[digest] == min(ran.source_id, copy)
+    ran.conn.rollback()
+    assert _prove(ran).artifacts == 3
+    assert _delivered(ran) is None
+
+
+def test_a_document_pinned_twice_with_two_extractions_resolves_to_neither(
+    twice: tuple[_Harness, UUID],
+) -> None:
+    ran, copy = twice
+    for table in ("source_extractions", "source_set_members"):
+        with _extraction_fault(ran.conn, table):
+            ran.conn.execute(
+                f"UPDATE {table} SET output_sha256 = %s WHERE source_id = %s",
+                ("e" * 64, copy),
+            )
+        ran.conn.commit()
+    # Read directly: the edited member no longer matches the pin's fingerprint,
+    # which the pin's own reader refuses before either verdict reaches sources.
+    assert sha256(REPORT).hexdigest() not in pinned_live_sources(ran.conn, ran.run_id)
+    ran.conn.rollback()
+
+
+def test_a_soft_input_accepted_before_the_call_cannot_be_left_unnamed(
+    harness: _Harness,
+) -> None:
+    # CP-L10 -> CP-5 is ADVISORY, but CP-L10 was accepted before CP-5 started.
+    _accept(harness, "CP-0")
+    _accept(harness, "CP-L10", **RESTRICTED)
+    _accept(harness, "CP-5", True)
+    attempt, _artifact, record = _stored(harness, "CP-5")
+    stored = harness.blobs.get(record)
+    host = host_identity(
+        harness.conn,
+        harness.bundle,
+        run_id=harness.run_id,
+        route=harness.route,
+        node=_node(harness, "CP-5"),
+        attempt_id=attempt,
+    )
+    expected = call_time_identity(
+        harness.conn, harness.route, host, attempt_id=attempt, record=stored
+    )
+    harness.conn.rollback()
+    # The record names only CP-0; the host keeps CP-L10, so the binding refuses.
+    assert (
+        _decoded_record(stored).identity.upstream
+        != expected.upstream
+        == (host.upstream)
+    )
+    assert _refusal(harness) is MISMATCH
+    assert _delivered(harness) is MISMATCH
+
+
+def test_a_blocked_run_proves_only_what_it_accepted(harness: _Harness) -> None:
+    # CP-5 never ran: the proof covers two artifacts and claims no third.
+    _accept(harness, "CP-0")
+    _accept(harness, "CP-L10", **RESTRICTED)
+    proof = _prove(harness)
+    assert (proof.artifacts, proof.citations) == (2, 2)
+    assert len(harness.route.nodes) == 3
+    assert _delivered(harness) is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
