@@ -171,6 +171,19 @@ plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Repair Phase 3.**
+
+- **Two vendor rules have no Python implementation and are not enforced.**
+  `server/methodology/handoff.py` calls the vendor's own validators, and the
+  vendor ships no code for `semantic_rules` or `document_substrings_casefold`.
+  Reimplementing them would make the host a second conformance authority
+  beside the bundle (invariant 4). The catalog declares each LITE pathway
+  `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a
+  LITE handoff saying `Committee Ready` validates; the host projects the scope
+  beside the status and invents no refusal. *Upgrade:* enforce each rule the
+  day the vendor ships it, or by a dated decision that the host owns it; readers
+  (3.1d) must label a screening-only record whatever its committee status.
+
 **Repair Phase 2.**
 
 - **Only a QA `Passed` releases CP-6; `Restricted` blocks it.** F03 asks which
