@@ -29,10 +29,12 @@ import pytest
 from server.engine.route import (
     Edge,
     EdgeType,
+    NodeResult,
     NodeState,
     ResolvedRoute,
     RouteExtensions,
     RouteNode,
+    claims_result,
     dependency_order,
     frontier,
     limitations_of,
@@ -61,28 +63,23 @@ def catalog() -> dict[str, Any]:
     return loaded
 
 
-def _cp0_artifact(**readiness: str) -> dict[str, Any]:
-    """A CP-0 artifact carrying a readiness status per module, in the shape the
-    bundle's own payload schema declares (`content_to_module_map`)."""
-    return {
-        "content_to_module_map": [
-            {"module_id": module_id, "readiness_status": status}
-            for module_id, status in readiness.items()
-        ]
-    }
+def _cp0_artifact(**readiness: str) -> NodeResult:
+    """A CP-0 result carrying a readiness status per module, as the runtime
+    reads it from a claims body or a canonical record."""
+    return NodeResult(readiness=tuple(readiness.items()))
 
 
 def _accept(
-    route: ResolvedRoute, *module_ids: str, cp0: dict[str, Any] | None = None
-) -> dict[str, Any]:
+    route: ResolvedRoute, *module_ids: str, cp0: NodeResult | None = None
+) -> dict[str, NodeResult]:
     """Accepted artifacts keyed by route node, CP-0's carrying the readiness."""
     wanted = set(module_ids)
-    accepted = {}
+    accepted: dict[str, NodeResult] = {}
     for node in route.nodes:
         if node.module_id == "CP-0" and ("CP-0" in wanted or cp0 is not None):
             accepted[node.route_node_id] = cp0 if cp0 is not None else _cp0_artifact()
         elif node.module_id in wanted:
-            accepted[node.route_node_id] = {}
+            accepted[node.route_node_id] = NodeResult()
     return accepted
 
 
@@ -90,7 +87,9 @@ def _node_id(route: ResolvedRoute, module_id: str) -> str:
     return next(n.route_node_id for n in route.nodes if n.module_id == module_id)
 
 
-def _state(route: ResolvedRoute, accepted: dict[str, Any], module_id: str) -> NodeState:
+def _state(
+    route: ResolvedRoute, accepted: dict[str, NodeResult], module_id: str
+) -> NodeState:
     return node_states(route, accepted)[_node_id(route, module_id)]
 
 
@@ -141,19 +140,23 @@ def test_both_ready_statuses_harden_a_soft_edge(
 @pytest.mark.parametrize(
     "cp5,released",
     [
-        ({}, False),
-        ({"qa_status": "Not Reviewed"}, False),
-        ({"qa_status": "Restricted"}, False),
-        ({"qa_status": "Blocked"}, False),
-        ({"qa_status": "Passed"}, True),
+        (None, False),
+        (NodeResult(), False),
+        (NodeResult(qa_status="Not Reviewed"), False),
+        (NodeResult(qa_status="Restricted"), False),
+        (NodeResult(qa_status="Blocked"), False),
+        (NodeResult(qa_status="passed"), False),
+        (NodeResult(qa_status="Passed"), True),
     ],
 )
 def test_qa_gate_blocks_cp6_until_cp5_accepted(
-    catalog: dict[str, Any], cp5: dict[str, Any], released: bool
+    catalog: dict[str, Any], cp5: NodeResult | None, released: bool
 ) -> None:
-    """The one QA_GATE in this build, CP-5 -> CP-6. Under the predecessor it did
-    not gate, because the untyped list it read had no QA_GATE in it; and an
-    accepted CP-5 is not clearance (F03) -- only its validated `Passed` is."""
+    """F03, pure. The one QA_GATE in this build, CP-5 -> CP-6. Under the
+    predecessor it did not gate, because the untyped list it read had no QA_GATE
+    in it; and an accepted CP-5 is not clearance -- only a stored `Passed` is.
+    Restricted, Blocked, Not Reviewed, no verdict and no artifact all hold CP-6,
+    whichever format the verdict was read from."""
     route = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
     everything_but_cp5 = [
         node.module_id for node in route.nodes if node.module_id not in {"CP-5", "CP-6"}
@@ -162,10 +165,15 @@ def test_qa_gate_blocks_cp6_until_cp5_accepted(
 
     assert _state(route, accepted, "CP-6") is NodeState.BLOCKED
 
-    accepted[_node_id(route, "CP-5")] = cp5
+    if cp5 is not None:
+        accepted[_node_id(route, "CP-5")] = cp5
+    cp6 = _node_id(route, "CP-6")
     assert _state(route, accepted, "CP-6") is (
         NodeState.RUNNABLE if released else NodeState.BLOCKED
     )
+    assert (cp6 in frontier(route, accepted)) is released
+    gate = Edge("CP-5", "CP-6", EdgeType.QA_GATE)
+    assert (gate in waiting_on(route, accepted, cp6)) is not released
 
 
 def test_restricted_node_runs_and_carries_limitation(catalog: dict[str, Any]) -> None:
@@ -405,7 +413,7 @@ def test_cp_cf_waits_for_all_required_owners(catalog: dict[str, Any]) -> None:
     accepted = _accept(route, "CP-0", "CP-1", "CP-2G", cp0=_cp0_artifact())
     assert _state(route, accepted, "CP-CF") is NodeState.BLOCKED
 
-    accepted[_node_id(route, "CP-4")] = {}
+    accepted[_node_id(route, "CP-4")] = NodeResult()
     assert _state(route, accepted, "CP-CF") is NodeState.RUNNABLE
 
 
@@ -546,20 +554,40 @@ def test_readiness_applies_only_once_the_gate_is_accepted(
     assert states[_node_id(route, "CP-1")] is NodeState.BLOCKED
 
 
-def test_a_malformed_readiness_map_refuses_rather_than_raising(
-    catalog: dict[str, Any],
-) -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"content_to_module_map": [{"module_id": "CP-1"}]},
+        {"content_to_module_map": [{"readiness_status": "READY"}]},
+        {"content_to_module_map": ["CP-1"]},
+        {"content_to_module_map": "READY"},
+    ],
+)
+def test_a_malformed_readiness_map_refuses_rather_than_raising(body: object) -> None:
     """A row the store could not have written is still a row this pure function
     must not raise `KeyError` over."""
-    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
-    accepted = _accept(
-        route, "CP-0", cp0={"content_to_module_map": [{"module_id": "CP-1"}]}
-    )
-
     with pytest.raises(Refusal) as caught:
-        node_states(route, accepted)
+        claims_result(body, gate=True)
 
     assert caught.value.code is RefusalCode.READINESS_INVALID
+
+
+def test_a_claims_body_reduces_to_the_typed_result() -> None:
+    """The gate's map becomes readiness rows; any other body's map is not
+    readiness, and is neither read nor refused; a body that is not an object,
+    or a verdict that is not a string, carries nothing."""
+    body = {
+        "content_to_module_map": [{"module_id": "CP-1", "readiness_status": "READY"}],
+        "qa_status": "Passed",
+    }
+
+    assert claims_result(body, gate=True) == NodeResult(
+        readiness=(("CP-1", "READY"),), qa_status="Passed"
+    )
+    assert claims_result(body, gate=False) == NodeResult(qa_status="Passed")
+    assert claims_result({"content_to_module_map": "READY"}, gate=False) == NodeResult()
+    assert claims_result(["not", "an", "object"], gate=True) == NodeResult()
+    assert claims_result({"qa_status": 1}, gate=True) == NodeResult()
 
 
 def test_a_nodes_predecessors_are_its_edge_sources_in_route_order(

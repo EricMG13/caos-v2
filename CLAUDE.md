@@ -220,19 +220,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   captured source is withdrawn no verdict can be re-derived, so a Blocked node
   is neither blocked nor re-paid (the pre-call read refuses) and each resume
   adds an attempt row until the 256 ordinal cap. `accepted_artifacts`
-  reads CP-0 readiness and `qa_status` of a canonical row from its record,
-  verified against its Markdown and the identity rebuilt from the store
-  (§42.4, no re-anchoring), and refuses such a row without a bundle -- which
-  the API's `read_run` and the harness's `_unrun` do not yet pass, so they
-  refuse (or fall back to presence) on a canonical run. Every frontier pass
-  re-runs the vendor validators on each readiness node's Markdown, costing the
-  host identity's queries and two blob reads per such node. Diagnostic blobs are
+  reduces each row to a typed `route.NodeResult` (readiness rows, `qa_status`):
+  a canonical row's from its record, verified against its Markdown and the
+  identity rebuilt from the store (§42.4, no re-anchoring), refused without a
+  bundle. The API's `read_run` (the process's cached vendored bundle,
+  `methodology_bundle`) and the harness's `_unrun` (the harness bundle) pass
+  one (slice d-1). Every frontier pass and every run-document read re-runs the
+  vendor validators on each readiness node's Markdown, costing the host
+  identity's nine queries and two blob reads per such node; `read_run`'s
+  `IO_BUDGET` is the bound for two such rows (the gate and the catalog's one
+  QA_GATE source), measured on LITE's one. The harness still falls back to
+  presence when a record will not verify. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
-  by the cached validator (every other read still is). *Upgrade:* d-1 hands
-  the API and harness the bundle with typed node results; f-1 makes readers
-  refuse a NULL record and removes the dispatch.
+  by the cached validator (every other read still is). *Upgrade:* f-1 makes
+  readers refuse a NULL record and removes the dispatch.
 - **The orchestration proof over a canonical run proves it and names no
   quote.** `server/qualification/proof.py` (slice d-2) reads both blobs,
   binds the record to the identity rebuilt from the store, requires the pin's

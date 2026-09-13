@@ -371,10 +371,7 @@ def test_readers_verify_the_record_against_its_markdown(harness: _Harness) -> No
     args = (harness.conn, harness.blobs, harness.route, harness.run_id)
     body = accepted_artifacts(*args, bundle=harness.bundle)[gate]
     harness.conn.rollback()
-    assert body["content_to_module_map"] == [
-        {"module_id": "CP-5", "readiness_status": "READY"},
-        {"module_id": "CP-L10", "readiness_status": "READY"},
-    ]
+    assert body.readiness == (("CP-5", "READY"), ("CP-L10", "READY"))
     with pytest.raises(Refusal) as unbundled:
         accepted_artifacts(*args)
     harness.conn.rollback()

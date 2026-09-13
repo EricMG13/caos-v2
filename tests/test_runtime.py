@@ -29,7 +29,7 @@ from psycopg.pq import TransactionStatus
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine import runtime as subject
-from server.engine.route import ResolvedRoute, resolve_route
+from server.engine.route import NodeResult, ResolvedRoute, resolve_route
 from server.engine.runtime import (
     Execution,
     Provider,
@@ -669,8 +669,10 @@ def test_accepted_artifacts_reads_cp0s_payload_and_no_other(
 
     accepted = accepted_artifacts(conn, blobs, route=route, run_id=run_id)
 
-    assert accepted[_node_id(route, "CP-0")] == READY_EVERYWHERE
-    assert accepted[_node_id(route, "CP-1")] == {}
+    assert accepted[_node_id(route, "CP-0")] == NodeResult(
+        readiness=tuple((module, "READY") for module in ("CP-1", "CP-2", "CP-2D"))
+    )
+    assert accepted[_node_id(route, "CP-1")] == NodeResult()
 
 
 def test_artifact_digests_maps_accepted_attempts_to_their_digest(
