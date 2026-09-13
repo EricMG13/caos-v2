@@ -15,11 +15,10 @@ first commit.
 
 Claude Code resumes from
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
-The application-code checkpoint is
-`f8cd7382441587b5aa357542e20bb526a0f01533` on
-`codex/execute-repair-plan`, based on accepted Task17d1 commit
-`59d31457ceff5d97ec1adc6ac43d1154e241468e`. It is green but is **not**
-Task17d2 acceptance or Phase 2 completion. Work only in
+Task17d2 is split (`.superpowers/sdd/task-17d2-split.md`). Task17d2a is
+accepted at application commit `f8cd7382441587b5aa357542e20bb526a0f01533`
+on `codex/execute-repair-plan` (base `59d31457`); next is the proof-only
+Task17d2b on that accepted slice. Phase 2 is **not** complete. Work only in
 `/Users/ericguei/Documents/caos-workbench`; the original
 `/Users/ericguei/Documents/caos-v2` checkout stays read-only.
 
