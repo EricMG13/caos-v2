@@ -128,7 +128,9 @@ settings command deciding with and without the repo venv.
 - Serial backend gate (`make -j1 check-postgres lint types test test-postgres-races security`)
   at `1d0a8dd`: 1892 passed, 3 live deselected, races 2 passed, lint, types,
   Bandit, pip-audit and gitleaks clean.
-- Complete `make check` at `1d0a8dd`: backend, frontend lint/types/unit/builds,
-  accessibility and 90 browser workbench tests passed; the `image` step refused
-  because the installed Trivy is 0.72.0 and the Makefile pins 0.70.0. **Open.**
+- Complete `make check` at `96e27ed` with the pinned Trivy 0.70.0 (official
+  macOS-ARM64 release, SHA-256 `68e543c5…b838a` matching the published
+  checksums): exit 0. Backend 1892 passed and races 2 passed; security clean;
+  frontend 157 unit tests; accessibility; 90 browser workbench tests; image built
+  and scanned with no fixable HIGH/CRITICAL findings.
 - Whole-phase confidence review and adversarial audit at actual `xhigh`: **open.**
