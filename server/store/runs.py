@@ -90,7 +90,7 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
         rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
-    if accepted_owner(conn, run_id, route_node_id):
+    if accepted_owner(conn, run_id, route_node_id) is not None:
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
@@ -196,7 +196,7 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
     if node is None or node[0] not in {n.route_node_id for n in route.nodes}:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     # One owner per node, under the run lock; the unique constraint backs it.
-    if accepted_owner(conn, run, node[0]):
+    if accepted_owner(conn, run, node[0]) is not None:
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
     # `route_node_id` is filled from the attempt by the migration 0009 trigger.
     conn.execute(

@@ -46,7 +46,11 @@ def _read_committed(conn: StoreConnection) -> None:
 def accepted_owner(
     conn: StoreConnection, run_id: UUID, route_node_id: str
 ) -> UUID | None:
-    """The attempt that owns this run node's accepted result, if any."""
+    """The attempt that owns this run node's accepted result, if any.
+
+    Joined through the attempt rather than `artifacts.route_node_id`, so the
+    check also reads a restored pre-0009 database before it is upgraded.
+    """
     row = conn.execute(
         "SELECT a.attempt_id FROM artifacts a JOIN run_attempts t USING (attempt_id)"
         " WHERE a.run_id=%s AND t.route_node_id=%s",
