@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
-| Latest observed implementation | `b4298dc`, Phase 2 adversarial-audit remediation |
-| Next task | Phase 3 entry: tracked brief for Task 3.1 (canonical record and adapter boundary) |
+| Latest observed implementation | `161e8a2`, Task 3.1b (slices 3.1a `5691b30` `2af18a8` `8ecb97a`, 3.1b `161e8a2`; each reviewed, backend gate green; not accepted) |
+| Next task | Task 3.1c: executor wire, artifact record migration 0012, acceptance, adapter version ([brief](superpowers/plans/2026-09-13-phase-3-task-3.1-brief.md)) |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
