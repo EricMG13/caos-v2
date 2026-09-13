@@ -204,13 +204,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
   (identity held, every citation anchored -- an unanchorable Blocked handoff is
   an ordinary refusal) keeps its bill and diagnostic, accepts nothing and ends
-  the run `BLOCKED` with one `RUN_BLOCKED`, no retry. `accepted_artifacts`
+  the run `BLOCKED` with one `RUN_BLOCKED`, no retry. The diagnostic is the
+  exact response body, and `blocked_verdict` re-derives that verdict from the
+  billed, unaccepted attempts -- before every frontier's attempts (so a crash
+  before `block_run` commits resumes BLOCKED without a second call) and before
+  ending the run; a raised `HANDOFF_BLOCKED` alone decides nothing. The
+  re-derivation reads the provider body back, but only through the full
+  validation and anchoring; it rebuilds identity from the upstream accepted
+  now, which holds only while no direct input is accepted after its target.
+  A billed attempt refused for another reason is re-validated on every pass
+  until the node is accepted. `accepted_artifacts`
   reads CP-0 readiness and `qa_status` of a canonical row from its record,
   verified against its Markdown and the identity rebuilt from the store
   (§42.4, no re-anchoring), and refuses such a row without a bundle -- which
   the API's `read_run` and the harness's `_unrun` do not yet pass, so they
   refuse (or fall back to presence) on a canonical run. Every frontier pass
-  re-runs the vendor validators on CP-0's Markdown. Diagnostic blobs are
+  re-runs the vendor validators on each readiness node's Markdown, costing the
+  host identity's queries and two blob reads per such node. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The orchestration proof still refuses canonical
   pins. The compiled vendor contract is cached per manifest digest, so a

@@ -1294,7 +1294,10 @@ slices (the binding re-slice in the Task 3.1 brief):
    response is stored as a blob before validation and its hash recorded as the
    attempt's `diagnostic_sha256` with the call outcome; a response that
    validates with `qa_status: Blocked` ends the run `BLOCKED` and is never an
-   accepted artifact.
+   accepted artifact. *Refined 2026-09-13 (c-5b remediation):* the diagnostic
+   blob holds the exact response body (the whole closed transport), so the
+   runtime re-derives a Blocked verdict -- identity, validation and anchoring --
+   from committed facts before every attempt and before ending a run BLOCKED.
 4. **Where citations are re-anchored.** Every reader verifies both blobs, their
    binding and the re-parsed projections. Citations are re-anchored against the
    token index by the proof, the qualification matrix and deliverable freezing,
