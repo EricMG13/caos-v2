@@ -1229,6 +1229,44 @@ real price for the live model is a user-supplied, dated fact; the byte bound is
 large for a real model against the default ceiling, and pricing the encoded
 request once it is built is the upgrade (CLAUDE.md known gaps).
 
+## 2026-09-13 §41 — The canonical Markdown handoff's identity, storage and citations
+
+(This repository's §41; the inherited table above maps CAOS-Final's own §41.)
+
+**Decision.** For the Phase 3 adapter (`canonical-markdown-v1`, modules CP-0,
+CP-L10 and CP-5 only):
+
+1. **Host identity is pinned and reproduced.** A run's subject — issuer id and
+   name, reporting period, analysis date — is immutable run input covered by
+   the plan-gate fingerprint. The host derives the vendor run id
+   (`COS-<UTC run creation>-<run id hex>`) and the attempt ordinal, builds the
+   vendor invocation fields with the bundle's own envelope code, hands them to
+   the module to copy, and checks them with the vendor's reproduce-and-match.
+   Provider-claimed identity never survives (invariant 3).
+2. **Storage.** The accepted artifact's `artifact_sha256` is the SHA-256 of the
+   exact Markdown bytes, which are the only analytical authority and what
+   downstream modules receive. A host sidecar blob, referenced by
+   `artifacts.record_sha256`, holds only derived data — adapter/build/authority
+   identity, typed projections and anchored citations — and every authority
+   read re-derives and compares it; it is never read back as fact.
+3. **Citations.** The provider answers on a closed transport
+   `{"canonical_markdown": ..., "citations": [{source_id, page, matched_text}]}`.
+   The host anchors each quote in its token index (invariant 11); an unanchored
+   quote is refused and counted, and a handoff with no anchored citation is
+   refused. This refines §26 for Markdown. The transport is not JSON inside the
+   Markdown, which the vendor forbids.
+
+**Why.** §29 makes the exact Markdown the authority and names run, route,
+bundle and upstream as host-owned; the vendor treats invocation reproduction as
+a completion condition, so skipping the `credit_os_*` fields would be a quiet
+non-conformance. Lineage requires the Markdown hash as the artifact identity.
+Coordinates cannot be recovered from vendor register locators, and editing the
+Markdown to add them is forbidden, so quotes travel beside it.
+
+**Not decided here.** Vendor rules with no Python implementation are not
+reimplemented by the host; they are recorded as known gaps when the adapter
+lands.
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a
