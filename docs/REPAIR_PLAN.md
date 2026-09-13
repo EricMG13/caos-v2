@@ -5,8 +5,9 @@ Reviewed 12 September 2026. Target: `/Users/ericguei/Documents/caos-v2`.
 > **Execution status, 13 September 2026.** The findings and original paths below
 > are baseline evidence, not a description of the current workbench. Phase 2 is
 > being repaired in `/Users/ericguei/Documents/caos-workbench` on
-> `codex/execute-repair-plan`. Application checkpoint `f8cd738` is a green but
-> incomplete Task17d2 checkpoint. Resume only from
+> `codex/execute-repair-plan`. Task17d2 is accepted: application checkpoint
+> `f8cd738` plus proof-only checkpoint `ceabf9f`; Task17d3 is next. Phase 2
+> remains incomplete. Resume only from
 > [`CLAUDE_CODE_HANDOFF.md`](CLAUDE_CODE_HANDOFF.md).
 
 ## Recommendation
