@@ -248,8 +248,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
-  by the cached validator (every other read still is). *Upgrade:* f-1 makes
-  readers refuse a NULL record and removes the dispatch.
+  by the cached validator (every other read still is). No HTTP test covers a
+  canonical `read_run` over a QA_GATE verdict other than `Passed`, because the
+  catalog's only QA_GATE (CP-5 -> CP-6) sits on a route the canonical adapter
+  does not execute (§42.2); the view function that projects a stored
+  `qa_status` is tested directly instead. *Upgrade:* f-1 makes readers refuse
+  a NULL record and removes the dispatch, and the HTTP gap closes the day
+  Phase 5 extends the canonical adapter to a route carrying that QA_GATE.
 - **The orchestration proof over a canonical run proves it now, not
   continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
   binds the record to the identity rebuilt from the store, requires the pin's

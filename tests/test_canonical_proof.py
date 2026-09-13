@@ -274,7 +274,22 @@ def test_a_proof_under_another_bundle_build_refuses(
 
 
 def test_a_record_naming_another_module_than_the_pin_refuses(ran: _Harness) -> None:
-    """Invariant 3: the module is the pin's, never the record's own claim."""
+    """Invariant 3: the module is the pin's, never the record's own claim.
+
+    This deliberately differs from
+    `test_the_module_checked_is_the_pinned_one_not_the_one_claimed` in
+    `tests/test_orchestration_proof.py`, which proves success on the same
+    kind of tamper: there, the *claims* envelope's `module_id` is untrusted
+    frontmatter, and the host silently derives the right module's authority
+    from the route pin regardless of what the envelope claims. Here the
+    record is not untrusted frontmatter -- it is the host's own canonical
+    write, bound end to end by `record_sha256`, and the model's claimed
+    module was already checked and refused at validation time
+    (`HANDOFF_IDENTITY_MISMATCH`) before this record could ever be stored.
+    So a stored record naming another module than the one its own binding
+    names is not a claim to reconcile against the pin; it is corruption of
+    the host's own write, and refusing it is the correct answer.
+    """
     _rewrite(
         ran,
         "CP-L10",
