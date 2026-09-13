@@ -34,10 +34,19 @@ from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute
 from server.engine.runtime import Execution, ProviderResult, run_route
 from server.evidence.ingest import Document, admit_pack
-from server.methodology.bundle import MANIFEST_NAME, Authority, Bundle
+from server.methodology.bundle import (
+    MANIFEST_NAME,
+    Authority,
+    Bundle,
+    assemble_authority,
+    authority_digest,
+)
 from server.methodology.envelope import Envelope
-from server.methodology.executor import Assignment, Delivery, execute_module
-from server.methodology.runner import ModuleProvider
+from server.methodology.executor import (
+    Assignment,
+    execute_module,
+)
+from server.methodology.runner import ModuleProvider, canonical
 from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
@@ -56,7 +65,6 @@ from server.store.members import Standing, grant, revoke
 from server.store.outcomes import (
     CallOutcome,
     check_attempt,
-    execution_reads,
     record_outcome,
 )
 from server.store.runs import (
@@ -202,13 +210,13 @@ def test_module_provider_rechecks_authority_after_transport_before_envelope_or_b
     def counted_envelope(
         conn: StoreConnection,
         assignment: Assignment,
-        delivered: list[Delivery],
+        context: executor._Context,
         authority: Authority,
         content: str,
     ) -> Envelope:
         nonlocal envelopes
         envelopes += 1
-        return original(conn, assignment, delivered, authority, content)
+        return original(conn, assignment, context, authority, content)
 
     monkeypatch.setattr(executor, "_envelope", counted_envelope)
     code = None
@@ -665,7 +673,7 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
     def envelope(
         conn: StoreConnection,
         assignment: Assignment,
-        delivered: list[Delivery],
+        context: executor._Context,
         authority: Authority,
         content: str,
     ) -> Envelope:
@@ -677,7 +685,7 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
                 _lockable(harness),
             )
         )
-        return original(conn, assignment, delivered, authority, content)
+        return original(conn, assignment, context, authority, content)
 
     original = executor._envelope
     monkeypatch.setattr(executor, "check_attempt", stamp("check", check_attempt))
@@ -781,24 +789,22 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
     _still_running(harness)
 
 
-def _assignment(harness: _Harness, provider: ModuleProvider) -> Assignment:
-    with execution_reads(harness.conn):
-        return provider._assignment(harness.route.nodes[0])
+def _assignment(harness: _Harness, attempt: UUID) -> Assignment:
+    node = harness.route.nodes[0]
+    return Assignment(node.module_id, harness.run_id, node, harness.route, attempt)
 
 
 def test_direct_executor_refuses_a_mismatched_module_before_any_call(
     harness: _Harness,
 ) -> None:
     completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
-    provider = _provider(harness, completion)
-    assignment = _assignment(harness, provider)
-    attempt = _reserved(harness)
+    assignment = _assignment(harness, _reserved(harness))
 
     with pytest.raises(Refusal) as module:
         execute_module(
             harness.conn,
             harness.bundle,
-            attempt_id=attempt,
+            harness.blobs,
             assignment=replace(assignment, module_id="CP-DR"),
             provider=completion,
         )
@@ -815,14 +821,13 @@ def test_direct_executor_refuses_a_moved_node_before_any_call(
     harness: _Harness,
 ) -> None:
     completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
-    assignment = _assignment(harness, _provider(harness, completion))
+    assignment = _assignment(harness, _reserved(harness))
     moved = replace(assignment.node, stage=assignment.node.stage + 7)
-    attempt = _reserved(harness)
     with pytest.raises(Refusal) as node:
         execute_module(
             harness.conn,
             harness.bundle,
-            attempt_id=attempt,
+            harness.blobs,
             assignment=replace(assignment, node=moved),
             provider=completion,
         )
@@ -1300,7 +1305,7 @@ def test_accept_refuses_a_node_outside_the_stored_route(harness: _Harness) -> No
     _still_running(harness)
 
 
-# Task17e: the host derives delivered evidence from the run's pins.
+# Task17e: the host derives delivered context and upstream from the pins.
 
 
 def _admit_unpinned(harness: _Harness, *, other_case: bool) -> None:
@@ -1334,16 +1339,94 @@ def test_module_provider_never_delivers_a_block_outside_the_captured_set(
     assert "UNPINNED" not in prompt
 
 
-def test_direct_executor_delivers_every_captured_block(harness: _Harness) -> None:
-    """Both captured documents reach the prompt, whatever the caller holds."""
+def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) -> None:
+    """Evidence is every captured block, the gate is asked about the stored
+    route's other modules, and a node with no accepted predecessor gets no
+    upstream: nothing a caller could hand in."""
     completions = _Completions(harness.source_id)
-    assignment = _assignment(harness, _provider(harness, completions))
     execute_module(
         harness.conn,
         harness.bundle,
-        attempt_id=_reserved(harness),
-        assignment=assignment,
+        harness.blobs,
+        assignment=_assignment(harness, _reserved(harness)),
         provider=completions,
     )
     [prompt] = completions.prompts
     assert str(harness.source_id) in prompt and str(harness.witness_id) in prompt
+    assert "\nCP-DR\n" in prompt
+    assert "--- UPSTREAM" not in prompt
+
+
+def _accepted_gate(harness: _Harness, conn: StoreConnection, **identity: object) -> str:
+    """Accept one CP-0 artifact on `conn`; identity fields override the host's."""
+    gate = harness.route.nodes[0]
+    envelope = Envelope(
+        module_id=str(identity.get("module_id", gate.module_id)),
+        build_id=str(identity.get("build_id", harness.bundle.build_id)),
+        authority_digest=authority_digest(
+            assemble_authority(harness.bundle, gate.module_id)
+        ),
+        claims=(),
+        claims_refused=int(str(identity.get("claims_refused", 0))),
+        readiness=(),
+    )
+    digest = harness.blobs.put(canonical(envelope))
+    attempt = start_attempt(conn, harness.run_id, gate.route_node_id)
+    reserve(conn, attempt, ESTIMATE)
+    assert accept_attempt(
+        conn, attempt_id=attempt, accepted=Accepted(digest, REPORTED, MODEL, "gen-up")
+    )
+    return digest
+
+
+@pytest.mark.parametrize(
+    "identity,expected",
+    [
+        ({"module_id": "CP-9"}, RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE),
+        ({"build_id": "f" * 64}, RefusalCode.ORCHESTRATION_BUILD_MOVED),
+    ],
+)
+def test_upstream_with_foreign_envelope_identity_is_refused_before_any_call(
+    harness: _Harness, identity: dict[str, object], expected: RefusalCode
+) -> None:
+    _accepted_gate(harness, harness.conn, **identity)
+    completions = _DuringCompletion(_Completions(harness.source_id), lambda: None)
+    node = harness.route.nodes[1]
+    attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
+    reserve(harness.conn, attempt, ESTIMATE)
+    with pytest.raises(Refusal) as refused:
+        _provider(harness, completions).execute(
+            node.route_node_id, node.module_id, attempt_id=attempt
+        )
+    assert (refused.value.code, completions.calls) == (expected, 0)
+
+
+def test_upstream_superseded_during_the_call_is_refused_keeping_the_bill(
+    harness: _Harness,
+) -> None:
+    _accepted_gate(harness, harness.conn)
+
+    def supersede() -> None:
+        with connect(harness.url) as other:
+            _accepted_gate(harness, other, claims_refused=1)
+
+    completions = _DuringCompletion(_Completions(harness.source_id), supersede)
+    node = harness.route.nodes[1]
+    attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
+    reserve(harness.conn, attempt, ESTIMATE)
+    with pytest.raises(Refusal) as refused:
+        _provider(harness, completions).execute(
+            node.route_node_id, node.module_id, attempt_id=attempt
+        )
+    assert (refused.value.code, completions.calls) == (
+        RefusalCode.ROUTE_IDENTITY_INVALID,
+        1,
+    )
+    with connect(harness.url) as observer:
+        billed = observer.execute(
+            "SELECT count(*) FROM call_outcomes WHERE attempt_id=%s", (attempt,)
+        ).fetchone()
+        artifact = observer.execute(
+            "SELECT count(*) FROM artifacts WHERE attempt_id=%s", (attempt,)
+        ).fetchone()
+    assert (billed, artifact) == ((1,), (0,))
