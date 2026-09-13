@@ -389,8 +389,8 @@ def _affordable(
     # Every node of a case's route reserves one worst case against that run's
     # ceiling; a route that cannot fit would pay for calls it cannot finish.
     # A floor, not a bound: a refused analysis reserves again.
-    call = worst_case(harness.price)
-    if any(call * len(route.nodes) > CEILING for route in routes):
+    call = Fraction(worst_case(harness.price))
+    if any(call * len(route.nodes) > Fraction(CEILING) for route in routes):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 

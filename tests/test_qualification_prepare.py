@@ -94,6 +94,12 @@ def test_a_price_whose_route_cannot_fit_a_run_is_refused_before_any_case(
     never finish (the whole-phase confidence review's F-1)."""
     conn, blobs, harness, qualification = ready
     half = replace(harness, price=priced(CEILING / 2 + Decimal("0.01")))
+    route = resolve_route(CATALOG, qualification.cases[0].profile_id, "DEEP_RESEARCH")
+    # Exact whatever the ambient precision (the whole-phase audit's W-1).
+    with localcontext() as context:
+        context.prec = 1
+        with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_OVER_CEILING$"):
+            subject._affordable(qualification, half, [route])
     with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_OVER_CEILING$"):
         subject.prepare(conn, blobs, half, qualification=qualification)
     assert _count(conn, "SELECT count(*) FROM cases") == 0

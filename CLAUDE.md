@@ -179,7 +179,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   only on a stored `qa_status` of `Passed`; `Not Reviewed` is refused as a
   verdict so the attempt can retry. A reading that let `Restricted` release
   CP-6 as RESTRICTED is also defensible from the bundle. The value is the
-  module's own verdict; human QA approval is not consulted in Phase 2.
+  module's own verdict, so text in the evidence that steers the model can steer
+  it too; human QA approval is not consulted in Phase 2.
   *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
   practice wants restricted clearance to proceed.
 - **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
