@@ -44,16 +44,19 @@ inline commands read `CLAUDE_FILE_PATHS` and `CLAUDE_TOOL_INPUT_command`, which
 are never set, so they enforced nothing
 ([PLAN_ADVERSARIAL_REVIEW.md](PLAN_ADVERSARIAL_REVIEW.md) R2).
 
-- **Guard (PreToolUse, Bash).** Refuses force pushes, hook-bypassing commits
-  (the long flag or `commit -n`), unpinned `pip install`, `printenv`, a bare
-  `env`, `$OPENROUTER…` and any `.env` other than `.env.example`. A malformed
-  event refuses, and the settings command turns a crash or a missing
-  interpreter into a refusal (`|| exit 2`). It is a pattern screen, not a
-  sandbox: a command built to hide its intent at run time passes, and one
-  `shlex` cannot split gets only the substring rules.
+- **Guard (PreToolUse, Bash).** Refuses force pushes (`-f` in any cluster,
+  `--force`, `+ref`), hook-bypassing commits (the long flag, or `-n` in any
+  cluster), unpinned `pip install`, `printenv`, `env` run with nothing to run,
+  `$OPENROUTER…` and a `.env` path other than `.env.example`. A newline ends a
+  command; a command `shlex` cannot split is checked on a plain split rather
+  than skipped. A malformed event refuses, and the settings command falls back
+  to `python3` when the repo venv is absent (a fresh worktree) and turns a crash
+  or a missing interpreter into a refusal (`|| exit 2`). It is a pattern screen,
+  not a sandbox: a command built to hide its intent at run time passes.
 - **Formatter (PostToolUse, Write/Edit/MultiEdit).** `ruff format
-  --force-exclude` for authored Python and the pinned `prettier` for frontend
-  TS/CSS; vendor, `.claude`, out-of-repo and other files are untouched.
+  --force-exclude` (format only, no `check --fix`) for authored Python and the
+  pinned `prettier`, run from `frontend/` so its ignore file applies, for
+  frontend TS/CSS; vendor, `.claude`, out-of-repo and other files are untouched.
 
 `tests/test_claude_hooks.py` drives both, including through the real settings
 command. Pre-commit and CI checks remain separate obligations.
