@@ -12,10 +12,10 @@ ignored reports cannot override those contracts.
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest reported task acceptance | Task17f complete through `2f12a2c`; Claude Code's evidence summarized below |
-| Latest observed implementation | `2f12a2c`, Task17f-b review remediation |
-| Next task | Preflight/brief for the remaining Phase 2 obligations; generation ownership/fencing first |
-| Phase | Phase 2 incomplete; do not begin Phase 3 yet |
+| Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
+| Latest observed implementation | `b4298dc`, Phase 2 adversarial-audit remediation |
+| Next task | Phase 3 entry: tracked brief for Task 3.1 (canonical record and adapter boundary) |
+| Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
@@ -28,6 +28,41 @@ at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
 with `acf334d`. The tracked `CLAUDE.md` at `694660b` records acceptance
 through Task17e. Original logs and detailed reviews remain local supplements;
 this documentation update has not rerun their gates or accepted new code.
+
+## Phase 2 acceptance record — 13 September 2026
+
+- **Candidate:** `codex/execute-repair-plan` at `b4298dc`; GitNexus 1.6.9
+  index-only at `b4298dc` (status up to date).
+- **Exit evidence:** every `docs/REPAIR_PLAN.md` Phase 2 exit check and the
+  hook prerequisite map to named regression tests in
+  [PHASE_2_EXIT_EVIDENCE.md](PHASE_2_EXIT_EVIDENCE.md), with slice commits.
+  The open adversarial-plan findings are closed in code: hook enforcement
+  (`fea7543`, `84bb6ce`), fenced accepted ownership (`4facb0f`, `036a104`),
+  blocked/QA terminal semantics (`b401253`, `ad8e931`, `e2da629`, `ebf6266`,
+  `ad312f9`) and priced reservations/exposure (`ba04982`, `1d0a8dd`).
+- **Complete gate at `b4298dc`:** `make check` with the pinned Trivy 0.70.0
+  (official macOS-ARM64 release, SHA-256 `68e543c5…b838a` matching the published
+  checksums) exited 0: backend 1917 passed, races 2 passed, lint/types/Bandit/
+  pip-audit/gitleaks clean, frontend 157 unit tests, accessibility, 90 browser
+  workbench tests, image built and scanned with no fixable HIGH/CRITICAL.
+- **Whole-phase confidence review:** Claude Opus 5 (`claude-opus-5`) at
+  **xhigh**, set externally with the session-effort control before the review
+  turn ([report](reviews/phase-2-confidence-review.md)). No P0/P1; two P2 and
+  two P3 confirmed and fixed in `118c685` with two open items; the rest recorded
+  in the CLAUDE.md "Repair Phase 2" ledger.
+- **Whole-phase adversarial audit:** same model and effort
+  ([report](reviews/phase-2-adversarial-audit.md)). Verdict CONCERNS, no
+  P0/P1; two P2 and the P3 notes fixed or documented in `b4298dc`.
+- **Accepted limits:** the CLAUDE.md "Repair Phase 2" ledger (BLOCKED is final
+  for a run; terminal decision outside the run lock; duplicate spend before
+  acceptance; acceptance does not recompare upstream; case lock held for context
+  reads; QA verdict is the module's own; the live price's source). No paid call
+  was made. Exit checks 1 (wrong-case at runtime) and 6 (cancellation) rest on
+  the stand-ins the evidence record names.
+- **Size:** each slice passed the 800-line gate against its task base. The
+  cumulative Phase 2 range exceeds 800 lines against `main`; landing it needs
+  stacked PRs along the recorded slice boundaries, and hosted checks remain
+  unverified.
 
 ## Read and inspect before changing code
 
