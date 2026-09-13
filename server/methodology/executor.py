@@ -93,8 +93,8 @@ Rules that will cause your answer to be refused if broken:
 
 _QA_INSTRUCTION = """\
 You are also this route's QA gate. Beside `claims`, return `qa_status`: exactly
-one of "Not Reviewed", "Passed", "Restricted", "Blocked". Only "Passed" releases
-the modules that wait on QA.
+one of "Passed", "Restricted", "Blocked". Only "Passed" releases the modules
+that wait on QA.
 """
 
 _GATE_INSTRUCTION = """\
