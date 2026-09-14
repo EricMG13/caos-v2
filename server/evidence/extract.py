@@ -89,6 +89,33 @@ class Extractor(Protocol):
     def extract(self, data: bytes) -> list[Token]: ...
 
 
+class ExtractorDispatch(Protocol):
+    """Chooses the extractor for one document from its bytes (§44.6)."""
+
+    def __call__(self, data: bytes) -> Extractor: ...
+
+
+# Readers accept a PDF header anywhere in the first kilobyte, so a PDF with
+# leading junk is still a PDF; past that it is not one any reader will open.
+PDF_HEADER = b"%PDF-"
+PDF_HEADER_WINDOW = 1024
+
+
+def dispatch_by_content(data: bytes) -> Extractor:
+    """A PDF by its header, plain text otherwise -- never by its filename.
+
+    A name is whatever the uploader typed; the bytes are what the extractor
+    will actually meet.
+    """
+    if PDF_HEADER in data[:PDF_HEADER_WINDOW]:
+        # Imported here: `pdf` imports this module, and plain-text admission
+        # should not pay for pdfminer.
+        from server.evidence.pdf import PdfExtractor
+
+        return PdfExtractor()
+    return PlainTextExtractor()
+
+
 @dataclass(frozen=True, slots=True)
 class PlainTextExtractor:
     """UTF-8 text as tokens on a fixed-pitch page.
