@@ -2,7 +2,8 @@
 
 The workspace: what surfaces exist, what each is for, and the rules that hold
 across all of them. Structure and contracts live in `docs/SYSTEM_SPEC.md`;
-scope and decisions in `docs/REBUILD_PLAN.md`. Visual language is `DESIGN.md`
+current repair scope in `docs/REPAIR_PLAN.md` and decisions in `docs/DECISIONS.md`.
+Historical rebuild phases are not current task authority. Visual language is `DESIGN.md`
 and the bound CAOS design system.
 
 Reference design: https://claude.ai/design/p/69d37748-8595-4309-9b06-bc5f9529a29c
@@ -97,10 +98,12 @@ page-level primary action, one dominant work region, and how it degrades.
 The case register. Search plus one filter and one action per row. No batch
 state. Document-first intake lives here: the panel posts files and nothing
 else; the server creates or resolves the case, admits every file or none,
-classifies, selects a route and starts the run. Issuer, label, types, periods,
-dispositions and route come back as **labelled suggestions**, never taken from
-the browser. A completed intake run is opened for review, never accepted on the
-analyst's behalf.
+and returns issuer, label, types, periods, dispositions and route as
+**labelled suggestions**. Intake does not authorize analytical provider calls:
+source-set and research-plan approval must bind the exact host-validated
+preview/pins before execution can start. User selections are validated inputs,
+never trusted identity or permission. Neither approvals nor run acceptance are
+performed on the analyst's behalf (decision §39).
 
 ### 4.2 Upload — `/upload/`
 

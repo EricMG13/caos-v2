@@ -108,7 +108,9 @@ gate. These ecosystems run sequentially even under
 `make -j`. Provider credentials are removed and the paid suite is not selected.
 
 The separate PR-only `check-size` gate has no guessed default: `PR_BASE` must be
-the exact caller-supplied PR base. It uses the hosted exclusions and 800-line limit and fails closed for
+the exact caller-supplied PR base. Run its final acceptance check after committing
+the candidate and any review remediation, and record both base and HEAD. The
+script measures committed `base...HEAD`; it does not count staged/unstaged edits. It uses the hosted exclusions and 800-line limit and fails closed for
 an absent or invalid base or failed diff. Splitting an oversized cumulative
 branch into commits does not make it eligible. Local completion cannot post or
 imitate required GitHub or SonarCloud statuses; those remain mandatory on the

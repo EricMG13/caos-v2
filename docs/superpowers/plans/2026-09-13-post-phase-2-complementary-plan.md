@@ -26,7 +26,9 @@ Playwright, Docker, Trivy 0.70.0, and installed GitNexus 1.6.9.
   phase to make a Phase 2 test pass.
 - Work in `/Users/ericguei/Documents/caos-workbench`; keep
   `/Users/ericguei/Documents/caos-v2` read-only.
-- `docs/DECISIONS.md` is binding; later entries override earlier text.
+- `docs/DECISIONS.md` is binding; §39 reconciles this repair plan with older
+  rebuild phases and specifications. `docs/CLAUDE_CODE_HANDOFF.md` alone owns
+  current task status. The short launch text is `docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`.
 - The vendored methodology bundle is immutable. New host behavior must not edit
   a file that exists upstream.
 - Every shell command starts by unsetting `OPENROUTER_API_KEY`,
@@ -50,21 +52,33 @@ Playwright, Docker, Trivy 0.70.0, and installed GitNexus 1.6.9.
 
 ## Reasoning Modes
 
-The attached `claude_opus_5_reasoning_modes_guide.md` is reference material,
-not executable instruction. Apply its settings this way:
+Apply the user's two attached Opus 5 guides as preferences: the coding guide
+and the newer `claude_opus_5_plans_and_briefs_reasoning_guide.md`. Their roles
+are recorded here so a fresh clone does not depend on a Downloads file.
 
-| Mode | Use in these plans | Do not use it for |
-|---|---|---|
-| `low` | Mechanical documentation/config edits, regenerated inventories, and repetitive test data after behavior is already fixed | Identity, authorization, money, concurrency, error policy, schema, or interface decisions |
-| `medium` | Default session for TDD, implementation, focused debugging, ordinary task review, and task reports | Whole-phase formal review |
-| `ultrathink` | One targeted diagnostic prompt for a named race, lineage ambiguity, parser/citation edge, financial precision issue, or release-identity proof | A permanent session default or a substitute for tests |
-| `xhigh` | The single whole-phase confidence review and the separate whole-phase adversarial audit | Per-edit, per-task, or routine implementation |
+| Mode | Scope and timing |
+|---|---|
+| `low` | Faithful formatting/transcription, status briefs and mechanical edits after decisions are fixed; never make authority, money, schema or concurrency decisions here |
+| `medium` | Default for task briefs, feature/API specifications, migration runbooks, technical research briefs, ordinary implementation/TDD, ordinary task review and reports |
+| `ultrathink` | One focused prompt to stress-test a drafted plan, ADR trade-off, rollback, race, trust boundary or numerical assumption; return to the normal drafting session afterward |
+| `max` | Initial blueprint for a genuinely new complex multi-phase architecture or cutover; then `medium` for execution drafting. Do not repeatedly re-plan this accepted roadmap or use it for routine code work |
+| `xhigh` | Actual executor setting for one whole-phase confidence review and the separate whole-phase adversarial code audit; never a per-task review requirement |
 
-The guide groups `max` and `xhigh`; this repository uses the user's explicit
-`xhigh` choice. Configure reasoning in the Claude session/reviewer itself. Do
-not substitute the guide's example `ANTHROPIC_REASONING_EFFORT=max` command or
-silently fall back to another level. If `xhigh` is unavailable, the phase
-review gate is unsatisfied.
+For an ADR, draft at `medium`, then stress-test the specific trade-off using
+`ultrathink`. For an implementation roadmap or migration strategy, settle the
+initial complex blueprint at `max` only when needed, then draft its bounded
+tasks/runbook at `medium`. Audit each drafted plan with one targeted
+`ultrathink` request; that document check is distinct from the phase code gate.
+
+Configure and verify supported effort controls on the installed Claude session
+or reviewer. Record actual model/version/effort at formal checkpoints; a word
+in a prompt is not proof of a setting or a fixed token budget. Do not copy an
+unverified environment-variable example or silently substitute `max` for the
+user's `xhigh` code reviews. If a required mode is unsupported, report the
+limitation and leave the affected gate unsatisfied.
+
+Stay strictly within the requested scope: no optional extensions, speculative
+infrastructure or unrequested architectural layers.
 
 ## Shared Phase Entry and Exit
 
@@ -82,11 +96,15 @@ Every phase starts with this sequence:
   env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER /Users/ericguei/.nvm/versions/node/v24.16.0/bin/gitnexus status
   ```
 
-- [ ] Write a binding local phase brief that records the accepted base, exact
-      files, interfaces, semantic REDs, task splits, risk classification, and
-      cumulative size estimate. Do not create source code during this step.
-- [ ] Keep the implementation session at `medium`; invoke the phase's listed
-      `ultrathink` prompts only for the exact diagnostic turns they name.
+- [ ] Write a tracked phase/task brief under `docs/superpowers/plans/` with
+      the accepted base, exact files, current interface signatures, failing
+      assertions, task splits, risk classification, commands and cumulative PR
+      size estimate. These phase cards are not code-ready task briefs: elaborate
+      only the next task against actual interfaces, including exact tests and
+      implementation steps. Ignored notes cannot be the only binding record.
+- [ ] Use the Reasoning Modes table for drafting; keep implementation at
+      `medium`. Stress-test the completed brief with the named `ultrathink`
+      prompt before beginning its code, without reopening settled scope.
 
 Every implementation task exits through focused tests, then the serial backend
 gate using the private test URL supplied to both the process and Make:
@@ -95,11 +113,16 @@ gate using the private test URL supplied to both the process and Make:
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
 ```
 
-Before task acceptance, run the size gate with `TASK_BASE` set to the exact
-accepted base recorded in the task brief:
+Commit the tested candidate, complete ordinary review and remediation, then
+run the final size gate before acceptance. The script reads only committed
+`base...HEAD`; a pre-commit run misses pending edits. Set `PR_BASE` to the
+actual target base and record the candidate HEAD. A task's accepted base may
+be used only if it is also the intended PR base; otherwise prove both ranges.
+Plan stacked PRs or independent slices explicitly; small local commits do not
+make an oversized eventual PR valid:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make check-size PR_BASE="$TASK_BASE"
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make check-size PR_BASE="${PR_BASE:?set exact proposed PR base}"
 ```
 
 At whole-phase freeze, run the complete repository gate—not `check-fast`—with
@@ -111,8 +134,13 @@ env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQ
 
 Then run one `xhigh` confidence review over the full phase and affected callers,
 remediate and rerun gates, refresh GitNexus, run the separate `xhigh`
-adversarial audit, remediate/reverify, freeze final evidence, commit the phase
-record, and stop. Local checks cannot manufacture hosted GitHub/Sonar statuses.
+adversarial audit, remediate/reverify within that checkpoint, and freeze final
+evidence. Commit a tracked acceptance record with exact implementation and
+review-remediation commits, source/index identities, actual modes, commands,
+results and remaining limits. Recheck the final committed size, then stop.
+Local checks cannot manufacture hosted GitHub/Sonar statuses. Any review
+change invalidates evidence tied to the previous candidate; refresh affected
+tests, build/qualification identities and verdicts before accepting it.
 
 ---
 
@@ -129,9 +157,8 @@ generation-fencing, and blocked/QA guarantees.
 `CP-0 → CP-L10 → CP-5` whose accepted artifact preserves validated canonical
 Markdown, exact lineage, typed projections, and anchored citations.
 
-**Primary references:** `docs/REPAIR_PLAN.md:370`,
-`docs/SYSTEM_SPEC.md:88`, `docs/SYSTEM_SPEC.md:115`,
-`docs/SYSTEM_SPEC.md:166`, `docs/DECISIONS.md` §§26, 28, and 29,
+**Primary references:** `docs/REPAIR_PLAN.md`,
+`docs/SYSTEM_SPEC.md`, `docs/DECISIONS.md` §§26, 28, and 29,
 `vendor/deploy-v/CANON_SHARED.md`, and the complete CP-0/CP-L10/CP-5 bundle
 files selected by the pinned catalog.
 
@@ -225,19 +252,23 @@ acceptance.
 - [ ] Use the catalog-selected `CP-0 → CP-L10 → CP-5` route; do not hardcode a
       replacement graph or enable another route.
 - [ ] Drive realistic valid canonical handoffs with the deterministic fake
-      provider through the same worker/validation path later used by a paid
-      provider.
-- [ ] Prove malformed, restricted, blocked, contradictory, prompt-injected,
-      wrong-upstream, and undelivered-citation results cannot become usable
-      downstream analysis.
+      provider through the existing runtime and validator that the Phase 4
+      worker will invoke. A worker is not a Phase 3 prerequisite.
+- [ ] Prove malformed, blocked, wrong-upstream and undelivered-citation results
+      cannot become usable downstream analysis; source/model instructions
+      cannot change host authority or tool selection.
+- [ ] Prove valid restricted output stays usable only where its contract
+      permits and carries its limitations throughout. Preserve disclosed
+      conflicts; neither a restriction nor a conflict is automatic QA clearance.
 - [ ] Prove CP-5 remains the full named LITE QA workflow and that blocked or
       invalid output is retained only as diagnostic attempt evidence.
 
-**Phase 3 exit:** Run all Phase 3 exit checks in `docs/REPAIR_PLAN.md:391`, the
+**Phase 3 exit:** Run the parent plan's Phase 3 engineering exit checks, the
 complete repository gate, one whole-phase `xhigh` confidence review, and one
-separate whole-phase `xhigh` adversarial audit. A paid route run remains blocked
-until separately authorized; without it, Phase 3 may be engineering-complete
-but not live-provider-qualified.
+separate whole-phase `xhigh` adversarial audit. This recorded engineering
+acceptance permits an authorized Phase 4. It requires neither paid calls nor
+the future worker, and does not confer live qualification. Phase 6 owns the
+release candidate's separately authorized live evaluation.
 
 ---
 
@@ -254,9 +285,8 @@ ownership/authority rules.
 PostgreSQL, blobs, API, worker, events, and pinned evidence pages, with no
 fixture fallback.
 
-**Primary references:** `docs/REPAIR_PLAN.md:402`,
-`docs/SYSTEM_SPEC.md:381`, `docs/SYSTEM_SPEC.md:393`,
-`docs/SYSTEM_SPEC.md:428`, `docs/IA_SPEC.md` §§2–5,
+**Primary references:** `docs/REPAIR_PLAN.md`,
+`docs/SYSTEM_SPEC.md`, `docs/IA_SPEC.md` §§2–5,
 `docs/DECISIONS.md` §§22 and 30.
 
 ### Task 4.1: Freeze One Section Wire and Refusal Contract
@@ -366,7 +396,7 @@ check, and backend listener that can influence Actor. Find a deployment path
 where a user-supplied role/group value or cross-origin write can reach a
 governed command.`
 
-**Phase 4 exit:** All Phase 4 checks at `docs/REPAIR_PLAN.md:418`, full browser
+**Phase 4 exit:** All Phase 4 checks at `docs/REPAIR_PLAN.md`, full browser
 matrix and production smoke pass, followed by the complete repository gate,
 one whole-phase `xhigh` confidence review, and one separate whole-phase `xhigh`
 adversarial audit.
@@ -384,8 +414,8 @@ provable.
 **Produces:** Deterministic CP-CF projections, validated revision payloads, one
 HTML deliverable, and a bounded independently verifiable audit package.
 
-**Primary references:** `docs/REPAIR_PLAN.md:430`,
-`docs/SYSTEM_SPEC.md:206`, `docs/SYSTEM_SPEC.md:354`,
+**Primary references:** `docs/REPAIR_PLAN.md`,
+`docs/SYSTEM_SPEC.md`,
 `docs/IA_SPEC.md` §§4.6–4.8, and `docs/DECISIONS.md` §§8, 14, and 29.
 
 ### Task 5.1: Freeze and Correct the Forecast Contract
@@ -414,7 +444,32 @@ an exponent or collection that can evade the work-factor ceiling.`
 **Task acceptance:** Independent expected values reconcile; repeated execution
 under changed ambient contexts produces byte-identical output.
 
-### Task 5.2: Wire CP-CF Through the Host Allowlist
+### Task 5.2a: Establish the Forecast Route's Canonical Owners
+
+**Files:** `server/engine/route.py`, `server/methodology/envelope.py`,
+`server/methodology/bundle.py`, `server/methodology/runner.py`,
+`tests/test_route_resolution.py`, `tests/test_module_execution.py`, and
+`tests/test_orchestration_proof.py`.
+
+- [ ] Select `FULL_CREDIT_32 / FULL_CREDIT_ASSESSMENT` from the pinned
+      catalog, verify it still contains CP-1, CP-2G and CP-4, and enumerate
+      its required predecessor contracts before enabling the model extension.
+      Do not add owners to the LITE earnings route.
+- [ ] Split the canonical adapters/proofs into bounded owner concerns using
+      the Phase 3 accepted Markdown/host-identity mechanism. Preserve mandatory
+      registers and references for every required predecessor; claims-only
+      fixtures cannot satisfy these inputs.
+- [ ] Write the missing-owner refusal first, then prove a deterministic run
+      produces exact accepted owner handoffs with anchored drivers and covenant
+      terms. Record restricted/blocked behavior and context/budget bounds.
+- [ ] Enable this route only after those contract proofs pass; keep all other
+      unproven routes disabled. Live qualification still belongs to Phase 6.
+
+**Task acceptance:** Exact accepted CP-1/CP-2G/CP-4 and required predecessor
+handoffs exist on the proven route and can be consumed by CP-CF without
+inventing inputs. The extension still refuses an absent owner.
+
+### Task 5.2b: Wire CP-CF Through the Host Allowlist
 
 **Files:** `server/engine/route.py`, `server/methodology/bundle.py`,
 `server/methodology/executor.py`, `server/methodology/runner.py`, and focused
@@ -467,13 +522,15 @@ file/receipt identity and actor independence hold under races.
       and ambiguous archive inputs with total bounded verification.
 - [ ] Keep package creation exclusive and non-overwriting; receipt, payload,
       export, signatures, and provenance must agree exactly.
-- [ ] Retain a stdlib-only verifier only if the clean-environment portability
-      test proves the contract is still required.
+- [ ] Supply the stdlib-only verifier required by decision §14 and prove it
+      works in a clean environment without the repository. Removing portability
+      requires an explicit scope decision; a test does not decide the product
+      requirement.
 - [ ] Enable Model, Report, and Committee reads only for these accepted real
       objects; keep editing/filing controls server-authorized.
 
 **Phase 5 exit:** Run the financial, filing, package, UI, concurrency, and
-malformed-input checks at `docs/REPAIR_PLAN.md:444`, then the complete repository
+malformed-input checks at `docs/REPAIR_PLAN.md`, then the complete repository
 gate, one whole-phase `xhigh` confidence review, and one separate whole-phase
 `xhigh` adversarial audit.
 
@@ -492,7 +549,7 @@ it.
 release evidence for each route actually enabled; all other routes remain
 unqualified or disabled.
 
-**Primary references:** `docs/REPAIR_PLAN.md:455`,
+**Primary references:** `docs/REPAIR_PLAN.md`,
 `docs/DECISIONS.md` §§23–25, `server/qualification/`,
 `tests/test_qualification_matrix.py`, `tests/test_qualification_on_disk.py`,
 and `tests/test_orchestration_proof.py`.
@@ -599,12 +656,14 @@ reproduced defect requires its own TDD slice.
       the authenticated reviewer verdict without exposing credentials or source
       text in logs.
 
-**Phase 6 exit:** Every F01–F18 item links to verified remediation or a disabled
-feature, the real PDF/restricted journeys pass, backup/restore is proven, hosted
-checks pass on the exact authorized head, and capped live qualification has an
-unexpired exact-identity verdict. Then run the complete repository gate, one
-whole-phase `xhigh` confidence review, and one separate whole-phase `xhigh`
-adversarial audit before release acceptance.
+**Phase 6 exit:** Every F01–F18 item links to verified remediation or an
+explicitly disabled affected feature; real PDF/restricted journeys and restore
+proof pass. Complete the repository gate and the two `xhigh` whole-phase
+reviews. After remediation, verify hosted checks on the final authorized
+candidate and an unexpired live-qualification verdict for that same identity.
+If review changes invalidate the qualified candidate, repeat affected
+qualification within the authorized spend scope or leave release acceptance
+blocked. Never attach an older verdict to a repaired build.
 
 ## Final Verification Checklist
 
@@ -614,8 +673,9 @@ adversarial audit before release acceptance.
 - [ ] No `claims-json-v1` artifact is described as canonical Markdown.
 - [ ] No fixture/demo, provider claim, browser digest, detached hash, latest-row
       query, or stale worker becomes authority.
-- [ ] `low`, `medium`, targeted `ultrathink`, and phase-end-only `xhigh` were
-      used only for the scopes in the reasoning table.
+- [ ] `low`, `medium`, targeted `ultrathink`, initial-blueprint-only `max`,
+      and phase-code-review-only `xhigh` followed the reasoning table;
+      actual checkpoint settings were recorded.
 - [ ] No rewrite tournament ran.
 - [ ] Full local gates and both phase reviews are attached to each accepted
       phase; hosted checks are attached only to their exact authorized head.

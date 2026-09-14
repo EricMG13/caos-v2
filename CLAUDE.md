@@ -13,30 +13,27 @@ first commit.
 
 ## Active continuation — Phase 2 repair
 
-Claude Code resumes from
+The sole current task/checkpoint record is
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
-Task17d2 is accepted on `codex/execute-repair-plan` (Task17d2a
-`f8cd738`, Task17d2b `ceabf9f`), and so is Task17d3 (Task17d3a `829d863`,
-proof-only Task17d3b `17645f3`, each with review remediation; reports in
-`.superpowers/sdd/`) and Task17e-a (a1 `9f299a4`, a2 `209b0ef`). Next is
-proof-only Task17e-b. Phase 2 is **not** complete. Work only in
-`/Users/ericguei/Documents/caos-workbench`; the original
-`/Users/ericguei/Documents/caos-v2` checkout stays read-only.
+Read its tracked scope and acceptance evidence before editing; ignored local
+reports are supplemental. Work only in `/Users/ericguei/Documents/caos-workbench`;
+the original `/Users/ericguei/Documents/caos-v2` stays read-only.
 
-Before changing code, read the tracked handoff and the local binding records
-`.superpowers/sdd/task-17e-brief.md` and
-`.superpowers/sdd/task-17e-a2-report.md`, then rebuild the local GitNexus index as
-the handoff specifies. Every shell command starts by unsetting
-`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and
-`CAOS_REQUIRE_PROVIDER`. Never invoke a live provider without separate explicit
-authorization.
+Decision §39 reconciles the repair plan with older specifications. Phase 2
+remains incomplete until the handoff records its full exit evidence. After its
+acceptance and applicable user authorization, use
+[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md).
+The complementary plan's Reasoning Modes section records both Opus 5 guides.
 
-The current review cadence overrides older repository text and historical task
-records: ordinary task review remains required at each accepted slice; no
-rewrite tournament runs; one `confidence-review` runs only after every Phase 2
-task passes, using actual `xhigh` reasoning; a separate adversarial code audit
-runs only after that whole-phase confidence review and remediation, also using
-actual `xhigh`. Stop before Phase 3.
+Every shell command starts by unsetting `OPENROUTER_API_KEY`,
+`OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `CAOS_REQUIRE_PROVIDER`.
+Never invoke a live provider without explicit authorization. Index the current
+checkout with GitNexus and verify affected callers in source.
+
+Ordinary review closes each task. One `confidence-review` and then one separate
+adversarial code audit close the whole phase, both at actual `xhigh` reasoning,
+with remediation/reverification between them. No per-task specialist review or
+rewrite tournament. Requested document reviews do not certify these code gates.
 
 ## The eleven invariants (never weaken)
 
@@ -160,6 +157,12 @@ Every accepted limitation gets an entry here with its reason and its upgrade
 path, in the same breath as the code that creates it. An empty ledger on a
 system this size means nobody looked.
 
+The phase labels below are historical **rebuild** labels, not current repair
+phase numbers. Entries are not evidence of completion; the handoff and repair
+plan govern present work. Correct a stale entry when its owning task proves
+the replacement behavior. The legacy hook claims are currently unverified
+controls; see the tracked Phase 2 hook prerequisite in the handoff.
+
 **Phase 0.**
 
 - ~~**No `image` CI job.**~~ Closed in Phase 7, and recorded here late. The
@@ -277,19 +280,12 @@ system this size means nobody looked.
   async store connection Phase 5's gap already owes; over a synchronous one a
   concurrent harness would serialise on the connection, for the same wall clock
   and harder reasoning.
-- **A document that will not admit still ends the set, after the cases before
-  it were paid for.** `perform` records a `Refusal` from `run_route` in
-  `Performed.stopped` and stops; what it cannot record is a refusal raised
-  before there is a run to record it against. Route resolution has left that
-  category — every case's route is now resolved in the pass over the whole set,
-  before anything is admitted, because resolution is pure and an unknown pathway
-  on the last case of ten was knowable from the catalog and the set alone. What
-  remains is `admit_pack` refusing `SOURCE_HAS_NO_TEXT` on a document whose
-  bytes carry none, which needs the extractor and therefore the case row, and so
-  cannot be answered before the earlier cases have run. *Upgrade:* extract once,
-  up front, and hand `admit_pack` what it already produced — which is worth
-  doing the day extraction is the expensive half, and is today a second pass
-  over bytes to answer a question about a set someone assembled badly.
+- ~~**A document that will not admit still ends the set, after the cases before
+  it were paid for.**~~ Closed by `prepare`, which resolves every route, creates
+  every case, admits every document and pins every input before `perform` may
+  spend anything: `SOURCE_HAS_NO_TEXT` on the last case of ten now refuses the
+  set before any provider call, with the earlier cases' prepared rows committed
+  and unspent.
 - **An unrun node's state is a weaker reading when the artifacts cannot be
   read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
   soft edge's readiness comes from, and bytes that will not load would raise out
@@ -299,13 +295,12 @@ system this size means nobody looked.
   The run has already refused its proof by then, so the signal is not lost.
   *Upgrade:* none — a run whose artifacts are unreadable has a worse problem
   than the precision of this field.
-- **`Unrun` does not say whether a node was attempted.** A node the provider was
-  asked for and refused and a node execution never reached both come back
-  RUNNABLE, although `run_attempts` holds the difference: the first has a
-  started, unaccepted row and a reservation, the second has nothing. With the
-  frontier running its ready nodes in order this is at most one node per run.
-  *Upgrade:* read the attempt rows alongside the states, the day a wide frontier
-  runs concurrently and more than one node can be mid-flight.
+- ~~**`Unrun` does not say whether a node was attempted.**~~ Closed in Task17f-b:
+  each `Unrun` carries its stored `Attempted` rows -- whether the attempt was
+  reserved, whether its call was recorded (reserved and unrecorded is possible
+  spend), whether a known charge was billed (a recorded call without one is
+  unknown exposure), and the recorded model and generation, read from the store
+  and `None` when the call recorded none.
 - **A proof is held and not stored.** `perform` now holds each case's
   `OrchestrationProof` beside the run id it covers — and only for as long as the
   caller does. There is no table and no route that serves one, so a proof still
@@ -325,13 +320,10 @@ system this size means nobody looked.
   hand the accepted mapping from `_perform_one` to the matrix the day a set is
   large enough for the reads to be measurable — which is the same day the
   per-set budget above starts to bite.
-- **`perform` returns with a read transaction open.** Its last writes commit
-  inside the store calls, and the proof, the status read, `_unrun` and the
-  matrix all read after them without committing or rolling back. Under the
-  `with connect(...)` every caller uses today the connection closes immediately
-  after; a caller that held one would leave a session idle-in-transaction,
-  pinning a snapshot. *Upgrade:* end the transaction on the way out, in the
-  phase that first gives this a caller which outlives one set.
+- ~~**`perform` returns with a read transaction open.**~~ Closed when
+  `_perform_one` and the matrix began reading inside `execution_reads`, which
+  rolls its unit back on the way out, so `perform` returns with the connection
+  idle.
 - **A bundle upgrade invalidates every earlier run's proof.** The authority is
   re-derived from the bundle that is here now, so after an upgrade a run that
   was correct under the old build refuses `ORCHESTRATION_BUILD_MOVED`. That is

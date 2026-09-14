@@ -9,7 +9,9 @@
 ## Checklist
 
 - [ ] Test first: the named test failed for the right reason before the implementation.
-- [ ] One concern; the diff stays under the CI size gate.
+- [ ] One concern; the final committed diff against the actual PR base passes
+      the 800-counted-line gate, including review remediation.
+- [ ] Ordinary exact-range task review and its remediation are recorded.
 - [ ] Any new dependency has a dated `docs/DECISIONS.md` entry.
 - [ ] Any accepted limitation has a `CLAUDE.md` known-gaps entry in this PR.
 - [ ] If this PR closes a phase: one `confidence-review` reviewed the whole

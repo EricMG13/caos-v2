@@ -26,6 +26,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -467,3 +468,96 @@ def test_the_proof_refuses_an_artifact_that_is_not_a_mapping(ran: Ran) -> None:
     ran.conn.commit()
 
     assert _refusal(ran) is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
+
+
+# Task17f-a: the proof reads the run's pins and stored call facts.
+
+
+def _withdraw(ran: Ran, source_id: UUID) -> None:
+    actor = uuid4()
+    grant(ran.conn, case_id=ran.case_id, user_id=actor, standing=Standing.APPROVER)
+    ran.conn.commit()
+    withdraw_source(ran.conn, case_id=ran.case_id, actor_id=actor, source_id=source_id)
+
+
+def _admit(ran: Ran, data: bytes) -> UUID:
+    [source_id] = admit_pack(
+        ran.conn,
+        ran.blobs,
+        case_id=ran.case_id,
+        documents=[Document(filename=BoundaryText.of("late.txt"), data=data)],
+    )
+    ran.conn.commit()
+    return source_id
+
+
+def test_a_readmitted_copy_of_a_withdrawn_pinned_source_does_not_revive_the_proof(
+    ran: Ran,
+) -> None:
+    _withdraw(ran, ran.source_id)
+    _admit(ran, REPORT)
+
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+
+
+def test_a_source_admitted_after_the_pin_cannot_support_the_proof(ran: Ran) -> None:
+    late = REPORT + b"Admitted after the run was pinned\n"
+    _admit(ran, late)
+    envelope = json.loads(
+        ran.blobs.get(
+            str(
+                ran.conn.execute(
+                    "SELECT artifact_sha256 FROM artifacts WHERE run_id = %s"
+                    " ORDER BY created_at LIMIT 1",
+                    (ran.run_id,),
+                ).fetchone()[0]  # type: ignore[index]
+            )
+        )
+    )
+    for claim in envelope["claims"]:
+        for citation in claim["citations"]:
+            citation["document_sha256"] = sha256(late).hexdigest()
+    _doctor(ran, {"claims": envelope["claims"]})
+
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+
+
+def test_the_proof_refuses_a_run_pinned_under_another_adapter(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server import methodology
+
+    monkeypatch.setattr(methodology, "CLAIMS_ADAPTER_VERSION", "another-adapter")
+
+    assert _refusal(ran) is RefusalCode.ORCHESTRATION_BUILD_MOVED
+
+
+def test_the_proof_refuses_a_run_with_no_stored_input(ran: Ran) -> None:
+    from test_execution_freshness import _guard_disabled
+
+    with _guard_disabled(ran.conn, "run_inputs", "input_immutable"):
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+
+    assert _refusal(ran) is RefusalCode.RUN_INPUT_INVALID
+
+
+def test_the_proof_refuses_an_artifact_whose_producer_differs_from_its_call(
+    ran: Ran,
+) -> None:
+    ran.conn.execute(
+        "UPDATE artifacts SET model = 'another/model' WHERE run_id = %s", (ran.run_id,)
+    )
+    ran.conn.commit()
+
+    assert _refusal(ran) is RefusalCode.CALL_OUTCOME_CONFLICT
+
+
+def test_the_proof_refuses_an_artifact_with_no_recorded_call(ran: Ran) -> None:
+    from test_execution_freshness import _guard_disabled
+
+    with _guard_disabled(ran.conn, "call_outcomes", "outcome_immutable"):
+        ran.conn.execute("DELETE FROM call_outcomes WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+
+    assert _refusal(ran) is RefusalCode.CALL_OUTCOME_LEGACY
