@@ -77,7 +77,7 @@ export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> =
   run_progress: ["run"],
   handoff_accepted: ["run", "analysis", "model"],
   run_terminal: ["run", "analysis", "model"],
-  sources_changed: ["upload", "run", "analysis", "model"],
+  sources_changed: ["upload", "run", "analysis", "model", "report"],
   runs_changed: ["run", "analysis", "model"],
 };
 
@@ -91,6 +91,7 @@ export function displayedRunIdOf(section: Section, doc: SectionDocument): string
   if (section === "run" && "run" in body) return body.run?.run_id ?? null;
   if (section === "analysis" && "handoffs" in body) return body.displayed_run_id;
   if (section === "model" && "forecast" in body) return body.displayed_run_id;
+  if (section === "report" && "revision_id" in body) return body.displayed_run_id;
   return null;
 }
 
@@ -114,6 +115,9 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
   if (section === "model" && "forecast" in body) {
     const forecast = body.forecast;
     return `${body.displayed_run_id ?? ""}|${forecast ? `${forecast.record_sha256}|${forecast.artifact_sha256}` : "NO_ACCEPTED_FORECAST"}`;
+  }
+  if (section === "report" && "revision_id" in body) {
+    return `${body.revision_id}|${body.payload_sha256}`;
   }
   return null;
 }

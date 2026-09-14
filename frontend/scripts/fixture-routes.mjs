@@ -13,9 +13,9 @@ export const SECTIONS = [
   "admin",
 ];
 
-/** The five sections served in every mode; the other four render `unavailable`
+/** The six sections served in every mode; the other three render `unavailable`
     with no request (brief 4.1, decision 9). Mirrors src/app/sections.ts. */
-export const ENABLED_SECTIONS = ["directory", "upload", "run", "analysis", "model"];
+export const ENABLED_SECTIONS = ["directory", "upload", "run", "analysis", "model", "report"];
 export const DISABLED_SECTIONS = SECTIONS.filter((section) => !ENABLED_SECTIONS.includes(section));
 
 /** The demo fixtures' case, for a section still on the legacy wire. A case
@@ -29,6 +29,14 @@ export const DEMO_CASE_BY_SECTION = {
   run: "00000000-0000-4000-8000-000000000001",
   analysis: "00000000-0000-4000-8000-000000000001",
   model: "00000000-0000-4000-8000-000000000001",
+  report: "00000000-0000-4000-8000-000000000001",
+};
+
+export const DEMO_RUN_BY_SECTION = {
+  report: "00000000-0000-4000-8000-0000000000b2",
+};
+export const DEMO_REVISION_BY_SECTION = {
+  report: "00000000-0000-4000-8000-0000000000c3",
 };
 
 /** A section's page, with the demo case where the section is case-scoped.
@@ -36,9 +44,11 @@ export const DEMO_CASE_BY_SECTION = {
     @param {string | null} [fixture] */
 export function sectionRoute(section, fixture = null) {
   const params = new URLSearchParams();
-  if (["upload", "run", "analysis", "model"].includes(section)) {
+  if (["upload", "run", "analysis", "model", "report"].includes(section)) {
     params.set("case", DEMO_CASE_BY_SECTION[section] ?? DEMO_CASE);
   }
+  if (DEMO_RUN_BY_SECTION[section]) params.set("run", DEMO_RUN_BY_SECTION[section]);
+  if (DEMO_REVISION_BY_SECTION[section]) params.set("revision", DEMO_REVISION_BY_SECTION[section]);
   if (fixture) params.set("fixture", fixture);
   const search = params.toString();
   return `/${section}/${search ? `?${search}` : ""}`;
