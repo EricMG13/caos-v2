@@ -14,7 +14,7 @@ ignored reports cannot override those contracts.
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 4 accepted at `0deb4a4`** (Phase 3 `3400b6c`, Phase 2 `b4298dc`; records below) |
 | Latest accepted task | **Phase 4 Tasks 4.1–4.5 accepted with the phase at `0deb4a4`** |
-| Next task | Phase 5 continuation: integrate Tasks 5.2b and 5.3, then enable the bounded live reads in 5.4b. |
+| Next task | Phase 5 Task 5.4b: implement the bounded authenticated live reads, durable receipt linkage, and CP-CF-aware presentation; then clear phase-exit gates. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -26,26 +26,33 @@ the middle of an edit. Other entry documents link here instead of copying it.
 ## Codex resume checkpoint — Phase 5 in progress
 
 - **Coordinator branch:** `codex/execute-repair-plan`; no Phase 5 acceptance has
-  been declared. Accepted task slices currently integrated are 5.1
-  (`c48219d`), 5.2a (`51d3123`, `859f548`), and 5.4a (`77eda16`). The route
-  selection regression expectation is recorded in `74f9f22`; the 5.4b live
-  read contract and dependency audit are in `fb4dc0f`.
+  been declared. Integrated slices are 5.1 (`c48219d`), 5.2a
+  (`51d3123`, `859f548`), 5.2b (`2e8f1d5`..`3b9430c`), 5.3
+  (`9bf20b2`..`e3899c3`), wire inventory (`e3b7b71`) and 5.4a (`77eda16`).
+  Review remediations are `351dd6e`, `0a7bddd` and `4c28ed0`. The 5.4b live
+  read contract and dependency audit are in `fb4dc0f`; its implementation is
+  still pending.
 - **Execution routing:** Codex `gpt-6-astra` is used at high reasoning for
   high-risk implementation slices; ordinary bounded work may use the balanced
   Codex models. At the end of the complete Phase 5 only, run one whole-phase
   confidence review and one separate adversarial audit at extra-high (`xhigh`)
   reasoning. Rewrite tournaments are disabled by the project policy.
-- **Gates:** provider variables remain stripped for every command. The full
-  repository gate, pinned Trivy image gate, focused suites, races, frontend
-  checks, and GitNexus index are coordinator-owned after integration. A
-  production smoke rerun exposed a Firefox journey timeout (`CP-0` remains
-  `RUNNABLE`); it is not an acceptance result and must be resolved or
-  explicitly recorded before Phase 5 exit.
-- **Next parallel slices:** Task 5.2b owns CP-CF host-extension/allowlist and
-  calculator proof; Task 5.3 owns stored revision/sign/freeze/file/render;
-  Task 5.4b owns only the live Model/Report/Committee read boundary after those
-  contracts land. Keep these scopes isolated, integrate serially, refresh
-  GitNexus, and rerun all CI gates before phase-end reviews.
+- **Interim review evidence:** requested `xhigh` adversarial and confidence
+  reviews are recorded in `reviews/phase-5-interim-adversarial-audit.md` and
+  `reviews/phase-5-interim-confidence-review.md`. Their confirmed package,
+  exception-chain, CP-CF revision-readiness and receipt-identity defects are
+  fixed, but neither report is a phase-exit review.
+- **Gates:** provider variables remain stripped for every command. The combined
+  backend suite passed 2,719 tests with 2 skipped, focused Phase 5 suites and
+  server mypy passed, and the image was built with the CP-CF methodology files
+  present before later revision changes. Rebuild/scan the current image,
+  refresh GitNexus, run all CI gates, and rerun production smoke. Firefox still
+  times out with CP-0 `RUNNABLE`; it blocks phase exit until root-caused.
+- **Next implementation:** Task 5.4b must add the bounded live
+  Model/Report/Committee read boundary, persisted receipt linkage, and
+  CP-CF-accurate display. Then create actual stacked PRs for the 5.3 range
+  (2,011 counted lines vs. the 800-line gate) and only then run the one
+  whole-phase confidence review followed by the separate adversarial audit.
 
 Accepted predecessor evidence is retained in Git: Task17d2 application/proofs
 at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
