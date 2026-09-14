@@ -36,6 +36,14 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         RunEvent.RUN_BLOCKED.value: "run_terminal",
         RunEvent.RUN_CANCELLED.value: "run_terminal",
         "SOURCE_WITHDRAWN": "sources_changed",
+        "SOURCES_ADMITTED": "sources_changed",
+        "RUN_CREATED": "runs_changed",
+        "RUN_INPUT_PINNED": "runs_changed",
+        "RUN_ENQUEUED": "runs_changed",
+        "RUN_REQUEUED": "runs_changed",
+        "RUN_CANCEL_REQUESTED": "runs_changed",
+        # Written before any case stream can exist: the Directory is not a stream.
+        "CASE_CREATED": None,
         "GATE_RELEASED:SOURCE_SET": "runs_changed",
         "GATE_RELEASED:RESEARCH_PLAN": "runs_changed",
         # Report and Committee are not enabled: nothing on screen reads these.

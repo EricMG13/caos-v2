@@ -179,10 +179,18 @@ def _command(  # noqa: PLR0913 -- one command's identity and unit, positional
     write: Callable[[StoreConnection], tuple[int, BaseModel]],
     payload: dict[str, str],
 ) -> Response:
-    audit = {
-        "START_RUN": "RUN_ENQUEUED",
-        "RETRY_RUN": "RUN_REQUEUED",
-        "CANCEL_RUN": "RUN_CANCEL_REQUESTED",
+    unit = {"run_id": str(run_id), **payload}
+    # One literal per call site: `tests/test_event_names.py` reads the action set.
+    action = {
+        "START_RUN": GovernedAction(
+            case_id, actor_id, "RUN_ENQUEUED", Standing.WRITER, unit
+        ),
+        "RETRY_RUN": GovernedAction(
+            case_id, actor_id, "RUN_REQUEUED", Standing.WRITER, unit
+        ),
+        "CANCEL_RUN": GovernedAction(
+            case_id, actor_id, "RUN_CANCEL_REQUESTED", Standing.WRITER, unit
+        ),
     }[command]
     result = run_command(
         conn,
@@ -196,13 +204,7 @@ def _command(  # noqa: PLR0913 -- one command's identity and unit, positional
             gate=None,
             body=body.model_dump(mode="json"),
         ),
-        action=GovernedAction(
-            case_id=case_id,
-            actor_id=actor_id,
-            action=audit,
-            requires=Standing.WRITER,
-            payload={"run_id": str(run_id), **payload},
-        ),
+        action=action,
         write=write,
     )
     return command_response(result, RunWork)
