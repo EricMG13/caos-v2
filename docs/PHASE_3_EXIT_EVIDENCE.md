@@ -1,6 +1,6 @@
 # Phase 3 exit evidence
 
-Candidate: `codex/execute-repair-plan` at `f9120d4`. This record maps every
+Candidate: `codex/execute-repair-plan` at `3400b6c`. This record maps every
 `docs/REPAIR_PLAN.md` Phase 3 exit check to the regression tests that
 demonstrate it. It is evidence for acceptance, not acceptance: the phase is
 accepted only when the handoff records the complete gate, the whole-phase
@@ -25,6 +25,9 @@ remediation.
 | Read-model labels (3.4e, §46.3) | `ea4f2f5` |
 | CP-5 held for its named LITE object (3.4b, §46.1) | `4f0879b` `8abaefd` |
 | End-to-end positive and negative (3.4c, 3.4d) | `f9120d4` |
+| Exit evidence and ledger (3.4f) | `8736158` |
+| Confidence review: only the proven pathway executes | `147ecf7` |
+| Adversarial audit: PDF extraction in a killed, budgeted child (§47) | `3400b6c` |
 
 ## Exit checks
 
@@ -42,7 +45,11 @@ produce specific safe outcomes.**
 `test_a_pack_over_the_document_or_byte_ceiling_is_refused`,
 `test_pages_over_the_ceiling_refuse_without_parsing_the_rest`,
 `test_tokens_over_the_ceiling_refuse`, `test_tokens_over_the_ceiling_refuse_in_a_pdf_too`,
-`test_extraction_past_the_deadline_refuses`.
+`test_extraction_past_the_deadline_refuses`,
+`test_one_page_cannot_outrun_the_deadline`,
+`test_a_stream_that_inflates_past_the_ceiling_refuses[intact|corrupt checksum]`,
+`test_an_ordinary_flate_page_still_extracts_in_the_child`,
+`test_one_line_past_the_token_ceiling_stops_building_tokens`.
 *Limit:* no OCR; a scanned page refuses `SOURCE_HAS_NO_TEXT` rather than admits.
 
 **2. Spaced glyphs, wrapped quotes, columns, repeated quotes, page rotation and
@@ -129,7 +136,10 @@ without an invented resolution.**
 `test_lite_route_e2e_negative.py`: `test_injected_source_text_changes_no_route_tool_file_or_identity_end_to_end`.
 Other routes stay disabled: `test_canonical_execution.py`
 `test_canonical_wire_on_a_disabled_route_is_refused`; `test_runtime.py`
-`test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt`.
+`test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt`;
+`test_disabled_routes.py` `test_a_disabled_route_pins_and_governs_but_makes_no_attempt`
+and `test_acceptance_refuses_a_disabled_route` over FULL, DEEP and the
+adapter-module LITE portfolio pathway (`ADAPTER_ROUTES`).
 *Limits:* `semantic_rules`, `document_substrings_casefold` and LITE
 `required_payload_fields` are not enforced (ledger, §46.5); the host runs no
 CP-5 content checks (§46.4); completion cap 32,768 unmeasured live (§46.2).
@@ -140,7 +150,9 @@ worker exists before Phase 4.
 
 ## Gates
 
-Wave gate at `f9120d4`: `make -j1 check-postgres lint types test
-test-postgres-races security` exit 0, 2284 backend passed; Docker restore probe
-passed. The complete `make check`, both `xhigh` reviews and their remediation
-are recorded in the handoff.
+Complete `make check` at `3400b6c` (pinned Trivy 0.70.0) exit 0: backend
+2291 passed, races 2 passed, frontend 157 unit, accessibility,
+90 workbench, image scanned with no fixable HIGH/CRITICAL. Reviews:
+[confidence review](reviews/phase-3-confidence-review.md) and
+[adversarial audit](reviews/phase-3-adversarial-audit.md), both Opus 5 at
+`xhigh`; acceptance is recorded in the handoff.
