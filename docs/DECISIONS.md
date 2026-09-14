@@ -732,7 +732,7 @@ that is what the envelope holds. The bundle's registers — the tables a module'
 own payload schema declares — are a later phase, and until then a chained module
 inherits sentences rather than a financial base.
 
-## 2026-09-14 §29 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
+## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a
 threshold or a scanner rule:
@@ -792,7 +792,7 @@ call sites (the dependency can stay unused), restore `docker build -t
 caos:ci .` in the `image` job, or drop any one cache block without touching
 the others.
 
-## 2026-09-14 §30 — `.sql` files are excluded from SonarCloud analysis, not run through a Data Dictionary
+## 2026-09-14 §49 — `.sql` files are excluded from SonarCloud analysis, not run through a Data Dictionary
 
 **Decision.** `sonar.exclusions` in `sonar-project.properties` adds `**/*.sql`
 beside the existing `vendor/**`.
