@@ -322,3 +322,14 @@ def test_no_api_module_reaches_the_runtime_or_a_provider_transport() -> None:
     assert _reaches(ast.parse("from server.engine.runtime import run_route")) == {
         "server.engine.runtime.run_route"
     }
+
+
+def test_the_widest_jitter_stays_within_twenty_percent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bounds are exact at both ends: the float sum once overshot +20%."""
+    config = WorkerConfig(BoundaryText.of("worker-test"), poll_seconds=1.0)
+    monkeypatch.setattr("server.engine.worker.secrets.randbelow", lambda _n: 400)
+    assert worker.pause_seconds(config, 2) <= 2.0 * 1.2
+    monkeypatch.setattr("server.engine.worker.secrets.randbelow", lambda _n: 0)
+    assert worker.pause_seconds(config, 2) >= 2.0 * 0.8
