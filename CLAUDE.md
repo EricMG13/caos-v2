@@ -314,7 +314,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the adapter is one constant: every reader refuses a row without its record
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
   `RUN_INPUT_INVALID`, and every route with a module outside CP-0, CP-L10 and
-  CP-5 -- FULL, DEEP and every other catalog pathway -- pins and passes its
+  CP-5 -- FULL, DEEP and every other catalog pathway -- and every pathway of
+  those modules but LITE earnings (`ADAPTER_ROUTES`: LITE portfolio decision,
+  CP-0 -> CP-L10, has no contract test) pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
@@ -477,8 +479,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   own a node's accepted result, but two attempts can each reserve and call
   before either accepts; both bills are kept. The same window lets a second
   worker that checked `blocked_verdict` before the first worker's Blocked bill
-  committed call again. *Upgrade:* Phase 4's PostgreSQL
-  claims/leases (§39) take the node before the call. `artifacts` rows are also
+  committed call again. One sequential loop re-pays too: a crash after a
+  successful answer's bill commits and before its acceptance leaves a billed,
+  unaccepted attempt, and resume calls again (the stored body is re-derived
+  only as a Blocked verdict). *Upgrade:* Phase 4's PostgreSQL
+  claims/leases (§39) take the node before the call, and worker recovery
+  accepts or explains a billed answer instead of re-calling. `artifacts` rows are also
   not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
   a refusal trigger like 0007's is the upgrade.
 - **Acceptance does not recompare upstream, and context reads hold the case
