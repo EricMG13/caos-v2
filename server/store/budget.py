@@ -20,6 +20,7 @@ the price of a provider with no idempotency key, paid knowingly.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import psycopg
@@ -27,6 +28,9 @@ import psycopg
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.events import lock_run
+
+if TYPE_CHECKING:
+    from server.store.work import Lease
 
 # What a run may spend when its caller names no ceiling. A run with no ceiling
 # at all would be invariant 8 with the number left out.
@@ -50,15 +54,22 @@ def validate_spend(amount: Decimal) -> None:
         raise Refusal(RefusalCode.MONEY_INVALID)
 
 
-def reserve(conn: StoreConnection, attempt_id: UUID, amount: Decimal) -> None:
+def reserve(
+    conn: StoreConnection,
+    attempt_id: UUID,
+    amount: Decimal,
+    *,
+    lease: Lease | None = None,
+) -> None:
     """Set `amount` aside for this attempt, or refuse `BUDGET_CEILING_REACHED`.
 
     Taken under the run row lock, which is what makes two connections reserving
     at once resolve to one: without it both read the same remaining balance and
-    both believe they fit.
+    both believe they fit. Under the same lock the run's lease must be held and
+    no cancel requested (brief 4.3 D3).
     """
     try:
-        _reserve(conn, attempt_id, amount)
+        _reserve(conn, attempt_id, amount, lease)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -68,13 +79,20 @@ def reserve(conn: StoreConnection, attempt_id: UUID, amount: Decimal) -> None:
         raise
 
 
-def _reserve(conn: StoreConnection, attempt_id: UUID, amount: Decimal) -> None:
+def _reserve(
+    conn: StoreConnection, attempt_id: UUID, amount: Decimal, lease: Lease | None
+) -> None:
+    # `work` imports `outcomes`, which imports this module.
+    from server.store.work import require_lease
+
     validate_spend(amount)
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     run_id = _run_of(conn, attempt_id)
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    if require_lease(conn, run_id, lease):
+        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
     # Revalidate after waiting, then retain the native owner key through commit.
     # A moved attempt must never spend under its former run lock.
     if (

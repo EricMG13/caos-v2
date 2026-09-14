@@ -36,6 +36,7 @@ from server.store.outcomes import (
     accepted_owner,
     record_outcome,
 )
+from server.store.work import Lease, mark_work_done, require_lease
 
 # The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
 MAX_ATTEMPT_ORDINAL = 256
@@ -84,7 +85,13 @@ def run_status(conn: StoreConnection, run_id: UUID) -> RunStatus:
     return RunStatus(row[0])
 
 
-def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UUID:
+def start_attempt(
+    conn: StoreConnection,
+    run_id: UUID,
+    route_node_id: str,
+    *,
+    lease: Lease | None = None,
+) -> UUID:
     """Record one try at one node, and say so in the stream.
 
     The row exists before the work does, because it is the identity the work is
@@ -94,6 +101,11 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
         rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    try:
+        _require_uncancelled(conn, run_id, lease)
+    except BaseException:
+        rollback_or_close(conn)
+        raise
     if accepted_owner(conn, run_id, route_node_id) is not None:
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
@@ -110,13 +122,29 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
         raise Refusal(RefusalCode.ATTEMPT_LIMIT_REACHED)
     attempt_id = uuid4()
     conn.execute(
-        "INSERT INTO run_attempts (attempt_id, run_id, route_node_id, ordinal)"
-        " VALUES (%s, %s, %s, %s)",
-        (attempt_id, run_id, route_node_id, ordinal),
+        "INSERT INTO run_attempts"
+        " (attempt_id, run_id, route_node_id, ordinal, lease_token)"
+        " VALUES (%s, %s, %s, %s, %s)",
+        (
+            attempt_id,
+            run_id,
+            route_node_id,
+            ordinal,
+            None if lease is None else lease.token,
+        ),
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
     conn.commit()
     return attempt_id
+
+
+def _require_uncancelled(
+    conn: StoreConnection, run_id: UUID, lease: Lease | None
+) -> None:
+    """The fence for new spend: the lease is held and no cancel was requested.
+    The caller holds `lock_run`."""
+    if require_lease(conn, run_id, lease):
+        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
 
 
 def attempt_ordinal(conn: StoreConnection, attempt_id: UUID) -> int:
@@ -152,14 +180,17 @@ def accept_attempt(
     *,
     attempt_id: UUID,
     accepted: Accepted,
+    lease: Lease | None = None,
 ) -> bool:
     """Commit call facts first, then independently accept eligible analysis.
 
     A later refusal/rollback cannot erase a committed bill. Each unit derives
     and locks current ownership; no lock or mutable status survives the gap.
+    The bill is unfenced; the acceptance is the lease holder's alone, and is
+    not gated on a requested cancel (brief 4.3 D3, D4).
     """
     try:
-        inserted = _accept(conn, attempt_id, accepted)
+        inserted = _accept(conn, attempt_id, accepted, lease)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -170,7 +201,12 @@ def accept_attempt(
     return inserted
 
 
-def _accept(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
+def _accept(
+    conn: StoreConnection,
+    attempt: UUID,
+    accepted: Accepted,
+    lease: Lease | None = None,
+) -> bool:
     if not isinstance(accepted, Accepted):
         raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
     validate_spend(accepted.charge)
@@ -190,10 +226,15 @@ def _accept(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
             raise
         _legacy_replay(conn, attempt, accepted)
         return False
-    return _accept_artifact(conn, attempt, accepted)
+    return _accept_artifact(conn, attempt, accepted, lease)
 
 
-def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
+def _accept_artifact(
+    conn: StoreConnection,
+    attempt: UUID,
+    accepted: Accepted,
+    lease: Lease | None,
+) -> bool:
     run, case, status = _locked_attempt(conn, attempt)
     digests = [accepted.artifact_sha256]
     if accepted.record_sha256 is not None:
@@ -222,6 +263,8 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
         return False
     if status is not RunStatus.RUNNING:
         return False
+    # Fenced under the run lock taken above; renews a live lease (D3, I4, I7).
+    require_lease(conn, run, lease)
     # Fresh authority in this locked unit: governed writes take the case lock
     # first, so nothing can commit between this check and the insert.
     pin, route = approved_run_input(conn, run)
@@ -275,14 +318,19 @@ def _legacy_replay(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> 
         raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
 
 
-def complete_run(conn: StoreConnection, run_id: UUID) -> bool:
+def complete_run(
+    conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+) -> bool:
     """End a run that finished its route. Returns whether this call ended it."""
-    lock_run(conn, run_id)
-    return _transition(conn, run_id, RunStatus.COMPLETE, RunEvent.RUN_COMPLETE)
+    return _transition(conn, run_id, RunStatus.COMPLETE, RunEvent.RUN_COMPLETE, lease)
 
 
 def complete_attempt(
-    conn: StoreConnection, *, attempt_id: UUID, accepted: Accepted
+    conn: StoreConnection,
+    *,
+    attempt_id: UUID,
+    accepted: Accepted,
+    lease: Lease | None = None,
 ) -> bool:
     """Accept the attempt and end the run it belongs to.
 
@@ -291,37 +339,58 @@ def complete_attempt(
     story: a crash in the gap yields one artifact, one charge, one terminal
     event, however many times it is replayed.
     """
-    accept_attempt(conn, attempt_id=attempt_id, accepted=accepted)
-    return complete_run(conn, _attempt_owner(conn, attempt_id)[0])
+    accept_attempt(conn, attempt_id=attempt_id, accepted=accepted, lease=lease)
+    return complete_run(conn, _attempt_owner(conn, attempt_id)[0], lease=lease)
 
 
-def block_run(conn: StoreConnection, run_id: UUID) -> bool:
+def block_run(
+    conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+) -> bool:
     """End a run whose route has required work nothing can release (§39).
 
     Returns whether this call ended it. No further attempt or reservation is
     possible; the reason is re-derived from the pins and accepted artifacts.
     """
-    lock_run(conn, run_id)
-    return _transition(conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED)
+    return _transition(conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease)
 
 
-def fail_run(conn: StoreConnection, run_id: UUID) -> bool:
+def fail_run(
+    conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+) -> bool:
     """End a run without an artifact. Returns whether this call ended it."""
-    lock_run(conn, run_id)
-    return _transition(conn, run_id, RunStatus.FAILED, RunEvent.RUN_FAILED)
+    return _transition(conn, run_id, RunStatus.FAILED, RunEvent.RUN_FAILED, lease)
 
 
 def _transition(
-    conn: StoreConnection, run_id: UUID, into: RunStatus, event: RunEvent
+    conn: StoreConnection,
+    run_id: UUID,
+    into: RunStatus,
+    event: RunEvent,
+    lease: Lease | None,
 ) -> bool:
     """Move a RUNNING run into a terminal status, appending `event` only if the
     move actually happened. Zero rows updated, no event -- the rule that makes a
-    terminal event exactly-once (`SYSTEM_SPEC.md` section 2)."""
-    changed = conn.execute(
-        "UPDATE runs SET status = %s WHERE run_id = %s AND status = %s",
-        (into.value, run_id, RunStatus.RUNNING.value),
-    ).rowcount
-    if changed:
-        append(conn, run_id, event)
-    conn.commit()
+    terminal event exactly-once (`SYSTEM_SPEC.md` section 2).
+
+    Under `lock_run`, a run already ended is answered False before the fence; a
+    RUNNING run is ended only by its lease holder, and its work row closes in
+    the same transaction (brief 4.3 D3, I8)."""
+    try:
+        changed = 0
+        if lock_run(conn, run_id) is RunStatus.RUNNING:
+            require_lease(conn, run_id, lease)
+            changed = conn.execute(
+                "UPDATE runs SET status = %s WHERE run_id = %s AND status = %s",
+                (into.value, run_id, RunStatus.RUNNING.value),
+            ).rowcount
+        if changed:
+            append(conn, run_id, event)
+            mark_work_done(conn, run_id)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
     return bool(changed)
