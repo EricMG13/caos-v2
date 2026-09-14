@@ -22,6 +22,10 @@ MIGRATIONS = (
         "0002_extraction",
         Path(__file__).with_name("0002_extraction.sql").read_text(encoding="utf-8"),
     ),
+    (
+        "0003_source_sets",
+        Path(__file__).with_name("0003_source_sets.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
