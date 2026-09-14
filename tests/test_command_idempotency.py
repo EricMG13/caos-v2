@@ -447,10 +447,10 @@ def test_case_standing_is_visibility_then_global_role_then_floor(
 
 def test_the_real_app_includes_the_command_routers_and_statuses() -> None:
     from server.api import app as app_module
-    from server.api.commands import cases, runs
+    from server.api.commands import runs
 
-    # `execution` has its routes (slice 4.2f, `tests/test_execution_commands.py`).
-    for module in (cases, runs):
+    # `execution` and `cases` have their routes (slices 4.2f and 4.2d).
+    for module in (runs,):
         assert module.IO_BUDGET == 0
         assert module.router.routes == []
     status = app_module._STATUS
@@ -479,13 +479,3 @@ def test_case_standing_asks_the_global_role_only_of_a_write(
         case_standing(conn, as_reader, case_id, Standing.READER, write=True)
     assert caught.value.code is RefusalCode.NOT_AUTHORISED
     conn.rollback()
-
-
-def test_the_real_app_boots_with_the_empty_command_routers(
-    command_client: TestClient,
-) -> None:
-    """No command route exists yet: a POST to one answers the refusal body."""
-    answer = command_client.post(
-        "/api/v1/cases", headers=command_headers(uuid4()), json={"title": "x"}
-    )
-    assert answer.json()["code"] == "ENDPOINT_NOT_FOUND"
