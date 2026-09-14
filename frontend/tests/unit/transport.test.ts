@@ -9,7 +9,12 @@ import { Workspace } from "@/app/Workspace";
 import { Rail } from "@/chrome/Rail";
 import { composeChrome, markDisabled } from "@/chrome/compose";
 import { SECTIONS } from "@/wire";
-import { parseModelDocument, parseReportDocument, parseUploadDocument } from "@/wire/v1";
+import {
+  parseCommitteeDocument,
+  parseModelDocument,
+  parseReportDocument,
+  parseUploadDocument,
+} from "@/wire/v1";
 
 const CASE = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const OTHER_CASE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
@@ -76,6 +81,36 @@ function v1Report({
     observed_empty: false,
     status: "complete",
     notes: [],
+  };
+}
+
+function v1Committee({
+  caseId = CASE,
+  runId = RUN,
+  revisionId = REVISION,
+  receiptRevisionId = revisionId,
+}: { caseId?: string; runId?: string; revisionId?: string; receiptRevisionId?: string } = {}) {
+  const report = v1Report({ caseId, runId, revisionId });
+  return {
+    ...report,
+    body: {
+      ...report.body,
+      state: "filed",
+      signed_by: [CASE],
+      frozen_by: RUN,
+      filed_by: REVISION,
+      receipt: {
+        case_id: caseId,
+        run_id: runId,
+        revision_id: receiptRevisionId,
+        payload_sha256: "a".repeat(64),
+        signed_by: CASE,
+        frozen_by: RUN,
+        filed_by: REVISION,
+        renderer_sha256: "b".repeat(64),
+        filed_event_sha256: "c".repeat(64),
+      },
+    },
   };
 }
 
@@ -154,12 +189,14 @@ describe("the transport", () => {
       `/api/v1/cases/a%2Fb%3Fc/model?run=${RUN}`,
     );
     expect(sectionUrl("model", { case: CASE })).toBe(`/api/v1/cases/${CASE}/model`);
-    expect(sectionUrl("report", { case: "a/b?c", run: RUN, revision: REVISION })).toBe(
-      `/api/v1/cases/a%2Fb%3Fc/report?run=${RUN}&revision=${REVISION}`,
-    );
+    for (const section of ["report", "committee"] as const) {
+      expect(sectionUrl(section, { case: "a/b?c", run: RUN, revision: REVISION })).toBe(
+        `/api/v1/cases/a%2Fb%3Fc/${section}?run=${RUN}&revision=${REVISION}`,
+      );
+    }
     expect(sectionUrl("run", { case: "a/b?c" })).toBe("/api/v1/cases/a%2Fb%3Fc/run");
     // A caseless case section, or a disabled section, has no URL at all.
-    for (const section of ["upload", "run", "analysis", "model", "report"] as const) {
+    for (const section of ["upload", "run", "analysis", "model", "report", "committee"] as const) {
       expect(sectionUrl(section, { run: RUN })).toBeNull();
     }
     for (const section of DISABLED) expect(sectionUrl(section, { case: CASE })).toBeNull();
@@ -196,8 +233,9 @@ describe("the transport", () => {
       "analysis",
       "model",
       "report",
+      "committee",
     ]);
-    expect(DISABLED).toEqual(["book", "committee", "admin"]);
+    expect(DISABLED).toEqual(["book", "admin"]);
     const spy = vi.fn();
     const tail = vi.fn();
     vi.stubGlobal("fetch", spy);
@@ -264,13 +302,41 @@ describe("the transport", () => {
     expect(parseReportDocument(v1Report()).body.revision_id).toBe(REVISION);
   });
 
-  test("the rail preserves an exact Report selection for every section", () => {
+  test("Committee requires and binds exact case/run/revision including its receipt", async () => {
+    const mismatches = [
+      v1Committee({ caseId: OTHER_CASE }),
+      v1Committee({ runId: OTHER_CASE }),
+      v1Committee({ revisionId: OTHER_CASE }),
+      v1Committee({ receiptRevisionId: OTHER_CASE }),
+    ];
+    const spy = vi.fn(async () => new Response(JSON.stringify(mismatches.shift())));
+    vi.stubGlobal("fetch", spy);
+    for (const query of [
+      { case: CASE, run: RUN },
+      { case: CASE, revision: REVISION },
+      { run: RUN, revision: REVISION },
+    ]) {
+      expect(await fetchSection("committee", query)).toEqual({ kind: "unavailable" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    for (let index = 0; index < 4; index += 1) {
+      expect(await fetchSection("committee", { case: CASE, run: RUN, revision: REVISION })).toEqual(
+        {
+          kind: "error",
+          refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+        },
+      );
+    }
+    expect(parseCommitteeDocument(v1Committee()).body.receipt?.revision_id).toBe(REVISION);
+  });
+
+  test("the rail preserves an exact Report or Committee selection for every section", () => {
     render(
       createElement(
         MemoryRouter,
         null,
         createElement(Rail, {
-          section: "report",
+          section: "committee",
           entries: null,
           local: null,
           servedRole: null,

@@ -1,85 +1,123 @@
-// Committee: the deliverable the host renders from the frozen snapshot
-// (IA_SPEC.md 4.8). Left: the accepted artifacts in route order, then the
-// narrative and the provenance index. Centre: the document on paper. Right:
-// the filing. Nothing on this section edits the deliverable.
-import { FilingLadder } from "./FilingLadder";
-import { Paper, type PaperScope } from "./Paper";
-import type { ViewProps } from "@/app/views";
-import type { ArtifactRow, CommitteeBody } from "@/wire/committee";
+import type { CommitteeDocument } from "@/wire/v1";
 
-const DISPOSITION_TONE: Record<ArtifactRow["disposition"], string> = {
-  ACCEPTED: "ok",
-  RESTRICTED: "warn",
-  SCREENING_ONLY: "",
-};
-
-function ArtifactList({ body }: { body: CommitteeBody }) {
-  const { artifacts, paper, narrative, provenance, deliverable } = body;
-  const sectionOf = new Map(paper.map((section) => [section.module_id, section.n]));
-  const narrativeN = paper.length + 1;
-  const provenanceN = paper.length + 2;
+function Values({ label, values }: { label: string; values: readonly string[] }) {
   return (
-    <section className="pnl" aria-labelledby="artifacts-title">
+    <div className="note">
+      <b>{label}</b> {values.length ? values.join(", ") : "none"}
+    </div>
+  );
+}
+
+function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts"][number] }) {
+  return (
+    <section className="pnl" data-committee-artifact={artifact.route_node_id}>
       <header>
-        <h2 id="artifacts-title">Accepted artifacts</h2>
-        <span className="cp">ROUTE ORDER · {deliverable.snapshot}</span>
+        <h2>{artifact.route_node_id}</h2>
+        <span className="cp">
+          {artifact.qa_status} · {artifact.committee_status}
+        </span>
       </header>
-      <ul className="pb flush" aria-label="Deliverable in route order">
-        {artifacts.map((artifact, index) => {
-          const n = sectionOf.get(artifact.module_id);
-          return (
-            <li
-              key={artifact.module_id}
-              className="secrow"
-              data-artifact={artifact.module_id}
-              data-route-position={index + 1}
-            >
-              <span className="n tabular">{n ? `§${n}` : "—"}</span>
-              <span>
-                <span className="tabular">{artifact.module_id}</span> · {artifact.name}
-              </span>
-              <span className="src">
-                <span className={`tag ${DISPOSITION_TONE[artifact.disposition]}`}>
-                  {artifact.disposition}
-                </span>
-              </span>
-            </li>
-          );
-        })}
-        <li className="secrow" data-entry="narrative">
-          <span className="n tabular">§{narrativeN}</span>
-          <span>{narrative.title}</span>
-          <span className="src">{deliverable.revision_id}</span>
-        </li>
-        <li className="secrow" data-entry="provenance">
-          <span className="n tabular">§{provenanceN}</span>
-          <span>Provenance index</span>
-          <span className="src">{provenance.length} MODULES</span>
-        </li>
-      </ul>
+      <div className="pb">
+        <dl className="kv">
+          <dt>Artifact</dt>
+          <dd>sha256:{artifact.artifact_sha256}</dd>
+          <dt>Record</dt>
+          <dd>sha256:{artifact.record_sha256}</dd>
+          <dt>Scope</dt>
+          <dd>{artifact.decision_scope}</dd>
+        </dl>
+        <div data-committee-artifact-text>{artifact.markdown}</div>
+        <div data-committee-artifact-record>{artifact.record}</div>
+        <Values label="Limitations." values={artifact.limitation_flags} />
+        <Values label="Validation warnings." values={artifact.validation_warnings} />
+      </div>
     </section>
   );
 }
 
-const SCOPES: Record<string, PaperScope> = { narrative: "narrative", provenance: "provenance" };
-
-export function CommitteeSection({ document, tab }: ViewProps<"committee">) {
-  const { body, chrome } = document;
-  const active = tab ?? chrome.tabs[0]?.id ?? "deliverable";
-  const scope = SCOPES[active] ?? "all";
+function Filing({ document }: { document: CommitteeDocument }) {
+  const { body } = document;
+  const receipt = body.receipt;
   return (
-    <div className="cols three" data-committee>
-      <div className="col">
-        <ArtifactList body={body} />
+    <section className="pnl" data-committee-filing data-state={body.state}>
+      <header>
+        <h2>Committee state</h2>
+        <span className="tag">{body.state}</span>
+      </header>
+      <div className="pb">
+        <dl className="kv">
+          <dt>Signers</dt>
+          <dd>{body.signed_by.join(", ")}</dd>
+          <dt>Frozen by</dt>
+          <dd>{body.frozen_by}</dd>
+          <dt>Filed by</dt>
+          <dd>{body.filed_by ?? "—"}</dd>
+        </dl>
+        {receipt ? (
+          <dl className="kv" data-committee-receipt>
+            <dt>Receipt case</dt>
+            <dd>{receipt.case_id}</dd>
+            <dt>Receipt run</dt>
+            <dd>{receipt.run_id}</dd>
+            <dt>Receipt revision</dt>
+            <dd>{receipt.revision_id}</dd>
+            <dt>Receipt payload</dt>
+            <dd>sha256:{receipt.payload_sha256}</dd>
+            <dt>Receipt signer</dt>
+            <dd>{receipt.signed_by}</dd>
+            <dt>Receipt freezer</dt>
+            <dd>{receipt.frozen_by}</dd>
+            <dt>Receipt filer</dt>
+            <dd>{receipt.filed_by}</dd>
+            <dt>Renderer</dt>
+            <dd>sha256:{receipt.renderer_sha256}</dd>
+            <dt>Filed event</dt>
+            <dd>sha256:{receipt.filed_event_sha256}</dd>
+          </dl>
+        ) : null}
       </div>
-      <div className="col" role="tabpanel" id={`view-${active}`} aria-labelledby={`tab-${active}`}>
-        <div className="papergutter">
-          <Paper body={body} scope={scope} />
+    </section>
+  );
+}
+
+export function CommitteeSection({
+  document,
+}: {
+  document: CommitteeDocument;
+  tab: string | null;
+}) {
+  const { body } = document;
+  return (
+    <div
+      className="col"
+      data-committee-v1
+      data-case={body.case_id}
+      data-run={body.displayed_run_id}
+      data-revision={body.revision_id}
+      data-payload={body.payload_sha256}
+    >
+      <section className="pnl">
+        <header>
+          <h2>{body.case_title}</h2>
+          <span className="cp">SAVED COMMITTEE</span>
+        </header>
+        <div className="pb">
+          <dl className="kv">
+            <dt>Case</dt>
+            <dd>{body.case_id}</dd>
+            <dt>Run</dt>
+            <dd>{body.displayed_run_id}</dd>
+            <dt>Revision</dt>
+            <dd>{body.revision_id}</dd>
+            <dt>Payload</dt>
+            <dd>sha256:{body.payload_sha256}</dd>
+          </dl>
         </div>
-      </div>
-      <div className="col right">
-        <FilingLadder body={body} role={chrome.served_role} />
-      </div>
+      </section>
+      {body.artifacts.map((artifact) => (
+        <Artifact key={artifact.route_node_id} artifact={artifact} />
+      ))}
+      <Filing document={document} />
     </div>
   );
 }
