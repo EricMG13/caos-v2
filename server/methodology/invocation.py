@@ -315,6 +315,11 @@ def accepted_lineage(
 
 
 def _module_name(bundle: Bundle, route: ResolvedRoute, node: RouteNode) -> str:
+    if node.module_id == "CP-CF":
+        from server.methodology.host import HOST_NAME, verify_extension
+
+        verify_extension(route)
+        return HOST_NAME
     try:
         catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
         pathway = catalog["profiles"][route.profile_id]["pathways"]
@@ -502,7 +507,16 @@ def allowed_uses(
         for values in uses.values()
     ):
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-    return {source: str(values.pop()) for source, values in uses.items()}
+    result = {source: str(values.pop()) for source, values in uses.items()}
+    if target == "CP-CF":
+        result.update(
+            {
+                source: "Accepted forecast inputs within the host CP-CF contract"
+                for source, edge_target in pinned
+                if edge_target == target
+            }
+        )
+    return result
 
 
 def owned_objects(
@@ -808,7 +822,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     ):
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     gate_expects = (
-        frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+        frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
         if identity.module_id == GATE_MODULE
         else frozenset()
     )
@@ -854,6 +868,17 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + f"\n--- EVIDENCE {tag} ---\n"
         + evidence
     )
+    if identity.module_id in {"CP-1", "CP-2G", "CP-4"} and any(
+        n.module_id == "CP-CF" for n in route.nodes
+    ):
+        prompt += (
+            "\nHost forecast extension: preserve source-supplied JSON-pointer "
+            "assignments (/path = JSON value) verbatim in the handoff and cite "
+            "the complete assignment quotes. CP-1 owns opening/periods/units/"
+            "perimeter; CP-2G owns drivers/tolerance; CP-4 owns contractual. "
+            "Never invent assignments, missing movements or zeros. Keep all "
+            "vendor registers and their vocabulary unchanged.\n"
+        )
     return prompt
 
 

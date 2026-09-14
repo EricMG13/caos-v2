@@ -21,6 +21,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
+from hashlib import sha256
 from typing import Any, NoReturn
 from uuid import UUID
 
@@ -46,6 +47,7 @@ ADAPTER_MODULES = frozenset(
         "CP-2",
         "CP-2G",
         "CP-3",
+        "CP-CF",
     }
 )
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
@@ -147,7 +149,7 @@ def invocation_fields(
             run_id=identity.run_id,
             profile_id=identity.profile_id,
             selection_id=identity.selection_id,
-            route_node_id=identity.route_node_id,
+            route_node_id=_envelope_node(identity),
             module_id=identity.module_id,
             module_name=identity.module_name,
             expected_output_filename=expected_filename(identity),
@@ -159,6 +161,14 @@ def invocation_fields(
             ordinal=identity.ordinal,
         ),
     )
+    if identity.module_id == "CP-CF":
+        # The vendor grammar stops at stage 99. Validate its shared envelope
+        # fields there, then bind our declared stage-100 host occurrence.
+        envelope["route_node_id"] = identity.route_node_id
+        seed = "\x00".join(
+            (identity.run_id, identity.route_node_id, str(identity.ordinal))
+        )
+        envelope["attempt_id"] = "ATT-CP-CF-" + sha256(seed.encode()).hexdigest()[:16]
     return {
         "module_id": identity.module_id,
         "module_name": identity.module_name,
@@ -187,6 +197,15 @@ def invocation_fields(
             for ref in upstream
         ],
     }
+
+
+def _envelope_node(identity: HostIdentity) -> str:
+    if identity.module_id != "CP-CF":
+        return identity.route_node_id
+    expected = f"RN-{identity.profile_id}-{identity.selection_id}-100-CP-CF"
+    if identity.route_node_id != expected:
+        raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
+    return f"RN-{identity.profile_id}-{identity.selection_id}-99-CP-CF"
 
 
 def _text(markdown: bytes) -> str:
@@ -305,14 +324,24 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     ) or any(fields.get(key) is not None for key in _UPGRADE_KEYS):
         raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
 
-    violations = _or_refuse(
-        RefusalCode.HANDOFF_INCOMPLETE,
-        lambda: contract.completeness_check.check(
-            skill.decode("utf-8"), text, identity.module_id
-        )[0],
+    violations = (
+        []
+        if identity.module_id == "CP-CF"
+        else _or_refuse(
+            RefusalCode.HANDOFF_INCOMPLETE,
+            lambda: contract.completeness_check.check(
+                skill.decode("utf-8"), text, identity.module_id
+            )[0],
+        )
     )
     if violations:
         raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
+    if identity.module_id == "CP-CF":
+        from server.methodology.forecast import forecast_projection
+
+        forecast_projection(markdown)
+        if fields["committee_status"] != "Draft Only":
+            raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
     readiness = (
         _readiness(contract, catalog, text, gate_expects)
         if identity.module_id == GATE_MODULE
