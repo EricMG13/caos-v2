@@ -1,21 +1,24 @@
 """Exercise read_report, read_committee and revision_query through real HTTP reads."""
 
 import json
+from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from test_analysis_section import _as, _CountingConnection, _serving, client
+from test_analysis_section import _as, client
 from test_deliverable_canonical import QUOTE, harness, lite, route
 from test_execution_freshness import _Harness
 from test_filed_receipts import _corrupt, _file
-from test_filing_chain import _freeze, _sign
+from test_filing_chain import _actor, _freeze, _sign
 from test_revisions import _read, _save
+from test_run_commands import _Counting
 
 from server.api.app import app, store_connection
+from server.api.reads.reports import IO_BUDGET
 from server.boundary_text import BoundaryText
-from server.deliverable.filing import receipt_bytes
+from server.deliverable.filing import file_deliverable, receipt_bytes
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant, revoke
 from server.store.runs import create_case, start_run
@@ -71,10 +74,21 @@ def test_report_reads_the_exact_saved_revision(
         assert actual["decision_scope"] == projections["decision_scope"]
 
 
+@pytest.mark.parametrize("damage", ["secondary", "injected", "filed", "filed_missing"])
 def test_committee_reads_the_exact_frozen_payload_and_receipt(
-    client: TestClient, lite: _Harness
+    client: TestClient, lite: _Harness, damage: str
 ) -> None:
-    receipt = _file(lite)
+    revision = _save(lite)
+    _sign(lite, revision)
+    _sign(lite, revision, _actor(lite))
+    _freeze(lite, revision)
+    receipt = file_deliverable(
+        lite.conn,
+        lite.blobs,
+        case_id=lite.case_id,
+        actor_id=_actor(lite),
+        revision_id=revision,
+    )
     saved = _read(lite, receipt.revision_id)
     _save(lite, [[{"text": "Later draft"}]])
     body = _get(client, lite, receipt.revision_id, "committee")
@@ -83,8 +97,37 @@ def test_committee_reads_the_exact_frozen_payload_and_receipt(
     assert body["payload_sha256"] == receipt.payload_sha256
     assert body["frozen_by"] == str(receipt.frozen_by)
     assert body["filed_by"] == str(receipt.filed_by)
-    assert body["signed_by"] == [str(receipt.signed_by)]
+    assert body["signed_by"] == [str(receipt.signed_by), str(lite.approver)]
     assert body["artifacts"][0]["markdown"] == saved["artifacts"][0]["markdown"]
+    if damage == "secondary":
+        _corrupt(
+            lite,
+            "UPDATE deliverable_opinions SET signed_by=gen_random_uuid()"
+            " WHERE signed_by=%s",
+            lite.approver,
+        )
+    elif damage == "injected":
+        _corrupt(
+            lite,
+            "INSERT INTO deliverable_opinions"
+            " SELECT revision_id,case_id,payload_sha256,gen_random_uuid(),"
+            " signed_at-interval '1 day' FROM deliverable_opinions"
+            " WHERE signed_by=%s",
+            lite.approver,
+        )
+    else:
+        _corrupt(
+            lite, "UPDATE deliverable_publications SET filed_by=%s,filed_at=NULL", None
+        )
+        if damage == "filed_missing":
+            lite.blobs.path_of(sha256(receipt_bytes(receipt)).hexdigest()).unlink()
+    lite.conn.commit()
+    response = client.get(
+        _path(lite, revision, "committee"), headers=_as(lite.approver)
+    )
+    assert response.status_code != 200
+    assert response.json()["code"] == "DELIVERABLE_PAYLOAD_INVALID"
+    assert set(response.json()) == {"code", "clears"}
 
 
 def test_committee_distinguishes_frozen_from_filed(
@@ -100,12 +143,10 @@ def test_committee_distinguishes_frozen_from_filed(
     lite.conn.rollback()
     _sign(lite, revision)
     _freeze(lite, revision)
-    counter = _Counter(lite.conn)
-    app.dependency_overrides[store_connection] = _serving(counter)
+    counter = _Counting(lite.conn)
+    app.dependency_overrides[store_connection] = lambda: counter
     body = _get(client, lite, revision, "committee")
     assert (body["state"], body["filed_by"], body["receipt"]) == ("frozen", None, None)
-    from server.api.reads.reports import IO_BUDGET
-
     assert counter.executed == IO_BUDGET["frozen"]
 
 
@@ -191,11 +232,6 @@ def test_revision_selection_is_private_and_exact(
         assert response.json()["code"] == "DELIVERABLE_NOT_FOUND"
 
 
-class _Counter(_CountingConnection):
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._conn, name)
-
-
 @pytest.mark.parametrize("field", ["frozen_by", "signed_by"])
 def test_frozen_actors_must_match_the_saved_events(
     client: TestClient, lite: _Harness, field: str
@@ -219,8 +255,6 @@ def test_frozen_actors_must_match_the_saved_events(
 def test_revision_http_actor_matrix_and_declared_io(
     client: TestClient, lite: _Harness, section: str
 ) -> None:
-    from server.api.reads.reports import IO_BUDGET
-
     receipt = _file(lite)
     readers = [uuid4() for _ in range(4)]
     for actor, standing in zip(readers, Standing, strict=True):
@@ -230,8 +264,8 @@ def test_revision_http_actor_matrix_and_declared_io(
     revoke(lite.conn, case_id=lite.case_id, user_id=revoked)
     lite.conn.commit()
     for actor in [*readers, uuid4(), revoked]:
-        counter = _Counter(lite.conn)
-        app.dependency_overrides[store_connection] = _serving(counter)
+        counter = _Counting(lite.conn)
+        app.dependency_overrides[store_connection] = lambda: counter  # noqa: B023
         response = client.get(
             _path(lite, receipt.revision_id, section),
             headers=_as(actor, "caos-admins" if actor not in readers else None),

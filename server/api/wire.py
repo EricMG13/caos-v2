@@ -680,15 +680,8 @@ class ReportDocument(BaseModel):
     notes: Notes
 
 
-class CommitteeDocument(BaseModel):
-    model_config = _CLOSED
-
-    chrome: Chrome
+class CommitteeDocument(ReportDocument):
     body: CommitteeBody
-    observed_at: AwareDatetime
-    observed_empty: bool
-    status: SectionStatus
-    notes: Notes
 
 
 V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
