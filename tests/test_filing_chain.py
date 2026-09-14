@@ -104,7 +104,7 @@ def test_a_revision_of_another_case_cannot_be_signed_frozen_or_filed(
     for function, args in (
         (sign_opinion, ()),
         (freeze, (lite.blobs, lite.bundle)),
-        (file_deliverable, ()),
+        (file_deliverable, (lite.blobs,)),
     ):
         with pytest.raises(Refusal) as caught:
             function(
@@ -147,7 +147,11 @@ def test_filing_refuses_the_signer_and_the_freezer(lite: _Harness) -> None:
     for actor in (lite.approver, freezer):
         with pytest.raises(Refusal) as caught:
             file_deliverable(
-                lite.conn, case_id=lite.case_id, actor_id=actor, revision_id=revision
+                lite.conn,
+                lite.blobs,
+                case_id=lite.case_id,
+                actor_id=actor,
+                revision_id=revision,
             )
         assert caught.value.code.value == "APPROVER_NOT_INDEPENDENT"
 
@@ -165,8 +169,10 @@ def test_the_receipt_names_its_case_run_and_filing_event(
         conn: StoreConnection,
         action: GovernedAction,
         write: Callable[[StoreConnection], None],
+        *,
+        after_event: Callable[[StoreConnection, str], None] | None = None,
     ) -> str:
-        link = governed_write(conn, action, write)
+        link = governed_write(conn, action, write, after_event=after_event)
         governed_write(
             conn,
             GovernedAction(
@@ -186,7 +192,11 @@ def test_the_receipt_names_its_case_run_and_filing_event(
     _freeze(lite, revision, freezer)
     monkeypatch.setattr(filing, "governed_write", followed_by_another_event)
     receipt = file_deliverable(
-        lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
+        lite.conn,
+        lite.blobs,
+        case_id=lite.case_id,
+        actor_id=filer,
+        revision_id=revision,
     )
     assert receipt.case_id == lite.case_id and receipt.run_id == lite.run_id
     assert isinstance(receipt, Receipt)
@@ -213,6 +223,7 @@ def test_sign_freeze_file_refusals_preserve_one_chain(lite: _Harness) -> None:
     with pytest.raises(Refusal, match="DELIVERABLE_NOT_FROZEN"):
         file_deliverable(
             lite.conn,
+            lite.blobs,
             case_id=lite.case_id,
             actor_id=lite.approver,
             revision_id=revision,
@@ -232,15 +243,27 @@ def test_sign_freeze_file_refusals_preserve_one_chain(lite: _Harness) -> None:
     for signer in (lite.approver, cosigner):
         with pytest.raises(Refusal, match="APPROVER_NOT_INDEPENDENT"):
             file_deliverable(
-                lite.conn, case_id=lite.case_id, actor_id=signer, revision_id=revision
+                lite.conn,
+                lite.blobs,
+                case_id=lite.case_id,
+                actor_id=signer,
+                revision_id=revision,
             )
     receipt = file_deliverable(
-        lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
+        lite.conn,
+        lite.blobs,
+        case_id=lite.case_id,
+        actor_id=filer,
+        revision_id=revision,
     )
     assert receipt.signed_by == cosigner
     with pytest.raises(Refusal, match="DELIVERABLE_ALREADY_FILED"):
         file_deliverable(
-            lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
+            lite.conn,
+            lite.blobs,
+            case_id=lite.case_id,
+            actor_id=filer,
+            revision_id=revision,
         )
     actions = [e.action for e in audit_trail(lite.conn, lite.case_id)]
     assert (
@@ -255,6 +278,7 @@ def test_filing_refuses_the_opinion_signer(lite: _Harness) -> None:
     with pytest.raises(Refusal, match="APPROVER_NOT_INDEPENDENT"):
         file_deliverable(
             lite.conn,
+            lite.blobs,
             case_id=lite.case_id,
             actor_id=lite.approver,
             revision_id=revision,
@@ -280,7 +304,11 @@ def test_audit_package_verifies_with_stdlib_alone(
     _sign(lite, revision)
     _freeze(lite, revision)
     receipt = file_deliverable(
-        lite.conn, case_id=lite.case_id, actor_id=_actor(lite), revision_id=revision
+        lite.conn,
+        lite.blobs,
+        case_id=lite.case_id,
+        actor_id=_actor(lite),
+        revision_id=revision,
     )
     archive = build_package(
         payload_bytes(payload), receipt_bytes(receipt), render(payload)
