@@ -468,14 +468,20 @@ def test_a_package_is_the_same_bytes_for_the_same_inputs() -> None:
     assert first == second
 
 
-def test_a_package_holds_the_three_files_a_reader_needs() -> None:
+def test_a_package_holds_the_five_files_a_reader_needs() -> None:
     import zipfile
     from io import BytesIO
 
     archive = build_package(PAYLOAD_BYTES, b"{}", b"<html></html>")
 
     with zipfile.ZipFile(BytesIO(archive)) as opened:
-        assert set(opened.namelist()) == {PAYLOAD, "receipt.json", EXPORT}
+        assert set(opened.namelist()) == {
+            PAYLOAD,
+            "receipt.json",
+            EXPORT,
+            "render.py",
+            "verify_package.py",
+        }
 
 
 def test_a_filed_package_is_never_overwritten(tmp_path: Path) -> None:
