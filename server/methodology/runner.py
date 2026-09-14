@@ -24,11 +24,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute
+from server.engine.route import ResolvedRoute, RouteNode
 from server.engine.runtime import ProviderResult
 from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.bundle import Bundle
-from server.methodology.canonical import execute_handoff
+from server.methodology.canonical import check_context, execute_handoff
 from server.methodology.executor import Assignment
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
@@ -60,6 +60,28 @@ class ModuleProvider:
         """The configured model identity this provider's calls are billed as."""
         return self.completions.model
 
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        """Build and bound the node's whole prompt before any attempt exists."""
+        node = self._node(route_node_id, module_id)
+        check_context(
+            self.conn,
+            self.bundle,
+            self.blobs,
+            run_id=self.run_id,
+            route=self.route,
+            node=node,
+        )
+
+    def _node(self, route_node_id: str, module_id: str) -> RouteNode:
+        nodes = [
+            n
+            for n in self.route.nodes
+            if (n.route_node_id, n.module_id) == (route_node_id, module_id)
+        ]
+        if len(nodes) != 1:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        return nodes[0]
+
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
@@ -73,20 +95,14 @@ class ModuleProvider:
                 route_node_id=route_node_id,
             )
             pin = load_run_input(self.conn, self.run_id)
-        nodes = [
-            n
-            for n in self.route.nodes
-            if (n.route_node_id, n.module_id) == (route_node_id, module_id)
-        ]
-        if len(nodes) != 1 or pin is None:
+        node = self._node(route_node_id, module_id)
+        if pin is None:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         # One adapter executes (§42.1): any other pin refuses before the call,
         # and `execute_handoff` refuses it again under its own read unit.
         if pin.adapter_version != CANONICAL_ADAPTER_VERSION:
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-        assignment = Assignment(
-            module_id, self.run_id, nodes[0], self.route, attempt_id
-        )
+        assignment = Assignment(module_id, self.run_id, node, self.route, attempt_id)
         handoff = execute_handoff(
             self.conn,
             self.bundle,

@@ -74,6 +74,10 @@ class _Counting:
     model: str = MODEL
     calls: list[str] = field(default_factory=list)
 
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        self.calls.append(module_id)
+        raise AssertionError(module_id)
+
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:

@@ -8,7 +8,7 @@ something remembered it.
 
 The order inside one pass is deliberate and is invariant 8's shape:
 
-    start the attempt  ->  reserve  ->  call the provider  ->  accept
+    check the context  ->  start the attempt  ->  reserve  ->  call  ->  accept
 
 The attempt row exists before the call because it is the identity the call is
 charged against. The reservation is taken before the call and commits on its own,
@@ -87,6 +87,10 @@ class Provider(Protocol):
 
     @property
     def model(self) -> str: ...
+
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        """Refuse a context the call could not carry (`CONTEXT_OVER_CEILING`),
+        before the loop starts an attempt or reserves anything (§45.3)."""
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -241,6 +245,9 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
     # Per call as well as per run: a provider whose model moved is unpriced.
     if execution.price.model != getattr(execution.provider, "model", None):
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    # The whole prompt is built and bounded while nothing is started or set
+    # aside: an over-ceiling context costs no attempt, reservation or call.
+    execution.provider.check_context(route_node_id, module_id)
     attempt_id = start_attempt(conn, run_id, route_node_id)
     reserve(conn, attempt_id, worst_case(execution.price))
 

@@ -764,11 +764,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   whole handoff rather than per claim (§41.3), so there is no partial-refusal
   count to show; a record's `citations` and its projections are what the
   deliverable renders in full.
-- **Only `SKILL.md` reaches the prompt.** A module's `reference_files` are
-  verified and assembled but not sent: one module's reference set runs to tens
-  of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
-  retrieval index the bundle ships (`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`) is
-  what selects the references a question actually needs.
+- ~~**Only `SKILL.md` reaches the prompt.**~~ Closed by repair Task 3.3b
+  (`docs/DECISIONS.md` §45.1): `build_handoff_prompt` takes the module's
+  `DeliveredAuthority` -- `SKILL.md`, every non-script manifest file and each
+  root file `SKILL.md` names -- and hands each file whole, UTF-8, in its own
+  tagged section named with its digest, beside a host note that the host runs
+  invocation preparation, handoff validation and the completeness check
+  itself; no script is delivered. Upstream sections carry their edge's
+  catalog `allowed_use` (`NOT_DECLARED` when the catalog gives none), read from
+  the verified catalog at prompt time because `Edge` and the route pin do not
+  carry it, so no route digest moved. Retrieval (Phase 5) remains the way to
+  send less than the whole set.
 - **A run's price is supplied by its caller, not read from a table.**
   `docs/DECISIONS.md` §40: every call reserves `pricing.worst_case(price)` --
   every byte of the largest request (§38) as an input token plus the output cap
@@ -846,13 +852,21 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from
   the engine rather than from the run document.
-- **An upstream section is unbounded.** A node's prompt carries every claim of
-  every direct predecessor (`docs/DECISIONS.md` §28), and nothing caps the
-  total: a node with five predecessors of fifty claims each carries two hundred
-  and fifty statements and their quotes on top of the authority and every block
-  of evidence. On the routes run so far it is a few thousand tokens. *Upgrade:*
-  a declared bound with a typed refusal, the day a wide route meets a model's
-  context rather than a budget.
+- **An upstream section is unbounded, but the whole context is refused.** A
+  node's prompt carries every direct predecessor's accepted Markdown whole
+  (`docs/DECISIONS.md` §28), with no per-section cap. Since Task 3.3b the whole
+  prompt -- authority, upstream, evidence -- is built by
+  `canonical.check_context` under `prospective_identity` before
+  `start_attempt`, and one whose JSON encoding exceeds `MAX_REQUEST_BYTES`
+  refuses `CONTEXT_OVER_CEILING` with no attempt, reservation or call and
+  nothing truncated (§45.3). The executor rebuilds and re-bounds it under the
+  attempt's own identity, so each call reads its context twice (the pre-call
+  reads, the case lock hold included). The bound is on the prompt's encoding:
+  the provider's request envelope (model, parameters) adds a few hundred bytes,
+  so a prompt within that margin of the ceiling passes here and is refused
+  `PROVIDER_CALL_INVALID` after reservation. *Upgrade:* a declared per-section
+  bound, and the envelope margin folded into the ceiling, the day a wide route
+  or a large pack comes near it.
 
 **Phase 4.**
 
