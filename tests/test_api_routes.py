@@ -796,7 +796,6 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/directory": "read_directory",
         "/api/v1/cases/{case_id}/upload": "read_upload",
         "/api/v1/cases/{case_id}/run": read_run_section.__name__,
-        "/api/runs/{run_id}": "read_run",
         "/api/runs/{run_id}/events": read_run_events.__name__,
     }
 
@@ -1095,16 +1094,3 @@ class _CountingConnection:
     def execute(self, *args: object, **kwargs: object) -> object:
         self.executed += 1
         return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
-
-
-def test_the_legacy_run_document_stays_until_its_route_is_retired(
-    client: TestClient, run: tuple[UUID, UUID]
-) -> None:
-    """Slice 4.1d-1 keeps `/api/runs/{id}` serving `RunDocument` beside the
-    section route whose identity dependency is `run_read.run_actor`; 4.1d-2
-    retires the route and this test with it."""
-    run_id, viewer = run
-    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
-    assert response.status_code == 200
-    app_module.RunDocument.model_validate(response.json())
-    assert callable(run_read.run_actor)

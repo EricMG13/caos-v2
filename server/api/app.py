@@ -1,10 +1,11 @@
-"""The HTTP surface. Two request paths, and one answer for a stranger.
+"""The HTTP surface: the section reads, the run tail, and one answer for a
+stranger.
 
-`SYSTEM_SPEC.md` §9 and `docs/DECISIONS.md` §22. The run document is what
-`/run/` will draw in Phase 9: each node's state with the reason for it, and the
-one QA_GATE reading as a gate. The events path is the socket
-`server/api/stream.py`'s contract is served over -- that module already answers
-every rule §9 states, and this is where those answers meet a connection.
+`SYSTEM_SPEC.md` §9 and `docs/DECISIONS.md` §22. Each section read lives in its
+own module under `server/api/reads/` (Task 4.1); the retired run document is now
+the Run section. The events path is the socket `server/api/stream.py`'s
+contract is served over -- that module already answers every rule §9 states,
+and this is where those answers meet a connection.
 
 The privacy rule is the load-bearing one. A run somebody may not see and a run
 that does not exist get the same status and the same body, because 403 is the
@@ -26,7 +27,7 @@ person from an anonymous one.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from functools import cache
 from json import dumps
@@ -44,7 +45,6 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg import OperationalError
-from pydantic import BaseModel, ConfigDict
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api.identity import Actor, actor_from_headers
@@ -56,51 +56,18 @@ from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
 from server.api.stream import TERMINAL, StreamEvent, tail
 from server.api.wire import CLEARS, RefusalBody
 from server.blobs import BlobStore
-from server.engine.route import (
-    EdgeType,
-    NamedObjects,
-    NodeResult,
-    NodeState,
-    ResolvedRoute,
-    RouteNode,
-    lite_object_unmet,
-    node_states,
-    readiness_from,
-    route_digest,
-    waiting_on,
-)
-from server.engine.runtime import accepted_artifacts
 from server.methodology.bundle import Bundle
-from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
-from server.store.routes import resolved_route
 
-# `GET /api/runs/{run_id}`: the run and its case in one row, the caller's
-# standing, the pinned route, the accepted attempts. Four, and it does not grow
-# with the size of the route -- which is the shape the predecessor got wrong.
-RUN_READ_IO = 4
-# A canonical readiness row (§42.4) is read from its record under the host
-# identity the store rebuilds: the run input, the pinned route, the attempt's
-# owner and ordinal, the accepted digests, and the call-time narrowing's
-# artifact read. Measured on a LITE run
-# (`tests/test_canonical_readers.py`), per such row. A row without its record
-# refuses `ARTIFACT_RECORD_MISMATCH` (503) at no further cost.
-CANONICAL_READINESS_IO = 10
-# Readiness rows are the gate's and each QA_GATE source's. The catalog carries
-# one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a
-# constant, not a function of route length.
-READINESS_ROWS = 2
-IO_BUDGET = RUN_READ_IO + READINESS_ROWS * CANONICAL_READINESS_IO
-
-# `GET /api/runs/{run_id}/events`: the same two authority reads, then whatever
-# the tail costs -- and that again on every poll. Named separately because it is
-# a different request path, and a budget that averaged two paths would describe
-# neither.
+# `GET /api/runs/{run_id}/events`, the one path this module serves: the run and
+# its case, the caller's standing, then whatever the tail costs -- and that
+# again on every poll. The section reads declare their own budgets.
 EVENTS_IO_BUDGET = 2 + TAIL_IO_BUDGET
+IO_BUDGET = EVENTS_IO_BUDGET
 
-# Reading a run is reading its case. Anything either path shows, a reader of the
+# Tailing a run is reading its case. Anything the tail shows, a reader of the
 # case may see; holding it grants nothing further.
 READ_REQUIRES = Standing.READER
 
@@ -143,6 +110,7 @@ _STATUS = {
     # likewise the server's own bytes failing verification.
     RefusalCode.ARTIFACT_RECORD_MISMATCH: 503,
     RefusalCode.RUN_INPUT_INVALID: 503,
+    RefusalCode.SOURCE_IDENTITY_INVALID: 503,
     RefusalCode.AUTHORITY_BYTES_MISMATCH: 503,
     # Re-validating an accepted handoff: it passed these under the same pin,
     # so failing now is stored bytes or authority moving, never the request.
@@ -179,47 +147,6 @@ app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
 # own module and none edits this one.
 for _section in (directory_read, upload_read, run_read, analysis_read):
     app.include_router(_section.router)
-
-
-class EdgeView(BaseModel):
-    """One dependency a node is still waiting for, with its type."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source: str
-    type: EdgeType
-
-
-class NodeView(BaseModel):
-    """A node's state and the reason for it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    route_node_id: str
-    module_id: str
-    state: str
-    waiting_on: list[EdgeView]
-    # The one QA_GATE in the catalog is `CP-5 -> CP-6`. True while the node
-    # waits for the QA source's verdict. Once CP-5 answered anything but
-    # `Passed`, nothing is awaited: the node is BLOCKED by that verdict and
-    # `waiting_on` still names the edge (F03). Human QA approval is not here.
-    awaiting_gate: bool
-    # The gate's own verdict on this module, when the gate has given one. After
-    # Phase 11 a node can be BLOCKED because CP-0 did not clear it, and no edge
-    # names that cause -- `waiting_on` would be empty and the state would read
-    # as unexplained.
-    gate_verdict: str | None
-
-
-class RunDocument(BaseModel):
-    """What `/run/` draws. Node states are recomputed, never stored."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: UUID
-    status: str
-    route_digest: str | None
-    nodes: list[NodeView]
 
 
 def _database_url() -> str:
@@ -346,51 +273,6 @@ async def _malformed_run_id(
     return _refused(request, Refusal(RefusalCode.RUN_NOT_FOUND))
 
 
-@app.get("/api/runs/{run_id}", response_model=RunDocument)
-def read_run(
-    run_id: UUID, actor: Caller, conn: Store, blobs: Blobs, bundle: Methodology
-) -> RunDocument:
-    """The run, its pinned route, and each node's state with its reason.
-
-    `actor` is declared first, and the order is load-bearing: see
-    `actor_from_request`.
-    """
-    _case_id, status = _visible(conn, run_id, actor)
-
-    route = resolved_route(conn, run_id)
-    if route is None:
-        return RunDocument(run_id=run_id, status=status, route_digest=None, nodes=[])
-
-    # The bundle is what reads a canonical run's gate and QA records (§42.4).
-    accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
-    # The runtime's named-object boundary, so the document shows its states.
-    named = named_objects(bundle, route)
-    states = node_states(route, accepted, named)
-    # `accepted` already carries CP-0's readiness -- `accepted_artifacts` reads
-    # it for exactly this reason -- so reading the verdict out of it here costs
-    # no further round trip.
-    readiness = readiness_from(route, accepted)
-    return RunDocument(
-        run_id=run_id,
-        status=status,
-        # Recomputed from the route just read, not read from its own column: it
-        # is then the digest of the thing this document actually describes, and
-        # a stored digest that had drifted from the stored route would show up
-        # here rather than being reported over the top of it.
-        route_digest=route_digest(route),
-        nodes=[
-            # Nothing is awaited on a run that is no longer running.
-            view
-            if status == "RUNNING"
-            else view.model_copy(update={"awaiting_gate": False})
-            for view in (
-                _node_view(route, accepted, node, states, readiness, named)
-                for node in route.nodes
-            )
-        ],
-    )
-
-
 @app.get("/api/runs/{run_id}/events")
 def read_run_events(
     run_id: UUID, actor: Caller, request: Request, conn: Store
@@ -398,7 +280,7 @@ def read_run_events(
     """The run's events as `text/event-stream`, resuming after `Last-Event-ID`.
 
     The authority read happens here, before the first byte, so that an
-    unauthorised watcher gets the same 404 the run document gives rather than an
+    unauthorised watcher gets a private 404 rather than an
     empty 200 -- which would still confirm the id names a run somebody watches.
     `actor` is declared before `conn` for the reason `actor_from_request` gives;
     `request` is still taken, for the resume marker alone.
@@ -471,37 +353,6 @@ def _marker(headers: object) -> int:
     if not isinstance(value, str) or not value.isdigit():
         return 0
     return int(value)
-
-
-def _node_view(  # noqa: PLR0913 -- one node of one run document
-    route: ResolvedRoute,
-    accepted: Mapping[str, NodeResult],
-    node: RouteNode,
-    states: Mapping[str, NodeState],
-    readiness: Mapping[str, str],
-    named: NamedObjects | None = None,
-) -> NodeView:
-    done = states[node.route_node_id] is NodeState.COMPLETE
-    unmet = () if done else waiting_on(route, accepted, node.route_node_id)
-    if not done and named is not None and node.module_id in named.accepted_ids:
-        # A node held for its named object names the edges that could meet it.
-        extra = lite_object_unmet(route, accepted, node.module_id, named)
-        unmet = (*unmet, *(edge for edge in extra if edge not in unmet))
-    answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
-    return NodeView(
-        route_node_id=node.route_node_id,
-        module_id=node.module_id,
-        state=states[node.route_node_id].value,
-        waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
-        awaiting_gate=any(
-            edge.type is EdgeType.QA_GATE and edge.source not in answered
-            for edge in unmet
-        ),
-        # `.get`, not `[]`: a module the gate has not ruled on -- every module,
-        # until CP-0's own artifact is accepted -- has no verdict rather than a
-        # false one, and None is that absence on the wire.
-        gate_verdict=readiness.get(node.module_id),
-    )
 
 
 def _visible(conn: StoreConnection, run_id: UUID, actor: Actor) -> tuple[UUID, str]:
