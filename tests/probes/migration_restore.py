@@ -18,10 +18,11 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from test_store_schema import _legacy, _populate, _records
+from test_store_schema import _columns, _legacy, _populate, _records
 
 from server.blobs import BlobStore
-from server.store import apply_schema, connect
+from server.evidence.read import read_block
+from server.store import MIGRATIONS, apply_schema, connect
 
 _ADMIN = "postgresql://postgres:local-test-admin-only@127.0.0.1:55437/postgres"
 _CONTAINER = "caos-workbench-dev-test-postgres-1"
@@ -36,6 +37,8 @@ def main() -> None:
         if key
         not in {
             "OPENROUTER_API_KEY",
+            "MODEL",
+            "BASE_URL",
             "OPENROUTER_MODEL",
             "OPENROUTER_BASE_URL",
             "CAOS_REQUIRE_PROVIDER",
@@ -55,7 +58,8 @@ def main() -> None:
             with connect(_ADMIN.rsplit("/", 1)[0] + "/" + original) as conn:
                 _legacy(conn)
                 digest = _populate(conn, blobs)
-                before = _records(conn)
+                columns = _columns(conn)
+                before = _records(conn, columns)
             dump = subprocess.run(  # nosec B603
                 [
                     docker,
@@ -101,12 +105,24 @@ def main() -> None:
                 env=env,
             )
             with connect(_ADMIN.rsplit("/", 1)[0] + "/" + restored) as conn:
-                assert _records(conn) == before
+                assert _records(conn, columns) == before
                 apply_schema(conn)
-                assert _records(conn) == before
+                assert _records(conn, columns) == before
                 assert conn.execute(
-                    "SELECT version FROM store_migrations"
-                ).fetchall() == [(1,)]
+                    "SELECT version FROM store_migrations ORDER BY version"
+                ).fetchall() == [(i,) for i in range(1, len(MIGRATIONS) + 1)]
+                assert conn.execute(
+                    "SELECT count(*) FROM source_extractions"
+                ).fetchone() == (0,)
+                for (source,) in conn.execute(
+                    "SELECT source_id FROM sources"
+                ).fetchall():
+                    assert (
+                        read_block(
+                            conn, source_id=source, block_id="b000000"
+                        ).text.value
+                        == "synthetic"
+                    )
                 for table, column in (
                     ("sources", "document_sha256"),
                     ("artifacts", "artifact_sha256"),
@@ -125,7 +141,8 @@ def main() -> None:
                         )
             print(
                 f"PASS dump={len(dump)} bytes; {original} -> {restored};"
-                " version=1; rows/blobs intact"
+                f" version={len(MIGRATIONS)}; rows/blobs intact;"
+                " legacy provenance UNKNOWN"
             )
         finally:
             for name in reversed(created):

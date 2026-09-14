@@ -22,6 +22,7 @@ from server.evidence.extract import (
     LINES_PER_PAGE,
     MARGIN,
     Extractor,
+    ExtractorIdentity,
     PlainTextExtractor,
     Token,
 )
@@ -96,6 +97,8 @@ def test_bytes_that_are_not_text_are_refused_without_quoting_them() -> None:
 class _OneTokenExtractor:
     """A stand-in for the PDF extractor Phase 6 owes: different bytes, same
     protocol, and nothing above this seam knows the difference."""
+
+    identity = ExtractorIdentity("test.one-token", "1", {})
 
     def extract(self, data: bytes) -> list[Token]:
         return [
