@@ -1,27 +1,43 @@
 // The Run section's governed controls (brief 4.2, decisions 1, 7, 10 and 12):
-// select and pin a route, and pin the subject. Every control renders from
-// `chrome.actions`, present or refused, never hidden (`RefusedControl`,
-// shared with the ribbon); the command re-checks at commit, so an advisory
-// `null` refusal here is never trusted as the last word. A success is shown,
-// and the caller is handed one refetch to run (`onRefetch`); the control
-// never claims a write took effect on its own say.
+// select and pin a route, pin the subject, read a gate preview exactly and
+// approve on its own digests, then start, retry or cancel. Every control
+// renders from `chrome.actions`, present or refused, never hidden
+// (`RefusedControl`, shared with the ribbon); the command re-checks at
+// commit, so an advisory `null` refusal here is never trusted as the last
+// word. A success is shown, and the caller is handed one refetch to run
+// (`onRefetch`); the control never claims a write took effect on its own say.
 import { useCallback, useRef, useState, type ChangeEvent } from "react";
-import { createRun, newIntent, pinRunInput, type CommandResult, type Intent } from "@/app/commands";
+import {
+  approveGate,
+  cancelRun,
+  createRun,
+  fetchGatePreview,
+  newIntent,
+  pinRunInput,
+  retryRun,
+  startRun,
+  type CommandResult,
+  type Intent,
+} from "@/app/commands";
 import { fetchSection } from "@/app/transport";
 import { RefusalNote, RefusedControl } from "@/controls/RefusedControl";
 import type {
   ActionView,
+  GateApproved,
+  GatePreviewDocument,
   Infer,
   RouteChoice,
   RunCreated,
   RunInputPinned,
   RunSectionDocument,
+  RunWork,
 } from "@/wire/v1";
 import type { V1_SHAPES } from "@/wire/v1/documents";
 
-// Not exported as a named type from `documents.ts` (only `types.ts`, owned by
-// an earlier slice, derives it for the read side); derived here the same way
-// rather than duplicated by hand.
+// Not exported as named types from `documents.ts` (only `types.ts`, owned by
+// an earlier slice, derives them for the read side); derived here the same
+// way rather than duplicated by hand.
+type GateView = Infer<typeof V1_SHAPES.GateView>;
 type RunSubjectView = Infer<typeof V1_SHAPES.RunSubjectView>;
 
 export type ActionName = ActionView["action"];
@@ -242,9 +258,11 @@ const EMPTY_SUBJECT: RunSubjectView = {
 
 /** Pins the subject the run executes against. The subject reuses
     `RunSubjectView`; the receipt's `input_fingerprint` is what a gate
-    approval and start/retry must carry (slice 4.2j part 2), and the document
-    never re-serves it, so the caller is handed it here to hold for the
-    session. */
+    approval and start/retry must carry, and the document never re-serves it,
+    so the caller is handed it here to hold for the session — and a change to
+    it invalidates any preview already read (`RunSection` remounts each gate
+    panel on a fingerprint change, clearing a digest that would else point at
+    the old input). */
 export function PinInputControl({
   caseId,
   runId,
@@ -311,6 +329,212 @@ export function PinInputControl({
           {pending ? "Pinning…" : "Pin input"}
         </RefusedControl>
         <CommandOutcome result={result} success="Subject pinned. Reading it back." />
+      </div>
+    </section>
+  );
+}
+
+const NOT_PREVIEWED = {
+  code: "GATE_PREVIEW_NOT_READ",
+  clears: "the exact preview text is read in this browser session before approving",
+};
+
+const APPROVE_ACTION: Record<GateView["gate"], ActionName> = {
+  SOURCE_SET: "APPROVE_SOURCE_SET",
+  RESEARCH_PLAN: "APPROVE_RESEARCH_PLAN",
+};
+
+/** Invariant 5: approval binds the exact reviewed content. The preview's own
+    `preview_sha256` and `input_fingerprint` are what the approval sends —
+    never a value the caller types or edits — so the content shown here is
+    the only thing this gate can be approved on. `RunSection` remounts this
+    component whenever the pinned fingerprint changes, so a stale preview
+    read under an earlier input cannot be approved after the fact. */
+export function GatePanelControl({
+  caseId,
+  runId,
+  gate,
+  state,
+  action,
+  onFingerprint,
+  onRefetch,
+}: {
+  caseId: string;
+  runId: string;
+  gate: GateView["gate"];
+  state: GateView["state"];
+  action: ActionView | undefined;
+  onFingerprint: (fingerprint: string) => void;
+  onRefetch: (runId: string | null) => void;
+}) {
+  const preview = useCommand<GatePreviewDocument>();
+  const approve = useCommand<GateApproved>();
+  const previewed = preview.result?.kind === "ok" ? preview.result.receipt : null;
+  const approveRefusal = action ? (action.refusal ?? (previewed ? null : NOT_PREVIEWED)) : null;
+  return (
+    <section className="pnl" data-gate-panel={gate}>
+      <header>
+        <h2>{gate === "SOURCE_SET" ? "Source set" : "Research plan"}</h2>
+        <span className="cp">{state}</span>
+      </header>
+      <div className="pb">
+        <RefusedControl
+          refusal={null}
+          className="rb"
+          data-action="PREVIEW"
+          data-preview-gate={gate}
+          onClick={() => {
+            // A preview grants nothing and does not seed the known
+            // fingerprint (`onFingerprint` is Pin's and Approve's alone) --
+            // doing so here would remount this very panel on its own
+            // success, at the moment the digest it just read matters most.
+            void preview.run(null, (intent) => fetchGatePreview(caseId, runId, gate, intent));
+          }}
+        >
+          {preview.pending ? "Loading…" : "Preview"}
+        </RefusedControl>
+        {previewed ? (
+          <pre className="preview" data-gate-preview-content>
+            {previewed.content}
+          </pre>
+        ) : null}
+        <CommandOutcome result={preview.result} success="Preview read." />
+        {state === "OPEN" ? (
+          <>
+            <RefusedControl
+              refusal={approveRefusal}
+              className="rb acc"
+              data-action={APPROVE_ACTION[gate]}
+              onClick={
+                action && previewed
+                  ? () => {
+                      const body = {
+                        preview_sha256: previewed.preview_sha256,
+                        input_fingerprint: previewed.input_fingerprint,
+                      };
+                      void approve
+                        .run(body, (intent) => approveGate(caseId, runId, gate, body, intent))
+                        .then((outcome) => {
+                          if (outcome.kind === "ok") {
+                            onFingerprint(outcome.receipt.input_fingerprint);
+                            onRefetch(runId);
+                          }
+                        });
+                    }
+                  : undefined
+              }
+            >
+              {approve.pending ? "Approving…" : "Approve"}
+            </RefusedControl>
+            <CommandOutcome result={approve.result} success="Gate approved. Reading it back." />
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+const NO_FINGERPRINT = {
+  code: "COMMAND_EXPECTATION_STALE",
+  clears:
+    "the subject is pinned, or a gate preview or approval is read, in this browser session — start and retry send the current input fingerprint",
+};
+
+/** Start, retry and cancel. Start and retry carry the pinned input's
+    fingerprint (brief 4.2, decision 1); this file has no other source for it
+    than a pin, preview or approval read in this session, so with none yet
+    read the control names that rather than guessing a value. */
+export function WorkControls({
+  caseId,
+  runId,
+  fingerprint,
+  actions,
+  onRefetch,
+}: {
+  caseId: string;
+  runId: string;
+  fingerprint: string | null;
+  actions: readonly ActionView[];
+  onRefetch: (runId: string | null) => void;
+}) {
+  const start = useCommand<RunWork>();
+  const retry = useCommand<RunWork>();
+  const cancel = useCommand<RunWork>();
+  const startAction = actionOf(actions, "START_RUN");
+  const retryAction = actionOf(actions, "RETRY_RUN");
+  const cancelAction = actionOf(actions, "CANCEL_RUN");
+  const startRefusal = startAction
+    ? (startAction.refusal ?? (fingerprint ? null : NO_FINGERPRINT))
+    : null;
+  const retryRefusal = retryAction
+    ? (retryAction.refusal ?? (fingerprint ? null : NO_FINGERPRINT))
+    : null;
+  const cancelRefusal = cancelAction ? cancelAction.refusal : null;
+  return (
+    <section className="pnl" data-work-controls>
+      <header>
+        <h2>Work</h2>
+      </header>
+      <div className="pb flush">
+        <RefusedControl
+          refusal={startRefusal}
+          className="rb acc"
+          data-action="START_RUN"
+          onClick={
+            startAction && fingerprint
+              ? () => {
+                  const body = { input_fingerprint: fingerprint };
+                  void start
+                    .run(body, (intent) => startRun(caseId, runId, body, intent))
+                    .then((outcome) => {
+                      if (outcome.kind === "ok") onRefetch(runId);
+                    });
+                }
+              : undefined
+          }
+        >
+          {start.pending ? "Starting…" : "Start run"}
+        </RefusedControl>
+        <CommandOutcome result={start.result} success="Run enqueued. Reading it back." />
+        <RefusedControl
+          refusal={retryRefusal}
+          className="rb"
+          data-action="RETRY_RUN"
+          onClick={
+            retryAction && fingerprint
+              ? () => {
+                  const body = { input_fingerprint: fingerprint };
+                  void retry
+                    .run(body, (intent) => retryRun(caseId, runId, body, intent))
+                    .then((outcome) => {
+                      if (outcome.kind === "ok") onRefetch(runId);
+                    });
+                }
+              : undefined
+          }
+        >
+          {retry.pending ? "Retrying…" : "Retry run"}
+        </RefusedControl>
+        <CommandOutcome result={retry.result} success="Run requeued. Reading it back." />
+        <RefusedControl
+          refusal={cancelRefusal}
+          className="rb crit"
+          data-action="CANCEL_RUN"
+          onClick={
+            cancelAction
+              ? () => {
+                  void cancel
+                    .run({}, (intent) => cancelRun(caseId, runId, intent))
+                    .then((outcome) => {
+                      if (outcome.kind === "ok") onRefetch(runId);
+                    });
+                }
+              : undefined
+          }
+        >
+          {cancel.pending ? "Cancelling…" : "Cancel run"}
+        </RefusedControl>
+        <CommandOutcome result={cancel.result} success="Cancellation requested. Reading it back." />
       </div>
     </section>
   );
