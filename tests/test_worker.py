@@ -350,3 +350,14 @@ def test_an_unexpected_fault_parks_the_run_and_the_worker_goes_on(
     run.conn.rollback()
     written = capsys.readouterr().err
     assert "RuntimeError" in written and "must not be shown" not in written
+
+
+def test_the_widest_jitter_stays_within_twenty_percent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bounds are exact at both ends: the float sum once overshot +20%."""
+    config = WorkerConfig(BoundaryText.of("worker-test"), poll_seconds=1.0)
+    monkeypatch.setattr("server.engine.worker.secrets.randbelow", lambda _n: 400)
+    assert worker.pause_seconds(config, 2) <= 2.0 * 1.2
+    monkeypatch.setattr("server.engine.worker.secrets.randbelow", lambda _n: 0)
+    assert worker.pause_seconds(config, 2) >= 2.0 * 0.8
