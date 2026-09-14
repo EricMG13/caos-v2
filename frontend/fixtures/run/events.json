@@ -1,18 +1,6 @@
 [
-  {
-    "id": 1,
-    "type": "node_state_changed"
-  },
-  {
-    "id": 2,
-    "type": "attempt_recorded"
-  },
-  {
-    "id": 3,
-    "type": "node_state_changed"
-  },
-  {
-    "id": 4,
-    "type": "run_terminal"
-  }
+  { "id": "0.1", "event": "run_progress" },
+  { "id": "0.2", "event": "run_progress" },
+  { "id": "0.3", "event": "handoff_accepted" },
+  { "id": "0.4", "event": "run_terminal" }
 ]

@@ -42,11 +42,3 @@ test("partial renders through warning status with its notes and the body", async
   await expect(page.locator("[data-handoff]").first()).toBeVisible();
   await expect(page.locator("[data-pending-node]").first()).toBeVisible();
 });
-
-test("an authority change marks the region stale until an explicit reload", async ({ page }) => {
-  await page.goto(`/analysis/?case=${CASE}&fixture=stale`);
-  const stale = page.locator("main#body [data-surface-state='stale']");
-  await expect(stale).toBeVisible({ timeout: 10_000 });
-  await stale.getByRole("button", { name: "RELOAD" }).click();
-  await expect(stale).toHaveCount(0);
-});

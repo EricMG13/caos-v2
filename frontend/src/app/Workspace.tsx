@@ -1,7 +1,7 @@
 // One screen. The chrome never changes; only the body does (IA_SPEC.md 1).
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { INITIAL, accepts, issue, navigate, ticket, type Authority } from "./authority";
+import { INITIAL, accepts, issue, navigate, refetches, ticket, type Authority } from "./authority";
 import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { eventsUrl, openTail } from "./sse";
 import { LedgerProvider } from "./ledger";
@@ -48,54 +48,63 @@ export function Workspace({ section }: { section: Section }) {
   const [result, setResult] = useState<Keyed<RegionStatus> | null>(null);
   const [tabChoice, setTabChoice] = useState<Keyed<string> | null>(null);
   const authority = useRef<Authority>(INITIAL);
-  // The key whose authority changed while its document was on the wire.
-  const staleKey = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    authority.current = issue(authority.current);
-    const sent = ticket(authority.current);
-    const next = await fetchSection(section, { case: caseId, run: runId, fixture });
-    // A late response, for a case the user has left or superseded by a later
-    // request, is discarded, never rendered.
-    if (!accepts(authority.current, sent)) return;
-    const value: RegionStatus =
-      staleKey.current === key && "document" in next && next.kind !== "stale"
-        ? { kind: "stale", document: next.document }
-        : next;
-    setResult({ key, value });
-  }, [section, caseId, runId, fixture, key]);
-
-  const reload = useCallback(() => {
-    staleKey.current = null;
-    void load();
-  }, [load]);
-
-  // The tail opens before the first fetch so a fixture stream's frame counter
-  // is reset before the document it drives is read.
   useEffect(() => {
     if (!requested) return undefined;
-    const tail = openTail(eventsUrl(caseId, fixture), {
-      onEvent: (name) => {
-        if (name !== "authority_changed") void load();
-      },
-      onStale: () => {
-        staleKey.current = key;
-        setResult((current) => {
-          if (!current || current.key !== key) return current;
-          const status = current.value;
-          return "document" in status && status.kind !== "stale"
-            ? { key: current.key, value: { kind: "stale", document: status.document } }
-            : current;
-        });
-      },
-    });
-    return () => tail.close();
-  }, [load, requested, caseId, fixture, key]);
-
-  useEffect(() => {
     authority.current = navigate(authority.current, caseId);
-    if (requested) void load();
-  }, [load, requested, caseId]);
+    // At most one fetch in flight; a name arriving mid-flight marks it dirty
+    // and exactly one more fetch follows (decision 5).
+    let flight: { controller: AbortController; dirty: boolean } | null = null;
+    const put = (value: RegionStatus) => setResult({ key, value });
+
+    const load = () => {
+      if (flight) {
+        flight.dirty = true;
+        return;
+      }
+      const mine = { controller: new AbortController(), dirty: false };
+      flight = mine;
+      authority.current = issue(authority.current);
+      const sent = ticket(authority.current);
+      void fetchSection(
+        section,
+        { case: caseId, run: runId, fixture },
+        mine.controller.signal,
+      ).then((next) => {
+        // A late response, for a case or run the user has left, is discarded.
+        if (!accepts(authority.current, sent)) return;
+        flight = null;
+        put(next);
+        if (mine.dirty) load();
+      });
+    };
+    const cancel = () => {
+      flight?.controller.abort();
+      flight = null;
+      authority.current = issue(authority.current);
+    };
+
+    // Directory has no stream. The tail opens before the first fetch so a
+    // fixture stream's frame counter is reset before the document it drives.
+    const tail =
+      caseId && section !== "directory"
+        ? openTail(eventsUrl(caseId, runId, fixture), {
+            onEvent: (name) => {
+              if (refetches(name, section)) load();
+            },
+            onReconnect: load,
+            onRefused: () => {
+              cancel();
+              put(UNAVAILABLE);
+            },
+          })
+        : null;
+    load();
+    return () => {
+      tail?.close();
+      cancel();
+    };
+  }, [requested, section, caseId, runId, fixture, key]);
 
   const status = requested ? (result?.key === key ? result.value : LOADING) : UNAVAILABLE;
   const chrome = chromeOf(section, status);
@@ -132,7 +141,7 @@ export function Workspace({ section }: { section: Section }) {
         <main className="body" id="body" aria-label={SECTION_LABELS[section]}>
           {status.kind === "offline" ? <PageAlert sentence={OFFLINE_WORDING} /> : null}
           <LedgerProvider>
-            <RegionState status={status} onReload={reload}>
+            <RegionState status={status}>
               {(doc) => <View key={doc.observed_at} document={doc} tab={activeTab} />}
             </RegionState>
           </LedgerProvider>

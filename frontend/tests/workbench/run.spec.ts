@@ -16,8 +16,8 @@ test("the route reads as a DAG, the QA gate as a gate, and the stream advances a
   await expect(page.locator("[data-gate]")).toContainText("QA_GATE");
   const cp6 = page.locator("button.node[data-node='CP-6']");
   await expect(cp6).toHaveAttribute("data-state", "RUNNABLE");
-  // The fixture stream emits node_state_changed; the client refetches and
-  // renders the later frame.
+  // The fixture stream emits run_progress; the client refetches and renders
+  // the later frame.
   await expect(cp6).toHaveAttribute("data-state", "COMPLETE", { timeout: 10_000 });
 });
 
@@ -33,4 +33,21 @@ test("a displayed run behind the latest is labelled, never silently swapped", as
   const row = page.locator(`[data-run-row='${RUN_OLDER}']`);
   await expect(row).toHaveAttribute("data-displayed", "true");
   await expect(row).toHaveAttribute("data-latest", "false");
+});
+
+test("a dropped stream resumes after its Last-Event-ID", async ({ page }) => {
+  // `drop` ends the first connection after frame 0.2. A client that restarted
+  // without its marker would be dropped at 0.2 again and never see 0.3.
+  const resumed = page.waitForRequest(
+    async (request) =>
+      request.url().includes(`/api/v1/cases/${CASE}/events`) &&
+      (await request.allHeaders())["last-event-id"] === "0.2",
+  );
+  await page.goto(`/run/?case=${CASE}&run=${RUN_LATEST}&fixture=drop`);
+  await resumed;
+  await expect(page.locator("button.node[data-node='CP-6']")).toHaveAttribute(
+    "data-state",
+    "COMPLETE",
+    { timeout: 10_000 },
+  );
 });

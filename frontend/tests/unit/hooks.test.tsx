@@ -7,7 +7,6 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { LedgerProvider, useLedger } from "@/app/ledger";
 import { SECTION_ABBREVIATIONS, SECTION_LABELS } from "@/app/sections";
-import { openTail } from "@/app/sse";
 import { useModalA11y } from "@/ds/use-modal-a11y";
 import { useEvidence } from "@/evidence/EvidenceContext";
 import { SECTIONS } from "@/wire/shared";
@@ -100,47 +99,5 @@ describe("modal a11y returns focus to the opener it was given", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
     expect(closed).toHaveBeenCalledOnce();
-  });
-});
-
-describe("the event tail", () => {
-  test("openTail is a no-op where EventSource does not exist", () => {
-    // Server-rendered or a browser without it: the workspace still draws, and
-    // closing a tail that was never opened is not an error.
-    const held = globalThis.EventSource;
-    // @ts-expect-error -- removing a global the runtime declares
-    delete globalThis.EventSource;
-    try {
-      const tail = openTail("/api/events", { onEvent: vi.fn(), onStale: vi.fn() });
-      expect(() => tail.close()).not.toThrow();
-    } finally {
-      globalThis.EventSource = held;
-    }
-  });
-
-  test("a named event refetches and authority_changed also marks the region stale", () => {
-    const listeners = new Map<string, () => void>();
-    class Fake {
-      addEventListener(name: string, handler: () => void) {
-        listeners.set(name, handler);
-      }
-      close() {}
-    }
-    const held = globalThis.EventSource;
-    globalThis.EventSource = Fake as unknown as typeof EventSource;
-    try {
-      const onEvent = vi.fn();
-      const onStale = vi.fn();
-      openTail("/api/events", { onEvent, onStale });
-
-      listeners.get("run_terminal")?.();
-      expect(onEvent).toHaveBeenCalledWith("run_terminal");
-      expect(onStale).not.toHaveBeenCalled();
-
-      listeners.get("authority_changed")?.();
-      expect(onStale).toHaveBeenCalledOnce();
-    } finally {
-      globalThis.EventSource = held;
-    }
   });
 });
