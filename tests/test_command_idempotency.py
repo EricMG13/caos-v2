@@ -447,9 +447,10 @@ def test_case_standing_is_visibility_then_global_role_then_floor(
 
 def test_the_real_app_includes_the_command_routers_and_statuses() -> None:
     from server.api import app as app_module
-    from server.api.commands import cases, execution, runs
+    from server.api.commands import cases, runs
 
-    for module in (cases, execution, runs):
+    # `execution` has its routes (slice 4.2f, `tests/test_execution_commands.py`).
+    for module in (cases, runs):
         assert module.IO_BUDGET == 0
         assert module.router.routes == []
     status = app_module._STATUS
