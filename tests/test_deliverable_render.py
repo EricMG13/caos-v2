@@ -9,10 +9,17 @@ A test that rendered with a live connection to hand would pass whether or not
 that were true, so this one closes the store first and renders from the payload
 alone. The other two exit tests -- the filing chain and the audit package --
 arrive with the chain they check.
+
+The payload below is the canonical shape `render()` understands since the
+claims render path was deleted (f-2a; `docs/DECISIONS.md` §42.1): one artifact
+carries a Markdown handoff and its host record, each addressed by digest, in
+place of the retired `module_id`/`claims` shape. `_artifact` builds one with
+correct digests by hand -- standard library only, like the render itself.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -26,28 +33,52 @@ from server.store.runs import create_case
 
 REVISION = "rev-001"
 
+MARKDOWN = "Total debt at 31 December 2026 was USD 1,240.0m.\n"
+BUILD_ID = "a43cb903ca2751f79e77b6da71f6ea131b8462a3"
+AUTHORITY_DIGEST = "0302b789df5d0cae" + "0" * 48
+QUOTE = "Total debt at 31 December 2026"
+DOCUMENT_SHA256 = "6fc4a221c5d5" + "0" * 52
+
+
+def _artifact(
+    markdown: str = MARKDOWN, *, projections: object = None, citations: object = None
+) -> dict[str, Any]:
+    """One canonical artifact, bound: the record's own digests match its bytes."""
+    digest = hashlib.sha256(markdown.encode()).hexdigest()
+    record = {
+        "artifact_sha256": digest,
+        "build_id": BUILD_ID,
+        "authority_digest": AUTHORITY_DIGEST,
+        "projections": (
+            {
+                "module_id": "CP-1",
+                "qa_status": "Passed",
+                "committee_status": "Committee Ready",
+                "decision_scope": "COMMITTEE",
+                "limitation_flags": [],
+            }
+            if projections is None
+            else projections
+        ),
+        "citations": (
+            [{"document_sha256": DOCUMENT_SHA256, "page": 1, "matched_text": QUOTE}]
+            if citations is None
+            else citations
+        ),
+    }
+    record_json = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return {
+        "markdown": markdown,
+        "record": record_json,
+        "artifact_sha256": digest,
+        "record_sha256": hashlib.sha256(record_json.encode()).hexdigest(),
+    }
+
+
 PAYLOAD_DATA: dict[str, Any] = {
     "case_title": "Acme Holdings plc",
     "revision_id": REVISION,
-    "artifacts": [
-        {
-            "module_id": "CP-1",
-            "build_id": "a43cb903ca2751f79e77b6da71f6ea131b8462a3",
-            "authority_digest": "0302b789df5d0cae" + "0" * 48,
-            "claims": [
-                {
-                    "statement": "Total debt was USD 1,240.0m at the year end.",
-                    "citations": [
-                        {
-                            "document_sha256": "6fc4a221c5d5" + "0" * 52,
-                            "page": 1,
-                            "matched_text": "Total debt at 31 December 2026",
-                        }
-                    ],
-                }
-            ],
-        }
-    ],
+    "artifacts": [_artifact()],
     "narrative": "Leverage is inside the covenant with limited headroom.",
 }
 
@@ -89,11 +120,11 @@ def test_the_render_reaches_no_network_and_no_clock() -> None:
 
 
 def test_an_uncited_figure_is_refused_at_the_render() -> None:
-    """§7: every figure carries its citation. An uncited claim inside a frozen
+    """§7: every figure carries its citation. An uncited handoff inside a frozen
     payload is a freeze that should not have happened, and this is the last
     place it can still be caught."""
     payload = json.loads(json.dumps(PAYLOAD_DATA))
-    payload["artifacts"][0]["claims"][0]["citations"] = []
+    payload["artifacts"][0] = _artifact(citations=[])
 
     with pytest.raises(Refusal) as caught:
         render(payload)
@@ -113,16 +144,22 @@ def test_an_uncited_figure_is_refused_at_the_render() -> None:
             id="artifact not a mapping",
         ),
         pytest.param(
-            lambda p: p["artifacts"][0].update(claims="not-a-list"),
-            id="claims not a list",
+            lambda p: p["artifacts"][0].__setitem__("record", "not json"),
+            id="record not valid json",
         ),
         pytest.param(
-            lambda p: p["artifacts"][0]["claims"].__setitem__(0, "not-a-mapping"),
-            id="claim not a mapping",
+            lambda p: p["artifacts"].__setitem__(
+                0, _artifact(projections="not-a-mapping")
+            ),
+            id="projections not a mapping",
         ),
         pytest.param(
-            lambda p: p["artifacts"][0]["claims"][0]["citations"].__setitem__(
-                0, "not-a-mapping"
+            lambda p: p["artifacts"].__setitem__(0, _artifact(citations="not-a-list")),
+            id="citations not a list",
+        ),
+        pytest.param(
+            lambda p: p["artifacts"].__setitem__(
+                0, _artifact(citations=["not-a-mapping"])
             ),
             id="citation not a mapping",
         ),

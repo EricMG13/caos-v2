@@ -53,6 +53,29 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # cannot see that, which is why a phase is not closed on the strength of it
 # alone.
 NOT_YET_REACHED: set[str] = {
+    # Phase 5's own exit test ran the retired claims executor on CP-1 of the
+    # FULL route (`docs/superpowers/plans/2026-09-13-phase-3-task-3.1-brief.md`,
+    # f-1c note); f-1c already refuses that executor `HANDOFF_MODULE_UNSUPPORTED`
+    # before any call, and f-2b deletes the executor itself, so nothing can pass
+    # this test as written. It is owed again the day Phase 5 extends the
+    # canonical adapter to CP-1 (`docs/DECISIONS.md` §42; `CLAUDE.md` Repair
+    # Phase 3 ledger).
+    "test_cp1_produces_canonical_envelope_with_anchored_citations",
+    # Phase 11's own exit list named these on the claims executor's readiness
+    # map and upstream-chain behaviour, deleted with it (f-2b). The behaviour
+    # itself is not gone -- it moved to the canonical adapter under different
+    # names, in `tests/test_canonical_handoff.py` and
+    # `tests/test_handoff_invocation.py`:
+    # `test_readiness_must_cover_exactly_the_pin` refuses a T8 register that
+    # misses a pinned module or covers one it was not asked about, which is
+    # both directions of the two readiness-map exits below in one test, and
+    # `test_the_prompt_carries_exact_upstream_bytes_and_every_block` is the
+    # direct-predecessors exit's canonical successor. Nothing under either
+    # literal name below can exist once the executor that produced a
+    # `content_to_module_map` JSON key is gone.
+    "test_a_gate_answer_missing_a_pinned_module_is_refused",
+    "test_only_the_gate_module_may_return_a_readiness_map",
+    "test_a_node_receives_its_direct_predecessors_accepted_claims",
     # Phase 12, the handoff: no module payload exists yet, so a register, a
     # critical column and a cited figure are all things no artifact carries.
     "test_the_declared_register_schema_matches_the_bundles_own_contract",

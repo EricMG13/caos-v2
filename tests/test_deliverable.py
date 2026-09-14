@@ -54,26 +54,43 @@ REVISION = BoundaryText.of("rev-001")
 NFC_LABEL = BoundaryText.of("rev-caf\u00e9")
 NFD_SPELLING = "rev-cafe\u0301"
 
+# The canonical shape `render()` understands since the claims render path was
+# deleted (f-2a; `docs/DECISIONS.md` decision 42.1): one artifact carries a
+# Markdown handoff and its host record, each addressed by digest, bound by
+# hand -- these tests only need bytes `render()` accepts, not a store-produced
+# record.
+_MARKDOWN = "Total debt at 31 December 2026 was USD 1,240.0m.\n"
+_DIGEST = hashlib.sha256(_MARKDOWN.encode()).hexdigest()
+_RECORD = {
+    "artifact_sha256": _DIGEST,
+    "build_id": "a43cb903ca2751f79e77b6da71f6ea131b8462a3",
+    "authority_digest": "0302b789df5d0cae" + "0" * 48,
+    "projections": {
+        "module_id": "CP-1",
+        "qa_status": "Passed",
+        "committee_status": "Committee Ready",
+        "decision_scope": "COMMITTEE",
+        "limitation_flags": [],
+    },
+    "citations": [
+        {
+            "document_sha256": "6fc4a221c5d5" + "0" * 52,
+            "page": 1,
+            "matched_text": "Total debt at 31 December 2026",
+        }
+    ],
+}
+_RECORD_JSON = json.dumps(_RECORD, sort_keys=True, separators=(",", ":"))
+
 PAYLOAD_DATA: dict[str, Any] = {
     "case_title": "Acme Holdings plc",
     "revision_id": REVISION.value,
     "artifacts": [
         {
-            "module_id": "CP-1",
-            "build_id": "a43cb903ca2751f79e77b6da71f6ea131b8462a3",
-            "authority_digest": "0302b789df5d0cae" + "0" * 48,
-            "claims": [
-                {
-                    "statement": "Total debt was USD 1,240.0m at the year end.",
-                    "citations": [
-                        {
-                            "document_sha256": "6fc4a221c5d5" + "0" * 52,
-                            "page": 1,
-                            "matched_text": "Total debt at 31 December 2026",
-                        }
-                    ],
-                }
-            ],
+            "markdown": _MARKDOWN,
+            "record": _RECORD_JSON,
+            "artifact_sha256": _DIGEST,
+            "record_sha256": hashlib.sha256(_RECORD_JSON.encode()).hexdigest(),
         }
     ],
     "narrative": "Leverage is inside the covenant with limited headroom.",

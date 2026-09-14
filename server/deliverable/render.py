@@ -50,22 +50,11 @@ def render(payload: Mapping[str, Any]) -> bytes:
     if not isinstance(artifacts, list) or not artifacts:
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
 
-    # A canonical artifact's page facts come from its record (§41), claims'
-    # from the artifact itself; both reach the same provenance index.
-    views = [
-        _canonical(artifact)
-        if isinstance(artifact, Mapping) and "markdown" in artifact
-        else artifact
-        for artifact in artifacts
-    ]
-    body = "\n".join(
-        _handoff(view) if isinstance(view, _Handoff) else _artifact(view)
-        for view in views
-    )
+    # A canonical artifact's page facts come from its record (§41).
+    views = [_canonical(artifact) for artifact in artifacts]
+    body = "\n".join(_handoff(view) for view in views)
     narrative = _narrative(payload.get("narrative"))
-    provenance = _provenance(
-        [view.provenance if isinstance(view, _Handoff) else view for view in views]
-    )
+    provenance = _provenance([view.provenance for view in views])
 
     return (
         "<!doctype html>\n"
@@ -93,34 +82,6 @@ def render(payload: Mapping[str, Any]) -> bytes:
     ).encode()
 
 
-def _artifact(artifact: object) -> str:
-    """One module's accepted output, with every figure carrying its citation."""
-    if not isinstance(artifact, Mapping):
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-    module_id = _text(artifact, "module_id")
-    claims = artifact.get("claims")
-    if not isinstance(claims, list):
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-
-    rows = []
-    for claim in claims:
-        if not isinstance(claim, Mapping):
-            raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-        statement = escape(_text(claim, "statement"))
-        citations = claim.get("citations")
-        if not isinstance(citations, list) or not citations:
-            # §7 says every figure carries its citation. An uncited claim in a
-            # frozen payload is a freeze that should not have happened, and the
-            # render is the last place it can still be caught.
-            raise Refusal(RefusalCode.DELIVERABLE_UNCITED_FIGURE)
-        rows.append(
-            f"<p>{statement}</p>\n"
-            + "\n".join(_citation(citation) for citation in citations)
-        )
-
-    return f"<h2>{escape(module_id)}</h2>\n" + "\n".join(rows)
-
-
 class _Handoff:
     """One canonical artifact as the page shows it, read from its record."""
 
@@ -145,6 +106,8 @@ def canonical_bound(artifact: Mapping[str, Any]) -> bool:
     """Whether the Markdown and record text hash to the pair the payload binds,
     and the record names that Markdown. Standard library only, like the package.
     """
+    if not isinstance(artifact, Mapping):
+        return False
     markdown, record = artifact.get("markdown"), artifact.get("record")
     if not isinstance(markdown, str) or not isinstance(record, str):
         return False

@@ -19,11 +19,10 @@ remaining cases did is the next thing they would ask.
 
 **What an answer key can express, and what it cannot.** A key names citations —
 which quote, from which document, under which module. That is the strongest key
-the canonical envelope can be checked against today, because an envelope carries
-statements and citations and not typed figures (`server/methodology/envelope.py`).
-A key saying "net leverage is 4.2x" has nothing to compare against until the
-envelope carries the figure as a number, which is the known-gaps entry this
-module ships with.
+the canonical handoff's record can be checked against today, because a record
+carries projections and citations and not typed figures. A key saying "net
+leverage is 4.2x" has nothing to compare against until the record carries the
+figure as a number, which is the known-gaps entry this module ships with.
 
 **A canonical run is scored on its records** (`docs/DECISIONS.md` §42.4), and
 only on what the proof proved: the proof returns the citations it re-anchored
