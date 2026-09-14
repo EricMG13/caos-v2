@@ -47,7 +47,7 @@ from server.methodology.handoff import (
     expected_filename,
     invocation_fields,
 )
-from server.provider import Completion
+from server.provider import Completion, encode_request
 
 # Whole words, no punctuation: must match whole tokens in the delivered
 # evidence exactly (invariant 11 / §41.3's word-boundary quoting rule).
@@ -451,6 +451,9 @@ class RealisticLiteCompletions:
     prompts: list[str] = field(default_factory=list)
     answers: list[bytes] = field(default_factory=list)
     bodies: list[str] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         assert json_object
