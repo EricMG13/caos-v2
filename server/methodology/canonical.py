@@ -739,6 +739,17 @@ def _forecast_inputs(
     }
     validate_forecast_bindings(markdown, upstream, citations)
     validate_driver_mapping(_contract(bundle), markdown, upstream["CP-2G"])
+    parse = _contract(bundle).validate_handoff.validate_text
+    fields = parse(markdown.decode()).fields
+    for data in upstream.values():
+        owner = parse(data.decode()).fields
+        if (
+            owner["qa_status"] == "Restricted" and fields["qa_status"] != "Restricted"
+        ) or any(
+            not set(owner[key]) <= set(fields[key])
+            for key in ("limitation_flags", "validation_warnings")
+        ):
+            raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
 
 
 def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
