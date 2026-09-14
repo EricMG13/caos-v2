@@ -55,7 +55,7 @@ class ModuleProvider:
     completions: CompletionProvider
     route: ResolvedRoute
     run_id: UUID
-    # The lease `run_route` writes under; its pre-transport check reads it.
+    # The lease `run_route` writes under; both pre-transport checks read it.
     lease: Lease | None = None
 
     @property
@@ -107,7 +107,9 @@ class ModuleProvider:
         # and `execute_handoff` refuses it again under its own read unit.
         if pin.adapter_version != CANONICAL_ADAPTER_VERSION:
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-        assignment = Assignment(module_id, self.run_id, node, self.route, attempt_id)
+        assignment = Assignment(
+            module_id, self.run_id, node, self.route, attempt_id, self.lease
+        )
         handoff = execute_handoff(
             self.conn,
             self.bundle,

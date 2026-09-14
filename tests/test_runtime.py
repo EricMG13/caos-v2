@@ -29,6 +29,7 @@ from canonical_fixtures import (
     LITE_PROFILE,
     LITE_SELECTION,
     QUOTE,
+    UNANCHORED,
     VENDORED,
     CanonicalCompletions,
 )
@@ -50,15 +51,23 @@ from server.engine.runtime import (
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.methodology.runner import ModuleProvider
+from server.pricing import worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
 from server.store.budget import reserve as reserve_budget
 from server.store.events import RunEvent, events_of
 from server.store.gates import Gate, withdraw_source
 from server.store.members import Standing, grant, revoke
+from server.store.outcomes import record_refusal
 from server.store.routes import pin_route
-from server.store.runs import run_status, start_run
-from server.store.work import Lease
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    run_status,
+    start_attempt,
+    start_run,
+)
+from server.store.work import Lease, claim_run, enqueue_run
 
 ESTIMATE = Decimal("0.10")
 # What `CanonicalCompletions` reports per call unless told otherwise.
@@ -112,20 +121,34 @@ class _Run:
         die_on: str | None = None,
         at_call: Callable[[], None] | None = None,
         charge: Decimal = REPORTED,
+        *,
+        answers: CanonicalCompletions | None = None,
+        lease: Lease | None = None,
     ) -> _Provider:
-        answers = CanonicalCompletions(self.source_id, charge=charge, during=at_call)
+        if answers is None:
+            answers = CanonicalCompletions(
+                self.source_id, charge=charge, during=at_call
+            )
         inner = ModuleProvider(
-            self.conn, self.bundle, self.blobs, answers, self.route, self.run_id
+            self.conn, self.bundle, self.blobs, answers, self.route, self.run_id, lease
         )
         return _Provider(inner, answers, die_on)
 
-    def run(self, provider: Provider, *, bundle: Bundle | None = None) -> None:
+    def run(
+        self,
+        provider: Provider,
+        *,
+        bundle: Bundle | None = None,
+        lease: Lease | None = None,
+    ) -> None:
         run_route(
             self.conn,
             self.blobs,
             run_id=self.run_id,
             route=self.route,
-            execution=Execution(provider, priced(ESTIMATE), bundle or self.bundle),
+            execution=Execution(
+                provider, priced(ESTIMATE), bundle or self.bundle, lease
+            ),
         )
 
 
@@ -676,3 +699,277 @@ def test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt(
     assert caught.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
     _assert_no_work(run, provider)
     assert run_status(conn, run.run_id) is RunStatus.RUNNING
+
+
+# Brief 4.3 D6/D7: a crash at each boundary, then a fresh drive of the run.
+
+
+@dataclass
+class _Uncallable:
+    """A provider a resumed run must not touch: the stored facts decide."""
+
+    model: str = "a-model/for-the-test"
+
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        pytest.fail(f"{module_id} was prepared for a second call")
+
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        pytest.fail(f"{module_id} was called again")
+
+
+@dataclass
+class _DiesAfterItsBill:
+    """Dies after the call's bill and diagnostic commit, whatever it answered."""
+
+    inner: _Provider
+
+    @property
+    def model(self) -> str:
+        return self.inner.model
+
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        self.inner.check_context(route_node_id, module_id)
+
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        try:
+            return self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
+        except Refusal:
+            pass
+        raise _Boom(module_id)
+
+
+def _count(run: _Run, table: str) -> int:
+    row = run.conn.execute(
+        "SELECT count(*) FROM " + table + " WHERE run_id=%s", (run.run_id,)
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _refusals(run: _Run) -> list[tuple[UUID, str]]:
+    rows = run.conn.execute(
+        "SELECT r.attempt_id, r.code FROM attempt_refusals r"
+        " JOIN run_attempts t USING (attempt_id) WHERE t.run_id=%s",
+        (run.run_id,),
+    ).fetchall()
+    return [(UUID(str(attempt)), str(code)) for attempt, code in rows]
+
+
+def test_a_leased_run_calls_its_provider_through_the_module_provider(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    enqueue_run(conn, run.run_id)
+    conn.commit()
+    lease = claim_run(conn, worker=BoundaryText.of("worker-a"), lease_seconds=300)
+    assert lease is not None and lease.run_id == run.run_id
+    provider = run.provider(lease=lease)
+
+    run.run(provider, lease=lease)
+
+    assert provider.calls == LITE_ORDER
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
+
+
+def test_crash_after_a_billed_answer_accepts_from_the_stored_body_without_a_call(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    real = accept_attempt
+    accepts: list[UUID] = []
+
+    def crashing(
+        conn: StoreConnection,
+        *,
+        attempt_id: UUID,
+        accepted: Accepted,
+        lease: Lease | None = None,
+    ) -> bool:
+        accepts.append(attempt_id)
+        if len(accepts) == len(LITE_ORDER):
+            raise _Boom(attempt_id)  # after the bill, before the acceptance
+        return real(conn, attempt_id=attempt_id, accepted=accepted, lease=lease)
+
+    monkeypatch.setattr(subject, "accept_attempt", crashing)
+    first = run.provider()
+    with pytest.raises(_Boom):
+        run.run(first)
+    assert (_count(run, "budget_ledger"), _count(run, "artifacts")) == (3, 2)
+    conn.rollback()
+    monkeypatch.setattr(subject, "accept_attempt", real)
+
+    run.run(_Uncallable())
+
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
+    assert set(_attempts_per_module(conn, run.run_id).values()) == {1}
+    assert (_count(run, "budget_ledger"), _count(run, "artifacts")) == (3, 3)
+    screen = artifact_digests(conn, run.run_id)[_node_id(route, "CP-5")]
+    assert blobs.get(screen) == first.answers.answers[2]
+    assert _refusals(run) == []
+
+
+def test_crash_after_a_billed_refused_answer_records_it_and_stops_without_a_call(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    answers = CanonicalCompletions(run.source_id, quotes=(UNANCHORED,))
+    with pytest.raises(_Boom):
+        run.run(_DiesAfterItsBill(run.provider(answers=answers)))
+    [(attempt,)] = conn.execute(
+        "SELECT attempt_id FROM run_attempts WHERE run_id=%s", (run.run_id,)
+    ).fetchall()
+    assert _count(run, "budget_ledger") == 1
+    assert _refusals(run) == []
+    conn.rollback()
+
+    with pytest.raises(Refusal) as caught:
+        run.run(_Uncallable())
+
+    assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
+    assert _refusals(run) == [(attempt, "CITATION_NOT_LOCATED")]
+    conn.rollback()
+    # Written once; a store fault is never an explanation of an answer.
+    for code in (RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.STORE_UNAVAILABLE):
+        assert not record_refusal(conn, attempt_id=attempt, code=code)
+    assert _refusals(run) == [(attempt, "CITATION_NOT_LOCATED")]
+    assert _attempts_per_module(conn, run.run_id) == {_node_id(route, "CP-0"): 1}
+    assert _count(run, "budget_ledger") == 1
+    assert run_status(conn, run.run_id) is RunStatus.RUNNING
+
+
+def test_a_retry_skips_a_recorded_refusal_and_makes_one_new_attempt(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    answers = CanonicalCompletions(run.source_id, quotes=(UNANCHORED,))
+    with pytest.raises(Refusal) as caught:
+        run.run(run.provider(answers=answers))
+    assert caught.value.code is RefusalCode.CITATION_NOT_LOCATED
+    # The live path explains the billed answer, so no retry replays it.
+    [(refused, code)] = _refusals(run)
+    assert code == "CITATION_NOT_LOCATED"
+    conn.rollback()
+
+    retry = run.provider()
+    run.run(retry)
+
+    assert retry.calls == LITE_ORDER
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
+    assert _attempts_per_module(conn, run.run_id) == {
+        _node_id(route, "CP-0"): 2,
+        _node_id(route, "CP-L10"): 1,
+        _node_id(route, "CP-5"): 1,
+    }
+    assert _refusals(run) == [(refused, "CITATION_NOT_LOCATED")]
+    assert _count(run, "budget_ledger") == 4
+
+
+def test_a_stored_answer_predating_a_later_soft_input_is_explained_not_accepted(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    """CP-5's answer was billed before its soft input CP-L10 was accepted, so it
+    names no CP-L10: replayed now, it is explained, never accepted or re-paid."""
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    with pytest.raises(_Boom):
+        run.run(run.provider(die_on="CP-L10"))
+    conn.rollback()
+    screen = _node_id(route, "CP-5")
+    early = start_attempt(conn, run.run_id, screen)
+    reserve_budget(conn, early, worst_case(priced(ESTIMATE)))
+    run.provider().inner.execute(screen, "CP-5", attempt_id=early)
+    conn.rollback()
+
+    resumed = run.provider(die_on="CP-5")
+    with pytest.raises(Refusal) as caught:
+        run.run(resumed)
+
+    assert caught.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+    assert resumed.calls == ["CP-L10"]
+    assert _refusals(run) == [(early, "ROUTE_IDENTITY_INVALID")]
+    assert screen not in artifact_digests(conn, run.run_id)
+    assert _attempts_per_module(conn, run.run_id)[screen] == 1
+
+
+def test_crash_after_acceptance_does_not_rerun_the_node(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    real = accept_attempt
+
+    def crashing(
+        conn: StoreConnection,
+        *,
+        attempt_id: UUID,
+        accepted: Accepted,
+        lease: Lease | None = None,
+    ) -> bool:
+        real(conn, attempt_id=attempt_id, accepted=accepted, lease=lease)
+        raise _Boom(attempt_id)  # after the acceptance
+
+    monkeypatch.setattr(subject, "accept_attempt", crashing)
+    with pytest.raises(_Boom):
+        run.run(run.provider())
+    monkeypatch.setattr(subject, "accept_attempt", real)
+    conn.rollback()
+
+    resumed = run.provider()
+    run.run(resumed)
+
+    assert resumed.calls == ["CP-L10", "CP-5"]
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
+    assert set(_attempts_per_module(conn, run.run_id).values()) == {1}
+    assert (_count(run, "budget_ledger"), _count(run, "artifacts")) == (3, 3)
+
+
+def test_crash_after_reservation_counts_possible_spend_and_retries_once(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    with pytest.raises(_Boom):
+        run.run(run.provider(die_on="CP-L10"))
+    conn.rollback()
+
+    resumed = run.provider()
+    run.run(resumed)
+
+    assert resumed.calls == ["CP-L10", "CP-5"]
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
+    assert _attempts_per_module(conn, run.run_id)[_node_id(route, "CP-L10")] == 2
+    # The indeterminate call's reservation stays counted; only known calls bill.
+    assert _count(run, "budget_reservations") == 4
+    assert (_count(run, "call_outcomes"), _count(run, "budget_ledger")) == (3, 3)
+    assert _refusals(run) == []

@@ -35,7 +35,13 @@ from server.engine.route import (
     node_states,
 )
 from server.methodology.bundle import Bundle
-from server.methodology.canonical import accepted_projections, blocked_verdict
+from server.methodology.canonical import (
+    Replayed,
+    Verdict,
+    accepted_projections,
+    blocked_verdict,
+    replay_billed,
+)
 from server.methodology.invocation import named_objects
 from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
@@ -49,6 +55,7 @@ from server.store.outcomes import (
     accepted_rows,
     execution_reads,
     record_outcome,
+    record_refusal,
     require_idle,
 )
 from server.store.outcomes import artifact_digests as artifact_digests
@@ -171,16 +178,25 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
         with execution_reads(conn):
             accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
             ready = frontier(route, accepted, named)
-            # Before any attempt: a Blocked verdict whose bill committed but
-            # whose block did not (a crash in that gap) is never paid twice.
-            blocked = bool(ready) and blocked_verdict(
-                conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=ready
+            # Before any attempt: an answer whose bill committed but whose
+            # acceptance, block or explanation did not (a crash in that gap)
+            # is settled from its stored body, never paid for twice (D7).
+            replayed = (
+                replay_billed(
+                    conn,
+                    blobs,
+                    bundle,
+                    run_id=run_id,
+                    route=route,
+                    route_node_ids=ready,
+                )
+                if ready
+                else None
             )
-        if blocked:
-            # A node's own stored verdict, not a whole-route decision: no
-            # snapshot (the lease fences the writer).
-            block_run(conn, run_id, lease=execution.lease)
-            return
+        if replayed is not None:
+            if not _settle(conn, blobs, replayed, run_id=run_id, lease=execution.lease):
+                return
+            continue
         if not ready:
             break
         for route_node_id in ready:
@@ -204,6 +220,52 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
         complete_run(conn, run_id, lease=execution.lease, accepted=decided)
     else:
         block_run(conn, run_id, lease=execution.lease, accepted=decided)
+
+
+def _settle(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    replayed: Replayed,
+    *,
+    run_id: UUID,
+    lease: Lease | None,
+) -> bool:
+    """Act on a replayed verdict with no call. Returns False once the run ended.
+
+    ANSWERED accepts the stored answer under its original bill; BLOCKED ends the
+    run as a live Blocked handoff does (a node's own verdict, so no snapshot);
+    REFUSED writes the explanation once and refuses with its code, so the
+    caller stops and a retry makes one new attempt instead of replaying it.
+    """
+    if replayed.verdict is Verdict.BLOCKED:
+        block_run(conn, run_id, lease=lease)
+        return False
+    outcome = replayed.outcome
+    if replayed.verdict is Verdict.REFUSED or outcome is None:
+        code = replayed.code or RefusalCode.PROVIDER_RESPONSE_INVALID
+        record_refusal(conn, attempt_id=replayed.attempt_id, code=code, lease=lease)
+        raise Refusal(code)
+    stored: tuple[str, str] | None = None
+    try:
+        stored = blobs.put(outcome.markdown), blobs.put(outcome.record)
+    except (OSError, Refusal):
+        pass  # raised below, outside the handler: no context carried
+    if stored is None:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+    accept_attempt(
+        conn,
+        attempt_id=replayed.attempt_id,
+        accepted=Accepted(
+            artifact_sha256=stored[0],
+            charge=outcome.charge,
+            model=outcome.model,
+            generation_id=outcome.generation_id,
+            diagnostic_sha256=outcome.diagnostic_sha256,
+            record_sha256=stored[1],
+        ),
+        lease=lease,
+    )
+    return True
 
 
 def accepted_artifacts(
@@ -266,6 +328,24 @@ def accepted_artifacts(
     return accepted
 
 
+def _explain_live(
+    conn: StoreConnection, attempt_id: UUID, refused: Refusal, lease: Lease | None
+) -> None:
+    """Write why a recorded call's answer was refused, once (D7). A store that
+    cannot take the explanation leaves it unwritten -- the caller keeps the
+    original refusal, and the next pass's replay explains the stored answer."""
+    try:
+        record_refusal(conn, attempt_id=attempt_id, code=refused.code, lease=lease)
+    except Refusal as fault:
+        if fault.code not in _STORE_FAULTS:
+            raise
+
+
+_STORE_FAULTS = frozenset(
+    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+)
+
+
 def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
@@ -294,14 +374,19 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
     reserve(conn, attempt_id, worst_case(execution.price), lease=lease)
 
     _execution_route(conn, run_id, route, execution.bundle)
+    refused: Refusal | None = None
+    result: ProviderResult | None = None
     try:
         result = execution.provider.execute(
             route_node_id, module_id, attempt_id=attempt_id
         )
     except Refusal as refusal:
-        if refusal.code is not RefusalCode.HANDOFF_BLOCKED:
-            raise
-        result = None
+        refused = refusal
+    if refused is not None and refused.code is not RefusalCode.HANDOFF_BLOCKED:
+        # A recorded call's answer is explained once, so no retry replays it
+        # (D7); an attempt with no recorded call writes nothing.
+        _explain_live(conn, attempt_id, refused, lease)
+        raise refused
     if result is None:
         _end_blocked(
             conn,
@@ -355,7 +440,7 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
     """End the run BLOCKED on a validated Blocked handoff (brief correction 6).
 
     The raised code is not trusted: the verdict is re-derived from the stored
-    bill and response body by the same `blocked_verdict` crash recovery uses,
+    bill and response body by the same `replay_billed` crash recovery uses,
     and a Blocked claim it does not confirm is an ordinary refusal.
     """
     with execution_reads(conn):
