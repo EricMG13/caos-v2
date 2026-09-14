@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, Inexact, Rounded, localcontext
+from pathlib import Path
 from threading import Event
 from uuid import UUID, uuid4
 
@@ -26,6 +27,8 @@ import psycopg
 import pytest
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked, _wait_for_blocking
+from test_module_execution import _catalog_route
+from test_run_events import approved_nodes
 
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
@@ -49,6 +52,8 @@ GENERATION = "gen-for-the-test"
 
 CEILING_FOR_TEST = Decimal("1.00")
 HALF = Decimal("0.60")
+# Acceptance requires a governed run on the real route (Task17d3a).
+NODES = [node.route_node_id for node in _catalog_route().nodes]
 
 
 def _run_with_ceiling(conn: StoreConnection, case_id: UUID) -> UUID:
@@ -239,11 +244,14 @@ def test_a_run_without_a_stated_ceiling_gets_the_declared_default(
 
 
 @pytest.fixture
-def money_run(case: tuple[StoreConnection, UUID]) -> tuple[StoreConnection, UUID, UUID]:
+def money_run(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> tuple[StoreConnection, UUID, UUID]:
     conn, case_id = case
     run = _run_with_ceiling(conn, case_id)
     conn.commit()
-    return conn, run, start_attempt(conn, run, "CP-1")
+    approved_nodes(conn, run, tmp_path)
+    return conn, run, start_attempt(conn, run, NODES[0])
 
 
 def _accept(conn: StoreConnection, attempt: UUID, charge: Decimal) -> None:
@@ -300,13 +308,14 @@ def test_invalid_money_refuses_at_each_store_entrance(
 
 @pytest.mark.parametrize("value", ["0", "-0.00", "0.2500", "1e131071", "1e-16383"])
 def test_native_money_boundaries_round_trip_at_all_entrances(
-    case: tuple[StoreConnection, UUID], value: str
+    case: tuple[StoreConnection, UUID], value: str, tmp_path: Path
 ) -> None:
     conn, case_id = case
     amount = Decimal(value)
     run = start_run(conn, case_id, budget_ceiling=amount)
     conn.commit()
-    attempt = start_attempt(conn, run, "CP-1")
+    approved_nodes(conn, run, tmp_path)
+    attempt = start_attempt(conn, run, NODES[0])
     reserve(conn, attempt, amount)
     _accept(conn, attempt, amount)
     assert reserved_for(conn, attempt) == amount
@@ -327,7 +336,7 @@ def test_known_charge_raises_exposure_but_never_releases_a_reservation(
     _accept(conn, attempt, Decimal(charge))
     assert remaining(conn, run) == Decimal(left)
     assert reserved_for(conn, attempt) == Decimal(estimate)
-    next_attempt = start_attempt(conn, run, "CP-2")
+    next_attempt = start_attempt(conn, run, NODES[1])
     if Decimal(left) < 0:
         with pytest.raises(Refusal, match=r"^BUDGET_CEILING_REACHED$"):
             reserve(conn, next_attempt, Decimal(0))
@@ -343,26 +352,27 @@ def test_mixed_historical_exposure_counts_each_attempt_once(
 ) -> None:
     conn, run, unresolved = money_run
     reserve(conn, unresolved, Decimal("0.30"))
-    retry = start_attempt(conn, run, "CP-1")
+    retry = start_attempt(conn, run, NODES[0])
     reserve(conn, retry, Decimal("0.20"))
     _accept(conn, retry, Decimal("0.40"))
-    historical = start_attempt(conn, run, "CP-2")
+    historical = start_attempt(conn, run, NODES[1])
     _accept(conn, historical, Decimal("0.25"))
-    start_attempt(conn, run, "CP-3")
+    start_attempt(conn, run, NODES[2])
     assert remaining(conn, run) == Decimal("0.05")
     assert reserved_for(conn, unresolved) == Decimal("0.30")
     assert reserved_for(conn, historical) is None
 
 
 def test_remaining_is_independent_of_decimal_context(
-    case: tuple[StoreConnection, UUID],
+    case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
     conn, case_id = case
     run = start_run(
         conn, case_id, budget_ceiling=Decimal("1.000000000000000000000000000001")
     )
     conn.commit()
-    attempt = start_attempt(conn, run, "CP-1")
+    approved_nodes(conn, run, tmp_path)
+    attempt = start_attempt(conn, run, NODES[0])
     with localcontext() as context:
         context.prec = 2
         context.traps[Inexact] = context.traps[Rounded] = True

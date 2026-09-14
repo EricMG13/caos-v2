@@ -27,6 +27,7 @@ from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
+from server.store.gates import approved_run_input
 from server.store.outcomes import (
     CallOutcome,
     _attempt_owner,
@@ -182,6 +183,14 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
         return False
     if status is not RunStatus.RUNNING:
         return False
+    # Fresh authority in this locked unit: governed writes take the case lock
+    # first, so nothing can commit between this check and the insert.
+    _pin, route = approved_run_input(conn, run)
+    node = conn.execute(
+        "SELECT route_node_id FROM run_attempts WHERE attempt_id = %s", (attempt,)
+    ).fetchone()
+    if node is None or node[0] not in {n.route_node_id for n in route.nodes}:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     conn.execute(
         "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
         " model, generation_id)"

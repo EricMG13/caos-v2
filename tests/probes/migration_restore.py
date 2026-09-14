@@ -28,10 +28,13 @@ from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 import server.store as store
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute
 from server.evidence.read import read_block
 from server.store import MIGRATIONS, StoreConnection, apply_schema, connect
 from server.store.budget import remaining, reserve
 from server.store.extraction_integrity import _verify_extractions_v1
+from server.store.gates import Gate, GateApproval, approve_gate, gate_preview
+from server.store.members import Standing, grant
 from server.store.run_inputs import load_run_input, pin_run_input
 from server.store.runs import Accepted, accept_attempt, create_case, start_attempt
 
@@ -57,6 +60,29 @@ def _check_frozen(conn: StoreConnection, source: UUID | None) -> None:
                 with conn.transaction():
                     _insert(conn, table, source)
     assert _records(conn) == before
+
+
+def _approve(
+    conn: StoreConnection, case_id: UUID, run: UUID, route: ResolvedRoute
+) -> str:
+    """Acceptance requires every gate's current approval (Task17d3a); returns
+    the real CP-DR node."""
+    approver = uuid4()
+    grant(conn, case_id=case_id, user_id=approver, standing=Standing.APPROVER)
+    conn.commit()
+    for gate in Gate:
+        preview = gate_preview(conn, run, gate)
+        approve_gate(
+            conn,
+            GateApproval(
+                run_id=run,
+                gate=gate,
+                actor_id=approver,
+                preview_sha256=preview.preview_sha256,
+                input_fingerprint=preview.input_fingerprint,
+            ),
+        )
+    return next(n.route_node_id for n in route.nodes if n.module_id == "CP-DR")
 
 
 def _backup_schema(conn: StoreConnection, prefix_seven: bool) -> None:
@@ -101,11 +127,13 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:
                     case_id = create_case(
                         conn, BoundaryText.of("complete input restore")
                     )
-                    run, sources, bundle, _ = _prepare(conn, case_id, blobs.root)
+                    run, sources, bundle, route = _prepare(conn, case_id, blobs.root)
                     pin = pin_run_input(
                         conn, run, sources.version, bundle, {"q": "Café?"}
                     )
-                    attempt = start_attempt(conn, run, "CP-DR")
+                    attempt = start_attempt(
+                        conn, run, _approve(conn, case_id, run, route)
+                    )
                     reserve(conn, attempt, Decimal("0.25"))
                     accept_attempt(
                         conn,

@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -42,10 +43,12 @@ from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.budget import reserve
+from server.store.events import RunEvent, append
 from server.store.gates import (
     Gate,
     GateApproval,
     approve_gate,
+    approved_run_input,
     execution_input,
     gate_preview,
     withdraw_source,
@@ -57,7 +60,14 @@ from server.store.outcomes import (
     execution_reads,
     record_outcome,
 )
-from server.store.runs import complete_run, fail_run, start_attempt, start_run
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    complete_run,
+    fail_run,
+    start_attempt,
+    start_run,
+)
 
 __all__ = ["route"]
 
@@ -695,8 +705,10 @@ def test_module_provider_control_analyzes_in_one_locked_read_committed_unit(
         1,
     )
     assert idle_unlocked == [(TransactionStatus.IDLE, (True, True))]
-    assert [name for name, _ in stamps] == ["check", "input"]
-    assert stamps[0][1] == stamps[1][1]
+    # Pre-call input read, then one post-billing unit: check and input share a
+    # transaction the pre-call read did not.
+    assert [name for name, _ in stamps] == ["input", "check", "input"]
+    assert stamps[1][1] == stamps[2][1] != stamps[0][1]
     assert during == [
         (
             TransactionStatus.INTRANS,
@@ -749,9 +761,9 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
         )
     assert (module.value.code, completion.calls) == (
         RefusalCode.ROUTE_IDENTITY_INVALID,
-        1,
+        0,
     )
-    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _counts(harness) == (0, [], 0, 1, 1)
 
     arbitrary = _ArbitraryProvider(harness, lambda: None)
     with pytest.raises(Refusal) as runtime:
@@ -766,7 +778,7 @@ def test_whole_route_mismatch_keeping_the_node_is_refused(
         RefusalCode.ROUTE_IDENTITY_INVALID,
         0,
     )
-    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _counts(harness) == (0, [], 0, 1, 1)
     _still_running(harness)
 
 
@@ -775,7 +787,7 @@ def _assignment(harness: _Harness, provider: ModuleProvider) -> Assignment:
         return provider._assignment(harness.route.nodes[0])
 
 
-def test_direct_executor_refuses_module_before_the_call_and_node_before_analysis(
+def test_direct_executor_refuses_a_mismatched_module_before_any_call(
     harness: _Harness,
 ) -> None:
     completion = _DuringCompletion(_Completions(harness.source_id), lambda: None)
@@ -796,32 +808,10 @@ def test_direct_executor_refuses_module_before_the_call_and_node_before_analysis
         0,
     )
     assert _counts(harness) == (0, [], 0, 1, 1)
-
-    moved = replace(assignment.node, stage=assignment.node.stage + 7)
-    with pytest.raises(Refusal) as node:
-        execute_module(
-            harness.conn,
-            harness.bundle,
-            attempt_id=attempt,
-            assignment=replace(assignment, node=moved),
-            provider=completion,
-        )
-    assert (node.value.code, completion.calls) == (
-        RefusalCode.ROUTE_IDENTITY_INVALID,
-        1,
-    )
-    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert harness.conn.info.transaction_status is TransactionStatus.IDLE
     _still_running(harness)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="RED for Task17d3: pre-call identity compares node id and module, "
-    "not the whole pinned node, so a moved node is billed before refusal "
-    "(invariant 8)",
-)
 def test_direct_executor_refuses_a_moved_node_before_any_call(
     harness: _Harness,
 ) -> None:
@@ -887,9 +877,14 @@ def _fail_in_analysis(
 
     original = execution_input
 
+    reads = 0
+
     def failing(conn: StoreConnection, run_id: UUID, bundle: Bundle) -> object:
+        nonlocal reads
+        reads += 1
         result = original(conn, run_id, bundle)
-        failure()
+        if reads == 2:  # The post-billing read, not the pre-call one.
+            failure()
         return result
 
     monkeypatch.setattr(executor, "execution_input", failing)
@@ -1079,3 +1074,228 @@ def test_guard_is_restored_when_the_guarded_change_fails(harness: _Harness) -> N
                 "UPDATE run_routes SET resolved='{}' WHERE run_id=%s",
                 (harness.run_id,),
             )
+
+
+def test_accept_boundary_refuses_authority_revoked_after_the_runtime_check(
+    harness: _Harness,
+) -> None:
+    """A revocation committed after the runtime check refuses at acceptance."""
+    attempt = _reserved(harness)
+    record_outcome(
+        harness.conn,
+        attempt_id=attempt,
+        outcome=CallOutcome(REPORTED, MODEL, "gen-accept"),
+    )
+    _revoke_during_transport(harness)
+    digest = harness.blobs.put(b"{}")
+    with pytest.raises(Refusal) as refused:
+        accept_attempt(
+            harness.conn,
+            attempt_id=attempt,
+            accepted=Accepted(digest, REPORTED, MODEL, "gen-accept"),
+        )
+    assert (refused.value.code, refused.value.__cause__) == (
+        RefusalCode.GATE_APPROVAL_MISMATCH,
+        None,
+    )
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
+    _still_running(harness)
+
+
+def _billed(harness: _Harness, node: str | None = None) -> tuple[UUID, Accepted]:
+    """A reserved attempt whose bill is already committed, and its acceptance."""
+    node = node or harness.route.nodes[0].route_node_id
+    attempt = start_attempt(harness.conn, harness.run_id, node)
+    reserve(harness.conn, attempt, ESTIMATE)
+    record_outcome(
+        harness.conn, attempt_id=attempt, outcome=CallOutcome(REPORTED, MODEL, "gen")
+    )
+    return attempt, Accepted(harness.blobs.put(b"{}"), REPORTED, MODEL, "gen")
+
+
+def _accept_refused(harness: _Harness, attempt: UUID, accepted: Accepted) -> object:
+    try:
+        return accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+    except Refusal as refused:
+        assert refused.__cause__ is None
+        return refused.code
+
+
+_AT_ACCEPT = [
+    ("gate_mismatch_SOURCE_SET", RefusalCode.GATE_APPROVAL_MISMATCH),
+    ("gate_missing_RESEARCH_PLAN", RefusalCode.GATE_APPROVAL_MISMATCH),
+    ("actor_revoked_SOURCE_SET", RefusalCode.GATE_APPROVAL_MISMATCH),
+    ("actor_downgraded_RESEARCH_PLAN", RefusalCode.GATE_APPROVAL_MISMATCH),
+    ("withdraw_cited", RefusalCode.EVIDENCE_NOT_AVAILABLE),
+    ("withdraw_uncited", RefusalCode.EVIDENCE_NOT_AVAILABLE),
+    ("input_missing", RefusalCode.RUN_INPUT_INVALID),
+    ("input_corrupt", RefusalCode.RUN_INPUT_INVALID),
+    ("route_corrupt", RefusalCode.ROUTE_IDENTITY_INVALID),
+    ("failed", False),
+    ("complete", False),
+]
+
+
+@pytest.mark.parametrize("change,expected", _AT_ACCEPT)
+def test_accept_refuses_what_changed_after_the_bill_committed(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+    expected: object,
+) -> None:
+    """Governed and terminal changes committed after the bill never reach an
+    artifact; the bill stays."""
+    attempt, accepted = _billed(harness)
+    _mutation(harness, change, monkeypatch)()
+    assert _accept_refused(harness, attempt, accepted) == expected
+    assert harness.conn.info.transaction_status is TransactionStatus.IDLE
+    assert (_counts(harness), _lockable(harness)) == (
+        (1, [REPORTED], 0, 1, 1),
+        (True, True),
+    )
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
+    if change in {"failed", "complete"}:
+        with connect(harness.url) as observer:
+            status = observer.execute(
+                "SELECT status FROM runs WHERE run_id=%s", (harness.run_id,)
+            ).fetchone()
+        assert status == (change.upper(),)
+        assert _events(harness, "RUN_" + change.upper()) == 1
+    else:
+        _still_running(harness)
+
+
+@pytest.mark.parametrize("terminal", [None, complete_run])
+def test_exact_replay_never_rechecks_authority_or_duplicates(
+    harness: _Harness, terminal: Callable[[StoreConnection, UUID], bool] | None
+) -> None:
+    attempt, accepted = _billed(harness)
+    assert accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+    if terminal is not None:
+        assert terminal(harness.conn, harness.run_id)
+    _revoke_during_transport(harness)
+    assert accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted) is False
+    with pytest.raises(Refusal) as conflict:
+        accept_attempt(
+            harness.conn,
+            attempt_id=attempt,
+            accepted=replace(accepted, artifact_sha256="c" * 64),
+        )
+    assert conflict.value.code is RefusalCode.CALL_OUTCOME_CONFLICT
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 1
+
+
+def test_accept_waits_for_a_case_lock_holder_then_sees_its_revocation(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The holder takes the case lock after the bill commits, so the wait lands
+    on acceptance's own lock rather than the bill replay."""
+    from test_case_ordering import _wait_for_blocking
+
+    attempt, accepted = _billed(harness)
+    harness.conn.execute("SET statement_timeout = '5s'")
+    harness.conn.commit()
+    released: list[Future[None]] = []
+
+    def release(holder: StoreConnection) -> None:
+        _wait_for_blocking(holder, harness.conn)
+        holder.commit()
+
+    with connect(harness.url) as holder, ThreadPoolExecutor(max_workers=1) as pool:
+
+        def billed(
+            conn: StoreConnection, *, attempt_id: UUID, outcome: CallOutcome
+        ) -> bool:
+            result = record_outcome(conn, attempt_id=attempt_id, outcome=outcome)
+            revoke(holder, case_id=harness.case_id, user_id=harness.approver)
+            released.append(pool.submit(release, holder))
+            return result
+
+        monkeypatch.setattr("server.store.runs.record_outcome", billed)
+        seen = _accept_refused(harness, attempt, accepted)
+        released[0].result(timeout=6)
+    assert seen == RefusalCode.GATE_APPROVAL_MISMATCH
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
+    _still_running(harness)
+
+
+def test_accept_holds_the_case_lock_from_the_authority_check_to_the_insert(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A revocation started after the check waits, and the insert shares the
+    check's transaction, so it cannot commit in between."""
+    from test_case_ordering import _wait_for_blocking
+
+    attempt, accepted = _billed(harness)
+    revoking: list[Future[None]] = []
+    unit: list[object] = []
+    with connect(harness.url) as other, ThreadPoolExecutor(max_workers=1) as pool:
+        other.execute("SET statement_timeout = '5s'")
+        other.commit()
+
+        def revoke_now() -> None:
+            revoke(other, case_id=harness.case_id, user_id=harness.approver)
+            other.commit()
+
+        def checked(conn: StoreConnection, run_id: UUID) -> object:
+            result = approved_run_input(conn, run_id)
+            unit.append(conn.execute("SELECT pg_current_xact_id()").fetchone())
+            revoking.append(pool.submit(revoke_now))
+            _wait_for_blocking(conn, other)
+            return result
+
+        def inserted(conn: StoreConnection, run_id: UUID, event: RunEvent) -> None:
+            # Same transaction as the check, so its lock was never released.
+            assert unit == [conn.execute("SELECT pg_current_xact_id()").fetchone()]
+            append(conn, run_id, event)
+
+        monkeypatch.setattr("server.store.runs.approved_run_input", checked)
+        monkeypatch.setattr("server.store.runs.append", inserted)
+        assert accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+        revoking[0].result(timeout=6)
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 1
+
+
+@pytest.mark.parametrize("failure", ["sql", "interrupt"])
+def test_failure_inside_accept_leaves_the_bill_and_no_artifact(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    attempt, accepted = _billed(harness)
+
+    def failing(conn: StoreConnection, run_id: UUID) -> object:
+        approved_run_input(conn, run_id)
+        if failure == "sql":
+            conn.execute("SELECT 1/0")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("server.store.runs.approved_run_input", failing)
+    with pytest.raises(Refusal if failure == "sql" else KeyboardInterrupt) as raised:
+        accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+    if isinstance(raised.value, Refusal):
+        assert (raised.value.code, raised.value.__cause__) == (
+            RefusalCode.STORE_UNAVAILABLE,
+            None,
+        )
+    assert harness.conn.closed or (
+        harness.conn.info.transaction_status is TransactionStatus.IDLE
+    )
+    assert (_counts(harness), _lockable(harness)) == (
+        (1, [REPORTED], 0, 1, 1),
+        (True, True),
+    )
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
+    _still_running(harness)
+
+
+def test_accept_refuses_a_node_outside_the_stored_route(harness: _Harness) -> None:
+    attempt, accepted = _billed(harness, "NOT-A-ROUTE-NODE")
+    assert _accept_refused(harness, attempt, accepted) == (
+        RefusalCode.ROUTE_IDENTITY_INVALID
+    )
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _events(harness, "ATTEMPT_ACCEPTED") == 0
+    _still_running(harness)

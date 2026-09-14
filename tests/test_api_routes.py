@@ -28,6 +28,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from test_run_events import approved_nodes
 
 from server.api import app as app_module
 from server.api.app import (
@@ -490,7 +491,7 @@ def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
     conn, _case_id = case
     run_id, viewer = run
     route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
-    pin_route(conn, run_id, route)
+    approved_nodes(conn, run_id, tmp_path / "blobs", route=route)
     _accept_gate(
         conn,
         run_id,
@@ -526,7 +527,7 @@ def test_a_stored_gate_map_the_host_cannot_bound_is_a_server_fault(
     conn, _case_id = case
     run_id, viewer = run
     route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
-    pin_route(conn, run_id, route)
+    approved_nodes(conn, run_id, tmp_path / "blobs", route=route)
     _accept_gate(conn, run_id, route, tmp_path, "READY")
 
     response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
@@ -707,13 +708,16 @@ def test_each_request_path_declares_what_it_costs_the_store(
 
 
 def test_the_tail_is_served_as_an_event_stream(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """The transport half of `server/api/stream.py`: the same contract, now over
     a socket."""
     conn, _case_id = case
     run_id, viewer = run
-    _finish(conn, run_id)
+    _finish(conn, run_id, tmp_path)
 
     response = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer))
 
@@ -721,6 +725,8 @@ def test_the_tail_is_served_as_an_event_stream(
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.headers["cache-control"] == "no-store"
     assert [name for _, name in _sse(response.text)] == [
+        "ROUTE_PINNED",
+        "INPUT_PINNED",
         "ATTEMPT_STARTED",
         "CALL_OUTCOME_RECORDED",
         "ATTEMPT_ACCEPTED",
@@ -729,56 +735,65 @@ def test_the_tail_is_served_as_an_event_stream(
 
 
 def test_every_frame_carries_an_id_and_a_name_and_no_state(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """The client never reads a payload -- a name triggers a refetch. A payload
     on the wire would be a second copy of state the client is about to fetch
     properly, and the first thing to go stale."""
     conn, _case_id = case
     run_id, viewer = run
-    _finish(conn, run_id)
+    _finish(conn, run_id, tmp_path)
 
     text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
 
     assert [line for line in text.splitlines() if line.startswith("data:")] == [
         "data: {}"
-    ] * 4
-    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3", "4"]
+    ] * 6
+    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3", "4", "5", "6"]
 
 
 def test_last_event_id_resumes_after_the_marker(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """`Last-Event-ID` is the last event the client actually received, so
     delivery starts strictly after it. Re-delivering it would make a client that
     refetches on every name do the work twice."""
     conn, _case_id = case
     run_id, viewer = run
-    _finish(conn, run_id)
+    _finish(conn, run_id, tmp_path)
 
     text = client.get(
-        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "3"}
+        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "5"}
     ).text
 
     assert [name for _, name in _sse(text)] == ["RUN_COMPLETE"]
 
 
 def test_a_last_event_id_that_is_not_a_number_starts_from_the_beginning(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """A resume marker is a browser-supplied string. Refusing the connection
     would strand a client that can only fix it by clearing storage; starting
     over re-delivers, which is what the contract already tolerates."""
     conn, _case_id = case
     run_id, viewer = run
-    _finish(conn, run_id)
+    _finish(conn, run_id, tmp_path)
 
     text = client.get(
         f"/api/runs/{run_id}/events",
         headers={**_as(viewer), "last-event-id": "; DROP TABLE runs"},
     ).text
 
-    assert len(_sse(text)) == 4
+    assert len(_sse(text)) == 6
 
 
 def test_an_unauthorised_tail_is_the_same_private_404(
@@ -909,9 +924,10 @@ def test_startup_applies_the_declared_schema(
     assert applied[0] == 4
 
 
-def _finish(conn: StoreConnection, run_id: UUID) -> None:
-    """Four events: started, outcome recorded, accepted, complete."""
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+def _finish(conn: StoreConnection, run_id: UUID, tmp_path: Path) -> None:
+    """Six events: two pins, started, outcome recorded, accepted, complete."""
+    nodes = approved_nodes(conn, run_id, tmp_path / "blobs")
+    attempt_id = start_attempt(conn, run_id, next(iter(nodes.values())))
     complete_attempt(
         conn,
         attempt_id=attempt_id,
