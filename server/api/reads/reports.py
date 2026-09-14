@@ -10,15 +10,7 @@ from fastapi import APIRouter, Depends
 from server.api.deps import Blobs, Caller, Methodology, Store
 from server.api.reads.analysis import RunQuery
 from server.api.reads.upload import READ_REQUIRES, CasePath
-from server.api.wire import (
-    Chrome,
-    CommitteeBody,
-    CommitteeDocument,
-    ReportBody,
-    ReportDocument,
-    ServedRole,
-    Subject,
-)
+from server.api.wire import CommitteeDocument, ReportDocument
 from server.deliverable.filing import _signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
@@ -125,16 +117,13 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
             if sha256(data).hexdigest() != digest:
                 raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
             payload = json.loads(data)
-        body = _body(payload, digest)
         return dict(
-            chrome=Chrome(
-                subject=Subject(case_id=case_id, title=payload["case_title"]),
-                served_role=ServedRole(global_role=actor.role, standing=standing),
+            chrome=dict(
+                subject=dict(case_id=case_id, title=payload["case_title"]),
+                served_role=dict(global_role=actor.role, standing=standing),
                 actions=[],
             ),
-            body=CommitteeBody(**body, **publication)
-            if committee
-            else ReportBody(**body),
+            body={**_body(payload, digest), **publication},
             observed_at=observed_at,
             observed_empty=False,
             status="complete",
@@ -146,7 +135,11 @@ def _publication(
     conn: Store, case_id: UUID, revision: UUID, digest: str
 ) -> dict[str, Any]:
     row = conn.execute(
-        "SELECT p.payload_sha256,frozen_by,filed_by,filed_at,c.receipt_sha256"
+        "SELECT p.payload_sha256,frozen_by,filed_by,filed_at,"
+        " c.receipt_sha256 IS NOT NULL OR EXISTS (SELECT 1 FROM audit_events e"
+        " LEFT JOIN deliverable_receipts r ON r.case_id=e.case_id"
+        " AND r.filed_event_sha256=e.entry_sha256 WHERE e.case_id=p.case_id"
+        " AND e.action='DELIVERABLE_FILED' AND r.revision_id IS NULL)"
         " FROM deliverable_publications p LEFT JOIN deliverable_receipts c"
         " USING (case_id,revision_id)"
         " WHERE case_id=%s AND revision_id=%s",
@@ -154,7 +147,7 @@ def _publication(
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
-    frozen_digest, freezer, filer, filed_at, receipt_digest = row
+    frozen_digest, freezer, filer, filed_at, filing_evidence = row
     signatures = _signatures(conn, case_id, revision)
     signers = [who for who, _ in signatures]
     if (
@@ -163,7 +156,7 @@ def _publication(
         or freezer in signers
         or any(signed != digest for _, signed in signatures)
         or (filer is None) != (filed_at is None)
-        or (filer is None and receipt_digest is not None)
+        or (filer is None and filing_evidence)
     ):
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
     bound = _digest_of({"revision_id": str(revision), "payload_sha256": digest})
