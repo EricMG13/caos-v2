@@ -33,10 +33,26 @@ from server.refusals import Refusal, RefusalCode
 # Both sets are enforced together at one point, `gates.require_adapter_route`
 # (execution input and acceptance); the readers below check modules alone.
 # Extending the adapter means extending both, with the contract tests.
-ADAPTER_MODULES = frozenset({"CP-0", "CP-L10", "CP-5"})
+ADAPTER_MODULES = frozenset(
+    {
+        "CP-0",
+        "CP-L10",
+        "CP-5",
+        "CP-1",
+        "CP-4",
+        "CP-1C",
+        "CP-2A",
+        "CP-3D",
+        "CP-2",
+        "CP-2G",
+        "CP-3",
+    }
+)
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
 # work item 6): adapter modules on any other pathway stay disabled.
-ADAPTER_ROUTES = frozenset({("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")})
+ADAPTER_ROUTES = frozenset(
+    {("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE"), ("FULL_CREDIT_32", "RELATIVE_VALUE")}
+)
 GATE_MODULE = "CP-0"
 ZERO_SHA256 = "0" * 64
 # The vendor's frozen reader limits (CREDIT_OS_RUNTIME_LIMITS_v1).
