@@ -18,7 +18,7 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from test_store_schema import _columns, _legacy, _populate, _records
+from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 
 from server.blobs import BlobStore
 from server.evidence.read import read_block
@@ -28,7 +28,7 @@ _ADMIN = "postgresql://postgres:local-test-admin-only@127.0.0.1:55437/postgres"
 _CONTAINER = "caos-workbench-dev-test-postgres-1"
 
 
-def main() -> None:
+def main(*, migrated: bool = False) -> None:
     docker = shutil.which("docker")
     assert docker is not None, "Docker CLI required for this manual proof"
     env = {
@@ -58,8 +58,11 @@ def main() -> None:
             with connect(_ADMIN.rsplit("/", 1)[0] + "/" + original) as conn:
                 _legacy(conn)
                 digest = _populate(conn, blobs)
+                if migrated:
+                    apply_schema(conn)
                 columns = _columns(conn)
                 before = _records(conn, columns)
+                catalog = _catalog(conn)
             dump = subprocess.run(  # nosec B603
                 [
                     docker,
@@ -106,6 +109,7 @@ def main() -> None:
             )
             with connect(_ADMIN.rsplit("/", 1)[0] + "/" + restored) as conn:
                 assert _records(conn, columns) == before
+                assert _catalog(conn) == catalog
                 apply_schema(conn)
                 assert _records(conn, columns) == before
                 assert conn.execute(
@@ -142,7 +146,7 @@ def main() -> None:
             print(
                 f"PASS dump={len(dump)} bytes; {original} -> {restored};"
                 f" version={len(MIGRATIONS)}; rows/blobs intact;"
-                " legacy provenance UNKNOWN"
+                f" migrated_backup={migrated}; legacy provenance UNKNOWN"
             )
         finally:
             for name in reversed(created):
@@ -156,3 +160,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    main(migrated=True)

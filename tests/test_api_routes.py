@@ -22,6 +22,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from conftest import route_fault
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
@@ -662,6 +663,23 @@ def test_the_reported_digest_is_the_one_that_was_pinned(
     body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
 
     assert body["route_digest"] == pinned == pinned_route(conn, run_id)
+
+
+def test_corrupt_route_is_a_sanitized_store_failure(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+) -> None:
+    conn, _ = case
+    run_id, viewer = run
+    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW"))
+    with route_fault(conn):
+        conn.execute("UPDATE run_routes SET route_digest = 'synthetic-corruption'")
+    conn.commit()
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+    assert response.status_code == 503
+    assert response.json() == {"refusal": "ROUTE_IDENTITY_INVALID"}
 
 
 def test_each_request_path_declares_what_it_costs_the_store(
