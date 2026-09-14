@@ -33,6 +33,7 @@ from hashlib import sha256
 from json import dumps
 from typing import Any
 
+from server.methodology.host_pin import HOST_MANIFEST_SHA256
 from server.refusals import Refusal, RefusalCode
 
 
@@ -208,12 +209,16 @@ def resolve_route(
             Edge(source=owner, target=MODEL_MODULE, type=EdgeType.REQUIRED)
             for owner in MODEL_OWNERS
         )
+    frozen = dict(predicates or {})
+    if extended.model_extension:
+        frozen["host_manifest_sha256"] = HOST_MANIFEST_SHA256
+        edges += (Edge(GATE_MODULE, MODEL_MODULE, EdgeType.REQUIRED),)
     return ResolvedRoute(
         profile_id=profile_id,
         selection_id=selection_id,
         nodes=dependency_order(nodes, edges),
         edges=edges,
-        predicates=tuple(sorted((predicates or {}).items())),
+        predicates=tuple(sorted(frozen.items())),
     )
 
 
