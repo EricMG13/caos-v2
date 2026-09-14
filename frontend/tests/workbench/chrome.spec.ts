@@ -7,7 +7,7 @@ import {
 } from "../../scripts/fixture-routes.mjs";
 
 // Every enabled section reads the v1 wire (brief 4.1, decision 9; slices
-// 4.1h-j). `composeChrome` (decision 5) composes an empty `ribbon.actions`
+// 4.1h-k). `composeChrome` (decision 5) composes an empty `ribbon.actions`
 // for every one of them, because 4.1 offers no action; a still-disabled
 // section never reaches a ribbon at all.
 const V1_SECTIONS = ENABLED_SECTIONS;
