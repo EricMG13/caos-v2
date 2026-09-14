@@ -87,13 +87,19 @@ export function RevisionEditor({
               <span className={`tag${paragraph.kind === "ANALYST_JUDGMENT" ? " acc" : ""}`}>
                 ¶{index + 1} · {kindLabel(paragraph)}
               </span>{" "}
-              {segments(paragraph.text, paragraph.figures).map((segment, i) =>
-                segment.figure ? (
+              {segments(paragraph.text, paragraph.figures).map((segment, i) => {
+                // A figure not found in this paragraph's own text is never
+                // rendered inline: doing so would insert a value the text
+                // never stated (REPAIR_PLAN F12). It still appears in the
+                // Figures register (ReportViews.tsx), which reads
+                // paragraph.figures directly.
+                if (segment.figure && !segment.placed) return null;
+                return segment.figure ? (
                   <FigureMark key={i} paragraph={paragraph} figure={segment.figure} />
                 ) : (
                   <span key={i}>{segment.text}</span>
-                ),
-              )}
+                );
+              })}
             </p>
           ))}
         </article>
