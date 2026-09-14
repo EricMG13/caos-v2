@@ -12,13 +12,12 @@ is what makes "whole or not at all" true, and a refusal leaves it to roll back.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
 from uuid import UUID, uuid4
-
-from pdfminer.pdfdocument import PDFEncryptionError
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -32,6 +31,12 @@ from server.evidence.extract import (
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.cases import lock_case
+
+# pdfminer logs tokens and content-stream operands at DEBUG and WARNING, which is
+# document text. Never let it reach this process's handlers.
+_PDFMINER = logging.getLogger("pdfminer")
+_PDFMINER.addHandler(logging.NullHandler())
+_PDFMINER.propagate = False
 
 # One block per line while small. `SYSTEM_SPEC.md` section 5 bounds line groups
 # once a document is not small; this build packs a line per block and the group
@@ -141,13 +146,22 @@ def _extract(
         tokens = reader.extract(document.data)
     except Refusal as refusal:
         code = refusal.code
-    except PDFEncryptionError:
-        code = RefusalCode.SOURCE_ENCRYPTED
-    except Exception:  # noqa: BLE001 -- untrusted bytes; any failure is a code
-        code = RefusalCode.SOURCE_NOT_READABLE
+    except MemoryError:
+        raise  # the process, not the document
+    except Exception as failure:  # noqa: BLE001 -- untrusted bytes; any failure is a code
+        code = _code_for(failure)
     if code is not None:
         raise Refusal(code) from None
     return identity, tokens
+
+
+def _code_for(failure: Exception) -> RefusalCode:
+    # Imported here so plain-text admission never loads pdfminer.
+    from pdfminer.pdfdocument import PDFEncryptionError
+
+    if isinstance(failure, PDFEncryptionError):
+        return RefusalCode.SOURCE_ENCRYPTED
+    return RefusalCode.SOURCE_NOT_READABLE
 
 
 def _identity(reader: Extractor) -> str:

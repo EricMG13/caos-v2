@@ -215,3 +215,23 @@ def test_a_refusal_and_its_logs_carry_no_document_text(
         assert word not in rendered
         assert word not in caplog.text
     assert _rows(conn) == 0
+
+
+def test_pdfminer_never_logs_document_text_through_this_process(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """pdfminer logs content-stream tokens at DEBUG; none may reach a handler."""
+    import server.evidence.ingest  # noqa: F401 -- installs the guard
+
+    with caplog.at_level(logging.DEBUG):
+        PdfExtractor().extract(PDF)
+    assert SECRET not in caplog.text
+    assert not [r for r in caplog.records if r.name.startswith("pdfminer")]
+
+
+def test_plain_text_beginning_with_a_pdf_header_is_read_as_pdf_and_refused() -> None:
+    """Deliberate (§44.6): bytes that declare a PDF are parsed as one; a memo
+    quoting a PDF header in its first kilobyte is refused, never re-read as
+    text, so a corrupt PDF cannot be admitted as garbage tokens."""
+    memo = b"%PDF-1.7 is the version our template uses.\n" + SECRET.encode()
+    assert isinstance(dispatch_by_content(memo), PdfExtractor)
