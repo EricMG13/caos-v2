@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import psycopg
@@ -14,6 +15,9 @@ from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import reserved_for, validate_spend
 from server.store.events import RunEvent, append, lock_run
+
+if TYPE_CHECKING:
+    from server.store.work import Lease
 
 
 def require_idle(conn: StoreConnection) -> None:
@@ -112,12 +116,20 @@ def check_attempt(
 
 
 def check_call(
-    conn: StoreConnection, *, attempt_id: UUID, run_id: UUID, route_node_id: str
+    conn: StoreConnection,
+    *,
+    attempt_id: UUID,
+    run_id: UUID,
+    route_node_id: str,
+    lease: Lease | None = None,
 ) -> None:
     """Require this unused reserved attempt. Caller owns the read transaction.
 
     Absence checks are not a concurrent call claim or crash/retry certainty.
+    The lease check is a non-locking read that stops a knowingly stale call;
+    the fenced writes, not this read, are the guarantee (brief 4.3 D3).
     """
+    _lease_seen(conn, run_id, lease)
     check_attempt(
         conn,
         attempt_id=attempt_id,
@@ -136,6 +148,16 @@ def check_call(
         (attempt_id, attempt_id),
     ).fetchone():
         raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
+
+
+def _lease_seen(conn: StoreConnection, run_id: UUID, lease: Lease | None) -> None:
+    row = conn.execute(
+        "SELECT state, lease_token FROM run_work WHERE run_id = %s", (run_id,)
+    ).fetchone()
+    if row is None and lease is None:
+        return
+    if lease is None or row != ("CLAIMED", lease.token) or lease.run_id != run_id:
+        raise Refusal(RefusalCode.LEASE_NOT_HELD)
 
 
 @dataclass(frozen=True, slots=True)

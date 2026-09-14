@@ -35,6 +35,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import check_call, execution_reads
 from server.store.run_inputs import load_run_input
+from server.store.work import Lease
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,8 @@ class ModuleProvider:
     completions: CompletionProvider
     route: ResolvedRoute
     run_id: UUID
+    # The lease `run_route` writes under; its pre-transport check reads it.
+    lease: Lease | None = None
 
     @property
     def model(self) -> str:
@@ -94,6 +97,7 @@ class ModuleProvider:
                 attempt_id=attempt_id,
                 run_id=self.run_id,
                 route_node_id=route_node_id,
+                lease=self.lease,
             )
             pin = load_run_input(self.conn, self.run_id)
         node = self._node(route_node_id, module_id)

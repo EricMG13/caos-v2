@@ -59,6 +59,7 @@ from server.store.gates import Gate, withdraw_source
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route
 from server.store.runs import run_status, start_run
+from server.store.work import Lease
 
 ESTIMATE = Decimal("0.10")
 # What `CanonicalCompletions` reports per call unless told otherwise.
@@ -348,10 +349,14 @@ def test_the_final_pre_call_check_sees_a_late_revocation(
     reservations = 0
 
     def reserve_then_revoke(
-        connection: StoreConnection, attempt_id: UUID, amount: Decimal
+        connection: StoreConnection,
+        attempt_id: UUID,
+        amount: Decimal,
+        *,
+        lease: Lease | None = None,
     ) -> None:
         nonlocal reservations
-        original(connection, attempt_id, amount)
+        original(connection, attempt_id, amount, lease=lease)
         reservations += 1
         if reservations == 2:
             revoke(connection, case_id=case_id, user_id=UUID(str(actor[0])))

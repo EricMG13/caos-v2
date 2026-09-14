@@ -58,6 +58,7 @@ from server.store.runs import (
     complete_run,
     start_attempt,
 )
+from server.store.work import Lease
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +112,9 @@ class Execution:
     provider: Provider
     price: ModelPrice
     bundle: Bundle
+    # The worker's claim on this run; None is a direct caller (harness, tests),
+    # which may drive only a run that was never enqueued (brief 4.3 D3).
+    lease: Lease | None = None
 
 
 def run_route(
@@ -147,7 +151,7 @@ def run_route(
                 conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=ready
             )
         if blocked:
-            block_run(conn, run_id)
+            block_run(conn, run_id, lease=execution.lease)
             return
         if not ready:
             break
@@ -167,9 +171,9 @@ def run_route(
         accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
         states = node_states(route, accepted, named)
     if all(state is NodeState.COMPLETE for state in states.values()):
-        complete_run(conn, run_id)
+        complete_run(conn, run_id, lease=execution.lease)
     else:
-        block_run(conn, run_id)
+        block_run(conn, run_id, lease=execution.lease)
 
 
 def accepted_artifacts(
@@ -255,8 +259,9 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
     # The whole prompt is built and bounded while nothing is started or set
     # aside: an over-ceiling context costs no attempt, reservation or call.
     execution.provider.check_context(route_node_id, module_id)
-    attempt_id = start_attempt(conn, run_id, route_node_id)
-    reserve(conn, attempt_id, worst_case(execution.price))
+    lease = execution.lease
+    attempt_id = start_attempt(conn, run_id, route_node_id, lease=lease)
+    reserve(conn, attempt_id, worst_case(execution.price), lease=lease)
 
     _execution_route(conn, run_id, route, execution.bundle)
     try:
@@ -274,7 +279,7 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
             run_id=run_id,
             route=route,
             node=route_node_id,
-            bundle=execution.bundle,
+            execution=execution,
         )
         return False
 
@@ -303,6 +308,7 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
             diagnostic_sha256=result.diagnostic_sha256,
             record_sha256=result.record_sha256,
         ),
+        lease=lease,
     )
     return True
 
@@ -314,7 +320,7 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
     run_id: UUID,
     route: ResolvedRoute,
     node: str,
-    bundle: Bundle,
+    execution: Execution,
 ) -> None:
     """End the run BLOCKED on a validated Blocked handoff (brief correction 6).
 
@@ -326,14 +332,14 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
         blocked = blocked_verdict(
             conn,
             blobs,
-            bundle,
+            execution.bundle,
             run_id=run_id,
             route=route,
             route_node_ids=(node,),
         )
     if not blocked:
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
-    block_run(conn, run_id)
+    block_run(conn, run_id, lease=execution.lease)
 
 
 def _execution_route(
