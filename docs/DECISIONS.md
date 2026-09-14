@@ -1456,3 +1456,31 @@ safe outcomes" did not hold. A child uses only the standard library and touches
 no transaction, so the failure mode §44.2 feared (a killed worker
 mid-transaction) does not arise; the probes after the change refused at 2.0 s
 and in 0.2 s.
+
+## 2026-09-14 §48 — CI installs with uv, runs once per pull request update and holds a read-only token
+
+**Decision.** Four changes to `.github/workflows/ci.yml`; no required check,
+threshold, scanner rule or job name changes.
+
+1. **`push` runs on `main` only.** A pull request's commits are checked by its
+   `pull_request` run. A branch pushed with no pull request open gets no CI
+   until one is opened.
+2. **The workflow token is `contents: read`** unless a job widens it; only
+   `security` does, to read pull requests for gitleaks.
+3. **One pin per action.** Every job uses `actions/checkout` v7.0.1,
+   `actions/setup-python` v7.0.0 and `actions/upload-artifact` v7.0.1, each
+   commit-pinned.
+4. **`astral-sh/setup-uv` v10.1.0**, commit-pinned, installs uv 0.12.5 (the
+   version `make venv` uses locally) with its download cache keyed on the
+   job's lock. Every Python job runs `uv pip install --system --require-hashes
+   --only-binary :all:` into the interpreter `setup-python` provides, in place
+   of `pip install` and its cache.
+
+**Reason.** A push to a branch with an open pull request started two full
+runs whose refs differ, so `cancel-in-progress` cancelled neither. The
+default token may carry write scopes no job uses. Mixed action versions are
+two things to maintain per action. uv is what the Makefile already installs
+with, and it resolves and installs the same hashed, wheels-only locks faster.
+
+**Rollback.** Revert the workflow commit; nothing outside the workflow
+depends on these changes.

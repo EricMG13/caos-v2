@@ -18,11 +18,19 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+  # main only: a branch with an open pull request is checked by its
+  # pull_request run, and a second push-triggered run of the same head would
+  # sit in a different concurrency group and never be cancelled.
   push:
+    branches: [main]
   pull_request:
     # Declared, not defaulted: a draft pull request produced no run under the
     # default set, and marking it ready would not have started one.
     types: [opened, synchronize, reopened, ready_for_review]
+
+# Read-only token unless a job widens it (security reads pull requests).
+permissions:
+  contents: read
 
 # One run per ref. A push that supersedes a running check cancels it, so the
 # check on a branch is always the check of its head, never of a stale one.
@@ -37,16 +45,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.14"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
       # --only-binary :all: — a source distribution runs its own setup code at
       # install time, which is not code this repository reviewed (SonarQube
       # githubactions:S8541). Every pinned dependency publishes a wheel; the
       # other jobs below (including security's requirements-security.txt)
       # carry the same flag on the same install.
-      - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
       - run: ruff check .
       - run: ruff format --check .
       - run: python scripts/check_vocabulary.py
@@ -58,11 +68,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.14"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-      - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
       # mypy re-validates every cached module against its source hash, so a
       # stale cache costs time, never a missed error.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -86,11 +98,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.14"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-      - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
       # Writes coverage.xml; the flags are in pyproject.toml so this and a
       # local run produce the same report. -n auto: one worker per core, each
       # minting its own databases (docs/DECISIONS.md section 43).
@@ -126,14 +140,16 @@ jobs:
           --health-cmd pg_isready --health-interval 5s --health-retries 10
         ports: ["5432:5432"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.14"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
       # --only-binary :all: — see the lint job above.
-      - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
       - run: pytest tests/test_postgres_races.py
         env:
           CAOS_TEST_POSTGRES_URL: postgresql://postgres:caos@localhost:5432/caos
@@ -157,7 +173,7 @@ jobs:
     steps:
       # Blame is what assigns a line to the new-code period the quality gate
       # judges, and a depth-1 clone has no blame to read.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {fetch-depth: 0}
       # Lands coverage.xml at the root, where sonar-project.properties says it is.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -195,13 +211,15 @@ jobs:
           --health-cmd pg_isready --health-interval 5s --health-retries 10
         ports: ["5432:5432"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.14"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-      - run: "pip install --require-hashes --only-binary :all: -r requirements-dev.txt"
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
       - run: pytest --live-provider -m live_provider
         env:
           # The key is a repository secret and the model id a repository
@@ -223,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Layers are cached in GitHub's cache (docs/DECISIONS.md section 43): the
       # apt and pip layers rebuild only when the base digest or the lock moves.
       # load: the image stays local for Trivy and is never pushed.
@@ -274,11 +292,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {fetch-depth: 0}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.12"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements-security.txt
-      - run: "pip install --require-hashes --only-binary :all: -r requirements-security.txt"
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-security.txt
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-security.txt"
       # `|| true` so the floor check, not bandit's exit code, is the verdict:
       # a report that parsed nothing must fail even when it found nothing.
       - run: bandit -r scripts server -f json -o bandit.json || true
@@ -352,7 +372,7 @@ jobs:
       - run: ./node_modules/.bin/playwright install --with-deps
       - run: npm run a11y
       - run: npm run test:workbench
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: frontend-evidence
