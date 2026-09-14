@@ -1,11 +1,25 @@
+// `useCommand` and `useRunRefetch` (controls.tsx) are exercised end-to-end
+// below: every click on a rendered control drives `useCommand`'s intent
+// lifecycle, and every command's success drives `useRunRefetch`'s
+// GET-after-success — neither is imported directly, since a hook is reached
+// by the component that calls it, not by its own name. `actionOf` is
+// imported directly below and given its own small, direct test.
 import { readFileSync } from "node:fs";
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { actionOf } from "@/sections/run/controls";
 import { RunSection } from "@/sections/run/RunSection";
 import { COL_GAP, NODE_H, NODE_W, ROW_H, edgesOf, layoutRoute } from "@/sections/run/RouteGraph";
 import { parseRunSectionDocument } from "@/wire/v1";
 import type { NodeState } from "@/wire";
 import type { RunSectionDocument } from "@/wire/v1";
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
 
 const load = (path: string): unknown =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -24,6 +38,17 @@ function mount(document: RunSectionDocument) {
     </MemoryRouter>,
   );
 }
+
+/** A document with exactly these served actions, everything else unchanged —
+    every action absent from the list is `ACTION_UNPLACED`. */
+function withActions(
+  document: RunSectionDocument,
+  actions: RunSectionDocument["chrome"]["actions"],
+): RunSectionDocument {
+  return { ...document, chrome: { ...document.chrome, actions } };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const BUNDLE: NodeState[] = ["COMPLETE", "RUNNABLE", "RESTRICTED", "BLOCKED"];
 
@@ -186,6 +211,261 @@ describe("Run", () => {
       "data-state",
       "RUNNABLE",
     );
+  });
+
+  test("test_a_refused_action_renders_its_code_and_clearance_and_is_not_hidden", () => {
+    const doc = withActions(running, [
+      {
+        action: "PIN_RUN_INPUT",
+        refusal: { code: "RUN_NOT_RUNNING", clears: "the run is RUNNING" },
+      },
+    ]);
+    const { container } = mount(doc);
+    const pin = container.querySelector('[data-action="PIN_RUN_INPUT"]')!;
+    expect(pin).not.toBeNull();
+    expect(pin).toHaveAttribute("aria-disabled", "true");
+    expect(pin).toHaveAttribute("data-refusal", "RUN_NOT_RUNNING");
+    const reason = pin.nextElementSibling;
+    expect(reason).toHaveTextContent("RUN_NOT_RUNNING");
+    expect(reason).toHaveTextContent("clears when the run is RUNNING");
+  });
+
+  test("test_an_action_absent_from_served_actions_is_action_unplaced_not_available", () => {
+    // A served `refusal: null` and an entry missing entirely both look
+    // "not refused" if coerced together; they must not be. Absent here means
+    // unavailable, shown the same visible way as any other refusal.
+    const doc = withActions(running, []);
+    const { container } = mount(doc);
+    const pin = container.querySelector('[data-action="PIN_RUN_INPUT"]')!;
+    expect(pin).toHaveAttribute("aria-disabled", "true");
+    expect(pin).toHaveAttribute("data-refusal", "ACTION_UNPLACED");
+  });
+
+  test("test_no_run_offers_a_create_run_control_from_route_choices", () => {
+    const empty: RunSectionDocument = withActions(
+      {
+        ...routeNotPinned,
+        body: {
+          case_id: routeNotPinned.body.case_id,
+          latest_run_id: null,
+          displayed_run_id: null,
+          runs: [],
+          run: null,
+          route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
+        },
+      },
+      [{ action: "CREATE_RUN", refusal: null }],
+    );
+    const { container } = mount(empty);
+    expect(container.querySelector("[data-run-empty]")).not.toBeNull();
+    expect(container.querySelector("[data-create-run]")).not.toBeNull();
+    const select = container.querySelector("[data-route-select]") as HTMLSelectElement;
+    expect(select.options.length).toBe(1);
+    const button = container.querySelector('[data-action="CREATE_RUN"]')!;
+    expect(button).not.toHaveAttribute("aria-disabled");
+  });
+
+  test("test_pinning_a_subject_sends_the_run_subject_view_shows_success_then_refetches", async () => {
+    const run = running.body.run!;
+    const caseId = running.body.case_id;
+    const receipt = {
+      run_id: run.run_id,
+      source_set_version: run.source_set_version,
+      input_fingerprint: "c".repeat(64),
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(receipt))
+      .mockResolvedValueOnce(jsonResponse(running));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const doc = withActions(running, [{ action: "PIN_RUN_INPUT", refusal: null }]);
+      const { container } = mount(doc);
+      const issuerId = container.querySelector('[data-field="issuer_id"]') as HTMLInputElement;
+      expect(issuerId.value).toBe(run.subject!.issuer_id);
+      fireEvent.click(container.querySelector('[data-action="PIN_RUN_INPUT"]')!);
+
+      await waitFor(() => {
+        const note = container.querySelector("[data-command-success]");
+        expect(note).not.toBeNull();
+      });
+      const [, init] = fetchSpy.mock.calls[0]!;
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual({ subject: run.subject });
+      expect(
+        UUID.test(
+          ((init as RequestInit).headers as Record<string, string>)["Idempotency-Key"] ?? "",
+        ),
+      ).toBe(true);
+
+      // One refetch, through the same transport and parser every load uses.
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const [refetchUrl] = fetchSpy.mock.calls[1]!;
+      expect(refetchUrl).toBe(`/api/v1/cases/${caseId}/run?run=${run.run_id}`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_the_idempotency_key_is_reused_for_a_retry_of_the_same_body", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          run_id: running.body.run!.run_id,
+          source_set_version: running.body.run!.source_set_version,
+          input_fingerprint: "d".repeat(64),
+        }),
+      )
+      // The pin's own success also triggers one refetch (finding 2); a
+      // benign fallback answers it so this test, which is about the key
+      // alone, need not assert anything about that second read.
+      .mockResolvedValue(jsonResponse(running));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const doc = withActions(running, [{ action: "PIN_RUN_INPUT", refusal: null }]);
+      const { container } = mount(doc);
+      const pinButton = container.querySelector('[data-action="PIN_RUN_INPUT"]')!;
+      fireEvent.click(pinButton); // offline
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      fireEvent.click(pinButton); // retry of the identical, unedited subject
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const key1 = (fetchSpy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      const key2 = (fetchSpy.mock.calls[1]![1] as RequestInit).headers as Record<string, string>;
+      expect(key2["Idempotency-Key"]).toBe(key1["Idempotency-Key"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_the_idempotency_key_is_replaced_when_the_body_changes_even_after_an_offline_answer", async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const doc = withActions(running, [{ action: "PIN_RUN_INPUT", refusal: null }]);
+      const { container } = mount(doc);
+      const pinButton = container.querySelector('[data-action="PIN_RUN_INPUT"]')!;
+      fireEvent.click(pinButton);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      fireEvent.change(container.querySelector('[data-field="issuer_name"]')!, {
+        target: { value: "A different name entirely" },
+      });
+      fireEvent.click(pinButton);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const key1 = (fetchSpy.mock.calls[0]![1] as { headers: Record<string, string> }).headers[
+        "Idempotency-Key"
+      ];
+      const key2 = (fetchSpy.mock.calls[1]![1] as { headers: Record<string, string> }).headers[
+        "Idempotency-Key"
+      ];
+      expect(key2).not.toBe(key1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_create_run_shows_a_success_note_and_refetches_so_a_second_click_is_never_a_silent_duplicate", async () => {
+    const caseId = routeNotPinned.body.case_id;
+    const newRunId = "11111111-1111-4111-8111-111111111111";
+    const created = { case_id: caseId, run_id: newRunId, route_digest: "f".repeat(64) };
+    const refreshed: RunSectionDocument = {
+      ...routeNotPinned,
+      chrome: { ...routeNotPinned.chrome, actions: [] },
+      body: {
+        case_id: caseId,
+        latest_run_id: newRunId,
+        displayed_run_id: newRunId,
+        runs: [
+          {
+            run_id: newRunId,
+            status: "RUNNING",
+            created_at: "2026-09-14T10:00:00Z",
+            profile_id: "FULL_CREDIT_ASSESSMENT",
+            selection_id: "default",
+          },
+        ],
+        run: { ...routeNotPinned.body.run!, run_id: newRunId },
+        route_choices: [],
+      },
+    };
+    // The refetch is held open deliberately: real network latency separates
+    // the command's own answer from the read that follows it, and asserting
+    // the transient success note is only deterministic if this test controls
+    // that gap itself rather than racing the mock's own resolution.
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(created, 201))
+      .mockImplementationOnce(() => refetchResponse);
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const empty: RunSectionDocument = withActions(
+        {
+          ...routeNotPinned,
+          body: {
+            case_id: caseId,
+            latest_run_id: null,
+            displayed_run_id: null,
+            runs: [],
+            run: null,
+            route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
+          },
+        },
+        [{ action: "CREATE_RUN", refusal: null }],
+      );
+      const { container } = mount(empty);
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+
+      // The success note is transient — the refetch it also triggers may
+      // replace this whole branch as soon as it lands — so both checks are
+      // made together, not across a second `await`.
+      await waitFor(() => {
+        const note = container.querySelector("[data-command-success]");
+        expect(note).not.toBeNull();
+        expect(note).toHaveTextContent("Run created");
+      });
+
+      const [createUrl, createInit] = fetchSpy.mock.calls[0]!;
+      expect(createUrl).toBe(`/api/v1/cases/${caseId}/runs`);
+      expect((createInit as RequestInit).method).toBe("POST");
+      expect(JSON.parse((createInit as RequestInit).body as string)).toEqual({
+        profile_id: "FULL_CREDIT_ASSESSMENT",
+        selection_id: "default",
+      });
+      expect(
+        UUID.test(
+          ((createInit as RequestInit).headers as Record<string, string>)["Idempotency-Key"] ?? "",
+        ),
+      ).toBe(true);
+
+      // One refetch, by the id the server just handed back — the analyst
+      // never has to guess whether the click landed.
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const [refetchUrl] = fetchSpy.mock.calls[1]!;
+      expect(refetchUrl).toBe(`/api/v1/cases/${caseId}/run?run=${newRunId}`);
+
+      resolveRefetch(jsonResponse(refreshed));
+      await waitFor(() => expect(container.querySelector("[data-run-empty]")).toBeNull());
+      expect(container.querySelector(`[data-run="${newRunId}"]`)).not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_action_of_finds_the_one_entry_for_a_served_action_by_name", () => {
+    const actions = [
+      { action: "PIN_RUN_INPUT" as const, refusal: null },
+      {
+        action: "CREATE_RUN" as const,
+        refusal: { code: "NOT_AUTHORISED" as const, clears: "the caller holds WRITER standing" },
+      },
+    ];
+    expect(actionOf(actions, "PIN_RUN_INPUT")).toEqual(actions[0]);
+    expect(actionOf(actions, "CREATE_RUN")).toEqual(actions[1]);
+    expect(actionOf(actions, "CANCEL_RUN")).toBeUndefined();
   });
 
   test("test_every_enabled_demo_fixture_is_a_valid_v1_document", () => {
