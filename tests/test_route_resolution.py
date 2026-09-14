@@ -29,6 +29,7 @@ import pytest
 from server.engine.route import (
     Edge,
     EdgeType,
+    NamedObjects,
     NodeResult,
     NodeState,
     ResolvedRoute,
@@ -37,6 +38,7 @@ from server.engine.route import (
     dependency_order,
     frontier,
     limitations_of,
+    lite_object_unmet,
     node_states,
     predecessors,
     readiness_from,
@@ -610,3 +612,30 @@ def test_predecessors_use_route_order_not_edge_or_alphabetical_order() -> None:
     )
 
     assert predecessors(route, "T") == ("B", "A")
+
+
+def test_a_named_object_boundary_blocks_until_an_accepted_input_owns_one() -> None:
+    """§46.1 as data: T's only input edge is soft, so without the boundary T
+    runs RESTRICTED beside an unrun S; with it T is BLOCKED until S, which
+    owns an accepted object, is accepted. An input owning another object
+    meets nothing."""
+    route = ResolvedRoute(
+        profile_id="P",
+        selection_id="S",
+        nodes=(RouteNode("RN-S", "S", 1), RouteNode("RN-T", "T", 2)),
+        edges=(Edge("S", "T", EdgeType.ADVISORY),),
+    )
+    named = NamedObjects(owned={"S": "obj"}, accepted_ids={"T": frozenset({"obj"})})
+    edge = route.edges[0]
+
+    assert node_states(route, {})["RN-T"] is NodeState.RESTRICTED
+    assert node_states(route, {}, named)["RN-T"] is NodeState.BLOCKED
+    assert frontier(route, {}, named) == ["RN-S"]
+    assert lite_object_unmet(route, {}, "T", named) == (edge,)
+    done = {"RN-S": NodeResult()}
+    assert node_states(route, done, named)["RN-T"] is NodeState.RUNNABLE
+    assert lite_object_unmet(route, done, "T", named) == ()
+    other = NamedObjects(owned={"S": "else"}, accepted_ids=named.accepted_ids)
+    assert node_states(route, done, other)["RN-T"] is NodeState.BLOCKED
+    assert lite_object_unmet(route, done, "T", other) == ()
+    assert lite_object_unmet(route, {}, "S", named) == ()

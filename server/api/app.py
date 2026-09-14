@@ -60,6 +60,7 @@ from server.engine.route import (
 )
 from server.engine.runtime import accepted_artifacts
 from server.methodology.bundle import Bundle
+from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
@@ -336,7 +337,8 @@ def read_run(
 
     # The bundle is what reads a canonical run's gate and QA records (§42.4).
     accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
-    states = node_states(route, accepted)
+    # The runtime's named-object boundary, so the document shows its states.
+    states = node_states(route, accepted, named_objects(bundle, route))
     # `accepted` already carries CP-0's readiness -- `accepted_artifacts` reads
     # it for exactly this reason -- so reading the verdict out of it here costs
     # no further round trip.

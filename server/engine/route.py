@@ -112,6 +112,22 @@ class NodeResult:
 
 
 @dataclass(frozen=True, slots=True)
+class NamedObjects:
+    """The vendor's named-object boundary, handed in as data (§46.1).
+
+    `owned` maps a module to the object its catalog artifact contract owns;
+    `accepted_ids` maps a module whose verified LITE compatibility block
+    retains `NAMED_LITE_OBJECT_ACCEPTED` for this route's profile to the object
+    ids it accepts. Read from verified bundle bytes by
+    `server.methodology.invocation.named_objects`, never here: this module
+    does no I/O, and nothing here names a module or an object.
+    """
+
+    owned: Mapping[str, str]
+    accepted_ids: Mapping[str, frozenset[str]]
+
+
+@dataclass(frozen=True, slots=True)
 class RouteExtensions:
     """The host-declared additions to a pathway, which travel together.
 
@@ -232,9 +248,16 @@ def dependency_order(
 
 
 def node_states(
-    route: ResolvedRoute, accepted: Mapping[str, NodeResult]
+    route: ResolvedRoute,
+    accepted: Mapping[str, NodeResult],
+    named: NamedObjects | None = None,
 ) -> dict[str, NodeState]:
-    """Each node's state, recomputed from the accepted attempts. Never stored."""
+    """Each node's state, recomputed from the accepted attempts. Never stored.
+
+    With `named`, a node retaining the named-object boundary is BLOCKED until
+    an accepted direct input owns one of its accepted objects (§46.1),
+    whatever its edges' types say.
+    """
     readiness = readiness_from(route, accepted)
     complete = {
         node.module_id for node in route.nodes if node.route_node_id in accepted
@@ -247,13 +270,47 @@ def node_states(
             states[node.route_node_id] = NodeState.COMPLETE
             continue
         unmet = _unmet(route, node.module_id, complete, passed)
-        states[node.route_node_id] = _state_for(node.module_id, unmet, readiness)
+        state = _state_for(node.module_id, unmet, readiness)
+        if named is not None and not _named_object_met(
+            route, complete, node.module_id, named
+        ):
+            state = NodeState.BLOCKED
+        states[node.route_node_id] = state
     return states
 
 
-def frontier(route: ResolvedRoute, accepted: Mapping[str, NodeResult]) -> list[str]:
+def lite_object_unmet(
+    route: ResolvedRoute,
+    accepted: Mapping[str, NodeResult],
+    module_id: str,
+    named: NamedObjects,
+) -> tuple[Edge, ...]:
+    """The edges into `module_id` whose source would meet its named-object
+    boundary once accepted, while none has been (§46.1).
+
+    `()` when the module retains no boundary or an accepted direct input
+    already owns an accepted object. A boundary no source on the route could
+    meet is also `()` here, and `node_states` still holds it BLOCKED: the
+    reason is the absence of any owner, not an edge.
+    """
+    complete = {n.module_id for n in route.nodes if n.route_node_id in accepted}
+    if _named_object_met(route, complete, module_id, named):
+        return ()
+    wanted = named.accepted_ids[module_id]
+    return tuple(
+        edge
+        for edge in route.edges
+        if edge.target == module_id and named.owned.get(edge.source) in wanted
+    )
+
+
+def frontier(
+    route: ResolvedRoute,
+    accepted: Mapping[str, NodeResult],
+    named: NamedObjects | None = None,
+) -> list[str]:
     """The nodes that may run now: RUNNABLE and RESTRICTED, in route order."""
-    states = node_states(route, accepted)
+    states = node_states(route, accepted, named)
     return [
         node.route_node_id
         for node in route.nodes
@@ -385,6 +442,22 @@ def _unmet(
             edge.source not in complete
             or (edge.type is EdgeType.QA_GATE and edge.source not in passed)
         )
+    )
+
+
+def _named_object_met(
+    route: ResolvedRoute, complete: set[str], module_id: str, named: NamedObjects
+) -> bool:
+    """True unless `module_id` retains the boundary and no accepted direct
+    input owns one of the object ids it accepts."""
+    wanted = named.accepted_ids.get(module_id)
+    if wanted is None:
+        return True
+    return any(
+        edge.target == module_id
+        and edge.source in complete
+        and named.owned.get(edge.source) in wanted
+        for edge in route.edges
     )
 
 

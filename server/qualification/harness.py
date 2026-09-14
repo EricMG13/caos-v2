@@ -72,6 +72,7 @@ from server.engine.route import (
 from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
 from server.methodology.bundle import Bundle
+from server.methodology.invocation import named_objects
 from server.methodology.runner import ModuleProvider
 from server.pricing import ModelPrice, worst_case
 from server.provider import CompletionProvider
@@ -533,7 +534,11 @@ def _unrun(
     route = resolved_route(conn, run_id)
     if route is None:
         return ()
-    states = node_states(route, _accepted(conn, blobs, bundle, route, run_id))
+    states = node_states(
+        route,
+        _accepted(conn, blobs, bundle, route, run_id),
+        named_objects(bundle, route),
+    )
     tried: dict[str, list[Attempted]] = {}
     for node_id, *fact in conn.execute(
         "SELECT t.route_node_id, t.attempt_id, r.attempt_id IS NOT NULL,"

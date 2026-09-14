@@ -28,7 +28,7 @@ from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute, RouteNode, resolve_route
+from server.engine.route import NamedObjects, ResolvedRoute, RouteNode, resolve_route
 from server.evidence.citations import AnchoredCitation, Rect
 from server.methodology.bundle import (
     delivered_authority,
@@ -49,6 +49,9 @@ from server.methodology.invocation import (
     allowed_uses,
     build_handoff_prompt,
     host_identity,
+    lite_object_requirement,
+    named_objects,
+    owned_objects,
     prospective_identity,
     upstream_markdown,
     within_request_ceiling,
@@ -570,6 +573,88 @@ def test_an_upstream_section_carries_its_edge_allowed_use() -> None:
     )
     assert f"sha256: {screen_ref.sha256}\nallowed_use: QA_ONLY\n" in prompt
     assert f"sha256: {gate_ref.sha256}\nallowed_use: NOT_DECLARED\n" in prompt
+
+
+def test_cp5_prompt_names_the_lite_object_as_qa_only_with_its_full_runbook() -> None:
+    """§46.1: CP-L10 reaches CP-5 labelled with the object it owns and its
+    QA_ONLY use, and CP-5 still receives its whole runbook (a FULL run)."""
+    gate = identity("CP-0")
+    gate_markdown = handoff_markdown(gate)
+    gate_ref = upstream_ref(gate, gate_markdown)
+    screen = identity("CP-L10", (gate_ref,))
+    screen_markdown = handoff_markdown(screen)
+    screen_ref = upstream_ref(screen, screen_markdown)
+    prompt = _prompt(
+        identity("CP-5", (gate_ref, screen_ref)),
+        upstream=((gate_ref, gate_markdown), (screen_ref, screen_markdown)),
+    )
+    assert (
+        f"sha256: {screen_ref.sha256}\nallowed_use: QA_ONLY\n"
+        "owned_object: lite_financial_change_screen\n"
+    ) in prompt
+    assert (
+        f"sha256: {gate_ref.sha256}\nallowed_use: NOT_DECLARED\n"
+        "owned_object: NOT_DECLARED\n"
+    ) in prompt
+    name = "references/CP-5_RUNBOOK.md"
+    runbook = verified_bytes(BUNDLE, "CP-5", name)
+    assert (name, hashlib.sha256(runbook).hexdigest(), runbook.decode()) in (
+        _authority_sections(prompt)
+    )
+
+
+def test_owned_objects_are_the_catalog_artifact_contracts_of_direct_inputs() -> None:
+    assert owned_objects(CATALOG, LITE_ROUTE, "CP-5") == {
+        "CP-0": "NOT_DECLARED",
+        "CP-L10": "lite_financial_change_screen",
+    }
+    assert owned_objects(CATALOG, LITE_ROUTE, "CP-0") == {}
+    broken = copy.deepcopy(CATALOG)
+    broken["modules"] = {"not": "a list"}
+    with pytest.raises(Refusal) as refused:
+        owned_objects(broken, LITE_ROUTE, "CP-5")
+    assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+
+
+def test_the_lite_compatibility_block_is_read_from_verified_vendor_bytes() -> None:
+    """The requirement comes from the module's own block, for the profile it
+    names; a module without one has none, and a malformed block refuses."""
+    cp5 = verified_bytes(BUNDLE, "CP-5", "SKILL.md")
+    ids = lite_object_requirement(cp5, "CP-5", "LITE_CREDIT_22")
+    assert ids == frozenset(
+        {
+            "lite_financial_change_screen",
+            "lite_fundamental_credit_screen",
+            "lite_liquidity_sensitivity_screen",
+            "lite_market_recovery_opportunity_screen",
+            "lite_legal_structure_capacity_screen",
+        }
+    )
+    assert lite_object_requirement(cp5, "CP-5", "FULL_CREDIT_32") is None
+    # No block, another boundary with `none`, an unkeyed prose heading.
+    for module_id in ("CP-L10", "CP-6", "CP-8", "CP-3C"):
+        other_skill = verified_bytes(BUNDLE, module_id, "SKILL.md")
+        assert lite_object_requirement(other_skill, module_id, "LITE_CREDIT_22") is None
+    # CP-5A's block beside it is not CP-5's.
+    other = cp5.replace(b"## LITE profile compatibility \xe2\x80\x94 CP-5A", b"## Gone")
+    assert lite_object_requirement(other, "CP-5", "LITE_CREDIT_22") == ids
+    text = cp5.decode()
+    block = text.index("## LITE profile compatibility — CP-5\n")
+    ids_line = text.index("- **accepted_lite_object_ids**", block)
+    no_ids = text[:ids_line] + text[text.index("\n", ids_line) + 1 :]
+    head, tail = text[:ids_line], no_ids[ids_line:]
+    empty = head + "- **accepted_lite_object_ids**: \n" + tail
+    none = head + "- **accepted_lite_object_ids**: none\n" + tail
+    no_boundary = text.replace("the retained input boundary is", "boundary", 1)
+    twice = text + "\n## LITE profile compatibility — CP-5\n"
+    for malformed in (no_ids, empty, none, no_boundary, twice):
+        with pytest.raises(Refusal) as refused:
+            lite_object_requirement(malformed.encode(), "CP-5", "LITE_CREDIT_22")
+        assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+    assert named_objects(BUNDLE, LITE_ROUTE) == NamedObjects(
+        owned={"CP-L10": "lite_financial_change_screen"},
+        accepted_ids={"CP-5": ids},
+    )
 
 
 def test_allowed_uses_are_the_pinned_edges_catalog_labels() -> None:

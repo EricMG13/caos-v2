@@ -418,6 +418,28 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   re-anchoring in the pre-call unit if a consumer ever relies on the register
   for more than orientation, and a per-section bound with the one "An upstream
   section is unbounded" owes.
+- **The named-LITE-object boundary is read from `SKILL.md` prose headings, and
+  only where a block is keyed to its module.** Slice 3.4b (§46.1): each
+  upstream section names its source's catalog
+  `artifact_contract.owned_object` (`NOT_DECLARED` when absent) beside
+  `allowed_use`, and `invocation.named_objects` reads every pinned node's
+  verified `SKILL.md` block headed `## LITE profile compatibility — <module_id>`
+  -- vendor fields only, no module or object named in host code. A block that
+  names the route's profile and retains `NAMED_LITE_OBJECT_ACCEPTED` holds its
+  node BLOCKED in `route.node_states` (no attempt, reservation or call) until
+  an accepted direct input owns one of its `accepted_lite_object_ids`; a
+  present but malformed block refuses `AUTHORITY_BYTES_MISMATCH`. The runtime,
+  `read_run` and the harness's `_unrun` pass it; `waiting_on` does not report
+  it, so a node held only by the boundary shows BLOCKED with no waiting edge
+  when no source could meet it. CP-3C's unkeyed prose heading is not read,
+  although the vendor's execution-profiles JSON declares its boundary; and on
+  LITE pathways a node whose accepted objects no catalog module owns (CP-2A,
+  CP-2H, CP-4C) is BLOCKED permanently -- today
+  those routes are refused `HANDOFF_MODULE_UNSUPPORTED` before any attempt.
+  `named_objects` re-reads the bundle bytes per run and per `read_run`.
+  *Upgrade:* read the structured `CP_DEPLOY_V_EXECUTION_PROFILES_v1.json`
+  declaration beside the block (refusing disagreement), and a waiting reason
+  for the boundary in the run document with Phase 4's API models.
 
 **Repair Phase 2.**
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -27,7 +28,7 @@ from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
-from server.engine.route import BLOCKING, ResolvedRoute, RouteNode
+from server.engine.route import BLOCKING, NamedObjects, ResolvedRoute, RouteNode
 from server.evidence.citations import AnchoredCitation
 from server.methodology.bundle import (
     Bundle,
@@ -494,6 +495,119 @@ def allowed_uses(
     return {source: str(values.pop()) for source, values in uses.items()}
 
 
+def owned_objects(
+    catalog: Mapping[str, Any], route: ResolvedRoute, target: str
+) -> dict[str, str]:
+    """Each direct input of `target` on the pinned route to the object its
+    catalog `artifact_contract.owned_object` names, `NOT_DECLARED` when none.
+
+    A catalog whose module list cannot be read, or that declares one module
+    twice, refuses `ROUTE_IDENTITY_INVALID`, as `allowed_uses` does.
+    """
+    sources = {edge.source for edge in route.edges if edge.target == target}
+    try:
+        entries = [
+            (entry["module_id"], entry.get("artifact_contract") or {})
+            for entry in catalog["modules"]
+        ]
+        declared = {
+            module: contract.get("owned_object", NOT_DECLARED)
+            for module, contract in entries
+        }
+    except (KeyError, TypeError, AttributeError):
+        declared = {}
+        entries = []
+    if not entries or len(declared) != len(entries):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    owned = {source: declared.get(source, NOT_DECLARED) for source in sources}
+    if not all(isinstance(value, str) and value for value in owned.values()):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    return dict(sorted(owned.items()))
+
+
+# The vendor's words for the named-object boundary (§46.1). The block is read
+# from the module's own verified SKILL.md; nothing here names a module.
+NAMED_LITE_OBJECT_ACCEPTED = "NAMED_LITE_OBJECT_ACCEPTED"
+_LITE_HEADING = "## LITE profile compatibility — "
+_LITE_BOUNDARY = re.compile(
+    r"`([A-Z0-9_]+)`; (?:the|its) retained input boundary is `([A-Z_]+)`"
+)
+_LITE_IDS = re.compile(r"^- \*\*accepted_lite_object_ids\*\*: (.*)$", re.MULTILINE)
+_OBJECT_ID = re.compile(r"`([a-z0-9_]+)`")
+_NO_IDS = "none"
+
+
+def lite_object_requirement(
+    skill: bytes, module_id: str, profile_id: str
+) -> frozenset[str] | None:
+    """The object ids `module_id`'s LITE compatibility block accepts, when that
+    block names `profile_id` and retains `NAMED_LITE_OBJECT_ACCEPTED`.
+
+    `None` when `skill` has no block headed `— <module_id>` (an unkeyed prose
+    heading is not a block), or the block names another profile or boundary.
+    A block that is present but duplicated, without exactly one boundary
+    sentence and one `accepted_lite_object_ids` line, whose ids are neither
+    `none` nor a list of distinct backticked ids, or that retains the named
+    boundary with no ids, refuses `AUTHORITY_BYTES_MISMATCH`: a boundary the
+    host cannot read is never read as absent.
+    """
+    lines = _utf8(skill, RefusalCode.AUTHORITY_BYTES_MISMATCH).split("\n")
+    heading = _LITE_HEADING + module_id
+    starts = [n for n, line in enumerate(lines) if line.rstrip() == heading]
+    if not starts:
+        return None
+    body: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if line.startswith("## "):
+            break
+        body.append(line)
+    block = "\n".join(body)
+    boundary = _LITE_BOUNDARY.findall(block)
+    listed = _LITE_IDS.findall(block)
+    written = listed[0].rstrip() if len(listed) == 1 else ""
+    ids = _OBJECT_ID.findall(written)
+    well_formed = written == _NO_IDS or (
+        bool(ids)
+        and len(set(ids)) == len(ids)
+        and written == ", ".join(f"`{i}`" for i in ids)
+    )
+    named = len(boundary) == 1 and boundary[0][1] == NAMED_LITE_OBJECT_ACCEPTED
+    if len(starts) != 1 or len(boundary) != 1 or not well_formed or (named and not ids):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    if boundary[0][0] != profile_id or not named:
+        return None
+    return frozenset(ids)
+
+
+def named_objects(bundle: Bundle, route: ResolvedRoute) -> NamedObjects:
+    """The pinned route's named-object boundary, from verified bundle bytes.
+
+    Every node's `SKILL.md` is read through `verified_bytes` and parsed by
+    `lite_object_requirement`; owners come from the verified catalog through
+    `owned_objects`. A module the manifest does not carry (a host extension)
+    has no vendor block to retain.
+    """
+    catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
+    owned: dict[str, str] = {}
+    accepted_ids: dict[str, frozenset[str]] = {}
+    for node in route.nodes:
+        owned.update(
+            (source, value)
+            for source, value in owned_objects(catalog, route, node.module_id).items()
+            if value != NOT_DECLARED
+        )
+        try:
+            skill = verified_bytes(bundle, node.module_id, SKILL)
+        except Refusal as refused:
+            if refused.code is not RefusalCode.AUTHORITY_MODULE_UNKNOWN:
+                raise
+            continue
+        ids = lite_object_requirement(skill, node.module_id, route.profile_id)
+        if ids is not None:
+            accepted_ids[node.module_id] = ids
+    return NamedObjects(owned=owned, accepted_ids=accepted_ids)
+
+
 def _utf8(data: bytes, code: RefusalCode) -> str:
     try:
         return data.decode("utf-8")
@@ -505,6 +619,7 @@ def _utf8(data: bytes, code: RefusalCode) -> str:
 def _upstream_section(
     upstream: Sequence[tuple[UpstreamRef, bytes]],
     uses: Mapping[str, str],
+    owned: Mapping[str, str],
     tag: str = "",
 ) -> str:
     if not upstream:
@@ -512,11 +627,16 @@ def _upstream_section(
     sections = []
     for ref, data in upstream:
         text = _utf8(data, RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-        if hashlib.sha256(data).hexdigest() != ref.sha256 or ref.module_id not in uses:
+        if (
+            hashlib.sha256(data).hexdigest() != ref.sha256
+            or ref.module_id not in uses
+            or ref.module_id not in owned
+        ):
             raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
         sections.append(
             f"module_id: {ref.module_id}\nroute_node_id: {ref.route_node_id}\n"
-            f"sha256: {ref.sha256}\nallowed_use: {uses[ref.module_id]}\n{text}"
+            f"sha256: {ref.sha256}\nallowed_use: {uses[ref.module_id]}\n"
+            f"owned_object: {owned[ref.module_id]}\n{text}"
         )
     return (
         f"\n--- UPSTREAM {tag} (accepted handoffs, exact bytes: context, not "
@@ -627,6 +747,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         else frozenset()
     )
     uses = allowed_uses(catalog, route, identity.module_id)
+    owned = owned_objects(catalog, route, identity.module_id)
     gate = (
         _GATE_INSTRUCTION.format(module_ids=", ".join(sorted(gate_expects)))
         if gate_expects
@@ -639,7 +760,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     sections = (
         _HOST_STEPS
         + _authority_sections(authority, "")
-        + _upstream_section(upstream, uses)
+        + _upstream_section(upstream, uses, owned)
         + _citation_register(upstream, upstream_citations)
         + evidence
     )
@@ -662,7 +783,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + f"\n--- HOST-PERFORMED STEPS {tag} ---\n"
         + _HOST_STEPS
         + _authority_sections(authority, tag)
-        + _upstream_section(upstream, uses, tag)
+        + _upstream_section(upstream, uses, owned, tag)
         + _citation_register(upstream, upstream_citations, tag)
         + f"\n--- EVIDENCE {tag} ---\n"
         + evidence

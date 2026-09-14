@@ -236,7 +236,10 @@ def test_mandatory_registers_and_disclosed_conflicts_reach_consumers_unchanged(
     for register_id in rules["registers"]:
         assert f"#### {register_id}\n" in screen
     digest = hashlib.sha256(screen.encode()).hexdigest()
-    assert f"sha256: {digest}\nallowed_use: QA_ONLY\n{screen}" in final
+    assert (
+        f"sha256: {digest}\nallowed_use: QA_ONLY\n"
+        f"owned_object: lite_financial_change_screen\n{screen}"
+    ) in final
     assert _stored(harness, "CP-0")[0].decode("utf-8") in final
     assert _register(final).count("handoff_sha256: ") == 2
 
