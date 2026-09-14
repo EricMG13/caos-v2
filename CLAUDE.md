@@ -224,9 +224,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   admission stays in-process; a hard per-call timeout is the upgrade the day a
   single page is shown to overrun it by more than the ceiling can absorb.
 
-- **Two vendor rules have no Python implementation and are not enforced.**
+- **Three vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
-  vendor ships no code for `semantic_rules` or `document_substrings_casefold`.
+  vendor ships no code for `semantic_rules`, `document_substrings_casefold` or
+  the LITE pathways' `required_payload_fields` (§46.5).
   Reimplementing them would make the host a second conformance authority
   beside the bundle (invariant 4). The catalog declares each LITE pathway
   `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a

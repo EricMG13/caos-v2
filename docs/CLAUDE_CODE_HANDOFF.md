@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
-| Latest accepted task | **Phase 3 Task 3.3 accepted at `1bb0cfd`** (3.1 `a8acbc6`, 3.2 `fffe5c8`; records below; phase not accepted) |
-| Next task | Phase 3 Task 3.4: prove the LITE route end to end ([brief](superpowers/plans/2026-09-14-phase-3-task-3.4-brief.md); 3.4a `1b60263` and 3.4e `ea4f2f5` already integrated) |
+| Latest accepted task | **Phase 3 Task 3.4 integrated at `f9120d4`** (3.1 `a8acbc6`, 3.2 `fffe5c8`, 3.3 `1bb0cfd`; wave gate green; phase not accepted) |
+| Next task | Phase 3 exit: `make check`, whole-phase confidence review and adversarial audit at actual `xhigh` ([evidence](PHASE_3_EXIT_EVIDENCE.md)) |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
