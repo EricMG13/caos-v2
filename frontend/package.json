@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --mode demo",
     "a11y": "node scripts/a11y-axe.mjs",
-    "test:workbench": "playwright test"
+    "test:workbench": "playwright test",
+    "test:journey": "playwright test -c playwright.journey.config.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "4.3.3",
