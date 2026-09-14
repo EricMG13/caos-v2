@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import subprocess  # nosec B404
 import sys
 import time
@@ -132,29 +133,53 @@ class PdfExtractor:
         `SOURCE_NOT_READABLE` for anything else, an unreadable answer included.
         Only a code or the tokens cross back, never a message.
         """
-        header = json.dumps({"limits": asdict(limits), "deadline": deadline})
-        # ponytail: one interpreter per PDF; a pool if admission volume makes the
-        # start-up cost show.
-        # Fixed argv, no shell, an empty environment.
-        child = subprocess.Popen(  # nosec B603
-            [sys.executable, "-I", "-c", _CHILD, str(_ROOT)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env={},
-        )
-        wait = (
-            None if deadline == float("inf") else max(0.0, deadline - time.monotonic())
-        )
-        try:
-            out, _ = child.communicate(header.encode() + b"\n" + data, timeout=wait)
-        except subprocess.TimeoutExpired:
-            out = None
-        if out is None:
-            child.kill()
-            child.communicate()
-            raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
-        return _answer(out)
+        return _answer(_in_child({"limits": asdict(limits)}, data, deadline))
+
+
+def page_frame(
+    data: bytes,
+    page: int,
+    *,
+    limits: AdmissionLimits = DEFAULT_LIMITS,
+    deadline: float = float("inf"),
+) -> Frame:
+    """One page's visible crop in pdfminer's layout space, y up (`_crop_frame`).
+
+    Read in the same killed, budgeted child as `extract` (§47): the page tree,
+    its boxes and `/Rotate` only -- no content stream is interpreted and no
+    layout runs -- but a cross-reference or object stream still inflates, so
+    the deadline and `max_decoded_bytes` bound it as they bound extraction.
+    Refuses `EVIDENCE_NOT_AVAILABLE` for a page the document does not have or
+    whose crop clips to nothing, and the child's codes otherwise.
+    """
+    header = {"limits": asdict(limits), "frame": page}
+    return _frame_answer(_in_child(header, data, deadline))
+
+
+def _in_child(header: dict[str, object], data: bytes, deadline: float) -> bytes:
+    """The child's answer to `header` and `data`, or `SOURCE_EXTRACTION_TIMEOUT`
+    once `deadline` passes, with the child killed."""
+    line = json.dumps({**header, "deadline": deadline}).encode()
+    # ponytail: one interpreter per PDF; a pool if admission volume makes the
+    # start-up cost show.
+    # Fixed argv, no shell, an empty environment.
+    child = subprocess.Popen(  # nosec B603
+        [sys.executable, "-I", "-c", _CHILD, str(_ROOT)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env={},
+    )
+    wait = None if deadline == float("inf") else max(0.0, deadline - time.monotonic())
+    try:
+        out, _ = child.communicate(line + b"\n" + data, timeout=wait)
+    except subprocess.TimeoutExpired:
+        out = None
+    if out is None:
+        child.kill()
+        child.communicate()
+        raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
+    return out
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -188,6 +213,28 @@ def _answer(out: bytes) -> list[Token]:
     if tokens is None:
         raise Refusal(code)
     return tokens
+
+
+def _frame_answer(out: bytes) -> Frame:
+    """The child's frame, `EVIDENCE_NOT_AVAILABLE` for its `null`, or the code
+    it names; anything else it says is an unreadable document."""
+    code = RefusalCode.SOURCE_NOT_READABLE
+    frame: Frame | None = None
+    try:
+        answer = json.loads(out)
+        if "frame" in answer and answer["frame"] is None:
+            code = RefusalCode.EVIDENCE_NOT_AVAILABLE
+        elif "frame" in answer:
+            (x0, y0, x1, y1) = (float(value) for value in answer["frame"])
+            if all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+                frame = (x0, y0, x1, y1)
+        elif RefusalCode(answer["refused"]) in _CHILD_CODES:
+            code = RefusalCode(answer["refused"])
+    except (ValueError, TypeError, KeyError):
+        frame = None
+    if frame is None:
+        raise Refusal(code)
+    return frame
 
 
 def walk_pages(data: bytes, *, limits: AdmissionLimits, deadline: float) -> list[Token]:
@@ -291,6 +338,26 @@ def _crop_frame(page: PDFPage) -> Frame | None:
         # reader sees -- so an empty visible area is no frame at all.
         return None
     return apply_matrix_rect(ctm, visible)
+
+
+def _page_crop(data: bytes, page: int, *, deadline: float) -> Frame | None:
+    """`_crop_frame` of page `page`, or `None` past the document's last page.
+
+    `PDFPage.get_pages` builds each page from the page tree -- its inherited
+    boxes and `/Rotate` -- without interpreting a content stream.
+    """
+    from pdfminer.pdfpage import PDFPage
+
+    try:
+        pages = PDFPage.get_pages(BytesIO(data), caching=True)
+        for number, candidate in enumerate(pages, start=1):
+            if time.monotonic() > deadline:
+                raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
+            if number == page:
+                return _crop_frame(candidate)
+    except (PDFSyntaxError, ValueError, TypeError, AssertionError):
+        raise Refusal(RefusalCode.SOURCE_NOT_READABLE) from None
+    return None
 
 
 def _ordered(rect: Frame) -> Frame:
@@ -419,7 +486,8 @@ class _Stream:
 
 def child_main() -> None:
     """The extraction child: a header line and the document on stdin, one JSON
-    answer on stdout. Its logs and its inflater are its own, and it never
+    answer on stdout -- the tokens, or with `frame` in the header that page's
+    crop (`page_frame`). Its logs and its inflater are its own, and it never
     raises: a traceback would print the text pdfminer choked on (stderr is
     discarded by the parent as well).
     """
@@ -436,10 +504,13 @@ def child_main() -> None:
         limits = AdmissionLimits(**header["limits"])
         inflater = _Inflater(limits.max_decoded_bytes)
         pdfminer.pdftypes.zlib = inflater  # type: ignore[assignment,attr-defined]
-        tokens = walk_pages(
-            sys.stdin.buffer.read(), limits=limits, deadline=float(header["deadline"])
-        )
-        answer = {"tokens": [astuple(token) for token in tokens]}
+        (data, deadline) = (sys.stdin.buffer.read(), float(header["deadline"]))
+        if "frame" in header:
+            frame = _page_crop(data, int(header["frame"]), deadline=deadline)
+            answer = {"frame": frame}
+        else:
+            tokens = walk_pages(data, limits=limits, deadline=deadline)
+            answer = {"tokens": [astuple(token) for token in tokens]}
     except Refusal as refusal:
         answer = {"refused": refusal.code}
     except (_Inflated, MemoryError):
