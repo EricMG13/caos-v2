@@ -20,7 +20,9 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
+import server.store.audit as audit_module
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -32,8 +34,9 @@ from server.store.audit import (
     governed_write,
     verify_chain,
 )
+from server.store.commands import CommandResult, request_digest, run_command
 from server.store.members import Standing, grant, revoke, satisfies, standing_of
-from server.store.runs import create_case
+from server.store.runs import create_case, start_run
 
 
 class _Died(RuntimeError):
@@ -270,3 +273,65 @@ def test_standing_of_a_stranger_is_none(case: tuple[StoreConnection, UUID]) -> N
     conn, case_id = case
 
     assert standing_of(conn, case_id=case_id, user_id=uuid4()) is None
+
+
+class _Receipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: UUID
+    padding: str = ""
+
+
+def test_a_command_commits_state_audit_and_receipt_together_or_nothing(
+    actor: tuple[StoreConnection, UUID, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 4.2 decision 9: the domain write, its audit link and the idempotency
+    receipt are one commit. A receipt the store refuses (over its bound) takes
+    the state and the audit event with it; an audit link that fails after the
+    receipt was written takes the receipt with it."""
+    conn, case_id, user_id = actor
+
+    def command(padding: str) -> CommandResult:
+        def write(unit: StoreConnection) -> tuple[int, BaseModel]:
+            return 201, _Receipt(run_id=start_run(unit, case_id), padding=padding)
+
+        return run_command(
+            conn,
+            scope=case_id,
+            key=uuid4(),
+            command="START_RUN",
+            request_sha256=request_digest(
+                "START_RUN", case_id=case_id, run_id=None, gate=None, body={}
+            ),
+            action=_action(case_id, user_id),
+            write=write,
+        )
+
+    def counts() -> tuple[int, int, int]:
+        row = conn.execute(
+            "SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM audit_events),"
+            " (SELECT count(*) FROM command_requests)"
+        ).fetchone()
+        conn.rollback()
+        assert row is not None
+        return int(row[0]), int(row[1]), int(row[2])
+
+    with pytest.raises(Refusal) as oversized:
+        command("x" * 70_000)
+    assert oversized.value.code is RefusalCode.STORE_UNAVAILABLE
+    assert counts() == (0, 0, 0)
+
+    def broken_link(*_args: object) -> str:
+        raise _Died
+
+    with monkeypatch.context() as patch:
+        patch.setattr(audit_module, "_link", broken_link)
+        with pytest.raises(_Died):
+            command("")
+    assert counts() == (0, 0, 0)
+
+    done = command("")
+    assert (done.status, done.replayed) == (201, False)
+    assert counts() == (1, 1, 1)
+    [entry] = audit_trail(conn, case_id)
+    assert entry.action == "SOURCE_SET_PINNED"
