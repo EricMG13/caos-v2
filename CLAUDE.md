@@ -171,6 +171,34 @@ plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Repair Phase 4.**
+
+- **An audit event cannot be read back to the ids its command made.**
+  `governed_write` stores only `payload_sha256`, never the payload, so a
+  `RUN_CREATED` or `SOURCES_ADMITTED` row says a command happened without
+  naming the run or sources. The payload binds the command's
+  `request_sha256`, and the ids are in the `command_requests` receipt under
+  that digest, but no column joins the two rows: an auditor needs the
+  request itself to recompute the payload digest. *Upgrade:* a
+  `request_sha256` column on `audit_events` (a migration), the day an audit
+  reader needs the join.
+- **Receipts are kept forever, including a revoked member's.**
+  `command_requests` is UPDATE/DELETE/TRUNCATE-immutable and nothing collects
+  it, so it grows by one row per committed command. A revoked member's
+  receipts stay; their replay is answered 404 by the visibility check before
+  the lookup. *Upgrade:* a dated retention decision and a governed sweep, the
+  day the table's size is measured.
+- **The demonstration workbench shows no available command.** The v1
+  fixtures carry `"actions": []`, so every command control in `make
+  dev-ui-demo` renders refused `ACTION_UNPLACED`, and the fixture middleware
+  answers any non-GET under `/api/` 405 `READ_ONLY_DEMO`. `ACTION_UNPLACED`'s
+  clearance (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still
+  says the API serves only the run document and its event stream, which has
+  not been true since §50. Availability is proven against the real API
+  (`test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code`)
+  and in unit tests, not in the workbench. *Upgrade:* correct the clearance
+  text, and fixture actions when a workbench spec needs an available control.
+
 **Repair Phase 3.**
 
 - **A letter-spaced heading cannot be quoted as a word.** (a) ~~The PDF
@@ -225,11 +253,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   inflater; each PDF pays an interpreter's start-up (0.124 s measured on the
   development machine); and plain text stays in-process and cooperative per
   line, which the 20 MiB document ceiling bounds (a line now stops building
-  tokens one past `max_tokens`). Extraction also runs while the caller's
-  transaction is open, before `lock_case`: a pack of fifty documents can hold
-  it idle for their extraction time. *Upgrade:* an address-space limit in the
-  child where the platform enforces one, a worker pool if start-up cost shows,
-  and extraction outside the store transaction with Phase 4's upload worker.
+  tokens one past `max_tokens`). The admission command (§51) extracts through
+  `prepare_pack` with no transaction open and no case lock held, but
+  `admit_pack`, which the qualification harness still calls, extracts while
+  the caller's transaction is open, before `lock_case`: a pack of fifty
+  documents can hold it idle for their extraction time. *Upgrade:* an
+  address-space limit in the child where the platform enforces one, a worker
+  pool if start-up cost shows, and the harness admitting through
+  `prepare_pack`.
 
 - **Three vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
@@ -490,8 +521,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   acceptance (interleaving I6: no lock is held across transport). A response
   that trickles past the 300 s lease (the provider timeout bounds each socket
   operation, not the call) costs at most one extra paid call. `run_work` is
-  enqueued only by the store function today; the governed start command is
-  Task 4.2. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
+  written only by the start, retry and cancel commands (§51), each in its own
+  audited unit that rechecks authority but never calls a provider. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
   a borrowed code. `artifacts` rows are also not UPDATE/DELETE-immutable, so a
   privileged edit could move ownership; a refusal trigger like 0007's is the
   upgrade. *Upgrade:* none planned for I6 while one worker runs; per-node
@@ -735,9 +766,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and commands are not wired yet.** Phase 4 Task 4.1 (§50) closed the reads:
   Directory, Upload, Run and Analysis are served at `/api/v1/…`, validated whole
   in the browser and bound to their case and run, with one `{code, clears}`
-  refusal body; the other five sections are unavailable. What follows is the
+  refusal body; the other five sections are unavailable. Phase 4 Task 4.2
+  (§51) closed the governed writes the journey needs: create case, admit
+  sources, create run, pin input, preview and approve both gates, start, retry
+  and cancel, each rendered from the server's `chrome.actions`. Withdraw, sign,
+  freeze, file and membership grants still have no route. What follows is the
   entry as it stood, kept for the parts still open — the event vocabulary
-  (Task 4.4), evidence pages (4.4) and governed writes (4.2):
+  (Task 4.4) and evidence pages (4.4):
   **The real workspace is not yet wired to backend section routes.**
   `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
   section document and `sse.ts` tails `/api/events` for six lower-case event
@@ -1022,7 +1057,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   not exist.
 - **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
   blob store inside the caller's transaction, and the blob store is a filesystem
-  that transaction cannot roll back. The orphans are harmless — content-
+  that transaction cannot roll back. The admission command (§51) extracts
+  before any transaction but still puts each document's bytes inside its
+  governed unit (`admit_prepared`), so a unit that fails after a put -- a
+  store fault on a later insert, the audit link or the commit -- leaves them
+  too.
+  The orphans are harmless — content-
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.
