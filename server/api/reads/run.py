@@ -13,13 +13,14 @@ and the accepted artifacts, never stored; each carries the reason for it.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from typing import Annotated, Any
+from collections.abc import Mapping
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
 
-from server.api.identity import Actor, actor_from_headers
+from server.api.deps import Blobs, Caller, Methodology, Store
+from server.api.identity import Actor
 from server.api.wire import (
     ATTEMPTS_MAX,
     RUNS_MAX,
@@ -96,52 +97,13 @@ READ_REQUIRES = Standing.READER
 router = APIRouter()
 
 
-def run_actor(request: Request) -> Actor:
-    """Who is asking; `app.actor_from_request`'s rule, without the store."""
-    return actor_from_headers(request.headers)
-
-
-def run_store() -> Iterator[StoreConnection]:
-    """The request's connection, from `app.store_connection`.
-
-    Resolved at call time: `server/api/app.py` imports this module to include
-    its router, so importing the app's dependencies here is a cycle whichever
-    module loads first. A test overrides these rather than the app's.
-    """
-    from server.api import app as api
-
-    yield from api.store_connection()
-
-
-def run_blobs() -> BlobStore:
-    """The blob store, from `app.blob_store` (resolved as `run_store` is)."""
-    from server.api import app as api
-
-    return api.blob_store()
-
-
-def run_bundle() -> Bundle:
-    """The process's bundle, from `app.methodology_bundle`."""
-    from server.api import app as api
-
-    return api.methodology_bundle()
-
-
-# Declared in this order on the route: identity is solved before the store, so
-# an anonymous request opens no connection.
-RunCaller = Annotated[Actor, Depends(run_actor)]
-RunStore = Annotated[StoreConnection, Depends(run_store)]
-RunBlobs = Annotated[BlobStore, Depends(run_blobs)]
-RunMethodology = Annotated[Bundle, Depends(run_bundle)]
-
-
 @router.get("/api/v1/cases/{case_id}/run", response_model=RunSectionDocument)
 def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two ids
     case_id: str,
-    actor: RunCaller,
-    conn: RunStore,
-    blobs: RunBlobs,
-    bundle: RunMethodology,
+    actor: Caller,
+    conn: Store,
+    blobs: Blobs,
+    bundle: Methodology,
     run: str | None = None,
 ) -> RunSectionDocument:
     """The case's runs and the displayed run with each node's state.

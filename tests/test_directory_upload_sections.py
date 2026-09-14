@@ -19,11 +19,10 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from server.api import app as app_module
-from server.api.app import app, blob_store
+from server.api.app import app, blob_store, store_connection
 from server.api.identity import TRUST_SWITCH
 from server.api.reads import directory as directory_read
 from server.api.reads import upload as upload_read
-from server.api.reads.directory import section_store
 from server.api.wire import CASES_MAX, CLEARS, DirectoryDocument, UploadDocument
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -62,7 +61,7 @@ def client(
     blobs = BlobStore(tmp_path / "blobs")
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     monkeypatch.delenv(TRUST_SWITCH, raising=False)
-    app.dependency_overrides[section_store] = lambda: conn
+    app.dependency_overrides[store_connection] = lambda: conn
     app.dependency_overrides[blob_store] = lambda: blobs
     try:
         with TestClient(app) as opened:
@@ -341,10 +340,10 @@ def test_an_anonymous_section_request_is_401_and_opens_no_store_connection(
     opened: list[str] = []
 
     def counted() -> StoreConnection:
-        opened.append(section_store.__name__)
+        opened.append(store_connection.__name__)
         return conn
 
-    app.dependency_overrides[section_store] = counted
+    app.dependency_overrides[store_connection] = counted
 
     for path in (DIRECTORY, _upload(case_id), _upload("not-a-case")):
         response = client.get(path)
@@ -362,10 +361,10 @@ def test_a_malformed_case_opens_no_store_connection(
     opened: list[str] = []
 
     def counted() -> StoreConnection:
-        opened.append(section_store.__name__)
+        opened.append(store_connection.__name__)
         return conn
 
-    app.dependency_overrides[section_store] = counted
+    app.dependency_overrides[store_connection] = counted
 
     response = client.get(_upload("not-a-case"), headers=_as(uuid4()))
 
@@ -398,17 +397,18 @@ def test_each_section_request_path_declares_its_store_budget(
         (_upload(case_id), upload_read.IO_BUDGET),
     ):
         counter = _CountingConnection(conn)
-        app.dependency_overrides[section_store] = _serving(counter)
+        app.dependency_overrides[store_connection] = _serving(counter)
         assert client.get(path, headers=_as(user)).status_code == 200, path
         assert 0 < counter.executed == budget, path
 
 
-def test_the_section_store_opens_the_apps_store_connection(
+def test_the_store_dependency_opens_the_apps_store_connection(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`section_store` delegates to `app.store_connection`, so a section read
-    without a configured store is refused as every other path is."""
-    del app.dependency_overrides[section_store]
+    """Every section read declares `server.api.deps.store_connection` (as
+    `app.py` re-exports it) directly, so a section read without a configured
+    store is refused as every other path is."""
+    del app.dependency_overrides[store_connection]
     monkeypatch.delenv(app_module.DATABASE_URL, raising=False)
 
     for path in (DIRECTORY, _upload(uuid4())):
@@ -420,23 +420,15 @@ def test_the_section_store_opens_the_apps_store_connection(
 
 
 def test_the_section_routes_are_the_read_functions() -> None:
-    """`read_directory`, `read_upload` and `case_path` are what the paths
-    serve; `section_actor` is solved before the store on both."""
+    """`read_directory` and `read_upload` are what the paths serve.
+
+    Dependency order and identity is `tests/test_api_routes.py`'s
+    `test_every_section_read_depends_on_the_shared_dependencies`.
+    """
     served = {
         route.path: route
         for route in (*directory_read.router.routes, *upload_read.router.routes)
         if isinstance(route, APIRoute)
     }
-    directory = served[DIRECTORY]
-    assert directory.endpoint is directory_read.read_directory
-    assert [d.call for d in directory.dependant.dependencies] == [
-        directory_read.section_actor,
-        section_store,
-    ]
-    upload = served["/api/v1/cases/{case_id}/upload"]
-    assert upload.endpoint is upload_read.read_upload
-    assert [d.call for d in upload.dependant.dependencies] == [
-        directory_read.section_actor,
-        upload_read.case_path,
-        section_store,
-    ]
+    assert served[DIRECTORY].endpoint is directory_read.read_directory
+    assert served["/api/v1/cases/{case_id}/upload"].endpoint is upload_read.read_upload

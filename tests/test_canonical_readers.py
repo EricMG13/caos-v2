@@ -21,8 +21,7 @@ from test_execution_freshness import _Harness
 from test_loop_charges import ESTIMATE
 
 from server.api import app as app_module
-from server.api.app import VENDORED_BUNDLE, app, methodology_bundle
-from server.api.reads import run as run_read
+from server.api.app import VENDORED_BUNDLE, app, methodology_bundle, store_connection
 from server.api.reads.run import (
     CANONICAL_READINESS_IO,
     IO_BUDGET,
@@ -85,7 +84,7 @@ def test_the_run_document_reads_a_completed_lite_run_from_its_records(
     _run(harness, CanonicalCompletions(harness.source_id))
     viewer = _reader(harness)
     counter = _CountingConnection(harness.conn)
-    app.dependency_overrides[run_read.run_store] = lambda: counter
+    app.dependency_overrides[store_connection] = lambda: counter
 
     body = _view(_section(client, harness.case_id, harness.run_id, viewer))
 

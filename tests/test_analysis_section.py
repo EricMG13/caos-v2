@@ -24,19 +24,15 @@ from test_execution_freshness import _Harness
 from test_loop_charges import ESTIMATE
 
 from server.api import app as app_module
-from server.api.app import app
+from server.api.app import app, blob_store, methodology_bundle, store_connection
 from server.api.identity import TRUST_SWITCH
 from server.api.reads import analysis as analysis_read
-from server.api.reads import directory as directory_read
-from server.api.reads import upload as upload_read
-from server.api.reads.analysis import section_blobs, section_bundle
-from server.api.reads.directory import section_store
 from server.api.wire import CLEARS, AnalysisDocument
 from server.boundary_text import BoundaryText
 from server.engine.runtime import Execution, run_route
 from server.methodology.handoff import _decoded_record, record_bytes
 from server.methodology.runner import ModuleProvider
-from server.refusals import Refusal, RefusalCode
+from server.refusals import RefusalCode
 from server.store import StoreConnection
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant, revoke
@@ -51,9 +47,9 @@ def client(
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     monkeypatch.delenv(TRUST_SWITCH, raising=False)
-    app.dependency_overrides[section_store] = lambda: harness.conn
-    app.dependency_overrides[section_blobs] = lambda: harness.blobs
-    app.dependency_overrides[section_bundle] = lambda: harness.bundle
+    app.dependency_overrides[store_connection] = lambda: harness.conn
+    app.dependency_overrides[blob_store] = lambda: harness.blobs
+    app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
     try:
         with TestClient(app) as opened:
             yield opened
@@ -255,7 +251,7 @@ def test_unaccepted_nodes_make_analysis_partial_with_a_note(
     _run(harness, qa_by_module={"CP-L10": "Blocked"})
     reader = _reader(harness)
     counter = _CountingConnection(harness.conn)
-    app.dependency_overrides[section_store] = _serving(counter)
+    app.dependency_overrides[store_connection] = _serving(counter)
 
     response = client.get(_analysis(harness.case_id), headers=_as(reader))
     harness.conn.rollback()
@@ -388,7 +384,7 @@ def test_an_anonymous_or_malformed_analysis_request_opens_no_store_connection(
         opened.append("store")
         return harness.conn
 
-    app.dependency_overrides[section_store] = counted
+    app.dependency_overrides[store_connection] = counted
 
     assert client.get(_analysis(harness.case_id)).status_code == 401
     for path in (_analysis("not-a-case"), _analysis(harness.case_id, "not-a-run")):
@@ -402,7 +398,7 @@ def test_the_analysis_request_path_declares_its_store_budget(
     _run(harness)
     reader = _reader(harness)
     counter = _CountingConnection(harness.conn)
-    app.dependency_overrides[section_store] = _serving(counter)
+    app.dependency_overrides[store_connection] = _serving(counter)
 
     response = client.get(_analysis(harness.case_id), headers=_as(reader))
     harness.conn.rollback()
@@ -412,31 +408,17 @@ def test_the_analysis_request_path_declares_its_store_budget(
     assert 0 < counter.executed == analysis_read.IO_BUDGET
 
 
-def test_the_section_blobs_and_bundle_are_the_apps(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`section_blobs` and `section_bundle` delegate to the app's dependencies."""
-    monkeypatch.delenv(app_module.BLOB_ROOT, raising=False)
-    with pytest.raises(Refusal) as refused:
-        section_blobs()
-    assert refused.value.code is RefusalCode.STORE_NOT_CONFIGURED
-    assert section_bundle() is app_module.methodology_bundle()
+def test_the_analysis_route_is_read_analysis() -> None:
+    """`read_analysis` serves the path.
 
-
-def test_the_analysis_route_is_read_analysis_with_identity_before_the_store() -> None:
-    """`read_analysis` serves the path; `section_actor`, `case_path` and
-    `run_query` are solved before `section_store`, `section_blobs` and
-    `section_bundle`."""
+    Dependency order and identity -- `actor_from_request`, `case_path`,
+    `run_query`, then `store_connection`, `blob_store` and
+    `methodology_bundle` from `server.api.deps` -- is
+    `tests/test_api_routes.py`'s
+    `test_every_section_read_depends_on_the_shared_dependencies`.
+    """
     [served] = [
         route for route in analysis_read.router.routes if isinstance(route, APIRoute)
     ]
     assert served.path == "/api/v1/cases/{case_id}/analysis"
     assert served.endpoint is analysis_read.read_analysis
-    assert [d.call for d in served.dependant.dependencies] == [
-        directory_read.section_actor,
-        upload_read.case_path,
-        analysis_read.run_query,
-        section_store,
-        section_blobs,
-        section_bundle,
-    ]

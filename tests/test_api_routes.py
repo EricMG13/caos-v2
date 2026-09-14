@@ -42,7 +42,11 @@ from server.api.app import (
     read_run_events,
     store_connection,
 )
+from server.api.deps import actor_from_request
+from server.api.reads import analysis as analysis_read
+from server.api.reads import directory as directory_read
 from server.api.reads import run as run_read
+from server.api.reads import upload as upload_read
 from server.api.reads.run import _node_view, read_run_section
 from server.api.wire import CLEARS, EdgeView, NodeView, RefusalBody, RunSectionDocument
 from server.blobs import BlobStore
@@ -147,15 +151,16 @@ def _serve(
     blobs: BlobStore | None = None,
     bundle: Bundle | None = None,
 ) -> None:
-    """Override the app's dependencies and the Run section's alike: the section
-    resolves the app's at call time, so a test names both."""
+    """Override the app's shared dependencies: every section read declares the
+    same `server.api.deps` functions, so overriding them here reaches every
+    route that depends on one, section reads included."""
     pairs = (
-        (conn, (store_connection, run_read.run_store)),
-        (blobs, (blob_store, run_read.run_blobs)),
-        (bundle, (methodology_bundle, run_read.run_bundle)),
+        (conn, store_connection),
+        (blobs, blob_store),
+        (bundle, methodology_bundle),
     )
-    for value, dependencies in pairs:
-        for dependency in dependencies if value is not None else ():
+    for value, dependency in pairs:
+        if value is not None:
             # A closure, not a default argument: FastAPI reads an override's
             # parameters as request inputs and copies their defaults.
             app.dependency_overrides[dependency] = _constant(value)
@@ -277,7 +282,6 @@ def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
     of later will help them.
     """
     app.dependency_overrides.pop(store_connection)
-    app.dependency_overrides.pop(run_read.run_store)
     if database_url is None:
         monkeypatch.delenv(app_module.DATABASE_URL, raising=False)
     else:
@@ -318,14 +322,11 @@ def test_an_anonymous_request_opens_no_store_connection(
         raise AssertionError  # never reached before identity
 
     app.dependency_overrides[store_connection] = counted
-    app.dependency_overrides[run_read.run_store] = counted
     app.dependency_overrides[methodology_bundle] = counted_bundle
-    app.dependency_overrides[run_read.run_bundle] = counted_bundle
 
     for path in (f"/api/v1/cases/{case_id}/run", f"/api/runs/{run_id}/events"):
         assert client.get(path).status_code == 401, path
     del app.dependency_overrides[methodology_bundle]
-    del app.dependency_overrides[run_read.run_bundle]
     assert opened == [], (
         "an anonymous request resolved the store dependency; identity is "
         "declared before it so that it does not"
@@ -801,6 +802,47 @@ def test_the_surface_is_exactly_the_routes_it_declares(
     }
 
 
+def test_every_section_read_depends_on_the_shared_dependencies() -> None:
+    """Each section route calls the `server.api.deps` functions directly, in
+    the order identity, then any path/query parser, then the store, blobs and
+    bundle -- never a per-module wrapper that resolves them lazily.
+
+    A dependency's own path parser (`case_path`, `run_query`) stays: those are
+    parameter parsers, not copies of `app.py`'s dependencies, so they are
+    named here rather than in `server.api.deps`.
+    """
+    routes = {
+        route.path: route
+        for router in (directory_read, upload_read, run_read, analysis_read)
+        for route in router.router.routes
+        if isinstance(route, APIRoute)
+    }
+    calls = {
+        path: [d.call for d in route.dependant.dependencies]
+        for path, route in routes.items()
+    }
+    assert calls["/api/v1/directory"] == [actor_from_request, store_connection]
+    assert calls["/api/v1/cases/{case_id}/upload"] == [
+        actor_from_request,
+        upload_read.case_path,
+        store_connection,
+    ]
+    assert calls["/api/v1/cases/{case_id}/run"] == [
+        actor_from_request,
+        store_connection,
+        blob_store,
+        methodology_bundle,
+    ]
+    assert calls["/api/v1/cases/{case_id}/analysis"] == [
+        actor_from_request,
+        upload_read.case_path,
+        analysis_read.run_query,
+        store_connection,
+        blob_store,
+        methodology_bundle,
+    ]
+
+
 def test_the_reported_digest_is_the_one_that_was_pinned(
     client: TestClient,
     case: tuple[StoreConnection, UUID],
@@ -851,7 +893,7 @@ def test_each_request_path_declares_what_it_costs_the_store(
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
     counter = _CountingConnection(conn)
-    app.dependency_overrides[run_read.run_store] = lambda: counter
+    app.dependency_overrides[store_connection] = lambda: counter
 
     assert _section(client, case_id, run_id, viewer).status_code == 200
 
