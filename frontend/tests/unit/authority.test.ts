@@ -1,14 +1,23 @@
+import { readFileSync } from "node:fs";
 import {
   INITIAL,
   REFETCHES,
   accepts,
+  analyticalIdentity,
   bind,
+  displayedRunIdOf,
   issue,
   navigate,
   refetches,
   release,
   ticket,
+  withWithdrawals,
+  withdrawalsOf,
 } from "@/app/authority";
+import { parseAnalysisDocument, parseRunSectionDocument } from "@/wire/v1";
+
+const load = (path: string): unknown =>
+  JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
 
 describe("the authority machine", () => {
   test("test_route_replay_discards_late_response_for_left_case", () => {
@@ -61,7 +70,10 @@ describe("the authority machine", () => {
   });
 });
 
-describe("what a name refetches", () => {
+describe("what a name refetches and what a view is", () => {
+  const analysis = parseAnalysisDocument(load("../../fixtures/analysis.json"));
+  const run = parseRunSectionDocument(load("../../fixtures/run/frames/1.json"));
+
   test("each event name refetches exactly the sections decision 2 names", () => {
     expect(REFETCHES).toEqual({
       run_progress: ["run"],
@@ -73,5 +85,54 @@ describe("what a name refetches", () => {
     expect(refetches("run_progress", "analysis")).toBe(false);
     expect(refetches("sources_changed", "upload")).toBe(true);
     expect(refetches("runs_changed", "directory")).toBe(false);
+  });
+
+  test("analytical identity is the run, or the run and its sorted records", () => {
+    expect(analyticalIdentity("run", run)).toBe(run.body.run!.run_id);
+    const records = analysis.body.handoffs.map((h) => h.record_sha256);
+    const reordered = {
+      ...analysis,
+      body: { ...analysis.body, handoffs: [...analysis.body.handoffs].reverse() },
+    };
+    expect(analyticalIdentity("analysis", reordered)).toBe(
+      analyticalIdentity("analysis", analysis),
+    );
+    expect(analyticalIdentity("analysis", analysis)).toBe(
+      `${analysis.body.displayed_run_id}|${[...records].sort().join(",")}`,
+    );
+    expect(analyticalIdentity("directory", analysis)).toBeNull();
+    expect(analyticalIdentity("upload", analysis)).toBeNull();
+    expect(displayedRunIdOf("run", run)).toBe(run.body.run!.run_id);
+    expect(displayedRunIdOf("analysis", analysis)).toBe(analysis.body.displayed_run_id);
+  });
+
+  test("withdrawals overlay a document without touching its figures", () => {
+    const fact = analysis.body.handoffs[0]!.source_facts[0]!;
+    const latest = {
+      ...analysis,
+      body: {
+        ...analysis.body,
+        handoffs: analysis.body.handoffs.map((h, i) =>
+          i === 0
+            ? {
+                ...h,
+                confidence_score: 1,
+                source_facts: h.source_facts.map((f) => ({
+                  ...f,
+                  withdrawn_at: "2026-09-10T00:00:00Z",
+                })),
+              }
+            : h,
+        ),
+      },
+    };
+    const withdrawals = withdrawalsOf(latest);
+    expect(withdrawals.get(fact.source_id)).toBe("2026-09-10T00:00:00Z");
+    const shown = withWithdrawals(analysis, withdrawals);
+    expect(shown.body.handoffs[0]!.source_facts[0]!.withdrawn_at).toBe("2026-09-10T00:00:00Z");
+    expect(shown.body.handoffs[0]!.confidence_score).toBe(
+      analysis.body.handoffs[0]!.confidence_score,
+    );
+    expect(withWithdrawals(run, withdrawals)).toBe(run);
   });
 });

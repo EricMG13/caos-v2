@@ -4,7 +4,7 @@
 // the Book binds one accepted snapshot per compared case. Pure; no I/O.
 import type { EnabledSection } from "./sections";
 import type { Refusal, Section } from "@/wire";
-import type { EventName } from "@/wire/v1";
+import type { EventName, SectionDocument } from "@/wire/v1";
 
 export interface Authority {
   /** The case on screen, or null when the section is not about one case. */
@@ -83,4 +83,76 @@ export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> =
 
 export function refetches(name: EventName, section: Section): boolean {
   return (REFETCHES[name] as readonly string[]).includes(section);
+}
+
+/** The run a view is about: Run's shown run, Analysis's displayed run. */
+export function displayedRunIdOf(section: Section, doc: SectionDocument): string | null {
+  const body = doc.body;
+  if (section === "run" && "run" in body) return body.run?.run_id ?? null;
+  if (section === "analysis" && "handoffs" in body) return body.displayed_run_id;
+  return null;
+}
+
+/** What a view's figures are about (decision 6). A refetch under the same
+    identity replaces the view; a different one waits for Reload. Directory
+    and Upload have none and always refresh. */
+export function analyticalIdentity(section: Section, doc: SectionDocument): string | null {
+  const body = doc.body;
+  if (section === "run" && "run" in body) return body.run?.run_id ?? "";
+  if (section === "analysis" && "handoffs" in body) {
+    // Sorted by code point, not by locale: this string is an identity key, so
+    // the same set of digests must produce the same key everywhere. A bare
+    // `.sort()` is already code-point order, and `localeCompare` would make the
+    // key depend on the reader's locale -- the comparator states which one is
+    // meant (sonar typescript:S2871).
+    const records = body.handoffs
+      .map((handoff) => handoff.record_sha256)
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return `${body.displayed_run_id ?? ""}|${records.join(",")}`;
+  }
+  return null;
+}
+
+/** Every withdrawn source a document names, by source id. */
+export function withdrawalsOf(doc: SectionDocument): ReadonlyMap<string, string> {
+  const withdrawn = new Map<string, string>();
+  const body = doc.body;
+  if ("handoffs" in body) {
+    for (const handoff of body.handoffs) {
+      for (const fact of handoff.source_facts) {
+        if (fact.withdrawn_at !== null) withdrawn.set(fact.source_id, fact.withdrawn_at);
+      }
+    }
+  }
+  if ("sources" in body) {
+    for (const source of body.sources) {
+      if (source.withdrawn_at !== null) withdrawn.set(source.source_id, source.withdrawn_at);
+    }
+  }
+  return withdrawn;
+}
+
+/** A safety change applied to the displayed view: citations of a withdrawn
+    source say so, and no figure moves. A document with nothing to mark is
+    returned as it is. */
+export function withWithdrawals<D extends SectionDocument>(
+  doc: D,
+  withdrawals: ReadonlyMap<string, string>,
+): D {
+  const body = doc.body;
+  if (!("handoffs" in body) || withdrawals.size === 0) return doc;
+  const marked = (id: string, at: string | null) => at ?? withdrawals.get(id) ?? null;
+  return {
+    ...doc,
+    body: {
+      ...body,
+      handoffs: body.handoffs.map((handoff) => ({
+        ...handoff,
+        source_facts: handoff.source_facts.map((fact) => ({
+          ...fact,
+          withdrawn_at: marked(fact.source_id, fact.withdrawn_at),
+        })),
+      })),
+    },
+  };
 }

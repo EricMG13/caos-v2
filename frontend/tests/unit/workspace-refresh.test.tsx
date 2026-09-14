@@ -1,5 +1,7 @@
-// The workspace under events (brief 4.4, decisions 2 and 5): which names
-// refetch, one fetch in flight, reconnects, refusals and late responses.
+// The workspace under events (brief 4.4, decisions 2, 5 and 6): which names
+// refetch, one fetch in flight, reconnects, refusals, late responses, the
+// stale view held until Reload, withdrawal over a stale view, and local state
+// kept through an ordinary refresh.
 import { readFileSync } from "node:fs";
 import { act, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
@@ -11,6 +13,7 @@ const json = (path: string): Record<string, unknown> => JSON.parse(text(path));
 
 const CASE = "00000000-0000-4000-8000-000000000001";
 const OTHER = "00000000-0000-4000-8000-0000000000ff";
+const RUN = "00000000-0000-4000-8000-0000000000b2";
 const analysis = () => json("../../fixtures/analysis.json");
 const otherCase = () => JSON.parse(text("../../fixtures/analysis.json").replaceAll(CASE, OTHER));
 
@@ -107,6 +110,12 @@ const region = (container: HTMLElement) => container.querySelector("main#body")!
 const confidence = (container: HTMLElement) =>
   region(container).querySelector("[data-confidence]")?.textContent ?? null;
 
+function changed(body: Record<string, unknown>, edit: (b: Record<string, unknown>) => void) {
+  const copy = structuredClone(body);
+  edit(copy["body"] as Record<string, unknown>);
+  return copy;
+}
+
 describe("the workspace under its event tail", () => {
   test("test_an_event_refetches_only_the_sections_it_names", async () => {
     await mount("upload", `/upload/?case=${CASE}`);
@@ -196,5 +205,94 @@ describe("the workspace under its event tail", () => {
     await answer(0, analysis());
     expect(confidence(container)).toMatch(/^7 /);
     expect(region(container).querySelector("[data-surface-state]")).toBeNull();
+  });
+
+  test("test_a_new_analytical_identity_is_held_until_reload", async () => {
+    const { container } = await mount("analysis", `/analysis/?case=${CASE}`);
+    await answer(0, analysis());
+    expect(confidence(container)).toMatch(/^96 /);
+    // Same identity, new figures: an ordinary refresh replaces.
+    await fire("handoff_accepted");
+    await answer(
+      1,
+      changed(analysis(), (b) => {
+        (b["handoffs"] as Record<string, unknown>[])[0]!["confidence_score"] = 95;
+      }),
+    );
+    expect(confidence(container)).toMatch(/^95 /);
+    expect(region(container).querySelector("[data-surface-state='stale']")).toBeNull();
+    // A new identity is held: the label shows, the figures do not move.
+    await fire("run_terminal");
+    const next = changed(analysis(), (b) => {
+      b["displayed_run_id"] = RUN;
+      b["latest_run_id"] = RUN;
+      (b["handoffs"] as Record<string, unknown>[])[0]!["confidence_score"] = 12;
+    });
+    await answer(2, next);
+    const stale = region(container).querySelector("[data-surface-state='stale']");
+    expect(stale).not.toBeNull();
+    expect(confidence(container)).toMatch(/^95 /);
+    // A further refetch of the same pending identity still does not advance.
+    await fire("runs_changed");
+    await answer(3, next);
+    expect(confidence(container)).toMatch(/^95 /);
+    act(() => fireEvent.click(stale!.querySelector("button")!));
+    await settle();
+    expect(confidence(container)).toMatch(/^12 /);
+    expect(region(container).querySelector("[data-surface-state='stale']")).toBeNull();
+  });
+
+  test("test_withdrawal_applies_to_a_stale_view_without_advancing_its_figures", async () => {
+    const { container } = await mount("analysis", `/analysis/?case=${CASE}`);
+    await answer(0, analysis());
+    const cited = () => region(container).querySelector("[data-citation]");
+    expect(cited()).toHaveAttribute("data-withdrawn", "false");
+    await fire("sources_changed");
+    await answer(
+      1,
+      changed(analysis(), (b) => {
+        b["displayed_run_id"] = RUN;
+        const handoffs = b["handoffs"] as Record<string, unknown>[];
+        handoffs[0]!["confidence_score"] = 12;
+        const facts = handoffs[0]!["source_facts"] as Record<string, unknown>[];
+        facts[0]!["withdrawn_at"] = "2026-09-10T00:00:00Z";
+      }),
+    );
+    expect(region(container).querySelector("[data-surface-state='stale']")).not.toBeNull();
+    expect(cited()).toHaveAttribute("data-withdrawn", "true");
+    expect(confidence(container)).toMatch(/^96 /);
+  });
+
+  test("a 404 on refetch makes the region unavailable at once, stale or not", async () => {
+    const { container } = await mount("analysis", `/analysis/?case=${CASE}`);
+    await answer(0, analysis());
+    await fire("run_terminal");
+    await answer(
+      1,
+      changed(analysis(), (b) => (b["displayed_run_id"] = RUN)),
+    );
+    expect(region(container).querySelector("[data-surface-state='stale']")).not.toBeNull();
+    await fire("run_terminal");
+    await answer(2, {}, 404);
+    expect(region(container).querySelector("[data-surface-state='unavailable']")).not.toBeNull();
+    expect(confidence(container)).toBeNull();
+  });
+
+  test("test_an_ordinary_refresh_preserves_run_node_selection_and_tab", async () => {
+    const { container } = await mount("run", `/run/?case=${CASE}&run=${RUN}`);
+    expect(FakeSource.all[0]!.url).toBe(`/api/v1/cases/${CASE}/events?run=${RUN}`);
+    await answer(0, json("../../fixtures/run/frames/1.json"));
+    const node = () => container.querySelector<HTMLButtonElement>("button.node[data-node='CP-6']")!;
+    act(() => fireEvent.click(node()));
+    expect(node()).toHaveAttribute("aria-pressed", "true");
+    // The v1 chrome declares no tabs; the active tab is the section's default
+    // and must survive too.
+    const tabs = () => [...container.querySelectorAll("[role='tab'][aria-selected='true']")];
+    const tabBefore = tabs().map((tab) => tab.textContent);
+    await fire("run_progress");
+    await answer(1, json("../../fixtures/run/frames/3.json"));
+    expect(node()).toHaveAttribute("data-state", "COMPLETE");
+    expect(node()).toHaveAttribute("aria-pressed", "true");
+    expect(tabs().map((tab) => tab.textContent)).toEqual(tabBefore);
   });
 });
