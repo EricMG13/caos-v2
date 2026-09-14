@@ -41,6 +41,9 @@ test("demo fixture HTTP is read-only before fixture selection", async ({ request
   expect(await get.json()).toHaveProperty("chrome");
   const run = await request.get("/api/v1/cases/CASE-2026-CVNA01/run");
   expect(run.status()).toBe(200);
+  const model = await request.get("/api/v1/cases/00000000-0000-4000-8000-000000000001/model");
+  expect(model.status()).toBe(200);
+  expect((await model.json()).body.forecast.route_node_id).toBe("CP-CF");
   // Only supported v1 paths are served.
   for (const path of ["/api/sections/directory", "/api/v1/cases/CASE-2026-CVNA01/book"]) {
     expect((await request.get(path)).status(), path).toBe(404);
@@ -53,4 +56,11 @@ test("demo fixture HTTP is read-only before fixture selection", async ({ request
     code: "READ_ONLY_DEMO",
     clears: "a real API handles commands",
   });
+});
+
+test("demo Model route renders parsed v1 content", async ({ page }) => {
+  await page.goto("/model/?case=00000000-0000-4000-8000-000000000001");
+  await expect(page.locator("[data-model-v1]")).toBeVisible();
+  await expect(page.locator("[data-model-periods]")).toContainText("123.45");
+  await expect(page.locator("main#body [data-surface-state]")).toHaveCount(0);
 });
