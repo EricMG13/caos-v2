@@ -61,7 +61,7 @@ def test_acceptance_requires_known_charge(
     assert _counts(conn) == (0, 0, 0)
 
 
-@pytest.mark.parametrize("terminal", [runs.complete_run, runs.fail_run])
+@pytest.mark.parametrize("terminal", [runs.block_run, runs.fail_run])
 def test_late_outcome_is_durable_without_analytical_acceptance(
     money_run: tuple[StoreConnection, UUID, UUID],
     terminal: Callable[[StoreConnection, UUID], bool],

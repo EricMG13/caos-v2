@@ -29,7 +29,7 @@ from server.store.run_inputs import (
     load_run_input,
     pin_run_input,
 )
-from server.store.runs import complete_run, create_case, start_attempt, start_run
+from server.store.runs import create_case, fail_run, start_attempt, start_run
 from server.store.source_sets import SourceSet, snapshot_source_set
 
 type Prepared = tuple[StoreConnection, UUID, SourceSet, Bundle, ResolvedRoute]
@@ -115,7 +115,7 @@ def test_complete_input_roundtrip_exact_terminal_replay(prepared: Prepared) -> N
     assert conn.info.transaction_status is TransactionStatus.INTRANS
     with pytest.raises(FrozenInstanceError):
         pin.source_version = 7  # type: ignore[misc]  # frozen model regression
-    complete_run(conn, run)
+    fail_run(conn, run)
     before = events_of(conn, run)
     assert (
         pin_run_input(

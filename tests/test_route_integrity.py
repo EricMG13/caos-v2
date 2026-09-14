@@ -27,7 +27,7 @@ from server.refusals import Refusal
 from server.store import StoreConnection, connect
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, events_of
-from server.store.runs import complete_run, create_case, start_attempt, start_run
+from server.store.runs import create_case, fail_run, start_attempt, start_run
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ def test_all_catalog_routes_and_host_extensions_roundtrip(
         assert conn.info.transaction_status is TransactionStatus.IDLE
         assert routes.resolved_route(conn, run) == route
         assert routes.pinned_route(conn, run) == digest == route_digest(route)
-        complete_run(conn, run)
+        fail_run(conn, run)
         before = events_of(conn, run)
         assert routes.pin_route(conn, run, route) == digest
         assert conn.info.transaction_status is TransactionStatus.IDLE

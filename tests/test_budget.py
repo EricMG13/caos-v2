@@ -40,7 +40,7 @@ from server.store.events import lock_run
 from server.store.runs import (
     Accepted,
     accept_attempt,
-    complete_run,
+    block_run,
     create_case,
     fail_run,
     start_attempt,
@@ -401,7 +401,7 @@ def test_same_attempt_never_authorizes_another_spend(
     )
 
 
-@pytest.mark.parametrize("terminal", [complete_run, fail_run])
+@pytest.mark.parametrize("terminal", [block_run, fail_run])
 def test_reserve_observes_terminal_transition_after_waiting(
     money_run: tuple[StoreConnection, UUID, UUID],
     empty_database: str,
@@ -441,7 +441,7 @@ def test_reservation_holds_order_until_commit(
         first = pool.submit(reserve, conn, attempt, Decimal("0.25"))
         try:
             assert ready.wait(3)
-            second = pool.submit(complete_run, other, run)
+            second = pool.submit(block_run, other, run)
             _wait_for_blocking(conn, other)
         finally:
             release.set()

@@ -19,11 +19,12 @@ from uuid import UUID
 import pytest
 from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION, VENDORED
 from conftest import priced
-from test_run_events import RECORD, approved_nodes
+from test_run_events import RECORD, accept_nodes, approved_nodes
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import resolve_route
+from server.engine import runtime
+from server.engine.route import NodeState, resolve_route
 from server.engine.runtime import Execution, ProviderResult, run_route
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
@@ -127,8 +128,10 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
     """
     _case_id, run_id = prepared_run
     with connect(empty_database) as conn:
-        nodes = approved_nodes(conn, run_id, tmp_path)
-        attempt_id = start_attempt(conn, run_id, next(iter(nodes.values())))
+        *others, last = approved_nodes(conn, run_id, tmp_path).values()
+        # Completion needs every other pinned node accepted (brief 4.3 D8).
+        accept_nodes(conn, run_id, *others)
+        attempt_id = start_attempt(conn, run_id, last)
         conn.commit()
 
     def complete() -> bool:
@@ -154,8 +157,9 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
         row = conn.execute(
             "SELECT count(*) FROM budget_ledger WHERE run_id = %s", (run_id,)
         ).fetchone()
-        assert row is not None and row[0] == 1
+        assert row is not None and row[0] == len(others) + 1, "one charge per node"
         assert run_status(conn, run_id) is RunStatus.COMPLETE
+        assert [e.name for e in events_of(conn, run_id)].count("RUN_COMPLETE") == 1
 
 
 # -- The lease fence (brief 4.3 D3; interleavings I2-I4, I7, I8, I12) --------
@@ -484,3 +488,62 @@ def test_the_runtime_writes_under_its_executions_lease(
         _refused(RefusalCode.LEASE_NOT_HELD, run)
         assert provider.calls == ["CP-0"], "a stale lease starts no attempt"
         assert _count(conn, "run_attempts", run_id) == 1
+
+
+@pytest.mark.parametrize("moves", [1, 2])
+def test_a_stale_terminal_decision_runs_one_more_pass_then_raises(
+    empty_database: str,
+    prepared_run: tuple[UUID, UUID],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    moves: int,
+) -> None:
+    """D8: `run_route` decides from a read unit; a node accepted on another
+    connection before the lock refuses `RUN_TERMINAL_STALE`, and the loop
+    decides once more from the store -- at most once per call."""
+    _case_id, run_id = prepared_run
+    bundle = Bundle(VENDORED)
+    route = resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
+    with connect(empty_database) as conn:
+        nodes = approved_nodes(conn, run_id, tmp_path, bundle, route)
+        conn.commit()
+    # Neither gate nor QA source: accepted as presence, no record to verify.
+    movers = [nodes["CP-L10"], nodes["CP-5"]][:moves]
+    decided: list[frozenset[str] | None] = []
+
+    def moving(
+        conn: StoreConnection,
+        run: UUID,
+        *,
+        lease: Lease | None = None,
+        accepted: frozenset[str] | None = None,
+    ) -> bool:
+        decided.append(accepted)
+        if movers:
+            with connect(empty_database) as other:
+                accept_nodes(other, run, movers.pop(0))
+        return block_run(conn, run, lease=lease, accepted=accepted)
+
+    monkeypatch.setattr(runtime, "frontier", lambda *_args: ())
+    monkeypatch.setattr(
+        runtime,
+        "node_states",
+        lambda *_args: {n.route_node_id: NodeState.BLOCKED for n in route.nodes},
+    )
+    monkeypatch.setattr(runtime, "block_run", moving)
+    execution = Execution(_Reclaiming(empty_database, run_id), priced(RESERVED), bundle)
+    blobs = BlobStore(tmp_path / "blobs")
+    with connect(empty_database) as conn:
+
+        def run() -> None:
+            run_route(conn, blobs, run_id=run_id, route=route, execution=execution)
+
+        if moves == 1:
+            run()
+            assert run_status(conn, run_id) is RunStatus.BLOCKED
+        else:
+            _refused(RefusalCode.RUN_TERMINAL_STALE, run)
+            assert run_status(conn, run_id) is RunStatus.RUNNING
+        assert decided == [frozenset(), frozenset({nodes["CP-L10"]})], "no third"
+        names = [e.name for e in events_of(conn, run_id)]
+        assert names.count(RunEvent.RUN_BLOCKED.value) == (2 - moves)
