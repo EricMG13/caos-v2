@@ -51,7 +51,7 @@ that omits the cases after the stop reads as complete.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from decimal import Decimal
 from fractions import Fraction
 from hashlib import sha256
@@ -79,6 +79,7 @@ from server.qualification.proof import OrchestrationProof, assert_orchestration_
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
+from server.store.gates import execution_input
 from server.store.outcomes import execution_reads, require_idle
 from server.store.routes import pin_route, resolved_route
 from server.store.run_inputs import RunInput, pin_run_input
@@ -238,37 +239,44 @@ def perform(
     harness: Harness,
     *,
     qualification: QualificationSet,
+    prepared: tuple[PreparedCase, ...] | None = None,
 ) -> PerformedSet:
-    """Run every case of the set and report what each run did, and the matrix.
-
-    The order is the contract: the set is checked whole, then each case is
-    admitted and run, then the matrix is built over the runs this call made.
-    Building the matrix from anything else would let a stale run answer for a
-    case this set never performed.
-    """
+    """Execute externally approved prepared inputs, then report their runs."""
+    if (
+        prepared is None
+        or type(prepared) is not tuple
+        or not isinstance(harness.bundle, Bundle)
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     # Measurable first: a case with no documents is unanswerable *because* it
     # is empty, and "it has no documents" is the more useful of two true
     # answers about the same defect.
     assert_measurable(qualification)
     _distinct(qualification)
     _answerable(qualification)
-    # Routes too. Resolution is pure and reads no store (invariant 10), so
-    # nothing made it wait for a case's turn — and resolving inside the loop
-    # meant a bad pathway on the last case of ten was found after nine had been
-    # admitted, run and paid for, then discarded with the refusal. Knowable from
-    # the catalog and the set alone, so it is answered before anything is spent.
-    routes = {
-        case.label: resolve_route(harness.catalog, case.profile_id, case.selection_id)
-        for case in qualification.cases
-    }
     _affordable(qualification, harness)
+    if len(prepared) != len(qualification.cases) or any(
+        type(item) is not PreparedCase
+        or type(item.input) is not RunInput
+        or type(item.case_label) is not str
+        or item.case_label != case.label
+        or type(item.input.run_id) is not UUID
+        or type(item.input.case_id) is not UUID
+        for case, item in zip(qualification.cases, prepared, strict=True)
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if len({item.input.run_id for item in prepared}) != len(prepared) or len(
+        {item.input.case_id for item in prepared}
+    ) != len(prepared):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    for case, item in zip(qualification.cases, prepared, strict=True):
+        with execution_reads(conn):
+            _eligible(conn, harness, case, item)
 
-    # A loop rather than a comprehension: every turn of it admits documents,
-    # opens a run and calls a provider, and a line that spends money should
-    # look like one.
+    # Each turn can purchase work; preserve its stopped record before returning.
     performed: list[Performed] = []
-    for case in qualification.cases:
-        record = _perform_one(conn, blobs, harness, case=case, route=routes[case.label])
+    for case, item in zip(qualification.cases, prepared, strict=True):
+        record = _perform_one(conn, blobs, harness, case=case, prepared=item)
         performed.append(record)
         if record.stopped is not None:
             # Stop, having recorded it. Carrying on would be a bet that the
@@ -279,23 +287,57 @@ def perform(
             # the refusals that are billable — another charge.
             break
 
-    return PerformedSet(
-        performed=tuple(performed),
-        # Only over a set that finished — which means every case, and every one
-        # of them to the end of its route. A matrix missing the cases after the
-        # one that stopped reads as complete; so does a row that says `proven`
-        # and `met` about a run that accepted CP-0 and went no further, which is
-        # the very confusion `Performed` exists to undo.
-        matrix=None
-        if any(record.stopped is not None for record in performed)
-        else build_matrix(
+    if any(record.stopped is not None for record in performed):
+        return PerformedSet(tuple(performed), None)
+    with execution_reads(conn):
+        matrix = build_matrix(
             conn,
             blobs,
             harness.bundle,
             qualification=qualification,
             runs={record.case_label: record.run_id for record in performed},
-        ),
-    )
+        )
+    return PerformedSet(tuple(performed), matrix)
+
+
+def _eligible(
+    conn: StoreConnection,
+    harness: Harness,
+    case: QualificationCase,
+    prepared: PreparedCase,
+) -> ResolvedRoute:
+    """Compare expectations with current authority inside the caller's owned unit."""
+    pin, route = execution_input(conn, prepared.input.run_id, harness.bundle)
+    if (
+        any(
+            type(getattr(pin, f.name)) is not type(getattr(prepared.input, f.name))
+            for f in fields(RunInput)
+        )
+        or pin != prepared.input
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    owner = conn.execute(
+        "SELECT c.title,r.budget_ceiling FROM runs r JOIN cases c USING(case_id)"
+        " WHERE r.run_id=%s AND c.case_id=%s",
+        (pin.run_id, pin.case_id),
+    ).fetchone()
+    members = conn.execute(
+        "SELECT m.filename,m.document_sha256 FROM source_set_members m"
+        " WHERE m.case_id=%s AND m.version=%s",
+        (pin.case_id, pin.source_version),
+    ).fetchall()
+    if (
+        owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
+        or (route.profile_id, route.selection_id)
+        != (case.profile_id, case.selection_id)
+        or pin.research_json is not None
+        or sorted(members)
+        != sorted(
+            (d.filename.value, sha256(d.data).hexdigest()) for d in case.documents
+        )
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return route
 
 
 def _affordable(qualification: QualificationSet, harness: Harness) -> None:
@@ -335,35 +377,15 @@ def _perform_one(
     harness: Harness,
     *,
     case: QualificationCase,
-    route: ResolvedRoute,
+    prepared: PreparedCase,
 ) -> Performed:
-    """One case: admitted, pinned, run, and recorded.
-
-    The route arrives resolved, from the pass `perform` makes over the whole set
-    before it spends anything — so by here an unknown pathway has already been
-    refused, and refused without a case row or a run behind it.
-
-    A refusal inside the run is recorded rather than raised, so the cases after
-    it are still performed. It is not swallowed: it lands in `stopped` as a
-    typed code, and the run it left behind is as recoverable and as fully
-    attempted as it would be for any other caller.
-    """
-    case_id = create_case(conn, BoundaryText.of(case.label, limit=_LABEL_LIMIT))
-    source_ids = admit_pack(
-        conn, blobs, case_id=case_id, documents=list(case.documents)
-    )
-    run_id = start_run(conn, case_id)
-    conn.commit()
-
-    # Pinned from that same object, then executed from it: resolving twice
-    # would make the pin and the execution two answers that merely happen to
-    # agree.
-    pin_route(conn, run_id, route)
-    delivered = _delivered(conn, source_ids)
-    conn.rollback()
-
+    """Recheck one prepared case, execute it, and retain its typed stopped record."""
+    run_id = prepared.input.run_id
     stopped: RefusalCode | None = None
     try:
+        with execution_reads(conn):
+            route = _eligible(conn, harness, case, prepared)
+            delivered = _delivered(conn, run_id)
         run_route(
             conn,
             blobs,
@@ -386,9 +408,23 @@ def _perform_one(
         # Every durable step of an attempt commits on its own
         # (`server/engine/runtime.py`), so there is nothing half-written here to
         # keep, and the next case starts on a clean transaction.
-        conn.rollback()
+        rollback_or_close(conn)
+        if conn.closed:
+            raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
         stopped = failed.code
 
+    with execution_reads(conn):
+        return _record(conn, blobs, harness, prepared, stopped)
+
+
+def _record(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    harness: Harness,
+    prepared: PreparedCase,
+    stopped: RefusalCode | None,
+) -> Performed:
+    run_id = prepared.input.run_id
     proof: OrchestrationProof | None = None
     refusal: RefusalCode | None = None
     try:
@@ -404,7 +440,7 @@ def _perform_one(
         proof, refusal, unrun = None, unattributed.code, ()
 
     return Performed(
-        case_label=case.label,
+        case_label=prepared.case_label,
         run_id=run_id,
         status=run_status(conn, run_id),
         stopped=stopped,
@@ -468,16 +504,15 @@ def _accepted(
         return {str(row[0]): {} for row in rows}
 
 
-def _delivered(conn: StoreConnection, source_ids: list[UUID]) -> list[tuple[UUID, str]]:
-    """Every block of every document this case was admitted with.
-
-    The whole case, because a qualification case is assembled to be answerable
-    and withholding part of it would measure the harness rather than the system.
-    """
+def _delivered(conn: StoreConnection, run_id: UUID) -> list[tuple[UUID, str]]:
+    """Captured block IDs, selected beside current eligibility in its owned unit."""
     rows = conn.execute(
-        "SELECT source_id, block_id FROM source_blocks"
-        " WHERE source_id = ANY(%s) ORDER BY source_id, block_id",
-        (source_ids,),
+        "SELECT b.source_id,b.block_id FROM run_inputs i"
+        " JOIN source_set_members m"
+        " ON (m.case_id,m.version)=(i.case_id,i.source_version)"
+        " JOIN source_blocks b ON b.source_id=m.source_id"
+        " WHERE i.run_id=%s ORDER BY b.source_id,b.block_id",
+        (run_id,),
     ).fetchall()
     return [(UUID(str(row[0])), str(row[1])) for row in rows]
 

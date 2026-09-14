@@ -30,13 +30,18 @@ recorded, not swallowed, in a typed field beside the proof.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 from conftest import gate_verdict, route_fault
+from test_gates import _approval
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -48,8 +53,10 @@ from server.qualification.harness import (
     Harness,
     Performed,
     PerformedSet,
+    PreparedCase,
     Unrun,
     perform,
+    prepare,
 )
 from server.qualification.matrix import (
     ExpectedCitation,
@@ -61,6 +68,8 @@ from server.qualification.matrix import (
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.budget import CEILING
+from server.store.gates import Gate, approve_gate
+from server.store.members import Standing, grant
 from server.store.runs import run_status
 
 REPO = Path(__file__).resolve().parents[1]
@@ -157,6 +166,7 @@ class _DamagesWhatWasAccepted:
     # What to damage on the second call. Two shapes of a store that moved
     # under a running set, and `perform` must survive both.
     loses_the_pin: bool = False
+    target: tuple[str, UUID] | None = None
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         if not self.inner.prompts:
@@ -165,14 +175,72 @@ class _DamagesWhatWasAccepted:
             # Committed, because this stands for another process moving the
             # store: `perform` rolls back the transaction the refusal leaves
             # open, and an uncommitted delete would simply come back.
-            with route_fault(self.conn):
-                self.conn.execute("DELETE FROM run_routes")
-            self.conn.commit()
+            assert self.target is not None
+            with _without_route(self.conn, *self.target):
+                pass
         else:
             for [digest] in self.conn.execute("SELECT artifact_sha256 FROM artifacts"):
                 self.blobs.path_of(str(digest)).write_bytes(b"not an envelope")
             self.conn.rollback()
         return Completion(None, None, None, RefusalCode.PROVIDER_UNAVAILABLE)
+
+
+@contextmanager
+def _without_route(conn: StoreConnection, database: str, run: UUID) -> Iterator[None]:
+    assert database == "caos_test_" + UUID(database.removeprefix("caos_test_")).hex
+    assert conn.info.transaction_status.name == "IDLE"
+    query = (
+        "SELECT t.tgname, t.tgenabled FROM pg_trigger t"
+        " JOIN pg_constraint c ON c.oid=t.tgconstraint"
+        " WHERE c.contype='f' AND c.conrelid='run_inputs'::regclass"
+        " AND c.confrelid='run_routes'::regclass AND t.tgrelid=c.confrelid"
+        " ORDER BY t.tgname"
+    )
+    with conn.transaction():
+        assert conn.execute("SELECT current_database()").fetchone() == (database,)
+        triggers = conn.execute(query).fetchall()
+        assert len(triggers) == 2 and all(state == "O" for _, state in triggers)
+        with route_fault(conn):
+            for name, _ in triggers:
+                conn.execute(
+                    psycopg.sql.SQL("ALTER TABLE run_routes DISABLE TRIGGER {}").format(
+                        psycopg.sql.Identifier(name)
+                    )
+                )
+            assert (
+                conn.execute("DELETE FROM run_routes WHERE run_id=%s", (run,)).rowcount
+                == 1
+            )
+            yield
+            for name, _ in triggers:
+                conn.execute(
+                    psycopg.sql.SQL("ALTER TABLE run_routes ENABLE TRIGGER {}").format(
+                        psycopg.sql.Identifier(name)
+                    )
+                )
+        assert conn.execute(query).fetchall() == triggers
+        assert conn.execute(
+            "SELECT tgenabled FROM pg_trigger WHERE tgrelid='run_routes'::regclass"
+            " AND tgname='route_immutable'"
+        ).fetchone() == ("O",)
+
+
+def _approve(
+    conn: StoreConnection,
+    prepared: tuple[PreparedCase, ...],
+    gates: tuple[Gate, ...] = tuple(Gate),
+) -> tuple[UUID, ...]:
+    actors = tuple(uuid4() for _ in prepared)
+    for item, actor in zip(prepared, actors, strict=True):
+        grant(
+            conn, case_id=item.input.case_id, user_id=actor, standing=Standing.APPROVER
+        )
+        conn.commit()
+        for gate in gates:
+            approval = _approval(conn, item.input.run_id, actor, gate)
+            conn.rollback()
+            approve_gate(conn, approval)
+    return actors
 
 
 def _case(label: str, data: bytes, *, quote: str = QUOTE) -> QualificationCase:
@@ -206,20 +274,24 @@ def _perform(
     blobs: BlobStore,
     qualification: QualificationSet,
     *,
-    refuses_call: int | None = None,
     ceiling: Decimal = SET_CEILING,
+    completions: _Completions | None = None,
 ) -> PerformedSet:
+    harness = Harness(
+        bundle=Bundle(root=VENDORED),
+        catalog=CATALOG,
+        completions=completions or _Completions(),
+        estimate=ESTIMATE,
+        ceiling=ceiling,
+    )
+    prepared = prepare(conn, blobs, harness, qualification=qualification)
+    _approve(conn, prepared)
     return perform(
         conn,
         blobs,
-        Harness(
-            bundle=Bundle(root=VENDORED),
-            catalog=CATALOG,
-            completions=_Completions(refuses_call=refuses_call),
-            estimate=ESTIMATE,
-            ceiling=ceiling,
-        ),
+        harness,
         qualification=qualification,
+        prepared=prepared,
     )
 
 
@@ -494,7 +566,7 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
             conn,
             BlobStore(tmp_path / "blobs"),
             QualificationSet(cases=(_case("acme-2026", REPORT),)),
-            refuses_call=2,
+            completions=_Completions(refuses_call=2),
         )
 
         [record] = performed.performed
@@ -541,13 +613,14 @@ def test_a_case_that_stops_ends_the_set_without_discarding_it(
         apply_schema(conn)
         conn.commit()
 
+        completions = _Completions(refuses_call=1)
         performed = _perform(
             conn,
             BlobStore(tmp_path / "blobs"),
             QualificationSet(
                 cases=(_case("acme-2026", REPORT), _case("borealis-2026", OTHER))
             ),
-            refuses_call=1,
+            completions=completions,
         )
 
         [record] = performed.performed
@@ -564,10 +637,42 @@ def test_a_case_that_stops_ends_the_set_without_discarding_it(
         ]
         assert performed.matrix is None
 
-        # The second case cost nothing: no case row, no run, no reservation.
-        assert _count(conn, "SELECT count(*) FROM cases") == 1
-        assert _count(conn, "SELECT count(*) FROM runs") == 1
+        # Both inputs exist; the second case purchased nothing.
+        assert _count(conn, "SELECT count(*) FROM cases") == 2
+        assert _count(conn, "SELECT count(*) FROM runs") == 2
         assert _count(conn, "SELECT count(*) FROM budget_reservations") == 1
+        second = conn.execute(
+            "SELECT run_id FROM runs WHERE run_id <> %s", (record.run_id,)
+        ).fetchone()
+        assert second is not None
+        for table in (
+            "run_attempts",
+            "budget_reservations",
+            "call_outcomes",
+            "budget_ledger",
+            "artifacts",
+        ):
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM " + table + " WHERE run_id=%s", second
+                ).fetchall()
+                == []
+            ), table
+        sources = conn.execute(
+            "SELECT s.source_id FROM sources s JOIN runs r USING(case_id)"
+            " WHERE r.run_id=%s",
+            second,
+        ).fetchall()
+        assert len(completions.prompts) == 1 and sources
+        first_source = conn.execute(
+            "SELECT s.source_id FROM sources s JOIN runs r USING(case_id)"
+            " WHERE r.run_id=%s",
+            (record.run_id,),
+        ).fetchone()
+        assert (
+            first_source is not None and str(first_source[0]) in completions.prompts[0]
+        )
+        assert all(str(source[0]) not in completions.prompts[0] for source in sources)
 
 
 def test_two_cases_under_one_label_are_refused_before_either_runs(
@@ -694,17 +799,18 @@ def test_an_unreadable_artifact_does_not_take_the_set_down_with_it(
         conn.commit()
         blobs = BlobStore(tmp_path / "blobs")
 
+        harness = Harness(
+            Bundle(VENDORED),
+            CATALOG,
+            _DamagesWhatWasAccepted(conn, blobs, _Completions()),
+            ESTIMATE,
+            SET_CEILING,
+        )
+        qualification = QualificationSet(cases=(_case("acme-2026", REPORT),))
+        prepared = prepare(conn, blobs, harness, qualification=qualification)
+        _approve(conn, prepared)
         performed = perform(
-            conn,
-            blobs,
-            Harness(
-                bundle=Bundle(root=VENDORED),
-                catalog=CATALOG,
-                completions=_DamagesWhatWasAccepted(conn, blobs, _Completions()),
-                estimate=ESTIMATE,
-                ceiling=SET_CEILING,
-            ),
-            qualification=QualificationSet(cases=(_case("acme-2026", REPORT),)),
+            conn, blobs, harness, qualification=qualification, prepared=prepared
         )
 
         # It returned at all, which is the assertion.
@@ -737,19 +843,19 @@ def test_a_run_whose_pin_is_gone_reports_no_pinned_nodes(
         conn.commit()
         blobs = BlobStore(tmp_path / "blobs")
 
+        provider = _DamagesWhatWasAccepted(
+            conn, blobs, _Completions(), loses_the_pin=True
+        )
+        harness = Harness(Bundle(VENDORED), CATALOG, provider, ESTIMATE, SET_CEILING)
+        qualification = QualificationSet(cases=(_case("acme-2026", REPORT),))
+        prepared = prepare(conn, blobs, harness, qualification=qualification)
+        _approve(conn, prepared)
+        provider.target = (
+            urlsplit(empty_database).path.lstrip("/"),
+            prepared[0].input.run_id,
+        )
         performed = perform(
-            conn,
-            blobs,
-            Harness(
-                bundle=Bundle(root=VENDORED),
-                catalog=CATALOG,
-                completions=_DamagesWhatWasAccepted(
-                    conn, blobs, _Completions(), loses_the_pin=True
-                ),
-                estimate=ESTIMATE,
-                ceiling=SET_CEILING,
-            ),
-            qualification=QualificationSet(cases=(_case("acme-2026", REPORT),)),
+            conn, blobs, harness, qualification=qualification, prepared=prepared
         )
 
         [record] = performed.performed
@@ -766,14 +872,14 @@ def test_a_late_invalid_pin_clears_proof_and_preserves_the_stopped_record(
 
     with connect(empty_database) as conn:
         apply_schema(conn)
+        conn.commit()
         blobs = BlobStore(tmp_path / "blobs")
         original = subject._unrun
 
         def corrupt(c: StoreConnection, b: BlobStore, run: UUID) -> tuple[Unrun, ...]:
             with route_fault(c):
                 c.execute(
-                    "UPDATE run_routes SET route_digest = repeat('0', 64)"
-                    " WHERE run_id = %s",
+                    "UPDATE run_routes SET resolved = '{}' WHERE run_id = %s",
                     (run,),
                 )
             c.commit()
@@ -784,7 +890,7 @@ def test_a_late_invalid_pin_clears_proof_and_preserves_the_stopped_record(
             conn,
             blobs,
             QualificationSet(cases=(_case("invalid-pin", REPORT),)),
-            refuses_call=2,
+            completions=_Completions(refuses_call=2),
         ).performed
         assert record.stopped is RefusalCode.PROVIDER_UNAVAILABLE
         assert record.refusal is RefusalCode.ROUTE_IDENTITY_INVALID
@@ -799,7 +905,7 @@ def test_a_late_invalid_pin_clears_proof_and_preserves_the_stopped_record(
                 conn,
                 blobs,
                 QualificationSet(cases=(_case("store-down", REPORT),)),
-                refuses_call=2,
+                completions=_Completions(refuses_call=2),
             )
 
 
