@@ -48,7 +48,7 @@ ROLE_HEADER = "x-caos-role"
 # Edge mode (`server/api/edge.py`): while this is set, the switch above is never
 # believed, whatever it says -- boot refuses the pair, and this is the rule a
 # request meeting the pair anyway still obeys.
-EDGE_TOKEN_ENV = "CAOS_EDGE_TOKEN"
+EDGE_TOKEN_ENV = "CAOS_EDGE_TOKEN"  # nosec B105 -- a variable name, not a secret
 
 
 class GlobalRole(StrEnum):
