@@ -14,7 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from server.api.reads.directory import SectionCaller, SectionStore
+from server.api.deps import Caller, Store
 from server.api.wire import (
     SOURCES_MAX,
     Chrome,
@@ -58,9 +58,7 @@ CasePath = Annotated[UUID, Depends(case_path)]
 
 
 @router.get("/api/v1/cases/{case_id}/upload", response_model=UploadDocument)
-def read_upload(
-    actor: SectionCaller, case_id: CasePath, conn: SectionStore
-) -> UploadDocument:
+def read_upload(actor: Caller, case_id: CasePath, conn: Store) -> UploadDocument:
     """The order of the three parameters is load-bearing: identity, then the
     path, then the store."""
     standing = standing_of(conn, case_id=case_id, user_id=actor.user_id)

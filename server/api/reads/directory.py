@@ -8,12 +8,9 @@ so with `LIST_TRUNCATED` rather than silently dropping rows.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Annotated
+from fastapi import APIRouter
 
-from fastapi import APIRouter, Depends, Request
-
-from server.api.identity import Actor, actor_from_headers
+from server.api.deps import Caller, Store
 from server.api.wire import (
     CASES_MAX,
     CaseRow,
@@ -24,7 +21,6 @@ from server.api.wire import (
     SectionNote,
     ServedRole,
 )
-from server.store import StoreConnection
 from server.store.members import cases_for_member
 
 # The store's `now()` and the one listing query (`cases_for_member` reads the
@@ -35,32 +31,8 @@ IO_BUDGET = 2
 router = APIRouter()
 
 
-def section_actor(request: Request) -> Actor:
-    """Who is asking; `app.actor_from_request`'s rule, without the store."""
-    return actor_from_headers(request.headers)
-
-
-def section_store() -> Iterator[StoreConnection]:
-    """The request's connection, from `app.store_connection`.
-
-    Imported at call time: `server/api/app.py` imports this module to include
-    its router before it defines `Caller` and `Store`, so importing them here
-    is a cycle whichever module loads first. The section reads depend on these
-    two instead, and a test overrides them rather than the app's.
-    """
-    from server.api import app as api
-
-    yield from api.store_connection()
-
-
-# Declared in this order on every section route: identity is solved before the
-# store dependency, so an anonymous request opens no connection.
-SectionCaller = Annotated[Actor, Depends(section_actor)]
-SectionStore = Annotated[StoreConnection, Depends(section_store)]
-
-
 @router.get("/api/v1/directory", response_model=DirectoryDocument)
-def read_directory(actor: SectionCaller, conn: SectionStore) -> DirectoryDocument:
+def read_directory(actor: Caller, conn: Store) -> DirectoryDocument:
     """`actor` is declared before `conn`: an anonymous request is refused
     before a connection opens."""
     [observed_at] = conn.execute("SELECT now()").fetchall()[0]

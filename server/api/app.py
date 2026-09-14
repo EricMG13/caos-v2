@@ -29,24 +29,32 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from functools import cache
 from json import dumps
-from os import environ
-from pathlib import Path
 from time import monotonic, sleep
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from psycopg import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from server.api.deps import BLOB_ROOT as BLOB_ROOT
+from server.api.deps import DATABASE_URL as DATABASE_URL
+from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
+from server.api.deps import Blobs as Blobs
+from server.api.deps import Caller as Caller
+from server.api.deps import Methodology as Methodology
+from server.api.deps import Store as Store
+from server.api.deps import _database_url as _database_url
+from server.api.deps import _vendored_bundle as _vendored_bundle
+from server.api.deps import actor_from_request as actor_from_request
+from server.api.deps import blob_store as blob_store
+from server.api.deps import methodology_bundle as methodology_bundle
+from server.api.deps import store_connection as store_connection
 from server.api.identity import Actor, actor_from_headers
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
@@ -55,8 +63,6 @@ from server.api.reads import upload as upload_read
 from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
 from server.api.stream import TERMINAL, StreamEvent, tail
 from server.api.wire import CLEARS, RefusalBody
-from server.blobs import BlobStore
-from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
@@ -79,11 +85,6 @@ TAIL_DEADLINE = 300.0
 # closes the stream promptly, long enough that an idle watcher is not a query a
 # second (CLAUDE.md known gaps -- `LISTEN`/`NOTIFY` is the upgrade).
 POLL_INTERVAL = 0.5
-
-DATABASE_URL = "CAOS_DATABASE_URL"
-BLOB_ROOT = "CAOS_BLOB_ROOT"
-# The vendored methodology bundle the image ships (`Dockerfile` copies it).
-VENDORED_BUNDLE = Path(__file__).resolve().parents[2] / "vendor" / "deploy-v"
 
 # The status for each refusal that can leave a route here. Unauthorised is
 # absent on purpose: it is answered as RUN_NOT_FOUND before it can be raised.
@@ -147,79 +148,6 @@ app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
 # own module and none edits this one.
 for _section in (directory_read, upload_read, run_read, analysis_read):
     app.include_router(_section.router)
-
-
-def _database_url() -> str:
-    url = environ.get(DATABASE_URL)
-    if not url:
-        raise Refusal(RefusalCode.STORE_NOT_CONFIGURED)
-    return url
-
-
-def store_connection() -> Iterator[StoreConnection]:
-    """One connection per request, from the environment.
-
-    A store that does not answer is refused like any other store fault. The
-    refusal is raised outside the `except`, so psycopg's message -- the host,
-    the port and the role -- is neither chained behind it nor logged with it.
-    """
-    conn: StoreConnection | None
-    try:
-        conn = connect(_database_url())
-    except OperationalError:
-        conn = None
-    if conn is None:
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
-    with conn:
-        yield conn
-
-
-def blob_store() -> BlobStore:
-    root = environ.get(BLOB_ROOT)
-    if not root:
-        raise Refusal(RefusalCode.STORE_NOT_CONFIGURED)
-    return BlobStore(Path(root))
-
-
-def actor_from_request(request: Request) -> Actor:
-    """Who is asking. A dependency rather than a line in a route body.
-
-    FastAPI builds a route's dependency list in the order its parameters declare
-    them and solves it sequentially, so declaring this one before `Store` is
-    what keeps identity ahead of the connection. Two things rest on that. An
-    anonymous request is refused without opening one -- a connection is per
-    request and unpooled, and asking in a loop costs the asker nothing. And the
-    answer to a stranger does not depend on the store being reachable: a process
-    that has lost its database still says "I do not know who you are", which is
-    the only one of the two answers that is about the caller.
-
-    It closes the anonymous half and not the whole of it. A request asserting
-    any well-formed subject still reaches the connection, because whether that
-    subject is real is the edge's question rather than this process's
-    (`server/api/identity.py`).
-    """
-    return actor_from_headers(request.headers)
-
-
-def methodology_bundle() -> Bundle:
-    """The process's one bundle, which canonical records are verified under.
-
-    Built once: its manifest snapshot is taken at construction and every use
-    re-verifies the bytes (invariant 4), so a moved manifest refuses rather than
-    being adopted.
-    """
-    return _vendored_bundle()
-
-
-@cache
-def _vendored_bundle() -> Bundle:
-    return Bundle(VENDORED_BUNDLE)
-
-
-Caller = Annotated[Actor, Depends(actor_from_request)]
-Store = Annotated[StoreConnection, Depends(store_connection)]
-Blobs = Annotated[BlobStore, Depends(blob_store)]
-Methodology = Annotated[Bundle, Depends(methodology_bundle)]
 
 
 def _body(code: RefusalCode, status: int) -> Response:

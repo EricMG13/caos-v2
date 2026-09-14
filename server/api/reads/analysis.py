@@ -17,7 +17,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from server.api.reads.directory import SectionCaller, SectionStore
+from server.api.deps import Blobs, Caller, Methodology, Store
 from server.api.reads.upload import READ_REQUIRES, CasePath
 from server.api.wire import (
     AnalysisBody,
@@ -59,21 +59,6 @@ IO_BUDGET = FIXED_IO + LITE_NODES * PER_HANDOFF_IO
 router = APIRouter()
 
 
-def section_blobs() -> BlobStore:
-    """The app's blob store, imported at call time for `section_store`'s reason
-    (`server/api/app.py` imports this module before it defines `blob_store`)."""
-    from server.api import app as api
-
-    return api.blob_store()
-
-
-def section_bundle() -> Bundle:
-    """The process's one vendored bundle, lazily for the same reason."""
-    from server.api import app as api
-
-    return api.methodology_bundle()
-
-
 def run_query(run: str | None = None) -> UUID | None:
     """The `run` query, or `RUN_NOT_FOUND` for one that names no run. Parsed
     here, like `case_path`, so a malformed run opens no connection."""
@@ -86,18 +71,16 @@ def run_query(run: str | None = None) -> UUID | None:
 
 
 RunQuery = Annotated[UUID | None, Depends(run_query)]
-SectionBlobs = Annotated[BlobStore, Depends(section_blobs)]
-SectionBundle = Annotated[Bundle, Depends(section_bundle)]
 
 
 @router.get("/api/v1/cases/{case_id}/analysis", response_model=AnalysisDocument)
 def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
-    actor: SectionCaller,
+    actor: Caller,
     case_id: CasePath,
     run: RunQuery,
-    conn: SectionStore,
-    blobs: SectionBlobs,
-    bundle: SectionBundle,
+    conn: Store,
+    blobs: Blobs,
+    bundle: Methodology,
 ) -> AnalysisDocument:
     """The order of the parameters is load-bearing: identity, the path and the
     query, then the store."""

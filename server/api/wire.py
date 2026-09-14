@@ -52,7 +52,7 @@ FLAGS_MAX = 256
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
 Sha256 = Annotated[str, Field(max_length=64, pattern="^[0-9a-f]{64}$")]
-RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED"]
+RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"]
 
 
 class RefusalBody(BaseModel):
