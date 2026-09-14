@@ -61,21 +61,6 @@ NOT_YET_REACHED: set[str] = {
     # canonical adapter to CP-1 (`docs/DECISIONS.md` §42; `CLAUDE.md` Repair
     # Phase 3 ledger).
     "test_cp1_produces_canonical_envelope_with_anchored_citations",
-    # Phase 11's own exit list named these on the claims executor's readiness
-    # map and upstream-chain behaviour, deleted with it (f-2b). The behaviour
-    # itself is not gone -- it moved to the canonical adapter under different
-    # names, in `tests/test_canonical_handoff.py` and
-    # `tests/test_handoff_invocation.py`:
-    # `test_readiness_must_cover_exactly_the_pin` refuses a T8 register that
-    # misses a pinned module or covers one it was not asked about, which is
-    # both directions of the two readiness-map exits below in one test, and
-    # `test_the_prompt_carries_exact_upstream_bytes_and_every_block` is the
-    # direct-predecessors exit's canonical successor. Nothing under either
-    # literal name below can exist once the executor that produced a
-    # `content_to_module_map` JSON key is gone.
-    "test_a_gate_answer_missing_a_pinned_module_is_refused",
-    "test_only_the_gate_module_may_return_a_readiness_map",
-    "test_a_node_receives_its_direct_predecessors_accepted_claims",
     # Phase 12, the handoff: no module payload exists yet, so a register, a
     # critical column and a cited figure are all things no artifact carries.
     "test_the_declared_register_schema_matches_the_bundles_own_contract",
