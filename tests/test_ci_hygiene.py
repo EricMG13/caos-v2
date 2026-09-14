@@ -19,6 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 CI_YAML = REPO / ".github" / "workflows" / "ci.yml"
 DOCKERFILE = REPO / "Dockerfile"
+MAKEFILE = REPO / "Makefile"
 
 
 def _dockerfile() -> str:
@@ -120,3 +121,17 @@ def test_the_runtime_image_pins_only_the_verified_os_security_updates() -> None:
         assert package in text
     assert "--only-upgrade" in text
     assert "rm -rf /var/lib/apt/lists/" in text
+
+
+def test_make_image_runs_the_exact_ci_trivy_gate() -> None:
+    text = MAKEFILE.read_text(encoding="utf-8")
+
+    assert "IMAGE ?= caos-workbench:local" in text
+    assert "TRIVY ?= trivy" in text
+    assert "TRIVY_VERSION := 0.70.0" in text
+    assert 'docker build -t "$(IMAGE)" .' in text
+    assert "--severity HIGH,CRITICAL --ignore-unfixed" in text
+    assert '--exit-code 0 "$(IMAGE)"' in text
+    floor = text.index("scripts/scan_floors.py trivy.json --trivy")
+    severity = text.index('--exit-code 1 "$(IMAGE)"')
+    assert floor < severity

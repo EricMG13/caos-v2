@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -107,6 +109,39 @@ def test_index_fails_closed_when_gitnexus_is_not_installed() -> None:
     assert "gitnexus is required; install it before indexing" in result.stderr
     assert "npx" not in result.stdout + result.stderr
     assert "pnpm" not in result.stdout + result.stderr
+
+
+def test_make_doctor_uses_the_bootstrapped_python(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "Makefile").write_text(
+        (REPO / "Makefile").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    project_bin = tmp_path / ".venv" / "bin"
+    project_bin.mkdir(parents=True)
+    (project_bin / "python").symlink_to(sys.executable)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "dev_doctor.py").write_text(
+        'print("project interpreter selected")\n', encoding="utf-8"
+    )
+    ambient_python = tmp_path / "python3"
+    ambient_python.write_text("#!/bin/sh\nexit 93\n", encoding="utf-8")
+    ambient_python.chmod(0o755)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{tmp_path}:{environment['PATH']}"
+
+    result = subprocess.run(
+        ["make", "--no-print-directory", "doctor"],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "project interpreter selected"
 
 
 def test_compose_keeps_dev_and_test_storage_isolated() -> None:

@@ -48,6 +48,11 @@ function Shell() {
 export function App() {
   return (
     <BrowserRouter>
+      {import.meta.env.MODE === "demo" ? (
+        <aside className="demo-banner" aria-label="Demonstration mode">
+          READ-ONLY DEMONSTRATION · SAMPLE DECISIONS · NOTHING IS PERSISTED
+        </aside>
+      ) : null}
       <Shell />
     </BrowserRouter>
   );
