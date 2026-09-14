@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from threading import Barrier
+from uuid import uuid4
 
 import pytest
 from test_deliverable_render import PAYLOAD_DATA
@@ -195,6 +196,30 @@ def test_a_highly_compressible_valid_package_round_trips(tmp_path: Path) -> None
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_a_current_receipt_identity_must_match_its_payload() -> None:
+    payload_data = json.loads(json.dumps(PAYLOAD_DATA))
+    payload_data.update(
+        case_id=str(uuid4()), run_id=str(uuid4()), revision_id=str(uuid4())
+    )
+    payload = json.dumps(payload_data).encode()
+    receipt = {
+        "payload_sha256": hashlib.sha256(payload).hexdigest(),
+        "signed_by": "analyst",
+        "frozen_by": "freezer",
+        "filed_by": "filer",
+        **{key: payload_data[key] for key in ("case_id", "run_id", "revision_id")},
+    }
+    export = render(payload_data)
+
+    package = build_package(payload, json.dumps(receipt).encode(), export)
+    assert verify_package(package).verified
+    receipt["case_id"] = str(uuid4())
+    package = build_package(payload, json.dumps(receipt).encode(), export)
+    result = verify_package(package)
+    assert not result.verified
+    assert result.reason == "the receipt does not identify this payload"
 
 
 @pytest.mark.parametrize(
