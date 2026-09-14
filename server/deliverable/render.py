@@ -165,8 +165,14 @@ def _handoff(view: _Handoff) -> str:
         f"<p>Committee status as written: {committee} · "
         f"decision scope {escape(scope)}</p>\n"
         f"{screen}{limitations}"
-        f"<pre>{escape(view.markdown)}</pre>\n"
+        # §45.6: what the host verified, what the model wrote, what the host
+        # computed -- in that order, never mixed.
+        "<h3>Source facts (host-verified citations)</h3>\n"
         + "\n".join(_citation(citation) for citation in view.citations)
+        + "\n<h3>Analysis (model-authored, not host-verified)</h3>\n"
+        f"<pre>{escape(view.markdown)}</pre>\n"
+        "<h3>Deterministic calculations</h3>\n"
+        "<p>None performed by the host on this route.</p>\n"
     )
 
 
