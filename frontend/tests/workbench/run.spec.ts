@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("the route reads as a DAG, the QA gate as a gate, and the stream advances a frame", async ({
   page,
 }) => {
-  await page.goto("/run/");
+  await page.goto("/run/?case=CASE-2026-CVNA01");
   await expect(page.locator(".dag[data-route]")).toBeVisible();
   await expect(page.locator("[data-gate]")).toContainText("QA_GATE");
   const cp6 = page.locator("button.node[data-node='CP-6']");
@@ -15,7 +15,7 @@ test("the route reads as a DAG, the QA gate as a gate, and the stream advances a
 });
 
 test("the plan gate binds a digest and offers approval live", async ({ page }) => {
-  await page.goto("/run/?fixture=gate");
+  await page.goto("/run/?case=CASE-2026-CVNA01&fixture=gate");
   const gate = page.locator("[data-plan-gate]");
   await expect(gate).toBeVisible();
   await expect(page.locator("[data-plan-gate][data-gate-state='RESOLVED_NOT_PINNED']")).toHaveCount(

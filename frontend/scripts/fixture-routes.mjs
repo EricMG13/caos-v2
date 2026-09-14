@@ -13,22 +13,39 @@ export const SECTIONS = [
   "admin",
 ];
 
+/** The four sections served in every mode; the other five render `unavailable`
+    with no request (brief 4.1, decision 9). Mirrors src/app/sections.ts. */
+export const ENABLED_SECTIONS = ["directory", "upload", "run", "analysis"];
+export const DISABLED_SECTIONS = SECTIONS.filter((section) => !ENABLED_SECTIONS.includes(section));
+
+/** The demo fixtures' case. A case section with no case sends no request. */
+export const DEMO_CASE = "CASE-2026-CVNA01";
+
+/** A section's page, with the demo case where the section is case-scoped.
+    @param {string} section
+    @param {string | null} [fixture] */
+export function sectionRoute(section, fixture = null) {
+  const params = new URLSearchParams();
+  if (["upload", "run", "analysis"].includes(section)) params.set("case", DEMO_CASE);
+  if (fixture) params.set("fixture", fixture);
+  const search = params.toString();
+  return `/${section}/${search ? `?${search}` : ""}`;
+}
+
 export const STATE_ROUTES = [
-  "/directory/?fixture=observed-empty",
-  "/upload/?fixture=partial",
-  "/analysis/?fixture=partial",
-  "/analysis/?fixture=stale",
-  "/analysis/?fixture=offline",
-  "/analysis/?fixture=unavailable",
-  "/analysis/?fixture=error",
-  "/book/?fixture=observed-empty",
-  "/run/?fixture=gate",
-  "/committee/?fixture=reader",
-  "/committee/?fixture=filed",
+  sectionRoute("directory", "observed-empty"),
+  sectionRoute("upload", "partial"),
+  sectionRoute("analysis", "partial"),
+  sectionRoute("analysis", "stale"),
+  sectionRoute("analysis", "offline"),
+  sectionRoute("analysis", "unavailable"),
+  sectionRoute("analysis", "error"),
+  sectionRoute("run", "gate"),
+  "/analysis/",
   "/nothing/",
 ];
 
-export const ROUTES = [...SECTIONS.map((section) => `/${section}/`), ...STATE_ROUTES];
+export const ROUTES = [...SECTIONS.map((section) => sectionRoute(section)), ...STATE_ROUTES];
 
 export const VIEWPORTS = ["1440x900", "1280x800", "1024x768"];
 export const ENGINES = ["chromium", "firefox", "webkit"];
