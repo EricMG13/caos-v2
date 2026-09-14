@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Connect, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Connect, type Plugin, type ProxyOptions } from "vite";
 
 // Explicit demo dev and preview serve fixtures at the v1 wire's routes, for the
 // four enabled sections only (brief 4.1, decision 9). Ordinary dev proxies to
@@ -11,6 +11,53 @@ import { defineConfig, type Connect, type Plugin } from "vite";
 // `?fixture=<state>` selects
 // fixtures/states/<section>.<state>.json, or drives a transport state.
 const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
+// The repository root's env files, read only for `CAOS_DEV_*` names (brief 4.5, decision 9).
+const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ROLES = new Set(["READER", "ANALYST", "ADMIN"]);
+
+/** A header the browser may not assert through the dev proxy. */
+function isClientIdentity(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.startsWith("x-caos-") ||
+    lower.startsWith("x-forwarded-") ||
+    lower === "forwarded" ||
+    lower.includes("_")
+  );
+}
+
+/**
+ * The real API proxy. Development trusts a role header, so the proxy -- never
+ * the browser -- says who is asking: every client identity or forwarding
+ * header is removed, then the local actor from `CAOS_DEV_USER` and
+ * `CAOS_DEV_ROLE` (default ANALYST) is set. Without `CAOS_DEV_USER` nothing is
+ * set and the API answers 401. A malformed value stops the server, and the
+ * message never repeats it. Production serves no proxy and trusts no header.
+ */
+export function devProxy(env: Record<string, string | undefined>): Record<string, ProxyOptions> {
+  const user = env.CAOS_DEV_USER || null;
+  const role = env.CAOS_DEV_ROLE || "ANALYST";
+  if (user !== null && !UUID.test(user)) throw new Error("CAOS_DEV_USER must be a UUID");
+  if (!ROLES.has(role)) throw new Error("CAOS_DEV_ROLE must be READER, ANALYST or ADMIN");
+  return {
+    "/api": {
+      target: "http://127.0.0.1:8000",
+      xfwd: false,
+      configure(proxy) {
+        proxy.on("proxyReq", (proxyReq) => {
+          for (const name of proxyReq.getHeaderNames()) {
+            if (isClientIdentity(name)) proxyReq.removeHeader(name);
+          }
+          if (user === null) return;
+          proxyReq.setHeader("x-caos-user", user);
+          proxyReq.setHeader("x-caos-role", role);
+        });
+      },
+    },
+  };
+}
 
 /** The enabled section a v1 path names, or null. A disabled section is not served. */
 function sectionOf(pathname: string): string | null {
@@ -193,14 +240,18 @@ const fixtures: Plugin = {
   },
 };
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ command, mode }) => ({
   plugins: [react(), tailwindcss(), ...(mode === "demo" ? [fixtures] : [])],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   publicDir: false,
   server: {
     port: 5173,
     strictPort: true,
-    proxy: mode === "demo" ? undefined : { "/api": { target: "http://127.0.0.1:8000" } },
+    // A build carries no proxy, so its dev identity is never read.
+    proxy:
+      mode === "demo" || command !== "serve"
+        ? undefined
+        : devProxy(loadEnv(mode, REPO_ROOT, "CAOS_DEV_")),
   },
   preview: { port: 4173, strictPort: true },
   build: { sourcemap: false, target: "es2022" },
