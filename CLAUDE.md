@@ -11,7 +11,7 @@ Most of this repository is written by an agent. `docs/AI_CODE_QUALITY.md` says
 what that costs and which tool stops each failure mode. Read it before your
 first commit.
 
-## Active continuation — Phase 2 repair
+## Active continuation — Phase 3 repair
 
 The sole current task/checkpoint record is
 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
@@ -19,10 +19,10 @@ Read its tracked scope and acceptance evidence before editing; ignored local
 reports are supplemental. Work only in `/Users/ericguei/Documents/caos-workbench`;
 the original `/Users/ericguei/Documents/caos-v2` stays read-only.
 
-Decision §39 reconciles the repair plan with older specifications. Phase 2
-remains incomplete until the handoff records its full exit evidence. After its
-acceptance and applicable user authorization, use
-[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md).
+Decision §39 reconciles the repair plan with older specifications. Phase 2 is
+accepted (the handoff's acceptance record); Phase 3 runs under
+[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md)
+and its tracked task briefs in `docs/superpowers/plans/`.
 The complementary plan's Reasoning Modes section records both Opus 5 guides.
 
 Every shell command starts by unsetting `OPENROUTER_API_KEY`,
@@ -179,7 +179,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   only on a stored `qa_status` of `Passed`; `Not Reviewed` is refused as a
   verdict so the attempt can retry. A reading that let `Restricted` release
   CP-6 as RESTRICTED is also defensible from the bundle. The value is the
-  module's own verdict; human QA approval is not consulted in Phase 2.
+  module's own verdict, so text in the evidence that steers the model can steer
+  it too; human QA approval is not consulted in Phase 2.
   *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
   practice wants restricted clearance to proceed.
 - **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
@@ -204,6 +205,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   claims/leases (§39) take the node before the call. `artifacts` rows are also
   not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
   a refusal trigger like 0007's is the upgrade.
+- **Acceptance does not recompare upstream, and context reads hold the case
+  lock.** `_accept_artifact` checks authority and ownership under the lock but
+  not the predecessor digests the post-call unit compared; with Phase 2's one
+  sequential loop no writer can accept a predecessor in between. The pre-call
+  unit also reads every captured block one query at a time under the case lock,
+  so a large pack holds governed writes on that case for the whole read.
+  *Upgrade:* Phase 4 rechecks upstream digests inside the accept unit (or fences
+  predecessors with the node's lease), and a batched block query when the first
+  large PDF pack measures the hold.
 
 **Phase 0.**
 
@@ -567,11 +577,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   every byte of the largest request (§38) as an input token plus the output cap
   -- and `run_route` refuses a price for any model but the provider's configured
   one before an attempt exists. Nothing in the tree says what the live model
-  costs, so `tests/test_live_run.py` still prices it from its flat estimate, and
-  the byte bound makes a real model's reservation large against the $5 default
-  ceiling. *Upgrade:* a user-confirmed dated price for the configured live model,
-  and pricing the actual encoded request once the prompt is built before the
-  reservation.
+  costs, so `tests/test_live_run.py` still prices it from its flat estimate. The
+  byte bound is severe for a real model: at about $3/M input and $15/M output one
+  call reserves about $3.64, so under the $5 default ceiling a two-node route
+  cannot finish; the qualification harness refuses a set whose route length
+  times that worst case exceeds a run's ceiling before any case is prepared.
+  `ModelPrice.as_of` is carried but not stored beside the reservation, so a
+  reservation row does not say which price produced it. *Upgrade:* a
+  user-confirmed dated price for the configured live model, recorded with the
+  reservation, and pricing the actual encoded request once the prompt is built
+  before the reservation.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the

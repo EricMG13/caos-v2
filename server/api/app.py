@@ -109,6 +109,7 @@ _STATUS = {
     # and nothing the caller holds could be corrected to avoid it.
     RefusalCode.READINESS_INVALID: 503,
     RefusalCode.ROUTE_IDENTITY_INVALID: 503,
+    RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
 }
 
 
@@ -298,7 +299,14 @@ def read_run(run_id: UUID, actor: Caller, conn: Store, blobs: Blobs) -> RunDocum
         # here rather than being reported over the top of it.
         route_digest=route_digest(route),
         nodes=[
-            _node_view(route, accepted, node, states, readiness) for node in route.nodes
+            # Nothing is awaited on a run that is no longer running.
+            view
+            if status == "RUNNING"
+            else view.model_copy(update={"awaiting_gate": False})
+            for view in (
+                _node_view(route, accepted, node, states, readiness)
+                for node in route.nodes
+            )
         ],
     )
 

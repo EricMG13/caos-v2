@@ -426,6 +426,20 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     states = node_states(route, accepted_artifacts(conn, blobs, route, run_id))
     assert states[nodes["CP-DR"]] is NodeState.BLOCKED, "reported unrun, with its cause"
 
+    # Blocked stays blocked: running the route again spends nothing and moves nothing.
+    conn.rollback()
+    with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+        run_route(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
+        )
+    assert len(completions.prompts) == 1
+    assert run_status(conn, run_id) is RunStatus.BLOCKED
+    assert _charges(conn, run_id) == [REPORTED]
+
 
 def _attempted(conn: StoreConnection, run_id: UUID) -> list[str]:
     rows = conn.execute(

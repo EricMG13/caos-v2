@@ -124,16 +124,16 @@ def test_a_live_run_admits_documents_and_completes_its_route(
         route=route,
         execution=Execution(
             module_provider,
-            # ponytail: live pricing needs a user-supplied dated price for the
-            # configured model; until then the nightly run reserves ESTIMATE.
+            # No dated price for the live model is in the tree yet (CLAUDE.md
+            # known gaps, Phase 5): this reserves ESTIMATE, not a real worst case.
             priced(ESTIMATE, completions.model),
             bundle,
         ),
     )
 
     assert run_status(conn, run_id) is RunStatus.COMPLETE
-    # A run whose frontier emptied with nodes still BLOCKED is COMPLETE too, so
-    # the count is what says every pinned node was accepted.
+    # COMPLETE now means every pinned node was accepted (§39); the count says so
+    # again from the proof's side.
     proof = assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
     assert proof.artifacts == len(route.nodes)
 

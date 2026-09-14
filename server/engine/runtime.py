@@ -180,10 +180,15 @@ def accepted_artifacts(
         for node in route.nodes
         if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
-    return {
-        node_id: (json.loads(blobs.get(digest)) if node_id in readiness_nodes else {})
-        for node_id, digest in artifact_digests(conn, run_id).items()
-    }
+    try:
+        return {
+            node_id: (
+                json.loads(blobs.get(digest)) if node_id in readiness_nodes else {}
+            )
+            for node_id, digest in artifact_digests(conn, run_id).items()
+        }
+    except ValueError:
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
 
 
 def _run_node(
@@ -198,6 +203,9 @@ def _run_node(
     module_id = next(
         node.module_id for node in route.nodes if node.route_node_id == route_node_id
     )
+    # Per call as well as per run: a provider whose model moved is unpriced.
+    if execution.price.model != getattr(execution.provider, "model", None):
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     attempt_id = start_attempt(conn, run_id, route_node_id)
     reserve(conn, attempt_id, worst_case(execution.price))
 

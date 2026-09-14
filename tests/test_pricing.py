@@ -45,12 +45,19 @@ def test_worst_case_covers_the_request_and_completion_ceilings() -> None:
         ("output_per_token", 0.1, RefusalCode.MONEY_NOT_DECIMAL),
         ("input_per_token", True, RefusalCode.MONEY_NOT_DECIMAL),
         ("model", "", RefusalCode.PROVIDER_NOT_CONFIGURED),
+        ("input_per_token", Decimal("0." + "1" * 1200), RefusalCode.MONEY_INVALID),
     ],
 )
 def test_invalid_prices_refuse(field: str, value: object, code: RefusalCode) -> None:
     with pytest.raises(Refusal) as caught:
         worst_case(replace(PRICE, **{field: value}))  # type: ignore[arg-type]
     assert caught.value.code is code
+
+
+def test_a_free_price_refuses_rather_than_reserving_nothing() -> None:
+    free = replace(PRICE, input_per_token=Decimal(0), output_per_token=Decimal(0))
+    with pytest.raises(Refusal, match=r"^MONEY_INVALID$"):
+        worst_case(free)
 
 
 def test_reservation_is_the_worst_case_charge_for_the_configured_model(
