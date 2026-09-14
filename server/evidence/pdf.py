@@ -12,6 +12,11 @@ declared fixed pitch, which is honest for a `.txt` file and is a fiction for a
 PDF. Here the coordinates come out of the document, so a citation's rectangle is
 a measurement rather than a reconstruction.
 
+Rectangles are given in one convention whatever the page (§44.3): points from
+the CropBox's top-left corner as the page is displayed, after `/Rotate`, with y
+growing downward. Identity version 2 declares it beside the layout parameters
+that decide where a word, a line and a region end.
+
 Nothing above this module changes. It implements the same `Extractor` protocol,
 so ingestion, block packing, citation anchoring and every refusal are the ones
 already tested -- which is what a seam is for.
@@ -24,9 +29,11 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from importlib.metadata import version
 from io import BytesIO
+from typing import TYPE_CHECKING, TypedDict
 
-from pdfminer.layout import LTAnno, LTChar, LTPage, LTTextBox, LTTextLine
+from pdfminer.layout import LAParams, LTAnno, LTChar, LTPage, LTTextBox, LTTextLine
 from pdfminer.pdfparser import PDFSyntaxError
+from pdfminer.utils import apply_matrix_rect
 
 from server.evidence.extract import (
     DEFAULT_LIMITS,
@@ -36,6 +43,38 @@ from server.evidence.extract import (
 )
 from server.refusals import Refusal, RefusalCode
 
+if TYPE_CHECKING:
+    from pdfminer.pdfpage import PDFPage
+
+
+class _Layout(TypedDict):
+    line_overlap: float
+    char_margin: float
+    line_margin: float
+    word_margin: float
+    boxes_flow: float
+    detect_vertical: bool
+    all_texts: bool
+
+
+# The layout analysis pdfminer runs with, stated rather than inherited: these
+# are pdfminer's own defaults, pinned here so the identity names the scalars
+# that decide where a word, a line and a region end.
+LAYOUT: _Layout = {
+    "line_overlap": 0.5,
+    "char_margin": 2.0,
+    "line_margin": 0.5,
+    "word_margin": 0.1,
+    "boxes_flow": 0.5,
+    "detect_vertical": False,
+    "all_texts": False,
+}
+COORDINATES = "crop-top-left-rotated-pt"
+# A token not wholly inside the crop is text no reader sees: dropped, not clipped.
+CROP_POLICY = "drop-outside"
+
+Frame = tuple[float, float, float, float]
+
 
 @dataclass(frozen=True, slots=True)
 class PdfExtractor:
@@ -43,13 +82,21 @@ class PdfExtractor:
 
     @property
     def identity(self) -> ExtractorIdentity:
-        # Default layout/dispatch behavior is versioned with the installed engine.
+        # Everything that decides the tokens: engine, layout, convention, crop.
         return ExtractorIdentity(
             "caos.pdfminer",
-            "1",
+            "2",
             {
                 "pdfminer_version": version("pdfminer.six"),
-                "laparams": "default",
+                "line_overlap": LAYOUT["line_overlap"],
+                "char_margin": LAYOUT["char_margin"],
+                "line_margin": LAYOUT["line_margin"],
+                "word_margin": LAYOUT["word_margin"],
+                "boxes_flow": LAYOUT["boxes_flow"],
+                "detect_vertical": LAYOUT["detect_vertical"],
+                "all_texts": LAYOUT["all_texts"],
+                "coordinates": COORDINATES,
+                "crop_policy": CROP_POLICY,
                 "password": "",
                 "page_numbers": "all",
                 "maxpages": 0,
@@ -78,7 +125,7 @@ class PdfExtractor:
         tokens: list[Token] = []
         region_id = 0
         line_id = 0
-        for page_number, page in enumerate(_pages(data), start=1):
+        for page_number, (frame, page) in enumerate(_pages(data), start=1):
             if page_number > limits.max_pages:
                 raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
             # Checked per page (§44.2): cooperative, not preemptive -- one
@@ -91,7 +138,9 @@ class PdfExtractor:
                 for line in box:
                     if not isinstance(line, LTTextLine):
                         continue
-                    tokens.extend(_line_tokens(line, page_number, region_id, line_id))
+                    tokens.extend(
+                        _line_tokens(line, frame, page_number, region_id, line_id)
+                    )
                     if len(tokens) > limits.max_tokens:
                         raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
                     line_id += 1
@@ -99,40 +148,93 @@ class PdfExtractor:
         return tokens
 
 
-def _pages(data: bytes) -> Iterator[LTPage]:
-    # Imported here rather than at module scope: `extract_pages` pulls in most of
-    # pdfminer, and nothing that merely imports this module should pay for it.
-    from pdfminer.high_level import extract_pages
+def _pages(data: bytes) -> Iterator[tuple[Frame, LTPage]]:
+    """Each page's layout beside its visible crop in the layout's own space.
 
-    # `yield from` inside this try keeps the whole walk lazy -- a caller that
-    # stops asking for pages (the page ceiling above) never drives pdfminer's
+    `extract_pages`, written out so the `PDFPage` -- which carries the crop and
+    the rotation, and which `extract_pages` does not hand back -- stays in hand.
+    """
+    # Imported here rather than at module scope: the interpreter pulls in most
+    # of pdfminer, and nothing that merely imports this module should pay for it.
+    from pdfminer.converter import PDFPageAggregator
+    from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
+    from pdfminer.pdfpage import PDFPage
+
+    # Yielding inside this try keeps the whole walk lazy -- a caller that stops
+    # asking for pages (the page ceiling above) never drives pdfminer's
     # generator past the one that crossed it -- while still catching a
     # malformed file however far into the walk it turns up malformed.
     try:
-        yield from extract_pages(BytesIO(data))
+        resources = PDFResourceManager(caching=True)
+        device = PDFPageAggregator(resources, laparams=LAParams(**LAYOUT))
+        interpreter = PDFPageInterpreter(resources, device)
+        for page in PDFPage.get_pages(BytesIO(data), caching=True):
+            frame = _crop_frame(page)
+            interpreter.process_page(page)
+            yield frame, device.get_result()
     except (PDFSyntaxError, ValueError, TypeError, AssertionError):
         # pdfminer reports a malformed file in several shapes. None of them may
         # travel: the message quotes the bytes it choked on.
         raise Refusal(RefusalCode.SOURCE_NOT_READABLE) from None
 
 
+def _crop_frame(page: PDFPage) -> Frame:
+    """The visible region, in the rotated y-up space pdfminer lays a page out in.
+
+    `PDFPageInterpreter.process_page` maps user space through a matrix built
+    from the MediaBox and `/Rotate`; this is that matrix, applied to the
+    CropBox clipped to the MediaBox (the PDF specification's visible region),
+    so the frame and every character sit in one space. A rotation that is not
+    a quarter turn is refused: pdfminer would lay it out unrotated, and the
+    convention could not say what a reader sees.
+    """
+    if page.rotate not in (0, 90, 180, 270):
+        raise Refusal(RefusalCode.SOURCE_NOT_READABLE)
+    (x0, y0, x1, y1) = page.mediabox
+    ctm = {
+        90: (0, -1, 1, 0, -y0, x1),
+        180: (-1, 0, 0, -1, x1, y1),
+        270: (0, 1, -1, 0, y1, -x0),
+    }.get(page.rotate, (1, 0, 0, 1, -x0, -y0))
+    (m0, n0, m1, n1) = _ordered(page.mediabox)
+    (c0, d0, c1, d1) = _ordered(page.cropbox)
+    return apply_matrix_rect(ctm, (max(m0, c0), max(n0, d0), min(m1, c1), min(n1, d1)))
+
+
+def _ordered(rect: Frame) -> Frame:
+    (x0, y0, x1, y1) = rect
+    return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+
 def _line_tokens(
-    line: LTTextLine, page: int, region_id: int, line_id: int
+    line: LTTextLine, frame: Frame, page: int, region_id: int, line_id: int
 ) -> list[Token]:
     """Whitespace-separated runs of one line, each under the union of its
-    characters' rectangles."""
+    characters' rectangles, measured from the crop's top-left corner.
+
+    A run not wholly inside the crop is dropped: a clipped rectangle would
+    anchor a quote whose other half no reader can see. An empty crop (one
+    that misses the MediaBox) contains nothing, so it drops every run.
+    """
+    (left, bottom, right, top) = frame
     tokens = []
     for run in _runs(line):
+        x0 = min(character.x0 for character in run)
+        y0 = min(character.y0 for character in run)
+        x1 = max(character.x1 for character in run)
+        y1 = max(character.y1 for character in run)
+        if not (left <= x0 and x1 <= right and bottom <= y0 and y1 <= top):
+            continue
         tokens.append(
             Token(
                 text="".join(character.get_text() for character in run),
                 page=page,
                 region_id=region_id,
                 line_id=line_id,
-                x0=min(character.x0 for character in run),
-                y0=min(character.y0 for character in run),
-                x1=max(character.x1 for character in run),
-                y1=max(character.y1 for character in run),
+                x0=x0 - left,
+                y0=top - y1,
+                x1=x1 - left,
+                y1=top - y0,
             )
         )
     return tokens
