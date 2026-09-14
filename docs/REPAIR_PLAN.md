@@ -5,8 +5,9 @@ Reviewed 12 September 2026. Target: `/Users/ericguei/Documents/caos-v2`.
 > **Execution status, 13 September 2026.** The findings and original paths below
 > are baseline evidence, not a description of the current workbench. Phase 2 is
 > being repaired in `/Users/ericguei/Documents/caos-workbench` on
-> `codex/execute-repair-plan`. Application checkpoint `f8cd738` is a green but
-> incomplete Task17d2 checkpoint. Resume only from
+> `codex/execute-repair-plan`. Task17d2 is accepted: application checkpoint
+> `f8cd738` plus proof-only checkpoint `ceabf9f`; Task17d3 is next. Phase 2
+> remains incomplete. Resume only from
 > [`CLAUDE_CODE_HANDOFF.md`](CLAUDE_CODE_HANDOFF.md).
 
 ## Recommendation
@@ -368,6 +369,12 @@ Phase-close order: implementation → normal tests → confidence review (`xhigh
 **Guardrails:** no “latest artifact wins”, no mutable whole-case source lookup as a pin, no catch-and-continue on invalid gates, no SQLite/checkpointer/Redis duplication. New schema states must be added consistently to database constraints, enums, events and frontend contracts.
 
 ### Phase 3 — Execute real module handoffs on one bounded route
+
+The complementary Phase 3–6 task breakdown and Claude reasoning-mode policy is
+tracked in
+[`docs/superpowers/plans/2026-09-13-post-phase-2-complementary-plan.md`](superpowers/plans/2026-09-13-post-phase-2-complementary-plan.md).
+It is subordinate to this plan and becomes executable only after Phase 2 is
+accepted.
 
 **Fixes:** F04/F07, methodology gap, F02/F03 semantic acceptance.
 

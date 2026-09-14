@@ -247,6 +247,12 @@ workers cannot accept conflicting generation results; and known/possible spend
 survives refusal, timeout, or crash. Stop before Phase 3 canonical module
 handoffs, frontend/API integration, forecast/model work, or release work.
 
+After Phase 2 is accepted and Phase 3 is separately authorized, continue with
+`docs/superpowers/plans/2026-09-13-post-phase-2-complementary-plan.md`. Its
+phase briefs use `medium` by default, `low` only for mechanical work, tactical
+`ultrathink` prompts for named high-risk diagnostics, and actual `xhigh` only at
+whole-phase confidence/adversarial review checkpoints.
+
 ## Whole-phase review checkpoint
 
 Do not run either specialist review per edit, task, split, or commit. Ordinary
