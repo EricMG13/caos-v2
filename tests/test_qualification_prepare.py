@@ -31,7 +31,7 @@ from server.methodology.bundle import Bundle
 from server.qualification import harness as subject
 from server.qualification.matrix import QualificationSet
 from server.refusals import Refusal
-from server.store import StoreConnection, apply_schema, connect
+from server.store import StoreConnection, apply_schema, connect, run_inputs
 from server.store.budget import CEILING
 from server.store.gates import Gate, GateState, gate_preview, gate_state
 from server.store.routes import resolved_route
@@ -167,10 +167,10 @@ def test_preparation_creates_exact_inputs_and_external_previews(ready: Fixture) 
         for gate in Gate:
             preview = gate_preview(conn, pin.run_id, gate)
             expected: dict[str, object] = {
-                "format_version": 1,
+                "format_version": pin.format_version,
                 "gate": gate.value,
                 "input": {
-                    **asdict(pin),
+                    **run_inputs.input_fields(pin),
                     "run_id": str(pin.run_id),
                     "case_id": str(pin.case_id),
                 },

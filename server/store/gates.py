@@ -22,7 +22,7 @@ from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
 from server.store.events import lock_run
 from server.store.members import Standing, satisfies, standing_of
-from server.store.run_inputs import RunInput, _load_run_input
+from server.store.run_inputs import RunInput, _load_run_input, input_fields
 from server.store.source_sets import SourceSet
 
 
@@ -82,10 +82,10 @@ def _historical_preview(
     pin: RunInput, route: ResolvedRoute, source: SourceSet, gate: Gate
 ) -> GatePreview:
     data: dict[str, object] = {
-        "format_version": 1,
+        "format_version": pin.format_version,
         "gate": gate.value,
         "input": {
-            **asdict(pin),
+            **input_fields(pin),
             "run_id": str(pin.run_id),
             "case_id": str(pin.case_id),
         },
