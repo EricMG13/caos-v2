@@ -83,8 +83,11 @@ function visible(held: Held): RegionStatus {
 export function Workspace({ section }: { section: Section }) {
   const [params] = useSearchParams();
   const caseId = params.get("case");
-  const caseSearch = caseId ? `?case=${encodeURIComponent(caseId)}` : "";
   const runId = params.get("run");
+  const carried = new URLSearchParams();
+  if (caseId) carried.set("case", caseId);
+  if (runId) carried.set("run", runId);
+  const caseSearch = carried.toString();
   const fixture = import.meta.env.MODE === "demo" ? params.get("fixture") : null;
   // A disabled section, or a case section with no case, sends no request and
   // opens no tail: it is `unavailable` in every mode (brief 4.1, decision 9).
@@ -216,7 +219,7 @@ export function Workspace({ section }: { section: Section }) {
           entries={markDisabled(chrome?.rail ?? null)}
           local={chrome?.rail_local ?? null}
           servedRole={chrome?.served_role ?? null}
-          search={caseSearch}
+          search={caseSearch ? `?${caseSearch}` : ""}
         />
         <main className="body" id="body" aria-label={SECTION_LABELS[section]}>
           {status.kind === "offline" ? <PageAlert sentence={OFFLINE_WORDING} /> : null}

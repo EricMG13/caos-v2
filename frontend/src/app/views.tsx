@@ -14,8 +14,8 @@ import type { WorkspaceDocument } from "./transport";
 import type { Bodies, Section, SectionDocument } from "@/wire";
 
 // Only the five sections that stay on the legacy wire type through this: the
-// four enabled sections (brief 4.1, decision 9) take their v1 document type
-// directly, as Directory, Upload, Run and Analysis already do above.
+// five enabled sections (brief 4.1, decision 9) take their v1 document type
+// directly, as Directory, Upload, Run, Analysis and Model already do above.
 export interface ViewProps<S extends keyof Bodies> {
   document: SectionDocument<Bodies[S]>;
   tab: string | null;

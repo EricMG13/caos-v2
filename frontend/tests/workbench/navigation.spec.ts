@@ -45,7 +45,7 @@ test("demo fixture HTTP is read-only before fixture selection", async ({ request
   expect(await get.json()).toHaveProperty("chrome");
   const run = await request.get("/api/v1/cases/CASE-2026-CVNA01/run");
   expect(run.status()).toBe(200);
-  // Only the v1 paths of the four enabled sections are served.
+  // Only supported v1 paths are served.
   for (const path of ["/api/sections/directory", "/api/v1/cases/CASE-2026-CVNA01/book"]) {
     expect((await request.get(path)).status(), path).toBe(404);
   }
