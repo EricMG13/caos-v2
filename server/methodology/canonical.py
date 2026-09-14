@@ -568,6 +568,43 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     return projections
 
 
+def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    *,
+    run_id: UUID,
+    route_node_id: str,
+    attempt_id: UUID,
+    artifact_sha256: str,
+    record_sha256: str,
+    accepted: Mapping[str, tuple[str, str | None]] | None = None,
+) -> tuple[bytes, CanonicalRecord]:
+    """An accepted canonical artifact's exact Markdown and its verified record.
+
+    The checks `accepted_projections` makes, inside the caller's read unit:
+    the record binds this Markdown, the identity rebuilt from the store, this
+    build and the accepted lineage, and the projections re-derived from the
+    Markdown equal the record's (§42.4). Citations are not re-anchored; the
+    rectangles are the ones recorded at acceptance.
+    """
+    record, _projections = _verified_accepted(
+        conn,
+        blobs,
+        bundle,
+        route,
+        run_id=run_id,
+        route_node_id=route_node_id,
+        attempt_id=attempt_id,
+        artifact_sha256=artifact_sha256,
+        record_sha256=record_sha256,
+        accepted=accepted,
+    )
+    # The bytes just validated, read again digest-checked for the caller.
+    return blobs.get(artifact_sha256), record
+
+
 def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
