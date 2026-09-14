@@ -12,10 +12,10 @@ ignored reports cannot override those contracts.
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 3 accepted at `3400b6c`** (Phase 2 `b4298dc`; records below) |
-| Latest accepted task | **Phase 3 Task 3.4 accepted at `3400b6c`** (3.1 `a8acbc6`, 3.2 `fffe5c8`, 3.3 `1bb0cfd`) |
-| Next task | Phase 4 in progress, integrated through `0db50fa` (none accepted; briefs `docs/superpowers/plans/2026-09-14-phase-4-task-4.*-brief.md`). Task 4.1 (section wire, §50) and 4.3 (worker, §49) through `d0b9dd8`. **4.2** (commands, §51): 4.2a `1d50568`, 4.2b `32ab072`/`026c871`, 4.2c `e88e924`, 4.2d `5e06b92`, 4.2e `75f6810`, 4.2f `7b39237`, 4.2g `b075fd6`, 4.2h `d00c06c`, 4.2i `6d2b9bf`, 4.2j `9ba49f8`/`943f57f`, fixes `7162f7f`, `a78f345`. **4.4** (case stream and evidence pages, §52): 4.4a `0a582eb`, 4.4b `1e1ac11`/`70c71cb`/`59738f9`, 4.4c `069aed2`/`1651067`/`7298b18`, 4.4d `81800bd`/`5c041d1`, 4.4e `350278d`, 4.4f `91d0d60`, fixes `62a6286`, `4c30e8e`. **4.5** (edge, site, health, image, §53): 4.5b `1f910bf`, 4.5e1 `2a07eeb`, 4.5d `a407470`, 4.5a1 `9bffadc`/`46bb618`, 4.5a2 `faaaaf5`, 4.5c `3207625`, 4.5e2 `7e47a8a` (39 passed across chromium, firefox and webkit), fixes `a0ca593`, `9858af7`, `0db50fa`. Docs 4.2k/4.4g/4.5f record §51–§53 and the ledger. **Open:** the Phase 4 exit gates -- complete `make check` on the final candidate, one whole-phase `confidence-review` and one separate adversarial audit, both at actual `xhigh`, with remediation between -- and a Phase 4 acceptance record |
-| Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
+| Latest accepted phase | **Phase 4 accepted at `0deb4a4`** (Phase 3 `3400b6c`, Phase 2 `b4298dc`; records below) |
+| Latest accepted task | **Phase 4 Tasks 4.1–4.5 accepted with the phase at `0deb4a4`** |
+| Next task | Phase 5 entry (REPAIR_PLAN "Make calculations and filing trustworthy"): refresh GitNexus, review the phase documents, write the Task 5.x briefs. Not started. |
+| Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
@@ -28,6 +28,48 @@ at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
 with `acf334d`. The tracked `CLAUDE.md` at `694660b` records acceptance
 through Task17e. Original logs and detailed reviews remain local supplements;
 this documentation update has not rerun their gates or accepted new code.
+
+## Phase 4 acceptance record — 14 September 2026
+
+- **Candidate:** `codex/execute-repair-plan` at `0deb4a4`; GitNexus index-only
+  refreshed at `5657ade` (the reviewed candidate) before the exit reviews.
+- **Tasks** (briefs `docs/superpowers/plans/2026-09-14-phase-4-task-4.{1..5}-brief.md`,
+  decisions §49–§53): 4.1 section wire and 4.3 worker through `d0b9dd8`;
+  4.2 commands `1d50568`..`943f57f`; 4.4 case stream and evidence pages
+  `0a582eb`..`62a6286`; 4.5 edge, site, health, image and journey
+  `1f910bf`..`7e47a8a`, fixes `a0ca593`, `9858af7`, `0db50fa`; docs
+  `0341990`, `40e8464`, `7387536`, `5657ade`.
+- **Exit evidence:** every REPAIR_PLAN Phase 4 exit check maps to named tests
+  in [PHASE_4_EXIT_EVIDENCE.md](PHASE_4_EXIT_EVIDENCE.md).
+- **Complete gate at `0deb4a4`:** `make check` with the pinned Trivy 0.70.0 exit
+  0: backend 2573 passed, races 20 passed, lint/types/Bandit/pip-audit/gitleaks
+  clean, frontend 235 unit tests, accessibility 0 violations, 84 browser
+  workbench tests, image built and scanned, production image tests 8 passed,
+  real-stack journey 39 passed (chromium, firefox, webkit).
+- **Whole-phase confidence review:** Claude Opus 5 (`claude-opus-5`) at
+  **xhigh** with ultrathink, read back from the session record (`effort:
+  "xhigh"`, 17:38:40Z) before the review ([report](reviews/phase-4-confidence-review.md)).
+  One confirmed P2 -- an unexpected worker fault killed the process with its
+  claim held, so the run blocked the queue after each lease expiry -- fixed in
+  `b8d905f`; a pre-existing jitter-bound flake fixed in `9e6247f`; one open P3
+  (commits `5e06b92` and `75f6810` are 10 and 9 lines over the 800-line gate,
+  not rewritten on the shared branch). Backend gate after remediation: 2571
+  passed.
+- **Whole-phase adversarial audit:** same model and effort with ultrathink,
+  read back at 17:49:56Z ([report](reviews/phase-4-adversarial-audit.md)).
+  Verdict CONCERNS: one P1 (promoted) -- no pack-level extraction deadline, so
+  one writer's fifty-document pack could hold an admission request fifty
+  minutes -- fixed in `420f628` (§51 refinement, `max_pack_seconds`); a P3
+  section-list drift test added in `1ca4989`; two P3 recorded (unauthenticated
+  readiness codes; the smoke credential in `compose.smoke.yaml`).
+- **Accepted limits:** the CLAUDE.md "Repair Phase 4" ledger (audit payloads
+  hold digests only; receipts kept forever; demo shows no available command;
+  evidence page holds a read transaction during frame extraction; demo stream
+  frame counter shared; static shared edge token; an edge that does not strip
+  identity is undetectable; worker has no readiness; stream concurrency counts
+  against `--limit-concurrency 32`; test-edge cookie without `Secure`; smoke
+  stack and journey local, not CI, with the worker exit proven on the first
+  engine only).
 
 ## Phase 3 acceptance record — 14 September 2026
 

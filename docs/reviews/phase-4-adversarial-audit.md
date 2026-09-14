@@ -5,7 +5,7 @@
   2026-09-14T17:49:56Z, before this audit began; ultrathink applied.
 - **Target:** `codex/execute-repair-plan`, range `8a64704..e2c4989`: Phase 4
   through the confidence-review remediation, run after the backend wave gate
-  passed on `e2c4989` (2,570 backend tests passed; the race tests passed).
+  passed on `e2c4989` (2,571 backend tests passed; the race tests passed).
 - **Method:** `~/.claude/skills/adversarial-reviewer/SKILL.md`, with three
   personas: Saboteur, New Hire and Security Auditor. Every finding was checked
   against source; the P1 was reproduced by a failing test before its fix.
@@ -93,4 +93,5 @@ and §53.11 describe as smoke-only. *Recorded here.*
 `tests/test_admission_limits.py`, `tests/test_ingestion.py`,
 `tests/test_pdf_extraction.py`, `tests/test_case_commands.py`,
 `tests/test_site.py`, ruff, mypy and `check_tested`, then a complete
-`make check` on the final candidate.
+`make check` at `0deb4a4` (exit 0: backend 2573, races 20, frontend unit 235,
+accessibility 0 violations, workbench 84, image 8, three-engine journey 39).
