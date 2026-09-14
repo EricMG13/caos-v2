@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from server.boundary_text import BoundaryText
-from server.deliverable.render import PENDING, render
+from server.deliverable.host import render_payload as render
+from server.deliverable.render import PENDING, RenderRefused
 from server.refusals import Refusal, RefusalCode
 from server.store import apply_schema, connect
 from server.store.runs import create_case
@@ -188,3 +189,15 @@ def test_a_narrative_that_is_not_a_string_is_refused() -> None:
         render(payload)
 
     assert caught.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+
+
+def test_the_portable_render_refusal_maps_to_the_host_code() -> None:
+    from server.deliverable.render import render as portable_render
+
+    with pytest.raises(RenderRefused, match="DELIVERABLE_PAYLOAD_INVALID") as portable:
+        portable_render({})
+    assert portable.value.code == "DELIVERABLE_PAYLOAD_INVALID"
+    with pytest.raises(Refusal) as host:
+        render({})
+    assert host.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+    assert host.value.__cause__ is None

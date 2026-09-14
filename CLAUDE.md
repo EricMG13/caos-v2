@@ -175,6 +175,23 @@ plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Repair Phase 5.**
+
+- **Package verification proves consistency, not authenticity.** Task 5.4a
+  (§55) ships a bounded stdlib verifier and exact renderer bytes; its trusted
+  renderer hash prevents arbitrary archived code from executing. Replacing the
+  verifier and the whole package can still produce a lying verdict: there is
+  no external signature trust anchor. The current host verifier accepts its
+  renderer build only; older packages use their own archived verifier. ZIP64,
+  multi-disk containers and trailing bytes refuse within the ZIP32 size bounds.
+  *Upgrade:* an authenticated external digest/signature and renderer-version
+  registry if archival verification becomes an authenticity service.
+- **Exclusive package creation is not crash durability.** `write_package`
+  uses `xb`, so simultaneous writers cannot overwrite one another, but an I/O
+  failure or crash may leave a partial new file that later writes refuse.
+  It has no fsync or atomic publication protocol. *Upgrade:* staged durable
+  writes and exclusive publication when this library becomes a filing exporter.
+
 **Repair Phase 4.**
 
 - **An audit event cannot be read back to the ids its command made.**

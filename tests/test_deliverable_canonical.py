@@ -30,8 +30,9 @@ from server.deliverable.canonical import (
     verify_frozen,
 )
 from server.deliverable.filing import sign_opinion
+from server.deliverable.host import render_payload as render
 from server.deliverable.package import build_package, verify_package
-from server.deliverable.render import canonical_bound, render
+from server.deliverable.render import canonical_bound
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import (

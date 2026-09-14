@@ -1868,3 +1868,68 @@ deadline existed, so one authenticated writer's fifty-document pack could hold
 an admission request, its thread and one of the image's 32 concurrency slots
 for fifty minutes. 300 s matches the edge's idle timeout (§53.1), past which
 the request would be cut anyway.
+
+## 2026-09-14 §55 — A bounded audit package with its own portable verifier
+
+**Decision.** Phase 5 Task 5.4a completes the package half of F15 without
+changing §14's scope: internal consistency, not externally authenticated
+signatures or proof that an entire receipt/audit chain was never replaced.
+
+1. **Exactly five members:** `payload.json`, `receipt.json`,
+   `deliverable.html`, `render.py`, `verify_package.py`. The two Python members
+   are exact build-time source bytes. Names are unique and exact; extras,
+   directory entries, traversal, absolute names, backslashes and embedded NULs
+   refuse. Building uses sorted names, fixed ZIP timestamps/permissions/system,
+   and DEFLATED level 9. Identical inputs and renderer/verifier bytes under the
+   same Python/zlib build produce identical archive bytes.
+2. **Portable render.** `render.py` imports only standard-library modules and
+   raises local `RenderRefused(ValueError)` with its existing code as a string.
+   `host.render_payload` maps this to the existing host `RefusalCode`/`Refusal`,
+   with no exception chain. Its HTML output is unchanged.
+3. **Portable verifier version 1.** `verify(archive: bytes)` returns
+   `(bool, str | None)`; malformed input is a fixed failure reason, never an
+   exception's text. The host `package.verify_package` wraps that result in
+   the existing `Verification`. A reader may run
+   `python -I -S verify_package.py <package.zip>` from any directory. The CLI
+   prints `{"verified": true, "reason": null}` on success and exits 0, or a
+   failed verdict and exits 1. It installs nothing, extracts nothing, and
+   loads its renderer from the bounded archive bytes.
+4. **Bounds before member reads.** Archive ≤64 MiB; payload ≤32 MiB; export
+   ≤64 MiB; receipt ≤64 KiB; each Python member ≤1 MiB. Exactly five central
+   headers are checked before `ZipFile` can allocate member objects, so a
+   forged count cannot conceal an unbounded entry list. The format is
+   single-disk ZIP32 with no appended bytes; ZIP64/multi-disk containers are
+   unnecessary at these ceilings and refuse. Only STORED and DEFLATED are
+   accepted, with no encryption and a declared ratio ≤100:1. Every deflate
+   output is capped at its limit plus one byte and must reach exactly the end
+   of its stream with no tail; actual size and CRC must match the directory.
+   Local names, flags, methods and member extents are checked too. We do not
+   rely on `ZipExtFile.read` for actual size: it silently truncates an inflated
+   body to a forged declared size, even if trailing output remains.
+5. **Safe renderer loading.** The verifier embeds `RENDERER_SHA256` for its
+   trusted build and refuses different renderer bytes before executing them.
+   If the receipt carries `renderer_sha256` (Task 5.3), it must also match.
+   Update the pin with every renderer edit; the package tests detect drift.
+   An old package carries its old verifier and renderer, so it remains
+   independently checkable. The current host verifier accepts its own renderer
+   build only. The pin protects a trusted verifier from arbitrary archived
+   code; running a replaced verifier cannot authenticate the package. No
+   external trust anchor is introduced or claimed.
+6. **Existing consistency checks remain:** receipt is a JSON object, payload
+   hashes to `payload_sha256`, three named roles contain three distinct people,
+   canonical Markdown/record digest pairs bind, and the archived renderer
+   reproduces the export byte for byte. Recorded projections are not freshly
+   re-derived from methodology authority here; store verification owns that.
+7. **Exclusive creation.** `write_package` opens `xb`, which atomically refuses
+   an existing path. Two concurrent writers leave one complete winner under
+   successful filesystem writes. This does not promise crash durability or
+   rollback after an I/O failure; a failed write can leave a partial new file,
+   which subsequent writers refuse and verification rejects.
+
+**Evidence.** `tests/test_deliverable_package.py` proves isolated `-I -S`
+execution with only a package in the temporary directory, stdlib imports,
+metadata-before-read bounds, duplicate/extra/missing/traversal names,
+encryption/method rejection, compression-ratio rejection, total malformed-input
+handling, concurrent exclusive writes, deterministic members, renderer-pin
+checks, and forged declared lengths/CRC/counts. Existing render, filing and
+LITE route tests remain required; this decision does not enable filing routes.
