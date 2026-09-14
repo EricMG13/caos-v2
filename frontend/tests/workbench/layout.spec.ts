@@ -46,8 +46,9 @@ test("route stage headers stay in their columns and node reasons are never cut m
 
 test("timestamps never wrap inside themselves", async ({ page }) => {
   // Report's module-id rule and the prose-wrap rule rode Model and Committee,
-  // which are unavailable in every mode (brief 4.1, decision 9).
-  await page.goto("/upload/?case=CASE-2026-CVNA01");
+  // which are unavailable in every mode (brief 4.1, decision 9). Upload reads
+  // the v1 wire since slice 4.1h, whose case is a UUID.
+  await page.goto("/upload/?case=ff1fbf5a-e56f-4f84-a983-2f5a507675f0");
   const stamp = page.locator("tr.wd [data-withdrawal] time").first();
   await expect(stamp).toBeVisible();
   expect(await lines(stamp)).toBe(1);

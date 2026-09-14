@@ -12,17 +12,15 @@ import { ACTION_UNPLACED, READ_ONLY_API, refusalText } from "@/controls/RefusedC
 import { SEV_COLOR, sevSurface, sevVar } from "@/ds/sev";
 import { NODE_SEVERITY, confidenceTier, nodeTone } from "@/sections/analysis/tone";
 import { stepLabel } from "@/sections/committee/FilingLadder";
-import { COLUMNS, caseHref, filledColumns } from "@/sections/directory/CaseRegister";
+import { caseHref } from "@/sections/directory/CaseRegister";
 import { figureCounts, isUncited, kindLabel } from "@/sections/report/RevisionEditor";
 import { shortDigest } from "@/sections/report/text";
 import { nodeAccept } from "@/sections/run/NodeDetail";
 import { severityOf } from "@/sections/run/RouteGraph";
-import { clock, withdrawRefusal } from "@/sections/upload/SourcePack";
+import { clock } from "@/sections/upload/SourcePack";
 import { CHROME_KEYS, REQUIRED_KEYS } from "@/wire/keys";
-import type { CaseRow } from "@/wire/directory";
 import type { LadderStep } from "@/wire/committee";
 import type { Figure, Paragraph } from "@/wire/report";
-import type { SourceRow } from "@/wire/upload";
 
 describe("severity is shape and hue, never hue alone", () => {
   test("every severity carries a class, and the four node states map onto them", () => {
@@ -157,25 +155,6 @@ describe("navigation and the event tail", () => {
 });
 
 describe("the helpers a section reads its own rows with", () => {
-  // Built from `COLUMNS` itself, so the fixture cannot drift from the columns
-  // the component actually draws.
-  const row = (over: Partial<CaseRow> = {}): CaseRow =>
-    ({
-      ...Object.fromEntries(COLUMNS.map((column) => [column.key, ""])),
-      severity: "IDLE",
-      standing: "READER",
-      ...over,
-    }) as CaseRow;
-
-  test("a column no row fills is not rendered", () => {
-    const columns = filledColumns([row({ issuer: "Acme" })]);
-    const keys = columns.map((column) => column.key);
-    expect(keys).toContain("issuer");
-    expect(keys).not.toContain("sector");
-    // Whitespace is not a filled cell.
-    expect(filledColumns([row({ issuer: "   " })]).map((c) => c.key)).not.toContain("issuer");
-  });
-
   test("a case opens in Analysis, with its id escaped", () => {
     expect(caseHref("CASE/2026")).toBe("/analysis/?case=CASE%2F2026");
   });
@@ -245,17 +224,5 @@ describe("the actions a run and an upload refuse", () => {
     expect(refusal?.code).toBe("NODE_NOT_ACCEPTABLE");
     expect(refusal?.clears).toContain("CP-4");
     expect(refusal?.clears).toContain("waiting on CP-1");
-  });
-
-  test("a source already withdrawn refuses a second withdrawal, by either mark", () => {
-    const source = (over: Partial<SourceRow>): SourceRow =>
-      ({ source_id: "SRC-1", disposition: "ADMITTED", withdrawn_at: null, ...over }) as SourceRow;
-    expect(withdrawRefusal(source({}))).toBeNull();
-    expect(withdrawRefusal(source({ withdrawn_at: "2026-09-09T14:30:00Z" }))?.code).toBe(
-      "SOURCE_ALREADY_WITHDRAWN",
-    );
-    expect(withdrawRefusal(source({ disposition: "WITHDRAWN" }))?.code).toBe(
-      "SOURCE_ALREADY_WITHDRAWN",
-    );
   });
 });

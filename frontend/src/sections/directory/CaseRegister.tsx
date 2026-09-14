@@ -1,40 +1,18 @@
 // The case register (IA_SPEC.md 4.1, card 5a): one action per row and it is
 // the same action — open the case. No batch state, no checkboxes, no second
-// selection model. A column nothing fills is not drawn.
+// selection model. The v1 wire carries no sector, rating, pathway, snapshot
+// or leverage; this table draws only what the host holds (brief 4.1,
+// "Fixture fields dropped rather than faked").
 import { Link } from "react-router";
-import { SeverityMark } from "@/chrome/SeverityMark";
-import type { CaseRow } from "@/wire/directory";
+import { Tag } from "@/ds/atoms";
+import type { CaseRow } from "@/wire/v1";
 
-type ColumnKey = Exclude<keyof CaseRow, "severity" | "standing">;
-
-interface Column {
-  key: ColumnKey;
-  label: string;
-  mono?: boolean;
-  right?: boolean;
-  wrap?: boolean;
-}
-
-export const COLUMNS: readonly Column[] = [
-  { key: "case_id", label: "Case", mono: true },
-  { key: "issuer", label: "Issuer", wrap: true },
-  { key: "sector", label: "Sector", wrap: true },
-  { key: "rating", label: "Rating", mono: true, wrap: true },
-  { key: "pathway", label: "Pathway", mono: true },
-  { key: "snapshot", label: "Snapshot", mono: true },
-  { key: "state", label: "State" },
-  { key: "net_leverage", label: "Net leverage", mono: true, right: true, wrap: true },
-  { key: "updated_at", label: "Updated", mono: true, right: true, wrap: true },
-];
+/** Not exported by `@/wire/v1` on its own; the shape lives only on `CaseRow`. */
+type RunSummary = NonNullable<CaseRow["latest_run"]>;
 
 /** `2026-09-09T14:30:00Z` reads `2026-09-09 14:30Z`. */
 export function stamp(iso: string): string {
   return iso.replace("T", " ").replace(/:\d\d(?:\.\d+)?Z$/, "Z");
-}
-
-/** The columns at least one row fills. An empty column is not rendered. */
-export function filledColumns(rows: CaseRow[]): Column[] {
-  return COLUMNS.filter((column) => rows.some((row) => row[column.key].trim() !== ""));
 }
 
 /** The one action a row has: open the case in Analysis. */
@@ -42,44 +20,42 @@ export function caseHref(caseId: string): string {
   return `/analysis/?case=${encodeURIComponent(caseId)}`;
 }
 
-function classOf(column: Column): string | undefined {
-  const classes = [column.mono ? "m" : "", column.right ? "r" : "", column.wrap ? "wrap" : ""]
-    .filter(Boolean)
-    .join(" ");
-  return classes || undefined;
-}
+const RUN_TONE: Record<RunSummary["status"], string> = {
+  COMPLETE: "ok",
+  RUNNING: "acc",
+  BLOCKED: "warn",
+  FAILED: "crit",
+  CANCELLED: "warn",
+};
 
-function Cell({ row, column }: { row: CaseRow; column: Column }) {
-  if (column.key === "state") {
-    // Severity is shape and hue beside the word; never hue alone.
-    return (
-      <span className="state">
-        <SeverityMark severity={row.severity} />
-        {row.state}
-      </span>
-    );
-  }
-  if (column.key === "updated_at") {
-    return <time dateTime={row.updated_at}>{stamp(row.updated_at)}</time>;
-  }
-  return <>{row[column.key]}</>;
+function LatestRunCell({ run }: { run: RunSummary | null }) {
+  if (!run) return <span className="m">No runs yet</span>;
+  return (
+    <span className="m">
+      <Tag sev={RUN_TONE[run.status]}>{run.status}</Tag>
+      {run.profile_id ? <span className="sub"> {run.profile_id}</span> : null}
+      {run.selection_id ? <span className="sub"> · {run.selection_id}</span> : null}
+    </span>
+  );
 }
 
 export function CaseRegister({ rows }: { rows: CaseRow[] }) {
-  const columns = filledColumns(rows);
   return (
     <table className="reg" data-register>
       <thead>
         <tr>
-          {columns.map((column) => (
-            <th
-              key={column.key}
-              scope="col"
-              className={[column.right ? "r" : "", column.wrap ? "wrap" : ""].join(" ").trim()}
-            >
-              {column.label}
-            </th>
-          ))}
+          <th scope="col">Case</th>
+          <th scope="col" className="wrap">
+            Title
+          </th>
+          <th scope="col" className="r">
+            Created
+          </th>
+          <th scope="col">Standing</th>
+          <th scope="col" className="r">
+            Live sources
+          </th>
+          <th scope="col">Latest run</th>
           <th scope="col" className="r">
             <span className="sr-only">Action</span>
           </th>
@@ -88,11 +64,16 @@ export function CaseRegister({ rows }: { rows: CaseRow[] }) {
       <tbody>
         {rows.map((row) => (
           <tr key={row.case_id} data-case={row.case_id}>
-            {columns.map((column) => (
-              <td key={column.key} className={classOf(column)}>
-                <Cell row={row} column={column} />
-              </td>
-            ))}
+            <td className="m">{row.case_id}</td>
+            <td className="wrap">{row.title}</td>
+            <td className="m r">
+              <time dateTime={row.created_at}>{stamp(row.created_at)}</time>
+            </td>
+            <td>{row.standing}</td>
+            <td className="m r">{row.live_sources}</td>
+            <td>
+              <LatestRunCell run={row.latest_run} />
+            </td>
             <td className="r">
               <Link className="rowact" to={caseHref(row.case_id)}>
                 Open case

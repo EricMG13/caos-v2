@@ -7,6 +7,7 @@ import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { MetricPassport } from "@/evidence/MetricPassport";
 import { CommitteeSection } from "@/sections/committee/CommitteeSection";
 import { PASSPORT_FIELDS, type Citation, type DocumentOf, type Passport } from "@/wire";
+import { parseUploadDocument } from "@/wire/v1";
 
 const CITATION: Citation = {
   chip: "D-04 p.68 ¶2",
@@ -92,18 +93,22 @@ describe("the evidence surface", () => {
 
   test("every citation of a source Upload shows withdrawn carries the withdrawal", () => {
     const fixtures = `${resolve(process.cwd(), "fixtures")}/`;
-    const upload = JSON.parse(
-      readFileSync(`${fixtures}upload.json`, "utf8"),
-    ) as DocumentOf<"upload">;
+    const upload = parseUploadDocument(JSON.parse(readFileSync(`${fixtures}upload.json`, "utf8")));
+    // Keyed by `document_sha256`, not `source_id`: Upload's v1 wire (brief
+    // 4.1, slice 4.1h) gives every source a UUID id, so the `D-0N` label a
+    // legacy citation's `chip` still carries can no longer join on it. The
+    // digest is the join key invariant 11 already anchors citations on.
     const withdrawn = new Map(
       upload.body.sources
         .filter((source) => source.withdrawn_at !== null)
-        .map((source) => [source.source_id, source.withdrawn_at]),
+        .map((source) => [source.document_sha256, source.withdrawn_at]),
     );
     expect(withdrawn.size).toBeGreaterThan(0);
     const files = [
-      ...readdirSync(fixtures).filter((name) => name.endsWith(".json")),
-      ...readdirSync(`${fixtures}states`).map((name) => `states/${name}`),
+      ...readdirSync(fixtures).filter((name) => name.endsWith(".json") && name !== "upload.json"),
+      ...readdirSync(`${fixtures}states`)
+        .filter((name) => name !== "upload.partial.json")
+        .map((name) => `states/${name}`),
     ];
     let checked = 0;
     const walk = (value: unknown): void => {
@@ -111,9 +116,9 @@ describe("the evidence surface", () => {
       if (typeof value !== "object" || value === null) return;
       const record = value as Record<string, unknown>;
       if (typeof record["chip"] === "string" && Array.isArray(record["bboxes"])) {
-        const source = (record["chip"] as string).split(" ")[0]!;
-        if (withdrawn.has(source)) {
-          expect(record["withdrawn_at"], `${record["chip"]}`).toBe(withdrawn.get(source));
+        const digest = record["document_sha256"];
+        if (typeof digest === "string" && withdrawn.has(digest)) {
+          expect(record["withdrawn_at"], `${record["chip"]}`).toBe(withdrawn.get(digest));
           checked += 1;
         }
       }
