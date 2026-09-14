@@ -74,7 +74,9 @@ def test_report_reads_the_exact_saved_revision(
         assert actual["decision_scope"] == projections["decision_scope"]
 
 
-@pytest.mark.parametrize("damage", ["secondary", "injected", "filed", "filed_missing"])
+@pytest.mark.parametrize(
+    "damage", ["secondary", "injected", "filed", "filed_missing", "orphan"]
+)
 def test_committee_reads_the_exact_frozen_payload_and_receipt(
     client: TestClient, lite: _Harness, damage: str
 ) -> None:
@@ -121,6 +123,12 @@ def test_committee_reads_the_exact_frozen_payload_and_receipt(
         )
         if damage == "filed_missing":
             lite.blobs.path_of(sha256(receipt_bytes(receipt)).hexdigest()).unlink()
+        elif damage == "orphan":
+            _corrupt(
+                lite,
+                "DELETE FROM deliverable_receipts WHERE revision_id=%s",
+                str(revision),
+            )
     lite.conn.commit()
     response = client.get(
         _path(lite, revision, "committee"), headers=_as(lite.approver)
@@ -133,13 +141,12 @@ def test_committee_reads_the_exact_frozen_payload_and_receipt(
 def test_committee_distinguishes_frozen_from_filed(
     client: TestClient, lite: _Harness
 ) -> None:
+    _file(lite)
     revision = _save(lite)
-    assert (
-        client.get(
-            _path(lite, revision, "committee"), headers=_as(lite.approver)
-        ).status_code
-        != 200
+    response = client.get(
+        _path(lite, revision, "committee"), headers=_as(lite.approver)
     )
+    assert response.status_code != 200
     lite.conn.rollback()
     _sign(lite, revision)
     _freeze(lite, revision)
