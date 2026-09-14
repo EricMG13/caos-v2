@@ -132,6 +132,9 @@ class PdfExtractor:
             # pathological page can still overrun it (CLAUDE.md ledger).
             if time.monotonic() > deadline:
                 raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
+            if frame is None:
+                # Nothing on the page is visible, so nothing on it is citable.
+                continue
             for box in page:
                 if not isinstance(box, LTTextBox):
                     continue
@@ -148,7 +151,7 @@ class PdfExtractor:
         return tokens
 
 
-def _pages(data: bytes) -> Iterator[tuple[Frame, LTPage]]:
+def _pages(data: bytes) -> Iterator[tuple[Frame | None, LTPage]]:
     """Each page's layout beside its visible crop in the layout's own space.
 
     `extract_pages`, written out so the `PDFPage` -- which carries the crop and
@@ -178,8 +181,9 @@ def _pages(data: bytes) -> Iterator[tuple[Frame, LTPage]]:
         raise Refusal(RefusalCode.SOURCE_NOT_READABLE) from None
 
 
-def _crop_frame(page: PDFPage) -> Frame:
-    """The visible region, in the rotated y-up space pdfminer lays a page out in.
+def _crop_frame(page: PDFPage) -> Frame | None:
+    """The visible region, in the rotated y-up space pdfminer lays a page out in,
+    or `None` when the CropBox clipped to the MediaBox is empty on either axis.
 
     `PDFPageInterpreter.process_page` maps user space through a matrix built
     from the MediaBox and `/Rotate`; this is that matrix, applied to the
@@ -198,7 +202,13 @@ def _crop_frame(page: PDFPage) -> Frame:
     }.get(page.rotate, (1, 0, 0, 1, -x0, -y0))
     (m0, n0, m1, n1) = _ordered(page.mediabox)
     (c0, d0, c1, d1) = _ordered(page.cropbox)
-    return apply_matrix_rect(ctm, (max(m0, c0), max(n0, d0), min(m1, c1), min(n1, d1)))
+    visible = (max(m0, c0), max(n0, d0), min(m1, c1), min(n1, d1))
+    if visible[0] >= visible[2] or visible[1] >= visible[3]:
+        # Clipped to nothing. `apply_matrix_rect` would normalise the inverted
+        # rectangle into one covering the gap between the boxes -- text no
+        # reader sees -- so an empty visible area is no frame at all.
+        return None
+    return apply_matrix_rect(ctm, visible)
 
 
 def _ordered(rect: Frame) -> Frame:
@@ -213,8 +223,10 @@ def _line_tokens(
     characters' rectangles, measured from the crop's top-left corner.
 
     A run not wholly inside the crop is dropped: a clipped rectangle would
-    anchor a quote whose other half no reader can see. An empty crop (one
-    that misses the MediaBox) contains nothing, so it drops every run.
+    anchor a quote whose other half no reader can see. A page whose crop misses
+    the MediaBox has no frame and never reaches here (`extract` skips it).
+    Membership uses pdfminer's full glyph box, descent included, so a word
+    whose baseline is inside the edge but whose box crosses it is dropped.
     """
     (left, bottom, right, top) = frame
     tokens = []

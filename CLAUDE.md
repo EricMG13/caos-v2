@@ -187,6 +187,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   display rather than readability -- split into single-letter tokens, so the
   word cannot be quoted as itself; `test_tracked_glyphs_beyond_word_margin_split_into_letters`
   pins it. *Upgrade:* quote normalisation, Phase 5.
+- **A word just inside a crop edge can be dropped.** `PdfExtractor`'s
+  `drop-outside` crop policy (slice 3.2d) tests membership on pdfminer's full
+  glyph box -- the font size, descent included -- not the baseline, so a word
+  whose baseline sits just inside the visible crop but whose box crosses its
+  edge is dropped and cannot be cited. That is the fail-closed direction: a
+  clipped rectangle would anchor text a reader may not fully see. A crop that
+  clips to nothing against the MediaBox drops every token on its page.
+  *Upgrade:* a declared tolerance, recorded in the extractor identity, if real
+  documents need it.
 - **"Undelivered pages of a delivered source cannot be cited" is enforced by
   the rule, not yet by any narrower delivery.** `verify_citations` (slice
   3.2e) anchors a quote only wholly within the block ids a node was handed,
