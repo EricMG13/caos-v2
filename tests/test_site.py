@@ -9,6 +9,7 @@ that lists no directory, leaves no root and follows no symlink out of it.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from server.api import health
 from server.api.app import app
 from server.api.deps import DATABASE_URL
 from server.api.edge import SECURITY_HEADERS
-from server.api.site import SITE_ROOT_ENV, application
+from server.api.site import SECTIONS, SITE_ROOT_ENV, application
 from server.refusals import Refusal, RefusalCode
 
 INDEX = b"<!doctype html><title>CAOS</title><div id=root></div>"
@@ -173,3 +174,12 @@ def test_the_api_lifespan_runs_through_the_site_application(
         pass
     assert missing.value.code is RefusalCode.EDGE_CONFIG_INVALID
     assert len(started) == 1
+
+
+def test_the_deep_link_sections_are_the_workspace_sections() -> None:
+    """`site.SECTIONS` is copied from the workspace's list; a section added there
+    and not here would deep-link to a 404 in the production image."""
+    shared = Path(__file__).resolve().parents[1] / "frontend/src/wire/shared.ts"
+    text = shared.read_text(encoding="utf-8")
+    block = text[text.index("export const SECTIONS = [") : text.index("] as const;")]
+    assert tuple(re.findall(r'"([a-z]+)"', block)) == SECTIONS
