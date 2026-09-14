@@ -80,6 +80,7 @@ STATEMENT = minimal_pdf(
 )
 
 
+@pytest.mark.live_provider
 def test_a_live_run_admits_documents_and_completes_its_route(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:

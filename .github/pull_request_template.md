@@ -12,5 +12,7 @@
 - [ ] One concern; the diff stays under the CI size gate.
 - [ ] Any new dependency has a dated `docs/DECISIONS.md` entry.
 - [ ] Any accepted limitation has a `CLAUDE.md` known-gaps entry in this PR.
-- [ ] `confidence-review` then `adversarial-reviewer` were run on the diff.
+- [ ] `confidence-review` was run after code changes.
+- [ ] High-risk changed symbols had a max-reasoning rewrite tournament.
+- [ ] `adversarial-reviewer` was run at phase completion, if this PR completes a phase.
 - [ ] No document-derived text or credential appears in a log, a test fixture or this description.

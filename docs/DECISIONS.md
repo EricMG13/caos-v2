@@ -116,6 +116,16 @@ waiving (`SYSTEM_SPEC.md` §11) — this is the first instance of that rule.
 dependency of its own, so the lock and the installer cannot disagree. The two
 interpreter versions are forced by §4 of `docs/AI_CODE_QUALITY.md`.
 
+## 2026-09-12 §10a — Pre-commit is part of the pinned development toolchain
+
+Pre-commit 4.6.2 is locked in `requirements-dev.txt`, and `make venv` installs
+hooks through `.venv/bin/pre-commit`. It does not install or invoke a global
+tool and does not hide installation failure.
+
+**Reason.** The hook runner enforces repository gates, so its version and
+installation must be reproduced by the same hashed, wheels-only development
+lock as the hooks it drives.
+
 ## 2026-09-08 §11 — A CI job arrives with the code it scans
 
 Phase 0 ships `lint`, `types`, `test`, `security` and `size`. `postgres`,
@@ -731,6 +741,49 @@ its context for evidence loses the answer rather than the sentence.
 that is what the envelope holds. The bundle's registers — the tables a module's
 own payload schema declares — are a later phase, and until then a chained module
 inherits sentences rather than a financial base.
+
+## 2026-09-12 §29 — Canonical Markdown is the authoritative handoff
+
+Deploy V's exact, validated canonical Markdown remains the analytical authority
+and the downstream handoff. Typed UI fields are closed, validated sidecar
+projections of it. The UI and host-rendered report are presentations of the
+accepted Markdown and projections, not a second model-authored authority.
+
+The host owns identities a module cannot establish: run, immutable source set,
+extractor and extraction manifest, resolved route, bundle manifest/build,
+adapter version, and accepted upstream artifacts. Those identities travel with
+the handoff and are checked by the adapter; provider-claimed identity is never
+substituted for them.
+
+The catalog-selected CP-0 remains the single executable preparation/readiness
+node. The host's extraction manifest is preparation metadata supplied to CP-0,
+not another LLM route stage. `CP-PARSE` remains only as an authority alias for
+archived compatibility; it is not inserted into the catalog route, so extraction
+and preparation do not run twice. The no-Excel/no-Word decision and archived
+workbook/publication contracts remain unchanged.
+
+**Reason.** The current claims JSON discards the bundle's complete registers and
+cannot become canonical merely because the host stores it. Adding a second model
+summary would create competing authority; preserving the exact validated
+Markdown and deriving presentation fields mechanically preserves one handoff.
+
+## 2026-09-12 §30 — Local development uses one project-scoped Compose stack
+
+Development uses the CI-pinned PostgreSQL image in two isolated services: a
+persistent database reached by a least-privilege application role, and a
+tmpfs-backed test-admin database. Both bind loopback-only deterministic ports;
+blobs remain in the ignored project-local `.dev-data/blobs` directory. Stopping
+the named Compose project removes neither the development volume nor blobs.
+
+Python 3.14, security Python 3.12, Node 24, and pinned pre-commit remain the
+existing toolchain; no dependency was added. GitNexus indexing uses only a
+runner already present locally or installed on the machine and runs
+`--index-only`.
+
+**Reason.** Separate named resources make test cleanup unable to reach durable
+development data, while one native Compose file is the smallest reproducible
+service layer. Fixed synthetic local credentials are configuration examples,
+not deployable secrets or permission to call a provider.
 
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 

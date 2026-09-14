@@ -98,7 +98,8 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
             )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = sorted(pool.submit(complete).result() for _ in range(2))
+        futures = [pool.submit(complete) for _ in range(2)]
+        outcomes = sorted(future.result() for future in futures)
 
     assert outcomes == [False, True], "exactly one caller completed the run"
     with connect(empty_database) as conn:
