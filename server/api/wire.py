@@ -142,6 +142,13 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.FORECAST_RESIDUAL_UNRECONCILED: "Reconcile the balances within tolerance.",
     _C.FORECAST_DRIVER_NOT_READY: "Complete the driver first.",
     _C.DELIVERABLE_PAYLOAD_INVALID: "Correct the deliverable payload.",
+    _C.DELIVERABLE_NOT_FOUND: "Name a saved revision of this case.",
+    _C.NARRATIVE_FIGURE_UNREFERENCED: (
+        "Insert every financial figure through a validated reference."
+    ),
+    _C.NARRATIVE_REFERENCE_INVALID: (
+        "Reference a citation in the accepted revision artifacts."
+    ),
     _C.DELIVERABLE_UNCITED_FIGURE: "Cite every figure.",
     _C.DELIVERABLE_NOT_SIGNED: "Sign the deliverable first.",
     _C.DELIVERABLE_NOT_FROZEN: "Freeze the deliverable first.",

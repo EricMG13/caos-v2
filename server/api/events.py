@@ -47,6 +47,7 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         # Written before any case stream can exist: the Directory is not a stream.
         "CASE_CREATED": None,
         # Report and Committee are not enabled: nothing on screen reads these.
+        "REVISION_SAVED": None,
         "OPINION_SIGNED": None,
         "DELIVERABLE_FROZEN": None,
         "DELIVERABLE_FILED": None,
