@@ -5,7 +5,14 @@
 // `latest_run_id` are two identities and are never collapsed into one.
 import { useState } from "react";
 import { Link } from "react-router";
-import { CreateRunControl, PinInputControl, actionOf, useRunRefetch } from "./controls";
+import {
+  CreateRunControl,
+  GatePanelControl,
+  PinInputControl,
+  WorkControls,
+  actionOf,
+  useRunRefetch,
+} from "./controls";
 import { NodeDetail } from "./NodeDetail";
 import { RouteGraph } from "./RouteGraph";
 import type { GateView } from "./types";
@@ -38,11 +45,11 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
   const body = live.body;
   const actions = live.chrome.actions;
   const [choice, setChoice] = useState<{ run: string; node: string } | null>(null);
-  // The fingerprint a start or retry must send (part 2). The document never
-  // re-serves it (`RunView` carries no such field), so it is held from
-  // whichever of a pin, a preview or an approval was last read in this
-  // session; nothing here reads it yet.
-  const [, setFingerprint] = useState<string | null>(null);
+  // The fingerprint a start or retry must send. The document never re-serves
+  // it (`RunView` carries no such field), so it is held from whichever of a
+  // pin, a preview or an approval was last read in this session
+  // (`controls.tsx`, brief 4.2 decision 1).
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
 
   const refetchNote = refetchFailed ? (
     <div className="note" data-refetch-failed>
@@ -221,6 +228,32 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           action={actionOf(actions, "PIN_RUN_INPUT")}
           initial={run.subject}
           onPinned={setFingerprint}
+          onRefetch={refetch}
+        />
+        {run.gates.map((gate) => (
+          // Keyed on the fingerprint: a pin (or an approval that moved it)
+          // remounts the panel, clearing any preview read under the input
+          // that just changed rather than leaving a stale digest approvable
+          // (brief 4.2 review finding 3).
+          <GatePanelControl
+            key={`${gate.gate}:${fingerprint ?? "none"}`}
+            caseId={body.case_id}
+            runId={run.run_id}
+            gate={gate.gate}
+            state={gate.state}
+            action={actionOf(
+              actions,
+              gate.gate === "SOURCE_SET" ? "APPROVE_SOURCE_SET" : "APPROVE_RESEARCH_PLAN",
+            )}
+            onFingerprint={setFingerprint}
+            onRefetch={refetch}
+          />
+        ))}
+        <WorkControls
+          caseId={body.case_id}
+          runId={run.run_id}
+          fingerprint={fingerprint}
+          actions={actions}
           onRefetch={refetch}
         />
         <CreateRunControl
