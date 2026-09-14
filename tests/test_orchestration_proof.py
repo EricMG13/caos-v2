@@ -30,7 +30,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from conftest import gate_verdict, route_fault
+from conftest import approve_run, gate_verdict, route_fault
 from tracked import tracked_python
 
 from server.blobs import BlobStore
@@ -47,7 +47,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant
-from server.store.routes import _canonical, pin_route
+from server.store.routes import _canonical
 from server.store.runs import start_run
 
 REPO = Path(__file__).resolve().parents[1]
@@ -145,25 +145,34 @@ def ran(
     run_id = start_run(conn, case_id)
     conn.commit()
 
-    pin_route(conn, run_id, catalog_route)
+    bundle = Bundle(root=VENDORED)
+    approve_run(
+        conn,
+        case_id=case_id,
+        run_id=run_id,
+        route=catalog_route,
+        bundle=bundle,
+    )
     delivered = [(source_id, block) for block in _blocks(conn, source_id)]
     conn.rollback()
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=bundle,
+        blobs=blobs,
+        completions=_Completions(source_id),
+        delivered=delivered,
+        route=catalog_route,
+        run_id=run_id,
+    )
     run_route(
         conn,
         blobs,
         run_id=run_id,
         route=catalog_route,
         execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=Bundle(root=VENDORED),
-                blobs=blobs,
-                completions=_Completions(source_id),
-                delivered=delivered,
-                route=catalog_route,
-                run_id=run_id,
-            ),
+            provider,
             ESTIMATE,
+            bundle,
         ),
     )
     return Ran(conn, blobs, run_id, case_id, source_id, catalog_route)
@@ -270,6 +279,9 @@ def test_the_proof_refuses_a_run_whose_route_was_never_pinned(
 ) -> None:
     """ "Ran as pinned" is unanswerable without a pin (invariant 10)."""
     with route_fault(ran.conn):
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
         ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
     ran.conn.commit()
 
@@ -281,10 +293,17 @@ def test_the_proof_refuses_a_node_the_pin_does_not_carry(ran: Ran) -> None:
     failure invariant 10 exists to prevent: execution that did not read the pin.
     """
     truncated = replace(ran.route, nodes=ran.route.nodes[:1], edges=())
+    digest = route_digest(truncated)
+    ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER ALL")
+    ran.conn.execute(
+        "UPDATE run_inputs SET route_digest = %s WHERE run_id = %s",
+        (digest, ran.run_id),
+    )
+    ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER ALL")
     with route_fault(ran.conn):
         ran.conn.execute(
             "UPDATE run_routes SET resolved = %s, route_digest = %s WHERE run_id = %s",
-            (_canonical(truncated), route_digest(truncated), ran.run_id),
+            (_canonical(truncated), digest, ran.run_id),
         )
     ran.conn.commit()
 

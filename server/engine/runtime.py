@@ -26,8 +26,11 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.engine.route import GATE_MODULE, ResolvedRoute, frontier
+from server.methodology.bundle import Bundle
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
+from server.store.gates import execution_input
 from server.store.outcomes import execution_reads, require_idle
 from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
 
@@ -67,6 +70,7 @@ class Execution:
 
     provider: Provider
     estimate: Decimal
+    bundle: Bundle
 
 
 def run_route(
@@ -85,6 +89,7 @@ def run_route(
     owns its frontier reads and never adopts pending caller writes.
     """
     require_idle(conn)
+    route = _execution_route(conn, run_id, route, execution.bundle)
     while True:
         with execution_reads(conn):
             ready = frontier(route, accepted_artifacts(conn, blobs, route, run_id))
@@ -161,6 +166,7 @@ def _run_node(
     attempt_id = start_attempt(conn, run_id, route_node_id)
     reserve(conn, attempt_id, execution.estimate)
 
+    _execution_route(conn, run_id, route, execution.bundle)
     result = execution.provider.execute(route_node_id, module_id, attempt_id=attempt_id)
 
     accept_attempt(
@@ -173,3 +179,17 @@ def _run_node(
             generation_id=result.generation_id,
         ),
     )
+
+
+def _execution_route(
+    conn: StoreConnection,
+    run_id: UUID,
+    requested: ResolvedRoute,
+    bundle: Bundle,
+) -> ResolvedRoute:
+    """Return current stored authority from one bounded, lock-owning read unit."""
+    with execution_reads(conn):
+        _input, stored = execution_input(conn, run_id, bundle)
+        if stored != requested:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        return stored

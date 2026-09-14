@@ -29,7 +29,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import gate_verdict, route_fault
+from conftest import approve_run, gate_verdict, route_fault
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -50,7 +50,6 @@ from server.qualification.matrix import (
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.routes import pin_route
 from server.store.runs import start_run
 
 REPO = Path(__file__).resolve().parents[1]
@@ -135,28 +134,37 @@ def ran(
     )
     run_id = start_run(conn, case_id)
     conn.commit()
-    pin_route(conn, run_id, catalog_route)
+    bundle = Bundle(root=VENDORED)
+    approve_run(
+        conn,
+        case_id=case_id,
+        run_id=run_id,
+        route=catalog_route,
+        bundle=bundle,
+    )
     blocks = conn.execute(
         "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
         (source_id,),
     ).fetchall()
     conn.rollback()
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=bundle,
+        blobs=blobs,
+        completions=_Completions(source_id),
+        delivered=[(source_id, str(row[0])) for row in blocks],
+        route=catalog_route,
+        run_id=run_id,
+    )
     run_route(
         conn,
         blobs,
         run_id=run_id,
         route=catalog_route,
         execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=Bundle(root=VENDORED),
-                blobs=blobs,
-                completions=_Completions(source_id),
-                delivered=[(source_id, str(row[0])) for row in blocks],
-                route=catalog_route,
-                run_id=run_id,
-            ),
+            provider,
             ESTIMATE,
+            bundle,
         ),
     )
     digest = conn.execute(
@@ -300,6 +308,9 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
     reviewer than an honest miss beside a refusal that explains it.
     """
     with route_fault(ran.conn):
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
         ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
     ran.conn.commit()
 
