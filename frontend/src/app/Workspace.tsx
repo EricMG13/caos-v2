@@ -84,17 +84,20 @@ export function Workspace({ section }: { section: Section }) {
   const [params] = useSearchParams();
   const caseId = params.get("case");
   const runId = params.get("run");
+  const revisionId = params.get("revision");
   const carried = new URLSearchParams();
   if (caseId) carried.set("case", caseId);
   if (runId) carried.set("run", runId);
+  if (revisionId) carried.set("revision", revisionId);
   const caseSearch = carried.toString();
   const fixture = import.meta.env.MODE === "demo" ? params.get("fixture") : null;
   // A disabled section, or a case section with no case, sends no request and
   // opens no tail: it is `unavailable` in every mode (brief 4.1, decision 9).
-  const requested = sectionUrl(section, { case: caseId, run: runId, fixture }) !== null;
+  const requested =
+    sectionUrl(section, { case: caseId, run: runId, revision: revisionId, fixture }) !== null;
   // Everything the reader sees is keyed on the request that produced it, so a
   // navigation shows `loading` without a render-time state write.
-  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${fixture ?? ""}`;
+  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${fixture ?? ""}`;
   const [held, setHeld] = useState<Keyed<Held> | null>(null);
   const [tabChoice, setTabChoice] = useState<Keyed<string> | null>(null);
   const authority = useRef<Authority>(INITIAL);
@@ -119,7 +122,7 @@ export function Workspace({ section }: { section: Section }) {
       const sent = ticket(authority.current);
       void fetchSection(
         section,
-        { case: caseId, run: runId, fixture },
+        { case: caseId, run: runId, revision: revisionId, fixture },
         mine.controller.signal,
       ).then((next) => {
         // A late response, for a case or run the user has left, is discarded.
@@ -155,7 +158,7 @@ export function Workspace({ section }: { section: Section }) {
       tail?.close();
       cancel();
     };
-  }, [requested, section, caseId, runId, fixture, key]);
+  }, [requested, section, caseId, runId, revisionId, fixture, key]);
 
   const reload = useCallback(() => {
     setHeld((current) =>
@@ -175,12 +178,14 @@ export function Workspace({ section }: { section: Section }) {
   const displayedRunId = document ? displayedRunIdOf(section, document) : null;
   // The view is mounted under what it is about, never under `observed_at`, so
   // an ordinary refresh keeps its local selection (R5).
-  const mountKey = `${caseId ?? ""}|${displayedRunId ?? ""}`;
+  const displayedRevisionId =
+    document && "revision_id" in document.body ? document.body.revision_id : null;
+  const mountKey = `${caseId ?? ""}|${displayedRunId ?? ""}|${displayedRevisionId ?? ""}`;
   const snapshot = useMemo<VisibleSnapshot | null>(
     () =>
       document
         ? {
-            key: `${section}|${caseId ?? ""}|${displayedRunId ?? ""}`,
+            key: `${section}|${caseId ?? ""}|${displayedRunId ?? ""}|${displayedRevisionId ?? ""}`,
             caseId,
             displayedRunId,
             document,
@@ -188,7 +193,7 @@ export function Workspace({ section }: { section: Section }) {
               latest && "document" in latest ? withdrawalsOf(latest.document) : new Map(),
           }
         : null,
-    [document, section, caseId, displayedRunId, latest],
+    [document, section, caseId, displayedRunId, displayedRevisionId, latest],
   );
   const chrome = chromeOf(section, status);
   const activeTab =
