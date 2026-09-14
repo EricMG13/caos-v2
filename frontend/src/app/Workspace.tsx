@@ -2,25 +2,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { INITIAL, accepts, issue, navigate, ticket, type Authority } from "./authority";
-import { SECTION_LABELS } from "./sections";
+import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { eventsUrl, openTail } from "./sse";
 import { LedgerProvider } from "./ledger";
-import { OFFLINE_WORDING, fetchSection, type RegionStatus } from "./transport";
+import {
+  OFFLINE_WORDING,
+  fetchSection,
+  sectionUrl,
+  type RegionStatus,
+  type WorkspaceDocument,
+} from "./transport";
 import { SECTION_VIEWS } from "./views";
 import { DecisionBrief } from "@/chrome/DecisionBrief";
 import { Rail } from "@/chrome/Rail";
 import { Ribbon } from "@/chrome/Ribbon";
 import { SectionTabs } from "@/chrome/SectionTabs";
 import { VerdictStrip } from "@/chrome/VerdictStrip";
+import { composeChrome, markDisabled } from "@/chrome/compose";
 import { fallbackChrome } from "@/chrome/fallback";
 import { PageAlert } from "@/states/PageAlert";
 import { RegionState } from "@/states/RegionState";
-import type { AnyDocument, Section } from "@/wire";
+import type { Chrome, Section } from "@/wire";
+import type { SectionDocument as V1Document } from "@/wire/v1";
 
 const LOADING: RegionStatus = { kind: "loading" };
+const UNAVAILABLE: RegionStatus = { kind: "unavailable" };
 
-function documentOf(status: RegionStatus): AnyDocument | null {
-  return "document" in status ? status.document : null;
+/** The legacy chrome a document carries, or the one composed for a v1 document. */
+function chromeOf(section: Section, status: RegionStatus): Chrome | null {
+  if (!("document" in status)) return null;
+  const { document } = status;
+  if (!isV1(document)) return document.chrome;
+  return isEnabledSection(section) ? composeChrome(section, document) : null;
+}
+
+function isV1(document: WorkspaceDocument): document is V1Document {
+  return !("ribbon" in document.chrome);
 }
 
 interface Keyed<T> {
@@ -32,10 +49,14 @@ export function Workspace({ section }: { section: Section }) {
   const [params] = useSearchParams();
   const caseId = params.get("case");
   const caseSearch = caseId ? `?case=${encodeURIComponent(caseId)}` : "";
-  const fixture = params.get("fixture");
+  const runId = params.get("run");
+  const fixture = import.meta.env.MODE === "demo" ? params.get("fixture") : null;
+  // A disabled section, or a case section with no case, sends no request and
+  // opens no tail: it is `unavailable` in every mode (brief 4.1, decision 9).
+  const requested = sectionUrl(section, { case: caseId, run: runId, fixture }) !== null;
   // Everything the reader sees is keyed on the request that produced it, so a
   // navigation shows `loading` without a render-time state write.
-  const key = `${section}|${caseId ?? ""}|${fixture ?? ""}`;
+  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${fixture ?? ""}`;
   const [result, setResult] = useState<Keyed<RegionStatus> | null>(null);
   const [tabChoice, setTabChoice] = useState<Keyed<string> | null>(null);
   const authority = useRef<Authority>(INITIAL);
@@ -45,7 +66,7 @@ export function Workspace({ section }: { section: Section }) {
   const load = useCallback(async () => {
     authority.current = issue(authority.current);
     const sent = ticket(authority.current);
-    const next = await fetchSection(section, { case: caseId, fixture });
+    const next = await fetchSection(section, { case: caseId, run: runId, fixture });
     // A late response, for a case the user has left or superseded by a later
     // request, is discarded, never rendered.
     if (!accepts(authority.current, sent)) return;
@@ -54,7 +75,7 @@ export function Workspace({ section }: { section: Section }) {
         ? { kind: "stale", document: next.document }
         : next;
     setResult({ key, value });
-  }, [section, caseId, fixture, key]);
+  }, [section, caseId, runId, fixture, key]);
 
   const reload = useCallback(() => {
     staleKey.current = null;
@@ -64,6 +85,7 @@ export function Workspace({ section }: { section: Section }) {
   // The tail opens before the first fetch so a fixture stream's frame counter
   // is reset before the document it drives is read.
   useEffect(() => {
+    if (!requested) return undefined;
     const tail = openTail(eventsUrl(caseId, fixture), {
       onEvent: (name) => {
         if (name !== "authority_changed") void load();
@@ -80,16 +102,15 @@ export function Workspace({ section }: { section: Section }) {
       },
     });
     return () => tail.close();
-  }, [load, caseId, fixture, key]);
+  }, [load, requested, caseId, fixture, key]);
 
   useEffect(() => {
     authority.current = navigate(authority.current, caseId);
-    void load();
-  }, [load, caseId]);
+    if (requested) void load();
+  }, [load, requested, caseId]);
 
-  const status = result?.key === key ? result.value : LOADING;
-  const document = documentOf(status);
-  const chrome = document?.chrome ?? null;
+  const status = requested ? (result?.key === key ? result.value : LOADING) : UNAVAILABLE;
+  const chrome = chromeOf(section, status);
   const activeTab =
     (tabChoice?.key === key ? tabChoice.value : null) ?? chrome?.tabs[0]?.id ?? null;
   const View = SECTION_VIEWS[section];
@@ -115,7 +136,7 @@ export function Workspace({ section }: { section: Section }) {
       <div className="frame">
         <Rail
           section={section}
-          entries={chrome?.rail ?? null}
+          entries={markDisabled(chrome?.rail ?? null)}
           local={chrome?.rail_local ?? null}
           servedRole={chrome?.served_role ?? null}
           search={caseSearch}
