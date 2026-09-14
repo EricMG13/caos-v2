@@ -163,6 +163,21 @@ def _is_digest(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) is not None
 
 
+def _validate_hashes(hashes: object, *, nonempty: str | None) -> None:
+    """Contained names, digests and sizes; `nonempty` names a file that must exist."""
+    if not isinstance(hashes, dict) or (
+        nonempty is not None and nonempty not in hashes
+    ):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    for name, entry in hashes.items():
+        _authority_name(name)
+        if not isinstance(entry, dict) or not _is_digest(entry.get("sha256")):
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+        size = entry.get("bytes")
+        if type(size) is not int or size < 0 or (name == nonempty and size == 0):
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+
+
 def _validate_skill(skill: object) -> str:
     if not isinstance(skill, dict):
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
@@ -170,16 +185,7 @@ def _validate_skill(skill: object) -> str:
     folder = _authority_name(skill.get("folder_slug"))
     if "/" in module_id or "/" in folder:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-    hashes = skill.get("relative_file_hashes")
-    if not isinstance(hashes, dict) or "SKILL.md" not in hashes:
-        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-    for name, entry in hashes.items():
-        _authority_name(name)
-        if not isinstance(entry, dict) or not _is_digest(entry.get("sha256")):
-            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-        size = entry.get("bytes")
-        if type(size) is not int or size < 0 or (name == "SKILL.md" and size == 0):
-            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    _validate_hashes(skill.get("relative_file_hashes"), nonempty="SKILL.md")
     return module_id
 
 
@@ -197,6 +203,7 @@ def _parse_manifest(raw: bytes) -> dict[str, Any]:
         or not _is_digest(loaded.get("build_id"))
     ):
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    _validate_hashes(loaded.get("root_file_hashes"), nonempty=None)
     skills = loaded.get("skills")
     if not isinstance(skills, list) or not skills:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
@@ -221,7 +228,10 @@ def verified_bytes(bundle: Bundle, module_id: str, relative_path: str) -> bytes:
 
     skills = _contained_path(bundle.root, SKILLS_DIR)
     folder = _contained_path(skills, skill["folder_slug"])
-    path = _contained_path(folder, relative_path)
+    return _read_verified(bundle, _contained_path(folder, relative_path), expected)
+
+
+def _read_verified(bundle: Bundle, path: Path, expected: dict[str, Any]) -> bytes:
     if not path.is_file():
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     try:
@@ -233,6 +243,91 @@ def verified_bytes(bundle: Bundle, module_id: str, relative_path: str) -> bytes:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     bundle.verify_manifest()
     return data
+
+
+def verified_root_bytes(bundle: Bundle, name: str) -> bytes:
+    """One bundle-root file, proven against the manifest's `root_file_hashes`.
+
+    The same contract as `verified_bytes`: a name the manifest does not list,
+    one that escapes the root, and bytes that moved all refuse
+    `AUTHORITY_BYTES_MISMATCH`, carrying no path or content.
+    """
+    expected = bundle._manifest["root_file_hashes"].get(_authority_name(name))
+    if not isinstance(expected, dict):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return _read_verified(bundle, _contained_path(bundle.root, name), expected)
+
+
+# A root file a skill names, as it names it (`../../CANON_SHARED.md`). Every
+# `../../` in a verified SKILL.md must be one of these, naming a listed root file.
+ROOT_PREFIX = "../../"
+_ROOT_MENTION = re.compile(rb"\.\./\.\./([^\s`]*)")
+_ROOT_LITERAL = re.compile(rb"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:md|txt)")
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveredAuthority:
+    """Exactly the verified files a module is handed, in delivery order.
+
+    `SKILL.md` first, then the module's non-script manifest files by name, then
+    the root files `SKILL.md` names, each under its `../../` literal
+    (`docs/DECISIONS.md` §45.1).
+    """
+
+    module_id: str
+    build_id: str
+    files: tuple[tuple[str, bytes], ...]
+
+
+def _named_root_files(bundle: Bundle, skill: bytes) -> list[str]:
+    listed = bundle._manifest["root_file_hashes"]
+    names: set[str] = set()
+    for mention in _ROOT_MENTION.finditer(skill):
+        literal = mention.group(1)
+        if _ROOT_LITERAL.fullmatch(literal) is None:
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+        name = literal.decode("ascii")
+        if name not in listed:
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+        names.add(name)
+    return sorted(names)
+
+
+def delivered_authority(bundle: Bundle, module_id: str) -> DeliveredAuthority:
+    """The module's delivered set: names come only from the manifest and the
+    verified `SKILL.md`, never from a caller, a source or a model."""
+    build_id = bundle.build_id
+    skill = verified_bytes(bundle, module_id, "SKILL.md")
+    references = sorted(
+        name
+        for name in bundle.skill_of(module_id)["relative_file_hashes"]
+        if name != "SKILL.md" and not name.startswith("scripts/")
+    )
+    files = [("SKILL.md", skill)]
+    files += [(name, verified_bytes(bundle, module_id, name)) for name in references]
+    files += [
+        (ROOT_PREFIX + name, verified_root_bytes(bundle, name))
+        for name in _named_root_files(bundle, skill)
+    ]
+    # Every read above re-verified the manifest bound when `build_id` was read.
+    return DeliveredAuthority(
+        module_id=module_id, build_id=build_id, files=tuple(files)
+    )
+
+
+def delivered_authority_digest(authority: DeliveredAuthority) -> str:
+    """One value over the build and each delivered (name, sha256) in order.
+
+    Length-prefixed, so no two different sets encode the same byte stream.
+    """
+    digest = sha256(b"caos-delivered-authority-v1\x00")
+    parts = [authority.build_id.encode("utf-8")]
+    for name, data in authority.files:
+        parts += [name.encode("utf-8"), sha256(data).digest()]
+    for part in parts:
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    return digest.hexdigest()
 
 
 def assemble_authority(bundle: Bundle, module_id: str) -> Authority:

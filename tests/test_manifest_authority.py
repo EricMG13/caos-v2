@@ -40,6 +40,7 @@ def manifest(tmp_path: Path) -> Path:
         "authority": "DEPLOY_V_INTEGRITY_v1",
         "schema_version": "1.0",
         "build_id": BUILD,
+        "root_file_hashes": {},
         "skills": [
             {"module_id": "CP-1", "folder_slug": "cp-1", "relative_file_hashes": hashes}
         ],
