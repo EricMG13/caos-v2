@@ -781,6 +781,9 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         ),
         "/api/v1/cases/{case_id}/events": read_case_events.__name__,
         "/api/health": "read_health",
+        "/api/v1/cases/{case_id}/runs/{run_id}/start": "start_run",
+        "/api/v1/cases/{case_id}/runs/{run_id}/retry": "retry_run",
+        "/api/v1/cases/{case_id}/runs/{run_id}/cancel": "cancel_run",
     }
 
 
