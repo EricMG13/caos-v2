@@ -63,7 +63,7 @@ from server.refusals import Refusal, RefusalCode
 IO_BUDGET = 0
 
 PUBLIC_ORIGIN_ENV = "CAOS_PUBLIC_ORIGIN"
-EDGE_TOKEN_HEADER = "x-caos-edge-token"
+EDGE_TOKEN_HEADER = "x-caos-edge-token"  # nosec B105 -- a header name, not a secret
 MIN_TOKEN_BYTES = 32
 
 HEALTH_PATH = "/api/health"
