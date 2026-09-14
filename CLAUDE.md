@@ -30,6 +30,14 @@ Every shell command starts by unsetting `OPENROUTER_API_KEY`,
 Never invoke a live provider without explicit authorization. Index the current
 checkout with GitNexus and verify affected callers in source.
 
+The coordinator may use up to three concurrent implementers only in isolated
+worktrees with disjoint owned files, migrations and test resources. Each agent
+gets an exact base and task brief, commits its own tested concern, and receives
+ordinary exact-range review. The coordinator alone integrates reviewed commits,
+runs integration/phase gates and updates the handoff. Never share a branch,
+database/blob root or provider authority; an independently green branch is not
+task or phase acceptance.
+
 Ordinary review closes each task. One `confidence-review` and then one separate
 adversarial code audit close the whole phase, both at actual `xhigh` reasoning,
 with remediation/reverification between them. No per-task specialist review or
@@ -162,6 +170,40 @@ phase numbers. Entries are not evidence of completion; the handoff and repair
 plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
+
+**Repair Phase 2.**
+
+- **Only a QA `Passed` releases CP-6; `Restricted` blocks it.** F03 asks which
+  QA results permit the downstream action, and §39 says restricted output is
+  usable but not QA-cleared, so `route._unmet` meets the CP-5 -> CP-6 QA_GATE
+  only on a stored `qa_status` of `Passed`; `Not Reviewed` is refused as a
+  verdict so the attempt can retry. A reading that let `Restricted` release
+  CP-6 as RESTRICTED is also defensible from the bundle. The value is the
+  module's own verdict; human QA approval is not consulted in Phase 2.
+  *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
+  practice wants restricted clearance to proceed.
+- **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
+  with unfinished required work recoverably blocked, and `run_route` now ends
+  such a run `BLOCKED` with one `RUN_BLOCKED` (migration 0010). Nothing moves a
+  BLOCKED run back to RUNNING: every spend guard refuses it and its stream
+  closes. "Recoverable" means nothing failed and the reason is re-derived from
+  the pins and accepted artifacts, not stored. *Upgrade:* a governed resume --
+  a CAS back to RUNNING with its own event, taken by an authorized actor when
+  an input that could release the node has changed -- arrives with Phase 4's
+  commands and worker.
+- **The terminal decision reads outside the run lock, and the store does not
+  check it.** `run_route` decides COMPLETE or BLOCKED from a snapshot taken after
+  its last pass, and `complete_run`/`complete_attempt` still let a direct store
+  caller complete a run with unrun nodes (only tests do). Sound for the one
+  sequential loop Phase 2 has. *Upgrade:* with Phase 4's concurrent workers,
+  decide under `lock_run` in `_transition`, requiring an accepted artifact for
+  every pinned node before COMPLETE.
+- **Two workers can pay for one node.** Migration 0009 lets exactly one attempt
+  own a node's accepted result, but two attempts can each reserve and call
+  before either accepts; both bills are kept. *Upgrade:* Phase 4's PostgreSQL
+  claims/leases (§39) take the node before the call. `artifacts` rows are also
+  not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
+  a refusal trigger like 0007's is the upgrade.
 
 **Phase 0.**
 

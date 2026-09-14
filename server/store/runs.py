@@ -32,6 +32,7 @@ from server.store.outcomes import (
     CallOutcome,
     _attempt_owner,
     _locked_attempt,
+    accepted_owner,
     record_outcome,
 )
 
@@ -89,6 +90,9 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
         rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    if accepted_owner(conn, run_id, route_node_id) is not None:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
     attempt_id = uuid4()
     conn.execute(
@@ -191,6 +195,10 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
     ).fetchone()
     if node is None or node[0] not in {n.route_node_id for n in route.nodes}:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    # One owner per node, under the run lock; the unique constraint backs it.
+    if accepted_owner(conn, run, node[0]) is not None:
+        raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
+    # `route_node_id` is filled from the attempt by the migration 0009 trigger.
     conn.execute(
         "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
         " model, generation_id)"
@@ -239,6 +247,16 @@ def complete_attempt(
     """
     accept_attempt(conn, attempt_id=attempt_id, accepted=accepted)
     return complete_run(conn, _attempt_owner(conn, attempt_id)[0])
+
+
+def block_run(conn: StoreConnection, run_id: UUID) -> bool:
+    """End a run whose route has required work nothing can release (§39).
+
+    Returns whether this call ended it. No further attempt or reservation is
+    possible; the reason is re-derived from the pins and accepted artifacts.
+    """
+    lock_run(conn, run_id)
+    return _transition(conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED)
 
 
 def fail_run(conn: StoreConnection, run_id: UUID) -> bool:

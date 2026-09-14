@@ -545,9 +545,8 @@ def test_the_one_qa_gate_reads_as_a_gate(
     catalog: dict[str, Any],
 ) -> None:
     """The catalog holds exactly one QA_GATE edge, `CP-5 -> CP-6`. A node held by
-    it is waiting for a person; every other BLOCKED node is waiting for a
-    module, and a surface that rendered both the same way would hide the one
-    thing a reviewer can act on."""
+    it waits for the QA verdict; every other BLOCKED node is waiting for a
+    module, and a surface that rendered both the same way would hide it."""
     conn, _case_id = case
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
@@ -558,6 +557,38 @@ def test_the_one_qa_gate_reads_as_a_gate(
     assert by_module["CP-6"]["awaiting_gate"] is True
     assert by_module["CP-1"]["awaiting_gate"] is False
     assert sum(node["awaiting_gate"] for node in body["nodes"]) == 1
+
+
+def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """F03: CP-5 answered `Blocked`, so CP-6 is blocked by that verdict and
+    nothing is awaited -- not a wait for a person."""
+    conn, _case_id = case
+    run_id, viewer = run
+    route = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    approved_nodes(conn, run_id, tmp_path / "blobs", route=route)
+    cp5 = next(n.route_node_id for n in route.nodes if n.module_id == "CP-5")
+    digest = BlobStore(tmp_path / "blobs").put(b'{"qa_status": "Blocked"}')
+    accept_attempt(
+        conn,
+        attempt_id=start_attempt(conn, run_id, cp5),
+        accepted=Accepted(digest, CHARGE, MODEL, GENERATION),
+    )
+
+    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+
+    by_module = {node["module_id"]: node for node in body["nodes"]}
+    assert (by_module["CP-6"]["state"], by_module["CP-6"]["awaiting_gate"]) == (
+        "BLOCKED",
+        False,
+    )
+    assert {"source": "CP-5", "type": "QA_GATE"} in by_module["CP-6"]["waiting_on"]
+    assert by_module["CP-5"]["waiting_on"] == []
 
 
 def test_a_run_with_no_pinned_route_has_no_nodes(

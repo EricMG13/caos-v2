@@ -880,3 +880,48 @@ def test_an_upstream_statement_is_not_citable_evidence(
     # and was refused as context, not silently dropped before it got there.
     assert "--- UPSTREAM" in stub.prompt
     assert sentence in stub.prompt
+
+
+def test_the_qa_module_is_asked_for_a_qa_status_and_stores_it(
+    admitted: tuple[StoreConnection, UUID, BlobStore], bundle: Bundle
+) -> None:
+    """F03: CP-5's clearance, read by `parse_qa`, travels in the envelope the
+    digest covers."""
+    conn, source_id, blobs = admitted
+    stub = _Stub(json.dumps(json.loads(_body(source_id)) | {"qa_status": "Blocked"}))
+
+    outcome = execute_module(
+        conn, bundle, **_attempt(conn, blobs, "CP-5"), provider=stub
+    )
+
+    assert "qa_status" in stub.prompt
+    assert outcome.envelope.qa_status == "Blocked"
+    assert json.loads(canonical(outcome.envelope))["qa_status"] == "Blocked"
+
+
+@pytest.mark.parametrize(
+    "module_id,qa,code",
+    [
+        ("CP-1", {"qa_status": "Passed"}, RefusalCode.ENVELOPE_UNDECLARED_FIELD),
+        ("CP-5", {}, RefusalCode.ENVELOPE_INVALID),
+        ("CP-5", {"qa_status": "Not Reviewed"}, RefusalCode.ENVELOPE_INVALID),
+        ("CP-5", {"qa_status": "Probably"}, RefusalCode.ENVELOPE_INVALID),
+        ("CP-5", {"qa_status": ["Passed"]}, RefusalCode.ENVELOPE_INVALID),
+    ],
+)
+def test_a_qa_status_the_host_did_not_ask_for_or_cannot_bound_is_refused(
+    admitted: tuple[StoreConnection, UUID, BlobStore],
+    bundle: Bundle,
+    module_id: str,
+    qa: dict[str, object],
+    code: RefusalCode,
+) -> None:
+    conn, source_id, blobs = admitted
+    body = json.dumps(json.loads(_body(source_id)) | qa)
+
+    with pytest.raises(Refusal) as caught:
+        execute_module(
+            conn, bundle, **_attempt(conn, blobs, module_id), provider=_Stub(body)
+        )
+
+    assert caught.value.code is code

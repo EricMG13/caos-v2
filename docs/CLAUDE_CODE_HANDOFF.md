@@ -65,6 +65,18 @@ Use only the private test-admin URL at `127.0.0.1:55437/postgres` for local
 database tests. UUID-owned test databases are cleaned in `finally`. Preserve
 development port 55436, its volumes and blobs. Never print or replace `.env`.
 
+## Coordinated concurrent execution
+
+To reduce elapsed time, a coordinator may dispatch at most three independent
+implementers. Use native isolated worktrees where available, otherwise ignored
+Git worktrees. Before dispatch, record each task's exact base, branch/worktree,
+owned files, migration owner, UUID-owned test database/blob root, test command,
+report path and ordinary-review range. Never overlap those scopes or allow an
+implementer to edit the integration branch, call a provider, or use shared test
+resources. The coordinator reviews and serially integrates accepted commits,
+runs cross-task gates and updates this handoff. Individual task success never
+certifies the integrated candidate or a phase.
+
 ## Task17f — retained contracts and reported acceptance
 
 Base: accepted Task17e at `694660b`. Task17f-a is reported accepted through

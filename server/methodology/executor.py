@@ -23,7 +23,13 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import GATE_MODULE, ResolvedRoute, RouteNode, predecessors
+from server.engine.route import (
+    GATE_MODULE,
+    EdgeType,
+    ResolvedRoute,
+    RouteNode,
+    predecessors,
+)
 from server.engine.runtime import artifact_digests
 from server.evidence.citations import verify_citations
 from server.evidence.read import read_run_block
@@ -34,7 +40,13 @@ from server.methodology.bundle import (
     assemble_authority,
     authority_digest,
 )
-from server.methodology.envelope import Claim, Envelope, parse_claims, parse_readiness
+from server.methodology.envelope import (
+    Claim,
+    Envelope,
+    parse_claims,
+    parse_qa,
+    parse_readiness,
+)
 from server.provider import CompletionProvider, _reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -77,6 +89,12 @@ Rules that will cause your answer to be refused if broken:
   join text across a blank line, do not add or remove punctuation.
 - `source_id` must be one of the ids given below.
 - Use no keys other than those shown.
+"""
+
+_QA_INSTRUCTION = """\
+You are also this route's QA gate. Beside `claims`, return `qa_status`: exactly
+one of "Passed", "Restricted", "Blocked". Only "Passed" releases the modules
+that wait on QA.
 """
 
 _GATE_INSTRUCTION = """\
@@ -178,6 +196,8 @@ class _Context:
     upstream: tuple[Upstream, ...]
     # Predecessor module -> the accepted artifact read, rechecked after the call.
     digests: dict[str, str]
+    # Whether this module is a QA_GATE source, asked for its clearance.
+    qa: bool
 
 
 # Every block of the run's pinned source-set version, never the case's live set.
@@ -215,7 +235,11 @@ def _context(
         Upstream(module, _stored_claims(blobs, bundle, module, digest))
         for module, digest in digests.items()
     )
-    return _Context(delivered, gate_expects, upstream, digests)
+    qa = any(
+        edge.type is EdgeType.QA_GATE and edge.source == module_id
+        for edge in assignment.route.edges
+    )
+    return _Context(delivered, gate_expects, upstream, digests, qa)
 
 
 def _upstream_digests(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
@@ -224,8 +248,7 @@ def _upstream_digests(conn: StoreConnection, assignment: Assignment) -> dict[str
     A predecessor with no accepted artifact is skipped: a soft edge's source may
     never have run, the same "unmet" a RESTRICTED node already tolerates.
     """
-    # ponytail: the latest accepted artifact per node; one owner per generation
-    # is the later fencing task, which retires this rule.
+    # One accepted owner per node is a store constraint (migration 0009).
     accepted = artifact_digests(conn, assignment.run_id)
     nodes = {node.module_id: node.route_node_id for node in assignment.route.nodes}
     return {
@@ -300,13 +323,14 @@ def _upstream(upstream: Sequence[Upstream]) -> str:
     )
 
 
-def build_prompt(
+def build_prompt(  # noqa: PLR0913 - one prompt, each input keyword-only
     module_id: str,
     authority: bytes,
     delivered: list[Delivery],
     *,
     gate_expects: frozenset[str] = frozenset(),
     upstream: Sequence[Upstream] = (),
+    qa: bool = False,
 ) -> str:
     """The question, the authority, what the chain established, and the
     evidence -- in that order."""
@@ -322,6 +346,7 @@ def build_prompt(
     return (
         _INSTRUCTION.format(module_id=module_id)
         + gate
+        + (_QA_INSTRUCTION if qa else "")
         + "\n--- AUTHORITY ---\n"
         + authority.decode("utf-8", errors="replace")
         + _upstream(upstream)
@@ -370,6 +395,7 @@ def execute_module(
         context.delivered,
         gate_expects=context.gate_expects,
         upstream=context.upstream,
+        qa=context.qa,
     )
 
     bundle.verify_manifest()
@@ -440,6 +466,7 @@ def _envelope(
     # was reached only once every quote had been anchored against the token index
     # -- a query per citation spent on an answer already refused.
     readiness = parse_readiness(content, expected=context.gate_expects)
+    qa_status = parse_qa(content, expected=context.qa)
 
     claims = []
     misses: list[RefusalCode] = []
@@ -469,4 +496,5 @@ def _envelope(
         claims=tuple(claims),
         readiness=tuple(readiness),
         claims_refused=len(misses),
+        qa_status=qa_status,
     )

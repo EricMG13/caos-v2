@@ -150,10 +150,10 @@ class NodeView(BaseModel):
     module_id: str
     state: str
     waiting_on: list[EdgeView]
-    # The one QA_GATE in the catalog is `CP-5 -> CP-6`. A node held by it is
-    # waiting for a person, not a module, and that is the only thing on this
-    # page a reviewer can act on -- so it is said, not left to be inferred from
-    # an edge type in a list.
+    # The one QA_GATE in the catalog is `CP-5 -> CP-6`. True while the node
+    # waits for the QA source's verdict. Once CP-5 answered anything but
+    # `Passed`, nothing is awaited: the node is BLOCKED by that verdict and
+    # `waiting_on` still names the edge (F03). Human QA approval is not here.
     awaiting_gate: bool
     # The gate's own verdict on this module, when the gate has given one. After
     # Phase 11 a node can be BLOCKED because CP-0 did not clear it, and no edge
@@ -392,13 +392,18 @@ def _node_view(
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
 ) -> NodeView:
-    unmet = waiting_on(route, accepted, node.route_node_id)
+    done = states[node.route_node_id] is NodeState.COMPLETE
+    unmet = () if done else waiting_on(route, accepted, node.route_node_id)
+    answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
     return NodeView(
         route_node_id=node.route_node_id,
         module_id=node.module_id,
         state=states[node.route_node_id].value,
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
-        awaiting_gate=any(edge.type is EdgeType.QA_GATE for edge in unmet),
+        awaiting_gate=any(
+            edge.type is EdgeType.QA_GATE and edge.source not in answered
+            for edge in unmet
+        ),
         # `.get`, not `[]`: a module the gate has not ruled on -- every module,
         # until CP-0's own artifact is accepted -- has no verdict rather than a
         # false one, and None is that absence on the wire.

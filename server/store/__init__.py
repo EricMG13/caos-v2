@@ -50,6 +50,14 @@ MIGRATIONS = (
         .with_name("0008_frozen_evidence.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0009_accepted_owner",
+        Path(__file__).with_name("0009_accepted_owner.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0010_blocked_runs",
+        Path(__file__).with_name("0010_blocked_runs.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
@@ -82,6 +90,8 @@ class RunStatus(StrEnum):
     RUNNING = "RUNNING"
     COMPLETE = "COMPLETE"
     FAILED = "FAILED"
+    # Recoverable: the route has required work no accepted result can release.
+    BLOCKED = "BLOCKED"
 
 
 def connect(url: str) -> StoreConnection:

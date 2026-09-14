@@ -382,13 +382,14 @@ def test_execute_module_refuses_changed_authority_before_completion(
     assert bundle.build_id == BUILD
     original = executor.build_prompt
 
-    def mutate(
+    def mutate(  # noqa: PLR0913 - mirrors build_prompt
         module_id: str,
         authority: bytes,
         delivered: list[Delivery],
         *,
         gate_expects: frozenset[str] = frozenset(),
         upstream: Sequence[Upstream] = (),
+        qa: bool = False,
     ) -> str:
         prompt = original(
             module_id,
@@ -396,6 +397,7 @@ def test_execute_module_refuses_changed_authority_before_completion(
             delivered,
             gate_expects=gate_expects,
             upstream=upstream,
+            qa=qa,
         )
         manifest.write_bytes(manifest.read_bytes() + b" ")
         return prompt

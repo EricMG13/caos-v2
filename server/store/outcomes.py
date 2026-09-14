@@ -43,6 +43,22 @@ def _read_committed(conn: StoreConnection) -> None:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
 
 
+def accepted_owner(
+    conn: StoreConnection, run_id: UUID, route_node_id: str
+) -> UUID | None:
+    """The attempt that owns this run node's accepted result, if any.
+
+    Joined through the attempt rather than `artifacts.route_node_id`, so the
+    check also reads a restored pre-0009 database before it is upgraded.
+    """
+    row = conn.execute(
+        "SELECT a.attempt_id FROM artifacts a JOIN run_attempts t USING (attempt_id)"
+        " WHERE a.run_id=%s AND t.route_node_id=%s",
+        (run_id, route_node_id),
+    ).fetchone()
+    return None if row is None else UUID(str(row[0]))
+
+
 def check_attempt(
     conn: StoreConnection, *, attempt_id: UUID, run_id: UUID, route_node_id: str
 ) -> None:
@@ -60,6 +76,9 @@ def check_attempt(
         raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
     if status is not RunStatus.RUNNING:
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    accepted = accepted_owner(conn, run_id, route_node_id)
+    if accepted is not None and accepted != attempt_id:
+        raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
 
 def check_call(

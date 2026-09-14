@@ -128,7 +128,10 @@ def canonical(envelope: Envelope) -> bytes:
                 }
                 for claim in envelope.claims
             ],
-        },
+        }
+        # Only the QA gate source carries it, so every other artifact's bytes
+        # (and digest) are unchanged.
+        | ({} if envelope.qa_status is None else {"qa_status": envelope.qa_status}),
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")

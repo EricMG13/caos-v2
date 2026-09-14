@@ -52,7 +52,7 @@ from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.budget import reserve
-from server.store.events import RunEvent, append
+from server.store.events import RunEvent, append, lock_run
 from server.store.gates import (
     Gate,
     GateApproval,
@@ -1382,6 +1382,28 @@ def _accepted_gate(harness: _Harness, conn: StoreConnection, **identity: object)
     return digest
 
 
+def _rewrite_gate(harness: _Harness, conn: StoreConnection) -> None:
+    """Point CP-0's accepted row at other valid bytes, under the run lock."""
+    gate = harness.route.nodes[0]
+    envelope = Envelope(
+        module_id=gate.module_id,
+        build_id=harness.bundle.build_id,
+        authority_digest=authority_digest(
+            assemble_authority(harness.bundle, gate.module_id)
+        ),
+        claims=(),
+        claims_refused=1,
+        readiness=(),
+    )
+    lock_run(conn, harness.run_id)
+    conn.execute(
+        "UPDATE artifacts SET artifact_sha256 = %s"
+        " WHERE run_id = %s AND route_node_id = %s",
+        (harness.blobs.put(canonical(envelope)), harness.run_id, gate.route_node_id),
+    )
+    conn.commit()
+
+
 @pytest.mark.parametrize(
     "identity,expected",
     [
@@ -1405,14 +1427,16 @@ def test_upstream_with_foreign_envelope_identity_is_refused_before_any_call(
     assert (refused.value.code, completions.calls) == (expected, 0)
 
 
-def test_upstream_superseded_during_the_call_is_refused_keeping_the_bill(
+def test_upstream_rewritten_during_the_call_is_refused_keeping_the_bill(
     harness: _Harness,
 ) -> None:
+    """A second acceptance cannot replace CP-0 (`tests/test_accepted_owner.py`);
+    a privileged rewrite of its row during the call is still caught."""
     _accepted_gate(harness, harness.conn)
 
     def supersede() -> None:
         with connect(harness.url) as other:
-            _accepted_gate(harness, other, claims_refused=1)
+            _rewrite_gate(harness, other)
 
     completions = _DuringCompletion(_Completions(harness.source_id), supersede)
     node = harness.route.nodes[1]
@@ -1467,9 +1491,9 @@ def _unbilled(harness: _Harness, attempt: UUID) -> None:
 def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    """The context unit holds the case lock: a withdrawal or a superseding
-    predecessor acceptance started inside it waits, lands before the answer is
-    analysed, and refuses it with the bill kept."""
+    """The context unit holds the case lock: a withdrawal or a privileged
+    rewrite of the predecessor row started inside it waits, lands before the
+    answer is analysed, and refuses it with the bill kept."""
     from test_case_ordering import _wait_for_blocking
 
     from server.methodology import executor
@@ -1498,7 +1522,7 @@ def test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call(
                     actor_id=harness.approver,
                 )
             else:
-                _accepted_gate(harness, other, claims_refused=1)
+                _rewrite_gate(harness, other)
 
         def inside(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
             result = derive(conn, assignment)

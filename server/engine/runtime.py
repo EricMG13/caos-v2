@@ -25,7 +25,14 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import GATE_MODULE, ResolvedRoute, frontier
+from server.engine.route import (
+    GATE_MODULE,
+    EdgeType,
+    NodeState,
+    ResolvedRoute,
+    frontier,
+    node_states,
+)
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -37,7 +44,13 @@ from server.store.outcomes import (
     record_outcome,
     require_idle,
 )
-from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    block_run,
+    complete_run,
+    start_attempt,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,30 +121,30 @@ def run_route(
                 route_node_id=route_node_id,
                 execution=execution,
             )
-    complete_run(conn, run_id)
+    # §39: success only when every pinned node was accepted; an empty frontier
+    # with unfinished required work ends the run blocked.
+    with execution_reads(conn):
+        states = node_states(route, accepted_artifacts(conn, blobs, route, run_id))
+    if all(state is NodeState.COMPLETE for state in states.values()):
+        complete_run(conn, run_id)
+    else:
+        block_run(conn, run_id)
 
 
 def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
     """Every accepted artifact of the run, keyed by route node id.
 
-    One join, read in one place. `accepted_artifacts` below and
-    `server.methodology.runner.ModuleProvider._upstream` both need exactly this
+    One query, read in one place. `accepted_artifacts` below and
+    `server.methodology.executor._upstream_digests` both need exactly this
     row set -- the first to decide which nodes are COMPLETE and which body
     to read, the second to read a node's predecessors' bodies -- and a query
     string kept twice is a join two callers can silently drift out of step on
     the day the schema moves under one of them and not the other.
     """
-    # Ordered, because the rows collapse into a dict and a node may hold more
-    # than one accepted attempt: the latest wins, which is a rule rather than
-    # whatever order the planner returned. Presence was all `node_states`
-    # needed; Phase 11's chain reads the winning artifact's *contents* into the
-    # next node's prompt, so which one wins is now part of the answer.
+    # One row per node: `artifacts UNIQUE (run_id, route_node_id)` makes the
+    # accepted owner a database fact, so no ordering picks a winner.
     rows = conn.execute(
-        "SELECT attempts.route_node_id, artifacts.artifact_sha256"
-        " FROM artifacts"
-        " JOIN run_attempts AS attempts USING (attempt_id)"
-        " WHERE artifacts.run_id = %s"
-        " ORDER BY artifacts.created_at",
+        "SELECT route_node_id, artifact_sha256 FROM artifacts WHERE run_id = %s",
         (run_id,),
     ).fetchall()
     return {str(route_node_id): str(digest) for route_node_id, digest in rows}
@@ -142,13 +155,17 @@ def accepted_artifacts(
 ) -> dict[str, Any]:
     """The run's accepted attempts, keyed by route node.
 
-    Only CP-0's body is fetched. `node_states` reads readiness from that artifact
-    and needs nothing but presence from the others, so fetching every payload
+    Only CP-0's and the QA gate source's bodies are fetched. `node_states` reads
+    readiness and QA clearance from those and needs nothing but presence from the
+    others, so fetching every payload
     would be a blob read per node per pass for data nobody looks at -- the ~8x
     shape `docs/AI_CODE_QUALITY.md` section 1 measures.
     """
+    qa_sources = {e.source for e in route.edges if e.type is EdgeType.QA_GATE}
     readiness_nodes = {
-        node.route_node_id for node in route.nodes if node.module_id == GATE_MODULE
+        node.route_node_id
+        for node in route.nodes
+        if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
     return {
         node_id: (json.loads(blobs.get(digest)) if node_id in readiness_nodes else {})
