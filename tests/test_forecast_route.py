@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 from canonical_fixtures import AUTHORED, CATALOG, CONTRACT, fields_from_prompt, wire
-from canonical_route_fixtures import PACK, RouteCompletions
+from canonical_route_fixtures import LIMITATION, PACK, RouteCompletions
 from forecast_fixtures import forecast_request
 from lite_route_fixtures import _yaml
 from test_canonical_runtime import _module_provider, _run_route, _status
@@ -124,6 +124,9 @@ class ForecastCompletions(RouteCompletions):
             **AUTHORED["Passed"],
             "qa_status": "Passed",
         }
+        if self.defect == "retain-restriction":
+            front.update(AUTHORED["Restricted"])
+            front.update(qa_status="Restricted", limitation_flags=[LIMITATION])
         quotes = "\n".join(OWNER_QUOTES.values())
         body = "".join(
             "## "
@@ -198,3 +201,19 @@ def test_forecast_route_refuses_unbound_or_altered_projection(
         is RefusalCode.HANDOFF_INCOMPLETE
     )
     assert _status(harness) != "COMPLETE"
+
+
+def test_forecast_cannot_drop_an_accepted_owner_restriction(harness: _Harness) -> None:
+    answers = ForecastCompletions(harness.source_id)
+    answers.qa_by_module = {"CP-1": "Restricted"}
+    assert (
+        _run_route(harness, _module_provider(harness, answers))
+        is RefusalCode.HANDOFF_INCOMPLETE
+    )
+
+
+def test_forecast_retains_an_accepted_owner_restriction(harness: _Harness) -> None:
+    answers = ForecastCompletions(harness.source_id, defect="retain-restriction")
+    answers.qa_by_module = {"CP-1": "Restricted"}
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+    assert _status(harness) == "COMPLETE"
