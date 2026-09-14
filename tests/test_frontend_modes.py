@@ -1,5 +1,6 @@
 """The UI fixture server is explicit, and local gates say what they prove."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -38,12 +39,168 @@ def test_vite_defaults_to_the_real_loopback_api() -> None:
     assert 'code: "READ_ONLY_DEMO"' in config
 
 
+def _node_and_vite() -> str:
+    node = shutil.which("node")
+    if node is None or not (REPO / "frontend/node_modules/vite/bin/vite.js").is_file():
+        # The backend CI job installs no Node; the frontend job builds `dist` itself.
+        pytest.skip("node and frontend/node_modules are required")
+    return node
+
+
+# Drives the real proxy hook the dev server installs: a Node OutgoingMessage
+# holds headers exactly as http-proxy's proxyReq does, without a socket.
+PROXY_PROBE = """
+import { OutgoingMessage } from "node:http";
+import { EventEmitter } from "node:events";
+const { devProxy } = await import(new URL("./vite.config.ts", `file://${process.cwd()}/`));
+const env = JSON.parse(process.argv[1]);
+const headers = JSON.parse(process.argv[2]);
+const route = devProxy(env)["/api"];
+const proxy = new EventEmitter();
+route.configure(proxy, route);
+const proxyReq = new OutgoingMessage();
+for (const [name, value] of Object.entries(headers)) proxyReq.setHeader(name, value);
+proxy.emit("proxyReq", proxyReq, { headers }, {});
+const out = {};
+for (const name of proxyReq.getHeaderNames()) out[name] = proxyReq.getHeader(name);
+console.log(JSON.stringify({ target: route.target, headers: out }));
+"""
+
+DEV_USER = "00000000-0000-4000-8000-00000000d001"
+CLIENT_HEADERS = {
+    "accept": "application/json",
+    "idempotency-key": "k-1",
+    "x-caos-user": "11111111-1111-4111-8111-111111111111",
+    "X-CAOS-ROLE": "ADMIN",
+    "x-caos-edge-token": "forged",
+    "x_caos_user": "11111111-1111-4111-8111-111111111111",
+    "x-forwarded-groups": "caos-admins",
+    "x-forwarded-for": "203.0.113.9",
+    "forwarded": "for=203.0.113.9",
+}
+
+
+def _proxied(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            _node_and_vite(),
+            "--input-type=module",
+            "-e",
+            PROXY_PROBE,
+            json.dumps(env),
+            json.dumps(CLIENT_HEADERS),
+        ],
+        cwd=REPO / "frontend",
+        check=False,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ.get("PATH", "")},
+    )
+
+
+def test_the_dev_proxy_strips_client_identity_and_injects_the_local_actor() -> None:
+    injected = _proxied({"CAOS_DEV_USER": DEV_USER})
+    assert injected.returncode == 0, injected.stderr
+    document = json.loads(injected.stdout)
+    assert document["target"] == "http://127.0.0.1:8000"
+    assert document["headers"] == {
+        "accept": "application/json",
+        "idempotency-key": "k-1",
+        "x-caos-user": DEV_USER,
+        "x-caos-role": "ANALYST",
+    }
+
+    reader = json.loads(
+        _proxied({"CAOS_DEV_USER": DEV_USER, "CAOS_DEV_ROLE": "READER"}).stdout
+    )
+    assert reader["headers"]["x-caos-role"] == "READER"
+
+    # No local actor: the browser's forgery is still removed, and nothing is
+    # injected, so the API answers 401 rather than believing the client.
+    anonymous = json.loads(_proxied({}).stdout)
+    assert anonymous["headers"] == {
+        "accept": "application/json",
+        "idempotency-key": "k-1",
+    }
+
+    bad_actors = (
+        {"CAOS_DEV_USER": "alice"},
+        {"CAOS_DEV_USER": DEV_USER, "CAOS_DEV_ROLE": "ROOT"},
+    )
+    for bad in bad_actors:
+        refused = _proxied(bad)
+        assert refused.returncode != 0
+        assert "alice" not in refused.stderr and "ROOT" not in refused.stderr
+
+
+def test_the_dev_proxy_is_absent_from_demo_mode_and_reads_only_dev_names() -> None:
+    config = _read("frontend/vite.config.ts")
+
+    assert 'mode === "demo" || command !== "serve"' in config
+    assert ": devProxy(" in config
+    assert 'loadEnv(mode, REPO_ROOT, "CAOS_DEV_")' in config
+    assert "VITE_CAOS" not in config
+    example = _read(".env.example")
+    assert f"CAOS_DEV_USER={DEV_USER}\n" in example
+    assert "CAOS_DEV_ROLE=ANALYST\n" in example
+
+
+def test_the_doctor_checks_the_dev_actor_without_printing_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "dev_doctor", REPO / "scripts/dev_doctor.py"
+    )
+    assert spec is not None and spec.loader is not None
+    doctor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(doctor)
+    tools = [
+        ("node", "24.1.0"),
+        ("npm", "11.0.0"),
+        ("uv", "0.12.0"),
+        ("docker", "29.0.0"),
+        ("docker compose", "5.2.0"),
+        ("gitnexus", "1.6.9"),
+        ("security Python", "3.12.12"),
+        ("pre-commit", "4.6.2"),
+    ]
+    monkeypatch.setattr(doctor, "PYTHON_VERSION", (3, 14))
+    monkeypatch.setattr(doctor, "_tool_versions", lambda: tools)
+    for name in doctor.REQUIRED_CONFIGURATION:
+        monkeypatch.setenv(name, "configured")
+
+    monkeypatch.delenv("CAOS_DEV_USER", raising=False)
+    monkeypatch.delenv("CAOS_DEV_ROLE", raising=False)
+    assert doctor.main() == 0
+    assert "CAOS_DEV_USER: absent (dev UI answers 401)" in capsys.readouterr().out
+
+    monkeypatch.setenv("CAOS_DEV_USER", DEV_USER)
+    monkeypatch.setenv("CAOS_DEV_ROLE", "READER")
+    assert doctor.main() == 0
+    captured = capsys.readouterr()
+    assert "CAOS_DEV_USER: present" in captured.out
+    assert DEV_USER not in captured.out + captured.err
+
+    monkeypatch.setenv("CAOS_DEV_USER", "alice-do-not-print")
+    monkeypatch.setenv("CAOS_DEV_ROLE", "ROOT-do-not-print")
+    assert doctor.main() == 1
+    captured = capsys.readouterr()
+    assert "CAOS_DEV_USER must be a UUID" in captured.err
+    assert "CAOS_DEV_ROLE must be READER, ANALYST or ADMIN" in captured.err
+    assert "do-not-print" not in captured.out + captured.err
+
+
+IDENTITY_MARKERS = ("x-caos-", "CAOS_DEV_", DEV_USER)
+
 DEMO_MARKERS = (
     "fixture=",
     "/api/sections/",
     "READ_ONLY_DEMO",
     "READ-ONLY DEMONSTRATION",
     "caos-fixtures",
+    *IDENTITY_MARKERS,
 )
 
 
@@ -81,12 +238,23 @@ def test_the_demo_scan_finds_fixtures_markers_and_an_empty_export(
     ]
 
 
+def test_the_production_build_carries_no_dev_actor_or_identity_header(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets/index.js").write_text(
+        f'h.set("X-CAOS-USER", "{DEV_USER}")', encoding="utf-8"
+    )
+    assert _demo_leaks(tmp_path) == [f"index.js: {DEV_USER}"]
+    (tmp_path / "assets/index.js").write_text(
+        'h.set("x-caos-role", "ADMIN")', encoding="utf-8"
+    )
+    assert _demo_leaks(tmp_path) == ["index.js: x-caos-"]
+
+
 def test_production_build_contains_no_fixture_or_demo_route(tmp_path: Path) -> None:
-    node = shutil.which("node")
+    node = _node_and_vite()
     vite = REPO / "frontend/node_modules/vite/bin/vite.js"
-    if node is None or not vite.is_file():
-        # The backend CI job installs no Node; the frontend job builds `dist` itself.
-        pytest.skip("node and frontend/node_modules are required to build the export")
     out = tmp_path / "dist"
     subprocess.run(
         [
@@ -102,7 +270,13 @@ def test_production_build_contains_no_fixture_or_demo_route(tmp_path: Path) -> N
         cwd=REPO / "frontend",
         check=True,
         capture_output=True,
-        env={"PATH": os.environ.get("PATH", ""), "NODE_ENV": "production"},
+        # A configured local actor must not reach the export.
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "NODE_ENV": "production",
+            "CAOS_DEV_USER": DEV_USER,
+            "CAOS_DEV_ROLE": "ADMIN",
+        },
     )
     assert (out / "index.html").is_file()
     assert _demo_leaks(out) == []
