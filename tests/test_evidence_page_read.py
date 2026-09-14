@@ -3,7 +3,7 @@
 `read_page` serves one page of a live source the run pinned: the token index
 grouped into lines, beside the frame the stored extractor identity draws those
 rectangles in (decisions 7 and 8). Everything unavailable is one
-`EVIDENCE_NOT_AVAILABLE` with nothing chained behind it.
+`PAGE_NOT_AVAILABLE` with nothing chained behind it.
 """
 
 from __future__ import annotations
@@ -121,9 +121,9 @@ def page_of(pinned: Pinned, source_id: UUID, page: int = 1) -> page_module.PageR
 def refused_with_no_text(pinned: Pinned, source_id: UUID, page: int) -> None:
     with pytest.raises(Refusal) as caught:
         page_of(pinned, source_id, page)
-    assert caught.value.code is RefusalCode.EVIDENCE_NOT_AVAILABLE
+    assert caught.value.code is RefusalCode.PAGE_NOT_AVAILABLE
     assert caught.value.__cause__ is None and caught.value.__context__ is None
-    assert str(caught.value) == "EVIDENCE_NOT_AVAILABLE"
+    assert str(caught.value) == "PAGE_NOT_AVAILABLE"
 
 
 def corrupt_extraction(pinned: Pinned, source_id: UUID, database_url: str) -> None:
@@ -413,7 +413,7 @@ def test_a_text_frame_refuses_a_configuration_it_cannot_draw_in(
 def test_a_text_page_with_no_lines_is_unavailable_rather_than_empty(
     data: bytes, page: int
 ) -> None:
-    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
+    with pytest.raises(Refusal, match=r"^PAGE_NOT_AVAILABLE$"):
         page_module._text_frame(_TEXT_CONFIG, data, page)
 
 

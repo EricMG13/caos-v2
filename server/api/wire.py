@@ -55,7 +55,7 @@ SOURCE_IDS_MAX = 50  # `AdmissionLimits.max_documents`
 ROUTE_CHOICES_MAX = 16
 PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
 PAGE_LINES_MAX = 2000  # beyond it a page is partial, `LIST_TRUNCATED`
-PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `EVIDENCE_NOT_AVAILABLE`
+PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `PAGE_NOT_AVAILABLE`
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
@@ -154,6 +154,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.SOURCE_EXTRACTION_TIMEOUT: "Supply a simpler document.",
     _C.SOURCE_IDENTITY_INVALID: "Readmit the document.",
     _C.EVIDENCE_NOT_AVAILABLE: "Pin a live source for the evidence.",
+    _C.PAGE_NOT_AVAILABLE: "Name a page of a live source pinned to this run.",
     _C.CITATION_NOT_LOCATED: "Quote whole tokens from delivered evidence.",
     _C.CITATION_AMBIGUOUS: "Quote enough text to locate it once.",
     _C.CITATION_NOT_DELIVERED: "Cite only delivered evidence.",

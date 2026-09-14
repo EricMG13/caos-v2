@@ -16,7 +16,7 @@ its recorded fixed pitch. PDF frames come from the §47 child.
 
 Everything unavailable -- not pinned, withdrawn, re-extracted, a page the
 document does not have, bytes that no longer hash to the pin, a child that
-refused -- is one `EVIDENCE_NOT_AVAILABLE`, raised outside any `except` so no
+refused -- is one `PAGE_NOT_AVAILABLE`, raised outside any `except` so no
 chain carries text (invariant 2). A stored identity no reader here knows is
 the server's own row failing, `SOURCE_IDENTITY_INVALID`.
 """
@@ -103,17 +103,17 @@ def read_page(  # noqa: PLR0913 -- the store, the blobs and one page's four ids
     limits: AdmissionLimits = DEFAULT_LIMITS,
 ) -> PageRead:
     """Page `page` of `source_id` as the run `run_id` of `case_id` pinned it,
-    or `EVIDENCE_NOT_AVAILABLE`. Authorisation is the caller's; the caller owns
+    or `PAGE_NOT_AVAILABLE`. Authorisation is the caller's; the caller owns
     the read transaction."""
     if (
         any(not isinstance(value, UUID) for value in (case_id, run_id, source_id))
         or type(page) is not int
         or not 1 <= page <= PAGE_MAX
     ):
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     rows = _rows(conn, (case_id, run_id, source_id, page))
     if not rows:
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     (document, identity) = (str(rows[0][0]), str(rows[0][1]))
     name, version, config = _identity(identity)
     data = _document(blobs, document)
@@ -144,7 +144,7 @@ def _rows(conn: StoreConnection, ids: tuple[UUID, UUID, UUID, int]) -> list[Any]
     except psycopg.Error:
         rows = None
     if rows is None:  # raised here, so psycopg's statement is not chained
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     return rows
 
 
@@ -173,7 +173,7 @@ def _document(blobs: BlobStore, digest: str) -> bytes:
     except Refusal:
         data = None
     if data is None:
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     return data
 
 
@@ -206,7 +206,7 @@ def _frame(  # noqa: PLR0913 -- one identity, one document, one page and its bou
     except Refusal:
         crop = None
     if crop is None:
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     (left, bottom, right, top) = crop
     if pdf_v2:
         return _view((0.0, 0.0, right - left, top - bottom), "down")
@@ -233,7 +233,7 @@ def _text_frame(config: dict[str, Any], data: bytes, page: int) -> FrameView:
         text = None
     lines = [] if text is None else text.splitlines()[(page - 1) * rows : page * rows]
     if not lines:
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     width = 2 * margin + cell_width * max(len(line) for line in lines)
     return _view((0.0, 0.0, width, 2 * margin + cell_height * rows), "down")
 

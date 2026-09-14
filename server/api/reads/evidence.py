@@ -6,7 +6,7 @@ checked first, then READER standing on the case -- an unknown, malformed,
 unauthorised or revoked case is one private `CASE_NOT_FOUND` -- then that the
 run is the case's (`RUN_NOT_FOUND` otherwise). Everything about the source and
 the page, including a page outside 1..`PAGE_MAX` and a malformed source id, is
-the same 404 `EVIDENCE_NOT_AVAILABLE` with no text. Not a section document, so
+the same 404 `PAGE_NOT_AVAILABLE` with no text. Not a section document, so
 no chrome; never cached.
 """
 
@@ -93,7 +93,7 @@ def _source(value: str) -> UUID:
     except ValueError:
         parsed = None
     if parsed is None:  # outside the `except`: the ValueError quotes the path
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     return parsed
 
 
@@ -101,5 +101,5 @@ def _page(value: str) -> int:
     """A page number as a reader writes it: no sign, no padding, 1..PAGE_MAX."""
     digits = value.isascii() and value.isdigit() and not value.startswith("0")
     if not digits or len(value) > len(str(PAGE_MAX)) or int(value) > PAGE_MAX:
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     return int(value)

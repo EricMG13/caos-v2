@@ -101,7 +101,7 @@ _STATUS = {
     RefusalCode.RUN_NOT_FOUND: 404,
     RefusalCode.CASE_NOT_FOUND: 404,
     # Every unavailable evidence page is one private answer (decision 7).
-    RefusalCode.EVIDENCE_NOT_AVAILABLE: 404,
+    RefusalCode.PAGE_NOT_AVAILABLE: 404,
     RefusalCode.STORE_NOT_CONFIGURED: 503,
     RefusalCode.STORE_UNAVAILABLE: 503,
     RefusalCode.STORE_NOT_TRANSACTIONAL: 503,

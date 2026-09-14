@@ -172,7 +172,7 @@ def test_every_unavailable_page_is_one_http_404_with_no_text(
             response = _get(client, report, path, reader)
             assert _answer(response) == (
                 404,
-                _refused(RefusalCode.EVIDENCE_NOT_AVAILABLE),
+                _refused(RefusalCode.PAGE_NOT_AVAILABLE),
             ), path
             bodies.add(response.text)
         return bodies

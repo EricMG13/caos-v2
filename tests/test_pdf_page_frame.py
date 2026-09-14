@@ -74,7 +74,7 @@ def test_page_frame_runs_in_the_killed_budgeted_child(
         refusals.append(caught.value.code)
 
     assert refusals == [
-        RefusalCode.EVIDENCE_NOT_AVAILABLE,
+        RefusalCode.PAGE_NOT_AVAILABLE,
         RefusalCode.SOURCE_EXTRACTION_TIMEOUT,
         RefusalCode.SOURCE_TOO_LARGE,
     ]
@@ -128,7 +128,7 @@ def test_a_page_clipped_to_nothing_is_no_frame() -> None:
 @pytest.mark.parametrize(
     "out,code",
     [
-        (b'{"frame": null}', "EVIDENCE_NOT_AVAILABLE"),
+        (b'{"frame": null}', "PAGE_NOT_AVAILABLE"),
         (b'{"refused": "SOURCE_TOO_LARGE"}', "SOURCE_TOO_LARGE"),
         (b'{"refused": "STORE_UNAVAILABLE"}', "SOURCE_NOT_READABLE"),
         (b"not json", "SOURCE_NOT_READABLE"),

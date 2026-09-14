@@ -149,7 +149,7 @@ def page_frame(
     its boxes and `/Rotate` only -- no content stream is interpreted and no
     layout runs -- but a cross-reference or object stream still inflates, so
     the deadline and `max_decoded_bytes` bound it as they bound extraction.
-    Refuses `EVIDENCE_NOT_AVAILABLE` for a page the document does not have or
+    Refuses `PAGE_NOT_AVAILABLE` for a page the document does not have or
     whose crop clips to nothing, and the child's codes otherwise.
     """
     header = {"limits": asdict(limits), "frame": page}
@@ -216,14 +216,14 @@ def _answer(out: bytes) -> list[Token]:
 
 
 def _frame_answer(out: bytes) -> Frame:
-    """The child's frame, `EVIDENCE_NOT_AVAILABLE` for its `null`, or the code
+    """The child's frame, `PAGE_NOT_AVAILABLE` for its `null`, or the code
     it names; anything else it says is an unreadable document."""
     code = RefusalCode.SOURCE_NOT_READABLE
     frame: Frame | None = None
     try:
         answer = json.loads(out)
         if "frame" in answer and answer["frame"] is None:
-            code = RefusalCode.EVIDENCE_NOT_AVAILABLE
+            code = RefusalCode.PAGE_NOT_AVAILABLE
         elif "frame" in answer:
             (x0, y0, x1, y1) = (float(value) for value in answer["frame"])
             if all(math.isfinite(value) for value in (x0, y0, x1, y1)):
