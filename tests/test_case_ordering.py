@@ -404,7 +404,7 @@ def test_extraction_precedes_case_lock(
                 BlobStore(tmp_path),
                 case_id=action.case_id,
                 documents=[Document(BoundaryText.of("source.txt"), b"Supplied text.")],
-                extractor=Reader(),
+                dispatch=lambda data: Reader(),
             ),
         ):
             assert extracted.is_set()

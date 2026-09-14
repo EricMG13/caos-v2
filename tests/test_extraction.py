@@ -129,7 +129,7 @@ def test_ingestion_takes_any_extractor(
         blobs,
         case_id=case_id,
         documents=[Document(filename=BoundaryText.of("report.pdf"), data=b"%PDF-1.7")],
-        extractor=extractor,
+        dispatch=lambda data: extractor,
     )
 
     row = conn.execute(

@@ -47,7 +47,7 @@ def _admit(
         BlobStore(tmp_path),
         case_id=case_id,
         documents=[Document(BoundaryText.of("report.pdf"), b"one two")],
-        extractor=cast(Extractor, reader),
+        dispatch=lambda data: cast(Extractor, reader),
     )
     row = conn.execute(
         "SELECT format_version, extractor_identity, output_sha256, extraction_sha256"
@@ -132,7 +132,7 @@ def test_order_block_identity_and_document_bytes_are_bound(
         BlobStore(tmp_path),
         case_id=case_id,
         documents=[Document(BoundaryText.of("different.txt"), b"different bytes")],
-        extractor=cast(Extractor, reader),
+        dispatch=lambda data: cast(Extractor, reader),
     )
     row = conn.execute(
         "SELECT output_sha256, extraction_sha256 FROM source_extractions"
@@ -215,7 +215,9 @@ def test_bad_output_refuses_whole_pack_before_writes(
                 Document(BoundaryText.of("ok"), b"ok"),
                 Document(BoundaryText.of("bad"), b"bad"),
             ],
-            extractor=cast(Extractor, BadSecond(PlainTextExtractor().identity)),
+            dispatch=lambda data: cast(
+                Extractor, BadSecond(PlainTextExtractor().identity)
+            ),
         )
     assert caught.value.code is RefusalCode.SOURCE_IDENTITY_INVALID
     assert conn.execute("SELECT count(*) FROM sources").fetchone() == (0,)

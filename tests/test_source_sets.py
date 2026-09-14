@@ -15,7 +15,11 @@ from test_extraction_provenance import Reader
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.evidence.extract import Extractor, PlainTextExtractor
+from server.evidence.extract import (
+    Extractor,
+    PlainTextExtractor,
+    dispatch_by_content,
+)
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_block
 from server.refusals import Refusal, RefusalCode
@@ -41,7 +45,7 @@ def _admit(
         BlobStore(path),
         case_id=case_id,
         documents=[Document(BoundaryText.of("one.txt"), b"one")],
-        extractor=extractor,
+        dispatch=dispatch_by_content if extractor is None else lambda data: extractor,
     )
     return source
 
