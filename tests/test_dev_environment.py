@@ -183,3 +183,59 @@ def test_make_dev_worker_runs_the_worker_entry_point(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().splitlines()[-1] == "worker entry point selected"
+
+
+def test_make_dev_api_serves_the_guarded_site_on_loopback_without_proxy_headers(
+    tmp_path: Path,
+) -> None:
+    """`make dev-api` names the guarded site, not the bare app, with the flag
+    that makes the edge guard's loopback check read the real socket peer.
+
+    The stub replaces `.venv/bin/python` itself rather than a module: the
+    Makefile invokes `uvicorn` as `python -m uvicorn ...`, and what this test
+    checks is the exact command line that reaches it, not uvicorn's own
+    behaviour.
+    """
+    (tmp_path / "Makefile").write_text(
+        (REPO / "Makefile").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    project_bin = tmp_path / ".venv" / "bin"
+    project_bin.mkdir(parents=True)
+    stub = project_bin / "python"
+    stub.write_text('#!/bin/sh\necho "$@"\n', encoding="utf-8")
+    stub.chmod(0o755)
+    environment = {"PATH": os.environ["PATH"]}
+
+    result = subprocess.run(
+        ["make", "--no-print-directory", "dev-api"],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    printed = result.stdout.strip()
+    assert "-m uvicorn server.api.site:application" in printed
+    assert "server.api.app:app" not in printed
+    assert "--host 127.0.0.1 --port 8000" in printed
+    assert "--no-proxy-headers" in printed
+
+
+def test_the_smoke_stack_is_disposable_and_isolated_from_dev_storage() -> None:
+    """`compose.smoke.yaml` never touches the persistent dev database or its
+    published ports, and its own database is disposable `tmpfs`."""
+    smoke = (REPO / "compose.smoke.yaml").read_text(encoding="utf-8")
+    dev = (REPO / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "caos-workbench-smoke" in smoke
+    assert "tmpfs:" in smoke
+    assert "caos-workbench-dev-postgres" not in smoke
+    assert ".dev-data" not in smoke
+    assert "55436" not in smoke
+    assert "55437" not in smoke
+    # The smoke stack's own volume name never collides with the dev volume.
+    assert "smoke-blobs" in smoke
+    # The dev volume this proves isolation from.
+    assert "caos-workbench-dev-postgres" in dev
