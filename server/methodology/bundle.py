@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, cast
 
 from server.boundary_text import BoundaryText
+from server.methodology.host import HOST_MODULE, host_skill, verified_host_bytes
 from server.refusals import Refusal, RefusalCode
 
 MANIFEST_NAME = "DEPLOY_V_INTEGRITY_v1.json"
@@ -93,6 +94,9 @@ class Bundle:
 
     def skill_of(self, module_id: str) -> dict[str, Any]:
         """The manifest entry for a module, following the host's carve-outs."""
+        if module_id == HOST_MODULE:
+            self.verify_manifest()
+            return host_skill()
         wanted = _CARVE_OUTS.get(module_id, module_id)
         for skill in self._manifest["skills"]:
             if skill["module_id"] == wanted:
@@ -221,6 +225,9 @@ def verified_bytes(bundle: Bundle, module_id: str, relative_path: str) -> bytes:
     and their resolved targets must remain contained. The code alone travels:
     a path or a body would put the vendor's filesystem into whatever logs it.
     """
+    if module_id == HOST_MODULE:
+        bundle.verify_manifest()
+        return verified_host_bytes(relative_path)
     skill = bundle.skill_of(module_id)
     expected = skill["relative_file_hashes"].get(relative_path)
     if not isinstance(expected, dict):
@@ -309,7 +316,8 @@ def delivered_authority(bundle: Bundle, module_id: str) -> DeliveredAuthority:
     references = sorted(
         name
         for name in bundle.skill_of(module_id)["relative_file_hashes"]
-        if name != "SKILL.md" and not name.startswith("scripts/")
+        if name != "SKILL.md"
+        and (module_id == HOST_MODULE or not name.startswith("scripts/"))
     )
     files = [("SKILL.md", skill)]
     files += [(name, verified_bytes(bundle, module_id, name)) for name in references]
