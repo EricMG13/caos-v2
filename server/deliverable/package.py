@@ -7,6 +7,7 @@ Its archived verifier retains the renderer pin for that build.
 from __future__ import annotations
 
 import zipfile
+import zlib
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +17,17 @@ from server.deliverable.verify_package import verify
 PAYLOAD = "payload.json"
 RECEIPT = "receipt.json"
 EXPORT = "deliverable.html"
+
+
+def _compression(data: bytes) -> int:
+    """Keep generated packages inside the verifier's bounded ratio policy."""
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+    compressed_size = len(compressor.compress(data) + compressor.flush())
+    return (
+        zipfile.ZIP_STORED
+        if len(data) > 100 * max(1, compressed_size)
+        else zipfile.ZIP_DEFLATED
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +51,7 @@ def build_package(payload: bytes, receipt: bytes, export: bytes) -> bytes:
             info.create_system = 3
             info.external_attr = 0o600 << 16
             archive.writestr(
-                info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9
+                info, data, compress_type=_compression(data), compresslevel=9
             )
     return buffer.getvalue()
 

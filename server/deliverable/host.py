@@ -12,4 +12,5 @@ def render_payload(payload: Mapping[str, Any]) -> bytes:
     try:
         return render(payload)
     except RenderRefused as exc:
-        raise Refusal(RefusalCode(exc.code)) from None
+        code = exc.code
+    raise Refusal(RefusalCode(code))

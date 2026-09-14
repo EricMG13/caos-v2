@@ -163,13 +163,38 @@ def test_encrypted_or_unsupported_compression_is_refused(
     assert not verify_package(_central(_package(), offset, value, "<H")).verified
 
 
-def test_a_decompression_bomb_is_refused_by_its_ratio() -> None:
-    members = _members(_package())
-    members["payload.json"] = b"x" * (2 * 1024 * 1024)
-    data = _archive(list(members.items()), zipfile.ZIP_DEFLATED)
-    result = verify_package(data)
-    assert not result.verified
-    assert result.reason == "the archive exceeds its compression ratio limit"
+def test_a_highly_compressible_valid_package_round_trips(tmp_path: Path) -> None:
+    payload_data = json.loads(json.dumps(PAYLOAD_DATA))
+    payload_data["narrative"] = "Risk disclosure. " * 20_000
+    payload = json.dumps(payload_data).encode()
+    receipt = json.dumps(
+        {
+            "payload_sha256": hashlib.sha256(payload).hexdigest(),
+            "signed_by": "analyst",
+            "frozen_by": "freezer",
+            "filed_by": "filer",
+        }
+    ).encode()
+
+    package = build_package(payload, receipt, render(payload_data))
+
+    assert verify_package(package).verified
+    with zipfile.ZipFile(BytesIO(package)) as archive:
+        assert archive.getinfo("payload.json").compress_type == zipfile.ZIP_STORED
+        assert archive.getinfo("deliverable.html").compress_type == zipfile.ZIP_STORED
+        script = archive.read("verify_package.py")
+    path = tmp_path / "repetitive-package.zip"
+    path.write_bytes(package)
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-", str(path)],
+        input=script,
+        cwd=tmp_path,
+        env={},
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(

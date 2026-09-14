@@ -209,4 +209,4 @@ def test_the_portable_render_refusal_maps_to_the_host_code() -> None:
     with pytest.raises(Refusal) as host:
         render({})
     assert host.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
-    assert host.value.__cause__ is None
+    assert host.value.__cause__ is None and host.value.__context__ is None

@@ -63,6 +63,7 @@ RUN pip install --no-cache-dir --require-hashes --only-binary :all: \
               /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14
 
 COPY server/ ./server/
+COPY methodology/ ./methodology/
 COPY vendor/ ./vendor/
 # Only the compiled export -- no Node, no npm, no node_modules and no frontend
 # source reach this stage; the build stage above is discarded with it.
