@@ -496,6 +496,52 @@ class AnalysisBody(BaseModel):
     pending: Annotated[list[PendingNode], Field(max_length=ROUTE_NODES_MAX)]
 
 
+class ModelValue(BaseModel):
+    model_config = _CLOSED
+
+    name: Id
+    value: Annotated[str, Field(max_length=64, pattern=r"^-?[0-9]+(\.[0-9]+)?$")] | None
+    unavailable_reason: Literal["ZERO_OR_NEGATIVE_DENOMINATOR"] | None
+
+
+class ModelPeriod(BaseModel):
+    model_config = _CLOSED
+
+    case: Text
+    period_id: Text
+    fiscal_year: Text
+    days: Annotated[str, Field(max_length=3, pattern=r"^[0-9]+$")]
+    values: Annotated[list[ModelValue], Field(max_length=40)]
+    unavailable_reason: Text | None
+
+
+class ModelForecast(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    artifact_sha256: Sha256
+    record_sha256: Sha256
+    accepted_at: AwareDatetime
+    qa_status: Id
+    limitation_flags: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    validation_warnings: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    currency: Annotated[str, Field(max_length=3, pattern="^[A-Z]{3}$")]
+    scale: Literal["units", "thousands", "millions", "billions"]
+    perimeter: Text
+    periods: Annotated[list[ModelPeriod], Field(max_length=240)]
+
+
+class ModelBody(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    latest_run_id: UUID | None
+    displayed_run_id: UUID | None
+    subject: RunSubjectView | None
+    forecast: ModelForecast | None
+    unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
+
+
 SectionStatus = Literal["complete", "partial"]
 Notes = Annotated[list[SectionNote], Field(max_length=len(SectionNote))]
 
@@ -544,11 +590,23 @@ class AnalysisDocument(BaseModel):
     notes: Notes
 
 
+class ModelDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: ModelBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
 V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
     DirectoryDocument,
     UploadDocument,
     RunSectionDocument,
     AnalysisDocument,
+    ModelDocument,
 )
 
 

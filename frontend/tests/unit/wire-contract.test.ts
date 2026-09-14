@@ -12,7 +12,9 @@ import {
   V1_SHAPES,
   WireIdentityError,
   WireShapeError,
+  parse,
   parseAnalysisDocument,
+  parseModelDocument,
   parseCaseCreated,
   parseDirectoryDocument,
   parseGateApproved,
@@ -37,6 +39,48 @@ const OTHER_RUN = "11111111-2222-4333-8444-555555555555";
 const AT = "2026-09-14T10:00:00.123456Z";
 const SHA = "a".repeat(64);
 const SOURCE = "216ec234-c70c-4a5f-8ae6-f4a0262bbe84";
+
+test("Model is closed and binds the displayed run independently of latest", () => {
+  const document = {
+    chrome: {
+      subject: { case_id: CASE, title: "Issuer" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: CASE,
+      latest_run_id: OTHER_RUN,
+      displayed_run_id: RUN,
+      subject: null,
+      forecast: null,
+      unavailable_reason: "NO_ACCEPTED_FORECAST",
+    },
+    observed_at: AT,
+    observed_empty: true,
+    status: "partial",
+    notes: [],
+  };
+  const parsed = parseModelDocument(document);
+  expect(() => requireIdentity(parsed, { caseId: CASE, runId: RUN })).not.toThrow();
+  expect(() => requireIdentity(parsed, { caseId: CASE, runId: OTHER_RUN })).toThrow(
+    WireIdentityError,
+  );
+  expect(() => requireIdentity(parsed, { caseId: OTHER_CASE, runId: RUN })).toThrow(
+    WireIdentityError,
+  );
+  expect(() => parseModelDocument({ ...document, arbitrary: "payload" })).toThrow(WireShapeError);
+  expect(() =>
+    parseModelDocument({ ...document, body: { ...document.body, unavailable_reason: "fixture" } }),
+  ).toThrow(WireShapeError);
+  const ratio = {
+    name: "metrics.interest_coverage",
+    value: null,
+    unavailable_reason: "ZERO_OR_NEGATIVE_DENOMINATOR",
+  };
+  expect(parse(V1_SHAPES.ModelValue, ratio)).toEqual(ratio);
+  expect(() => parse(V1_SHAPES.ModelValue, { ...ratio, value: 6 })).toThrow(WireShapeError);
+  expect(() => parse(V1_SHAPES.ModelValue, { ...ratio, value: "NaN" })).toThrow(WireShapeError);
+});
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 

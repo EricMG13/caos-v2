@@ -84,6 +84,36 @@ ENVELOPE = frozenset(
 
 # A new field is a model change, a regenerated schema and an edit here.
 PINNED: dict[type[BaseModel], frozenset[str]] = {
+    wire.ModelValue: frozenset({"name", "value", "unavailable_reason"}),
+    wire.ModelPeriod: frozenset(
+        {"case", "period_id", "fiscal_year", "days", "values", "unavailable_reason"}
+    ),
+    wire.ModelForecast: frozenset(
+        {
+            "route_node_id",
+            "artifact_sha256",
+            "record_sha256",
+            "accepted_at",
+            "qa_status",
+            "limitation_flags",
+            "validation_warnings",
+            "currency",
+            "scale",
+            "perimeter",
+            "periods",
+        }
+    ),
+    wire.ModelBody: frozenset(
+        {
+            "case_id",
+            "latest_run_id",
+            "displayed_run_id",
+            "subject",
+            "forecast",
+            "unavailable_reason",
+        }
+    ),
+    wire.ModelDocument: ENVELOPE,
     RefusalBody: frozenset({"code", "clears"}),
     Subject: frozenset({"case_id", "title"}),
     ServedRole: frozenset({"global_role", "standing"}),
@@ -377,6 +407,7 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "UploadDocument",
         "RunSectionDocument",
         "AnalysisDocument",
+        "ModelDocument",
     ]
 
 

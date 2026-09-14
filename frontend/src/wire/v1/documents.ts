@@ -206,6 +206,42 @@ const AnalysisBody = object({
 });
 const AnalysisDocument = sectionDocument(AnalysisBody);
 
+const ModelValue = object({
+  name: short,
+  value: nullable(string({ max: 64, pattern: "^-?[0-9]+(\\.[0-9]+)?$" })),
+  unavailable_reason: nullable(literal("ZERO_OR_NEGATIVE_DENOMINATOR")),
+});
+const ModelPeriod = object({
+  case: text,
+  period_id: text,
+  fiscal_year: text,
+  days: string({ max: 3, pattern: "^[0-9]+$" }),
+  values: array(ModelValue, 40),
+  unavailable_reason: nullable(text),
+});
+const ModelForecast = object({
+  route_node_id: short,
+  artifact_sha256: hash,
+  record_sha256: hash,
+  accepted_at: datetime,
+  qa_status: short,
+  limitation_flags: array(text, 256),
+  validation_warnings: array(text, 256),
+  currency: string({ max: 3, pattern: "^[A-Z]{3}$" }),
+  scale: enumOf(["units", "thousands", "millions", "billions"]),
+  perimeter: text,
+  periods: array(ModelPeriod, 240),
+});
+const ModelBody = object({
+  case_id: uuid,
+  latest_run_id: nullable(uuid),
+  displayed_run_id: nullable(uuid),
+  subject: nullable(RunSubjectView),
+  forecast: nullable(ModelForecast),
+  unavailable_reason: nullable(literal("NO_ACCEPTED_FORECAST")),
+});
+const ModelDocument = sectionDocument(ModelBody);
+
 // Events and evidence pages (brief 4.4, decisions 2, 7 and 8).
 /** The closed event names a case stream carries; a name only says what to refetch. */
 export const EVENT_NAMES = [
@@ -373,6 +409,11 @@ const RefusalBody = object({ code: RefusalCode, clears: text });
 
 /** Every model `schema.json` declares, under its backend name. */
 export const V1_SHAPES = {
+  ModelValue,
+  ModelPeriod,
+  ModelForecast,
+  ModelBody,
+  ModelDocument,
   ActionName,
   ActionView,
   AnalysisBody,
@@ -422,6 +463,7 @@ export type DirectoryDocument = Infer<typeof DirectoryDocument>;
 export type UploadDocument = Infer<typeof UploadDocument>;
 export type RunSectionDocument = Infer<typeof RunSectionDocument>;
 export type AnalysisDocument = Infer<typeof AnalysisDocument>;
+export type ModelDocument = Infer<typeof ModelDocument>;
 export type RefusalBody = Infer<typeof RefusalBody>;
 export type RefusalCode = Infer<typeof RefusalCode>;
 export type Chrome = Infer<typeof Chrome>;
@@ -440,7 +482,7 @@ export type ActionView = Infer<typeof ActionView>;
 export type WorkView = Infer<typeof WorkView>;
 export type RouteChoice = Infer<typeof RouteChoice>;
 export type SectionDocument =
-  DirectoryDocument | UploadDocument | RunSectionDocument | AnalysisDocument;
+  DirectoryDocument | UploadDocument | RunSectionDocument | AnalysisDocument | ModelDocument;
 
 export const parseDirectoryDocument = (value: unknown): DirectoryDocument =>
   parse(DirectoryDocument, value);
@@ -449,6 +491,7 @@ export const parseRunSectionDocument = (value: unknown): RunSectionDocument =>
   parse(RunSectionDocument, value);
 export const parseAnalysisDocument = (value: unknown): AnalysisDocument =>
   parse(AnalysisDocument, value);
+export const parseModelDocument = (value: unknown): ModelDocument => parse(ModelDocument, value);
 export const parseRefusalBody = (value: unknown): RefusalBody => parse(RefusalBody, value);
 export const parsePageDocument = (value: unknown): PageDocument => parse(PageDocument, value);
 
