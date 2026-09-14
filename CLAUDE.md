@@ -284,6 +284,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Repair Phase 3.**
 
+- **RELATIVE_VALUE is proven offline, not economically qualified.** Task
+  5.2a (§56) adds only `FULL_CREDIT_32` / `RELATIVE_VALUE` beside LITE earnings:
+  all nine modules execute, validate, anchor, prove and freeze deterministically.
+  Other pathways remain disabled, including FULL_CREDIT_ASSESSMENT; CP-CF
+  remains disabled. The fixture pack is a compact annual/legal/peer extract,
+  with independently authored owner rows and explicit extract-only limits;
+  this proves contracts and lineage, not full underwriting or live-model
+  quality. CP-3's two binary XLSX references reach the prompt whole as labelled
+  base64 under their original digests; the host does not interpret workbook
+  cells. CP-2G's 42-row vendor driver vocabulary differs from CP-CF's movement
+  vocabulary. *Upgrade:* explicit accepted-owner mapping in 5.2b, and separately
+  authorized exact-route economic/live qualification in Phase 6.
+
 - **A letter-spaced heading cannot be quoted as a word.** (a) ~~The PDF
   extractor's identity no longer predicts its output for positioned text.~~
   Closed by slice 3.2d: `caos.pdfminer` v2 declares every effective `LAParams`
@@ -434,9 +447,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   that projects a stored `qa_status` is tested directly instead. Since f-1c
   the adapter is one constant: every reader refuses a row without its record
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
-  `RUN_INPUT_INVALID`, and every route with a module outside CP-0, CP-L10 and
-  CP-5 -- FULL, DEEP and every other catalog pathway -- and every pathway of
-  those modules but LITE earnings (`ADAPTER_ROUTES`: LITE portfolio decision,
+  `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
+  modules; every route outside that pathway and LITE earnings remains
+  disabled (`ADAPTER_ROUTES`: LITE portfolio decision,
   CP-0 -> CP-L10, has no contract test) pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
