@@ -130,6 +130,12 @@ def _sources_live(conn: StoreConnection, run_id: UUID) -> bool:
     )
 
 
+def sources_live(conn: StoreConnection, run_id: UUID) -> bool:
+    """Whether every member the run's pin captured is still live and unchanged:
+    the predicate approval and execution refuse `EVIDENCE_NOT_AVAILABLE` on."""
+    return _sources_live(conn, run_id)
+
+
 def approve_gate(conn: StoreConnection, approval: GateApproval) -> None:
     """Release a gate, as a governed write requiring APPROVER standing.
 

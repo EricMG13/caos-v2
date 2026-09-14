@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from server.api.commands.availability import directory_actions
 from server.api.deps import Caller, Store
 from server.api.wire import (
     CASES_MAX,
@@ -42,7 +43,7 @@ def read_directory(actor: Caller, conn: Store) -> DirectoryDocument:
         chrome=Chrome(
             subject=None,
             served_role=ServedRole(global_role=actor.role, standing=None),
-            actions=[],
+            actions=directory_actions(actor.role),
         ),
         body=DirectoryBody(
             cases=[
