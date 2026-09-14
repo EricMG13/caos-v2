@@ -524,6 +524,7 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     attempt_id: UUID,
     artifact_sha256: str,
     record_sha256: str,
+    accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> Projections:
     """An accepted canonical artifact's projections, re-derived and compared.
 
@@ -531,11 +532,41 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     facts, the record must bind this Markdown and that identity, and the
     projections re-parsed from the Markdown must equal the record's (§42.4).
     Citations are not re-anchored here; the proof and freezing do that.
+    `accepted` is the unit's accepted pairs when the caller holds them.
 
     The identity is `call_time_identity`, the one rule the proof and the
     deliverable use too, so a soft input accepted after its target never makes
     the runtime refuse a record the other readers accept.
     """
+    _record, projections = _verified_accepted(
+        conn,
+        blobs,
+        bundle,
+        route,
+        run_id=run_id,
+        route_node_id=route_node_id,
+        attempt_id=attempt_id,
+        artifact_sha256=artifact_sha256,
+        record_sha256=record_sha256,
+        accepted=accepted,
+    )
+    return projections
+
+
+def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    *,
+    run_id: UUID,
+    route_node_id: str,
+    attempt_id: UUID,
+    artifact_sha256: str,
+    record_sha256: str,
+    accepted: Mapping[str, tuple[str, str | None]] | None,
+) -> tuple[CanonicalRecord, Projections]:
+    """`accepted_projections` with the verified record it read beside them."""
     node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
     if node is None:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
@@ -549,6 +580,7 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
         attempt_id=attempt_id,
         artifact_sha256=artifact_sha256,
         record_sha256=record_sha256,
+        accepted=accepted,
     )
     identity = record.identity
     try:
@@ -568,7 +600,7 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     )
     if projections != record.projections:
         raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    return projections
+    return record, projections
 
 
 def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
@@ -582,6 +614,7 @@ def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
     attempt_id: UUID,
     artifact_sha256: str,
     record_sha256: str,
+    accepted: Mapping[str, tuple[str, str | None]] | None,
 ) -> CanonicalRecord:
     """An accepted row's record, bound to its call-time identity and this build.
 
@@ -613,7 +646,7 @@ def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
     upstream = record.identity.upstream
     if record.lineage != accepted_lineage(
-        conn, blobs, run_id=run_id, upstream=upstream
+        conn, blobs, run_id=run_id, upstream=upstream, accepted=accepted
     ):
         raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
     return record
@@ -635,20 +668,24 @@ def _upstream_records(
     same checks the frontier and the proof apply). A row whose digest is not the
     ref's is `ROUTE_IDENTITY_INVALID`; a row without a record, or whose Markdown
     will not read, `ARTIFACT_RECORD_MISMATCH`.
-    No query when there is no upstream.
+    One `accepted_rows` query for the whole unit, none when there is no
+    upstream; each upstream record is read once, by its own verification, and
+    that verified record is what the lineage is read from.
     """
     if not refs:
         return ()
     rows = {row[0]: row for row in accepted_rows(conn, assignment.run_id)}
+    accepted = {row[0]: (row[2], row[3]) for row in rows.values()}
     nodes = {n.route_node_id: n for n in assignment.route.nodes}
+    verified: dict[str, CanonicalRecord] = {}
     for ref in refs:
         row = rows.get(ref.route_node_id)
         if row is None or row[2] != ref.sha256 or ref.route_node_id not in nodes:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-        _, attempt, digest, record = row
-        if record is None:
+        _, attempt, digest, record_sha256 = row
+        if record_sha256 is None:
             raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        accepted_projections(
+        verified[record_sha256], _projections = _verified_accepted(
             conn,
             blobs,
             bundle,
@@ -657,10 +694,10 @@ def _upstream_records(
             route_node_id=ref.route_node_id,
             attempt_id=attempt,
             artifact_sha256=digest,
-            record_sha256=record,
+            record_sha256=record_sha256,
+            accepted=accepted,
         )
-    accepted = {row[0]: (row[2], row[3]) for row in rows.values()}
-    return stored_lineage(blobs, refs, accepted)
+    return stored_lineage(blobs, refs, accepted, verified=verified)
 
 
 def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:

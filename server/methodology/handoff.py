@@ -7,7 +7,7 @@ host owns is compared type-exactly against what the host would have written,
 because a provider-claimed identity never survives (invariant 3).
 
 Pure: no clock, and no I/O but digest-verified blob reads (`read_record`'s two,
-`stored_lineage`'s one per direct upstream record).
+`stored_lineage`'s one per direct upstream record the caller has not verified).
 The closed provider transport and the host record beside the Markdown live
 here too, so one module owns the handoff's shape end to end. Every refusal is
 a typed code raised outside the handler that caught the vendor's exception, so
@@ -531,16 +531,21 @@ def stored_lineage(
     blobs: BlobStore,
     upstream: Sequence[UpstreamRef],
     accepted: Mapping[str, tuple[str, str | None]],
+    *,
+    verified: Mapping[str, CanonicalRecord] | None = None,
 ) -> tuple[LineageRef, ...]:
     """The whole accepted chain behind `upstream`, read from the stored records.
 
     `accepted` maps each accepted route node to its (artifact, record) pair.
     Every direct ref with its pair, then every ancestor its stored record names,
     each of which must still be the accepted pair for its node; ordered by route
-    node id. Never recomputed from prompt text. `ARTIFACT_RECORD_MISMATCH`, with
-    no text, for a pair that is not accepted, a record that will not read or
-    binds another artifact, or two pairs for one node.
+    node id. Never recomputed from prompt text. `verified` maps a record digest
+    to the record a caller already read through `read_record` in this unit, so
+    that blob is not read again. `ARTIFACT_RECORD_MISMATCH`, with no text, for a
+    pair that is not accepted, a record that will not read or binds another
+    artifact, or two pairs for one node.
     """
+    known = verified or {}
 
     def chain() -> tuple[LineageRef, ...]:
         found: dict[str, LineageRef] = {}
@@ -548,9 +553,13 @@ def stored_lineage(
             artifact, record_sha256 = accepted[ref.route_node_id]
             if artifact != ref.sha256 or record_sha256 is None:
                 raise ValueError
-            data = blobs.get(record_sha256)
-            record = _decoded_record(data)
-            if record_bytes(record) != data or record.artifact_sha256 != artifact:
+            record = known.get(record_sha256)
+            if record is None:
+                data = blobs.get(record_sha256)
+                record = _decoded_record(data)
+                if record_bytes(record) != data:
+                    raise ValueError
+            if record.artifact_sha256 != artifact:
                 raise ValueError
             direct = LineageRef(
                 ref.route_node_id, ref.module_id, artifact, record_sha256
