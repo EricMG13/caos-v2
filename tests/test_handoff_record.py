@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import json
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -23,13 +24,21 @@ from canonical_fixtures import identity as _identity
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, Rect
-from server.methodology.bundle import assemble_authority, authority_digest
+from server.methodology.bundle import (
+    assemble_authority,
+    authority_digest,
+    delivered_authority,
+    delivered_authority_digest,
+)
 from server.methodology.handoff import (
     RECORD_FORMAT,
     CanonicalRecord,
+    LineageRef,
+    UpstreamRef,
     parse_response,
     read_record,
     record_bytes,
+    stored_lineage,
     validate_markdown,
 )
 from server.methodology.invocation import record_authority_matches
@@ -132,7 +141,9 @@ def _record(**changes: object) -> CanonicalRecord:
         "manifest_sha256": "a" * 64,
         "authority_bundle_sha256": CP0.authority_bundle_sha256,
         "authority_digest": "b" * 64,
+        "delivered_authority_digest": "f" * 64,
         "identity": CP0,
+        "lineage": (),
         "projections": projections,
         "citations": (
             AnchoredCitation(
@@ -155,7 +166,14 @@ def _stored(tmp_path: Path, record: CanonicalRecord) -> tuple[BlobStore, str, st
 
 @pytest.mark.parametrize(
     "field",
-    [None, "adapter_version", "build_id", "manifest_sha256", "authority_digest"],
+    [
+        None,
+        "adapter_version",
+        "build_id",
+        "manifest_sha256",
+        "authority_digest",
+        "delivered_authority_digest",
+    ],
 )
 def test_record_authority_matches_only_this_build_and_pinned_module(
     field: str | None,
@@ -167,6 +185,9 @@ def test_record_authority_matches_only_this_build_and_pinned_module(
         "build_id": BUNDLE.build_id,
         "manifest_sha256": BUNDLE.manifest_sha256,
         "authority_digest": authority_digest(assemble_authority(BUNDLE, "CP-0")),
+        "delivered_authority_digest": delivered_authority_digest(
+            delivered_authority(BUNDLE, "CP-0")
+        ),
     }
     if field is not None:
         this_build[field] = "0" * 64
@@ -177,7 +198,8 @@ def test_record_authority_matches_only_this_build_and_pinned_module(
 
 
 def test_a_record_round_trips_exactly(tmp_path: Path) -> None:
-    record = _record()
+    link = LineageRef("RN-01-CP-0", "CP-0", "d" * 64, "e" * 64)
+    record = _record(lineage=(link,))
     blobs, artifact, sha = _stored(tmp_path, record)
     read = read_record(blobs, artifact_sha256=artifact, record_sha256=sha, expected=CP0)
     assert read == record
@@ -257,6 +279,8 @@ def _set(path: tuple[str | int, ...], value: object) -> Callable[[Any], None]:
         _rewritten(_set(("projections", "confidence_score"), 90.0)),
         _rewritten(_set(("projections", "readiness"), [["CP-5"]])),
         _rewritten(_set(("citations",), [])),
+        _rewritten(_set(("lineage",), [{"route_node_id": "RN-1"}])),
+        _rewritten(_set(("lineage",), None)),
         _rewritten(_set(("citations", 0, "page"), False)),
         _rewritten(_set(("citations", 0, "bboxes", 0, "x0"), 1)),
         _rewritten(_set(("citations", 0, "bboxes", 0, "extra"), 1.0)),
@@ -281,7 +305,9 @@ def test_the_record_carries_no_model_authored_claims() -> None:
         "manifest_sha256",
         "authority_bundle_sha256",
         "authority_digest",
+        "delivered_authority_digest",
         "identity",
+        "lineage",
         "projections",
         "citations",
     }
@@ -317,7 +343,48 @@ def test_a_record_contradicting_its_own_identity_refuses(tmp_path: Path) -> None
     _mismatch(blobs, artifact, sha, CP0)
 
 
+def test_a_v1_record_refuses_without_backfill(tmp_path: Path) -> None:
+    """§45.4: a pre-release v1 record -- no delivered digest, no lineage -- is
+    not read as a v2 record with defaults."""
+    assert RECORD_FORMAT == "caos-canonical-record-v2"
+
+    def v1(decoded: dict[str, Any]) -> None:
+        decoded["format"] = "caos-canonical-record-v1"
+        del decoded["delivered_authority_digest"], decoded["lineage"]
+
+    blobs = BlobStore(tmp_path / "blobs")
+    _mismatch(blobs, blobs.put(CP0_MD), blobs.put(_rewritten(v1)), CP0)
+
+
 def test_a_record_not_in_canonical_form_refuses(tmp_path: Path) -> None:
     blobs, artifact, _ = _stored(tmp_path, _record())
     spaced = record_bytes(_record()).replace(b'":', b'": ', 1)
     _mismatch(blobs, artifact, blobs.put(spaced), CP0)
+
+
+def test_stored_lineage_reads_the_chain_from_the_stored_records(
+    tmp_path: Path,
+) -> None:
+    """§45.4: a direct ref's pair plus every ancestor its stored record names,
+    each still the accepted pair; anything else refuses with no text."""
+    blobs = BlobStore(tmp_path / "blobs")
+    gate = LineageRef("RN-01-CP-0", "CP-0", "d" * 64, "e" * 64)
+    screen_md = blobs.put(CP0_MD)
+    screen_sha = blobs.put(record_bytes(_record(lineage=(gate,))))
+    ref = UpstreamRef("RN-02-CP-L10", "CP-L10", "COS-1", "FY2025", screen_md)
+    screen = LineageRef(ref.route_node_id, "CP-L10", screen_md, screen_sha)
+    accepted: dict[str, tuple[str, str | None]] = {
+        gate.route_node_id: (gate.artifact_sha256, gate.record_sha256),
+        ref.route_node_id: (screen_md, screen_sha),
+    }
+    assert stored_lineage(blobs, (ref,), accepted) == (gate, screen)
+    assert stored_lineage(blobs, (), accepted) == ()
+    moved: list[dict[str, tuple[str, str | None]]] = [
+        {**accepted, gate.route_node_id: (gate.artifact_sha256, "0" * 64)},
+        {**accepted, ref.route_node_id: (screen_md, None)},
+        {ref.route_node_id: (screen_md, screen_sha)},
+        {**accepted, ref.route_node_id: ("0" * 64, screen_sha)},
+    ]
+    for rows in moved:
+        refusal = _refused(partial(stored_lineage, blobs, (ref,), rows))
+        assert refusal.code is RefusalCode.ARTIFACT_RECORD_MISMATCH

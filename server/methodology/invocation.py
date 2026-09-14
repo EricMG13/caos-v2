@@ -31,6 +31,8 @@ from server.methodology.bundle import (
     DeliveredAuthority,
     assemble_authority,
     authority_digest,
+    delivered_authority,
+    delivered_authority_digest,
     verified_bytes,
 )
 from server.methodology.executor import SKILL, Delivery
@@ -39,9 +41,11 @@ from server.methodology.handoff import (
     GATE_MODULE,
     CanonicalRecord,
     HostIdentity,
+    LineageRef,
     UpstreamRef,
     expected_filename,
     invocation_fields,
+    stored_lineage,
 )
 from server.methodology.vendor import (
     VENDOR_MODULE,
@@ -51,7 +55,7 @@ from server.methodology.vendor import (
 from server.provider import MAX_REQUEST_BYTES, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.outcomes import artifact_digests
+from server.store.outcomes import accepted_rows, artifact_digests
 from server.store.routes import resolved_route
 from server.store.run_inputs import load_run_input
 from server.store.runs import MAX_ATTEMPT_ORDINAL, attempt_ordinal
@@ -135,6 +139,18 @@ def _identity(  # noqa: PLR0913 -- one identity, keyword-only
             raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
         ordinal = attempt_ordinal(conn, attempt_id)
     subject = pin.subject
+    upstream = _upstream(
+        stored,
+        node,
+        artifact_digests(conn, run_id),
+        run_id=pin.cos_run_id,
+        period=subject.reporting_period,
+    )
+    # §45.5: a non-gate node's CP-0 anchor comes only from a direct CP-0 ref.
+    if node.module_id != GATE_MODULE and all(
+        ref.module_id != GATE_MODULE for ref in upstream
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     return HostIdentity(
         run_id=pin.cos_run_id,
         profile_id=stored.profile_id,
@@ -148,13 +164,7 @@ def _identity(  # noqa: PLR0913 -- one identity, keyword-only
         analysis_date=subject.analysis_date,
         ordinal=ordinal,
         authority_bundle_sha256=authority_bundle_sha256(bundle),
-        upstream=_upstream(
-            stored,
-            node,
-            artifact_digests(conn, run_id),
-            run_id=pin.cos_run_id,
-            period=subject.reporting_period,
-        ),
+        upstream=upstream,
     )
 
 
@@ -211,8 +221,9 @@ def record_authority_matches(
     """Whether a record was written under this bundle for this pinned module.
 
     The one comparison every reader of an accepted record makes (invariant 4):
-    the canonical adapter, and the bundle's build, manifest and the module's
-    authority digest, re-derived from the bytes here now. `read_record` binds
+    the canonical adapter, and the bundle's build, manifest, the module's
+    authority digest and its delivered-authority digest (§45.1), re-derived from
+    the bytes here now. `read_record` binds
     the invocation; this binds the methodology. `module_id` is the pin's, never
     the record's. Each caller raises its own code on False.
     """
@@ -221,12 +232,36 @@ def record_authority_matches(
         record.build_id,
         record.manifest_sha256,
         record.authority_digest,
+        record.delivered_authority_digest,
     ) == (
         methodology.CANONICAL_ADAPTER_VERSION,
         bundle.build_id,
         bundle.manifest_sha256,
         authority_digest(assemble_authority(bundle, module_id)),
+        delivered_authority_digest(delivered_authority(bundle, module_id)),
     )
+
+
+def accepted_lineage(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    *,
+    run_id: UUID,
+    upstream: Sequence[UpstreamRef],
+) -> tuple[LineageRef, ...]:
+    """The whole accepted chain behind `upstream`, as the store holds it now.
+
+    `stored_lineage` over the run's accepted rows: what a record's `lineage`
+    must equal when read (§45.4). One query, none without upstream; caller owns
+    the read. `ARTIFACT_RECORD_MISMATCH` when the chain does not bind.
+    """
+    if not upstream:
+        return ()
+    accepted = {
+        node: (artifact, record)
+        for node, _attempt, artifact, record in accepted_rows(conn, run_id)
+    }
+    return stored_lineage(blobs, upstream, accepted)
 
 
 def _module_name(bundle: Bundle, route: ResolvedRoute, node: RouteNode) -> str:

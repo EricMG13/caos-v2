@@ -6,7 +6,8 @@ this module decides whether it is *this* invocation's handoff. Every field the
 host owns is compared type-exactly against what the host would have written,
 because a provider-claimed identity never survives (invariant 3).
 
-Pure: no clock, and no I/O but `read_record`'s two digest-verified blob reads.
+Pure: no clock, and no I/O but digest-verified blob reads (`read_record`'s two,
+`stored_lineage`'s one per direct upstream record).
 The closed provider transport and the host record beside the Markdown live
 here too, so one module owns the handoff's shape end to end. Every refusal is
 a typed code raised outside the handler that caught the vendor's exception, so
@@ -17,7 +18,7 @@ quote the document (invariant 2).
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
 from typing import Any, NoReturn
@@ -50,6 +51,16 @@ class UpstreamRef:
     run_id: str
     period: str
     sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class LineageRef:
+    """One accepted ancestor handoff and the host record beside it (§45.4)."""
+
+    route_node_id: str
+    module_id: str
+    artifact_sha256: str
+    record_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,7 +315,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
 # The closed provider transport (§41.3) and the host record's own format.
 WIRE_KEYS = frozenset({"canonical_markdown", "citations"})
 WIRE_CITATION_KEYS = frozenset({"source_id", "page", "matched_text"})
-RECORD_FORMAT = "caos-canonical-record-v1"
+RECORD_FORMAT = "caos-canonical-record-v2"
 # A body may carry the largest Markdown the vendor reads plus its citations.
 MAX_TRANSPORT_CHARS = 2 * MAX_FILE_BYTES
 MAX_PAGE = 2**31 - 1  # the store's integer page
@@ -317,6 +328,10 @@ class CanonicalRecord:
     Host-written and bound to the Markdown by `artifact_sha256`. It carries no
     model-authored summary and no claims: the Markdown is the authority, and
     `projections` is a sidecar a reader re-derives from it and compares.
+    `delivered_authority_digest` binds exactly the authority files the prompt
+    carried (§45.1); `lineage` is the whole accepted chain behind the direct
+    upstream, ordered by route node id, each pair read from the stored records
+    (§45.4).
     """
 
     artifact_sha256: str
@@ -325,7 +340,9 @@ class CanonicalRecord:
     manifest_sha256: str
     authority_bundle_sha256: str
     authority_digest: str
+    delivered_authority_digest: str
     identity: HostIdentity
+    lineage: tuple[LineageRef, ...]
     projections: Projections
     citations: tuple[AnchoredCitation, ...]
 
@@ -496,6 +513,7 @@ def _decoded_record(data: bytes) -> CanonicalRecord:
             ordinal=_int,
             upstream=_each(lambda ref: _typed(UpstreamRef, ref)),
         ),
+        lineage=_each(lambda ref: _typed(LineageRef, ref)),
         projections=lambda item: _typed(
             Projections,
             item,
@@ -507,6 +525,45 @@ def _decoded_record(data: bytes) -> CanonicalRecord:
         ),
         citations=lambda _: citations,
     )
+
+
+def stored_lineage(
+    blobs: BlobStore,
+    upstream: Sequence[UpstreamRef],
+    accepted: Mapping[str, tuple[str, str | None]],
+) -> tuple[LineageRef, ...]:
+    """The whole accepted chain behind `upstream`, read from the stored records.
+
+    `accepted` maps each accepted route node to its (artifact, record) pair.
+    Every direct ref with its pair, then every ancestor its stored record names,
+    each of which must still be the accepted pair for its node; ordered by route
+    node id. Never recomputed from prompt text. `ARTIFACT_RECORD_MISMATCH`, with
+    no text, for a pair that is not accepted, a record that will not read or
+    binds another artifact, or two pairs for one node.
+    """
+
+    def chain() -> tuple[LineageRef, ...]:
+        found: dict[str, LineageRef] = {}
+        for ref in upstream:
+            artifact, record_sha256 = accepted[ref.route_node_id]
+            if artifact != ref.sha256 or record_sha256 is None:
+                raise ValueError
+            data = blobs.get(record_sha256)
+            record = _decoded_record(data)
+            if record_bytes(record) != data or record.artifact_sha256 != artifact:
+                raise ValueError
+            direct = LineageRef(
+                ref.route_node_id, ref.module_id, artifact, record_sha256
+            )
+            for link in (direct, *record.lineage):
+                pair = (link.artifact_sha256, link.record_sha256)
+                if accepted.get(link.route_node_id) != pair:
+                    raise ValueError  # an ancestor whose accepted pair moved
+                if found.setdefault(link.route_node_id, link) != link:
+                    raise ValueError
+        return tuple(found[key] for key in sorted(found))
+
+    return _or_refuse(RefusalCode.ARTIFACT_RECORD_MISMATCH, chain)
 
 
 def read_record(

@@ -361,8 +361,33 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   soft edge whose unaccepted source CP-0 reported READY is omitted where the
   vendor refuses. The route engine already BLOCKS such a node, so the runtime
   never asks for its identity. `module_name` is read from the verified catalog
-  at call time rather than pinned. *Upgrade:* readiness joins
-  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2).
+  at call time rather than pinned. Since slice 3.3c a non-gate node whose
+  upstream carries no direct CP-0 ref refuses `ROUTE_IDENTITY_INVALID` in
+  `host_identity` (§45.5), so before any attempt via `check_context`; the
+  anchor is still derived from that ref, not stored. *Upgrade:* readiness joins
+  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2),
+  and a stored anchor field with Phase 5.
+- **A record's lineage is re-checked against the accepted rows, not re-proven
+  ancestor by ancestor.** Record format v2 (slice 3.3c, §45.4) adds
+  `delivered_authority_digest` -- over exactly the `DeliveredAuthority` the
+  prompt carried, compared with the pinned bundle's by every reader through
+  `record_authority_matches` (`ORCHESTRATION_BUILD_MOVED` in the runtime and
+  proof, `ARTIFACT_RECORD_MISMATCH` in the deliverable) -- and `lineage`, the
+  transitive accepted chain behind the direct upstream, each (artifact, record)
+  pair read by `stored_lineage` from the direct upstream records and required
+  to be each node's accepted pair now. v1 records refuse; there is no backfill.
+  A reader compares a record's lineage with `accepted_lineage` (one
+  `accepted_rows` query and one record blob read per direct upstream), so an
+  ancestor record rewritten after its consumer was accepted refuses at the
+  runtime's pre-call unit, at the proof and at the deliverable -- but whether
+  that ancestor's own record is sound is the ancestor's own verification, which
+  the proof and deliverable run for every row and the pre-call unit runs for
+  direct inputs only. The executor's post-call unit compares only the lineage's
+  pairs with the accepted rows (one query), not the records again, and the
+  lineage names `call_time_identity`'s narrowed upstream, so a soft input
+  accepted during a call appears in no lineage. `blocked_verdict` builds no
+  record and checks no lineage. *Upgrade:* Phase 4's lease fencing ancestors
+  for the node's whole attempt, and immutable `artifacts` rows.
 
 **Repair Phase 2.**
 

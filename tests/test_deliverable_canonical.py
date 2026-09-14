@@ -34,10 +34,15 @@ from server.deliverable.package import build_package, verify_package
 from server.deliverable.render import canonical_bound, render
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
-from server.methodology.bundle import assemble_authority, authority_digest
+from server.methodology.bundle import (
+    assemble_authority,
+    authority_digest,
+    delivered_authority,
+    delivered_authority_digest,
+)
 from server.methodology.canonical import accepted_projections
 from server.methodology.handoff import CanonicalRecord, record_bytes, validate_markdown
-from server.methodology.invocation import host_identity
+from server.methodology.invocation import accepted_lineage, host_identity
 from server.methodology.vendor import authority_bundle_sha256
 from server.refusals import Refusal, RefusalCode
 from server.store.budget import reserve
@@ -98,6 +103,9 @@ def _accept(
         delivered=every_block(conn, harness.source_id),
         citations=[Citation(harness.source_id, 1, QUOTE)],
     )
+    lineage = accepted_lineage(
+        conn, harness.blobs, run_id=harness.run_id, upstream=identity.upstream
+    )
     conn.rollback()
     record = CanonicalRecord(
         artifact_sha256=harness.blobs.put(markdown),
@@ -106,7 +114,11 @@ def _accept(
         manifest_sha256=bundle.manifest_sha256,
         authority_bundle_sha256=authority_bundle_sha256(bundle),
         authority_digest=authority_digest(assemble_authority(bundle, module_id)),
+        delivered_authority_digest=delivered_authority_digest(
+            delivered_authority(bundle, module_id)
+        ),
         identity=identity,
+        lineage=lineage,
         projections=projections,
         citations=tuple(anchored),
     )

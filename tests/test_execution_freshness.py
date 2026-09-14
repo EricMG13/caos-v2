@@ -1439,7 +1439,14 @@ def test_upstream_with_foreign_envelope_identity_is_refused_before_any_call(
 
 @pytest.mark.parametrize("entry", ["frontier", "module"])
 @pytest.mark.parametrize(
-    "field", ["build_id", "manifest_sha256", "authority_digest", "adapter_version"]
+    "field",
+    [
+        "build_id",
+        "manifest_sha256",
+        "authority_digest",
+        "delivered_authority_digest",
+        "adapter_version",
+    ],
 )
 def test_upstream_record_from_another_build_is_refused_before_any_call(
     harness: _Harness, field: str, entry: str
