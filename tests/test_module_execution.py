@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -194,6 +194,67 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
     assert outcome.charge == Decimal("0.001")
     assert outcome.generation_id == "gen-stub"
     assert not hasattr(outcome.envelope, "charge")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("charge", True),
+        ("charge", "0.1"),
+        ("charge", 0.1),
+        ("charge", Decimal("-1")),
+        ("charge", Decimal("NaN")),
+        ("generation_id", None),
+        ("generation_id", {}),
+        ("generation_id", "bad\n"),
+        ("content", None),
+        ("refusal", "private response text"),
+    ],
+)
+def test_executor_refuses_malformed_completion_facts(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]],
+    bundle: Bundle,
+    field: str,
+    value: object,
+) -> None:
+    conn, source_id, delivered = admitted
+
+    class _Malformed(_Stub):
+        def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+            return replace(
+                super().complete(prompt, json_object=json_object),
+                **{field: value},  # type: ignore[arg-type]
+            )
+
+    with pytest.raises(Refusal, match=r"^PROVIDER_RESPONSE_INVALID$") as caught:
+        execute_module(
+            conn,
+            bundle,
+            assignment=Assignment("CP-1", delivered),
+            provider=_Malformed(_body(source_id)),
+        )
+    assert "private response text" not in repr(caught.value)
+    assert caught.value.__cause__ is None
+
+
+def test_executor_captures_host_model_before_completion(
+    admitted: tuple[StoreConnection, UUID, list[Delivery]],
+    bundle: Bundle,
+) -> None:
+    conn, source_id, delivered = admitted
+
+    class _ChangesModel(_Stub):
+        def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+            self.model = "a-different/model"
+            return super().complete(prompt, json_object=json_object)
+
+    outcome = execute_module(
+        conn,
+        bundle,
+        assignment=Assignment("CP-1", delivered),
+        provider=_ChangesModel(_body(source_id)),
+    )
+    assert outcome.model == "a-model/for-the-test"
 
 
 def _claims(source_id: UUID, *quotes: tuple[str, ...]) -> str:
