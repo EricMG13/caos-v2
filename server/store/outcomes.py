@@ -1,16 +1,80 @@
 """One immutable call outcome; known spend lives only in the original ledger."""
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
 import psycopg
+from psycopg.pq import TransactionStatus
 
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
-from server.store.budget import validate_spend
+from server.store.budget import reserved_for, validate_spend
 from server.store.events import RunEvent, append, lock_run
+
+
+def require_idle(conn: StoreConnection) -> None:
+    """Execution never adopts an active caller transaction, even read-only."""
+    if conn.autocommit or conn.info.transaction_status is not TransactionStatus.IDLE:
+        raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
+
+
+@contextmanager
+def execution_reads(conn: StoreConnection) -> Iterator[None]:
+    """Own one bounded execution read unit; no transport inside this scope."""
+    require_idle(conn)  # Outside cleanup: pending caller writes remain untouched.
+    try:
+        _read_committed(conn)
+        yield
+        conn.rollback()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+
+
+def _read_committed(conn: StoreConnection) -> None:
+    if conn.execute("SHOW transaction_isolation").fetchone() != ("read committed",):
+        raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
+
+
+def check_call(
+    conn: StoreConnection, *, attempt_id: UUID, run_id: UUID, route_node_id: str
+) -> None:
+    """Require this unused reserved attempt. Caller owns the read transaction.
+
+    Absence checks are not a concurrent call claim or crash/retry certainty.
+    """
+    if not isinstance(attempt_id, UUID) or conn.execute(
+        "SELECT run_id,route_node_id FROM run_attempts WHERE attempt_id=%s",
+        (attempt_id,),
+    ).fetchone() != (run_id, route_node_id):
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    owner, _case, status = _locked_attempt(conn, attempt_id)
+    if owner != run_id or conn.execute(
+        "SELECT route_node_id FROM run_attempts WHERE attempt_id=%s AND run_id=%s",
+        (attempt_id, run_id),
+    ).fetchone() != (route_node_id,):
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    if status is not RunStatus.RUNNING:
+        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    if reserved_for(conn, attempt_id) is None:
+        raise Refusal(RefusalCode.BUDGET_NOT_RESERVED)
+    if conn.execute(
+        "SELECT 1 FROM call_outcomes WHERE attempt_id=%s", (attempt_id,)
+    ).fetchone():
+        raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
+    if conn.execute(
+        "SELECT 1 FROM budget_ledger WHERE attempt_id=%s"
+        " UNION ALL SELECT 1 FROM artifacts WHERE attempt_id=%s",
+        (attempt_id, attempt_id),
+    ).fetchone():
+        raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
 
 
 @dataclass(frozen=True, slots=True)

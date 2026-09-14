@@ -28,6 +28,7 @@ from server.blobs import BlobStore
 from server.engine.route import GATE_MODULE, ResolvedRoute, frontier
 from server.store import StoreConnection
 from server.store.budget import reserve
+from server.store.outcomes import execution_reads, require_idle
 from server.store.runs import Accepted, accept_attempt, complete_run, start_attempt
 
 
@@ -50,7 +51,9 @@ class ProviderResult:
 class Provider(Protocol):
     """The seam Phase 5 fills with a real OpenRouter call."""
 
-    def execute(self, route_node_id: str, module_id: str) -> ProviderResult: ...
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,9 +81,15 @@ def run_route(
 
     Every pass recomputes the frontier from the store rather than advancing an
     index, so this is the same function whether it is starting a run or resuming
-    one that died three nodes in.
+    one that died three nodes in. Requires an idle, nonautocommit connection;
+    owns its frontier reads and never adopts pending caller writes.
     """
-    while ready := frontier(route, accepted_artifacts(conn, blobs, route, run_id)):
+    require_idle(conn)
+    while True:
+        with execution_reads(conn):
+            ready = frontier(route, accepted_artifacts(conn, blobs, route, run_id))
+        if not ready:
+            break
         for route_node_id in ready:
             _run_node(
                 conn,
@@ -152,7 +161,7 @@ def _run_node(
     attempt_id = start_attempt(conn, run_id, route_node_id)
     reserve(conn, attempt_id, execution.estimate)
 
-    result = execution.provider.execute(route_node_id, module_id)
+    result = execution.provider.execute(route_node_id, module_id, attempt_id=attempt_id)
 
     accept_attempt(
         conn,

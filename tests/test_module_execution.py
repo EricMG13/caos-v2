@@ -19,12 +19,14 @@ import os
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import RouteNode
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
@@ -49,6 +51,8 @@ from server.methodology.runner import canonical
 from server.provider import Completion, OpenRouter
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.budget import reserve
+from server.store.runs import start_attempt, start_run
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 
@@ -129,6 +133,34 @@ def _body(
     )
 
 
+def _attempt(
+    conn: StoreConnection,
+    delivered: list[Delivery],
+    module_id: str = "CP-1",
+    *,
+    gate_expects: frozenset[str] = frozenset(),
+    upstream: tuple[Upstream, ...] = (),
+) -> dict[str, Any]:
+    """Commit this test's setup, then reserve one explicitly named execution."""
+    row = conn.execute("SELECT case_id FROM cases").fetchone()
+    assert row is not None
+    run = start_run(conn, row[0])
+    node = RouteNode("test-node", module_id, 1)
+    attempt = start_attempt(conn, run, node.route_node_id)
+    reserve(conn, attempt, Decimal("0.5"))
+    return {
+        "attempt_id": attempt,
+        "assignment": Assignment(
+            module_id,
+            delivered,
+            run,
+            node,
+            gate_expects,
+            upstream,
+        ),
+    }
+
+
 def test_the_envelope_carries_the_hosts_identity_not_the_modules(
     admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
 ) -> None:
@@ -139,7 +171,7 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_body(source_id)),
     )
 
@@ -162,7 +194,7 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_body(source_id)),
     )
 
@@ -186,7 +218,7 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_body(source_id)),
     )
 
@@ -202,8 +234,15 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
         ("charge", True),
         ("charge", "0.1"),
         ("charge", 0.1),
+        ("charge", 0),
+        ("charge", 1),
+        ("charge", None),
         ("charge", Decimal("-1")),
         ("charge", Decimal("NaN")),
+        ("charge", Decimal("sNaN")),
+        ("charge", Decimal("Infinity")),
+        ("charge", Decimal("1e131072")),
+        ("charge", Decimal("1e-16384")),
         ("generation_id", None),
         ("generation_id", {}),
         ("generation_id", "bad\n"),
@@ -230,31 +269,36 @@ def test_executor_refuses_malformed_completion_facts(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment("CP-1", delivered),
+            **_attempt(conn, delivered),
             provider=_Malformed(_body(source_id)),
         )
     assert "private response text" not in repr(caught.value)
     assert caught.value.__cause__ is None
 
 
+@pytest.mark.parametrize("charge", [Decimal("0"), Decimal("0.001")])
 def test_executor_captures_host_model_before_completion(
     admitted: tuple[StoreConnection, UUID, list[Delivery]],
     bundle: Bundle,
+    charge: Decimal,
 ) -> None:
     conn, source_id, delivered = admitted
 
     class _ChangesModel(_Stub):
         def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
             self.model = "a-different/model"
-            return super().complete(prompt, json_object=json_object)
+            return replace(
+                super().complete(prompt, json_object=json_object), charge=charge
+            )
 
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment("CP-1", delivered),
+        **_attempt(conn, delivered),
         provider=_ChangesModel(_body(source_id)),
     )
     assert outcome.model == "a-model/for-the-test"
+    assert outcome.charge == charge
 
 
 def _claims(source_id: UUID, *quotes: tuple[str, ...]) -> str:
@@ -296,7 +340,7 @@ def test_a_quote_that_does_not_anchor_refuses_its_claim_not_the_answer(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_claims(source_id, (GOOD,), (miss,))),
     )
 
@@ -315,7 +359,7 @@ def test_a_claim_survives_only_when_every_citation_anchors(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_claims(source_id, (GOOD, MISSING), (GOOD,))),
     )
 
@@ -337,7 +381,7 @@ def test_a_statement_the_boundary_refuses_still_refuses_the_answer(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment(module_id="CP-1", delivered=delivered),
+            **_attempt(conn, delivered),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -354,7 +398,7 @@ def test_the_stored_artifact_counts_the_claims_it_refused(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_claims(source_id, (GOOD,), (MISSING,))),
     )
 
@@ -373,7 +417,7 @@ def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment(module_id="CP-1", delivered=delivered),
+            **_attempt(conn, delivered),
             provider=_Stub(_body(source_id, quote="Total debt was USD 2,000.0m")),
         )
 
@@ -389,7 +433,7 @@ def test_a_citation_naming_undelivered_evidence_is_refused(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment(module_id="CP-1", delivered=delivered),
+            **_attempt(conn, delivered),
             provider=_Stub(_body(uuid4())),
         )
 
@@ -409,7 +453,7 @@ def test_an_undeclared_field_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment(module_id="CP-1", delivered=delivered),
+            **_attempt(conn, delivered),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -427,7 +471,7 @@ def test_an_uncited_claim_is_refused(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment(module_id="CP-1", delivered=delivered),
+            **_attempt(conn, delivered),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -463,7 +507,7 @@ def test_the_prompt_carries_the_authority_and_the_evidence(
     execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=stub,
     )
 
@@ -510,7 +554,7 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=OpenRouter(api_key=LIVE_KEY, model=LIVE_MODEL),
     )
 
@@ -568,7 +612,7 @@ def test_a_delivery_announces_the_page_its_block_sits_on(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(module_id="CP-1", delivered=delivered),
+        **_attempt(conn, delivered),
         provider=_Stub(_body(source_id, page=2)),
     )
     [claim] = outcome.envelope.claims
@@ -694,9 +738,7 @@ def test_the_stored_gate_artifact_carries_its_readiness(
     outcome = execute_module(
         conn,
         bundle,
-        assignment=Assignment(
-            module_id="CP-0", delivered=delivered, gate_expects=frozenset({"CP-1"})
-        ),
+        **_attempt(conn, delivered, "CP-0", gate_expects=frozenset({"CP-1"})),
         provider=_Stub(json.dumps(body)),
     )
 
@@ -768,9 +810,10 @@ def test_an_upstream_statement_is_not_citable_evidence(
         execute_module(
             conn,
             bundle,
-            assignment=Assignment(
-                module_id="CP-2",
-                delivered=delivered,
+            **_attempt(
+                conn,
+                delivered,
+                "CP-2",
                 upstream=(
                     Upstream(
                         module_id="CP-1",

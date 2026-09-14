@@ -140,6 +140,7 @@ def ran(
         "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
         (source_id,),
     ).fetchall()
+    conn.rollback()
     run_route(
         conn,
         blobs,

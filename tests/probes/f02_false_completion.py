@@ -13,7 +13,7 @@ import tempfile
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 
@@ -47,7 +47,9 @@ class ProviderWasCalled(AssertionError):
 
 
 class NoProvider:
-    def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
         raise ProviderWasCalled
 
 
