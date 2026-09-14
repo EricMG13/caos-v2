@@ -13,7 +13,7 @@ const FIXTURES = `${resolve(process.cwd(), "fixtures")}/`;
 // `chrome` carries only `{subject, served_role}` (composed into the legacy
 // `Chrome` shape by `@/chrome/compose`, not stored on the fixture itself), so
 // the generic legacy-chrome fixtures this file scans exclude them.
-const V1_CUTOVER = ["directory", "upload"];
+const V1_CUTOVER = ["directory", "upload", "run"];
 const documents = (): [string, AnyDocument][] =>
   [
     ...SECTIONS.filter((section) => !V1_CUTOVER.includes(section)).map(
@@ -122,7 +122,6 @@ describe("the chrome", () => {
   });
 
   test("every refusal a fixture carries reads as a clause after 'clears when', and names no build phase", () => {
-    const frames = readdirSync(`${FIXTURES}run/frames`).map((name) => `run/frames/${name}`);
     const clauses: string[] = [];
     const walk = (value: unknown): void => {
       if (Array.isArray(value)) return value.forEach(walk);
@@ -134,9 +133,9 @@ describe("the chrome", () => {
       Object.values(record).forEach(walk);
     };
     for (const [, doc] of documents()) walk(doc);
-    for (const name of frames) walk(JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8")));
-    // A scan that found nothing would pass every assertion below.
-    expect(clauses.length).toBeGreaterThan(20);
+    // A scan that found nothing would pass every assertion below. Run frames
+    // are v1 since 4.1i and carry no refusals; 4.1j retires this legacy scan.
+    expect(clauses.length).toBeGreaterThan(10);
     for (const clause of clauses) {
       // Every surface reads it as "Clears when " + clause + ".".
       expect(clause).toMatch(/^[a-z]/);

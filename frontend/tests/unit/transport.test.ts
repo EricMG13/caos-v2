@@ -41,7 +41,7 @@ describe("the wire", () => {
     // marker), so their fixtures no longer carry the legacy pinned keys this
     // test checks; `test_every_enabled_demo_fixture_is_a_valid_v1_document`
     // (tests/unit/directory.test.tsx) is their equivalent gate.
-    const V1_CUTOVER = ["directory", "upload"];
+    const V1_CUTOVER = ["directory", "upload", "run"];
     const documents = [
       ...SECTIONS.filter((section) => !V1_CUTOVER.includes(section)).map(
         (section) => `${section}.json`,
@@ -49,7 +49,6 @@ describe("the wire", () => {
       ...readdirSync(`${FIXTURES}states`)
         .filter((name) => !V1_CUTOVER.some((section) => name.startsWith(`${section}.`)))
         .map((name) => `states/${name}`),
-      ...readdirSync(`${FIXTURES}run/frames`).map((name) => `run/frames/${name}`),
     ];
     expect(documents.length).toBeGreaterThanOrEqual(9);
     for (const name of documents) {

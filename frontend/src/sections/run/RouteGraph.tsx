@@ -1,15 +1,18 @@
 // The resolved route as a DAG: one column per stage, one row per node in the
 // stage, typed edges as SVG lines, the one QA_GATE drawn through a diamond.
-// Node states are the bundle's four, each with its reason under it.
+// Node states are the bundle's four; edges come from each node's own
+// `waiting_on` (v1 carries no separate edge list — brief 4.1, slice 4.1i).
 import { RouteLegend } from "./RouteLegend";
+import { reasonOf, runningOf } from "./reason";
 import { SeverityMark } from "@/chrome/SeverityMark";
-import type { RouteEdge, RouteNode, Stage } from "@/wire/run";
+import type { AttemptView } from "./types";
 import type { EdgeType, NodeState, Severity } from "@/wire";
+import type { NodeView } from "@/wire/v1";
 
 export const NODE_W = 128;
-// Tall enough for the id, the name, the state and two whole lines of reason;
-// at 62 the second reason line was cut through the middle. Both sizes are set
-// on each node and stage header here, not in caos.css, so each is one number.
+// Tall enough for the id, the state and two whole lines of reason; at 62 the
+// second reason line was cut through the middle. Both sizes are set on each
+// node and stage header here, not in caos.css, so each is one number.
 export const NODE_H = 76;
 export const COL_GAP = 40;
 export const ROW_H = NODE_H + 12;
@@ -19,7 +22,7 @@ const TOP = 30;
 const PAD_BOTTOM = 10;
 
 export interface PlacedNode {
-  module_id: string;
+  route_node_id: string;
   stage: number;
   col: number;
   row: number;
@@ -34,7 +37,7 @@ export interface RouteLayout {
 }
 
 /** Pure: columns by ascending stage, rows in the given order within a stage. */
-export function layoutRoute(nodes: Pick<RouteNode, "module_id" | "stage">[]): RouteLayout {
+export function layoutRoute(nodes: Pick<NodeView, "route_node_id" | "stage">[]): RouteLayout {
   const stages = [...new Set(nodes.map((node) => node.stage))].sort((a, b) => a - b);
   const columns = stages.map((stage, col) => ({ stage, x: PAD_X + col * (NODE_W + COL_GAP) }));
   const rows = new Map<number, number>();
@@ -43,7 +46,7 @@ export function layoutRoute(nodes: Pick<RouteNode, "module_id" | "stage">[]): Ro
     const row = rows.get(node.stage) ?? 0;
     rows.set(node.stage, row + 1);
     return {
-      module_id: node.module_id,
+      route_node_id: node.route_node_id,
       stage: node.stage,
       col,
       row,
@@ -68,18 +71,18 @@ const EDGE_CLASS: Record<EdgeType, string> = {
   CONDITIONAL: "cond",
 };
 
-export function severityOf(node: Pick<RouteNode, "state" | "running">): Severity {
+export function severityOf(node: Pick<NodeView, "state">, running: boolean): Severity {
   const by: Record<NodeState, Severity> = {
     COMPLETE: "SUCCESS",
-    RUNNABLE: node.running ? "RUNNING" : "IDLE",
+    RUNNABLE: running ? "RUNNING" : "IDLE",
     RESTRICTED: "WARNING",
     BLOCKED: "CRITICAL",
   };
   return by[node.state];
 }
 
-function stateWord(node: RouteNode): string {
-  if (node.state === "RUNNABLE") return node.running ? "RUNNABLE · RUNNING" : "RUNNABLE · FRONTIER";
+function stateWord(node: NodeView, running: boolean): string {
+  if (node.state === "RUNNABLE") return running ? "RUNNABLE · RUNNING" : "RUNNABLE · FRONTIER";
   return node.state;
 }
 
@@ -102,36 +105,55 @@ function segment(from: PlacedNode, to: PlacedNode): Segment {
   return { x1: from.x + NODE_W, y1: from.y + NODE_H / 2, x2: to.x, y2: to.y + NODE_H / 2 };
 }
 
+interface EdgeLine {
+  from: string;
+  to: string;
+  type: EdgeType;
+}
+
+/** Every edge the route carries, derived from each node's own `waiting_on`. */
+export function edgesOf(
+  nodes: readonly Pick<NodeView, "route_node_id" | "waiting_on">[],
+): EdgeLine[] {
+  const lines: EdgeLine[] = [];
+  for (const node of nodes) {
+    for (const edge of node.waiting_on) {
+      lines.push({ from: edge.source, to: node.route_node_id, type: edge.type });
+    }
+  }
+  return lines;
+}
+
 export function RouteGraph({
   nodes,
-  edges,
-  stages,
+  attempts,
   selected,
   onSelect,
 }: {
-  nodes: RouteNode[];
-  edges: RouteEdge[];
-  stages: Stage[];
+  nodes: NodeView[];
+  attempts: AttemptView[];
   selected: string | null;
-  onSelect: (moduleId: string) => void;
+  onSelect: (routeNodeId: string) => void;
 }) {
   const layout = layoutRoute(nodes);
-  const at = new Map(layout.nodes.map((placed) => [placed.module_id, placed]));
-  const labelOf = new Map(stages.map((stage) => [stage.n, stage.label]));
-  const lines: { key: string; cls: string; seg: Segment; gate: boolean }[] = [];
+  const at = new Map(layout.nodes.map((placed) => [placed.route_node_id, placed]));
+  const moduleOf = new Map(nodes.map((node) => [node.route_node_id, node.module_id]));
+  const edges = edgesOf(nodes);
+  const lines: { key: string; cls: string; seg: Segment }[] = [];
   let gate: { seg: Segment; from: string; to: string } | null = null;
   for (const edge of edges) {
     const from = at.get(edge.from);
     const to = at.get(edge.to);
     if (!from || !to) continue;
     const seg = segment(from, to);
-    if (edge.type === "QA_GATE" && !gate) gate = { seg, from: edge.from, to: edge.to };
-    lines.push({
-      key: `${edge.from}→${edge.to}`,
-      cls: EDGE_CLASS[edge.type],
-      seg,
-      gate: edge.type === "QA_GATE",
-    });
+    if (edge.type === "QA_GATE" && !gate) {
+      gate = {
+        seg,
+        from: moduleOf.get(edge.from) ?? edge.from,
+        to: moduleOf.get(edge.to) ?? edge.to,
+      };
+    }
+    lines.push({ key: `${edge.from}→${edge.to}`, cls: EDGE_CLASS[edge.type], seg });
   }
   const gateMid = gate
     ? { x: (gate.seg.x1 + gate.seg.x2) / 2, y: (gate.seg.y1 + gate.seg.y2) / 2 }
@@ -150,43 +172,40 @@ export function RouteGraph({
               <line key={key} className={cls} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2} />
             ))}
           </svg>
-          {layout.columns.map((column) => {
-            // Two lines fit above the nodes; a longer name is clamped and whole in its title.
-            const label = labelOf.get(column.stage) ?? `Stage ${column.stage}`;
-            return (
-              <span
-                key={column.stage}
-                className="stagehdr"
-                style={{ left: column.x, width: NODE_W }}
-                title={label}
-              >
-                {label}
-              </span>
-            );
-          })}
+          {layout.columns.map((column) => (
+            <span
+              key={column.stage}
+              className="stagehdr"
+              style={{ left: column.x, width: NODE_W }}
+              title={`Stage ${column.stage}`}
+            >
+              {`Stage ${column.stage}`}
+            </span>
+          ))}
           {nodes.map((node) => {
-            const placed = at.get(node.module_id);
+            const placed = at.get(node.route_node_id);
             if (!placed) return null;
-            const on = node.module_id === selected;
-            const cls = `node ${node.state.toLowerCase()}${node.running ? " running" : ""}${node.is_gate ? " gate" : ""}${on ? " sel" : ""}`;
+            const running = runningOf(node, attempts);
+            const on = node.route_node_id === selected;
+            const cls = `node ${node.state.toLowerCase()}${running ? " running" : ""}${node.awaiting_gate ? " gate" : ""}${on ? " sel" : ""}`;
             return (
               <button
-                key={node.module_id}
+                key={node.route_node_id}
                 type="button"
                 className={cls}
                 data-node={node.module_id}
+                data-route-node={node.route_node_id}
                 data-state={node.state}
                 aria-pressed={on}
                 style={{ left: placed.x, top: placed.y, width: NODE_W, height: NODE_H }}
-                onClick={() => onSelect(node.module_id)}
+                onClick={() => onSelect(node.route_node_id)}
               >
                 <span className="id">{node.module_id}</span>
-                <span className="nm">{node.name}</span>
                 <span className="st">
-                  <SeverityMark severity={severityOf(node)} pulse={node.running} />
-                  {stateWord(node)}
+                  <SeverityMark severity={severityOf(node, running)} pulse={running} />
+                  {stateWord(node, running)}
                 </span>
-                <span className="why">{node.reason}</span>
+                <span className="why">{reasonOf(node)}</span>
               </button>
             );
           })}

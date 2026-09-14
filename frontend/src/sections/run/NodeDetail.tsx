@@ -1,84 +1,50 @@
 // The right column is about the selected node: its state and reason, the
-// edges in, its attempts, the artifact digest, the limitation when RESTRICTED,
-// and the node-level Accept — visible, refused NODE_NOT_ACCEPTABLE until COMPLETE.
+// edges in, the gate's own verdict when it named one, and its attempts.
+// No accept action here (brief 4.1: commands are 4.2).
 import { severityOf } from "./RouteGraph";
+import { reasonOf, runningOf } from "./reason";
 import { SeverityMark, toneOf } from "@/chrome/SeverityMark";
-import { RefusedControl } from "@/controls/RefusedControl";
-import type { Attempt, RouteEdge, RouteNode, Stage } from "@/wire/run";
-import type { Refusal } from "@/wire";
+import type { AttemptView } from "./types";
+import type { NodeView } from "@/wire/v1";
 
-const ATTEMPT_TONE: Record<Attempt["state"], string> = {
-  ACCEPTED: "ok",
-  INDETERMINATE: "run",
-  REFUSED: "crit",
-};
-
-export function nodeAccept(node: RouteNode): Refusal | null {
-  if (node.state === "COMPLETE") return null;
-  return {
-    code: "NODE_NOT_ACCEPTABLE",
-    clears: `${node.module_id} has an accepted attempt and is COMPLETE; it is ${node.state} — ${node.reason}`,
-  };
-}
-
-export function NodeDetail({
-  node,
-  edges,
-  attempts,
-  stages,
-}: {
-  node: RouteNode;
-  edges: RouteEdge[];
-  attempts: Attempt[];
-  stages: Stage[];
-}) {
-  const edgesIn = edges.filter((edge) => edge.to === node.module_id);
-  const severity = severityOf(node);
-  const stage = stages.find((s) => s.n === node.stage)?.label ?? `Stage ${node.stage}`;
+export function NodeDetail({ node, attempts }: { node: NodeView; attempts: AttemptView[] }) {
+  const running = runningOf(node, attempts);
+  const severity = severityOf(node, running);
+  const mine = attempts.filter((attempt) => attempt.route_node_id === node.route_node_id);
   return (
     <>
       <section className="pnl" data-node-detail={node.module_id}>
         <header>
           <h2>Selected node</h2>
           <span className="cp">
-            {node.module_id} · {node.name}
+            {node.module_id} · {node.route_node_id}
           </span>
           <span className={`tag ${toneOf(severity)} right`}>
-            <SeverityMark severity={severity} pulse={node.running} />
+            <SeverityMark severity={severity} pulse={running} />
             {node.state}
           </span>
         </header>
         <div className="pb">
           <dl className="kv">
             <dt>Reason</dt>
-            <dd className="wrap">{node.reason}</dd>
+            <dd className="wrap">{reasonOf(node)}</dd>
             <dt>Stage</dt>
-            <dd>{stage}</dd>
+            <dd>{node.stage}</dd>
             <dt>Edges in</dt>
             <dd>
-              {edgesIn.length
-                ? edgesIn.map((edge) => `${edge.type} ${edge.from}`).join(" · ")
+              {node.waiting_on.length
+                ? node.waiting_on.map((edge) => `${edge.type} ${edge.source}`).join(" · ")
                 : "none"}
             </dd>
-            <dt>Artifact</dt>
-            <dd>{node.artifact_sha256 ? `sha256:${node.artifact_sha256.slice(0, 12)}…` : "—"}</dd>
-            {node.extension ? (
+            <dt>Awaiting gate</dt>
+            <dd>{node.awaiting_gate ? "yes" : "no"}</dd>
+            {node.gate_verdict ? (
               <>
-                <dt>Placed by</dt>
-                <dd>host extension · stage {node.stage}</dd>
+                <dt>Gate verdict</dt>
+                <dd data-gate-verdict>{node.gate_verdict}</dd>
               </>
             ) : null}
           </dl>
-          {node.limitation ? (
-            <div className="note limitation" data-limitation>
-              <b>Limitation carried forward.</b> {node.limitation}
-            </div>
-          ) : null}
-          <div className="actions">
-            <RefusedControl refusal={nodeAccept(node)} className="rb solid">
-              Accept
-            </RefusedControl>
-          </div>
         </div>
       </section>
       <section className="pnl">
@@ -87,15 +53,14 @@ export function NodeDetail({
           <span className="cp">one row per try</span>
         </header>
         <div className="pb flush">
-          {attempts.length ? (
-            attempts.map((attempt) => (
-              <div key={attempt.n} className="att" data-attempt={attempt.n}>
-                <span className="a">attempt {attempt.n}</span>
-                <span>
-                  started {attempt.started_at} · charge {attempt.charge ?? "—"} ·{" "}
-                  {attempt.generation_id ?? "no generation id"}
+          {mine.length ? (
+            mine.map((attempt) => (
+              <div key={attempt.attempt_id} className="att" data-attempt={attempt.ordinal ?? "—"}>
+                <span className="a">attempt {attempt.ordinal ?? "unassigned"}</span>
+                <span>started {attempt.started_at}</span>
+                <span className={attempt.accepted ? "t-ok" : "t-run"}>
+                  {attempt.accepted ? "ACCEPTED" : "NOT ACCEPTED"}
                 </span>
-                <span className={`t-${ATTEMPT_TONE[attempt.state]}`}>{attempt.state}</span>
               </div>
             ))
           ) : (

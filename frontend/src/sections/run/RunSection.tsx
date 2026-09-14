@@ -1,109 +1,189 @@
-// Run — the resolved route and its frontier (IA_SPEC.md 4.5). Centre: the DAG
-// (tab "route") or the plan gate above it (tab "plan"). Right: the selected node.
-// Compilation, acceptance and plan approval live only here.
+// Run — the resolved route and its frontier (IA_SPEC.md 4.5), cut over to the
+// v1 wire (brief 4.1, slice 4.1i). No stages list, no selection state on the
+// wire, no charge or generation id, no plan-gate approve/reserve and no
+// accept action: those arrive with commands (4.2). `displayed_run_id` and
+// `latest_run_id` are two identities and are never collapsed into one.
 import { useState } from "react";
+import { Link } from "react-router";
 import { NodeDetail } from "./NodeDetail";
-import { PlanGate } from "./PlanGate";
 import { RouteGraph } from "./RouteGraph";
-import type { ViewProps } from "@/app/views";
+import type { GateView } from "./types";
 import type { NodeState } from "@/wire";
-
-interface Choice {
-  run: string;
-  module_id: string;
-}
+import type { RunSectionDocument } from "@/wire/v1";
 
 const STATES: NodeState[] = ["COMPLETE", "RUNNABLE", "RESTRICTED", "BLOCKED"];
+const GATE_LABEL: Record<GateView["gate"], string> = {
+  SOURCE_SET: "Source set",
+  RESEARCH_PLAN: "Research plan",
+};
 
-export function RunSection({ document, tab }: ViewProps<"run">) {
+/** The digest, shortened for the run summary; the full value is the `title`. */
+function abbreviate(digest: string | null): string {
+  if (digest === null) return "not pinned";
+  return digest.length > 12 ? `${digest.slice(0, 8)}…${digest.slice(-4)}` : digest;
+}
+
+function runHref(caseId: string, runId: string): string {
+  return `?case=${encodeURIComponent(caseId)}&run=${encodeURIComponent(runId)}`;
+}
+
+export function RunSection({ document }: { document: RunSectionDocument; tab: string | null }) {
   const body = document.body;
-  const view = tab ?? document.chrome.tabs[0]?.id ?? "route";
-  const [choice, setChoice] = useState<Choice | null>(null);
-  // The reader's choice survives a stream refetch of the same run; it is
-  // dropped for another run and falls back to the document's own selection.
-  const chosen = choice?.run === body.run_id ? choice.module_id : null;
+  const [choice, setChoice] = useState<{ run: string; node: string } | null>(null);
+
+  // Defensive: the transport classes `run: null` as observed-empty and never
+  // mounts this view for it, but a direct caller (a unit test, a future
+  // composer) may still hand one over — this names it rather than crashing.
+  if (body.run === null) {
+    return (
+      <section className="pnl" data-run-empty>
+        <header>
+          <h2>No run</h2>
+        </header>
+        <div className="pb">This case has no run to show.</div>
+      </section>
+    );
+  }
+
+  const run = body.run;
+  const stale =
+    body.displayed_run_id !== null &&
+    body.latest_run_id !== null &&
+    body.displayed_run_id !== body.latest_run_id;
+  const chosen = choice?.run === run.run_id ? choice.node : null;
   const selectedId =
-    (chosen && body.nodes.some((node) => node.module_id === chosen) ? chosen : null) ??
-    body.selected ??
-    body.nodes[0]?.module_id ??
+    (chosen && run.nodes.some((node) => node.route_node_id === chosen) ? chosen : null) ??
+    run.nodes[0]?.route_node_id ??
     null;
-  const selected = body.nodes.find((node) => node.module_id === selectedId) ?? null;
-  const pinned = body.gate.state === "PINNED";
+  const selected = run.nodes.find((node) => node.route_node_id === selectedId) ?? null;
   const tally = STATES.map(
-    (state) => `${body.nodes.filter((node) => node.state === state).length} ${state}`,
+    (state) => `${run.nodes.filter((node) => node.state === state).length} ${state}`,
   ).join(" · ");
 
   return (
-    <div className="cols two" data-run={body.run_id}>
+    <div className="cols two" data-run={run.run_id}>
       <div className="col">
-        {view === "plan" ? (
-          <PlanGate
-            gate={body.gate}
-            runId={body.run_id}
-            nodeCount={body.nodes.length}
-            edgeCount={body.edges.length}
-          />
+        {body.runs.length > 1 ? (
+          <section className="pnl" data-run-selector>
+            <header>
+              <h2>Runs</h2>
+              <span className="cp">displayed and latest are named separately</span>
+            </header>
+            <div className="pb flush">
+              {body.runs.map((summary) => {
+                const displayed = summary.run_id === body.displayed_run_id;
+                const latest = summary.run_id === body.latest_run_id;
+                const label = displayed
+                  ? latest
+                    ? "DISPLAYED · LATEST"
+                    : "DISPLAYED · NOT LATEST"
+                  : latest
+                    ? "LATEST"
+                    : "";
+                return (
+                  <Link
+                    key={summary.run_id}
+                    className={`att${displayed ? " sel" : ""}`}
+                    data-run-row={summary.run_id}
+                    data-displayed={displayed}
+                    data-latest={latest}
+                    to={runHref(body.case_id, summary.run_id)}
+                  >
+                    <span className="a">{summary.status}</span>
+                    <span>{summary.created_at}</span>
+                    <span>{label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+        {stale ? (
+          <div className="note" data-stale-run>
+            <b>This run is not the latest.</b> Displayed run {body.displayed_run_id}; the latest run
+            for this case is {body.latest_run_id}.
+          </div>
         ) : null}
         <section className="pnl">
           <header>
-            <h2>
-              {pinned
-                ? "Resolved route — pinned at the plan gate"
-                : "Resolved route — preview, not yet pinned"}
-            </h2>
+            <h2>Resolved route</h2>
             <span className="cp">
-              {body.profile} · build {body.build_id}
+              build {run.build_id ?? "not pinned"} · digest {abbreviate(run.route_digest)}
             </span>
-            <span className="tag right">
-              {body.nodes.length} NODES · {body.edges.length} EDGES
-            </span>
+            <span className="tag right">{run.nodes.length} NODES</span>
             <span className="tag acc">{tally}</span>
           </header>
+          {run.route_digest === null ? (
+            <div className="note" data-route-not-pinned>
+              The route is not yet pinned; nothing has run.
+            </div>
+          ) : null}
           <div className="pb flush">
             <RouteGraph
-              nodes={body.nodes}
-              edges={body.edges}
-              stages={body.stages}
+              nodes={run.nodes}
+              attempts={run.attempts}
               selected={selectedId}
-              onSelect={(module_id) => setChoice({ run: body.run_id, module_id })}
+              onSelect={(routeNodeId) => setChoice({ run: run.run_id, node: routeNodeId })}
             />
           </div>
         </section>
         <div className="note">
           <b>States are the bundle&apos;s, recomputed from accepted attempts — never stored.</b>{" "}
-          COMPLETE has an accepted artifact. RUNNABLE has every blocking edge satisfied and is in
-          the frontier. RESTRICTED runs and carries its limitation forward. BLOCKED names the edge
-          and the upstream it waits on. Recovery is recomputation: kill the process and the frontier
-          is the same.
+          COMPLETE has an accepted artifact. RUNNABLE is in the frontier. RESTRICTED runs and
+          carries its limitation forward. BLOCKED names the edge and the upstream it waits on.
         </div>
       </div>
       <div className="col right">
-        {selected ? (
-          <NodeDetail
-            node={selected}
-            edges={body.edges}
-            attempts={body.attempts[selected.module_id] ?? []}
-            stages={body.stages}
-          />
-        ) : null}
+        {selected ? <NodeDetail node={selected} attempts={run.attempts} /> : null}
         <section className="pnl">
           <header>
             <h2>Run</h2>
-            <span className="cp">{body.run_id}</span>
+            <span className="cp">{run.run_id}</span>
           </header>
           <div className="pb">
             <dl className="kv">
+              <dt>Status</dt>
+              <dd>{run.status}</dd>
+              <dt>Created</dt>
+              <dd>{run.created_at}</dd>
               <dt>Route digest</dt>
-              <dd className="wrap">{body.gate.route_digest}</dd>
+              <dd className="wrap" title={run.route_digest ?? "not pinned"}>
+                {abbreviate(run.route_digest)}
+              </dd>
               <dt>Build</dt>
-              <dd>{body.build_id}</dd>
-              <dt>Profile</dt>
-              <dd>{body.profile}</dd>
-              <dt>Plan</dt>
-              <dd>{pinned ? "PINNED" : "RESOLVED · NOT PINNED"}</dd>
-              <dt>Reserved</dt>
-              <dd>{body.gate.reserved ?? "nothing reserved"}</dd>
+              <dd>{run.build_id ?? "not pinned"}</dd>
+              <dt>Source set</dt>
+              <dd>{run.source_set_version ?? "not pinned"}</dd>
+              {run.subject ? (
+                <>
+                  <dt>Subject</dt>
+                  <dd>
+                    {run.subject.issuer_name} · {run.subject.reporting_period}
+                  </dd>
+                </>
+              ) : null}
             </dl>
+          </div>
+        </section>
+        <section className="pnl">
+          <header>
+            <h2>Gates</h2>
+            <span className="cp">{run.gates.length} of 2</span>
+          </header>
+          <div className="pb flush">
+            {run.gates.length ? (
+              run.gates.map((gate) => (
+                <div key={gate.gate} className="att" data-gate-row={gate.gate}>
+                  <span className="a">{GATE_LABEL[gate.gate]}</span>
+                  <span className={gate.state === "RELEASED" ? "t-ok" : "t-run"}>{gate.state}</span>
+                </div>
+              ))
+            ) : (
+              <div className="att">
+                <span className="a">none</span>
+                <span>no gate recorded for this run</span>
+              </div>
+            )}
           </div>
         </section>
       </div>
