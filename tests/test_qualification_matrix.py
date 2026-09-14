@@ -22,6 +22,7 @@ question they would ask is what the other cases did.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -35,7 +36,7 @@ from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
-from server.methodology.bundle import Bundle
+from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion
 from server.qualification.matrix import (
@@ -196,6 +197,36 @@ def _matrix(ran: Ran, qualification: QualificationSet) -> Matrix:
         qualification=qualification,
         runs={"acme-2026-refinancing": ran.run_id},
     )
+
+
+def test_matrix_refuses_manifest_changed_after_its_last_proof(
+    ran: Ran, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.qualification import matrix
+
+    root = tmp_path / "bundle"
+    shutil.copytree(VENDORED, root)
+    bundle = Bundle(root)
+    original = matrix._cited
+
+    def mutate(
+        conn: StoreConnection, blobs: BlobStore, run_id: UUID
+    ) -> set[tuple[str, str, str]]:
+        cited = original(conn, blobs, run_id)
+        manifest = root / MANIFEST_NAME
+        manifest.write_bytes(manifest.read_bytes() + b" ")
+        return cited
+
+    monkeypatch.setattr(matrix, "_cited", mutate)
+    with pytest.raises(Refusal) as caught:
+        build_matrix(
+            ran.conn,
+            ran.blobs,
+            bundle,
+            qualification=QualificationSet(cases=(_one_case(ran),)),
+            runs={"acme-2026-refinancing": ran.run_id},
+        )
+    assert caught.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
 
 
 def test_the_matrix_reports_every_case_and_concludes_nothing(ran: Ran) -> None:
