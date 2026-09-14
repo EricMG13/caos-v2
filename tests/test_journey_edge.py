@@ -272,3 +272,47 @@ def test_the_orchestrator_refuses_without_its_stack_files(
     (tmp_path / "compose.smoke.yaml").write_text("services: {}\n")
     assert run.main() == 2, "one file present is still a refusal"
     assert "playwright.journey.config.ts" in capsys.readouterr().err
+
+
+class _Body(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b"{}"
+
+
+class _Restarting(httpx.AsyncBaseTransport):
+    """An upstream that refuses its first connects, as a restarting API does."""
+
+    def __init__(self, refusals: int) -> None:
+        self.refusals = refusals
+        self.sent: list[str] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.sent.append(request.method)
+        if self.refusals:
+            self.refusals -= 1
+            raise httpx.ConnectError("refused", request=request)
+        return httpx.Response(200, stream=_Body())
+
+
+def test_a_get_waits_out_a_restarting_upstream_and_an_unsafe_method_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A browser's stream reconnect meets the API again instead of an error that
+    closes its EventSource; a POST that never connected is answered 502 once."""
+    monkeypatch.setattr(edge, "UPSTREAM_WAIT_SECONDS", 5.0)
+
+    async def run() -> None:
+        restarting = _Restarting(refusals=2)
+        app = edge.make_edge(UPSTREAM, TOKEN, transport=restarting)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:18080"
+        ) as client:
+            await _logged_in(client, "analyst")
+            assert (await client.get("/api/v1/directory")).status_code == 200
+            assert restarting.sent == ["GET", "GET", "GET"]
+            restarting.refusals, restarting.sent = 1, []
+            answer = await client.post("/api/v1/cases", content=b"{}")
+            assert answer.status_code == 502
+            assert restarting.sent == ["POST"]
+
+    asyncio.run(run())
