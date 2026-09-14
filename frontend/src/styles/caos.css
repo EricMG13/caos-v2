@@ -387,6 +387,7 @@ button.pill{height: 24px;font-family: var(--font-mono)}
 .frontier .why{grid-column: 1/-1;font: 500 8px var(--font-mono);color: var(--caos-muted)}
 .att{display: grid;grid-template-columns: auto 1fr auto;gap: 2px 8px;padding: 5px 10px;border-bottom: 1px solid var(--hairline);font: 500 9px var(--font-mono);color: var(--caos-muted)}
 .att .a{color: var(--caos-text)}
+a.att{min-height: 24px;align-items: center}
 /* inputs */
 .tin{background: var(--caos-bg);border: 1px solid var(--caos-border);border-radius: 4px;color: var(--caos-text);font: 500 10px var(--font-mono);padding: 4px 8px;height: 24px;min-width: 0}
 .tin::placeholder{color: var(--caos-muted)}
