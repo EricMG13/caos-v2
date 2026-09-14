@@ -1,53 +1,37 @@
-"""`cash_flow_forecast` — the deterministic forecast the host owns.
+"""Bounded, deterministic forecast contract (decision §54).
 
-`SYSTEM_SPEC.md` §6.1. CP-2G states its roll-forward rules in prose and emits
-driver rows; no calculator computed the projection, so leverage and coverage were
-recomputed deterministically *over* arithmetic a model had performed. This moves
-the arithmetic here and leaves the model choosing drivers, with rationale and
-evidence.
-
-Six invariants, and the three that shape every line below:
-
-*Decimal, never float.* JSON has no decimal type, so every numeric arrives as a
-**string** and is parsed with `Decimal(str)`. A JSON float in a numeric field is
-`METHODOLOGY_INPUT_INVALID` rather than a silent coercion, because binary
-floating point cannot represent a cent. There is no `float(` in this module and
-output numerics are strings.
-
-*The residual is explicit and never forced to zero.* The model states what it
-believes each period closes at; the host computes the same thing from the two
-identities. The residual is the difference. Forcing it to zero -- by computing
-the closing balance and calling it the answer -- would make the reconciliation
-vacuous, which is the whole failure §6.1 exists to prevent. A residual larger
-than the tolerance makes the period unavailable and says so.
-
-*Unavailability propagates forward.* A period that could not be computed makes
-every later period in that case unavailable. It is never read as zero growth.
-
-Pure: no I/O, no clock, no randomness. Same inputs, byte-identical output.
+Money is parsed only after collection ceilings, and computed under one explicit
+Decimal context. Missing drivers and failed reconciliation remain unavailable.
+The dictionary API is serialized as sorted, compact JSON by forecast_bytes.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import json
+import re
+from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import (
+    ROUND_HALF_EVEN,
+    Context,
+    Decimal,
+    DivisionByZero,
+    InvalidOperation,
+    Overflow,
+    localcontext,
+)
 from typing import Any
 
+from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 
-# Host-enforced before anything else runs, so model-authored input cannot widen
-# what a calculation may cost (`SYSTEM_SPEC.md` §6.1).
 MAX_FORECAST_PERIODS = 40
 MAX_FORECAST_CASES = 6
 MAX_FORECAST_FACILITIES = 40
 MAX_WORK = 100_000
-
-DEFAULT_TOLERANCE = Decimal("0.001")
-READY = "READY"
-
-# Every movement a driver row may state. Absent means zero; present and not a
-# numeric string means the row is refused rather than read as zero.
+MAX_AMORTISATION = 2_000
+_NUMBER = re.compile(r"-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?")
 _MOVEMENTS = (
     "revenue",
     "ebitda",
@@ -62,385 +46,362 @@ _MOVEMENTS = (
     "pik",
     "capitalised_interest",
     "fx_perimeter",
-    "financing_investing",
 )
-# What the model says the period closes at. The host computes both and the
-# difference is the residual, so these are required: a driver row that states no
-# result gives nothing to reconcile against.
-_STATED = ("stated_closing_debt", "stated_closing_cash")
+_SIGNED = {"acquisitions_disposals", "fx_perimeter"}
+_STATED = {"stated_closing_debt", "stated_closing_cash"}
+_PAIR = {"case", "period_id"}
 
 
 @dataclass(frozen=True, slots=True)
 class _Inputs:
-    """Everything the projection reads that is the same for every period.
-
-    One object rather than four arguments threaded through two functions: they
-    are all the validated request, and passing them separately made the
-    signatures wide enough that the argument ceiling refused them -- which is
-    the ceiling doing its job.
-    """
-
-    drivers: Mapping[tuple[str, str], Mapping[str, Any]]
-    contractual: Mapping[tuple[str, str], Decimal]
+    periods: list[dict[str, Any]]
+    drivers: dict[tuple[str, str], dict[str, Any]]
+    repayments: dict[tuple[str, str], Decimal]
+    opening: tuple[Decimal, Decimal]
     tolerance: Decimal
-
-    def driver_for(self, period: Period) -> Mapping[str, Any]:
-        driver = self.drivers.get((period.case, period.period_id))
-        if driver is None:
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        if str(driver.get("status")) != READY:
-            raise Refusal(RefusalCode.FORECAST_DRIVER_NOT_READY)
-        return driver
-
-    def repayment_for(self, period: Period) -> Decimal:
-        return self.contractual.get((period.case, period.period_id)) or Decimal(0)
-
-
-@dataclass(frozen=True, slots=True)
-class Period:
-    """One case-period of the requested horizon."""
-
-    period_id: str
-    fiscal_year: str
-    case: str
-    days: Decimal
+    units: dict[str, Any]
+    perimeter: str
 
 
 def cash_flow_forecast(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Project every requested case-period, or refuse.
+    """Return one row per requested pair, preserving caller order."""
+    _enforce_work_factor(request)
+    # A fresh Context also isolates exponent limits, flags and traps.
+    with localcontext(
+        Context(
+            prec=38,
+            rounding=ROUND_HALF_EVEN,
+            traps=[InvalidOperation, DivisionByZero, Overflow],
+        )
+    ):
+        inputs = _parse(request)
+        rows: list[dict[str, Any]] = []
+        checks = []
+        openings: dict[str, tuple[Decimal, Decimal]] = {}
+        previous: dict[str, dict[str, Any]] = {}
+        unavailable: set[str] = set()
+        for period in inputs.periods:
+            case = period["case"]
+            opening = openings.get(case, inputs.opening)
+            reason = _unavailable_reason(period, inputs, case in unavailable)
+            if reason is not None:
+                row = {**period, "unavailable_reason": reason}
+            else:
+                if case in previous:
+                    _check_chain(previous[case], opening)
+                row, debt, cash = _project_period(period, inputs, opening)
+                openings[case] = (debt, cash)
+                previous[case] = row
+            if row["unavailable_reason"] is not None:
+                unavailable.add(case)
+            rows.append(row)
+            checks.append(
+                {
+                    "check_id": f"residual:{case}:{period['period_id']}",
+                    "outcome": "PASS" if row["unavailable_reason"] is None else "FAIL",
+                    "reason": row["unavailable_reason"],
+                }
+            )
+        return {
+            "status": "incomplete" if unavailable else "complete",
+            "units": inputs.units,
+            "perimeter": inputs.perimeter,
+            "rows": rows,
+            "checks": checks,
+        }
 
-    Returns the shape `SYSTEM_SPEC.md` §6.1 describes: one row per requested
-    case-period with its movements, balances, residual, metrics and
-    `unavailable_reason`, plus `checks` and a `status` that is `complete` only
-    when every requested period computed.
-    """
-    periods = _periods(request)
-    _enforce_work_factor(periods, request)
-    inputs = _Inputs(
-        drivers=_drivers(request),
-        contractual=_contractual(request),
-        tolerance=_decimal(request.get("tolerance", "0.001"), "tolerance"),
+
+def forecast_bytes(request: Mapping[str, Any]) -> bytes:
+    """Canonical UTF-8 forecast output for the host calculator boundary."""
+    return json.dumps(
+        cash_flow_forecast(request),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode()
+
+
+def _object(
+    value: object, required: set[str], optional: set[str] | None = None
+) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or not required <= value.keys()
+        or value.keys() - required - (optional or set())
+    ):
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    return value
+
+
+def _rows(value: object, limit: int) -> list[dict[str, Any]]:
+    if (
+        not isinstance(value, list)
+        or len(value) > limit
+        or any(not isinstance(row, dict) for row in value)
+    ):
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    return value
+
+
+def _text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    try:
+        return BoundaryText.of(value, limit=64).value
+    except Refusal:
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID) from None
+
+
+def _pair(row: Mapping[str, Any]) -> tuple[str, str]:
+    return _text(row.get("case")), _text(row.get("period_id"))
+
+
+def _decimal(value: object, *, signed: bool = False) -> Decimal:
+    if (
+        not isinstance(value, str)
+        or len(value) > 26
+        or _NUMBER.fullmatch(value) is None
+    ):
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    amount = Decimal(value)
+    if not signed and amount < 0:
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    return amount
+
+
+def _enforce_work_factor(request: Mapping[str, Any]) -> None:
+    """Bound every collection before parsing even the first days or amount."""
+    _object(
+        request,
+        {"opening", "periods", "drivers", "contractual", "units", "perimeter"},
+        {"tolerance"},
     )
-    opening = _opening(request)
-
-    rows: list[dict[str, Any]] = []
-    checks: list[dict[str, str]] = []
-    for case in sorted({period.case for period in periods}):
-        rows.extend(
-            _project_case(
-                [period for period in periods if period.case == case],
-                inputs,
-                opening,
-                checks,
-            )
-        )
-
-    complete = bool(rows) and all(row["unavailable_reason"] is None for row in rows)
-    return {
-        "status": "complete" if complete else "incomplete",
-        "periods": rows,
-        "checks": checks,
-    }
+    opening = _object(
+        request["opening"], {"cash", "as_of_period_id", "debt_by_facility"}
+    )
+    facilities = _rows(opening["debt_by_facility"], MAX_FORECAST_FACILITIES)
+    periods = _rows(request["periods"], MAX_FORECAST_PERIODS * MAX_FORECAST_CASES)
+    _rows(request["drivers"], len(periods))
+    contractual = _object(request["contractual"], {"amortisation"})
+    _rows(contractual["amortisation"], MAX_AMORTISATION)
+    counts = Counter(_text(row.get("case")) for row in periods)
+    if (
+        not counts
+        or len(counts) > MAX_FORECAST_CASES
+        or max(counts.values()) > MAX_FORECAST_PERIODS
+    ):
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    if max(counts.values()) * len(counts) * (1 + len(facilities)) > MAX_WORK:
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
 
 
-def _project_case(
-    periods: Sequence[Period],
-    inputs: _Inputs,
-    opening: tuple[Decimal, Decimal],
-    checks: list[dict[str, str]],
-) -> list[dict[str, Any]]:
-    """One case, chained. `opening[n+1] == closing[n]`, checked rather than
-    assumed -- a break is `FORECAST_CHAIN_BROKEN`."""
-    opening_debt, opening_cash = opening
-    rows = []
-    unavailable_from: str | None = None
+def _parse(request: Mapping[str, Any]) -> _Inputs:
+    units = _object(request["units"], {"currency", "scale"})
+    if (
+        not isinstance(units["currency"], str)
+        or re.fullmatch("[A-Z]{3}", units["currency"]) is None
+    ):
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    if not isinstance(units["scale"], str) or units["scale"] not in {
+        "units",
+        "thousands",
+        "millions",
+        "billions",
+    }:
+        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+    periods = _periods(request["periods"])
+    pairs = {_pair(period) for period in periods}
+    facilities = {}
+    for row in request["opening"]["debt_by_facility"]:
+        _object(row, {"facility_id", "amount"})
+        facility = _text(row["facility_id"])
+        if facility in facilities:
+            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+        facilities[facility] = _decimal(row["amount"], signed=True)
+    _text(request["opening"]["as_of_period_id"])
+    return _Inputs(
+        periods,
+        _drivers(request["drivers"], pairs),
+        _contractual(request["contractual"]["amortisation"], pairs, set(facilities)),
+        (
+            sum(facilities.values(), Decimal(0)),
+            _decimal(request["opening"]["cash"], signed=True),
+        ),
+        _decimal(request.get("tolerance", "0.001")),
+        dict(units),
+        _text(request["perimeter"]),
+    )
 
-    for period in periods:
-        if unavailable_from is not None:
-            # Invariant 4: never read as zero growth.
-            rows.append(
-                _unavailable(
-                    period,
-                    opening_debt,
-                    opening_cash,
-                    f"a period earlier in this case is unavailable: {unavailable_from}",
-                )
-            )
-            continue
 
-        row, closing_debt, closing_cash = _project_period(
-            period, inputs, (opening_debt, opening_cash)
-        )
-        rows.append(row)
-        checks.append(
+def _periods(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    periods = []
+    seen = set()
+    for row in rows:
+        _object(row, _PAIR | {"fiscal_year", "days"})
+        case, period_id = _pair(row)
+        if (case, period_id) in seen:
+            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+        seen.add((case, period_id))
+        days = _decimal(row["days"])
+        if "." in row["days"] or not 1 <= days <= 366:
+            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+        periods.append(
             {
-                "check_id": f"residual:{period.case}:{period.period_id}",
-                "outcome": "PASS" if row["unavailable_reason"] is None else "FAIL",
-                "detail": str(row["residual"]),
+                "case": case,
+                "period_id": period_id,
+                "fiscal_year": _text(row["fiscal_year"]),
+                "days": row["days"],
             }
         )
-        if row["unavailable_reason"] is not None:
-            unavailable_from = period.period_id
-        opening_debt, opening_cash = closing_debt, closing_cash
+    return periods
 
-    return rows
+
+def _drivers(
+    rows: list[dict[str, Any]], pairs: set[tuple[str, str]]
+) -> dict[tuple[str, str], dict[str, Any]]:
+    drivers = {}
+    for row in rows:
+        _object(row, _PAIR | _STATED | {"status"}, set(_MOVEMENTS))
+        pair = _pair(row)
+        if pair not in pairs or pair in drivers:
+            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+        driver: dict[str, Any] = {"status": _text(row["status"])}
+        for name in (*_MOVEMENTS, *_STATED):
+            if name in row:
+                driver[name] = _decimal(
+                    row[name], signed=name in _SIGNED or name in _STATED
+                )
+        drivers[pair] = driver
+    return drivers
+
+
+def _contractual(
+    rows: list[dict[str, Any]], pairs: set[tuple[str, str]], facilities: set[str]
+) -> dict[tuple[str, str], Decimal]:
+    totals: dict[tuple[str, str], Decimal] = {}
+    seen = set()
+    for row in rows:
+        _object(row, _PAIR | {"facility_id", "amount"})
+        pair, facility = _pair(row), _text(row["facility_id"])
+        amount = _decimal(row["amount"])
+        key = (*pair, facility, amount)
+        if pair not in pairs or facility not in facilities or key in seen:
+            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
+        seen.add(key)
+        totals[pair] = totals.get(pair, Decimal(0)) + amount
+    return totals
+
+
+def _unavailable_reason(
+    period: dict[str, Any], inputs: _Inputs, prior: bool
+) -> str | None:
+    if prior:
+        return "PRIOR_PERIOD_UNAVAILABLE"
+    driver = inputs.drivers.get(_pair(period))
+    if driver is None:
+        return "DRIVER_MISSING"
+    if driver["status"] != "READY":
+        return "DRIVER_NOT_READY"
+    if not set(_MOVEMENTS) <= driver.keys():
+        return "DRIVER_FIELD_MISSING"
+    return None
+
+
+def _check_chain(previous: dict[str, Any], opening: tuple[Decimal, Decimal]) -> None:
+    if opening != (
+        Decimal(previous["debt"]["closing"]),
+        Decimal(previous["cash"]["closing"]),
+    ):
+        raise Refusal(RefusalCode.FORECAST_CHAIN_BROKEN)
+
+
+def _amount(value: Decimal) -> str:
+    return format((value if value else Decimal(0)).quantize(Decimal("0.000001")), "f")
+
+
+def _ratio(numerator: Decimal, denominator: Decimal) -> dict[str, str | None]:
+    if denominator <= 0:
+        return {"value": None, "reason": "ZERO_OR_NEGATIVE_DENOMINATOR"}
+    value = (numerator / denominator).quantize(Decimal("0.0001"))
+    return {"value": format(value if value else abs(value), "f"), "reason": None}
 
 
 def _project_period(
-    period: Period, inputs: _Inputs, opening: tuple[Decimal, Decimal]
+    period: dict[str, Any], inputs: _Inputs, opening: tuple[Decimal, Decimal]
 ) -> tuple[dict[str, Any], Decimal, Decimal]:
-    """The two identities, and the residual between them and what was stated."""
-    driver = inputs.driver_for(period)
-    contractual_repayment = inputs.repayment_for(period)
+    moves = inputs.drivers[_pair(period)]
+    repayment = inputs.repayments.get(_pair(period), Decimal(0))
     opening_debt, opening_cash = opening
-    moves = {name: _movement(driver, name) for name in _MOVEMENTS}
-
-    closing_debt = (
+    debt = (
         opening_debt
         + moves["issuance"]
         + moves["pik"]
         + moves["capitalised_interest"]
-        - contractual_repayment
+        - repayment
         - moves["optional_repayment"]
         + moves["fx_perimeter"]
     )
-    closing_cash = (
-        opening_cash
-        + moves["cfo"]
-        - moves["capex"]
-        - moves["cash_interest"]
-        - moves["cash_taxes"]
-        - moves["distributions"]
-        + moves["financing_investing"]
+    financing = (
+        moves["issuance"]
+        - repayment
+        - moves["optional_repayment"]
+        - moves["acquisitions_disposals"]
     )
-
-    stated_debt = _decimal(driver.get("stated_closing_debt"), "stated_closing_debt")
-    stated_cash = _decimal(driver.get("stated_closing_cash"), "stated_closing_cash")
-    residual = max(abs(closing_debt - stated_debt), abs(closing_cash - stated_cash))
-
-    reason = None
-    if residual > inputs.tolerance:
-        # Invariant 3. Not absorbed into a balancing figure: the model's own
-        # numbers do not add up, and that is the answer.
-        reason = f"residual {residual} exceeds tolerance {inputs.tolerance}"
-
     fcf = moves["cfo"] - moves["capex"] - moves["cash_interest"] - moves["cash_taxes"]
+    cash = opening_cash + fcf - moves["distributions"] + financing
+    residual_debt = moves["stated_closing_debt"] - debt
+    residual_cash = moves["stated_closing_cash"] - cash
+    reason = (
+        "RESIDUAL_UNRECONCILED"
+        if max(abs(residual_debt), abs(residual_cash)) > inputs.tolerance
+        else None
+    )
     row = {
-        "period_id": period.period_id,
-        "fiscal_year": period.fiscal_year,
-        "case": period.case,
+        **period,
         "operating": {
-            "revenue": str(moves["revenue"]),
-            "ebitda": str(moves["ebitda"]),
+            **{name: _amount(moves[name]) for name in ("revenue", "ebitda", "cfo")},
             "margin": _ratio(moves["ebitda"], moves["revenue"]),
-            "cfo": str(moves["cfo"]),
         },
         "investing": {
-            "capex": str(moves["capex"]),
-            "acquisitions_disposals": str(moves["acquisitions_disposals"]),
+            name: _amount(moves[name]) for name in ("capex", "acquisitions_disposals")
         },
         "financing": {
-            "cash_interest": str(moves["cash_interest"]),
-            "cash_taxes": str(moves["cash_taxes"]),
-            "distributions": str(moves["distributions"]),
-            "issuance": str(moves["issuance"]),
-            "contractual_repayment": str(contractual_repayment),
-            "optional_repayment": str(moves["optional_repayment"]),
+            **{
+                name: _amount(moves[name])
+                for name in (
+                    "cash_interest",
+                    "cash_taxes",
+                    "distributions",
+                    "issuance",
+                    "optional_repayment",
+                )
+            },
+            "contractual_repayment": _amount(repayment),
+            "financing_investing": _amount(financing),
         },
-        "fcf": str(fcf),
+        "fcf": _amount(fcf),
         "debt": {
-            "opening": str(opening_debt),
-            "pik": str(moves["pik"]),
-            "capitalised_interest": str(moves["capitalised_interest"]),
-            "fx_perimeter": str(moves["fx_perimeter"]),
-            "closing": str(closing_debt),
+            "opening": _amount(opening_debt),
+            "closing": _amount(debt),
+            **{
+                name: _amount(moves[name])
+                for name in ("pik", "capitalised_interest", "fx_perimeter")
+            },
         },
         "cash": {
-            "opening": str(opening_cash),
-            "closing": str(closing_cash),
-            "accessible": str(closing_cash),
+            "opening": _amount(opening_cash),
+            "closing": _amount(cash),
+            "accessible": _amount(cash),
         },
-        "residual": str(residual),
+        "residual_debt": _amount(residual_debt),
+        "residual_cash": _amount(residual_cash),
         "metrics": {
-            "gross_leverage": _ratio(closing_debt, moves["ebitda"]),
-            "net_leverage": _ratio(closing_debt - closing_cash, moves["ebitda"]),
+            "gross_leverage": _ratio(debt, moves["ebitda"]),
+            "net_leverage": _ratio(debt - cash, moves["ebitda"]),
             "interest_coverage": _ratio(moves["ebitda"], moves["cash_interest"]),
-            "fcf_to_debt": _ratio(fcf, closing_debt),
+            "fcf_to_debt": _ratio(fcf, debt),
         },
         "unavailable_reason": reason,
     }
-    return row, closing_debt, closing_cash
-
-
-def _unavailable(
-    period: Period, opening_debt: Decimal, opening_cash: Decimal, reason: str
-) -> dict[str, Any]:
-    """A period that cannot be computed still appears, with its reason.
-
-    `calculation_output_complete` requires every requested pair to be present:
-    a horizon that silently dropped its unavailable periods would look like a
-    shorter horizon that succeeded.
-    """
-    return {
-        "period_id": period.period_id,
-        "fiscal_year": period.fiscal_year,
-        "case": period.case,
-        "operating": None,
-        "investing": None,
-        "financing": None,
-        "fcf": None,
-        "debt": {"opening": str(opening_debt), "closing": None},
-        "cash": {"opening": str(opening_cash), "closing": None},
-        "residual": None,
-        "metrics": {},
-        "unavailable_reason": reason,
-    }
-
-
-def _ratio(numerator: Decimal, denominator: Decimal) -> dict[str, str] | None:
-    """A ratio, or `null` with a reason. Never an infinity (invariant 7)."""
-    if denominator == 0:
-        return None
-    return {"value": str(numerator / denominator)}
-
-
-def _movement(driver: Mapping[str, Any], name: str) -> Decimal:
-    """A stated movement, or zero when the row does not mention it.
-
-    Absent and zero are the same thing for a movement -- a period with no capex
-    spent no capex. A *present* value that is not a numeric string is refused,
-    because that is a statement the host could not read rather than one the
-    model did not make.
-    """
-    if name not in driver:
-        return Decimal(0)
-    return _decimal(driver[name], name)
-
-
-def _decimal(value: object, field: str) -> Decimal:
-    """Parse a numeric that arrived as a string.
-
-    A `float` here is refused rather than converted. By the time a float exists
-    the cent is already gone, and converting it would launder a value the model
-    never actually stated.
-    """
-    if isinstance(value, float):
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    if isinstance(value, Decimal):
-        parsed = value
-    elif isinstance(value, str | int):
-        try:
-            parsed = Decimal(str(value))
-        except InvalidOperation:
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID) from None
-    else:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    if not parsed.is_finite():
-        # Invariant 7: refused before use, not carried into a ratio. Every path
-        # above lands here, because a `Decimal` a caller had already parsed is
-        # the same value as the string it was parsed from -- and it was the one
-        # spelling of infinity that used to reach a division.
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    return parsed
-
-
-def _periods(request: Mapping[str, Any]) -> list[Period]:
-    rows = request.get("periods")
-    if not isinstance(rows, list) or not rows:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-
-    periods = []
-    seen = set()
-    for row in rows:
-        if not isinstance(row, Mapping):
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        period = Period(
-            period_id=str(row.get("period_id", "")),
-            fiscal_year=str(row.get("fiscal_year", "")),
-            case=str(row.get("case", "")),
-            days=_decimal(row.get("days", "0"), "days"),
-        )
-        if not period.period_id or not period.case:
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        key = (period.case, period.period_id)
-        if key in seen:
-            # A duplicate pair would make "every requested pair exactly once"
-            # unanswerable, so it is refused rather than de-duplicated.
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        seen.add(key)
-        periods.append(period)
-    return periods
-
-
-def _enforce_work_factor(periods: Sequence[Period], request: Mapping[str, Any]) -> None:
-    """The ceiling, before any arithmetic. Model-authored input cannot widen it."""
-    cases = {period.case for period in periods}
-    facilities = len(_opening_facilities(request))
-    per_case = len({period.period_id for period in periods})
-
-    if per_case > MAX_FORECAST_PERIODS:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    if len(cases) > MAX_FORECAST_CASES:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    if facilities > MAX_FORECAST_FACILITIES:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    if per_case * len(cases) * (1 + facilities) > MAX_WORK:
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-
-
-def _opening_facilities(request: Mapping[str, Any]) -> Mapping[str, Any]:
-    opening = request.get("opening")
-    if not isinstance(opening, Mapping):
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    facilities = opening.get("debt_by_facility", {})
-    if not isinstance(facilities, Mapping):
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    return facilities
-
-
-def _opening(request: Mapping[str, Any]) -> tuple[Decimal, Decimal]:
-    opening = request["opening"]
-    debt = sum(
-        (
-            _decimal(amount, "debt_by_facility")
-            for amount in _opening_facilities(request).values()
-        ),
-        Decimal(0),
-    )
-    return debt, _decimal(opening.get("cash", "0"), "cash")
-
-
-def _drivers(request: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
-    rows = request.get("drivers")
-    if not isinstance(rows, list):
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    drivers = {}
-    for row in rows:
-        if not isinstance(row, Mapping):
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        for name in _STATED:
-            if name not in row:
-                # Nothing to reconcile against is not a period that reconciles.
-                raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        drivers[(str(row.get("case", "")), str(row.get("period_id", "")))] = row
-    return drivers
-
-
-def _contractual(request: Mapping[str, Any]) -> dict[tuple[str, str], Decimal]:
-    """Contractual amortisation, summed per case-period across facilities."""
-    contractual = request.get("contractual", {})
-    if not isinstance(contractual, Mapping):
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-    rows = contractual.get("amortisation", [])
-    if not isinstance(rows, list):
-        raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-
-    totals: dict[tuple[str, str], Decimal] = {}
-    for row in rows:
-        if not isinstance(row, Mapping):
-            raise Refusal(RefusalCode.METHODOLOGY_INPUT_INVALID)
-        key = (str(row.get("case", "")), str(row.get("period_id", "")))
-        totals[key] = totals.get(key, Decimal(0)) + _decimal(
-            row.get("amount", "0"), "amount"
-        )
-    return totals
+    return row, debt, cash
