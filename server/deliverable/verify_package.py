@@ -18,7 +18,7 @@ from typing import Any
 
 VERIFIER_VERSION = "1"
 # Updated with render.py; the archived verifier retains its historical pin.
-RENDERER_SHA256 = "3417b65ec59fe417033ea4f4f60f2441432668731626002c7371b587b91fba86"
+RENDERER_SHA256 = "e31b2f583c97d7bac5c23aa79eec90e3f0a64b746b1d294e9ec7a32f465f0e3c"
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 LIMITS = {
     "payload.json": 32 * 1024 * 1024,
