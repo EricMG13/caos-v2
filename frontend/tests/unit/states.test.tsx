@@ -32,6 +32,18 @@ describe("the states", () => {
     expect(region.querySelector("time")).toHaveAttribute("datetime", "2026-09-09T14:30:00Z");
   });
 
+  test("observed-empty still renders the section body, so an empty directory can create", () => {
+    render(
+      <RegionState
+        status={{ kind: "observed-empty", observed_at: "2026-09-09T14:30:00Z", document: "d" }}
+      >
+        {(d) => <button type="button">create from {d}</button>}
+      </RegionState>,
+    );
+    expect(document.querySelector("[data-surface-state='observed-empty']")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "create from d" })).toBeInTheDocument();
+  });
+
   test("ready renders its children with no marker", () => {
     render(
       <RegionState status={{ kind: "ready", document: 1 }}>{(n) => <p>doc {n}</p>}</RegionState>,

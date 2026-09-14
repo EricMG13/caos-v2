@@ -20,18 +20,21 @@ export function RegionState<D>({
       return <SurfaceState kind="loading" />;
     case "observed-empty":
       return (
-        <SurfaceState
-          kind="observed-empty"
-          detail={
-            <>
-              Observed at{" "}
-              <time className="ts" dateTime={status.observed_at}>
-                {status.observed_at}
-              </time>
-              . Nothing is inferred from silence.
-            </>
-          }
-        />
+        <>
+          <SurfaceState
+            kind="observed-empty"
+            detail={
+              <>
+                Observed at{" "}
+                <time className="ts" dateTime={status.observed_at}>
+                  {status.observed_at}
+                </time>
+                . Nothing is inferred from silence.
+              </>
+            }
+          />
+          {children(status.document)}
+        </>
       );
     case "unavailable":
       return <SurfaceState kind="unavailable" title={UNAVAILABLE_WORDING} />;
