@@ -63,6 +63,12 @@ class RefusalCode(StrEnum):
     NOT_AUTHENTICATED = "NOT_AUTHENTICATED"
     # Phase 4 Task 4.1: an undeclared path or method under /api/.
     ENDPOINT_NOT_FOUND = "ENDPOINT_NOT_FOUND"
+    # Phase 4 Task 4.5: the edge guard (decisions 3 and 5); the last is boot-only.
+    EDGE_NOT_TRUSTED = "EDGE_NOT_TRUSTED"
+    ORIGIN_REFUSED = "ORIGIN_REFUSED"
+    EDGE_CONFIG_INVALID = "EDGE_CONFIG_INVALID"
+    # An unhandled exception, answered by the guard in the constant body.
+    INTERNAL_FAULT = "INTERNAL_FAULT"
     NOT_AUTHORISED = "NOT_AUTHORISED"
     # Phase 4 Task 4.2: governed commands (decisions 5 to 8).
     REQUEST_INVALID = "REQUEST_INVALID"

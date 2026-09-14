@@ -18,11 +18,11 @@ Responses are named models with `extra="forbid"` in both directions. A response
 shape that let an extra key through is how a store column reaches a browser
 because somebody widened a SELECT.
 
-FastAPI's own `/docs` and `/openapi.json` are left served. They describe route
-shapes and disclose no case, and the proxy in front of this process
-authenticates every path it forwards -- so they are not a public surface. The
-privacy rule above is about an authenticated stranger, which is a different
-person from an anonymous one.
+FastAPI's own `/docs`, `/redoc` and `/openapi.json` are not served (Task 4.5
+decision 6): Swagger loads a script from a CDN the policy refuses, and a route
+map is nothing a browser of this workspace needs. Every request passes
+`server/api/edge.py`'s guard first -- the edge token or the loopback rule, the
+identity-header hygiene, the Origin check -- before routing or identity.
 """
 
 from __future__ import annotations
@@ -60,6 +60,7 @@ from server.api.deps import actor_from_request as actor_from_request
 from server.api.deps import blob_store as blob_store
 from server.api.deps import methodology_bundle as methodology_bundle
 from server.api.deps import store_connection as store_connection
+from server.api.edge import EdgeGuard
 from server.api.identity import Actor, actor_from_headers
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
@@ -148,6 +149,10 @@ _STATUS = {
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,
+    # Answered by the edge guard before routing; listed so a route cannot give
+    # either a different status.
+    RefusalCode.EDGE_NOT_TRUSTED: 403,
+    RefusalCode.ORIGIN_REFUSED: 403,
     RefusalCode.SOURCE_TOO_LARGE: 413,
     # The request was sound and the state it expected has moved: a conflict.
     RefusalCode.IDEMPOTENCY_KEY_REUSED: 409,
@@ -192,7 +197,15 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await probes
 
 
-app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
+app = FastAPI(
+    title="CAOS",
+    version="2",
+    lifespan=_lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+app.add_middleware(EdgeGuard)
 # One router per section read (Task 4.1), so each slice adds its route in its
 # own module and none edits this one.
 for _section in (directory_read, upload_read, run_read, analysis_read, evidence_read):
