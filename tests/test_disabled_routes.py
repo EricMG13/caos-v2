@@ -25,6 +25,7 @@ from canonical_fixtures import (
 from conftest import priced
 from fastapi.testclient import TestClient
 from test_accepted_owner import _billed, _count
+from test_api_routes import _section
 from test_canonical_readers import _reader, _run, client
 from test_execution_freshness import _Harness, harness
 from test_gates import _approval
@@ -33,7 +34,8 @@ from test_run_inputs import SUBJECT, pin_version_one
 from test_source_sets import _admit
 
 from server import methodology
-from server.api.app import app, store_connection
+from server.api.app import app
+from server.api.reads import run as run_read
 from server.api.wire import CLEARS
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, resolve_route
@@ -231,7 +233,7 @@ def test_readers_refuse_an_artifact_without_its_record(
     """No reader takes a row as a claims body: a NULL record refuses, whether
     or not the engine needs that node's readiness."""
     _run(harness, CanonicalCompletions(harness.source_id))
-    headers = _reader(harness)
+    viewer = _reader(harness)
     _strip_record(harness, module_id)
     args = (harness.conn, harness.blobs, harness.route, harness.run_id)
     with pytest.raises(Refusal) as runtime:
@@ -244,8 +246,8 @@ def test_readers_refuse_an_artifact_without_its_record(
                 harness.conn, harness.blobs, harness.bundle, run_id=harness.run_id
             )
     assert proof.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
-    app.dependency_overrides[store_connection] = lambda: harness.conn
-    response = client.get(f"/api/runs/{harness.run_id}", headers=headers)
+    app.dependency_overrides[run_read.run_store] = lambda: harness.conn
+    response = _section(client, harness.case_id, harness.run_id, viewer)
     assert response.status_code == 503
     assert response.json() == {
         "code": "ARTIFACT_RECORD_MISMATCH",
