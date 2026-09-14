@@ -28,10 +28,9 @@ person from an anonymous one.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from json import dumps
-from time import monotonic, sleep
 from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
@@ -68,16 +67,7 @@ from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
 from server.api.reads.analysis import RunQuery
 from server.api.reads.upload import CasePath
-from server.api.stream import (
-    CONNECT_IO,
-    POLL_IO,
-    TERMINAL,
-    StreamEvent,
-    _CaseEvent,
-    case_tail,
-    tail,
-)
-from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
+from server.api.stream import CONNECT_IO, POLL_IO, StreamEvent, case_tail
 from server.api.wire import CLEARS, RefusalBody
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
@@ -89,8 +79,6 @@ from server.store.members import Standing, satisfies, standing_of
 # frame one recheck. Measured in `tests/test_case_events.py`. The section reads
 # declare their own budgets.
 EVENTS_IO_BUDGET = 2 + CONNECT_IO + 1 + POLL_IO
-# The retired `GET /api/runs/{run_id}/events`, until p3 removes it.
-RUN_EVENTS_IO_BUDGET = 2 + TAIL_IO_BUDGET
 IO_BUDGET = EVENTS_IO_BUDGET
 
 # Tailing a case is reading it. Anything the tail shows, a reader of the
@@ -270,7 +258,7 @@ def read_case_events(
     Identity, then the path and query parsers, then the store: the order is
     what keeps an anonymous or malformed request off a connection.
     """
-    _case_visible(conn, case_id, run, actor)
+    _visible(conn, case_id, run, actor)
     # Read at request time rather than bound as defaults, so a corrected value
     # needs no restart (and a test can shorten them).
     events = case_tail(
@@ -283,7 +271,7 @@ def read_case_events(
         poll=POLL_INTERVAL,
     )
     return StreamingResponse(
-        (_case_frame(event) for event in events),
+        (_frame(event) for event in events),
         media_type="text/event-stream",
         # No store, and no proxy buffering: a tail that arrived in one block
         # when the deadline passed would not be a tail.
@@ -291,7 +279,7 @@ def read_case_events(
     )
 
 
-def _case_frame(event: _CaseEvent) -> bytes:
+def _frame(event: StreamEvent) -> bytes:
     """One SSE frame. The cursor frame is `id` alone, which sets the browser's
     `lastEventId` and dispatches nothing. A named frame's `data` is a
     placeholder because the spec dispatches no event without one."""
@@ -300,7 +288,7 @@ def _case_frame(event: _CaseEvent) -> bytes:
     return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
 
 
-def _case_visible(
+def _visible(
     conn: StoreConnection, case_id: UUID, run_id: UUID | None, actor: Actor
 ) -> None:
     """Refuse a case this actor may not read, then a run that is not the case's.
@@ -318,107 +306,3 @@ def _case_visible(
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
-
-
-@app.get("/api/runs/{run_id}/events")
-def read_run_events(
-    run_id: UUID, actor: Caller, request: Request, conn: Store
-) -> StreamingResponse:
-    """The run's events as `text/event-stream`, resuming after `Last-Event-ID`.
-
-    The authority read happens here, before the first byte, so that an
-    unauthorised watcher gets a private 404 rather than an
-    empty 200 -- which would still confirm the id names a run somebody watches.
-    `actor` is declared before `conn` for the reason `actor_from_request` gives;
-    `request` is still taken, for the resume marker alone.
-    """
-    case_id, _status = _visible(conn, run_id, actor)
-
-    return StreamingResponse(
-        _frames(conn, run_id, case_id, actor, _marker(request.headers)),
-        media_type="text/event-stream",
-        # No store, and no proxy buffering: a tail that arrived in one block when
-        # the run ended would not be a tail.
-        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
-    )
-
-
-def _frames(
-    conn: StoreConnection,
-    run_id: UUID,
-    case_id: UUID,
-    actor: Actor,
-    last_event_id: int,
-) -> Iterator[bytes]:
-    """Frames until the run is terminal, the actor loses standing, or the
-    deadline passes.
-
-    `TAIL_DEADLINE` is read here rather than bound as a default, so a process
-    does not have to restart to pick up a corrected value.
-    """
-    started = monotonic()
-    marker = last_event_id
-    while True:
-        for event in tail(
-            conn, run_id=run_id, actor_id=actor.user_id, last_event_id=marker
-        ):
-            marker = event.id
-            yield _frame(event)
-            if event.name in TERMINAL:
-                return
-
-        # The tail is silent both when it is caught up and when standing was
-        # revoked mid-stream. Asking directly is what tells those apart -- an SSE
-        # connection is exactly the thing that stays open across a revocation,
-        # and a loop that idled to the deadline instead would keep a revoked
-        # reader's socket alive for five minutes.
-        if not satisfies(
-            standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
-        ):
-            return
-        if monotonic() - started >= TAIL_DEADLINE:
-            return
-        sleep(POLL_INTERVAL)
-
-
-def _frame(event: StreamEvent) -> bytes:
-    """One SSE frame. The name triggers a refetch; `data` is a placeholder
-    because the spec dispatches no event without one, and a real payload would be
-    a second copy of state the client is about to fetch properly."""
-    return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
-
-
-def _marker(headers: object) -> int:
-    """The client's resume position, or the beginning.
-
-    A browser-supplied string. Refusing the connection would strand a client that
-    can only fix it by clearing storage, and re-delivering from the start is what
-    the contract already tolerates.
-    """
-    get = getattr(headers, "get", None)
-    value = get("last-event-id") if get is not None else None
-    if not isinstance(value, str) or not value.isdigit():
-        return 0
-    return int(value)
-
-
-def _visible(conn: StoreConnection, run_id: UUID, actor: Actor) -> tuple[UUID, str]:
-    """The run's case and status, if this actor may see it at all.
-
-    One query: a second round trip to learn the status of a run the caller turns
-    out not to be able to see would be a round trip spent on a 404.
-    """
-    row = conn.execute(
-        "SELECT case_id, status FROM runs WHERE run_id = %s", (run_id,)
-    ).fetchone()
-    if row is None:
-        raise Refusal(RefusalCode.RUN_NOT_FOUND)
-
-    case_id = UUID(str(row[0]))
-    if not satisfies(
-        standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
-    ):
-        # Deliberately the refusal a missing run gets. The two answers have to be
-        # identical, or the difference between them is the disclosure.
-        raise Refusal(RefusalCode.RUN_NOT_FOUND)
-    return case_id, str(row[1])
