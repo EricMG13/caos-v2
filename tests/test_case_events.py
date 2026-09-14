@@ -242,6 +242,24 @@ def test_a_run_of_another_case_is_run_not_found_on_the_event_stream(
     assert _frames_of(served, _path(case_id, own), _as(reader)) == [{"id": "0.0"}]
 
 
+def test_the_retired_run_event_route_is_absent(
+    served: str, case: tuple[StoreConnection, UUID]
+) -> None:
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    run_id = start_run(conn, case_id)
+    conn.commit()
+
+    answer = _stream(served, f"/api/runs/{run_id}/events", _as(reader))
+
+    assert isinstance(answer, httpx.Response)
+    assert (answer.status_code, answer.json()) == (
+        404,
+        _refused(RefusalCode.ENDPOINT_NOT_FOUND),
+    )
+    assert not hasattr(app_module, "read_run_events")
+
+
 def test_the_first_frame_is_a_cursor_at_the_current_heads(
     served: str, case: tuple[StoreConnection, UUID]
 ) -> None:
@@ -307,6 +325,24 @@ def test_resume_delivers_strictly_after_the_composite_marker(
     assert resumed("2.1") == [("2.2", "run_progress")]
     assert resumed("0.2") == [("1.2", "sources_changed"), ("2.2", "runs_changed")]
     assert resumed("2.2") == []
+
+
+def test_a_marker_that_cannot_be_used_resumes_from_the_heads_over_http(
+    served: str, case: tuple[StoreConnection, UUID]
+) -> None:
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    run_id = start_run(conn, case_id)
+    _audit(conn, case_id, "SOURCE_WITHDRAWN")
+    start_attempt(conn, run_id, "CP-1")
+    conn.commit()
+
+    for marker in (b"0.9", b"9.0", "\u00b9.0".encode(), b"; DROP TABLE runs"):
+        headers = httpx.Headers(
+            [(b"x-caos-user", str(reader).encode()), (b"last-event-id", marker)]
+        )
+        frames = _frames_of(served, _path(case_id, run_id), headers)
+        assert frames == [{"id": "1.1"}], marker
 
 
 def _open(
