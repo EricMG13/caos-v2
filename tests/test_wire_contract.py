@@ -84,6 +84,36 @@ ENVELOPE = frozenset(
 
 # A new field is a model change, a regenerated schema and an edit here.
 PINNED: dict[type[BaseModel], frozenset[str]] = {
+    wire.NarrativeFigure: frozenset(
+        "route_node_id citation_index document_sha256 page matched_text".split()
+    ),
+    wire.NarrativeSpan: frozenset({"text", "figure"}),
+    wire.ReportArtifact: frozenset(
+        (
+            "route_node_id artifact_sha256 record_sha256 markdown record qa_status "
+            "committee_status decision_scope limitation_flags validation_warnings"
+        ).split()
+    ),
+    wire.ReportBody: frozenset(
+        (
+            "case_id displayed_run_id revision_id payload_sha256 case_title "
+            "artifacts narrative"
+        ).split()
+    ),
+    wire.FiledReceipt: frozenset(
+        (
+            "case_id run_id revision_id payload_sha256 signed_by frozen_by filed_by "
+            "renderer_sha256 filed_event_sha256"
+        ).split()
+    ),
+    wire.CommitteeBody: frozenset(
+        (
+            "case_id displayed_run_id revision_id payload_sha256 case_title artifacts "
+            "narrative state signed_by frozen_by filed_by receipt"
+        ).split()
+    ),
+    wire.ReportDocument: ENVELOPE,
+    wire.CommitteeDocument: ENVELOPE,
     wire.ModelValue: frozenset({"name", "value", "unavailable_reason"}),
     wire.ModelPeriod: frozenset(
         {"case", "period_id", "fiscal_year", "days", "values", "unavailable_reason"}
@@ -408,6 +438,8 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "RunSectionDocument",
         "AnalysisDocument",
         "ModelDocument",
+        "ReportDocument",
+        "CommitteeDocument",
     ]
 
 
