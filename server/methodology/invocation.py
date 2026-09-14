@@ -219,7 +219,7 @@ def call_time_identity(
 
 
 def record_authority_matches(
-    record: CanonicalRecord, *, bundle: Bundle, module_id: str
+    record: CanonicalRecord, *, bundle: Bundle, module_id: str, verify: bool = False
 ) -> bool:
     """Whether a record was written under this bundle for this pinned module.
 
@@ -229,6 +229,11 @@ def record_authority_matches(
     the bytes here now. `read_record` binds
     the invocation; this binds the methodology. `module_id` is the pin's, never
     the record's. Each caller raises its own code on False.
+
+    `verify=True` re-reads and verifies every authority file now instead of
+    answering from the per-manifest cache: the proof and the deliverable use it,
+    so a file tampered on disk under an unchanged manifest refuses there whatever
+    this process read before (invariant 4).
     """
     manifest_sha256, build_id = bundle.manifest_sha256, bundle.build_id
     return (
@@ -241,7 +246,11 @@ def record_authority_matches(
         methodology.CANONICAL_ADAPTER_VERSION,
         build_id,
         manifest_sha256,
-        *_authority_digests(bundle, module_id, manifest_sha256, build_id),
+        *(
+            _read_authority_digests(bundle, module_id)
+            if verify
+            else _authority_digests(bundle, module_id, manifest_sha256, build_id)
+        ),
     )
 
 
@@ -257,17 +266,21 @@ _AUTHORITY_LOCK = threading.Lock()
 def _authority_digests(
     bundle: Bundle, module_id: str, manifest_sha256: str, build_id: str
 ) -> tuple[str, str]:
-    key = (str(bundle.root), manifest_sha256, build_id, module_id)
+    key = (str(bundle.root.resolve()), manifest_sha256, build_id, module_id)
     with _AUTHORITY_LOCK:
         cached = _AUTHORITY_DIGESTS.get(key)
     if cached is None:
-        cached = (
-            authority_digest(assemble_authority(bundle, module_id)),
-            delivered_authority_digest(delivered_authority(bundle, module_id)),
-        )
+        cached = _read_authority_digests(bundle, module_id)
         with _AUTHORITY_LOCK:
             _AUTHORITY_DIGESTS[key] = cached
     return cached
+
+
+def _read_authority_digests(bundle: Bundle, module_id: str) -> tuple[str, str]:
+    return (
+        authority_digest(assemble_authority(bundle, module_id)),
+        delivered_authority_digest(delivered_authority(bundle, module_id)),
+    )
 
 
 def accepted_lineage(

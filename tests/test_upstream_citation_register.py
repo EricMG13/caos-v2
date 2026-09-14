@@ -52,6 +52,7 @@ from server.methodology.invocation import (
 )
 from server.provider import Completion, encode_request
 from server.refusals import Refusal, RefusalCode
+from server.store.gates import withdraw_source
 
 __all__ = ["harness", "route"]
 
@@ -272,3 +273,23 @@ def test_a_blocked_or_refused_attempt_never_reaches_a_consumer_prompt(
             )
             assert markdown not in prompt
             assert attempt_line not in prompt
+
+
+def test_a_withdrawn_cited_source_never_reaches_a_prompt_as_host_verified(
+    harness: _Harness,
+) -> None:
+    """The register lists citations anchored when the upstream was accepted; a
+    source withdrawn since refuses CP-L10's whole pre-call unit, so none of its
+    citations reach a prompt labelled HOST_VERIFIED."""
+    attempt, gate = _run(harness, "CP-0", CanonicalCompletions(harness.source_id))
+    _accept(harness, attempt, gate)
+    withdraw_source(
+        harness.conn,
+        case_id=harness.case_id,
+        source_id=harness.source_id,
+        actor_id=harness.approver,
+    )
+    answers = CanonicalCompletions(harness.source_id)
+    refusal = _refused(harness, "CP-L10", answers)
+    assert refusal is not None
+    assert answers.prompts == []

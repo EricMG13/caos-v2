@@ -513,3 +513,31 @@ def test_authority_digests_are_hashed_once_per_manifest(
         module_id="CP-0",
     )
     assert len(reads) > first
+
+
+def test_a_verifying_reader_refuses_a_file_tampered_after_a_cache_hit(
+    tmp_path: Path,
+) -> None:
+    """The proof and deliverable path (`verify=True`) re-reads the bytes, so a
+    reference edited on disk under an unchanged manifest refuses even though this
+    process already cached the manifest's digests."""
+    root = tmp_path / "deploy-v"
+    shutil.copytree(VENDORED, root)
+    bundle = Bundle(root)
+    record = _record(
+        build_id=bundle.build_id,
+        manifest_sha256=bundle.manifest_sha256,
+        authority_digest=authority_digest(assemble_authority(bundle, "CP-0")),
+        delivered_authority_digest=delivered_authority_digest(
+            delivered_authority(bundle, "CP-0")
+        ),
+    )
+    assert record_authority_matches(record, bundle=bundle, module_id="CP-0")
+    entry = bundle.skill_of("CP-0")
+    name = min(n for n in entry["relative_file_hashes"] if n.startswith("references/"))
+    path = root / SKILLS_DIR / entry["folder_slug"] / name
+    path.write_bytes(path.read_bytes() + b"tampered")
+    assert record_authority_matches(record, bundle=bundle, module_id="CP-0")
+    with pytest.raises(Refusal) as refused:
+        record_authority_matches(record, bundle=bundle, module_id="CP-0", verify=True)
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH

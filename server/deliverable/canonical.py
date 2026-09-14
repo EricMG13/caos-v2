@@ -174,7 +174,7 @@ class _Reader:
         )
         mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
         if not record_authority_matches(
-            record, bundle=bundle, module_id=node.module_id
+            record, bundle=bundle, module_id=node.module_id, verify=True
         ) or any(c.document_sha256 not in pinned for c in record.citations):
             raise mismatch
         upstream = record.identity.upstream
