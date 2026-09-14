@@ -76,11 +76,13 @@ The `size` check was skipped on the main push because it runs only on PRs.
 ## Local execution and review
 
 The repair plan strengthens local gate parity; it does not loosen hosted CI.
-Use `confidence-review` after code changes, prioritizing high-risk sections,
-with actual extra-high (`xhigh`) executor reasoning. Confidence review replaces
-rewrite tournaments; no further tournaments are required. Run the adversarial
-audit only at phase completion, over the full phase diff and affected callers,
-also with actual `xhigh` reasoning. The user's current policy in
+Run ordinary task review at each accepted slice. Run `confidence-review` only
+once at phase completion, over the full phase diff and affected callers and
+prioritizing high-risk sections, with actual extra-high (`xhigh`) executor
+reasoning. After remediation and re-verification, run the separate adversarial
+audit once at phase completion over the same phase/impact scope, also with
+actual `xhigh` reasoning. Confidence review replaces rewrite tournaments; no
+further tournaments are required. The user's current policy in
 `docs/REPAIR_PLAN.md` supersedes older blanket skill cadence and historical
 max-reasoning requirements. Record risk scope, executor settings and evidence
 in the execution ledger. Keep external writes and live spend separately

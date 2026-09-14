@@ -3,12 +3,39 @@
 CAOS turns governed source documents into committee-ready credit conclusions.
 This file is the contract. `docs/DECISIONS.md` is the binding record (later
 entries override earlier). `docs/SYSTEM_SPEC.md` is the structure,
-`docs/IA_SPEC.md` the workspace, `docs/MODEL_BUILDER_SPEC.md` the workbook,
+`docs/IA_SPEC.md` the workspace, `docs/archive/MODEL_BUILDER_SPEC.md` the
+archived workbook,
 `DESIGN.md` the visual language, `CONTEXT.md` the vocabulary.
 
 Most of this repository is written by an agent. `docs/AI_CODE_QUALITY.md` says
 what that costs and which tool stops each failure mode. Read it before your
 first commit.
+
+## Active continuation — Phase 2 repair
+
+Claude Code resumes from
+[`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
+Task17d2 is split (`.superpowers/sdd/task-17d2-split.md`). Task17d2a is
+accepted at application commit `f8cd7382441587b5aa357542e20bb526a0f01533`
+on `codex/execute-repair-plan` (base `59d31457`); next is the proof-only
+Task17d2b on that accepted slice. Phase 2 is **not** complete. Work only in
+`/Users/ericguei/Documents/caos-workbench`; the original
+`/Users/ericguei/Documents/caos-v2` checkout stays read-only.
+
+Before changing code, read the tracked handoff and the local binding records
+`.superpowers/sdd/task-17d2-brief.md` and
+`.superpowers/sdd/task-17d2-pause.md`, then rebuild the local GitNexus index as
+the handoff specifies. Every shell command starts by unsetting
+`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and
+`CAOS_REQUIRE_PROVIDER`. Never invoke a live provider without separate explicit
+authorization.
+
+The current review cadence overrides older repository text and historical task
+records: ordinary task review remains required at each accepted slice; no
+rewrite tournament runs; one `confidence-review` runs only after every Phase 2
+task passes, using actual `xhigh` reasoning; a separate adversarial code audit
+runs only after that whole-phase confidence review and remediation, also using
+actual `xhigh`. Stop before Phase 3.
 
 ## The eleven invariants (never weaken)
 
@@ -78,11 +105,11 @@ Standing rules that back them:
 - `server/store/routes.py` — the pin. Resolution stays pure by keeping the one
   place it meets the store outside `server/engine/`.
 - `server/store/` — Postgres owns everything transactional; bytes are content-
-  addressed in the blob store. `schema.sql` is the declared schema, applied in
-  full at startup and refused when the database was built from a different one
-  (`docs/DECISIONS.md` §20, which corrected this line from `storage/`).
-- `methodology/` — bundle verification, the registry (the only seam for adding
-  or upgrading a module), and the calculator execution boundary.
+  addressed in the blob store. `schema.sql` is migration `0001_legacy`;
+  `apply_schema` verifies and atomically advances the ordered immutable
+  migration prefix (`docs/DECISIONS.md` §20a and `docs/MIGRATIONS.md`).
+- `server/methodology/` — bundle verification, the registry (the only seam for
+  adding or upgrading a module), and the calculator execution boundary.
 - `vendor/deploy-v/` — the methodology bundle, read-only, pinned
   (`docs/DECISIONS.md` §13). Gates do not scan it.
 - `server/deliverable/` — the renderer that turns a frozen snapshot into the
@@ -104,10 +131,16 @@ Standing rules that back them:
 
 ## Running
 
-- `make venv` — the two toolchains. `make lock` — recompile every lock.
-- `make dev` — the `api` process alone, on port 8000. It needs a Postgres URL
-  in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
-  per request, and applies `schema.sql` at startup. No worker, nothing seeded.
+- First setup: copy `.env.example` to `.env`, then run `make bootstrap`,
+  `make doctor`, and `make dev-up`. This creates the locked Python 3.14/3.12
+  and Node 24 environments, starts the persistent dev database on 55436 and
+  the ephemeral test-admin database on 55437, and preserves local blobs.
+- `make dev-api` (`make dev` is an alias) — the API alone on port 8000. It
+  needs `CAOS_DATABASE_URL` and `CAOS_BLOB_ROOT`, both read per request, and
+  advances the verified migration prefix at startup. No worker, nothing seeded.
+- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000. It
+  fails visibly for routes not built yet. `make dev-ui-demo` is the separately
+  labelled, read-only fixture workbench; it is never integration evidence.
 - `make test` — the offline suite with PostgreSQL required; paid provider tests
   remain deselected.
 - `make test-provider` — the live suite against the real model. Needs
@@ -361,15 +394,16 @@ system this size means nobody looked.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
-- **The workspace reads fixtures; the API serves none of its routes.**
+- **The real workspace is not yet wired to backend section routes.**
   `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
   section document and `sse.ts` tails `/api/events` for six lower-case event
   names, while `server/api/app.py` serves `/api/runs/{id}` and its
   `/events`, whose stream carries `RunEvent` names (`ROUTE_PINNED` …
   `RUN_FAILED`). The refusal bodies differ as well: the client reads
   `{code, clears}` and the server sends `{refusal}`, so a real server refusal
-  would be classed `RESPONSE_INVALID`. Every section therefore renders the
-  dev/preview fixtures and nothing else, and no governed write — commit,
+  is classed `RESPONSE_INVALID`. Ordinary development and production preview
+  now use the real API path and fail visibly; only the explicitly labelled
+  read-only demo serves fixtures. No governed write — commit,
   withdraw, pin, approve, accept, sign, freeze, file — has a route. A control
   refused for want of one now says so (`READ_ONLY_API`) instead of naming a
   build phase that had already exited; a control refused for a domain reason —
@@ -634,12 +668,12 @@ system this size means nobody looked.
 
 **Phase 1.**
 
-- **A schema change is refused, not migrated.** `apply_schema` refuses
-  `STORE_SCHEMA_DRIFT` against a database built from a different declared
-  schema, which is the right answer only while no deployment holds data — it
-  offers a running system no way forward. *Upgrade:* the first deployment brings
-  an ordered migration table and a decision entry overriding §20; the drift
-  refusal stays as the check that the migrations were actually run.
+- ~~**A schema change is refused, not migrated.**~~ Closed by the ordered,
+  checksum-verified `MIGRATIONS` prefix and `store_migrations` history in
+  `server/store/__init__.py`; append-only migration files now advance populated
+  databases under one transaction and advisory lock. Backup/restore and the
+  no-downgrade rule are recorded in `docs/MIGRATIONS.md` and
+  `docs/DECISIONS.md` §20a.
 - **The recorded digest proves the declared schema did not change, not that the
   database still matches it.** `apply_schema` compares the SHA-256 of
   `schema.sql` against what was applied; a table altered or dropped outside this
@@ -674,8 +708,8 @@ system this size means nobody looked.
 - ~~**`scan_floors.py --min-files 1` is a weak floor.**~~ Closed in Phase 1.
   The floor is now `--cover scripts server --unscanned tests`: a tracked `.py`
   under `--cover` that the report did not measure is a failure, and so is one
-  neither list claims. `methodology` joins `--cover` in Phase 5, which is when
-  the directory exists — naming it now would claim a tree that is not there.
+  neither list claims. `server/methodology` is already included by the `server`
+  coverage root; there is no separate top-level methodology tree to add.
 - **The record cites decisions this repository did not take.** The specs
   lifted from CAOS-Final at `cf8c3a9` cite its §18–§48; `docs/DECISIONS.md`
   §12 maps each to the entry here or to the phase that adopts it. *Upgrade:*

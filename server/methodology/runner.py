@@ -113,6 +113,7 @@ class ModuleProvider:
             delivered=deliver(self.conn, self.delivered),
             run_id=self.run_id,
             node=node,
+            route=self.route,
             gate_expects=gate_expects,
             upstream=self._upstream(module_id),
         )
