@@ -39,7 +39,7 @@ def pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> s
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     try:
-        digest = _pin_route(conn, run_id, resolved)
+        digest = pin_route_in(conn, run_id, resolved)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -50,7 +50,8 @@ def pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> s
     return digest
 
 
-def _pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> str:
+def pin_route_in(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> str:
+    """`pin_route`'s row and event in the caller's transaction; never commits."""
     try:
         raw = _canonical(resolved)
     except (TypeError, ValueError, AttributeError, RecursionError):

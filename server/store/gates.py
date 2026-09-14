@@ -151,32 +151,42 @@ def approve_gate(conn: StoreConnection, approval: GateApproval) -> None:
         },
     )
 
-    def write(connection: StoreConnection) -> None:
-        preview = gate_preview(connection, approval.run_id, approval.gate)
-        if (approval.preview_sha256, approval.input_fingerprint) != (
-            preview.preview_sha256,
-            preview.input_fingerprint,
-        ):
-            raise Refusal(RefusalCode.GATE_APPROVAL_MISMATCH)
-        if not _sources_live(connection, approval.run_id):
-            raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
-        connection.execute(
-            "INSERT INTO run_gates (run_id, gate, preview_sha256, input_fingerprint,"
-            " approved_by) VALUES (%s, %s, %s, %s, %s)"
-            " ON CONFLICT (run_id, gate) DO UPDATE SET"
-            " preview_sha256 = EXCLUDED.preview_sha256,"
-            " input_fingerprint = EXCLUDED.input_fingerprint,"
-            " approved_by = EXCLUDED.approved_by, approved_at = now()",
-            (
-                approval.run_id,
-                approval.gate.value,
-                approval.preview_sha256,
-                approval.input_fingerprint,
-                approval.actor_id,
-            ),
-        )
+    governed_write(
+        conn, action, lambda connection: release_gate_in(connection, approval)
+    )
 
-    governed_write(conn, action, write)
+
+def release_gate_in(conn: StoreConnection, approval: GateApproval) -> None:
+    """Release one gate in the caller's governed transaction; never commits.
+
+    The run lock is taken case-first, and a run that is no longer RUNNING
+    refuses: releasing a gate on a terminal run authorises nothing it could use.
+    """
+    if lock_run(conn, approval.run_id) is not RunStatus.RUNNING:
+        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    preview = gate_preview(conn, approval.run_id, approval.gate)
+    if (approval.preview_sha256, approval.input_fingerprint) != (
+        preview.preview_sha256,
+        preview.input_fingerprint,
+    ):
+        raise Refusal(RefusalCode.GATE_APPROVAL_MISMATCH)
+    if not _sources_live(conn, approval.run_id):
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+    conn.execute(
+        "INSERT INTO run_gates (run_id, gate, preview_sha256, input_fingerprint,"
+        " approved_by) VALUES (%s, %s, %s, %s, %s)"
+        " ON CONFLICT (run_id, gate) DO UPDATE SET"
+        " preview_sha256 = EXCLUDED.preview_sha256,"
+        " input_fingerprint = EXCLUDED.input_fingerprint,"
+        " approved_by = EXCLUDED.approved_by, approved_at = now()",
+        (
+            approval.run_id,
+            approval.gate.value,
+            approval.preview_sha256,
+            approval.input_fingerprint,
+            approval.actor_id,
+        ),
+    )
 
 
 def gate_state(conn: StoreConnection, run_id: UUID, gate: Gate) -> GateState:

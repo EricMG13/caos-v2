@@ -113,7 +113,7 @@ def load_source_set(
 def snapshot_source_set(conn: StoreConnection, case_id: UUID) -> SourceSet:
     """Own and finish the transaction, including replay; commit setup first."""
     try:
-        result = _snapshot(conn, case_id)
+        result = snapshot_in(conn, case_id)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -127,7 +127,8 @@ def snapshot_source_set(conn: StoreConnection, case_id: UUID) -> SourceSet:
     return result
 
 
-def _snapshot(conn: StoreConnection, case_id: UUID) -> SourceSet:
+def snapshot_in(conn: StoreConnection, case_id: UUID) -> SourceSet:
+    """`snapshot_source_set`'s write in the caller's transaction; never commits."""
     lock_case(conn, case_id)
     rows = conn.execute(
         "SELECT s.source_id, s.document_sha256, s.filename, s.admitted_at,"
