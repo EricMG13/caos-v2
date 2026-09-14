@@ -1431,3 +1431,28 @@ is only reachable on routes the adapter refuses. Execution is also limited to
 the pathways a contract test proves (`ADAPTER_ROUTES`, LITE earnings only), so
 LITE portfolio decision (CP-0 -> CP-L10) stays disabled (REPAIR_PLAN work
 item 6).
+
+## 2026-09-14 §47 — PDF extraction runs in a killed, budgeted child
+
+**Decision.** Supersedes §44.2 (Phase 3 adversarial audit):
+
+1. **Isolation.** `PdfExtractor.extract` runs the page walk in a child
+   interpreter (`python -I -c`, empty environment, stderr discarded); the
+   parent kills it at the admission deadline and refuses
+   `SOURCE_EXTRACTION_TIMEOUT`. Only a JSON token list or an allowlisted code
+   crosses back. Not `multiprocessing`: `spawn` re-runs the caller's
+   `__main__`, and a fork copies credentials and connections.
+2. **Decoded bytes.** `AdmissionLimits.max_decoded_bytes` (256 MiB) bounds what
+   one PDF's Flate streams inflate to, enforced in the child by replacing
+   pdfminer's `zlib` with a budgeted inflater; over budget refuses
+   `SOURCE_TOO_LARGE`.
+3. **Plain text** stays in-process; a line stops building tokens one past
+   `max_tokens`.
+
+**Why.** A 16,926-byte PDF page overran a 2 s deadline to 23.2 s and a
+261,529-byte page held 806 MiB, so a document inside every §44.1 ceiling could
+exhaust the extracting process: REPAIR_PLAN Phase 3 exit check 1's "specific
+safe outcomes" did not hold. A child uses only the standard library and touches
+no transaction, so the failure mode §44.2 feared (a killed worker
+mid-transaction) does not arise; the probes after the change refused at 2.0 s
+and in 0.2 s.

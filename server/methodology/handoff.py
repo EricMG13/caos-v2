@@ -30,6 +30,9 @@ from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.vendor import VendorContract
 from server.refusals import Refusal, RefusalCode
 
+# Both sets are enforced together at one point, `gates.require_adapter_route`
+# (execution input and acceptance); the readers below check modules alone.
+# Extending the adapter means extending both, with the contract tests.
 ADAPTER_MODULES = frozenset({"CP-0", "CP-L10", "CP-5"})
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
 # work item 6): adapter modules on any other pathway stay disabled.

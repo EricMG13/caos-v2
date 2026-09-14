@@ -20,15 +20,28 @@ that decide where a word, a line and a region end.
 Nothing above this module changes. It implements the same `Extractor` protocol,
 so ingestion, block packing, citation anchoring and every refusal are the ones
 already tested -- which is what a seam is for.
+
+The walk runs in a child interpreter (§47). One page of a few kilobytes can
+inflate to gigabytes or hold millions of operators, and neither is visible
+between pages, so the parent kills the child at the deadline and the child's
+inflater refuses past `max_decoded_bytes`: both bounds hold whatever pdfminer is
+doing. The child is `python -I` with an empty environment -- no credential, no
+caller's `__main__` re-run -- and speaks JSON, so nothing it prints is code.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import subprocess  # nosec B404
+import sys
 import time
+import zlib
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import asdict, astuple, dataclass
 from importlib.metadata import version
 from io import BytesIO
+from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
 from pdfminer.layout import LAParams, LTAnno, LTChar, LTPage, LTTextBox, LTTextLine
@@ -111,44 +124,113 @@ class PdfExtractor:
         limits: AdmissionLimits = DEFAULT_LIMITS,
         deadline: float = float("inf"),
     ) -> list[Token]:
-        """Refuses `SOURCE_NOT_READABLE` for bytes that are not a readable PDF.
+        """`walk_pages` in a child interpreter, killed at `deadline` (§47).
 
-        A scanned page parses fine and yields no tokens; that is not an error
-        here, and `admit_pack` refuses it as `SOURCE_HAS_NO_TEXT` -- the code
-        that says what is actually wrong with it.
-
-        Pages come from `_pages` one at a time, and the page and time ceilings
-        are checked before a page's boxes are walked -- so a document that
-        crosses `max_pages` stops pulling pages from pdfminer's own generator
-        rather than paying to lay out every remaining page first (§44.1/§44.2).
+        Refuses `SOURCE_EXTRACTION_TIMEOUT` when the child has not answered by
+        the deadline, `SOURCE_TOO_LARGE` when its streams inflate past
+        `max_decoded_bytes`, `SOURCE_ENCRYPTED` for an encrypted document, and
+        `SOURCE_NOT_READABLE` for anything else, an unreadable answer included.
+        Only a code or the tokens cross back, never a message.
         """
-        tokens: list[Token] = []
-        region_id = 0
-        line_id = 0
-        for page_number, (frame, page) in enumerate(_pages(data), start=1):
-            if page_number > limits.max_pages:
-                raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
-            # Checked per page (§44.2): cooperative, not preemptive -- one
-            # pathological page can still overrun it (CLAUDE.md ledger).
-            if time.monotonic() > deadline:
-                raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
-            if frame is None:
-                # Nothing on the page is visible, so nothing on it is citable.
+        header = json.dumps({"limits": asdict(limits), "deadline": deadline})
+        # ponytail: one interpreter per PDF; a pool if admission volume makes the
+        # start-up cost show.
+        # Fixed argv, no shell, an empty environment.
+        child = subprocess.Popen(  # nosec B603
+            [sys.executable, "-I", "-c", _CHILD, str(_ROOT)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={},
+        )
+        wait = (
+            None if deadline == float("inf") else max(0.0, deadline - time.monotonic())
+        )
+        try:
+            out, _ = child.communicate(header.encode() + b"\n" + data, timeout=wait)
+        except subprocess.TimeoutExpired:
+            out = None
+        if out is None:
+            child.kill()
+            child.communicate()
+            raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
+        return _answer(out)
+
+
+_ROOT = Path(__file__).resolve().parents[2]
+_CHILD = (
+    "import sys; sys.path.insert(0, sys.argv[1]); "
+    "from server.evidence.pdf import child_main; child_main()"
+)
+# What a child may answer; anything else it says is an unreadable document.
+_CHILD_CODES = frozenset(
+    {
+        RefusalCode.SOURCE_NOT_READABLE,
+        RefusalCode.SOURCE_ENCRYPTED,
+        RefusalCode.SOURCE_TOO_LARGE,
+        RefusalCode.SOURCE_EXTRACTION_TIMEOUT,
+    }
+)
+
+
+def _answer(out: bytes) -> list[Token]:
+    """The child's JSON answer as tokens, or the refusal it names."""
+    code = RefusalCode.SOURCE_NOT_READABLE
+    tokens: list[Token] | None = None
+    try:
+        answer = json.loads(out)
+        if "tokens" in answer:
+            tokens = [Token(*row) for row in answer["tokens"]]
+        elif RefusalCode(answer["refused"]) in _CHILD_CODES:
+            code = RefusalCode(answer["refused"])
+    except (ValueError, TypeError, KeyError):
+        tokens = None
+    if tokens is None:
+        raise Refusal(code)
+    return tokens
+
+
+def walk_pages(data: bytes, *, limits: AdmissionLimits, deadline: float) -> list[Token]:
+    """The tokens of every page, in this process. Refuses `SOURCE_NOT_READABLE`
+    for bytes that are not a readable PDF.
+
+    A scanned page parses fine and yields no tokens; that is not an error
+    here, and `admit_pack` refuses it as `SOURCE_HAS_NO_TEXT` -- the code
+    that says what is actually wrong with it.
+
+    Pages come from `_pages` one at a time, and the page and time ceilings
+    are checked before a page's boxes are walked -- so a document that
+    crosses `max_pages` stops pulling pages from pdfminer's own generator
+    rather than paying to lay out every remaining page first (§44.1/§44.2).
+    Only `PdfExtractor.extract`'s child should call it for untrusted bytes.
+    """
+    tokens: list[Token] = []
+    region_id = 0
+    line_id = 0
+    for page_number, (frame, page) in enumerate(_pages(data), start=1):
+        if page_number > limits.max_pages:
+            raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+        # Checked per page (§44.2): cooperative, not preemptive -- one
+        # pathological page can still overrun it (CLAUDE.md ledger).
+        if time.monotonic() > deadline:
+            raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
+        if frame is None:
+            # Nothing on the page is visible, so nothing on it is citable.
+            continue
+        for box in page:
+            if not isinstance(box, LTTextBox):
                 continue
-            for box in page:
-                if not isinstance(box, LTTextBox):
+            for line in box:
+                if not isinstance(line, LTTextLine):
                     continue
-                for line in box:
-                    if not isinstance(line, LTTextLine):
-                        continue
-                    tokens.extend(
-                        _line_tokens(line, frame, page_number, region_id, line_id)
-                    )
-                    if len(tokens) > limits.max_tokens:
-                        raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
-                    line_id += 1
-                region_id += 1
-        return tokens
+                tokens.extend(
+                    _line_tokens(line, frame, page_number, region_id, line_id)
+                )
+                if len(tokens) > limits.max_tokens:
+                    raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+                line_id += 1
+            region_id += 1
+    return tokens
 
 
 def _pages(data: bytes) -> Iterator[tuple[Frame | None, LTPage]]:
@@ -287,3 +369,85 @@ def _runs(line: LTTextLine) -> list[list[LTChar]]:
     if current:
         runs.append(current)
     return runs
+
+
+class _Inflated(Exception):
+    """The document's streams inflated past `max_decoded_bytes`."""
+
+
+class _Inflater:
+    """`zlib` as pdfminer's stream decoder sees it in the child: one budget.
+
+    `decompress` keeps `zlib.decompress`'s contract (an incomplete or corrupt
+    stream raises `zlib.error`, which sends pdfminer to its fallback), and the
+    fallback's `decompressobj` draws on the same budget, so a corrupt checksum
+    is no way around it. Output past the budget is never produced.
+    """
+
+    error = zlib.error
+
+    def __init__(self, budget: int) -> None:
+        self.left = budget
+        self.exceeded = False
+
+    def take(self, stream: zlib._Decompress, data: bytes) -> bytes:
+        out = stream.decompress(data, self.left + 1)
+        self.left -= len(out)
+        if self.left < 0 or stream.unconsumed_tail:
+            self.exceeded = True
+            raise _Inflated
+        return out
+
+    def decompress(self, data: bytes) -> bytes:
+        stream = zlib.decompressobj()
+        out = self.take(stream, data)
+        if not stream.eof:
+            raise zlib.error
+        return out
+
+    def decompressobj(self) -> _Stream:
+        return _Stream(self)
+
+
+class _Stream:
+    def __init__(self, inflater: _Inflater) -> None:
+        self.inflater, self.stream = inflater, zlib.decompressobj()
+
+    def decompress(self, data: bytes) -> bytes:
+        return self.inflater.take(self.stream, data)
+
+
+def child_main() -> None:
+    """The extraction child: a header line and the document on stdin, one JSON
+    answer on stdout. Its logs and its inflater are its own, and it never
+    raises: a traceback would print the text pdfminer choked on (stderr is
+    discarded by the parent as well).
+    """
+    import pdfminer.pdftypes
+    from pdfminer.pdfdocument import PDFEncryptionError
+
+    quiet = logging.getLogger("pdfminer")
+    quiet.addHandler(logging.NullHandler())
+    quiet.propagate = False
+    answer: dict[str, object] = {"refused": RefusalCode.SOURCE_NOT_READABLE}
+    inflater = _Inflater(0)
+    try:
+        header = json.loads(sys.stdin.buffer.readline())
+        limits = AdmissionLimits(**header["limits"])
+        inflater = _Inflater(limits.max_decoded_bytes)
+        pdfminer.pdftypes.zlib = inflater  # type: ignore[assignment,attr-defined]
+        tokens = walk_pages(
+            sys.stdin.buffer.read(), limits=limits, deadline=float(header["deadline"])
+        )
+        answer = {"tokens": [astuple(token) for token in tokens]}
+    except Refusal as refusal:
+        answer = {"refused": refusal.code}
+    except (_Inflated, MemoryError):
+        answer = {"refused": RefusalCode.SOURCE_TOO_LARGE}
+    except PDFEncryptionError:
+        answer = {"refused": RefusalCode.SOURCE_ENCRYPTED}
+    except BaseException:  # noqa: BLE001 -- untrusted bytes; any failure is a code
+        answer = {"refused": RefusalCode.SOURCE_NOT_READABLE}
+    if inflater.exceeded:  # however pdfminer handled the exception on its way up
+        answer = {"refused": RefusalCode.SOURCE_TOO_LARGE}
+    sys.stdout.buffer.write(json.dumps(answer).encode())

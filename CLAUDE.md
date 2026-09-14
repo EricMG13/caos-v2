@@ -210,19 +210,26 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   evidence. *Upgrade:* per-node evidence selection -- the Phase 5 entry "The
   gate's evidence demands are dropped" -- is what first delivers less than a
   whole source, and its callers already pass exactly what they delivered.
-- **The extraction deadline is cooperative, not preemptive (§44.2).**
-  `AdmissionLimits.max_seconds` bounds one document's extraction, and
-  `PdfExtractor`/`PlainTextExtractor` each check `time.monotonic()` against the
-  deadline they are handed -- per page, per line -- before doing that unit's
-  work, not while it runs. A single pathological page (one `LTTextBox` pdfminer's
-  own layout analysis takes disproportionately long to resolve) or a single
-  pathological line can still overrun the deadline before the next check point
-  is reached; nothing here interrupts work already in progress. That is the
-  decision §44 states, not an oversight: process isolation or a hard timeout
-  would be a new dependency and a new failure mode (a killed worker mid-
-  transaction) for a residual this narrow. *Upgrade:* none planned while
-  admission stays in-process; a hard per-call timeout is the upgrade the day a
-  single page is shown to overrun it by more than the ceiling can absorb.
+- ~~**The extraction deadline is cooperative, not preemptive (§44.2).**~~
+  Superseded by §47 after the Phase 3 adversarial audit measured a 16,926-byte
+  page of operators taking 23.2 s against a 2 s deadline and a 261,529-byte page
+  holding 806 MiB. `PdfExtractor.extract` runs `walk_pages` in a child
+  interpreter (`python -I`, empty environment, JSON over pipes) that the
+  parent kills at the admission deadline (`SOURCE_EXTRACTION_TIMEOUT`), and
+  inside that child pdfminer's `zlib` is a budgeted inflater, so a
+  document's Flate streams refuse `SOURCE_TOO_LARGE` past `max_decoded_bytes`
+  (256 MiB) before the bytes are held -- the corrupt-checksum fallback draws on
+  the same budget. What remains: LZW and run-length streams, which pdfminer
+  decodes in pure Python, are bounded by the kill rather than by bytes; no
+  address-space limit is set, so a child's memory is bounded only through the
+  inflater; each PDF pays an interpreter's start-up (0.124 s measured on the
+  development machine); and plain text stays in-process and cooperative per
+  line, which the 20 MiB document ceiling bounds (a line now stops building
+  tokens one past `max_tokens`). Extraction also runs while the caller's
+  transaction is open, before `lock_case`: a pack of fifty documents can hold
+  it idle for their extraction time. *Upgrade:* an address-space limit in the
+  child where the platform enforces one, a worker pool if start-up cost shows,
+  and extraction outside the store transaction with Phase 4's upload worker.
 
 - **Three vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
