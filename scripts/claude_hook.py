@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import shutil
 import subprocess  # nosec B404
 import sys
 from collections.abc import Callable, Sequence
@@ -125,7 +126,16 @@ def format_file(
 ) -> int:
     """Run the pinned formatter on one target. Returns its exit code."""
     if path.suffix in _PYTHON:
-        argv = [str(repo / ".venv/bin/ruff"), "format", "--force-exclude", str(path)]
+        # The pinned dev venv's ruff when `make venv` has been run (the local
+        # dev flow); otherwise whatever `ruff` PATH resolves to (CI's `test`
+        # job installs it system-wide, docs/DECISIONS.md §48).
+        venv_ruff = repo / ".venv/bin/ruff"
+        ruff = (
+            str(venv_ruff)
+            if venv_ruff.is_file()
+            else shutil.which("ruff") or str(venv_ruff)
+        )
+        argv = [ruff, "format", "--force-exclude", str(path)]
     else:
         prettier = repo / "frontend/node_modules/.bin/prettier"
         argv = [str(prettier), "--write", str(path)]

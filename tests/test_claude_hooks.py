@@ -120,7 +120,12 @@ def test_format_targets_only_authored_files(tmp_path: Path) -> None:
         assert format_target(str(skipped), tmp_path) is None
 
 
-def test_format_file_runs_the_pinned_formatter_on_one_path(tmp_path: Path) -> None:
+def test_format_file_falls_back_to_the_venv_path_when_ruff_is_on_no_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither `make venv` nor a system install: the fixed `.venv` path is
+    still what gets run (and fails loudly), not a silent no-op."""
+    monkeypatch.setattr("claude_hook.shutil.which", lambda _name: None)
     calls: list[list[str]] = []
 
     def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
@@ -141,6 +146,44 @@ def test_format_file_runs_the_pinned_formatter_on_one_path(tmp_path: Path) -> No
             "--write",
             str(tmp_path / "frontend/d.tsx"),
         ],
+    ]
+
+
+def test_format_file_prefers_the_pinned_venv_ruff_over_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`make venv` was run: its ruff is used even if another one is on PATH."""
+    venv_ruff = tmp_path / ".venv/bin/ruff"
+    venv_ruff.parent.mkdir(parents=True)
+    venv_ruff.touch()
+    monkeypatch.setattr("claude_hook.shutil.which", lambda _name: "/usr/bin/ruff")
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert format_file(tmp_path / "a.py", tmp_path, run) == 0
+    assert calls == [
+        [str(venv_ruff), "format", "--force-exclude", str(tmp_path / "a.py")]
+    ]
+
+
+def test_format_file_resolves_ruff_from_path_without_a_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No `.venv` (CI's system-wide install, docs/DECISIONS.md §48): ruff
+    still runs, resolved from PATH rather than a hardcoded venv path."""
+    monkeypatch.setattr("claude_hook.shutil.which", lambda _name: "/usr/bin/ruff")
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert format_file(tmp_path / "a.py", tmp_path, run) == 0
+    assert calls == [
+        ["/usr/bin/ruff", "format", "--force-exclude", str(tmp_path / "a.py")]
     ]
 
 
