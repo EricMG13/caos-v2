@@ -75,6 +75,7 @@ def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
     from test_revisions import _save
 
     from server.deliverable.filing import file_deliverable
+    from server.deliverable.receipts import read_filed_receipt
     from server.store.audit import audit_trail, verify_chain
 
     make_harness = cast(
@@ -108,6 +109,7 @@ def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
                         else:
                             receipt = file_deliverable(
                                 other,
+                                held.blobs,
                                 case_id=held.case_id,
                                 actor_id=filer,
                                 revision_id=revision,
@@ -129,7 +131,7 @@ def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
             }[stage]
             for pair in (outcomes[:2], outcomes[2:]):
                 assert sorted(pair) == sorted(expected)
-        for held, _, _, _ in cases:
+        for held, revision, _, _ in cases:
             actions = [entry.action for entry in audit_trail(conn, held.case_id)]
             assert (
                 actions.count("DELIVERABLE_FROZEN")
@@ -137,6 +139,19 @@ def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
                 == 1
             )
             assert verify_chain(conn, held.case_id)
+            rows = conn.execute(
+                "SELECT receipt_sha256 FROM deliverable_receipts WHERE case_id=%s",
+                (held.case_id,),
+            ).fetchall()
+            assert len(rows) == 1
+            assert read_filed_receipt(
+                conn,
+                held.blobs,
+                held.bundle,
+                case_id=held.case_id,
+                run_id=held.run_id,
+                revision_id=revision,
+            ) == held.blobs.get(rows[0][0])
 
 
 @pytest.fixture
