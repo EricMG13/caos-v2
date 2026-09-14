@@ -39,6 +39,7 @@ from server.api.app import (
     app,
     blob_store,
     methodology_bundle,
+    read_case_events,
     read_run_events,
     store_connection,
 )
@@ -823,6 +824,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/runs/{run_id}/sources/{source_id}/pages/{page}": (
             "read_evidence_page"
         ),
+        "/api/v1/cases/{case_id}/events": read_case_events.__name__,
         "/api/runs/{run_id}/events": read_run_events.__name__,
         "/api/health": "read_health",
     }
@@ -858,6 +860,18 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         store_connection,
         blob_store,
         methodology_bundle,
+    ]
+    events = next(
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/api/v1/cases/{case_id}/events"
+    )
+    assert [d.call for d in events.dependant.dependencies] == [
+        actor_from_request,
+        upload_read.case_path,
+        analysis_read.run_query,
+        store_connection,
     ]
     assert calls["/api/v1/cases/{case_id}/analysis"] == [
         actor_from_request,
