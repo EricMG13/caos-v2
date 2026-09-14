@@ -1,27 +1,21 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { UNAVAILABLE_WORDING, classify, fetchSection, sectionUrl } from "@/app/transport";
+import { UNAVAILABLE_WORDING, fetchSection, sectionUrl } from "@/app/transport";
 import { ENABLED_SECTIONS, isEnabledSection } from "@/app/sections";
 import { Workspace } from "@/app/Workspace";
 import { Rail } from "@/chrome/Rail";
 import { composeChrome, markDisabled } from "@/chrome/compose";
-import { PINNED_KEYS, keysMatch } from "@/wire/keys";
 import { SECTIONS } from "@/wire";
 import { parseUploadDocument } from "@/wire/v1";
 
-const FIXTURES = `${resolve(process.cwd(), "fixtures")}/`;
 const CASE = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const OTHER_CASE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const RUN = "7e6d5c4b-3a29-4817-a6f5-e4d3c2b1a098";
 const AT = "2026-09-14T10:00:00.123456Z";
 const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
-
-function fixture(name: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8"));
-}
 
 /** A v1 Upload document for `CASE`, served under `role`. */
 function v1Upload(role: { global_role: string; standing: string | null }, caseId = CASE) {
@@ -34,66 +28,6 @@ function v1Upload(role: { global_role: string; standing: string | null }, caseId
     notes: [],
   };
 }
-
-describe("the wire", () => {
-  test("test_wire_pinned_keys_match_fixtures", () => {
-    // Directory and Upload read the v1 wire since slice 4.1h (their `wire.ts`
-    // marker), so their fixtures no longer carry the legacy pinned keys this
-    // test checks; `test_every_enabled_demo_fixture_is_a_valid_v1_document`
-    // (tests/unit/directory.test.tsx) is their equivalent gate.
-    const V1_CUTOVER = ["directory", "upload", "run"];
-    const documents = [
-      ...SECTIONS.filter((section) => !V1_CUTOVER.includes(section)).map(
-        (section) => `${section}.json`,
-      ),
-      ...readdirSync(`${FIXTURES}states`)
-        .filter((name) => !V1_CUTOVER.some((section) => name.startsWith(`${section}.`)))
-        .map((name) => `states/${name}`),
-    ];
-    expect(documents.length).toBeGreaterThanOrEqual(9);
-    for (const name of documents) {
-      const document = fixture(name);
-      expect(keysMatch(document), name).toBe(true);
-      expect(
-        Object.keys(document).every((key) => (PINNED_KEYS as readonly string[]).includes(key)),
-      ).toBe(true);
-    }
-  });
-
-  test("a document with a key outside the pinned set is refused", () => {
-    const document = fixture("admin.json");
-    const status = classify({ ...document, widget: {} });
-    expect(status).toEqual({
-      kind: "error",
-      refusal: { code: "WIRE_KEYS_MISMATCH", clears: expect.any(String) },
-    });
-    expect(
-      classify({ ...document, chrome: { ...(document["chrome"] as object), extra: 1 } }).kind,
-    ).toBe("error");
-  });
-
-  test("test_observed_empty_requires_timestamp", () => {
-    const document = fixture("admin.json");
-    expect(classify({ ...document, observed_empty: true, observed_at: "" })).toMatchObject({
-      kind: "error",
-      refusal: { code: "OBSERVED_EMPTY_UNTIMED" },
-    });
-    expect(classify({ ...document, observed_empty: true })).toMatchObject({
-      kind: "observed-empty",
-      observed_at: document["observed_at"],
-    });
-  });
-
-  test("partial renders through warning status with its notes", () => {
-    const document = fixture("admin.json");
-    expect(
-      classify({ ...document, status: "partial", notes: ["CP-3 not accepted"] }),
-    ).toMatchObject({
-      kind: "partial",
-      notes: ["CP-3 not accepted"],
-    });
-  });
-});
 
 describe("the transport", () => {
   afterEach(() => {
@@ -286,29 +220,16 @@ describe("the transport", () => {
     const code = readFileSync(resolve(process.cwd(), "src/app/transport.ts"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/.*$/gm, "")
-      // An import rename (`WIRE as RUN_WIRE`) is a binding, not a cast.
       .replace(/^import\s[^;]*;/gm, "");
     expect(code.length).toBeGreaterThan(500);
     expect(code.match(/\bas\s+(?!const\b)[A-Za-z_{[(]/g) ?? []).toEqual([]);
     expect(code).not.toMatch(/<\s*[A-Z]\w*\s*>\s*(JSON|value|body)/);
   });
-});
 
-describe("a section whose marker is v1", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.doUnmock("@/sections/upload/wire");
-    vi.resetModules();
-  });
-
-  async function v1Transport() {
-    vi.resetModules();
-    vi.doMock("@/sections/upload/wire", () => ({ WIRE: "v1" }));
-    return import("@/app/transport");
-  }
-
-  test("is validated whole and bound to the requested case", async () => {
-    const transport = await v1Transport();
+  // Every enabled section reads the v1 wire unconditionally since slice
+  // 4.1j; there is no marker left to mock, so this is `fetchSection` on the
+  // one path it now has, not a variant of it.
+  test("a v1 document is validated whole and bound to the requested case", async () => {
     const served = [
       v1Upload({ global_role: "ANALYST", standing: "WRITER" }),
       { ...v1Upload({ global_role: "ANALYST", standing: "WRITER" }), widget: 1 },
@@ -319,21 +240,43 @@ describe("a section whose marker is v1", () => {
       "fetch",
       vi.fn(async () => new Response(JSON.stringify(served.shift()))),
     );
-    expect(await transport.fetchSection("upload", { case: CASE })).toMatchObject({
+    expect(await fetchSection("upload", { case: CASE })).toMatchObject({
       kind: "ready",
       document: { body: { case_id: CASE } },
     });
-    expect(await transport.fetchSection("upload", { case: CASE })).toEqual({
+    expect(await fetchSection("upload", { case: CASE })).toEqual({
       kind: "error",
       refusal: { code: "WIRE_SHAPE_INVALID", clears: expect.any(String) },
     });
-    expect(await transport.fetchSection("upload", { case: CASE })).toEqual({
+    expect(await fetchSection("upload", { case: CASE })).toEqual({
       kind: "error",
       refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
     });
-    expect(await transport.fetchSection("upload", { case: CASE })).toMatchObject({
+    expect(await fetchSection("upload", { case: CASE })).toMatchObject({
       kind: "observed-empty",
       observed_at: AT,
     });
+  });
+
+  test("test_no_dual_wire_marker_remains", () => {
+    // Task 4.1 is not accepted while `keysMatch` or a legacy marker exists
+    // (brief 4.1, Waves). Slice 4.1j retired both: `wire/keys.ts`, the
+    // per-section `sections/<s>/wire.ts` markers and the legacy branch in
+    // `transport.ts` this file used to exercise.
+    const sources = [
+      "src/app/transport.ts",
+      "src/app/Workspace.tsx",
+      "src/app/views.tsx",
+      "src/wire/index.ts",
+    ].map((path) => readFileSync(resolve(process.cwd(), path), "utf8"));
+    for (const code of sources) {
+      expect(code).not.toMatch(/keysMatch|WIRE_KEYS_MISMATCH|isLegacyDocument/);
+      expect(code).not.toMatch(/sections\/[a-z]+\/wire["']/);
+    }
+    expect(existsSync(resolve(process.cwd(), "src/wire/keys.ts"))).toBe(false);
+    for (const section of ["directory", "upload", "run", "analysis"]) {
+      expect(existsSync(resolve(process.cwd(), `src/sections/${section}/wire.ts`))).toBe(false);
+      expect(existsSync(resolve(process.cwd(), `src/wire/${section}.ts`))).toBe(false);
+    }
   });
 });

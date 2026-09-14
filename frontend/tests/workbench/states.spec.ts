@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { DEMO_CASE_BY_SECTION } from "../../scripts/fixture-routes.mjs";
+
+const CASE = DEMO_CASE_BY_SECTION.analysis;
 
 test("offline is one page-level sentence and never engine text", async ({ page }) => {
   // The transport fails here rather than at the fixture middleware, which
@@ -10,7 +13,7 @@ test("offline is one page-level sentence and never engine text", async ({ page }
   // failure and not a status, because `fetchSection` reads offline from a
   // rejected `fetch` and every status is some other state.
   await page.route("**/api/v1/**", (route) => route.abort("connectionfailed"));
-  await page.goto("/analysis/?case=CASE-2026-CVNA01&fixture=offline");
+  await page.goto(`/analysis/?case=${CASE}&fixture=offline`);
   const alert = page.locator("[data-page-alert]");
   await expect(alert).toHaveCount(1);
   await expect(alert).toHaveText("The request did not reach the server.");
@@ -27,20 +30,21 @@ test("observed-empty is timestamped and never inferred", async ({ page }) => {
 });
 
 test("a typed refusal shows its code and what clears it", async ({ page }) => {
-  await page.goto("/analysis/?case=CASE-2026-CVNA01&fixture=error");
+  await page.goto(`/analysis/?case=${CASE}&fixture=error`);
   const region = page.locator("main#body [data-surface-state='error']");
   await expect(region).toContainText("STORE_UNAVAILABLE");
   await expect(region).toContainText("Clears when");
 });
 
 test("partial renders through warning status with its notes and the body", async ({ page }) => {
-  await page.goto("/analysis/?case=CASE-2026-CVNA01&fixture=partial");
+  await page.goto(`/analysis/?case=${CASE}&fixture=partial`);
   await expect(page.locator("main#body [data-surface-state='partial']")).toBeVisible();
-  await expect(page.locator("table.fin[data-financials]")).toBeVisible();
+  await expect(page.locator("[data-handoff]").first()).toBeVisible();
+  await expect(page.locator("[data-pending-node]").first()).toBeVisible();
 });
 
 test("an authority change marks the region stale until an explicit reload", async ({ page }) => {
-  await page.goto("/analysis/?case=CASE-2026-CVNA01&fixture=stale");
+  await page.goto(`/analysis/?case=${CASE}&fixture=stale`);
   const stale = page.locator("main#body [data-surface-state='stale']");
   await expect(stale).toBeVisible({ timeout: 10_000 });
   await stale.getByRole("button", { name: "RELOAD" }).click();
