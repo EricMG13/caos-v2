@@ -235,7 +235,9 @@ def _read_verified(bundle: Bundle, path: Path, expected: dict[str, Any]) -> byte
     if not path.is_file():
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     try:
-        data = path.read_bytes()
+        with path.open("rb") as stream:
+            # Never more than the manifest allows plus one byte to prove excess.
+            data = stream.read(expected["bytes"] + 1)
     except OSError:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH) from None
 
@@ -253,15 +255,21 @@ def verified_root_bytes(bundle: Bundle, name: str) -> bytes:
     `AUTHORITY_BYTES_MISMATCH`, carrying no path or content.
     """
     expected = bundle._manifest["root_file_hashes"].get(_authority_name(name))
-    if not isinstance(expected, dict):
+    # Methodology text only: the root also lists scripts and tests.
+    if not isinstance(expected, dict) or _ROOT_LITERAL.fullmatch(name.encode()) is None:
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     return _read_verified(bundle, _contained_path(bundle.root, name), expected)
 
 
 # A root file a skill names, as it names it (`../../CANON_SHARED.md`). Every
 # `../../` in a verified SKILL.md must be one of these, naming a listed root file.
+# The name is matched directly, so trailing prose punctuation is not part of it.
+# One-level-up links (`../cp-os-credit-os/scripts/prepare_invocation.py`) name
+# scripts whose steps the host performs itself; they are not delivered (§45.1).
 ROOT_PREFIX = "../../"
-_ROOT_MENTION = re.compile(rb"\.\./\.\./([^\s`]*)")
+_ROOT_MENTION = re.compile(
+    rb"\.\./\.\./([A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:md|txt)(?![A-Za-z0-9_\x80-\xff-]))?"
+)
 _ROOT_LITERAL = re.compile(rb"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:md|txt)")
 
 
@@ -284,7 +292,7 @@ def _named_root_files(bundle: Bundle, skill: bytes) -> list[str]:
     names: set[str] = set()
     for mention in _ROOT_MENTION.finditer(skill):
         literal = mention.group(1)
-        if _ROOT_LITERAL.fullmatch(literal) is None:
+        if literal is None or _ROOT_LITERAL.fullmatch(literal) is None:
             raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
         name = literal.decode("ascii")
         if name not in listed:
@@ -321,7 +329,7 @@ def delivered_authority_digest(authority: DeliveredAuthority) -> str:
     Length-prefixed, so no two different sets encode the same byte stream.
     """
     digest = sha256(b"caos-delivered-authority-v1\x00")
-    parts = [authority.build_id.encode("utf-8")]
+    parts = [authority.build_id.encode("utf-8"), authority.module_id.encode("utf-8")]
     for name, data in authority.files:
         parts += [name.encode("utf-8"), sha256(data).digest()]
     for part in parts:

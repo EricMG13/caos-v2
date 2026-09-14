@@ -274,3 +274,31 @@ def test_the_delivered_digest_moves_with_every_delivered_byte(bundle: Bundle) ->
         )
     )
     assert len(seen) == len(delivered.files) + 3
+
+
+def test_trailing_punctuation_after_a_root_link_is_not_part_of_its_name() -> None:
+    from server.methodology.bundle import _ROOT_MENTION
+
+    [mention] = _ROOT_MENTION.finditer(b"see (../../CANON_SHARED.md).")
+    assert mention.group(1) == b"CANON_SHARED.md"
+
+
+def test_the_digest_binds_the_module() -> None:
+    from dataclasses import replace
+
+    from server.methodology.bundle import (
+        delivered_authority,
+        delivered_authority_digest,
+    )
+
+    authority = delivered_authority(Bundle(VENDORED), "CP-0")
+    renamed = replace(authority, module_id="CP-PARSE")
+    assert delivered_authority_digest(authority) != delivered_authority_digest(renamed)
+
+
+def test_a_listed_root_script_is_not_readable_as_authority() -> None:
+    from server.methodology.bundle import verified_root_bytes
+
+    with pytest.raises(Refusal) as refused:
+        verified_root_bytes(Bundle(VENDORED), "verify_package.py")
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
