@@ -1544,3 +1544,89 @@ every stale write, and no lock is held across transport.
 **Why.** The repair plan requires versioned models, settled identity and refusal
 semantics, whole-document validation and no pretence that `/api/runs` was a
 section document.
+
+## 2026-09-14 §51 — Governed commands: one audited unit and one receipt per intent
+
+**Decision.** Phase 4 Task 4.2 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.2-brief.md`):
+
+1. **Nine endpoints under `/api/v1/cases`.** Create case (`POST`), admit
+   sources (`/{case}/sources`), create run (`/{case}/runs`, the route resolved
+   and pinned in the same unit), pin input (`/runs/{run}/input`, snapshotting
+   the case's live sources in the same unit), a gate preview (`GET
+   /runs/{run}/gates/{gate}/preview`) and approval (`POST …/approval`) for
+   `source-set` and `research-plan`, and start, retry and cancel. Start, retry
+   and cancel are the only writers of `run_work`; none calls a provider, and
+   `test_command_modules_import_no_runtime_provider_or_transport` holds that.
+2. **Authority is derived, in order.** Identity (401), path ids, the
+   `Idempotency-Key` header (400 `IDEMPOTENCY_KEY_REQUIRED`, before a body is
+   read), visibility (no live standing is the private 404), the global role (a
+   write needs ANALYST or ADMIN), the command's case floor (403
+   `NOT_AUTHORISED`), the bounded body, then the governed write, which
+   rechecks standing under the case lock; a `NOT_AUTHORISED` there answers
+   `CASE_NOT_FOUND`. No request carries an actor, case, run or approver. Create
+   case inserts the case, grants its creator ADMIN and writes `CASE_CREATED` in
+   one transaction.
+3. **Idempotency (migration 0014).** `command_requests` holds one immutable
+   receipt per `(actor_id, scope, idempotency_key)`, scope the case or the nil
+   UUID for create case, beside `request_sha256` -- canonical JSON of
+   `{command, case_id, run_id, gate, body}`, an admission's body being
+   `[{filename, sha256}]` in part order. Only committed successes are recorded,
+   as the governed unit's last domain statement, so state, run events, the
+   work row, the audit event and the receipt commit together or not at all. A
+   key already committed replays its status and receipt with
+   `Idempotency-Replayed: true` and writes nothing; under another digest it is
+   409 `IDEMPOTENCY_KEY_REUSED`. A concurrent twin finds the first receipt
+   under the case lock, or waits on the primary key's `ON CONFLICT DO NOTHING`
+   under the nil scope, rolls back its whole unit and replays. A refusal burns
+   no key.
+4. **In-transaction store entry points.** `pin_route_in`, `pin_run_input_in`,
+   `snapshot_in` and `release_gate_in` write in the caller's transaction (the
+   committing wrappers call them); `release_gate_in` takes the run lock and
+   refuses `RUN_NOT_RUNNING`. Lock order stays case, run, `run_work`.
+5. **Conflicts, not faults.** Approval re-derives the preview under the case
+   and run locks (`GATE_APPROVAL_MISMATCH`, `EVIDENCE_NOT_AVAILABLE`,
+   `RUN_NOT_RUNNING`). Start and retry classify inside the unit: no pin
+   `RUN_INPUT_NOT_PINNED`; another build, manifest or adapter
+   `ORCHESTRATION_BUILD_MOVED`; then `execution_input`; a fingerprint other
+   than the body's `COMMAND_EXPECTATION_STALE`; then `RUN_ALREADY_STARTED` or
+   `RUN_NOT_STOPPED`. Cancel of an unqueued run enqueues and requests cancel in
+   one unit. A route pair outside `ADAPTER_ROUTES` is `ROUTE_NOT_ENABLED`
+   before resolution. Each is 409; oversize is 413 `SOURCE_TOO_LARGE`.
+6. **Bodies.** JSON commands need `application/json` of at most 16 KiB; any
+   failure is 400 `REQUEST_INVALID`, never FastAPI's 422 quoting the input.
+   Admission needs `multipart/form-data` with a declared `Content-Length` no
+   larger than `max_pack_bytes` plus 1 MiB and no `Transfer-Encoding`, checked
+   from headers; after the floor the standing read's transaction is closed, the
+   form is parsed (`max_files=50`, `max_fields=0`, the stream held to its
+   declared length), only file parts named `document` are taken, each filename
+   `BoundaryText` of at most 255 characters and not blank. The receipt is
+   looked up before extraction; `prepare_pack` then extracts (the §47 child for
+   a PDF) with no transaction open and no case lock held, and one unit runs
+   `admit_prepared`, `SOURCES_ADMITTED` and the receipt. The pack is admitted
+   whole or not at all.
+7. **Dependency.** `python-multipart==0.0.32`, pinned and hashed in
+   `requirements.txt` and `requirements-dev.txt`, authorized by the user on
+   2026-09-14. Starlette's `Request.form` requires it; nothing else imports it.
+8. **Availability is advisory.** `Chrome.actions` is computed by the pure
+   functions of `server/api/commands/availability.py` from facts each read
+   already holds, in the order the command checks them, so a refused action
+   names the code its command would answer now. It grants nothing; the command
+   rechecks at commit. The Run document adds `RunView.work` and
+   `RunBody.route_choices` (at most 16, from `ADAPTER_ROUTES`).
+9. **The browser.** `frontend/src/app/commands.ts` validates every receipt and
+   preview whole. A control holds one `crypto.randomUUID()` key per intent,
+   reused only when the previous call carried the identical body and never
+   reached the server, and replaced after any answer. Controls render from
+   `chrome.actions`, present and refused rather than hidden (an absent entry is
+   `ACTION_UNPLACED`); a success refetches its section once.
+10. **CSRF, first half.** No CORS middleware, exact content types and a
+    mandatory custom header, so a cross-site simple form POST is refused before
+    any effect. Origin and `Sec-Fetch-Site` are §53's.
+
+**Why.** REPAIR_PLAN Phase 4 work item 3 asks for idempotent, server-authorized
+commands with stale-preview and changed-authority conflicts. The committing
+store pins could not share a transaction with an audit event or a receipt, and
+`admit_pack` extracted before it locked, so neither could be governed as it
+stood. A key per intent is what makes a retried request after a lost
+acknowledgement safe to send, and recording only committed successes means a
+refusal never has to be un-remembered.
