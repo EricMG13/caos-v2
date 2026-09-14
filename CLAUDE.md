@@ -243,6 +243,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   visible only in its exit code and logs, and a queued run simply waits.
   *Upgrade:* a heartbeat the worker writes and health reads, the day an
   operator has to alert on a stalled queue.
+- **An idle case stream held its thread until the deadline.** Fixed in
+  `0db50fa`: each poll now ends in an SSE comment, so a disconnected browser
+  releases its worker thread and uvicorn concurrency slot within one
+  `POLL_INTERVAL`. What remains is the poll itself (the Phase 6 entry "A run
+  tail polls") and `--limit-concurrency 32` counting every open stream: 32
+  watching tabs refuse a 33rd request with 503. *Upgrade:* `LISTEN`/`NOTIFY`
+  and a stream cap below the concurrency limit, the day real watchers measure it.
 - **The test edge's session cookie is weaker than the contract's.** Over
   `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
   drops `Secure` and the `__Host-` prefix the contract names and keeps
@@ -251,10 +258,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   TLS material, which this task was not authorized to create.
 - **The production image and journey are proven locally, not in CI.**
   `make smoke-production` is the last step of `make check`, and no CI
-  job runs it. At `943f57f` its journey step refuses with exit 2 because
-  `frontend/playwright.journey.config.ts` (slice 4.5e2) does not exist yet, so
-  a complete `make check` fails there until that slice lands. *Upgrade:* the
-  journey slice, then a CI job over the smoke stack (Phase 6).
+  job runs it. The journey (slice 4.5e2) runs 13 tests on each of chromium,
+  firefox and webkit, but only the first engine meets the worker's real
+  exit-after-first-accept and the 300 s lease wait: the exit-once marker lives
+  in the shared blob volume, so the later engines restart the worker against
+  a run that has already finished. *Upgrade:* a CI job over the smoke stack
+  (Phase 6), and a per-engine marker if the recovery must be proven per engine.
 
 **Repair Phase 3.**
 
