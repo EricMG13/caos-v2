@@ -14,13 +14,16 @@ from uuid import UUID
 
 import psycopg
 
+from server import methodology
+from server.engine.route import ResolvedRoute
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
+from server.store.events import lock_run
 from server.store.members import Standing, satisfies, standing_of
-from server.store.routes import resolved_route
-from server.store.run_inputs import load_run_input
-from server.store.source_sets import load_source_set
+from server.store.run_inputs import RunInput, _load_run_input
+from server.store.source_sets import SourceSet
 
 
 class Gate(StrEnum):
@@ -71,45 +74,40 @@ def gate_preview(conn: StoreConnection, run_id: UUID, gate: Gate) -> GatePreview
 
 
 def _preview(conn: StoreConnection, run_id: UUID, gate: Gate) -> GatePreview | None:
-    try:
-        pin = load_run_input(conn, run_id)
-        if pin is None:
-            return None
-        data: dict[str, object] = {
-            "format_version": 1,
-            "gate": gate.value,
-            "input": {
-                **asdict(pin),
-                "run_id": str(run_id),
-                "case_id": str(pin.case_id),
-            },
-        }
-        if gate is Gate.SOURCE_SET:
-            source = load_source_set(conn, pin.case_id, pin.source_version)
-            if source is None:
-                raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-            data["sources"] = [
-                {**asdict(member), "source_id": str(member.source_id)}
-                for member in source.members
-            ]
-        else:
-            route = resolved_route(conn, run_id)
-            if route is None:
-                raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-            data["route"] = asdict(route)
-        content = json.dumps(
-            data, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2
-        )
-        return GatePreview(
-            run_id,
-            pin.case_id,
-            gate,
-            content,
-            sha256(content.encode("utf-8")).hexdigest(),
-            pin.input_fingerprint,
-        )
-    except psycopg.Error:
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    loaded = _load_run_input(conn, run_id)
+    return None if loaded is None else _historical_preview(*loaded, gate)
+
+
+def _historical_preview(
+    pin: RunInput, route: ResolvedRoute, source: SourceSet, gate: Gate
+) -> GatePreview:
+    data: dict[str, object] = {
+        "format_version": 1,
+        "gate": gate.value,
+        "input": {
+            **asdict(pin),
+            "run_id": str(pin.run_id),
+            "case_id": str(pin.case_id),
+        },
+    }
+    if gate is Gate.SOURCE_SET:
+        data["sources"] = [
+            {**asdict(member), "source_id": str(member.source_id)}
+            for member in source.members
+        ]
+    else:
+        data["route"] = asdict(route)
+    content = json.dumps(
+        data, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2
+    )
+    return GatePreview(
+        pin.run_id,
+        pin.case_id,
+        gate,
+        content,
+        sha256(content.encode("utf-8")).hexdigest(),
+        pin.input_fingerprint,
+    )
 
 
 def _sources_live(conn: StoreConnection, run_id: UUID) -> bool:
@@ -119,7 +117,12 @@ def _sources_live(conn: StoreConnection, run_id: UUID) -> bool:
             " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
             " LEFT JOIN live_sources s"
             " ON (s.case_id, s.source_id) = (m.case_id, m.source_id)"
-            " WHERE i.run_id = %s AND s.source_id IS NULL LIMIT 1",
+            " LEFT JOIN source_extractions e ON e.source_id = s.source_id"
+            " WHERE i.run_id = %s AND (s.source_id IS NULL OR"
+            " (s.document_sha256, e.extractor_identity, e.output_sha256,"
+            " e.extraction_sha256) IS DISTINCT FROM"
+            " (m.document_sha256, m.extractor_identity, m.output_sha256,"
+            " m.extraction_sha256)) LIMIT 1",
             (run_id,),
         ).fetchone()
         is None
@@ -181,24 +184,74 @@ def gate_state(conn: StoreConnection, run_id: UUID, gate: Gate) -> GateState:
         preview = _preview(conn, run_id, gate)
         if preview is None:
             return GateState.OPEN
-        row = conn.execute(
-            "SELECT preview_sha256, input_fingerprint, approved_by FROM run_gates"
-            " WHERE run_id = %s AND gate = %s",
-            (run_id, gate.value),
-        ).fetchone()
-        if (
-            row is None
-            or row[:2] != (preview.preview_sha256, preview.input_fingerprint)
-            or not _sources_live(conn, run_id)
-            or not satisfies(
-                standing_of(conn, case_id=preview.case_id, user_id=row[2]),
-                Standing.APPROVER,
-            )
-        ):
+        if not _approved(conn, preview) or not _sources_live(conn, run_id):
             return GateState.OPEN
     except psycopg.Error:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     return GateState.RELEASED
+
+
+def _approved(conn: StoreConnection, preview: GatePreview) -> bool:
+    row = conn.execute(
+        "SELECT preview_sha256, input_fingerprint, approved_by FROM run_gates"
+        " WHERE run_id = %s AND gate = %s",
+        (preview.run_id, preview.gate.value),
+    ).fetchone()
+    return (
+        row is not None
+        and row[:2] == (preview.preview_sha256, preview.input_fingerprint)
+        and satisfies(
+            standing_of(conn, case_id=preview.case_id, user_id=row[2]),
+            Standing.APPROVER,
+        )
+    )
+
+
+def approved_run_input(
+    conn: StoreConnection, run_id: UUID
+) -> tuple[RunInput, ResolvedRoute]:
+    """Live authority under case/run locks; caller owns the whole transaction.
+
+    Runtime and acceptance integration remain separate. This read is not an
+    atomic provider-call claim and does not prove frozen block/token contents.
+    """
+    try:
+        try:
+            status = lock_run(conn, run_id)
+        except Refusal as refused:
+            if refused.code is RefusalCode.RUN_NOT_FOUND:
+                raise Refusal(RefusalCode.RUN_INPUT_INVALID) from None
+            raise
+        if status is not RunStatus.RUNNING:
+            raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+        loaded = _load_run_input(conn, run_id)
+        if loaded is None:
+            raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+        if not _sources_live(conn, run_id):
+            raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        for gate in Gate:
+            if not _approved(conn, _historical_preview(*loaded, gate)):
+                raise Refusal(RefusalCode.GATE_APPROVAL_MISMATCH)
+    except psycopg.Error:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    pin, route, _source = loaded
+    return pin, route
+
+
+def execution_input(
+    conn: StoreConnection, run_id: UUID, bundle: Bundle
+) -> tuple[RunInput, ResolvedRoute]:
+    """Require the actual executing Bundle/host adapter beside live authority."""
+    pin, route = approved_run_input(conn, run_id)
+    if not isinstance(bundle, Bundle):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if (pin.build_id, pin.manifest_sha256, pin.adapter_version) != (
+        bundle.build_id,
+        bundle.manifest_sha256,
+        methodology.CLAIMS_ADAPTER_VERSION,
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return pin, route
 
 
 def source_set_fingerprint(conn: StoreConnection, case_id: UUID) -> str:

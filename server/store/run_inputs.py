@@ -8,16 +8,16 @@ from uuid import UUID
 
 import psycopg
 
+from server import methodology
 from server.boundary_text import BoundaryText
-from server.engine.route import route_digest
+from server.engine.route import ResolvedRoute, route_digest
 from server.evidence.ingest import _digest
-from server.methodology import executor
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.events import RunEvent, append, lock_run
 from server.store.routes import resolved_route
-from server.store.source_sets import load_source_set
+from server.store.source_sets import SourceSet, load_source_set
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +122,14 @@ def load_run_input(conn: StoreConnection, run_id: UUID) -> RunInput | None:
 
     This read retains the caller's transaction, including on database failure.
     """
+    loaded = _load_run_input(conn, run_id)
+    return None if loaded is None else loaded[0]
+
+
+def _load_run_input(
+    conn: StoreConnection, run_id: UUID
+) -> tuple[RunInput, ResolvedRoute, SourceSet] | None:
+    """One verified component load for historical and execution-authority reads."""
     try:
         row = conn.execute(
             "SELECT run_id, case_id, source_version, source_fingerprint, route_digest,"
@@ -149,7 +157,7 @@ def load_run_input(conn: StoreConnection, run_id: UUID) -> RunInput | None:
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     except psycopg.Error:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    return pin
+    return pin, route, source
 
 
 def pin_run_input(
@@ -202,7 +210,7 @@ def _pin(
         route_digest(route),
         bundle.build_id,
         bundle.manifest_sha256,
-        executor.CLAIMS_ADAPTER_VERSION,
+        methodology.CLAIMS_ADAPTER_VERSION,
         raw,
         "",
     )

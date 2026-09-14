@@ -13,9 +13,9 @@ from test_case_ordering import _blocked
 from test_route_pinning import CATALOG_PATH, PROFILE
 from test_source_sets import _admit
 
+from server import methodology
 from server.boundary_text import BoundaryText
 from server.engine.route import EdgeType, ResolvedRoute, resolve_route, route_digest
-from server.methodology import executor
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal
 from server.store import StoreConnection, connect, run_inputs
@@ -162,7 +162,7 @@ def test_changed_host_or_research_refuses_replay_but_history_is_readable(
         if changed == "moving":
             (tmp_path / "DEPLOY_V_INTEGRITY_v1.json").write_text(raw + "  ")
     if changed == "adapter":
-        monkeypatch.setattr(executor, "CLAIMS_ADAPTER_VERSION", "claims-json-v2")
+        monkeypatch.setattr(methodology, "CLAIMS_ADAPTER_VERSION", "claims-json-v2")
     assert load_run_input(conn, run) == pin
     expected = (
         "AUTHORITY_BYTES_MISMATCH"
