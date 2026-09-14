@@ -44,6 +44,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api import health
+from server.api.commands import cases as cases_command
+from server.api.commands import execution as execution_command
+from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
 from server.api.deps import DATABASE_URL as DATABASE_URL
 from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
@@ -125,6 +128,25 @@ _STATUS = {
     RefusalCode.HANDOFF_MODULE_UNSUPPORTED: 503,
     RefusalCode.ATTEMPT_NOT_FOUND: 503,
     RefusalCode.AUTHORITY_MODULE_UNKNOWN: 503,
+    # Commands (Task 4.2 decision 8). A member below a command's floor is told
+    # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
+    RefusalCode.NOT_AUTHORISED: 403,
+    RefusalCode.SOURCE_TOO_LARGE: 413,
+    # The request was sound and the state it expected has moved: a conflict.
+    RefusalCode.IDEMPOTENCY_KEY_REUSED: 409,
+    RefusalCode.RUN_NOT_RUNNING: 409,
+    RefusalCode.GATE_APPROVAL_MISMATCH: 409,
+    RefusalCode.EVIDENCE_NOT_AVAILABLE: 409,
+    RefusalCode.ROUTE_ALREADY_PINNED: 409,
+    RefusalCode.ROUTE_PIN_TOO_LATE: 409,
+    RefusalCode.RUN_INPUT_ALREADY_PINNED: 409,
+    RefusalCode.RUN_INPUT_TOO_LATE: 409,
+    RefusalCode.RUN_INPUT_NOT_PINNED: 409,
+    RefusalCode.RUN_ALREADY_STARTED: 409,
+    RefusalCode.RUN_NOT_STOPPED: 409,
+    RefusalCode.RUN_CANCEL_REQUESTED: 409,
+    RefusalCode.COMMAND_EXPECTATION_STALE: 409,
+    RefusalCode.ORCHESTRATION_BUILD_MOVED: 409,
 }
 
 
@@ -159,6 +181,8 @@ app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
 for _section in (directory_read, upload_read, run_read, analysis_read):
     app.include_router(_section.router)
 app.include_router(health.router)
+for _commands in (cases_command, runs_command, execution_command):
+    app.include_router(_commands.router)
 
 
 def _body(code: RefusalCode, status: int) -> Response:
@@ -193,23 +217,29 @@ async def _undeclared(request: Request, error: StarletteHTTPException) -> Respon
 async def _malformed_run_id(
     request: Request, error: RequestValidationError
 ) -> Response:
-    """A run id that cannot be read names no run.
+    """A run id that cannot be read names no run, and a body that cannot be
+    read is an invalid request.
 
-    FastAPI's own 422 answered it before identity, in a body that is not the
-    declared refusal and that quotes the input back. So it is answered as
+    FastAPI's own 422 answered them before identity, in a body that is not the
+    declared refusal and that quotes the input back. So a run id is answered as
     `_visible` answers any run it cannot show: NOT_AUTHENTICATED to a caller
-    with no identity, RUN_NOT_FOUND to everyone else. Only for `run_id` -- any
-    other path parameter, a query or a body is not a missing run, and gets the
-    default until the route that takes one says what it should get instead.
+    with no identity, RUN_NOT_FOUND to everyone else. A body (Task 4.2
+    decision 5) is REQUEST_INVALID after the same identity check. Any other
+    path parameter or a query gets the default until the route that takes one
+    says what it should get instead.
     """
     unreadable = {tuple(detail.get("loc") or ())[:2] for detail in error.errors()}
-    if unreadable != {("path", "run_id")}:
+    if unreadable == {("path", "run_id")}:
+        code = RefusalCode.RUN_NOT_FOUND
+    elif unreadable and all(loc[:1] == ("body",) for loc in unreadable):
+        code = RefusalCode.REQUEST_INVALID
+    else:
         return await request_validation_exception_handler(request, error)
     try:
         actor_from_headers(request.headers)
     except Refusal as refusal:
         return _refused(request, refusal)
-    return _refused(request, Refusal(RefusalCode.RUN_NOT_FOUND))
+    return _refused(request, Refusal(code))
 
 
 @app.get("/api/runs/{run_id}/events")
