@@ -10,14 +10,15 @@ import { ModelSection } from "@/sections/model/ModelSection";
 import { ReportSection } from "@/sections/report/ReportSection";
 import { RunSection } from "@/sections/run/RunSection";
 import { UploadSection } from "@/sections/upload/UploadSection";
-import type { AnyDocument, Bodies, Section, SectionDocument } from "@/wire";
+import type { WorkspaceDocument } from "./transport";
+import type { Bodies, Section, SectionDocument } from "@/wire";
 
 export interface ViewProps<S extends Section> {
   document: SectionDocument<Bodies[S]>;
   tab: string | null;
 }
 
-type AnyView = ComponentType<{ document: AnyDocument; tab: string | null }>;
+type AnyView = ComponentType<{ document: WorkspaceDocument; tab: string | null }>;
 
 // Each view is typed on its own body; the registry erases that so the
 // workspace can mount any of the nine without a switch.

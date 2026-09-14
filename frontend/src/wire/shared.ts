@@ -109,7 +109,8 @@ export interface RailLocal {
 }
 export interface ServedRole {
   role: string;
-  standing: Standing;
+  /** Null when the actor holds no standing on the case (the v1 directory). */
+  standing: Standing | null;
 }
 export interface Subject {
   case_id: string;
