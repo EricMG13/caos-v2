@@ -14,7 +14,7 @@ ignored reports cannot override those contracts.
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 4 accepted at `0deb4a4`** (Phase 3 `3400b6c`, Phase 2 `b4298dc`; records below) |
 | Latest accepted task | **Phase 4 Tasks 4.1–4.5 accepted with the phase at `0deb4a4`** |
-| Next task | Phase 5 entry (REPAIR_PLAN "Make calculations and filing trustworthy"): refresh GitNexus, review the phase documents, write the Task 5.x briefs. Not started. |
+| Next task | Phase 5 continuation: integrate Tasks 5.2b and 5.3, then enable the bounded live reads in 5.4b. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -22,6 +22,30 @@ A later Git HEAD may include documentation or concurrent implementation.
 Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
+
+## Codex resume checkpoint — Phase 5 in progress
+
+- **Coordinator branch:** `codex/execute-repair-plan`; no Phase 5 acceptance has
+  been declared. Accepted task slices currently integrated are 5.1
+  (`c48219d`), 5.2a (`51d3123`, `859f548`), and 5.4a (`77eda16`). The route
+  selection regression expectation is recorded in `74f9f22`; the 5.4b live
+  read contract and dependency audit are in `fb4dc0f`.
+- **Execution routing:** Codex `gpt-6-astra` is used at high reasoning for
+  high-risk implementation slices; ordinary bounded work may use the balanced
+  Codex models. At the end of the complete Phase 5 only, run one whole-phase
+  confidence review and one separate adversarial audit at extra-high (`xhigh`)
+  reasoning. Rewrite tournaments are disabled by the project policy.
+- **Gates:** provider variables remain stripped for every command. The full
+  repository gate, pinned Trivy image gate, focused suites, races, frontend
+  checks, and GitNexus index are coordinator-owned after integration. A
+  production smoke rerun exposed a Firefox journey timeout (`CP-0` remains
+  `RUNNABLE`); it is not an acceptance result and must be resolved or
+  explicitly recorded before Phase 5 exit.
+- **Next parallel slices:** Task 5.2b owns CP-CF host-extension/allowlist and
+  calculator proof; Task 5.3 owns stored revision/sign/freeze/file/render;
+  Task 5.4b owns only the live Model/Report/Committee read boundary after those
+  contracts land. Keep these scopes isolated, integrate serially, refresh
+  GitNexus, and rerun all CI gates before phase-end reviews.
 
 Accepted predecessor evidence is retained in Git: Task17d2 application/proofs
 at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
