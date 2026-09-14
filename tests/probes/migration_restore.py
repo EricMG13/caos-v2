@@ -13,20 +13,25 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from uuid import uuid4
+from unittest.mock import patch
+from uuid import UUID, uuid4
 
 import psycopg
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_frozen_evidence import _insert
 from test_run_inputs import _prepare
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 
+import server.store as store
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.read import read_block
-from server.store import MIGRATIONS, apply_schema, connect
+from server.store import MIGRATIONS, StoreConnection, apply_schema, connect
 from server.store.budget import remaining, reserve
+from server.store.extraction_integrity import _verify_extractions_v1
 from server.store.run_inputs import load_run_input, pin_run_input
 from server.store.runs import Accepted, accept_attempt, create_case, start_attempt
 
@@ -34,7 +39,34 @@ _ADMIN = "postgresql://postgres:local-test-admin-only@127.0.0.1:55437/postgres"
 _CONTAINER = "caos-workbench-dev-test-postgres-1"
 
 
-def main(*, migrated: bool = False) -> None:
+def _check_frozen(conn: StoreConnection, source: UUID | None) -> None:
+    before = _records(conn)
+    _verify_extractions_v1(conn)
+    conn.commit()
+    for table in ("source_blocks", "source_tokens"):
+        for mutation in (
+            f"UPDATE {table} SET text = text",
+            f"DELETE FROM {table}",
+            f"TRUNCATE {table}",
+        ):
+            with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+                with conn.transaction():
+                    conn.execute(mutation)
+        if source is not None:
+            with pytest.raises(psycopg.errors.CheckViolation, match="sealed"):
+                with conn.transaction():
+                    _insert(conn, table, source)
+    assert _records(conn) == before
+
+
+def _backup_schema(conn: StoreConnection, prefix_seven: bool) -> None:
+    with patch.object(
+        store, "MIGRATIONS", MIGRATIONS[:7] if prefix_seven else MIGRATIONS
+    ):
+        apply_schema(conn)
+
+
+def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:
     docker = shutil.which("docker")
     assert docker is not None, "Docker CLI required for this manual proof"
     env = {
@@ -65,7 +97,7 @@ def main(*, migrated: bool = False) -> None:
                 _legacy(conn)
                 digest = _populate(conn, blobs)
                 if migrated:
-                    apply_schema(conn)
+                    _backup_schema(conn, prefix_seven)
                     case_id = create_case(
                         conn, BoundaryText.of("complete input restore")
                     )
@@ -146,6 +178,7 @@ def main(*, migrated: bool = False) -> None:
                 if migrated:
                     assert load_run_input(conn, run) == pin
                     assert remaining(conn, run) == Decimal("4.25")
+                _check_frozen(conn, sources.members[0].source_id if migrated else None)
                 for (source,) in conn.execute(
                     "SELECT source_id FROM sources"
                 ).fetchall():
@@ -170,7 +203,8 @@ def main(*, migrated: bool = False) -> None:
             print(
                 f"PASS dump={len(dump)} bytes; {original} -> {restored};"
                 f" version={len(MIGRATIONS)}; rows/blobs intact;"
-                f" migrated_backup={migrated}; legacy provenance UNKNOWN"
+                f" migrated_backup={migrated}; prefix_seven={prefix_seven};"
+                " legacy provenance UNKNOWN; known v1 verified; native guards refuse"
             )
         finally:
             for name in reversed(created):
@@ -185,3 +219,4 @@ def main(*, migrated: bool = False) -> None:
 if __name__ == "__main__":
     main()
     main(migrated=True)
+    main(migrated=True, prefix_seven=True)

@@ -14,24 +14,31 @@ first deployment happened to create.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
+from typing import cast
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from test_case_ordering import _blocked, _wait_for_blocking
+from test_extraction_provenance import Reader
+from test_run_inputs import Prepared, _prepare
 
 import server.store as store
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence.extract import Extractor, ExtractorIdentity, Token
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_block
 from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
 from server.store.routes import resolved_route
+from server.store.run_inputs import load_run_input, pin_run_input
 from server.store.runs import create_case, run_status, start_run
 
 # A declared schema that differs from the repository's by one table -- the shape
@@ -306,7 +313,7 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         assert _catalog(conn) == catalog
 
 
-@pytest.mark.parametrize("prefix", [2, 3, 4, 5, 6])
+@pytest.mark.parametrize("prefix", [2, 3, 4, 5, 6, 7])
 def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
     empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
 ) -> None:
@@ -695,3 +702,307 @@ def test_invalid_populated_money_upgrade_refuses_atomically(
                 ).fetchall()
                 == migrations
             )
+
+
+@pytest.fixture
+def known_prefix(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Prepared]:
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:7])
+            apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("prefix seven"))
+        run, sources, bundle, route = _prepare(conn, case_id, tmp_path)
+        pin_run_input(conn, run, sources.version, bundle)
+        yield conn, run, sources, bundle, route
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "UPDATE source_blocks SET text = 'changed'",
+        "UPDATE source_blocks SET page = 2",
+        "UPDATE source_blocks SET block_id = 'b000001'",
+        "DELETE FROM source_blocks",
+        "INSERT INTO source_blocks SELECT source_id, 'b000001', page, text"
+        " FROM source_blocks",
+        "UPDATE source_tokens SET token_id = 1",
+        "UPDATE source_tokens SET text = 'changed'",
+        *[
+            f"UPDATE source_tokens SET {field} = {field} + 1"
+            for field in ("page", "region_id", "line_id", "x0", "y0", "x1", "y1")
+        ],
+        "DELETE FROM source_tokens",
+        "INSERT INTO source_tokens SELECT source_id, 1, page, region_id, line_id,"
+        " text, x0, y0, x1, y1 FROM source_tokens",
+        "UPDATE sources SET document_sha256 = repeat('a', 64)",
+        "UPDATE source_extractions SET output_sha256 = repeat('a', 64)",
+        "UPDATE source_extractions SET extraction_sha256 = repeat('a', 64)",
+        "UPDATE source_extractions SET extractor_identity = '{}'",
+        "UPDATE source_extractions SET extractor_identity = '[]'",
+        "UPDATE source_extractions SET extractor_identity = '{'",
+        "UPDATE source_extractions SET extractor_identity ="
+        " replace(extractor_identity, 'caos.plain-text', 'retired.writer')",
+    ],
+)
+def test_corrupt_known_upgrade_refuses_without_any_change(
+    known_prefix: Prepared, empty_database: str, mutation: str
+) -> None:
+    conn, _, _, _, _ = known_prefix
+    assert conn.info.dbname.startswith("caos_test_")
+    with conn.transaction():
+        if "UPDATE source_extractions" in mutation:
+            conn.execute(
+                "ALTER TABLE source_extractions DISABLE TRIGGER extraction_is_immutable"
+            )
+        conn.execute(mutation)
+        if "UPDATE source_extractions" in mutation:
+            conn.execute(
+                "ALTER TABLE source_extractions ENABLE TRIGGER extraction_is_immutable"
+            )
+    conn.commit()
+    before, catalog = repr(_records(conn)), _catalog(conn)
+    history = conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+    head = conn.execute("SELECT * FROM store_schema").fetchall()
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+        apply_schema(conn)
+    assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+    assert repr(_records(conn)) == before and _catalog(conn) == catalog
+    assert (
+        conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+        == history
+    )
+    assert conn.execute("SELECT * FROM store_schema").fetchall() == head
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '1s'")
+        other.execute(
+            "LOCK TABLE sources, source_tokens, source_blocks, source_extractions"
+            " IN SHARE ROW EXCLUSIVE MODE"
+        )
+        assert other.execute(
+            "SELECT pg_try_advisory_xact_lock(%s)", (store._SCHEMA_LOCK,)
+        ).fetchone() == (True,)
+
+
+@pytest.mark.parametrize("digits", [3, 0, -15])
+def test_exact_historical_unicode_float_output_and_complete_pin_upgrade(
+    known_prefix: Prepared, tmp_path: Path, digits: int
+) -> None:
+    conn, run, sources, _, _ = known_prefix
+    pin = load_run_input(conn, run)
+    identity = ExtractorIdentity("retired-custom", "historical-v1", {"signed": -0.0})
+    coordinate = 0.12345678901234566
+    reader = Reader(
+        identity,
+        [
+            Token("e\u0301", 1, 0, 0, -0.0, coordinate, 1.7976931348623157e308, 5e-324),
+            Token("雪", 2, 1, 1, -1.7976931348623157e308, 0.0, 0.3, -5e-324),
+        ],
+    )
+    admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=sources.case_id,
+        documents=[Document(BoundaryText.of("custom.txt"), b"custom")],
+        extractor=cast(Extractor, reader),
+    )
+    conn.commit()
+    before = repr(_records(conn))
+    conn.execute(f"SET extra_float_digits = {digits}")
+    apply_schema(conn)
+    conn.execute("SET extra_float_digits = 3")
+    assert repr(_records(conn)) == before
+    assert load_run_input(conn, run) == pin
+    assert conn.execute("SELECT count(*) FROM source_extractions").fetchone() == (2,)
+    catalog = _catalog(conn)
+    apply_schema(conn)
+    conn.execute("CREATE SCHEMA fresh_frozen; SET search_path TO fresh_frozen")
+    apply_schema(conn)
+    assert _catalog(conn) == catalog
+
+
+@pytest.mark.parametrize("ordinal", [0, 999999, 1000000, 1000001])
+def test_v1_block_ordinals_keep_minted_spelling(ordinal: int) -> None:
+    from server.store.extraction_integrity import _block_ordinal_v1
+
+    assert _block_ordinal_v1(f"b{ordinal:06d}") == ordinal
+    assert sorted(["b1000000", "b999999"], key=_block_ordinal_v1) == [
+        "b999999",
+        "b1000000",
+    ]
+    with pytest.raises((Refusal, ValueError)):
+        _block_ordinal_v1(f"b0{ordinal:06d}")
+
+
+@pytest.mark.parametrize("commit", [False, True])
+def test_migration_reads_only_after_waiting_for_all_old_writers(
+    known_prefix: Prepared, empty_database: str, commit: bool
+) -> None:
+    conn, _, _, _, _ = known_prefix
+    conn.execute("UPDATE source_tokens SET text = 'changed'")
+    with connect(empty_database) as other:
+
+        def migrate() -> None:
+            if commit:
+                with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+                    apply_schema(other)
+            else:
+                apply_schema(other)
+            assert other.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+
+        with _blocked(conn, other, migrate):
+            if not commit:
+                conn.rollback()
+    assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
+        7 if commit else 8,
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", ["cancel", "closed", "repeatable read", "serializable"]
+)
+def test_verifier_failure_preserves_cleanup_and_history(
+    known_prefix: Prepared, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from server.store import extraction_integrity
+
+    conn, _, _, _, _ = known_prefix
+    if failure in {"cancel", "closed"}:
+
+        def interrupted(c: StoreConnection, source: UUID) -> str:
+            if failure == "closed":
+                c.close()
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(extraction_integrity, "_stored_output_v1", interrupted)
+    else:
+        conn.execute(f"SET TRANSACTION ISOLATION LEVEL {failure}")
+    with pytest.raises(
+        KeyboardInterrupt if failure in {"cancel", "closed"} else Refusal
+    ):
+        apply_schema(conn)
+    assert (
+        conn.closed or conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+    )
+
+
+def test_v1_dispatch_is_exact_and_only_once(
+    known_prefix: Prepared, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.store import extraction_integrity
+
+    conn, _, _, _, _ = known_prefix
+    verify, calls = extraction_integrity._verify_extractions_v1, []
+
+    def counted(c: StoreConnection) -> None:
+        calls.append(True)
+        verify(c)
+
+    monkeypatch.setattr(extraction_integrity, "_verify_extractions_v1", counted)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            store,
+            "MIGRATIONS",
+            (*store.MIGRATIONS[:7], ("synthetic_eight", "SELECT 1")),
+        )
+        with conn.transaction():
+            store._migrate(conn, SCHEMA)
+            assert calls == []
+            raise psycopg.Rollback
+    apply_schema(conn)
+    apply_schema(conn)
+    assert calls == [True]
+
+
+def test_migration_holds_writers_until_native_guards_exist(
+    known_prefix: Prepared, empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.store import extraction_integrity
+
+    conn, _, _, _, _ = known_prefix
+    original = extraction_integrity._stored_output_v1
+    ready, release = Event(), Event()
+
+    def pause(c: StoreConnection, source: UUID) -> str:
+        output = original(c, source)
+        ready.set()
+        assert release.wait(5)
+        return output
+
+    monkeypatch.setattr(extraction_integrity, "_stored_output_v1", pause)
+    with connect(empty_database) as writer, ThreadPoolExecutor(max_workers=2) as pool:
+
+        def mutate() -> None:
+            with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+                writer.execute("UPDATE source_tokens SET text = 'late'")
+            writer.rollback()
+
+        migration = pool.submit(apply_schema, conn)
+        try:
+            assert ready.wait(3)
+            mutation = pool.submit(mutate)
+            _wait_for_blocking(conn, writer)
+        finally:
+            release.set()
+        migration.result(timeout=6)
+        mutation.result(timeout=6)
+    assert conn.execute("SELECT text FROM source_tokens").fetchone() == ("one",)
+
+
+def test_migration_deadlock_refuses_and_releases_its_partial_locks(
+    known_prefix: Prepared, empty_database: str
+) -> None:
+    conn, _, _, _, _ = known_prefix
+    # Writer owns the child table; migration will own sources before waiting for it.
+    conn.execute("SET deadlock_timeout = '5s'; UPDATE source_tokens SET text = text")
+    with (
+        connect(empty_database) as migration,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        migration.execute("SET deadlock_timeout = '100ms'")
+        migration.commit()
+
+        def upgrade() -> None:
+            with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+                apply_schema(migration)
+            assert (
+                migration.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+            )
+
+        future = pool.submit(upgrade)
+        try:
+            _wait_for_blocking(conn, migration)
+            conn.execute("UPDATE sources SET filename = filename")
+        finally:
+            conn.rollback()
+        future.result(timeout=6)
+        migration.execute("SET lock_timeout = '1s'")
+        apply_schema(migration)
+    assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (8,)
+
+
+def test_reordered_contiguous_tokens_refuse_upgrade(
+    known_prefix: Prepared, tmp_path: Path
+) -> None:
+    conn, _, sources, _, _ = known_prefix
+    [source] = admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=sources.case_id,
+        documents=[Document(BoundaryText.of("order.txt"), b"first second")],
+    )
+    conn.execute(
+        "UPDATE source_tokens SET token_id = token_id + 2 WHERE source_id = %s",
+        (source,),
+    )
+    conn.execute(
+        "UPDATE source_tokens SET token_id = 3 - token_id WHERE source_id = %s",
+        (source,),
+    )
+    conn.commit()
+    before = _records(conn)
+    with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+        apply_schema(conn)
+    assert _records(conn) == before

@@ -44,6 +44,12 @@ MIGRATIONS = (
         "0007_call_outcomes",
         Path(__file__).with_name("0007_call_outcomes.sql").read_text(encoding="utf-8"),
     ),
+    (
+        "0008_frozen_evidence",
+        Path(__file__)
+        .with_name("0008_frozen_evidence.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
@@ -139,6 +145,11 @@ def _migrate(conn: StoreConnection, sql: str) -> None:
     if applied_count == len(expected):
         return
     for version, name, digest in expected[applied_count:]:
+        if (version, name) == (8, "0008_frozen_evidence"):
+            # Historical v1 verification belongs only to this migration.
+            from server.store.extraction_integrity import _verify_extractions_v1
+
+            _verify_extractions_v1(conn)
         if not (legacy and version == 1):
             conn.execute(MIGRATIONS[version - 1][1])
         conn.execute(
