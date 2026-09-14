@@ -4,13 +4,21 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  V1_COMMAND_SHAPES,
   V1_SHAPES,
   WireIdentityError,
   WireShapeError,
   parseAnalysisDocument,
+  parseCaseCreated,
   parseDirectoryDocument,
+  parseGateApproved,
+  parseGatePreviewDocument,
   parseRefusalBody,
+  parseRunCreated,
+  parseRunInputPinned,
   parseRunSectionDocument,
+  parseRunWork,
+  parseSourcesAdmitted,
   parseUploadDocument,
   requireIdentity,
 } from "@/wire/v1";
@@ -99,7 +107,14 @@ function committed(): Record<string, Json> {
 
 function envelope(body: Json, subject: Json): { [key: string]: Json } {
   return {
-    chrome: { subject, served_role: { global_role: "ANALYST", standing: "READER" } },
+    chrome: {
+      subject,
+      served_role: { global_role: "ANALYST", standing: "READER" },
+      actions: [
+        { action: "START_RUN", refusal: null },
+        { action: "RETRY_RUN", refusal: { code: "RUN_NOT_STOPPED", clears: "x" } },
+      ],
+    },
     body,
     observed_at: AT,
     observed_empty: false,
@@ -186,7 +201,9 @@ function runSection(): { [key: string]: Json } {
         attempts: [
           { attempt_id: RUN, route_node_id: "CP-0", ordinal: 1, started_at: AT, accepted: true },
         ],
+        work: { state: "STOPPED", stop_code: "PROVIDER_UNAVAILABLE", cancel_requested: false },
       },
+      route_choices: [{ profile_id: "LITE_CREDIT_22", selection_id: "LITE_EARNINGS_UPDATE" }],
     },
     SUBJECT,
   );
@@ -256,8 +273,12 @@ function refuses(parse: () => unknown, path?: string): void {
 describe("the v1 wire contract", () => {
   test("test_v1_shapes_equal_the_committed_backend_schema", () => {
     const defs = committed();
-    expect(Object.keys(V1_SHAPES).sort()).toEqual(Object.keys(defs).sort());
-    const shapes = new Map(Object.entries(V1_SHAPES));
+    const all = { ...V1_SHAPES, ...V1_COMMAND_SHAPES };
+    expect(Object.keys(all)).toHaveLength(
+      Object.keys(V1_SHAPES).length + Object.keys(V1_COMMAND_SHAPES).length,
+    );
+    expect(Object.keys(all).sort()).toEqual(Object.keys(defs).sort());
+    const shapes = new Map(Object.entries(all));
     for (const [name, definition] of Object.entries(defs)) {
       const shape = shapes.get(name);
       expect(shape, name).toBeDefined();
@@ -265,10 +286,96 @@ describe("the v1 wire contract", () => {
     }
   });
 
+  test("test_command_shapes_equal_the_committed_schema", () => {
+    const defs = committed();
+    const commands = [
+      "CreateCase",
+      "CaseCreated",
+      "SourcesAdmitted",
+      "CreateRun",
+      "RunCreated",
+      "PinRunInput",
+      "RunInputPinned",
+      "GatePreviewDocument",
+      "ApproveGate",
+      "GateApproved",
+      "StartRun",
+      "RetryRun",
+      "CancelRun",
+      "RunWork",
+    ];
+    expect(Object.keys(V1_COMMAND_SHAPES).sort()).toEqual([...commands].sort());
+    const shapes = new Map(Object.entries(V1_COMMAND_SHAPES));
+    for (const name of commands) {
+      const definition = defs[name];
+      expect(definition, name).toBeDefined();
+      expect(normalise(shapes.get(name)!.toSchema(), defs), name).toEqual(
+        normalise(definition!, defs),
+      );
+    }
+  });
+
+  test("test_a_receipt_is_validated_not_cast", () => {
+    const work = { state: "QUEUED", stop_code: null, cancel_requested: false };
+    const preview = {
+      run_id: RUN,
+      gate: "SOURCE_SET",
+      content: '{\n  "gate": "SOURCE_SET"\n}',
+      preview_sha256: SHA,
+      input_fingerprint: SHA,
+      observed_at: AT,
+    };
+    expect(parseCaseCreated({ case_id: CASE }).case_id).toBe(CASE);
+    expect(parseSourcesAdmitted({ case_id: CASE, source_ids: [RUN] }).source_ids).toEqual([RUN]);
+    expect(parseRunCreated({ case_id: CASE, run_id: RUN, route_digest: SHA }).run_id).toBe(RUN);
+    expect(
+      parseRunInputPinned({ run_id: RUN, source_set_version: 1, input_fingerprint: SHA })
+        .source_set_version,
+    ).toBe(1);
+    expect(parseGatePreviewDocument(preview).content).toBe(preview.content);
+    expect(
+      parseGateApproved({
+        run_id: RUN,
+        gate: "RESEARCH_PLAN",
+        preview_sha256: SHA,
+        input_fingerprint: SHA,
+      }).gate,
+    ).toBe("RESEARCH_PLAN");
+    expect(parseRunWork({ run_id: RUN, run_status: "RUNNING", work }).work.state).toBe("QUEUED");
+
+    // A receipt the server did not declare is refused, not trusted.
+    refuses(() => parseCaseCreated({ case_id: CASE, standing: "ADMIN" }), "$");
+    refuses(() => parseCaseCreated({}), "$");
+    refuses(
+      () =>
+        parseSourcesAdmitted({ case_id: CASE, source_ids: Array.from({ length: 51 }, () => RUN) }),
+      "$.source_ids",
+    );
+    refuses(
+      () => parseRunCreated({ case_id: CASE, run_id: RUN, route_digest: "A".repeat(64) }),
+      "$.route_digest",
+    );
+    refuses(() => parseGatePreviewDocument({ ...preview, gate: "source-set" }), "$.gate");
+    refuses(() => parseGatePreviewDocument({ ...preview, content: 7 }), "$.content");
+    refuses(
+      () =>
+        parseRunWork({ run_id: RUN, run_status: "RUNNING", work: { ...work, state: "PAUSED" } }),
+      "$.work.state",
+    );
+    refuses(() => parseRunWork({ run_id: RUN, run_status: "RUNNING", work: null }), "$.work");
+    refuses(
+      () => parseRunInputPinned({ run_id: RUN, source_set_version: 1.5, input_fingerprint: SHA }),
+      "$.source_set_version",
+    );
+    refuses(() => parseGateApproved({ run_id: RUN, gate: "SOURCE_SET", preview_sha256: SHA }), "$");
+  });
+
   test("the valid documents parse", () => {
     expect(parseDirectoryDocument(directory()).body.cases).toHaveLength(1);
     expect(parseUploadDocument(upload()).body.case_id).toBe(CASE);
     expect(parseRunSectionDocument(runSection()).body.run?.status).toBe("BLOCKED");
+    expect(parseRunSectionDocument(runSection()).body.run?.work?.state).toBe("STOPPED");
+    expect(parseRunSectionDocument(runSection()).chrome.actions).toHaveLength(2);
     expect(parseAnalysisDocument(analysis()).body.handoffs[0]?.host_calculation).toBe("NONE");
     expect(parseRefusalBody({ code: "CASE_NOT_FOUND", clears: "x" }).code).toBe("CASE_NOT_FOUND");
   });
@@ -286,6 +393,13 @@ describe("the v1 wire contract", () => {
     const chrome = JSON.parse(JSON.stringify(runSection()));
     chrome.chrome.served_role.enables = ["approve"];
     refuses(() => parseRunSectionDocument(chrome), "$.chrome.served_role");
+
+    const action = JSON.parse(JSON.stringify(runSection()));
+    action.chrome.actions[0].enabled = true;
+    refuses(() => parseRunSectionDocument(action), "$.chrome.actions[0]");
+    const unknown = JSON.parse(JSON.stringify(runSection()));
+    unknown.chrome.actions[0].action = "SIGN";
+    refuses(() => parseRunSectionDocument(unknown), "$.chrome.actions[0].action");
 
     const proto = JSON.parse('{"code":"CASE_NOT_FOUND","clears":"x","__proto__":{}}');
     refuses(() => parseRefusalBody(proto), "$");

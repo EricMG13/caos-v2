@@ -4,7 +4,8 @@
     "served_role": {
       "global_role": "ANALYST",
       "standing": "APPROVER"
-    }
+    },
+    "actions": []
   },
   "body": {
     "cases": []

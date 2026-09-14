@@ -159,6 +159,7 @@ describe("Run", () => {
         displayed_run_id: null,
         runs: [],
         run: null,
+        route_choices: [],
       },
       observed_empty: true,
     };

@@ -7,7 +7,8 @@
     "served_role": {
       "global_role": "ANALYST",
       "standing": "APPROVER"
-    }
+    },
+    "actions": []
   },
   "body": {
     "case_id": "00000000-0000-4000-8000-000000000001",
