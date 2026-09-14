@@ -29,9 +29,9 @@ from server.store.members import satisfies, standing_of
 from server.store.outcomes import execution_reads
 
 # Three-node LITE: authorization/lock/selection (6), live proof (46).
-# Filed Committee adds publication/signatures (2), receipt/audit (5), saved (1).
-# Frozen Committee adds publication/signatures and three audit proof reads.
-IO_BUDGET = {"report": 52, "committee": 60, "frozen": 57}
+# Committee adds publication/signatures (2) and three actor/audit proof reads.
+# Filed Committee also adds receipt/audit (5) and saved payload (1).
+IO_BUDGET = {"report": 52, "committee": 63, "frozen": 57}
 router = APIRouter()
 
 
@@ -146,14 +146,15 @@ def _publication(
     conn: Store, case_id: UUID, revision: UUID, digest: str
 ) -> dict[str, Any]:
     row = conn.execute(
-        "SELECT payload_sha256,frozen_by,filed_by,filed_at"
-        " FROM deliverable_publications"
+        "SELECT p.payload_sha256,frozen_by,filed_by,filed_at,c.receipt_sha256"
+        " FROM deliverable_publications p LEFT JOIN deliverable_receipts c"
+        " USING (case_id,revision_id)"
         " WHERE case_id=%s AND revision_id=%s",
         (case_id, str(revision)),
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
-    frozen_digest, freezer, filer, filed_at = row
+    frozen_digest, freezer, filer, filed_at, receipt_digest = row
     signatures = _signatures(conn, case_id, revision)
     signers = [who for who, _ in signatures]
     if (
@@ -162,20 +163,20 @@ def _publication(
         or freezer in signers
         or any(signed != digest for _, signed in signatures)
         or (filer is None) != (filed_at is None)
+        or (filer is None and receipt_digest is not None)
     ):
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-    if filer is None:
-        bound = _digest_of({"revision_id": str(revision), "payload_sha256": digest})
-        trail = audit_trail(conn, case_id)
-        events = {(e.action, e.actor_id) for e in trail if e.payload_sha256 == bound}
-        required = {("OPINION_SIGNED", who) for who in signers}
-        required.add(("DELIVERABLE_FROZEN", freezer))
-        if (
-            not required <= events
-            or not verify_chain(conn, case_id)
-            or trail[-1].entry_sha256 != audit_head(conn, case_id)
-        ):
-            raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+    bound = _digest_of({"revision_id": str(revision), "payload_sha256": digest})
+    trail = audit_trail(conn, case_id)
+    events = {(e.action, e.actor_id) for e in trail if e.payload_sha256 == bound}
+    required = {("OPINION_SIGNED", who) for who in signers}
+    required.add(("DELIVERABLE_FROZEN", freezer))
+    if (
+        not required <= events
+        or not verify_chain(conn, case_id)
+        or trail[-1].entry_sha256 != audit_head(conn, case_id)
+    ):
+        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
     return dict(
         state="frozen" if filer is None else "filed",
         signed_by=signers,
@@ -189,21 +190,15 @@ def _body(payload: dict[str, Any], digest: str) -> dict[str, Any]:
     artifacts = []
     for artifact in payload["artifacts"]:
         projections = json.loads(artifact["record"])["projections"]
-        artifacts.append(
-            {
-                **artifact,
-                **{
-                    key: projections[key]
-                    for key in (
-                        "qa_status",
-                        "committee_status",
-                        "decision_scope",
-                        "limitation_flags",
-                        "validation_warnings",
-                    )
-                },
-            }
-        )
+        artifacts.append(dict(artifact))
+        for key in (
+            "qa_status",
+            "committee_status",
+            "decision_scope",
+            "limitation_flags",
+            "validation_warnings",
+        ):
+            artifacts[-1][key] = projections[key]
     return dict(
         case_id=payload["case_id"],
         displayed_run_id=payload["run_id"],
