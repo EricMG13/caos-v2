@@ -475,25 +475,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   a CAS back to RUNNING with its own event, taken by an authorized actor when
   an input that could release the node has changed -- arrives with Phase 4's
   commands and worker.
-- **The terminal decision reads outside the run lock, and the store does not
-  check it.** `run_route` decides COMPLETE or BLOCKED from a snapshot taken after
-  its last pass, and `complete_run`/`complete_attempt` still let a direct store
-  caller complete a run with unrun nodes (only tests do). Sound for the one
-  sequential loop Phase 2 has. *Upgrade:* with Phase 4's concurrent workers,
-  decide under `lock_run` in `_transition`, requiring an accepted artifact for
-  every pinned node before COMPLETE.
-- **Two workers can pay for one node.** Migration 0009 lets exactly one attempt
-  own a node's accepted result, but two attempts can each reserve and call
-  before either accepts; both bills are kept. The same window lets a second
-  worker that checked `blocked_verdict` before the first worker's Blocked bill
-  committed call again. One sequential loop re-pays too: a crash after a
-  successful answer's bill commits and before its acceptance leaves a billed,
-  unaccepted attempt, and resume calls again (the stored body is re-derived
-  only as a Blocked verdict). *Upgrade:* Phase 4's PostgreSQL
-  claims/leases (§39) take the node before the call, and worker recovery
-  accepts or explains a billed answer instead of re-calling. `artifacts` rows are also
-  not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
-  a refusal trigger like 0007's is the upgrade.
+- ~~**The terminal decision reads outside the run lock, and the store does not
+  check it.**~~ Closed by Phase 4 Task 4.3c (§49.4): `complete_run` refuses
+  `RUN_NODES_UNACCEPTED` while a pinned node is unaccepted and `complete_run`/
+  `block_run` refuse `RUN_TERMINAL_STALE` when the accepted set moved since the
+  caller's snapshot; `run_route` retries one pass. A Blocked verdict still ends
+  the run on one node's stored verdict without a snapshot.
+- **A stale lease holder can still pay once.** Phase 4 Task 4.3 (§49) fences
+  every run write with the work lease and replays a billed, unaccepted answer
+  from its stored body after a crash (accepted, Blocked, or written once to
+  `attempt_refusals`), so a crash no longer pays twice and a lost lease never
+  accepts. Two residuals remain. A holder whose bill commits after the new
+  holder's replay read but before its reservation is paid for twice with one
+  acceptance (interleaving I6: no lock is held across transport). A response
+  that trickles past the 300 s lease (the provider timeout bounds each socket
+  operation, not the call) costs at most one extra paid call. `run_work` is
+  enqueued only by the store function today; the governed start command is
+  Task 4.2. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
+  a borrowed code. `artifacts` rows are also not UPDATE/DELETE-immutable, so a
+  privileged edit could move ownership; a refusal trigger like 0007's is the
+  upgrade. *Upgrade:* none planned for I6 while one worker runs; per-node
+  fencing of the transport if a second worker is ever added.
 - **Acceptance does not recompare upstream, and context reads hold the case
   lock.** `_accept_artifact` checks authority and ownership under the lock but
   not the predecessor digests the post-call unit compared; with Phase 2's one
@@ -729,7 +731,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
-- **The real workspace is not yet wired to backend section routes.**
+- **The real workspace reads the v1 section routes, but events, evidence pages
+  and commands are not wired yet.** Phase 4 Task 4.1 (§50) closed the reads:
+  Directory, Upload, Run and Analysis are served at `/api/v1/…`, validated whole
+  in the browser and bound to their case and run, with one `{code, clears}`
+  refusal body; the other five sections are unavailable. What follows is the
+  entry as it stood, kept for the parts still open — the event vocabulary
+  (Task 4.4), evidence pages (4.4) and governed writes (4.2):
+  **The real workspace is not yet wired to backend section routes.**
   `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
   section document and `sse.ts` tails `/api/events` for six lower-case event
   names, while `server/api/app.py` serves `/api/runs/{id}` and its
@@ -800,7 +809,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **Identity before the store rests on parameter order.** `read_run` and
+- **Identity before the store rests on parameter order.** Every section read
+  (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
   `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
   the whole of what refuses an anonymous request before a connection is opened:
   FastAPI builds a route's dependency list in signature order (`get_dependant`)
@@ -920,12 +930,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   every module is still handed every block. *Upgrade:* per-module evidence
   selection, which is the same change that would let a set with a 541-page
   credit agreement run at all.
-- **The workspace cannot show the cause yet.** `NodeView.gate_verdict` names
-  why the gate blocked a module (`docs/DECISIONS.md` §27), but
-  `frontend/src/wire/run.ts`'s `RouteNode` does not carry the field, so the API
-  sends the reason and the UI has nowhere to put it. *Upgrade:* the
-  workspace's wire type and the section that draws a node —
-  `frontend/src/sections/run/RouteGraph.tsx` and `NodeDetail.tsx`.
+- ~~**The workspace cannot show the cause yet.**~~ Closed by Phase 4 Task
+  4.1i: the v1 `NodeView` carries `gate_verdict` and the Run section's node
+  detail and reason (`frontend/src/sections/run/reason.ts`) draw it as the
+  cause.
 - ~~**The host asks the gate for claims and a map in one answer, and refuses an
   answer carrying only the map.**~~ Closed by retirement: `execute_module` and
   `parse_claims` were the claims adapter's mechanism, deleted with it (Task 3.1
