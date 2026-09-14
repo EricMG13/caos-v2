@@ -11,7 +11,7 @@ export CAOS_TRUST_ROLE_HEADER CAOS_REQUIRE_POSTGRES
 
 .PHONY: bootstrap venv lock lint types test test-fast test-provider test-postgres-races \
 	check-postgres security image frontend-check check-fast check-size check doctor \
-	dev dev-up dev-down dev-api dev-ui dev-ui-demo index
+	dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index
 
 bootstrap: venv  ## exact locked Python and Node development environments
 	npm --prefix frontend ci --ignore-scripts
@@ -123,6 +123,9 @@ dev-api:  ## the route surface. CAOS_DATABASE_URL and CAOS_BLOB_ROOT are read pe
 	# No --reload: it needs watchfiles, and a dependency that only the developer
 	# loop uses still has to be locked, audited and justified.
 	$(PY) -m uvicorn server.api.app:app --host 127.0.0.1 --port 8000
+
+dev-worker:  ## the one polling worker; needs the store, blob root, provider and CAOS_MODEL_PRICE
+	$(PY) -m server.engine.worker
 
 dev: dev-api  ## retained API alias
 
