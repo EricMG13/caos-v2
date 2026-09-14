@@ -529,11 +529,12 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
         patch.setattr(executor, "execution_input", boundary("node", execution_input))
         patch.setattr(psycopg.Connection, "execute", sql)
         result = _run(ready, prepared)
-    # Per node: evidence is read in the pre-call authority unit, then the
-    # post-call unit rechecks input and anchors in the captured blocks, which
-    # the proof reads again inside the record and the matrix units (3.2e).
-    unit = ["node", "blocks"]
-    case = ["input", "members", *unit * 6, "record", "blocks"]
+    # Per node: evidence is read in the pre-call authority unit, and the
+    # post-call unit rechecks input and anchors in those same deliveries without
+    # reading the blocks again; the proof reads them inside the record and the
+    # matrix units (3.2e).
+    unit = ["node", "blocks", "node"]
+    case = ["input", "members", *unit * 3, "record", "blocks"]
     assert [name for name, _ in observed] == [
         *["input", "members"] * 2,
         *case,
@@ -542,14 +543,22 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
         "blocks",
         "blocks",
     ]
-    starts = range(0, len(observed) - 2, 2)
-    for start in starts:
-        assert observed[start][1] == observed[start + 1][1]
-    assert observed[-1][1] == observed[-3][1]
-    assert len({observed[i][1] for i in starts}) == len(starts)
+    units = _units(observed)
+    assert all(len(ids) == 1 for ids in units)
+    assert len(set().union(*units)) == len(units)
     assert conn.info.transaction_status.name == "IDLE"
     assert result.matrix is not None and len(result.matrix.rows) == 2
     assert len(cast(_Completions, harness.completions).prompts) == 6
+
+
+def _units(observed: list[tuple[str, int]]) -> list[set[int]]:
+    """Each boundary opens one unit; every read after it belongs to that unit."""
+    units: list[set[int]] = []
+    for name, transaction_id in observed:
+        if name in {"input", "node", "record", "matrix"}:
+            units.append(set())
+        units[-1].add(transaction_id)
+    return units
 
 
 @pytest.mark.parametrize(

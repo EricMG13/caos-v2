@@ -30,7 +30,7 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.citations import Citation, verify_citations
 from server.evidence.extract import LINES_PER_PAGE
-from server.evidence.ingest import Document, admit_pack
+from server.evidence.ingest import Document, admit_pack, block_ids_by_line
 from server.evidence.read import read_block
 from server.refusals import Refusal
 from server.store import StoreConnection
@@ -167,3 +167,41 @@ def test_a_repeated_quote_with_one_undelivered_copy_stays_ambiguous(
             verify_citations(
                 conn, delivered={source_id: frozenset({only})}, citations=[quote]
             )
+
+
+def test_admission_and_anchoring_share_one_line_to_block_numbering(
+    admitted: tuple[StoreConnection, UUID],
+) -> None:
+    """The block a quoted line belongs to is read back with admission's own
+    numbering (`block_ids_by_line`), not a second copy of it: every stored
+    block is exactly the line that numbering assigns it."""
+    conn, source_id = admitted
+    lines: dict[int, list[str]] = {}
+    for line_id, text in conn.execute(
+        "SELECT line_id, text FROM source_tokens WHERE source_id = %s"
+        " ORDER BY token_id",
+        (source_id,),
+    ).fetchall():
+        lines.setdefault(int(line_id), []).append(str(text))
+    stored = {
+        str(block_id): str(text)
+        for block_id, text in conn.execute(
+            "SELECT block_id, text FROM source_blocks WHERE source_id = %s",
+            (source_id,),
+        ).fetchall()
+    }
+    numbering = block_ids_by_line(lines)
+    assert len(stored) == len(lines) > LINES_PER_PAGE
+    assert {
+        numbering[line_id]: " ".join(words) for line_id, words in lines.items()
+    } == stored
+
+
+def test_the_numbering_is_ascending_by_line_and_widens_past_six_digits() -> None:
+    assert block_ids_by_line([7, 3, 7, 11]) == {
+        3: "b000000",
+        7: "b000001",
+        11: "b000002",
+    }
+    wide = block_ids_by_line(range(1_000_001))
+    assert (wide[999_999], wide[1_000_000]) == ("b999999", "b1000000")
