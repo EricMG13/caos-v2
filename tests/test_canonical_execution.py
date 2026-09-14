@@ -44,7 +44,7 @@ from server.methodology.executor import Assignment, captured_blocks
 from server.methodology.handoff import read_record, validate_markdown
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
-from server.provider import Completion, CompletionProvider
+from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
@@ -221,6 +221,9 @@ class _ClaimsJson:
     source_id: UUID
     model: str = "a-model/for-the-test"
     prompts: list[str] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.prompts.append(prompt)

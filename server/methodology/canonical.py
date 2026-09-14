@@ -62,6 +62,7 @@ from server.methodology.invocation import (
     prospective_identity,
     record_authority_matches,
     upstream_markdown,
+    within_request_ceiling,
 )
 from server.methodology.vendor import (
     VENDOR_MODULE,
@@ -174,7 +175,9 @@ def execute_handoff(
     authority = assemble_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
     # carries exactly this attempt's identity, and refused again if it moved.
-    prompt = _prompt(bundle, assignment, identity, delivered, upstream)
+    prompt = within_request_ceiling(
+        provider, _prompt(bundle, assignment, identity, delivered, upstream)
+    )
 
     bundle.verify_manifest()
     model = producer_identifier(provider.model, limit=256)
@@ -266,14 +269,15 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
     run_id: UUID,
     route: ResolvedRoute,
     node: RouteNode,
+    provider: CompletionProvider,
 ) -> None:
     """Build the node's whole prompt before any attempt, reservation or call.
 
     The pre-call unit `execute_handoff` runs, under `prospective_identity`, so
-    every refusal the prompt would raise -- `CONTEXT_OVER_CEILING` above all,
-    and a delivered file whose bytes moved -- is raised while nothing has been
-    started or set aside (§45.3, invariant 8). Nothing is kept: the attempt's
-    own prompt is rebuilt from its own read unit.
+    every refusal the prompt would raise -- `CONTEXT_OVER_CEILING` on the whole
+    request `provider` would send, and a delivered file whose bytes moved -- is
+    raised while nothing has been started or set aside (§45.3, invariant 8).
+    Nothing is kept: the attempt's own prompt is rebuilt from its own read unit.
     """
     assignment = Assignment(node.module_id, run_id, node, route, _NO_ATTEMPT)
     with execution_reads(conn):
@@ -284,7 +288,9 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
             conn, bundle, run_id=run_id, route=route, node=node
         )
         delivered, upstream = _context(conn, blobs, bundle, assignment, identity)
-    _prompt(bundle, assignment, identity, delivered, upstream)
+    within_request_ceiling(
+        provider, _prompt(bundle, assignment, identity, delivered, upstream)
+    )
 
 
 # `check_context` runs before an attempt exists; nothing it reads uses the id.

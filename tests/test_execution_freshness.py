@@ -47,7 +47,7 @@ from server.methodology.handoff import (
     record_bytes,
 )
 from server.methodology.runner import ModuleProvider
-from server.provider import Completion, CompletionProvider
+from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.budget import reserve
@@ -153,6 +153,9 @@ class _DuringCompletion:
     mutate: Callable[[], None]
     calls: int = 0
     model: str = MODEL
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return self.delegate.request_bytes(prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         assert json_object
@@ -831,6 +834,9 @@ class _RefusedCompletion:
     mutate: Callable[[], None]
     model: str = MODEL
     calls: int = 0
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls += 1

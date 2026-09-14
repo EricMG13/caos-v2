@@ -50,7 +50,7 @@ from server.methodology.handoff import (
 )
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
-from server.provider import Completion, CompletionProvider
+from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.events import lock_run
@@ -69,6 +69,9 @@ class _Answers:
     facts: dict[str, Any] = field(default_factory=dict)
     model: str = MODEL
     calls: int = 0
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.calls += 1
@@ -552,12 +555,81 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call(
     """§45.3 through the runtime: the ceiling is met before `start_attempt`, so
     an over-ceiling context leaves no attempt, reservation, call or charge.
     (Exactness at the ceiling, and no truncation, is proven on the prompt in
-    `test_handoff_invocation.py`.)"""
-    monkeypatch.setattr(invocation, "MAX_REQUEST_BYTES", 4096)
-    answers = _answers(harness)
-    assert _run_route(harness, _module_provider(harness, answers)) is (
-        RefusalCode.CONTEXT_OVER_CEILING
-    )
-    assert answers.calls == 0
+    `test_handoff_invocation.py`.) The ceiling here admits the prompt's own
+    JSON encoding exactly, so only the request around it is over."""
+    sized = _Sized(_answers(harness))
+    provider = _module_provider(harness, sized)
+    first = harness.route.nodes[0]
+    provider.check_context(first.route_node_id, first.module_id)
+    harness.conn.rollback()
+    monkeypatch.setattr(invocation, "MAX_REQUEST_BYTES", len(json.dumps(sized.seen[0])))
+    assert _run_route(harness, provider) is RefusalCode.CONTEXT_OVER_CEILING
+    assert sized.inner.calls == 0
     assert _counts(harness) == (0, [], 0, 0, 0)
+    _still_running(harness)
+
+
+@dataclass
+class _Sized:
+    """Records each prompt whose request is bounded; `after_check` runs once,
+    after the first bound (the pre-attempt check) has passed."""
+
+    inner: _Answers
+    after_check: Callable[[], None] = lambda: None
+    seen: list[str] = field(default_factory=list)
+
+    @property
+    def model(self) -> str:
+        return self.inner.model
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        self.seen.append(prompt)
+        return self.inner.request_bytes(prompt, json_object=json_object)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        return self.inner.complete(prompt, json_object=json_object)
+
+
+@dataclass
+class _ChangesAfterCheck:
+    """Passes the pre-attempt check, then changes what the attempt reads."""
+
+    inner: ModuleProvider
+    change: Callable[[], None]
+    model: str = MODEL
+
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        self.inner.check_context(route_node_id, module_id)
+        self.change()
+
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        return self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
+
+
+@pytest.mark.parametrize("moved", ["ceiling", "root-file"])
+def test_the_executor_rechecks_the_context_after_reservation(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, moved: str
+) -> None:
+    """What passed `check_context` can move before the attempt's own build:
+    the executor's second bound refuses, after the attempt and its reservation
+    exist and before any provider call (the Phase 4 ledger residual)."""
+    canon = harness.bundle.root / "CANON_SHARED.md"
+
+    def change() -> None:
+        if moved == "ceiling":
+            monkeypatch.setattr(invocation, "MAX_REQUEST_BYTES", 4096)
+        else:
+            canon.write_bytes(canon.read_bytes().replace(b"CP", b"CQ", 1))
+
+    answers = _answers(harness)
+    provider = _ChangesAfterCheck(_module_provider(harness, answers), change)
+    expected = {
+        "ceiling": RefusalCode.CONTEXT_OVER_CEILING,
+        "root-file": RefusalCode.AUTHORITY_BYTES_MISMATCH,
+    }[moved]
+    assert _run_route(harness, provider) is expected
+    assert answers.calls == 0
+    assert _counts(harness) == (0, [], 0, 1, 1)
     _still_running(harness)

@@ -50,7 +50,7 @@ from server.boundary_text import BoundaryText
 from server.engine.route import NodeState
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.provider import Completion
+from server.provider import Completion, encode_request
 from server.qualification.harness import (
     Attempted,
     Harness,
@@ -120,6 +120,9 @@ class _Completions:
     model: str = "a-model/for-the-test"
     qa_by_module: dict[str, str] = field(default_factory=dict)
 
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
+
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         self.prompts.append(prompt)
         if len(self.prompts) == self.refuses_call:
@@ -157,6 +160,9 @@ class _DamagesWhatWasAccepted:
     # under a running set, and `perform` must survive both.
     loses_the_pin: bool = False
     target: tuple[str, UUID] | None = None
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return self.inner.request_bytes(prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         if not self.inner.prompts:

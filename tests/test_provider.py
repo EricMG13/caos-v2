@@ -44,6 +44,7 @@ from server.provider import (
     Transport,
     UrllibTransport,
     _opener,
+    encode_request,
 )
 from server.refusals import Refusal, RefusalCode
 
@@ -629,6 +630,27 @@ def test_json_object_mode_is_asked_for_only_when_wanted() -> None:
 
     _provider(_Recorder()).complete(PROMPT, json_object=True)
     assert sent["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.parametrize("json_object", [False, True])
+def test_request_bytes_are_exactly_the_body_the_call_sends(json_object: bool) -> None:
+    """What a caller bounds before reserving is the request, not the prompt."""
+    bodies: list[bytes] = []
+
+    @dataclass
+    class _Recorder(_Transport):
+        def post(
+            self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
+        ) -> tuple[int, bytes]:
+            bodies.append(body)
+            return 200, self.payload
+
+    provider = _provider(_Recorder())
+    provider.complete(PROMPT, json_object=json_object)
+    expected = provider.request_bytes(PROMPT, json_object=json_object)
+    assert bodies == [expected]
+    assert expected == encode_request(provider.model, PROMPT, json_object=json_object)
+    assert len(expected) > len(json.dumps(PROMPT))
 
 
 @pytest.mark.parametrize("status", [400, 401, 402, 403, 404, 413, 422])

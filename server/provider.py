@@ -193,6 +193,31 @@ class CompletionProvider(Protocol):
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion: ...
 
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        """The whole encoded request `complete` would send for this prompt.
+
+        Pure: no call, no credential. What a caller bounds against
+        `MAX_REQUEST_BYTES` before reserving, so the ceiling it meets is the
+        one the provider enforces rather than the prompt's share of it.
+        """
+        ...
+
+
+def encode_request(model: str, prompt: str, *, json_object: bool = False) -> bytes:
+    """The chat-completions body for one prompt, exactly as `OpenRouter` sends it."""
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "max_completion_tokens": MAX_COMPLETION_TOKENS,
+        # One run, one provider identity. A fallback would move the run
+        # to a model its charges were never priced against.
+        "provider": {"allow_fallbacks": False, "require_parameters": True},
+    }
+    if json_object:
+        request["response_format"] = {"type": "json_object"}
+    return json.dumps(request).encode("utf-8")
+
 
 @dataclass(frozen=True, slots=True)
 class OpenRouter:
@@ -260,21 +285,14 @@ class OpenRouter:
             return Completion(None, None, None, refusal or failed.code)
         return _completion(decoded, refusal=refusal)
 
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        """The body `_post` sends, built without sending it."""
+        return encode_request(self.model, prompt, json_object=json_object)
+
     def _post(self, prompt: str, *, json_object: bool = False) -> tuple[int, bytes]:
         if not isinstance(prompt, str) or len(prompt) > MAX_REQUEST_BYTES:
             raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
-        request: dict[str, Any] = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "max_completion_tokens": MAX_COMPLETION_TOKENS,
-            # One run, one provider identity. A fallback would move the run
-            # to a model its charges were never priced against.
-            "provider": {"allow_fallbacks": False, "require_parameters": True},
-        }
-        if json_object:
-            request["response_format"] = {"type": "json_object"}
-        payload = json.dumps(request).encode("utf-8")
+        payload = self.request_bytes(prompt, json_object=json_object)
         if len(payload) > MAX_REQUEST_BYTES:
             raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
         try:
