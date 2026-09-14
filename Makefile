@@ -8,10 +8,11 @@ TRIVY_VERSION := 0.70.0
 -include .env
 export CAOS_DATABASE_URL CAOS_TEST_POSTGRES_URL CAOS_BLOB_ROOT
 export CAOS_TRUST_ROLE_HEADER CAOS_REQUIRE_POSTGRES
+export CAOS_DEV_USER CAOS_DEV_ROLE
 
 .PHONY: bootstrap venv lock lint types test test-fast test-provider test-postgres-races \
-	check-postgres security image frontend-check check-fast check-size check doctor \
-	dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index
+	check-postgres security image smoke-production frontend-check check-fast check-size \
+	check doctor dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index
 
 bootstrap: venv  ## exact locked Python and Node development environments
 	npm --prefix frontend ci --ignore-scripts
@@ -42,14 +43,15 @@ types:
 
 test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarqube job
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
-		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 $(PY) -m pytest -n auto
+		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 \
+		$(PY) -m pytest -n auto -m "not production_image"
 	$(PY) scripts/scan_floors.py coverage.xml --cobertura
 	$(PY) scripts/io_budget.py --assert
 
-test-fast:  ## partial: provider and PostgreSQL suites are skipped
+test-fast:  ## partial: provider, PostgreSQL and image suites are skipped
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
 		-u CAOS_REQUIRE_PROVIDER -u CAOS_TEST_POSTGRES_URL CAOS_REQUIRE_POSTGRES=0 \
-		$(PY) -m pytest --no-cov
+		$(PY) -m pytest --no-cov -m "not production_image"
 
 check-postgres:  ## fail before complete gates when the configured test DB is absent
 	@$(PY) scripts/check_postgres.py
@@ -80,6 +82,14 @@ image:  ## build and run the exact CI Trivy floor and severity gate
 	$(PY) scripts/scan_floors.py trivy.json --trivy
 	"$(TRIVY)" image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$(IMAGE)"
 
+smoke-production:  ## disposable production-image stack, then the real-browser journey
+	docker build -t "$(IMAGE)" .
+	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_IMAGE=1 IMAGE="$(IMAGE)" \
+		$(PY) -m pytest --no-cov -m production_image tests/test_production_image.py
+	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u CAOS_REQUIRE_PROVIDER IMAGE="$(IMAGE)" $(PY) tests/journey/run.py
+
 frontend-check:
 	npm --prefix frontend run lint
 	npm --prefix frontend run typecheck
@@ -108,6 +118,7 @@ check:
 	@$(MAKE) --no-print-directory security
 	@$(MAKE) --no-print-directory frontend-check
 	@$(MAKE) --no-print-directory image
+	@$(MAKE) --no-print-directory smoke-production
 
 doctor:  ## versions and configuration presence; values are never printed
 	@$(PY) scripts/dev_doctor.py
@@ -119,10 +130,12 @@ dev-up:  ## persistent dev DB/blob root plus an isolated ephemeral test-admin DB
 dev-down:  ## stop only this project's services; preserve dev DB and blobs
 	docker compose down
 
-dev-api:  ## the route surface. CAOS_DATABASE_URL and CAOS_BLOB_ROOT are read per request
+dev-api:  ## the guarded route surface. CAOS_DATABASE_URL and CAOS_BLOB_ROOT are read per request
 	# No --reload: it needs watchfiles, and a dependency that only the developer
-	# loop uses still has to be locked, audited and justified.
-	$(PY) -m uvicorn server.api.app:app --host 127.0.0.1 --port 8000
+	# loop uses still has to be locked, audited and justified. --no-proxy-headers:
+	# the edge guard's loopback check reads the real socket peer (finding 8).
+	$(PY) -m uvicorn server.api.site:application --host 127.0.0.1 --port 8000 \
+		--no-proxy-headers
 
 dev-worker:  ## the one polling worker; needs the store, blob root, provider and CAOS_MODEL_PRICE
 	$(PY) -m server.engine.worker
