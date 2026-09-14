@@ -28,4 +28,5 @@ them from growth or reinterpret vendor columns. CP-1's opening and CP-4's
 amortisation must be explicitly supplied in the same assignment form.
 
 Forecasts are projections over supplied assumptions, not credit qualification.
-Carry every upstream restriction. Set committee_status to Draft Only.
+Carry every upstream restriction. Set committee_status to Draft Only for Passed
+or Restricted for Restricted; neither is committee clearance.

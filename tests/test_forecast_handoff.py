@@ -85,7 +85,8 @@ def test_forecast_projection_is_independent_of_ambient_decimal_context() -> None
 
 
 def test_validate_driver_mapping_refuses_changed_vendor_movements() -> None:
-    from canonical_route_fixtures import CONTRACT, canonical_markdown, route_identity
+    from canonical_fixtures import CONTRACT
+    from canonical_route_fixtures import canonical_markdown, route_identity
     from test_forecast_route import request_data
 
     from server.methodology.forecast import validate_driver_mapping

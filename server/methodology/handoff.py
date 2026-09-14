@@ -340,7 +340,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
         from server.methodology.forecast import forecast_projection
 
         forecast_projection(markdown)
-        if fields["committee_status"] != "Draft Only":
+        if fields["committee_status"] not in {"Draft Only", "Restricted"}:
             raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
     readiness = (
         _readiness(contract, catalog, text, gate_expects)
