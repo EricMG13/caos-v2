@@ -168,6 +168,8 @@ def test_analysis_labels_source_facts_model_analysis_and_no_host_calculation(
         assert handoff.model_analysis.encode() == harness.blobs.get(artifact)
         [fact] = handoff.source_facts
         assert fact.filename == "report.txt"
+        # The pinned live source the page endpoint is addressed by (4.4a).
+        assert fact.source_id == harness.source_id
         assert fact.page == 1
         assert fact.matched_text == completions.quotes[0]
         assert fact.withdrawn_at is None

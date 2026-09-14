@@ -3,7 +3,11 @@
 // schema, and the validators they produce refuse what the models refuse.
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { VisibleSnapshotContext, useVisibleSnapshot } from "@/app/snapshot";
 import {
+  EVENT_NAMES,
   V1_COMMAND_SHAPES,
   V1_SHAPES,
   WireIdentityError,
@@ -13,6 +17,7 @@ import {
   parseDirectoryDocument,
   parseGateApproved,
   parseGatePreviewDocument,
+  parsePageDocument,
   parseRefusalBody,
   parseRunCreated,
   parseRunInputPinned,
@@ -21,6 +26,7 @@ import {
   parseSourcesAdmitted,
   parseUploadDocument,
   requireIdentity,
+  requirePageIdentity,
 } from "@/wire/v1";
 
 const V1_DIR = resolve(process.cwd(), "src/wire/v1");
@@ -30,6 +36,7 @@ const RUN = "7e6d5c4b-3a29-4817-a6f5-e4d3c2b1a098";
 const OTHER_RUN = "11111111-2222-4333-8444-555555555555";
 const AT = "2026-09-14T10:00:00.123456Z";
 const SHA = "a".repeat(64);
+const SOURCE = "216ec234-c70c-4a5f-8ae6-f4a0262bbe84";
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -239,6 +246,7 @@ function analysis(): { [key: string]: Json } {
           source_facts: [
             {
               document_sha256: SHA,
+              source_id: SOURCE,
               filename: "10-K.pdf",
               page: 3,
               matched_text: "net leverage",
@@ -254,6 +262,23 @@ function analysis(): { [key: string]: Json } {
     },
     SUBJECT,
   );
+}
+
+function page(): { [key: string]: Json } {
+  return {
+    body: {
+      case_id: CASE,
+      run_id: RUN,
+      source_id: SOURCE,
+      document_sha256: SHA,
+      page: 3,
+      frame: { x0: 0, y0: 0, x1: 612, y1: 792, y_axis: "down" },
+      lines: [{ text: "net leverage", x0: 1, y0: 2, x1: 3, y1: 4 }],
+    },
+    observed_at: AT,
+    status: "complete",
+    notes: [],
+  };
 }
 
 function refuses(parse: () => unknown, path?: string): void {
@@ -501,6 +526,86 @@ describe("the v1 wire contract", () => {
     const dir = parseDirectoryDocument(directory());
     expect(() => requireIdentity(dir, { caseId: null })).not.toThrow();
     expect(() => requireIdentity(dir, { caseId: CASE })).toThrow(WireIdentityError);
+  });
+
+  test("test_event_names_equal_the_committed_backend_schema", () => {
+    const defs = committed();
+    expect(defs["EventName"]).toEqual({ type: "string", enum: [...EVENT_NAMES] });
+    expect([...EVENT_NAMES]).toEqual([
+      "run_progress",
+      "handoff_accepted",
+      "run_terminal",
+      "sources_changed",
+      "runs_changed",
+    ]);
+  });
+
+  test("test_a_nested_null_where_a_list_is_declared_is_refused", () => {
+    // R4 (F10), restated for v1 lists. A guard: the closed DSL already refuses
+    // it, and this pins that a null never reaches a render as an empty list.
+    const facts = JSON.parse(JSON.stringify(analysis()));
+    facts.body.handoffs[0].source_facts = null;
+    refuses(() => parseAnalysisDocument(facts), "$.body.handoffs[0].source_facts");
+    const rects = JSON.parse(JSON.stringify(analysis()));
+    rects.body.handoffs[0].source_facts[0].rects = null;
+    refuses(() => parseAnalysisDocument(rects), "$.body.handoffs[0].source_facts[0].rects");
+    const nodes = JSON.parse(JSON.stringify(runSection()));
+    nodes.body.run.nodes[0].waiting_on = null;
+    refuses(() => parseRunSectionDocument(nodes), "$.body.run.nodes[0].waiting_on");
+    const lines = JSON.parse(JSON.stringify(page()));
+    lines.body.lines = null;
+    refuses(() => parsePageDocument(lines), "$.body.lines");
+    const notes = JSON.parse(JSON.stringify(upload()));
+    notes.notes = null;
+    refuses(() => parseUploadDocument(notes), "$.notes");
+  });
+
+  test("test_a_page_document_is_validated_and_bound_to_its_request", () => {
+    const doc = parsePageDocument(page());
+    expect(doc.body.frame.y_axis).toBe("down");
+    const expected = { caseId: CASE, runId: RUN, sourceId: SOURCE, page: 3 };
+    expect(() => requirePageIdentity(doc, expected)).not.toThrow();
+    expect(() =>
+      requirePageIdentity(doc, { ...expected, sourceId: SOURCE.toUpperCase() }),
+    ).not.toThrow();
+    for (const moved of [
+      { caseId: OTHER_CASE },
+      { runId: OTHER_RUN },
+      { sourceId: OTHER_RUN },
+      { page: 4 },
+    ]) {
+      expect(() => requirePageIdentity(doc, { ...expected, ...moved })).toThrow(WireIdentityError);
+    }
+
+    const zero = JSON.parse(JSON.stringify(page()));
+    zero.body.page = 0;
+    refuses(() => parsePageDocument(zero), "$.body.page");
+    const axis = JSON.parse(JSON.stringify(page()));
+    axis.body.frame.y_axis = "left";
+    refuses(() => parsePageDocument(axis), "$.body.frame.y_axis");
+    const many = JSON.parse(JSON.stringify(page()));
+    many.body.lines = Array.from({ length: 2001 }, () => many.body.lines[0]);
+    refuses(() => parsePageDocument(many), "$.body.lines");
+    const chrome = JSON.parse(JSON.stringify(page()));
+    chrome.chrome = null;
+    refuses(() => parsePageDocument(chrome), "$");
+    const unsourced = JSON.parse(JSON.stringify(analysis()));
+    delete unsourced.body.handoffs[0].source_facts[0].source_id;
+    refuses(() => parseAnalysisDocument(unsourced), "$.body.handoffs[0].source_facts[0]");
+  });
+
+  test("the visible snapshot is null without a provider and the provided one within", () => {
+    expect(renderHook(() => useVisibleSnapshot()).result.current).toBeNull();
+    const snapshot = {
+      key: `analysis|${CASE}|${RUN}`,
+      caseId: CASE,
+      displayedRunId: RUN,
+      document: parseAnalysisDocument(analysis()),
+      withdrawals: new Map([[SOURCE, AT]]),
+    };
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(VisibleSnapshotContext.Provider, { value: snapshot }, children);
+    expect(renderHook(() => useVisibleSnapshot(), { wrapper }).result.current).toBe(snapshot);
   });
 
   test("test_a_legacy_refusal_body_is_response_invalid", () => {

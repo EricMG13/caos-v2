@@ -170,6 +170,7 @@ const RunSectionDocument = sectionDocument(RunBody);
 const RectView = object({ x0: number, y0: number, x1: number, y1: number });
 const CitationView = object({
   document_sha256: hash,
+  source_id: uuid,
   filename: text,
   page: int(),
   matched_text: string({ max: 65536 }),
@@ -204,6 +205,47 @@ const AnalysisBody = object({
   pending: array(PendingNode, 256),
 });
 const AnalysisDocument = sectionDocument(AnalysisBody);
+
+// Events and evidence pages (brief 4.4, decisions 2, 7 and 8).
+/** The closed event names a case stream carries; a name only says what to refetch. */
+export const EVENT_NAMES = [
+  "run_progress",
+  "handoff_accepted",
+  "run_terminal",
+  "sources_changed",
+  "runs_changed",
+] as const;
+const EventName = enumOf(EVENT_NAMES);
+const FrameView = object({
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  y_axis: enumOf(["down", "up"]),
+});
+const PageLine = object({
+  text: string({ max: 65536 }),
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+});
+const PageBody = object({
+  case_id: uuid,
+  run_id: uuid,
+  source_id: uuid,
+  document_sha256: hash,
+  page: int({ min: 1, max: 500 }),
+  frame: FrameView,
+  lines: array(PageLine, 2000),
+});
+// Not a section document: no chrome.
+const PageDocument = object({
+  body: PageBody,
+  observed_at: datetime,
+  status: enumOf(["complete", "partial"]),
+  notes: array(SectionNote, 3),
+});
 
 const RefusalCode = enumOf([
   "BOUNDARY_TEXT_INVALID",
@@ -335,6 +377,8 @@ export const V1_SHAPES = {
   DirectoryDocument,
   EdgeType,
   EdgeView,
+  EventName,
+  FrameView,
   Gate,
   GateState,
   GateView,
@@ -342,6 +386,9 @@ export const V1_SHAPES = {
   HandoffView,
   NodeState,
   NodeView,
+  PageBody,
+  PageDocument,
+  PageLine,
   PendingNode,
   RectView,
   RefusalBody,
@@ -377,6 +424,10 @@ export type NodeView = Infer<typeof NodeView>;
 export type HandoffView = Infer<typeof HandoffView>;
 export type CitationView = Infer<typeof CitationView>;
 export type PendingNode = Infer<typeof PendingNode>;
+export type EventName = Infer<typeof EventName>;
+export type FrameView = Infer<typeof FrameView>;
+export type PageLine = Infer<typeof PageLine>;
+export type PageDocument = Infer<typeof PageDocument>;
 export type ActionView = Infer<typeof ActionView>;
 export type WorkView = Infer<typeof WorkView>;
 export type RouteChoice = Infer<typeof RouteChoice>;
@@ -391,6 +442,7 @@ export const parseRunSectionDocument = (value: unknown): RunSectionDocument =>
 export const parseAnalysisDocument = (value: unknown): AnalysisDocument =>
   parse(AnalysisDocument, value);
 export const parseRefusalBody = (value: unknown): RefusalBody => parse(RefusalBody, value);
+export const parsePageDocument = (value: unknown): PageDocument => parse(PageDocument, value);
 
 export class WireIdentityError extends Error {
   readonly code = "WIRE_IDENTITY_MISMATCH";
@@ -421,5 +473,21 @@ export function requireIdentity(
   if (expected.runId !== undefined) {
     if (!("displayed_run_id" in doc.body)) throw new WireIdentityError();
     if (!sameId(doc.body.displayed_run_id, expected.runId)) throw new WireIdentityError();
+  }
+}
+
+/** Refuse an evidence page answering for another case, run, source or page. */
+export function requirePageIdentity(
+  doc: PageDocument,
+  expected: { caseId: string; runId: string; sourceId: string; page: number },
+): void {
+  const body = doc.body;
+  if (
+    !sameId(body.case_id, expected.caseId) ||
+    !sameId(body.run_id, expected.runId) ||
+    !sameId(body.source_id, expected.sourceId) ||
+    body.page !== expected.page
+  ) {
+    throw new WireIdentityError();
   }
 }

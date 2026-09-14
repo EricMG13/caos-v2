@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 from pydantic.json_schema import models_json_schema
 
 from server.api.identity import GlobalRole
@@ -54,6 +54,8 @@ TITLE_CHARS = 256  # a case title a command sets
 SOURCE_IDS_MAX = 50  # `AdmissionLimits.max_documents`
 ROUTE_CHOICES_MAX = 16
 PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
+PAGE_LINES_MAX = 2000  # beyond it a page is partial, `LIST_TRUNCATED`
+PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `EVIDENCE_NOT_AVAILABLE`
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
@@ -426,11 +428,13 @@ class RectView(BaseModel):
 
 
 class CitationView(BaseModel):
-    """A host-verified citation; withdrawal is read live."""
+    """A host-verified citation; withdrawal is read live. `source_id` is the
+    pinned source the document resolves to, which addresses its page (4.4)."""
 
     model_config = _CLOSED
 
     document_sha256: Sha256
+    source_id: UUID
     filename: Text
     page: int
     matched_text: Annotated[str, Field(max_length=QUOTE_CHARS)]
@@ -534,6 +538,68 @@ V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
     RunSectionDocument,
     AnalysisDocument,
 )
+
+
+# Events and evidence pages (Task 4.4, decisions 2, 7 and 8).
+
+# The closed event names a case stream carries. A frame has no payload: a name
+# only says which sections to refetch. Printed as its own `$defs` entry.
+EventName = Literal[
+    "run_progress",
+    "handoff_accepted",
+    "run_terminal",
+    "sources_changed",
+    "runs_changed",
+]
+
+
+class FrameView(BaseModel):
+    """A page's frame in the coordinates its rectangles are stored in."""
+
+    model_config = _CLOSED
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    y_axis: Literal["down", "up"]
+
+
+class PageLine(BaseModel):
+    """One line of the token index: joined text and its union rectangle."""
+
+    model_config = _CLOSED
+
+    text: Annotated[str, Field(max_length=QUOTE_CHARS)]
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class PageBody(BaseModel):
+    """The text layer of one page of a pinned live source of a run."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    source_id: UUID
+    document_sha256: Sha256
+    page: Annotated[int, Field(ge=1, le=PAGE_MAX)]
+    frame: FrameView
+    lines: Annotated[list[PageLine], Field(max_length=PAGE_LINES_MAX)]
+
+
+class PageDocument(BaseModel):
+    """An evidence page. Not a section document, so it carries no chrome."""
+
+    model_config = _CLOSED
+
+    body: PageBody
+    observed_at: AwareDatetime
+    status: SectionStatus
+    notes: Notes
 
 
 # Commands (Task 4.2, decision 1). A request carries no actor, case, run or
@@ -664,17 +730,24 @@ V1_COMMANDS: tuple[type[BaseModel], ...] = (
 
 
 def wire_schema() -> str:
-    """The four documents, the commands and `RefusalBody` under `$defs`, keys
+    """The four documents, the page document, `EventName`, the commands and
+    `RefusalBody` under `$defs`, keys
     sorted, one definition per line and one trailing newline -- byte for byte
     the committed schema, and a diff that names the model that moved."""
-    models: tuple[type[BaseModel], ...] = (*V1_DOCUMENTS, *V1_COMMANDS, RefusalBody)
+    models: tuple[type[BaseModel], ...] = (
+        *V1_DOCUMENTS,
+        PageDocument,
+        *V1_COMMANDS,
+        RefusalBody,
+    )
     _, schema = models_json_schema(
         [(model, "validation") for model in models],
         ref_template="#/$defs/{model}",
     )
     definitions = schema.get("$defs", {})
-    if set(schema) != {"$defs"}:
+    if set(schema) != {"$defs"} or "EventName" in definitions:
         raise ValueError  # everything is a definition; nothing else is printed
+    definitions["EventName"] = TypeAdapter(EventName).json_schema()
     lines = [
         f"  {json.dumps(name)}: "
         + json.dumps(definitions[name], sort_keys=True, ensure_ascii=False)
