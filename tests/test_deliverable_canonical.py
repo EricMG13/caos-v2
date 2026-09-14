@@ -12,7 +12,7 @@ import hashlib
 import json
 from dataclasses import replace
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CATALOG, CONTRACT, handoff_markdown, skill
@@ -33,6 +33,7 @@ from server.deliverable.filing import sign_opinion
 from server.deliverable.host import render_payload as render
 from server.deliverable.package import build_package, verify_package
 from server.deliverable.render import canonical_bound
+from server.deliverable.revisions import read_revision, save_revision
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import (
@@ -289,18 +290,31 @@ def test_an_incomplete_run_has_no_canonical_payload(harness: _Harness) -> None:
 
 
 def _frozen(harness: _Harness) -> bytes:
-    data = payload_bytes(_payload(harness))
+    saved = save_revision(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        case_id=harness.case_id,
+        run_id=harness.run_id,
+        actor_id=harness.approver,
+        narrative=[],
+    )
+    data = payload_bytes(
+        read_revision(
+            harness.conn, harness.blobs, case_id=harness.case_id, revision_id=saved
+        )
+    )
+    harness.conn.rollback()
     sign_opinion(
         harness.conn,
         case_id=harness.case_id,
         actor_id=harness.approver,
-        revision_id=REVISION,
-        payload_sha256=hashlib.sha256(data).hexdigest(),
+        revision_id=saved,
     )
     freezer = uuid4()
     grant(harness.conn, case_id=harness.case_id, user_id=freezer, standing=APPROVER)
     harness.conn.commit()
-    revision = _revision(harness)
+    revision = replace(_revision(harness), revision_id=BoundaryText.of(str(saved)))
     digest = freeze_canonical(
         harness.conn, harness.blobs, harness.bundle, revision, actor_id=freezer
     )
@@ -314,7 +328,7 @@ def _verify(harness: _Harness, data: bytes) -> None:
         harness.blobs,
         harness.bundle,
         case_id=harness.case_id,
-        revision_id=REVISION,
+        revision_id=UUID(json.loads(data)["revision_id"]),
         payload=data,
     )
 

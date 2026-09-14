@@ -242,3 +242,13 @@ table is altered and nothing is backfilled, so the upgrade cannot refuse a
 populated store; `test_version_fourteen_adds_empty_command_requests_to_a_populated_store`
 advances a version-13 store and finds the table empty. Rows are written only
 by a committed command and no code path removes one.
+
+## Version 15 — immutable saved revisions — 2026-09-14
+
+`0015_revisions` adds immutable host-UUID revision metadata. Payload bytes live
+in the blob store and must be backed up together with these rows. Composite
+case/revision foreign keys on new opinions and publications reference a
+generated canonical text form of the UUID. They are `NOT VALID`: old text-label
+history stays readable without fabricated saved payloads; new writes must name
+a saved revision of the same case. The populated version-14 migration test
+preserves a legacy signature and refuses a new detached signature.

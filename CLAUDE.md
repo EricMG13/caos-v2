@@ -374,9 +374,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **The canonical deliverable proves the store at freeze and verification, not
   continuously.** `server/deliverable/canonical.py` re-derives the payload --
   both blobs, identity, projections, rectangles -- when it is built, frozen and
-  verified. It is derived in its own read unit before `freeze`'s governed write,
-  and `artifacts` rows are mutable (the Phase 2 entry below), so a pair moved in
-  that gap freezes and is caught by `verify_frozen`, not by the freeze. Proof is
+  verified. Task 5.3 now stores an immutable host revision and re-derives it inside
+  the freeze governed write under its case lock, closing the old read/write
+  gap. Proof is
   re-derived under the bundle and live sources present now: a bundle upgrade
   (as for the proof, Phase 10) or a withdrawn source makes a filed revision
   refuse verification. The payload needs every pinned node accepted, and the
@@ -391,9 +391,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   too: a document captured under several live members resolves to the lowest
   source id when they share one extraction output and to none when they do
   not.
-  *Upgrade:* derive inside the freeze's lock once artifact rows are immutable,
-  and a Markdown renderer with a closed element set when committee layout needs
-  one.
+  *Upgrade:* a Markdown renderer with a closed element set when committee
+  layout needs one.
 - **A LITE route runs through `run_route`, but only the runtime reads its
   records.** Slice c-5b: `_run_node` replays the executor's outcome with its
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
@@ -869,15 +868,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 8.**
 
-- **The analyst narrative reaches the page as one escaped paragraph.**
-  `_narrative` takes a `str` and emits a single `<p>`, so a narrative with two
-  paragraphs, a list or an emphasised clause arrives as one run of text. That is
-  the safe direction while the render must stay pure and the narrative is
-  analyst-authored text reaching a governed page — escaping everything is the
-  only reading that cannot surprise — but a committee paper whose narrative
-  cannot have two paragraphs is a real limit on the deliverable. *Upgrade:* a
-  bounded structured narrative, the day an analyst's revision needs shape rather
-  than prose.
+- **Narrative is now structured, but its figure screen is syntactic.** Task
+  5.3 stores bounded paragraphs of text and anchored citation references.
+  ASCII digits in text refuse; numbers spelled in words and misleading prose
+  still require independent human review. Historical string payloads remain
+  renderable, but cannot enter the new save API. *Upgrade:* a separately
+  specified semantic review if those claims must be machine-checked.
 - **A citation renders without its page when the payload omits one.**
   `_citation` reads `str(citation.get("page", ""))`, while `matched_text` and
   `document_sha256` beside it are refused when absent — so a payload with no
@@ -885,7 +881,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `AnchoredCitation` (`server/evidence/citations.py`) declares `page` a
   required `int` with no default, and `record_bytes`
   (`server/methodology/handoff.py`) serialises it into every stored record, so
-  only a payload hand-built for `freeze` can carry a citation without one. The
+  only an external hand-built render payload can carry a citation without one. The
   cost is a cosmetic line on the page rather than a false assurance, which is
   why it is recorded and not fixed. *Upgrade:* refuse it here too, for
   consistency with the two fields beside it, the day a payload
