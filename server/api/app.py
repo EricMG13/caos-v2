@@ -63,6 +63,7 @@ from server.api.deps import store_connection as store_connection
 from server.api.identity import Actor, actor_from_headers
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
+from server.api.reads import evidence as evidence_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
 from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
@@ -99,6 +100,8 @@ _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
     RefusalCode.RUN_NOT_FOUND: 404,
     RefusalCode.CASE_NOT_FOUND: 404,
+    # Every unavailable evidence page is one private answer (decision 7).
+    RefusalCode.EVIDENCE_NOT_AVAILABLE: 404,
     RefusalCode.STORE_NOT_CONFIGURED: 503,
     RefusalCode.STORE_UNAVAILABLE: 503,
     RefusalCode.STORE_NOT_TRANSACTIONAL: 503,
@@ -178,7 +181,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
 # One router per section read (Task 4.1), so each slice adds its route in its
 # own module and none edits this one.
-for _section in (directory_read, upload_read, run_read, analysis_read):
+for _section in (directory_read, upload_read, run_read, analysis_read, evidence_read):
     app.include_router(_section.router)
 app.include_router(health.router)
 for _commands in (cases_command, runs_command, execution_command):
