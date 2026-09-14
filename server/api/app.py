@@ -27,8 +27,9 @@ person from an anonymous one.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from json import dumps
 from time import monotonic, sleep
 from uuid import UUID
@@ -42,6 +43,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from server.api import health
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
 from server.api.deps import DATABASE_URL as DATABASE_URL
 from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
@@ -140,7 +142,15 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """
     with connect(_database_url()) as conn:
         apply_schema(conn)
-    yield
+    # The one health probe task (slice 4.5b); the route reads what it leaves.
+    _app.state.health = health.ProbeState()
+    probes = asyncio.create_task(health.probe_loop(_app.state.health))
+    try:
+        yield
+    finally:
+        probes.cancel()
+        with suppress(asyncio.CancelledError):
+            await probes
 
 
 app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
@@ -148,6 +158,7 @@ app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
 # own module and none edits this one.
 for _section in (directory_read, upload_read, run_read, analysis_read):
     app.include_router(_section.router)
+app.include_router(health.router)
 
 
 def _body(code: RefusalCode, status: int) -> Response:

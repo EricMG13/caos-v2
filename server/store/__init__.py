@@ -110,9 +110,15 @@ class RunStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
-def connect(url: str) -> StoreConnection:
-    """A connection with the store's policy on it: transactions are explicit."""
-    return psycopg.connect(url, autocommit=False)
+def connect(url: str, *, connect_timeout: int | None = None) -> StoreConnection:
+    """A connection with the store's policy on it: transactions are explicit.
+
+    `connect_timeout` (seconds) bounds the connection attempt, for a caller
+    such as the health probe that must not wait on an unanswering host.
+    """
+    if connect_timeout is None:
+        return psycopg.connect(url, autocommit=False)
+    return psycopg.connect(url, autocommit=False, connect_timeout=connect_timeout)
 
 
 def rollback_or_close(conn: StoreConnection) -> None:
@@ -142,14 +148,43 @@ def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
         raise
 
 
-def _migrate(conn: StoreConnection, sql: str) -> None:
-    """Validate the complete applied prefix under the lock before advancing it."""
-    if sql != SCHEMA or not MIGRATIONS or MIGRATIONS[0] != ("0001_legacy", SCHEMA):
+def verify_schema(conn: StoreConnection) -> None:
+    """Refuse `STORE_SCHEMA_DRIFT` unless every declared migration is applied.
+
+    The check `_migrate` makes, read-only: SELECTs alone, no DDL, no advisory
+    lock, no write and no commit -- the caller owns (and should roll back or
+    close) the transaction. A partial prefix is drift here too: a process that
+    serves requests is one whose startup advanced it in full. A missing
+    bookkeeping table is drift; any other store error propagates as itself.
+    """
+    expected = _expected_history()
+    try:
+        applied = conn.execute("SELECT applied_digest FROM store_schema").fetchone()
+        history = conn.execute(
+            "SELECT version, name, digest FROM store_migrations ORDER BY version"
+        ).fetchall()
+    except psycopg.errors.UndefinedTable:
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
+    head = sha256(json.dumps(expected).encode("utf-8")).hexdigest()
+    if history != expected or applied != (head,):
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
-    expected = [
+
+
+def _expected_history() -> list[tuple[int, str, str]]:
+    """The ordered `(version, name, digest)` rows a fully migrated store holds."""
+    if not MIGRATIONS or MIGRATIONS[0] != ("0001_legacy", SCHEMA):
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
+    return [
         (version, name, sha256(body.encode("utf-8")).hexdigest())
         for version, (name, body) in enumerate(MIGRATIONS, 1)
     ]
+
+
+def _migrate(conn: StoreConnection, sql: str) -> None:
+    """Validate the complete applied prefix under the lock before advancing it."""
+    if sql != SCHEMA:
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
+    expected = _expected_history()
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK,))
     conn.execute(_BOOKKEEPING)
     conn.execute(_HISTORY)
