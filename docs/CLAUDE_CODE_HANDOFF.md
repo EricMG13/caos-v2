@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
-| Latest accepted task | **Phase 3 Task 3.1 accepted at `a8acbc6`** (record below; phase not accepted) |
-| Next task | Phase 3 Task 3.2: evidence admission and PDF geometry (tracked brief first) |
+| Latest accepted task | **Phase 3 Task 3.2 accepted at `fffe5c8`** (Task 3.1 at `a8acbc6`; records below; phase not accepted) |
+| Next task | Phase 3 Task 3.3: complete instructions and upstream lineage ([brief](superpowers/plans/2026-09-14-phase-3-task-3.3-brief.md)) |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -282,3 +282,32 @@ adversarial audit remain.
   a canonical QA_GATE verdict other than Passed; remaining limits are in the
   `CLAUDE.md` "Repair Phase 3." ledger. Branch history exceeds the 800-line PR
   gate and needs stacked PRs; deletion commits are exempt by user decision.
+
+
+## Phase 3 Task 3.2 acceptance record — 14 September 2026
+
+Task 3.2 (evidence admission and PDF geometry) is accepted at `fffe5c8`. The
+phase is not accepted.
+
+- **Scope delivered** (brief `docs/superpowers/plans/2026-09-14-phase-3-task-3.2-brief.md`,
+  decision §44): per-document extractor dispatch from bytes with typed
+  `SOURCE_ENCRYPTED`/`SOURCE_NOT_READABLE` mapping and pdfminer logs detached;
+  admission limits before expensive work with a cooperative deadline and lazy
+  pages (`SOURCE_TOO_LARGE`, `SOURCE_EXTRACTION_TIMEOUT`); PDF words split on
+  pdfminer's word-margin breaks; rectangles normalised to crop origin, top-left,
+  rotated displayed space, tokens outside the visible crop dropped (an empty
+  crop drops the page); extractor identity v2 for PDF and plain text with v1
+  rows still verifying; citations anchor only within delivered blocks through
+  one shared block numbering.
+- **Exit checks**: mixed packs atomic with specific safe outcomes
+  (`tests/test_extractor_dispatch.py`, `test_admission_limits.py`); spaced
+  glyphs, wrapped quotes, columns, repeated quotes, rotation and crop covered
+  (`tests/test_pdf_extraction.py`); undelivered pages of a delivered source
+  cannot be cited (`tests/test_awkward_evidence.py`) — enforced at the anchoring
+  rule; no run yet delivers less than whole sources until per-node evidence
+  selection (ledger).
+- **Review**: each server slice had an ordinary review and remediation
+  (3.2a/3.2e/3.2d on Opus, 3.2c on Sonnet per the routing table).
+- **Gate at `fffe5c8`**: serial backend gate green, 2167 passed; F02 probe
+  `BLOCKED 2/3`; Docker restore probe passed. Frontend/image half of
+  `make check` owed at phase exit.
