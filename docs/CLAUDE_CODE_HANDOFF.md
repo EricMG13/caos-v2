@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
-| Latest accepted task | **Phase 3 Task 3.2 accepted at `fffe5c8`** (Task 3.1 at `a8acbc6`; records below; phase not accepted) |
-| Next task | Phase 3 Task 3.3: complete instructions and upstream lineage ([brief](superpowers/plans/2026-09-14-phase-3-task-3.3-brief.md)) |
+| Latest accepted task | **Phase 3 Task 3.3 accepted at `1bb0cfd`** (3.1 `a8acbc6`, 3.2 `fffe5c8`; records below; phase not accepted) |
+| Next task | Phase 3 Task 3.4: prove the LITE route end to end ([brief](superpowers/plans/2026-09-14-phase-3-task-3.4-brief.md); 3.4a `1b60263` and 3.4e `ea4f2f5` already integrated) |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -311,3 +311,33 @@ phase is not accepted.
 - **Gate at `fffe5c8`**: serial backend gate green, 2167 passed; F02 probe
   `BLOCKED 2/3`; Docker restore probe passed. Frontend/image half of
   `make check` owed at phase exit.
+
+
+## Phase 3 Task 3.3 acceptance record — 14 September 2026
+
+Task 3.3 (complete instructions and upstream lineage) is accepted at `1bb0cfd`.
+The phase is not accepted.
+
+- **Scope delivered** (brief `docs/superpowers/plans/2026-09-14-phase-3-task-3.3-brief.md`,
+  decision §45): verified root files and each module's delivered authority set
+  (every non-script reference plus the root files its `SKILL.md` names); every
+  delivered file in tagged prompt sections with a host note classifying every
+  named vendor script; upstream `allowed_use` labels; `CONTEXT_OVER_CEILING`
+  bounding the whole encoded request before any attempt or reservation; record
+  format v2 binding the delivered-authority digest and the transitive upstream
+  lineage, compared by runtime, proof and deliverable; CP-0 anchor refusal; a
+  host-owned upstream citation register (existence host-verified, support left
+  to CP-5) that can never satisfy a citation.
+- **Exit checks**: every delivered byte verified and bound
+  (`tests/test_delivered_authority.py`, `test_handoff_invocation.py`); a missing
+  or changed predecessor or ancestor fails before call or at acceptance
+  (`tests/test_record_lineage.py`); oversized context refuses with no truncation
+  or call; upstream text and register never evidence, blocked/refused attempts
+  never reach a consumer, disclosed conflicts and registers pass unchanged
+  (`tests/test_upstream_citation_register.py`); no source or model text selects
+  a file or tool.
+- **Review**: each server slice had an ordinary Opus review with remediation.
+- **Gate at `1bb0cfd`**: serial backend gate green, 2265 passed; F02 probe
+  `BLOCKED 2/3`; restore probe passed. A complete `make check` (frontend 157,
+  workbench 90, image clean with pinned Trivy 0.70.0) passed at `83d7745`; the
+  phase-exit `make check` reruns on the final candidate.
