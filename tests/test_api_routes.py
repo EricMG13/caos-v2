@@ -59,7 +59,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke, standing_of
 from server.store.routes import pin_route, pinned_route
-from server.store.runs import block_run, complete_run, start_attempt, start_run
+from server.store.runs import block_run, start_attempt, start_run
 
 __all__ = ["harness", "route"]
 
@@ -881,7 +881,7 @@ def test_the_tail_is_served_as_an_event_stream(
         "ATTEMPT_STARTED",
         "CALL_OUTCOME_RECORDED",
         "ATTEMPT_ACCEPTED",
-        "RUN_COMPLETE",
+        "RUN_BLOCKED",
     ]
 
 
@@ -917,7 +917,7 @@ def test_last_event_id_resumes_after_the_marker(
         f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "5"}
     ).text
 
-    assert [name for _, name in _sse(text)] == ["RUN_COMPLETE"]
+    assert [name for _, name in _sse(text)] == ["RUN_BLOCKED"]
 
 
 def test_a_last_event_id_that_is_not_a_number_starts_from_the_beginning(
@@ -1067,10 +1067,11 @@ def test_startup_applies_the_declared_schema(
 
 
 def _finish(harness: _Harness) -> UUID:
-    """Six events: two pins, started, outcome recorded, accepted, complete --
-    on a canonical LITE run whose CP-0 is accepted with its record."""
+    """Six events: two pins, started, outcome recorded, accepted, blocked -- on
+    a canonical LITE run whose CP-0 is accepted with its record. Blocked, not
+    complete: the store refuses COMPLETE while pinned nodes are unaccepted."""
     _answer(harness, "CP-0")
-    complete_run(harness.conn, harness.run_id)
+    block_run(harness.conn, harness.run_id)
     return harness.run_id
 
 

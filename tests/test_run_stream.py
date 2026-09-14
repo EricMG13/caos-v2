@@ -21,7 +21,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from test_run_events import RECORD, approved_nodes
+from test_run_events import RECORD, accept_nodes, approved_nodes
 
 from server.api.stream import IO_BUDGET, TERMINAL, StreamEvent, tail
 from server.refusals import Refusal
@@ -60,8 +60,12 @@ def watched(case: tuple[StoreConnection, UUID]) -> tuple[StoreConnection, UUID, 
 
 
 def _approved(conn: StoreConnection, run_id: UUID, blobs: Path) -> str:
-    """Govern the run on the real route; acceptance requires it."""
-    return next(iter(approved_nodes(conn, run_id, blobs).values()))
+    """Govern the run on the real route and accept all but its last node:
+    acceptance requires the pin, completion every other node (brief 4.3 D8).
+    Leaves ten events: two pins and three per accepted node."""
+    *others, last = approved_nodes(conn, run_id, blobs).values()
+    accept_nodes(conn, run_id, *others)
+    return last
 
 
 def _names(events: list[StreamEvent]) -> list[str]:
@@ -96,24 +100,27 @@ def test_sse_closes_after_terminal_delivery(
     # Late billing may follow a terminal event; it must not keep this tail open.
     conn.execute(
         "INSERT INTO run_events (run_id, seq, name) VALUES (%s, %s, %s)",
-        (run_id, 7, RunEvent.CALL_OUTCOME_RECORDED.value),
+        (run_id, 13, RunEvent.CALL_OUTCOME_RECORDED.value),
     )
     conn.commit()
 
     delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
 
-    assert _names(delivered) == [
-        RunEvent.ROUTE_PINNED.value,
-        RunEvent.INPUT_PINNED.value,
+    accepted = [
         RunEvent.ATTEMPT_STARTED.value,
         RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
+    ]
+    assert _names(delivered) == [
+        RunEvent.ROUTE_PINNED.value,
+        RunEvent.INPUT_PINNED.value,
+        *accepted * 3,
         RunEvent.RUN_COMPLETE.value,
     ]
     assert delivered[-1].name == RunEvent.RUN_COMPLETE.value, "the last thing sent"
-    assert len(delivered) == 6, "delivery stopped at the terminal event"
+    assert len(delivered) == 12, "delivery stopped at the terminal event"
     assert _names(
-        list(tail(conn, run_id=run_id, actor_id=viewer, last_event_id=6))
+        list(tail(conn, run_id=run_id, actor_id=viewer, last_event_id=12))
     ) == [RunEvent.CALL_OUTCOME_RECORDED.value]
 
 
@@ -208,7 +215,7 @@ def test_a_tail_resumes_after_last_event_id(
     first = list(tail(conn, run_id=run_id, actor_id=viewer))
 
     resumed = list(
-        tail(conn, run_id=run_id, actor_id=viewer, last_event_id=first[2].id)
+        tail(conn, run_id=run_id, actor_id=viewer, last_event_id=first[8].id)
     )
 
     assert _names(resumed) == [
@@ -216,7 +223,7 @@ def test_a_tail_resumes_after_last_event_id(
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
-    assert [event.id for event in resumed] == [4, 5, 6]
+    assert [event.id for event in resumed] == [10, 11, 12]
 
 
 def test_resuming_from_the_last_event_delivers_nothing(
