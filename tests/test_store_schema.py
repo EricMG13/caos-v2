@@ -306,7 +306,7 @@ def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
         assert _catalog(conn) == catalog
 
 
-@pytest.mark.parametrize("prefix", [2, 3, 4, 5])
+@pytest.mark.parametrize("prefix", [2, 3, 4, 5, 6])
 def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
     empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
 ) -> None:
@@ -331,6 +331,7 @@ def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
         apply_schema(conn)
         assert _records(conn, columns) == before
         assert conn.execute("SELECT count(*) FROM run_inputs").fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM call_outcomes").fetchone() == (0,)
         assert blobs.get(digest) == b"synthetic legacy document and artifact"
 
         [run] = conn.execute("SELECT run_id FROM runs").fetchone() or ()
@@ -605,6 +606,9 @@ def test_native_money_constraints_refuse_malformed_rows(
     with connect(empty_database) as conn:
         apply_schema(conn)
         _populate(conn, BlobStore(tmp_path))
+        if table == "budget_ledger":
+            assert conn.info.dbname.startswith("caos_test_")
+            conn.execute("ALTER TABLE budget_ledger DISABLE TRIGGER USER")
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(f"UPDATE {table} SET {column} = %s", (Decimal(value),))
         conn.rollback()
@@ -620,6 +624,9 @@ def test_budget_owner_keys_reject_existing_unrelated_run(
         other_case = create_case(conn, BoundaryText.of("unrelated owner"))
         other_run = start_run(conn, other_case)
         conn.commit()
+        if table == "budget_ledger":
+            assert conn.info.dbname.startswith("caos_test_")
+            conn.execute("ALTER TABLE budget_ledger DISABLE TRIGGER USER")
         with pytest.raises(psycopg.errors.ForeignKeyViolation):
             conn.execute(f"UPDATE {table} SET run_id = %s", (other_run,))
         conn.rollback()

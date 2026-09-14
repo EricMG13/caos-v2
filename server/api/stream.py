@@ -19,8 +19,8 @@ stream that had already closed.
 *Membership is rechecked before each event, not at the handshake.* An SSE
 connection is exactly the thing that stays open across a revocation.
 
-*A terminal event ends the tail.* A completed run produces nothing further, so
-holding the connection open is a promise about events that cannot arrive.
+*A terminal event ends this tail.* Late billing events remain durable and can
+be read by explicitly resuming after the terminal marker.
 
 The HTTP binding is not here. `text/event-stream` over a socket is transport, and
 every rule above is answerable without one; the framework arrives with the route
@@ -47,7 +47,7 @@ from server.store.members import Standing, satisfies, standing_of
 # checks are spread across the life of the stream rather than paid in a burst.
 IO_BUDGET = 2
 
-# The events after which there is nothing more to send.
+# The events that close this analytical-progress stream.
 TERMINAL = frozenset({RunEvent.RUN_COMPLETE.value, RunEvent.RUN_FAILED.value})
 
 # Watching a run is reading it. Anything a stream can reveal, the run document

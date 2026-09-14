@@ -140,6 +140,9 @@ def main(*, migrated: bool = False) -> None:
                 assert conn.execute(
                     "SELECT count(*) FROM source_extractions"
                 ).fetchone() == (1 if migrated else 0,)
+                assert conn.execute(
+                    "SELECT count(*) FROM call_outcomes"
+                ).fetchone() == (1 if migrated else 0,)
                 if migrated:
                     assert load_run_input(conn, run) == pin
                     assert remaining(conn, run) == Decimal("4.25")
