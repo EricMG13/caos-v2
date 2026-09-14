@@ -282,6 +282,7 @@ def read_case_events(
         after=request.headers.get("last-event-id"),
         deadline=TAIL_DEADLINE,
         poll=POLL_INTERVAL,
+        heartbeat=True,
     )
     return StreamingResponse(
         (_frame(event) for event in events),
@@ -292,10 +293,13 @@ def read_case_events(
     )
 
 
-def _frame(event: StreamEvent) -> bytes:
+def _frame(event: StreamEvent | None) -> bytes:
     """One SSE frame. The cursor frame is `id` alone, which sets the browser's
     `lastEventId` and dispatches nothing. A named frame's `data` is a
-    placeholder because the spec dispatches no event without one."""
+    placeholder because the spec dispatches no event without one. The
+    keepalive (`None`) is a comment, which the browser ignores."""
+    if event is None:
+        return b":\n\n"
     if event.name is None:
         return f"id: {event.id}\n\n".encode()
     return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
