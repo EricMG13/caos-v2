@@ -167,8 +167,9 @@ def execute_handoff(
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
         delivered = _delivered(conn, assignment.run_id)
-        upstream = upstream_markdown(blobs, identity.upstream)
+        # Records first: what binds and re-validates is then read as context.
         _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
+        upstream = upstream_markdown(blobs, identity.upstream)
     contract = _contract(bundle)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_handoff_prompt(
@@ -506,11 +507,14 @@ def _upstream_records(
     assignment: Assignment,
     refs: tuple[UpstreamRef, ...],
 ) -> None:
-    """Every upstream the prompt will carry is an accepted record of this build.
+    """Every upstream the prompt will carry is an accepted record of this build
+    whose projections re-derive from its Markdown.
 
-    Inside the pre-call read unit, so nothing another build wrote reaches the
-    prompt (invariant 4). A row whose digest is not the ref's is
-    `ROUTE_IDENTITY_INVALID`; a row without a record `ARTIFACT_RECORD_MISMATCH`.
+    Inside the pre-call read unit, so nothing another build wrote, and no record
+    that disagrees with its own Markdown, reaches the prompt (invariant 4; the
+    same checks the frontier and the proof apply). A row whose digest is not the
+    ref's is `ROUTE_IDENTITY_INVALID`; a row without a record, or whose Markdown
+    will not read, `ARTIFACT_RECORD_MISMATCH`.
     No query when there is no upstream.
     """
     if not refs:
@@ -524,13 +528,13 @@ def _upstream_records(
         _, attempt, digest, record = row
         if record is None:
             raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        _accepted_record(
+        accepted_projections(
             conn,
             blobs,
             bundle,
             assignment.route,
-            nodes[ref.route_node_id],
             run_id=assignment.run_id,
+            route_node_id=ref.route_node_id,
             attempt_id=attempt,
             artifact_sha256=digest,
             record_sha256=record,
