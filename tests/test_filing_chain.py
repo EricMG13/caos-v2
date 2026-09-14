@@ -216,3 +216,57 @@ def test_sign_freeze_file_refusals_preserve_one_chain(lite: _Harness) -> None:
     assert (
         actions.count("DELIVERABLE_FROZEN") == actions.count("DELIVERABLE_FILED") == 1
     )
+
+
+def test_filing_refuses_the_opinion_signer(lite: _Harness) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    with pytest.raises(Refusal, match="APPROVER_NOT_INDEPENDENT"):
+        file_deliverable(
+            lite.conn,
+            case_id=lite.case_id,
+            actor_id=lite.approver,
+            revision_id=revision,
+        )
+    assert not any(
+        e.action == "DELIVERABLE_FILED" for e in audit_trail(lite.conn, lite.case_id)
+    )
+
+
+def test_audit_package_verifies_with_stdlib_alone(
+    lite: _Harness, tmp_path: Path
+) -> None:
+    import subprocess
+    import sys
+    import zipfile
+    from io import BytesIO
+
+    from server.deliverable.package import build_package
+    from server.deliverable.render import render
+
+    revision = _save(lite)
+    payload = _read(lite, revision)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    receipt = file_deliverable(
+        lite.conn, case_id=lite.case_id, actor_id=_actor(lite), revision_id=revision
+    )
+    archive = build_package(
+        payload_bytes(payload), receipt_bytes(receipt), render(payload)
+    )
+    lite.conn.close()
+    package = tmp_path / "filed.zip"
+    package.write_bytes(archive)
+    verifier = tmp_path / "verify_package.py"
+    with zipfile.ZipFile(BytesIO(archive)) as opened:
+        verifier.write_bytes(opened.read("verify_package.py"))
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", str(verifier), str(package)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    assert json.loads(result.stdout) == {"verified": True, "reason": None}
