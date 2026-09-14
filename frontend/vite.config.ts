@@ -217,6 +217,24 @@ const fixtureMiddleware: Connect.NextHandleFunction = (req, res, next) => {
     void serveEvents(fixture, req, res);
     return;
   }
+  // An evidence page's text layer (brief 4.4, decision 7): a fixture per
+  // source and page, and the private 404 for anything else.
+  const layer =
+    /^\/api\/v1\/cases\/[^/]+\/runs\/[^/]+\/sources\/([0-9a-f-]{36})\/pages\/([1-9][0-9]{0,2})$/.exec(
+      pathname,
+    );
+  if (layer) {
+    void readJson(`pages/v1/${layer[1]}.${layer[2]}.json`).then((body) =>
+      body === null
+        ? send(
+            res,
+            404,
+            JSON.stringify({ code: "PAGE_NOT_AVAILABLE", clears: "a pinned live page" }),
+          )
+        : send(res, 200, body),
+    );
+    return;
+  }
   const page = /^\/api\/pages\/([A-Za-z0-9-]+\.svg)$/.exec(pathname)?.[1];
   if (page) {
     void readJson(`pages/${page}`).then((body) => {

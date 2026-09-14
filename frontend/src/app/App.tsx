@@ -2,7 +2,6 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import { forward, sectionFromPath } from "./sections";
 import { Workspace } from "./Workspace";
 import { Rail } from "@/chrome/Rail";
-import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { RegionState } from "@/states/RegionState";
 
 /** A private 404 and an absent route share one neutral wording. */
@@ -32,16 +31,14 @@ function Resolve() {
   return <Workspace key={section} section={section} />;
 }
 
-/** The one evidence surface belongs to the page it was opened on: a
-    navigation remounts it, so no drawer outlives its opener. */
+/** The evidence surface lives in the Workspace, under the visible snapshot it
+    is bound to (brief 4.4, decision 9): a section, case or displayed-run
+    change closes it, so no drawer outlives the view it was opened on. */
 function Shell() {
-  const { pathname } = useLocation();
   return (
-    <EvidenceProvider key={pathname}>
-      <Routes>
-        <Route path="*" element={<Resolve />} />
-      </Routes>
-    </EvidenceProvider>
+    <Routes>
+      <Route path="*" element={<Resolve />} />
+    </Routes>
   );
 }
 
