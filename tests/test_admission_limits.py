@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import time
 import zlib
+from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 from uuid import UUID
 
 import pytest
@@ -33,7 +34,7 @@ from server.evidence.extract import (
     PlainTextExtractor,
     Token,
 )
-from server.evidence.ingest import Document, admit_pack
+from server.evidence.ingest import Document, admit_pack, prepare_pack
 from server.evidence.pdf import PdfExtractor, walk_pages
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -365,3 +366,38 @@ def test_one_line_past_the_token_ceiling_stops_building_tokens(
 
     assert caught.value.code is RefusalCode.SOURCE_TOO_LARGE
     assert len(built) <= limits.max_tokens + 1
+
+
+class _Deadlines:
+    """Records the deadline each document's extraction was handed."""
+
+    identity = PlainTextExtractor().identity
+    seen: ClassVar[list[float]] = []
+
+    def extract(
+        self, data: bytes, *, limits: AdmissionLimits, deadline: float
+    ) -> list[Token]:
+        type(self).seen.append(deadline)
+        time.sleep(0.05)
+        return PlainTextExtractor().extract(data, limits=limits, deadline=deadline)
+
+
+def test_one_deadline_bounds_the_whole_pack_not_each_document() -> None:
+    """A per-document deadline alone let fifty documents take fifty times it in
+    one request (the Phase 4 audit): every document's deadline is capped by the
+    pack's, so the whole extraction ends by `max_pack_seconds`."""
+    _Deadlines.seen = []
+    limits = replace(DEFAULT_LIMITS, max_seconds=60.0, max_pack_seconds=0.12)
+    documents = [_document(f"{n}.txt", TEXT) for n in range(3)]
+    started = time.monotonic()
+
+    with pytest.raises(Refusal) as caught:
+        prepare_pack(
+            documents,
+            dispatch=lambda data: cast(Extractor, _Deadlines()),
+            limits=limits,
+        )
+
+    assert caught.value.code is RefusalCode.SOURCE_EXTRACTION_TIMEOUT
+    assert _Deadlines.seen, "extraction ran"
+    assert max(_Deadlines.seen) <= started + limits.max_pack_seconds + 0.01

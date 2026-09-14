@@ -70,6 +70,9 @@ class AdmissionLimits:
     max_seconds: float
     # What one PDF's compressed streams may inflate to, in total (§47).
     max_decoded_bytes: int
+    # One deadline for the whole pack, capping each document's: fifty documents
+    # must not take fifty times `max_seconds` in one request (Phase 4 audit).
+    max_pack_seconds: float = 300.0
 
 
 DEFAULT_LIMITS = AdmissionLimits(
@@ -80,6 +83,7 @@ DEFAULT_LIMITS = AdmissionLimits(
     max_tokens=500_000,
     max_seconds=60.0,
     max_decoded_bytes=256 * 1024 * 1024,
+    max_pack_seconds=300.0,
 )
 
 
