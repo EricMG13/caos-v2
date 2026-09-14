@@ -48,6 +48,7 @@ from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import AnchoredCitation, Citation, verify_citations
 from server.methodology.bundle import Bundle, verified_bytes
+from server.methodology.executor import captured_blocks
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
 from server.methodology.invocation import (
     call_time_identity,
@@ -136,7 +137,9 @@ def assert_orchestration_proof(
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 
     live = pinned_live_sources(conn, run_id)
-    reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live)
+    captured = captured_blocks(conn, run_id)
+    delivered = {s: captured.get(s, frozenset()) for s in live.values()}
+    reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live, delivered)
     nodes = {node.route_node_id: node for node in route.nodes}
     citations = 0
     anchored: set[tuple[str, str, str]] = set()
@@ -201,9 +204,11 @@ class _CanonicalReader:
         route: ResolvedRoute,
         run_id: UUID,
         live: dict[str, UUID],
+        delivered: dict[UUID, frozenset[str]],
     ) -> None:
         self.conn, self.blobs, self.bundle = conn, blobs, bundle
         self.route, self.run_id, self.live = route, run_id, live
+        self.delivered = delivered
         self.contract = load_vendor_contract(bundle)
         self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
 
@@ -279,18 +284,24 @@ class _CanonicalReader:
             source_id = self.live.get(citation.document_sha256)
             if source_id is None:
                 raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
-            if not _anchors_as_recorded(self.conn, source_id, citation):
+            blocks = self.delivered[source_id]
+            if not _anchors_as_recorded(self.conn, source_id, blocks, citation):
                 raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
         return tuple(record.citations)
 
 
 def _anchors_as_recorded(
-    conn: StoreConnection, source_id: UUID, citation: AnchoredCitation
+    conn: StoreConnection,
+    source_id: UUID,
+    blocks: frozenset[str],
+    citation: AnchoredCitation,
 ) -> bool:
-    """The recorded citation re-anchors to itself: same quote, same rectangles."""
+    """The recorded citation re-anchors to itself, inside the captured blocks:
+    same quote, same rectangles."""
     request = Citation(source_id, citation.page, citation.matched_text)
+    delivered = {source_id: blocks}
     anchored = _unless_refused(
-        lambda: verify_citations(conn, delivered={source_id}, citations=[request])
+        lambda: verify_citations(conn, delivered=delivered, citations=[request])
     )
     return anchored == [citation]
 

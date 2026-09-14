@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
@@ -40,6 +40,7 @@ from server.methodology.executor import (
     Assignment,
     _delivered,
     _stored_identity,
+    captured_blocks,
 )
 from server.methodology.handoff import (
     GATE_MODULE,
@@ -210,7 +211,6 @@ def execute_handoff(
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
 
     catalog = _catalog(bundle)
-    sources = {item.source_id for item in delivered}
     gate_expects = _gate_expects(assignment.route, assignment.module_id)
     with execution_reads(conn):
         check_attempt(
@@ -224,7 +224,8 @@ def execute_handoff(
         # comparison also catches an upstream rewritten during the call.
         if _identity(conn, bundle, assignment) != identity:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-        markdown, citations = parse_response(content, delivered=frozenset(sources))
+        blocks = captured_blocks(conn, assignment.run_id)
+        markdown, citations = parse_response(content, delivered=frozenset(blocks))
         projections = _unless_blocked(
             lambda: validate_markdown(
                 contract,
@@ -237,7 +238,7 @@ def execute_handoff(
         )
         # A Blocked verdict ends the run only once its quotes are verified: an
         # unanchorable Blocked handoff is an ordinary refusal (c-5b, P3-2).
-        anchored = verify_citations(conn, delivered=sources, citations=citations)
+        anchored = verify_citations(conn, delivered=blocks, citations=citations)
         if projections is None:
             raise Refusal(RefusalCode.HANDOFF_BLOCKED)
     record = CanonicalRecord(
@@ -306,20 +307,21 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
         (run_id, list(route_node_ids)),
     ).fetchall()
     nodes = {node.route_node_id: node for node in route.nodes}
-    sources: frozenset[UUID] | None = None
+    blocks: dict[UUID, frozenset[str]] | None = None
     for route_node_id, attempt, diagnostic in rows:
         node = nodes.get(str(route_node_id))
         if node is None:
             continue
         body = _stored_body(blobs, str(diagnostic))
-        if sources is None:
+        if blocks is None:
             # Once per call: every captured block, whatever the attempts.
             try:
-                sources = frozenset(i.source_id for i in _delivered(conn, run_id))
+                _delivered(conn, run_id)
             except Refusal as refusal:
                 if refusal.code in _STORE_FAULTS:
                     raise
                 return False  # e.g. a withdrawn source: no verdict can be re-derived
+            blocks = captured_blocks(conn, run_id)
         if body is not None and _answered_blocked(
             conn,
             bundle,
@@ -328,7 +330,7 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
             run_id=run_id,
             attempt_id=UUID(str(attempt)),
             body=body,
-            sources=sources,
+            blocks=blocks,
         ):
             return True
     return False
@@ -358,7 +360,7 @@ def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
     run_id: UUID,
     attempt_id: UUID,
     body: str,
-    sources: frozenset[UUID],
+    blocks: Mapping[UUID, frozenset[str]],
 ) -> bool:
     try:
         # The call-time identity every reader shares: an unaccepted attempt has
@@ -377,7 +379,7 @@ def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
             attempt_id=attempt_id,
             record=None,
         )
-        markdown, citations = parse_response(body, delivered=sources)
+        markdown, citations = parse_response(body, delivered=frozenset(blocks))
         authority = assemble_authority(bundle, node.module_id)
         projections = _unless_blocked(
             lambda: validate_markdown(
@@ -392,7 +394,7 @@ def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
         if projections is not None:
             return False
         # Anchored before Blocked is honoured, exactly as on the live path.
-        verify_citations(conn, delivered=set(sources), citations=citations)
+        verify_citations(conn, delivered=blocks, citations=citations)
     except Refusal as refusal:
         if refusal.code in _STORE_FAULTS:
             raise

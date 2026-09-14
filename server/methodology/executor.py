@@ -70,6 +70,19 @@ _CAPTURED = (
 )
 
 
+def captured_blocks(conn: StoreConnection, run_id: UUID) -> dict[UUID, frozenset[str]]:
+    """Source to the block ids the run's pin captured: what a node is handed.
+
+    Every citation anchors inside these (invariant 11). Pins only -- no block
+    text is read and no withdrawal is judged here; `verify_citations` reads
+    tokens from live sources alone, so a withdrawn source still anchors nothing.
+    """
+    captured: dict[UUID, set[str]] = {}
+    for source, block in conn.execute(_CAPTURED, (run_id,)).fetchall():
+        captured.setdefault(UUID(str(source)), set()).add(str(block))
+    return {source: frozenset(blocks) for source, blocks in captured.items()}
+
+
 def _delivered(conn: StoreConnection, run_id: UUID) -> list[Delivery]:
     """Every captured block of the run, each through the run-bound reader."""
     delivered = []

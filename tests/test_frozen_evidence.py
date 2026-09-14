@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from conftest import every_block
 from test_case_ordering import _blocked
 from test_run_inputs import SUBJECT, Prepared, prepared
 
@@ -35,7 +36,9 @@ def test_ordinary_mutation_cannot_change_pinned_evidence(
     assert read_block(conn, source_id=source, block_id="b000000").text.value == "one"
     with pytest.raises(Refusal, match=r"^CITATION_NOT_LOCATED$"):
         verify_citations(
-            conn, delivered={source}, citations=[Citation(source, 1, "two")]
+            conn,
+            delivered=every_block(conn, source),
+            citations=[Citation(source, 1, "two")],
         )
 
 
