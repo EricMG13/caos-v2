@@ -1539,3 +1539,63 @@ with, and it resolves and installs the same hashed, wheels-only locks faster.
 
 **Rollback.** Revert the workflow commit; nothing outside the workflow
 depends on these changes.
+
+## 2026-09-14 §49 — One PostgreSQL worker: a claim per run fenced by a token
+
+**Decision.** Phase 4 Task 4.3 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.3-brief.md`):
+
+1. **Claim per run.** Migration 0013's `run_work` row gives one lease holder
+   the run's frontier, fenced by a token that every claim advances;
+   `start_attempt`, `reserve`, acceptance and every terminal transition check it
+   under `lock_run`. The bill (`record_outcome`) is never fenced.
+2. **Lease.** 300 s, renewed by every fenced write; a test pins it above twice
+   the provider's socket timeout. A trickling response can outlive a lease: at
+   most one extra paid call, never a second acceptance.
+3. **Cancellation is a request.** It never interrupts a call in flight; that
+   call's bill commits and a valid answer is accepted; the next start or
+   reservation refuses and the holder ends the run `CANCELLED` (`cancel_run`).
+4. **Terminal decision under the lock.** COMPLETE requires every pinned node
+   accepted (`RUN_NODES_UNACCEPTED`); a terminal snapshot that moved refuses
+   `RUN_TERMINAL_STALE` and the runtime runs one more pass.
+5. **Crash recovery replays the stored body.** `replay_billed` re-runs the live
+   post-call checks over a billed, unaccepted attempt: answered is accepted with
+   its original bill, Blocked ends the run, refused is written once to
+   `attempt_refusals` and stops the run. No billed answer is paid for twice
+   after a crash.
+6. **Worker.** `server/engine/worker.py` polls (no LISTEN/NOTIFY, no broker),
+   backs off on store faults, stops between passes on SIGTERM, and refuses to
+   start without a configured provider and a dated `CAOS_MODEL_PRICE`
+   (`model,input,output,YYYY-MM-DD`), the worker's price source under §40.
+
+**Why.** One holder makes Phase 2's single-loop assumptions exact under
+concurrency without predecessor fencing; the token, not the clock, decides
+every stale write, and no lock is held across transport.
+
+## 2026-09-14 §50 — One versioned section wire and refusal body
+
+**Decision.** Phase 4 Task 4.1 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.1-brief.md`):
+
+1. **Paths.** `GET /api/v1/directory` and `/api/v1/cases/{case_id}/{upload,run,analysis}`
+   (`?run=` for run and analysis); the case is the authorization resource and
+   unknown, unauthorized, revoked and malformed cases are one private 404. The
+   version lives in the path only. `GET /api/runs/{run_id}` is retired.
+2. **One refusal body** `{code, clears}` for every non-success under `/api/`,
+   with `clears` a host constant per code (`server/api/wire.py` `CLEARS`); an
+   undeclared path or method answers `ENDPOINT_NOT_FOUND`.
+3. **Documents** carry only facts the host holds after Phase 3; fixture-era
+   fields with no host source are removed, not faked. The server computes only
+   authority facts in `chrome` (subject, served role); persona grants nothing.
+   Analysis carries each verified handoff with the §46.3 labels.
+4. **Cross-language contract.** `python -m server.api.wire` prints the models'
+   JSON Schema (committed, one definition per line); the browser's closed-shape
+   DSL (`frontend/src/wire/v1/shape.ts`) is proven equal to it and validates
+   every document whole and bound to its case and run. No cast, no dependency.
+5. **Disabled sections.** Book, Model, Report, Committee and Admin render
+   unavailable with no request in every mode; fixtures are served only in demo
+   mode and the production export carries none.
+6. **Shared dependencies.** Every section read depends on
+   `server/api/deps.py`, so an override of the app's store reaches every route.
+
+**Why.** The repair plan requires versioned models, settled identity and refusal
+semantics, whole-document validation and no pretence that `/api/runs` was a
+section document.

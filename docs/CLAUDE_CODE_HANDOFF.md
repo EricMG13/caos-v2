@@ -14,7 +14,7 @@ ignored reports cannot override those contracts.
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 3 accepted at `3400b6c`** (Phase 2 `b4298dc`; records below) |
 | Latest accepted task | **Phase 3 Task 3.4 accepted at `3400b6c`** (3.1 `a8acbc6`, 3.2 `fffe5c8`, 3.3 `1bb0cfd`) |
-| Next task | Phase 4 entry: refresh GitNexus, review the Phase 4 documents, write the Phase 4 task brief |
+| Next task | Phase 4 in progress: Task 4.1 (section wire, §50) and Task 4.3 (worker, §49) integrated through `d0b9dd8`; 4.2 (commands, §51), 4.4 (events and evidence pages, §52) and 4.5 (edge, health, image, journey, §53) open per their briefs in `docs/superpowers/plans/2026-09-14-phase-4-task-4.*-brief.md` |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
