@@ -21,7 +21,9 @@ from test_loop_charges import (
     route,
 )
 
+import server.store as store
 from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, RouteNode
 from server.engine.runtime import Execution, ProviderResult, run_route
 from server.methodology.bundle import Bundle
@@ -29,12 +31,31 @@ from server.methodology.canonical import execute_handoff
 from server.methodology.executor import Assignment
 from server.methodology.runner import ModuleProvider
 from server.provider import OpenRouter
-from server.refusals import Refusal
-from server.store import StoreConnection, connect
+from server.refusals import Refusal, RefusalCode
+from server.store import RunStatus, StoreConnection, apply_schema, connect
 from server.store.budget import reserve
-from server.store.events import lock_run
+from server.store.events import RunEvent, events_of, lock_run
 from server.store.outcomes import CallOutcome, record_outcome
-from server.store.runs import Accepted, accept_attempt, fail_run, start_attempt
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    create_case,
+    fail_run,
+    run_status,
+    start_attempt,
+    start_run,
+)
+from server.store.work import (
+    Lease,
+    claim_run,
+    enqueue_run,
+    mark_work_done,
+    release,
+    request_cancel,
+    requeue_run,
+    require_lease,
+    stop,
+)
 
 __all__ = ["ready", "route"]
 
@@ -360,3 +381,228 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
     monkeypatch.undo()
     with connect(dsn) as observer:
         assert observer.execute("SELECT count(*) FROM budget_ledger").fetchone() == (0,)
+
+
+# --- Slice 4.3a: the run work queue (brief D2-D4) ---------------------------
+
+WORKER = BoundaryText.of("worker-a")
+
+
+@pytest.fixture
+def work_run(
+    case: tuple[StoreConnection, UUID],
+) -> tuple[StoreConnection, UUID, UUID]:
+    """A RUNNING run with no work row, committed, and its case."""
+    conn, case_id = case
+    run_id = start_run(conn, case_id)
+    conn.commit()
+    return conn, run_id, case_id
+
+
+def _work(conn: StoreConnection, run_id: UUID) -> tuple[object, ...] | None:
+    row = conn.execute(
+        "SELECT state, lease_token, worker, stop_code, cancel_requested_at IS NOT NULL"
+        " FROM run_work WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    conn.rollback()
+    return row
+
+
+def _expire(conn: StoreConnection, run_id: UUID) -> None:
+    conn.execute(
+        "UPDATE run_work SET lease_expires_at = clock_timestamp() - interval '1 second'"
+        " WHERE run_id = %s",
+        (run_id,),
+    )
+    conn.commit()
+
+
+def test_enqueue_is_idempotent_and_rides_the_callers_transaction(
+    work_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, case_id = work_run
+    assert enqueue_run(conn, run_id) is True
+    with connect(_url_for(conn.info.dbname)) as observer:
+        assert _work(observer, run_id) is None, "the caller owns the commit"
+        conn.rollback()
+        assert _work(observer, run_id) is None
+        assert enqueue_run(conn, run_id) is True
+        assert enqueue_run(conn, run_id) is False
+        conn.commit()
+        assert _work(observer, run_id) == ("QUEUED", 0, None, None, False)
+    assert enqueue_run(conn, run_id) is False
+    conn.commit()
+    other = start_run(conn, case_id)
+    fail_run(conn, other)
+    with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+        enqueue_run(conn, other)
+    conn.rollback()
+    assert _work(conn, other) is None
+
+
+def test_only_an_expired_or_queued_row_is_claimable_and_each_claim_advances_the_token(
+    work_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, _case = work_run
+    assert claim_run(conn, worker=WORKER, lease_seconds=60) is None
+    enqueue_run(conn, run_id)
+    with pytest.raises(Refusal, match=r"^STORE_NOT_TRANSACTIONAL$"):
+        claim_run(conn, worker=WORKER, lease_seconds=60)
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^BOUNDARY_TEXT_INVALID$"):
+        claim_run(conn, worker=BoundaryText.of("é" * 65), lease_seconds=60)
+    first = claim_run(conn, worker=WORKER, lease_seconds=60)
+    assert first == Lease(run_id, 1)
+    assert _work(conn, run_id) == ("CLAIMED", 1, "worker-a", None, False)
+    assert claim_run(conn, worker=WORKER, lease_seconds=60) is None, "live lease"
+    _expire(conn, run_id)
+    second = claim_run(conn, worker=BoundaryText.of("worker-b"), lease_seconds=60)
+    assert second == Lease(run_id, 2)
+    assert stop(conn, second, RefusalCode.CONTEXT_OVER_CEILING) is True
+    conn.commit()
+    assert _work(conn, run_id) == ("STOPPED", 2, None, "CONTEXT_OVER_CEILING", False)
+    assert claim_run(conn, worker=WORKER, lease_seconds=60) is None, "stopped"
+    assert requeue_run(conn, run_id) is True
+    assert requeue_run(conn, run_id) is False
+    conn.commit()
+    third = claim_run(conn, worker=WORKER, lease_seconds=60)
+    assert third == Lease(run_id, 3)
+    mark_work_done(conn, run_id)
+    conn.commit()
+    _expire(conn, run_id)
+    assert _work(conn, run_id) == ("DONE", 3, None, None, False)
+    assert claim_run(conn, worker=WORKER, lease_seconds=60) is None, "done"
+
+
+def test_a_stale_lease_is_refused_and_a_live_one_renews(
+    work_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, _case = work_run
+    lock_run(conn, run_id)
+    assert require_lease(conn, run_id, None) is False, "an unenqueued run is direct"
+    enqueue_run(conn, run_id)
+    conn.commit()
+    stale = claim_run(conn, worker=WORKER, lease_seconds=60)
+    assert stale is not None
+    _expire(conn, run_id)
+    lock_run(conn, run_id)
+    assert require_lease(conn, run_id, stale) is False, "same token renews"
+    conn.commit()
+    assert conn.execute(
+        "SELECT lease_expires_at > clock_timestamp() FROM run_work"
+    ).fetchone() == (True,)
+    conn.rollback()
+    _expire(conn, run_id)
+    live = claim_run(conn, worker=WORKER, lease_seconds=60)
+    assert live == Lease(run_id, stale.token + 1)
+    for held in (stale, None, Lease(uuid4(), live.token)):
+        lock_run(conn, run_id)
+        with pytest.raises(Refusal, match=r"^LEASE_NOT_HELD$"):
+            require_lease(conn, run_id, held)
+        conn.rollback()
+    assert release(conn, stale) is False
+    assert stop(conn, stale, RefusalCode.RUN_NOT_RUNNING) is False
+    lock_run(conn, run_id)
+    assert require_lease(conn, run_id, live) is False
+    assert release(conn, live) is True
+    conn.commit()
+    assert _work(conn, run_id) == ("QUEUED", 2, None, None, False)
+
+
+def test_a_cancel_on_a_queued_run_ends_it_cancelled_once_with_its_event(
+    work_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, case_id = work_run
+    enqueue_run(conn, run_id)
+    conn.commit()
+    assert request_cancel(conn, run_id) is True
+    conn.rollback()
+    assert run_status(conn, run_id) is RunStatus.RUNNING, "rides the transaction"
+    assert events_of(conn, run_id) == []
+    conn.rollback()
+    assert request_cancel(conn, run_id) is True
+    assert request_cancel(conn, run_id) is False
+    conn.commit()
+    assert run_status(conn, run_id) is RunStatus.CANCELLED
+    assert [e.name for e in events_of(conn, run_id)] == [RunEvent.RUN_CANCELLED.value]
+    assert _work(conn, run_id) == ("DONE", 0, None, None, True)
+    assert claim_run(conn, worker=WORKER, lease_seconds=60) is None
+    # A claimed run records the request and keeps running until its holder acts.
+    claimed = start_run(conn, case_id)
+    enqueue_run(conn, claimed)
+    conn.commit()
+    lease = claim_run(conn, worker=WORKER, lease_seconds=60)
+    assert lease is not None
+    assert request_cancel(conn, claimed) is True
+    assert request_cancel(conn, claimed) is False
+    conn.commit()
+    assert run_status(conn, claimed) is RunStatus.RUNNING
+    lock_run(conn, claimed)
+    assert require_lease(conn, claimed, lease) is True
+    conn.commit()
+    assert events_of(conn, claimed) == []
+    conn.rollback()
+    # A holder that stops instead leaves a row the cancel ends; retry cannot revive it.
+    assert stop(conn, lease, RefusalCode.CONTEXT_OVER_CEILING) is True
+    conn.commit()
+    assert requeue_run(conn, claimed) is False
+    assert request_cancel(conn, claimed) is True
+    assert request_cancel(conn, claimed) is False
+    conn.commit()
+    assert run_status(conn, claimed) is RunStatus.CANCELLED
+    assert [e.name for e in events_of(conn, claimed)] == [RunEvent.RUN_CANCELLED.value]
+    conn.rollback()
+
+
+def test_attempt_refusals_are_write_once_and_never_store_faults(
+    work_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, _case = work_run
+    attempt = start_attempt(conn, run_id, "CP-0")
+    insert = "INSERT INTO attempt_refusals (attempt_id, code) VALUES (%s, %s)"
+    for code in ("STORE_UNAVAILABLE", "STORE_SCHEMA_DRIFT", "lower_case", "A" * 65):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(insert, (attempt, code))
+        conn.rollback()
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        conn.execute(insert, (uuid4(), "CITATION_NOT_LOCATED"))
+    conn.rollback()
+    conn.execute(insert, (attempt, "CITATION_NOT_LOCATED"))
+    conn.commit()
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute(insert, (attempt, "ROUTE_IDENTITY_INVALID"))
+    conn.rollback()
+    for mutation in (
+        "UPDATE attempt_refusals SET code = 'ROUTE_IDENTITY_INVALID'",
+        "DELETE FROM attempt_refusals",
+        "TRUNCATE attempt_refusals",
+    ):
+        with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+            conn.execute(mutation)
+        conn.rollback()
+    assert conn.execute("SELECT attempt_id, code FROM attempt_refusals").fetchall() == [
+        (attempt, "CITATION_NOT_LOCATED")
+    ]
+    conn.rollback()
+
+
+def test_version_thirteen_adds_empty_work_and_keeps_attempts_unleased(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:12])
+            apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("before work"))
+        run_id = start_run(conn, case_id)
+        conn.commit()
+        attempt = start_attempt(conn, run_id, "CP-0")
+        fail_run(conn, run_id)
+        apply_schema(conn)
+        assert conn.execute(
+            "SELECT attempt_id, lease_token FROM run_attempts"
+        ).fetchall() == [(attempt, None)]
+        assert conn.execute("SELECT count(*) FROM run_work").fetchone() == (0,)
+        assert run_status(conn, run_id) is RunStatus.FAILED
+        conn.rollback()

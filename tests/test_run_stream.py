@@ -23,7 +23,7 @@ from uuid import UUID, uuid4
 import pytest
 from test_run_events import RECORD, approved_nodes
 
-from server.api.stream import IO_BUDGET, StreamEvent, tail
+from server.api.stream import IO_BUDGET, TERMINAL, StreamEvent, tail
 from server.refusals import Refusal
 from server.store import StoreConnection
 from server.store.events import RunEvent, events_of
@@ -37,6 +37,7 @@ from server.store.runs import (
     start_attempt,
     start_run,
 )
+from server.store.work import enqueue_run, request_cancel
 
 # The producer the store records beside every accepted artifact: what the
 # host configured, and the provider's own handle for the call.
@@ -137,6 +138,22 @@ def test_a_blocked_run_closes_the_stream_too(
     delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
 
     assert _names(delivered) == [RunEvent.RUN_BLOCKED.value]
+
+
+def test_a_cancelled_run_closes_the_stream_too(
+    watched: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, viewer = watched
+    enqueue_run(conn, run_id)
+    assert request_cancel(conn, run_id)
+    conn.commit()
+    assert not request_cancel(conn, run_id), "the terminal event is exactly-once"
+    conn.commit()
+
+    delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
+
+    assert _names(delivered) == [RunEvent.RUN_CANCELLED.value]
+    assert RunEvent.RUN_CANCELLED.value in TERMINAL
 
 
 def test_a_blocked_run_refuses_new_attempts(
