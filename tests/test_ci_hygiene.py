@@ -106,3 +106,17 @@ def test_the_runtime_image_pins_its_base_and_drops_its_privileges() -> None:
         "pip's package directory is still in the shipped image"
     )
     assert "/usr/local/bin/pip" in text, "pip's executables are still on PATH"
+
+
+def test_the_runtime_image_pins_only_the_verified_os_security_updates() -> None:
+    text = _dockerfile()
+
+    for package in (
+        "gzip=1.13-1+deb13u1",
+        "libpcre2-8-0=10.46-1~deb13u2",
+        "libsqlite3-0=3.46.1-7+deb13u2",
+        "perl-base=5.40.1-6+deb13u1",
+    ):
+        assert package in text
+    assert "--only-upgrade" in text
+    assert "rm -rf /var/lib/apt/lists/" in text
