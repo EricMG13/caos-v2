@@ -26,7 +26,7 @@
     ],
     "narrative": [
       [
-        { "text": "<img src=x onerror=\"window.pwned=1\">", "figure": null },
+        { "text": "<svg onload=window.pwned=1>", "figure": null },
         {
           "text": null,
           "figure": {
