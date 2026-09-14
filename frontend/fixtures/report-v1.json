@@ -20,8 +20,8 @@
         "qa_status": "ACCEPTED",
         "committee_status": "READY",
         "decision_scope": "Credit review",
-        "limitation_flags": [],
-        "validation_warnings": []
+        "limitation_flags": ["<script>limit</script>"],
+        "validation_warnings": ["<img src=x onerror=\"window.warned=1\">"]
       }
     ],
     "narrative": [
