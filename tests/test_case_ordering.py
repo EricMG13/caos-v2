@@ -390,7 +390,7 @@ def test_extraction_precedes_case_lock(
     class Reader:
         identity = PlainTextExtractor().identity
 
-        def extract(self, data: bytes) -> list[Token]:
+        def extract(self, data: bytes, **_kwargs: object) -> list[Token]:
             extracted.set()
             return PlainTextExtractor().extract(data)
 

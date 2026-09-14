@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -22,6 +23,8 @@ from uuid import UUID, uuid4
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.extract import (
+    DEFAULT_LIMITS,
+    AdmissionLimits,
     Extractor,
     ExtractorDispatch,
     ExtractorIdentity,
@@ -85,13 +88,14 @@ class _Packed:
     extraction_sha256: str
 
 
-def admit_pack(
+def admit_pack(  # noqa: PLR0913 -- one pack's store, blobs and policy, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
     *,
     case_id: UUID,
     documents: Sequence[Document],
     dispatch: ExtractorDispatch = dispatch_by_content,
+    limits: AdmissionLimits = DEFAULT_LIMITS,
 ) -> list[UUID]:
     """Admit every document or refuse the pack. Returns the new source ids.
 
@@ -102,14 +106,19 @@ def admit_pack(
     rectangle, and packed into blocks -- one row each, never a JSON column on
     the source row, which is the ~8x read defect `docs/AI_CODE_QUALITY.md`
     section 1 measures.
+
+    `limits` bounds the pack (document count, pack bytes) and each document
+    (document bytes, then -- inside its extractor -- pages, tokens and
+    extraction time) before the expensive step each ceiling guards (§44.1).
     """
     if not documents:
         raise Refusal(RefusalCode.SOURCE_PACK_EMPTY)
     _require_case(conn, case_id)
+    _check_pack_limits(documents, limits)
 
     # Extract everything first. A document that cannot be read must refuse the
     # pack before any of it is written, not after some of it is.
-    extracted = [_extract(dispatch, document) for document in documents]
+    extracted = [_extract(dispatch, document, limits) for document in documents]
     if any(not tokens for _identity, tokens in extracted):
         # Readable bytes, no text: a scanned page. Admitting it would put a
         # source in the pinned set that can never support a citation, and
@@ -130,8 +139,27 @@ def admit_pack(
     return [_admit_one(conn, blobs, case_id, one) for one in packed]
 
 
+def _check_pack_limits(documents: Sequence[Document], limits: AdmissionLimits) -> None:
+    """Document count and byte ceilings, before any dispatch or extraction.
+
+    Checked here rather than per document inside `_extract`, so a pack that
+    is simply too big -- too many documents, or too many bytes total -- never
+    reaches an extractor at all: not the one document over its own ceiling,
+    and not the documents before it, either.
+    """
+    if len(documents) > limits.max_documents:
+        raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+    total_bytes = 0
+    for document in documents:
+        if len(document.data) > limits.max_document_bytes:
+            raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+        total_bytes += len(document.data)
+    if total_bytes > limits.max_pack_bytes:
+        raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+
+
 def _extract(
-    dispatch: ExtractorDispatch, document: Document
+    dispatch: ExtractorDispatch, document: Document, limits: AdmissionLimits
 ) -> tuple[str, list[Token]]:
     """One document's canonical extractor identity and tokens, or a typed code.
 
@@ -143,7 +171,8 @@ def _extract(
     try:
         reader = dispatch(document.data)
         identity = _identity(reader)
-        tokens = reader.extract(document.data)
+        deadline = time.monotonic() + limits.max_seconds
+        tokens = reader.extract(document.data, limits=limits, deadline=deadline)
     except Refusal as refusal:
         code = refusal.code
     except MemoryError:

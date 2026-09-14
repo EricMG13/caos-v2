@@ -30,7 +30,7 @@ class Reader:
         self.identity = identity
         self.tokens = tokens
 
-    def extract(self, data: bytes) -> list[Token]:
+    def extract(self, data: bytes, **_kwargs: object) -> list[Token]:
         return (
             self.tokens
             if self.tokens is not None
@@ -197,7 +197,7 @@ def test_bad_output_refuses_whole_pack_before_writes(
     case: tuple[StoreConnection, UUID], tmp_path: Path, field: str, value: object
 ) -> None:
     class BadSecond(Reader):
-        def extract(self, data: bytes) -> list[Token]:
+        def extract(self, data: bytes, **_kwargs: object) -> list[Token]:
             tokens = PlainTextExtractor().extract(data)
             return (
                 [replace(tokens[0], **{field: cast(Any, value)})]

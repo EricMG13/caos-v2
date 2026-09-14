@@ -19,6 +19,8 @@ already tested -- which is what a seam is for.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from importlib.metadata import version
 from io import BytesIO
@@ -26,7 +28,12 @@ from io import BytesIO
 from pdfminer.layout import LTAnno, LTChar, LTPage, LTTextBox, LTTextLine
 from pdfminer.pdfparser import PDFSyntaxError
 
-from server.evidence.extract import ExtractorIdentity, Token
+from server.evidence.extract import (
+    DEFAULT_LIMITS,
+    AdmissionLimits,
+    ExtractorIdentity,
+    Token,
+)
 from server.refusals import Refusal, RefusalCode
 
 
@@ -50,17 +57,34 @@ class PdfExtractor:
             },
         )
 
-    def extract(self, data: bytes) -> list[Token]:
+    def extract(
+        self,
+        data: bytes,
+        *,
+        limits: AdmissionLimits = DEFAULT_LIMITS,
+        deadline: float = float("inf"),
+    ) -> list[Token]:
         """Refuses `SOURCE_NOT_READABLE` for bytes that are not a readable PDF.
 
         A scanned page parses fine and yields no tokens; that is not an error
         here, and `admit_pack` refuses it as `SOURCE_HAS_NO_TEXT` -- the code
         that says what is actually wrong with it.
+
+        Pages come from `_pages` one at a time, and the page and time ceilings
+        are checked before a page's boxes are walked -- so a document that
+        crosses `max_pages` stops pulling pages from pdfminer's own generator
+        rather than paying to lay out every remaining page first (§44.1/§44.2).
         """
         tokens: list[Token] = []
         region_id = 0
         line_id = 0
         for page_number, page in enumerate(_pages(data), start=1):
+            if page_number > limits.max_pages:
+                raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+            # Checked per page (§44.2): cooperative, not preemptive -- one
+            # pathological page can still overrun it (CLAUDE.md ledger).
+            if time.monotonic() > deadline:
+                raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
             for box in page:
                 if not isinstance(box, LTTextBox):
                     continue
@@ -68,18 +92,24 @@ class PdfExtractor:
                     if not isinstance(line, LTTextLine):
                         continue
                     tokens.extend(_line_tokens(line, page_number, region_id, line_id))
+                    if len(tokens) > limits.max_tokens:
+                        raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
                     line_id += 1
                 region_id += 1
         return tokens
 
 
-def _pages(data: bytes) -> list[LTPage]:
+def _pages(data: bytes) -> Iterator[LTPage]:
     # Imported here rather than at module scope: `extract_pages` pulls in most of
     # pdfminer, and nothing that merely imports this module should pay for it.
     from pdfminer.high_level import extract_pages
 
+    # `yield from` inside this try keeps the whole walk lazy -- a caller that
+    # stops asking for pages (the page ceiling above) never drives pdfminer's
+    # generator past the one that crossed it -- while still catching a
+    # malformed file however far into the walk it turns up malformed.
     try:
-        return list(extract_pages(BytesIO(data)))
+        yield from extract_pages(BytesIO(data))
     except (PDFSyntaxError, ValueError, TypeError, AssertionError):
         # pdfminer reports a malformed file in several shapes. None of them may
         # travel: the message quotes the bytes it choked on.
