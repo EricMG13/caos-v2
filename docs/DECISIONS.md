@@ -1833,7 +1833,14 @@ coordinate space citations were anchored in (invariant 11).
     digest-pinned PostgreSQL on tmpfs with no host port, the API on
     `127.0.0.1:18000` in edge mode with its own blob volume, a credential-less
     `worker` (profile `smoke`) and the deterministic `journey-worker` (profile
-    `journey`, `./tests` mounted read-only; `tests/` is never in the image).
+    `journey`, `./tests` mounted read-only at `/app/tests` -- not
+    `/opt/caos-tests` as the brief wrote, because `tests/canonical_fixtures.py`
+    finds `vendor/deploy-v` as its parent's sibling -- with its exit-once marker
+    in the blob volume the image's uid owns; `tests/` is never in the image).
+    The test edge retries a refused upstream connect for a GET for up to 30 s
+    and answers 502 after, so a browser's stream reconnect meets a restarted
+    API rather than an error Firefox and WebKit treat as final; an unsafe
+    method is never retried.
     `make smoke-production` builds the image, runs `pytest -m production_image`
     with `CAOS_REQUIRE_IMAGE=1`, then `tests/journey/run.py`, which starts the
     stack, the host test edge on 127.0.0.1:18080 and Playwright, and always

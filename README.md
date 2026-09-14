@@ -138,5 +138,4 @@ database or blobs:
 make smoke-production
 ```
 
-The journey step refuses until its Playwright configuration lands (see the
-handoff); no CI job runs this target.
+No CI job runs this target.

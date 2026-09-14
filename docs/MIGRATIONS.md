@@ -219,6 +219,18 @@ the other stored facts. Readers that refuse a NULL record arrive with slice
 f-1. The restore probe carries only claims-route artifacts, whose record stays
 NULL across restore and upgrade.
 
+## Version 13 — run work, lease tokens and attempt refusals — 2026-09-14
+
+Version 13 (`0013_run_work`) is additive. It creates two empty tables --
+`run_work`, one row per enqueued run with its state, fencing `lease_token`,
+lease and cancel request, and `attempt_refusals`, write-once (triggers refuse
+UPDATE, DELETE and TRUNCATE) -- adds a nullable `run_attempts.lease_token`,
+and widens the `runs` status and `run_events` name CHECKs to admit
+`CANCELLED`/`RUN_CANCELLED` (`docs/DECISIONS.md` §49). Existing attempts keep
+NULL and existing rows satisfy the wider CHECKs, so the upgrade cannot refuse a
+populated store; `test_version_thirteen_adds_empty_work_and_keeps_attempts_unleased`
+advances a version-12 store and proves it.
+
 ## Version 14 — command receipts — 2026-09-14
 
 Version 14 (`0014_command_requests`) is additive. It creates one empty table,

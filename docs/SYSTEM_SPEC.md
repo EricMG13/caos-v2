@@ -414,10 +414,12 @@ they went with those services (`docs/DECISIONS.md` §48).
 One document per section, not per widget — the per-widget query pattern is what
 produced the open-envelope carve-outs in the current tree.
 
-Run progress reaches the browser as SSE over `run_events` with `Last-Event-ID`
-resume. Membership is rechecked before each event; the stream closes once a
-terminal run is fully delivered, and tails close after five minutes for edge
-reauthentication. The client never reads event payloads — an event name triggers
+Case and run progress reach the browser as one SSE stream per case
+(`/api/v1/cases/{case}/events`, `?run=` for a run's events) over `audit_events`
+and `run_events`, with a composite `Last-Event-ID` resume (`docs/DECISIONS.md`
+§52). Membership is rechecked before each event; the run half ends once its
+terminal is delivered, each idle poll writes an SSE comment so a disconnect is
+noticed, and streams close after five minutes for edge reauthentication. The client never reads event payloads — an event name triggers
 a refetch.
 
 ---
