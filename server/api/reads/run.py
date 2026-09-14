@@ -137,6 +137,7 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
         chrome=Chrome(
             subject=Subject(case_id=case, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
+            actions=[],
         ),
         body=RunBody(
             case_id=case,
@@ -144,6 +145,7 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
             displayed_run_id=None if displayed is None else displayed.run_id,
             runs=runs,
             run=view,
+            route_choices=[],
         ),
         observed_at=observed_at,
         observed_empty=not runs,
@@ -261,6 +263,7 @@ def _run_view(
             )
             for row in attempts[:ATTEMPTS_MAX]
         ],
+        work=None,
     )
     return view, list(dict.fromkeys(notes))
 

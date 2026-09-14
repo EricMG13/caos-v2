@@ -118,6 +118,7 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
         chrome=Chrome(
             subject=Subject(case_id=case_id, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
+            actions=[],
         ),
         body=AnalysisBody(
             case_id=case_id,

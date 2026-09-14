@@ -16,6 +16,7 @@ import {
   parse,
   string,
   uuid,
+  type Shape,
 } from "./shape";
 
 const SHORT = 256;
@@ -33,9 +34,39 @@ const EdgeType = enumOf(["REQUIRED", "CONDITIONAL", "QA_GATE", "OPTIONAL", "ADVI
 const Gate = enumOf(["SOURCE_SET", "RESEARCH_PLAN"]);
 const GateState = enumOf(["OPEN", "RELEASED"]);
 
+/** A shape declared further down this file, resolved only when first used. */
+function later<T>(get: () => Shape<T>): Shape<T> {
+  return {
+    check: (value, path): value is T => get().check(value, path),
+    toSchema: () => get().toSchema(),
+  };
+}
+
+const ActionName = enumOf([
+  "CREATE_CASE",
+  "ADMIT_SOURCES",
+  "CREATE_RUN",
+  "PIN_RUN_INPUT",
+  "APPROVE_SOURCE_SET",
+  "APPROVE_RESEARCH_PLAN",
+  "START_RUN",
+  "RETRY_RUN",
+  "CANCEL_RUN",
+]);
+
 const Subject = object({ case_id: uuid, title: text });
 const ServedRole = object({ global_role: GlobalRole, standing: nullable(Standing) });
-const Chrome = object({ subject: nullable(Subject), served_role: ServedRole });
+// Server-computed and advisory: a refused action is shown with its code, and
+// the command rechecks at commit (brief 4.2, decision 10).
+const ActionView = object({
+  action: ActionName,
+  refusal: nullable(later(() => RefusalBody)),
+});
+const Chrome = object({
+  subject: nullable(Subject),
+  served_role: ServedRole,
+  actions: array(ActionView, 9),
+});
 
 function sectionDocument<B extends ReturnType<typeof object>>(body: B) {
   return object({
@@ -107,6 +138,12 @@ const AttemptView = object({
   started_at: datetime,
   accepted: bool,
 });
+const WorkView = object({
+  state: enumOf(["QUEUED", "CLAIMED", "STOPPED", "DONE"]),
+  stop_code: nullable(later(() => RefusalCode)),
+  cancel_requested: bool,
+});
+const RouteChoice = object({ profile_id: short, selection_id: short });
 const RunView = object({
   run_id: uuid,
   status: enumOf(RUN_STATUSES),
@@ -118,6 +155,7 @@ const RunView = object({
   gates: array(GateView, 2),
   nodes: array(NodeView, 256),
   attempts: array(AttemptView, 4096),
+  work: nullable(WorkView),
 });
 const RunBody = object({
   case_id: uuid,
@@ -125,6 +163,7 @@ const RunBody = object({
   displayed_run_id: nullable(uuid),
   runs: array(RunSummary, 200),
   run: nullable(RunView),
+  route_choices: array(RouteChoice, 16),
 });
 const RunSectionDocument = sectionDocument(RunBody);
 
@@ -213,6 +252,14 @@ const RefusalCode = enumOf([
   "NOT_AUTHENTICATED",
   "ENDPOINT_NOT_FOUND",
   "NOT_AUTHORISED",
+  "REQUEST_INVALID",
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_REUSED",
+  "RUN_INPUT_NOT_PINNED",
+  "RUN_ALREADY_STARTED",
+  "RUN_NOT_STOPPED",
+  "ROUTE_NOT_ENABLED",
+  "COMMAND_EXPECTATION_STALE",
   "METHODOLOGY_INPUT_INVALID",
   "FORECAST_CHAIN_BROKEN",
   "FORECAST_RESIDUAL_UNRECONCILED",
@@ -276,6 +323,8 @@ const RefusalBody = object({ code: RefusalCode, clears: text });
 
 /** Every model `schema.json` declares, under its backend name. */
 export const V1_SHAPES = {
+  ActionName,
+  ActionView,
   AnalysisBody,
   AnalysisDocument,
   AttemptView,
@@ -297,6 +346,7 @@ export const V1_SHAPES = {
   RectView,
   RefusalBody,
   RefusalCode,
+  RouteChoice,
   RunBody,
   RunSectionDocument,
   RunSubjectView,
@@ -310,6 +360,7 @@ export const V1_SHAPES = {
   Subject,
   UploadBody,
   UploadDocument,
+  WorkView,
 };
 
 export type DirectoryDocument = Infer<typeof DirectoryDocument>;
@@ -326,6 +377,9 @@ export type NodeView = Infer<typeof NodeView>;
 export type HandoffView = Infer<typeof HandoffView>;
 export type CitationView = Infer<typeof CitationView>;
 export type PendingNode = Infer<typeof PendingNode>;
+export type ActionView = Infer<typeof ActionView>;
+export type WorkView = Infer<typeof WorkView>;
+export type RouteChoice = Infer<typeof RouteChoice>;
 export type SectionDocument =
   DirectoryDocument | UploadDocument | RunSectionDocument | AnalysisDocument;
 

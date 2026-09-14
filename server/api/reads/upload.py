@@ -75,6 +75,7 @@ def read_upload(actor: Caller, case_id: CasePath, conn: Store) -> UploadDocument
         chrome=Chrome(
             subject=Subject(case_id=case_id, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
+            actions=[],
         ),
         body=UploadBody(
             case_id=case_id,

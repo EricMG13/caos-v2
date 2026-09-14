@@ -138,6 +138,7 @@ def test_a_case_with_no_run_is_observed_empty(
         "displayed_run_id": None,
         "runs": [],
         "run": None,
+        "route_choices": [],  # 4.2g fills these from `ADAPTER_ROUTES`
     }
 
 
