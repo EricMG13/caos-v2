@@ -15,13 +15,16 @@ here rather than the object the provider sent.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute, RouteNode
+from server.engine.route import GATE_MODULE, ResolvedRoute, RouteNode, predecessors
+from server.engine.runtime import artifact_digests
 from server.evidence.citations import verify_citations
 from server.evidence.read import read_run_block
 from server.methodology import CLAIMS_ADAPTER_VERSION as CLAIMS_ADAPTER_VERSION
@@ -151,21 +154,30 @@ class Upstream:
 
 @dataclass(frozen=True, slots=True)
 class Assignment:
-    """What the host hands one module for one node of one run."""
+    """What the host hands one module for one node of one run.
+
+    Identity only. What the module reads -- the evidence, the gate's
+    expectation and its predecessors' results -- is derived from the run's pins
+    inside the authority unit (`_context`), so no caller's copy of it survives.
+    """
 
     module_id: str
     run_id: UUID
     node: RouteNode
     route: ResolvedRoute
-    # The modules this one must return a readiness verdict for: the pinned
-    # route less itself when it is the gate, and empty for everyone else.
-    gate_expects: frozenset[str] = frozenset()
-    # This node's direct predecessors' accepted results
-    # (`predecessors(route, module_id)` in `server/engine/route.py`), read
-    # from the store by the caller that holds the route -- this dataclass
-    # only carries what it was handed, the same division `gate_expects`
-    # already draws.
-    upstream: tuple[Upstream, ...] = ()
+    # The reserved attempt this call is made under.
+    attempt_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class _Context:
+    """What this node reads, as the host derived it from the pins."""
+
+    delivered: list[Delivery]
+    gate_expects: frozenset[str]
+    upstream: tuple[Upstream, ...]
+    # Predecessor module -> the accepted artifact read, rechecked after the call.
+    digests: dict[str, str]
 
 
 # Every block of the run's pinned source-set version, never the case's live set.
@@ -178,21 +190,93 @@ _CAPTURED = (
 )
 
 
-def _delivered(conn: StoreConnection, run_id: UUID) -> list[Delivery]:
-    """Every captured block of the run, read through the run-bound reader.
+def _context(
+    conn: StoreConnection, blobs: BlobStore, bundle: Bundle, assignment: Assignment
+) -> _Context:
+    """Evidence through the run-bound reader, and the stored route's upstream.
 
-    Derived from the pin, never handed in: a block outside the captured set
-    cannot reach the prompt (invariant 1), and withdrawal is still checked live
-    by the reader at every use.
+    Called only after `_stored_identity`, so `assignment.route` is the pin.
     """
     delivered = []
-    for source, block in conn.execute(_CAPTURED, (run_id,)).fetchall():
+    for source, block in conn.execute(_CAPTURED, (assignment.run_id,)).fetchall():
         source_id = UUID(str(source))
         read = read_run_block(
-            conn, run_id=run_id, source_id=source_id, block_id=str(block)
+            conn, run_id=assignment.run_id, source_id=source_id, block_id=str(block)
         )
         delivered.append(Delivery(source_id, str(block), read.page, read.text))
-    return delivered
+    module_id = assignment.module_id
+    gate_expects = (
+        frozenset(node.module_id for node in assignment.route.nodes) - {module_id}
+        if module_id == GATE_MODULE
+        else frozenset()
+    )
+    digests = _upstream_digests(conn, assignment)
+    upstream = tuple(
+        Upstream(module, _stored_claims(blobs, bundle, module, digest))
+        for module, digest in digests.items()
+    )
+    return _Context(delivered, gate_expects, upstream, digests)
+
+
+def _upstream_digests(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
+    """Each direct predecessor's accepted artifact in this run, in route order.
+
+    A predecessor with no accepted artifact is skipped: a soft edge's source may
+    never have run, the same "unmet" a RESTRICTED node already tolerates.
+    """
+    # ponytail: the latest accepted artifact per node; one owner per generation
+    # is the later fencing task, which retires this rule.
+    accepted = artifact_digests(conn, assignment.run_id)
+    nodes = {node.module_id: node.route_node_id for node in assignment.route.nodes}
+    return {
+        module: accepted[nodes[module]]
+        for module in predecessors(assignment.route, assignment.module_id)
+        if nodes.get(module) in accepted
+    }
+
+
+def _stored_claims(
+    blobs: BlobStore, bundle: Bundle, module_id: str, artifact_sha256: str
+) -> tuple[UpstreamClaim, ...]:
+    """One predecessor's accepted claims, under the identity the pin requires.
+
+    The same codes as `server/qualification/proof.py`: bytes that will not load
+    or name another module are unreadable, and an artifact produced under
+    another build or authority is `ORCHESTRATION_BUILD_MOVED`. Nothing
+    document-derived reaches a refusal.
+    """
+    try:
+        decoded = json.loads(blobs.get(artifact_sha256))
+    except (ValueError, Refusal):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
+    if not isinstance(decoded, dict) or decoded.get("module_id") != module_id:
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    expected = authority_digest(assemble_authority(bundle, module_id))
+    if (decoded.get("build_id"), decoded.get("authority_digest")) != (
+        bundle.build_id,
+        expected,
+    ):
+        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
+    claims = decoded.get("claims")
+    if not isinstance(claims, list):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    return tuple(_stored_claim(claim) for claim in claims)
+
+
+def _stored_claim(claim: object) -> UpstreamClaim:
+    if not isinstance(claim, dict):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    statement = claim.get("statement")
+    citations = claim.get("citations")
+    if not isinstance(statement, str) or not isinstance(citations, list):
+        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+    quotes = []
+    for citation in citations:
+        quote = citation.get("matched_text") if isinstance(citation, dict) else None
+        if not isinstance(quote, str):
+            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+        quotes.append(quote)
+    return UpstreamClaim(statement=statement, quotes=tuple(quotes))
 
 
 def _upstream(upstream: Sequence[Upstream]) -> str:
@@ -249,8 +333,8 @@ def build_prompt(
 def execute_module(
     conn: StoreConnection,
     bundle: Bundle,
+    blobs: BlobStore,
     *,
-    attempt_id: UUID,
     assignment: Assignment,
     provider: CompletionProvider,
 ) -> ModuleOutcome:
@@ -258,8 +342,9 @@ def execute_module(
 
     Supplied run/node identity must match the actual attempt, and the complete
     current input, whole stored route, node and module must match the
-    assignment both before the call and again before analysis. The evidence is
-    every captured block of the run, read in the same unit as that check.
+    assignment both before the call and again before analysis. The evidence,
+    gate expectation and upstream are derived from the pins in the same unit as
+    that check, and the upstream read must be unchanged before analysis.
     Billing commits before any analytical refusal and survives later cleanup.
 
     The order is the contract: authority is verified before the prompt is built,
@@ -268,27 +353,23 @@ def execute_module(
     cannot locate exactly once refuses the claim resting on it -- invariant 11
     happening before the artifact rather than after it -- and the envelope
     counts what it refused. An answer with no claim left is refused (§26).
-
-    `upstream` goes straight to the prompt: what keeps it from becoming
-    evidence is `verify_citations` refusing a quote that is not in the
-    delivered evidence, not anything this function does.
     """
     with execution_reads(conn):
         check_call(
             conn,
-            attempt_id=attempt_id,
+            attempt_id=assignment.attempt_id,
             run_id=assignment.run_id,
             route_node_id=assignment.node.route_node_id,
         )
         _stored_identity(conn, assignment, bundle)
-        delivered = _delivered(conn, assignment.run_id)
+        context = _context(conn, blobs, bundle, assignment)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_prompt(
         assignment.module_id,
         authority.files[SKILL],
-        delivered,
-        gate_expects=assignment.gate_expects,
-        upstream=assignment.upstream,
+        context.delivered,
+        gate_expects=context.gate_expects,
+        upstream=context.upstream,
     )
 
     bundle.verify_manifest()
@@ -303,7 +384,9 @@ def execute_module(
     generation = producer_identifier(completion.generation_id, limit=512)
     require_idle(conn)
     record_outcome(
-        conn, attempt_id=attempt_id, outcome=CallOutcome(charge, model, generation)
+        conn,
+        attempt_id=assignment.attempt_id,
+        outcome=CallOutcome(charge, model, generation),
     )
     if completion.refusal is not None:
         code = completion.refusal
@@ -315,12 +398,14 @@ def execute_module(
     with execution_reads(conn):
         check_attempt(
             conn,
-            attempt_id=attempt_id,
+            attempt_id=assignment.attempt_id,
             run_id=assignment.run_id,
             route_node_id=assignment.node.route_node_id,
         )
         _stored_identity(conn, assignment, bundle)
-        envelope = _envelope(conn, assignment, delivered, authority, completion.content)
+        if _upstream_digests(conn, assignment) != context.digests:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        envelope = _envelope(conn, assignment, context, authority, completion.content)
     return ModuleOutcome(
         envelope=envelope,
         charge=charge,
@@ -345,16 +430,16 @@ def _stored_identity(
 def _envelope(
     conn: StoreConnection,
     assignment: Assignment,
-    delivered: list[Delivery],
+    context: _Context,
     authority: Authority,
     content: str,
 ) -> Envelope:
-    sources = {item.source_id for item in delivered}
+    sources = {item.source_id for item in context.delivered}
     # The map first: it is a pure read of the same body, and a map the host
     # cannot bound refuses this answer whatever the claims say. After the loop it
     # was reached only once every quote had been anchored against the token index
     # -- a query per citation spent on an answer already refused.
-    readiness = parse_readiness(content, expected=assignment.gate_expects)
+    readiness = parse_readiness(content, expected=context.gate_expects)
 
     claims = []
     misses: list[RefusalCode] = []

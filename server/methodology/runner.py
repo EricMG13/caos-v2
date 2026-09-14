@@ -24,16 +24,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from server.blobs import BlobStore
-from server.engine.route import GATE_MODULE, ResolvedRoute, RouteNode, predecessors
-from server.engine.runtime import ProviderResult, artifact_digests
+from server.engine.route import ResolvedRoute
+from server.engine.runtime import ProviderResult
 from server.methodology.bundle import Bundle
 from server.methodology.envelope import Envelope
-from server.methodology.executor import (
-    Assignment,
-    Upstream,
-    UpstreamClaim,
-    execute_module,
-)
+from server.methodology.executor import Assignment, execute_module
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -44,29 +39,25 @@ from server.store.outcomes import check_call, execution_reads
 class ModuleProvider:
     """A `runtime.Provider` that runs a real module.
 
-    Holds the six things a module execution needs and the loop does not know
-    about: the store, the bundle that is authority, the blob store the
-    envelope is written to, the provider that answers, the pinned route --
-    which is what tells the gate every other module it must cover -- and the
-    run the node belongs to. The evidence is the run's captured blocks, derived
-    by `execute_module` from the pin rather than chosen here.
+    Holds what a module execution needs and the loop does not know about: the
+    store, the bundle that is authority, the blob store artifacts are read from
+    and written to, the provider that answers, the pinned route and the run.
+    What the module reads is derived from the run's pins by `execute_module`,
+    never chosen here.
     """
 
     conn: StoreConnection
     bundle: Bundle
     blobs: BlobStore
     completions: CompletionProvider
-    # The pin. The gate needs the module ids it must cover, and Phase 11's
-    # chain needs each node's predecessors from the same object.
     route: ResolvedRoute
-    # The run whose accepted artifacts are this node's upstream. The provider
-    # attempt must belong to this run before any of its evidence is read.
     run_id: UUID
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
-        """Check attempt identity and own bounded reads from idle entry."""
+        """Check attempt identity, name the pinned node; `execute_module` checks
+        again and derives what the module reads."""
         with execution_reads(self.conn):
             check_call(
                 self.conn,
@@ -74,19 +65,20 @@ class ModuleProvider:
                 run_id=self.run_id,
                 route_node_id=route_node_id,
             )
-            nodes = [
-                n
-                for n in self.route.nodes
-                if (n.route_node_id, n.module_id) == (route_node_id, module_id)
-            ]
-            if len(nodes) != 1:
-                raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-            assignment = self._assignment(nodes[0])
+        nodes = [
+            n
+            for n in self.route.nodes
+            if (n.route_node_id, n.module_id) == (route_node_id, module_id)
+        ]
+        if len(nodes) != 1:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         outcome = execute_module(
             self.conn,
             self.bundle,
-            attempt_id=attempt_id,
-            assignment=assignment,
+            self.blobs,
+            assignment=Assignment(
+                module_id, self.run_id, nodes[0], self.route, attempt_id
+            ),
             provider=self.completions,
         )
         return ProviderResult(
@@ -95,115 +87,6 @@ class ModuleProvider:
             model=outcome.model,
             generation_id=outcome.generation_id,
         )
-
-    def _assignment(self, node: RouteNode) -> Assignment:
-        module_id = node.module_id
-        # Only the gate is asked about the rest of the pinned route; deciding
-        # so is this method's job because it is the one holding `route` --
-        # `execute_module` only ever reads what the assignment already says.
-        gate_expects = (
-            frozenset(node.module_id for node in self.route.nodes) - {module_id}
-            if module_id == GATE_MODULE
-            else frozenset()
-        )
-        return Assignment(
-            module_id=module_id,
-            run_id=self.run_id,
-            node=node,
-            route=self.route,
-            gate_expects=gate_expects,
-            upstream=self._upstream(module_id),
-        )
-
-    def _upstream(self, module_id: str) -> tuple[Upstream, ...]:
-        """Each direct predecessor's accepted envelope, as the host stored it.
-
-        Read from the store rather than carried in memory: the host owns
-        identity (invariant 3), and a run resumed in another process has only
-        the store to read -- a caller's copy of what a predecessor said is a
-        claim, not the fact this method needs.
-
-        One round trip regardless of how many predecessors this node has:
-        `artifact_digests` (`server/engine/runtime.py`) reads every accepted
-        artifact of the run in one query -- the same query, and the same row
-        set, `accepted_artifacts` reads for the frontier itself, factored into
-        one function so the two readers cannot drift out of step with the
-        schema under them -- and which rows answer *this* module's
-        predecessors is decided in Python against
-        `predecessors(self.route, module_id)`. A query per predecessor is
-        exactly the shape `docs/AI_CODE_QUALITY.md` measures at ~8x.
-        """
-        wanted = predecessors(self.route, module_id)
-        if not wanted:
-            return ()
-        # Built once, not once per node: the membership test is inside a
-        # comprehension over every node of the route.
-        named = set(wanted)
-        nodes = {
-            node.module_id: node.route_node_id
-            for node in self.route.nodes
-            if node.module_id in named
-        }
-        digests = artifact_digests(self.conn, self.run_id)
-        upstream: list[Upstream] = []
-        for predecessor in wanted:
-            # Not every predecessor has run: a soft edge's source may never
-            # have been accepted, and that is not an error here -- it is the
-            # same "unmet" this route already tolerates for a RESTRICTED node.
-            digest = digests.get(nodes.get(predecessor, ""))
-            if digest is None:
-                continue
-            upstream.append(
-                Upstream(
-                    module_id=predecessor, claims=_stored_claims(self.blobs, digest)
-                )
-            )
-        return tuple(upstream)
-
-
-def _stored_claims(blobs: BlobStore, artifact_sha256: str) -> tuple[UpstreamClaim, ...]:
-    """One predecessor's accepted claims, read the way a proof reads one.
-
-    The same shape as `server/qualification/proof.py`'s `_envelope`, and for the
-    same reason: these are bytes the host wrote, and bare indexing into them
-    raised `KeyError` or `TypeError` on valid JSON of another shape -- an
-    untyped exception crossing the provider seam from inside `_run_node`, after
-    the reservation. "This artifact cannot be read" is already named
-    `ORCHESTRATION_ARTIFACT_UNREADABLE`, including when the bytes will not load
-    at all, so the two readers of one artifact refuse it with one code. Nothing
-    document-derived reaches the refusal (`CLAUDE.md`: log the typed code).
-
-    An empty claim list is not refused here, unlike in the proof: this function
-    assembles context rather than proving anything, and a predecessor with
-    nothing to carry forward is an empty upstream section, not a fault.
-    """
-    try:
-        decoded = json.loads(blobs.get(artifact_sha256))
-    except (ValueError, Refusal):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
-    if not isinstance(decoded, dict):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-    claims = decoded.get("claims")
-    if not isinstance(claims, list):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-    return tuple(_stored_claim(claim) for claim in claims)
-
-
-def _stored_claim(claim: object) -> UpstreamClaim:
-    if not isinstance(claim, dict):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-    statement = claim.get("statement")
-    citations = claim.get("citations")
-    if not isinstance(statement, str) or not isinstance(citations, list):
-        raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-
-    quotes = []
-    for citation in citations:
-        quote = citation.get("matched_text") if isinstance(citation, dict) else None
-        if not isinstance(quote, str):
-            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-        quotes.append(quote)
-    return UpstreamClaim(statement=statement, quotes=tuple(quotes))
 
 
 def canonical(envelope: Envelope) -> bytes:
