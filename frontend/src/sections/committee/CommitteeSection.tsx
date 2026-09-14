@@ -117,6 +117,26 @@ export function CommitteeSection({
       {body.artifacts.map((artifact) => (
         <Artifact key={artifact.route_node_id} artifact={artifact} />
       ))}
+      <section className="pnl" data-committee-narrative>
+        <header>
+          <h2>Narrative</h2>
+          <span className="tag">{body.narrative.length}</span>
+        </header>
+        <div className="pb">
+          {body.narrative.map((spans, index) => (
+            <p key={index}>
+              {spans.map((span, spanIndex) => (
+                <span key={spanIndex}>
+                  {span.text}
+                  {span.figure
+                    ? ` [${span.figure.route_node_id} · p.${span.figure.page} · ${span.figure.matched_text}]`
+                    : null}
+                </span>
+              ))}
+            </p>
+          ))}
+        </div>
+      </section>
       <Filing document={document} />
     </div>
   );

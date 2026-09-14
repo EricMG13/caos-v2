@@ -52,4 +52,12 @@ describe("Committee v1", () => {
     expect(container).toHaveTextContent(frozen.body.frozen_by);
     expect(container).toHaveTextContent("—");
   });
+
+  test("renders distinct hostile narrative spans and typed figures as text", () => {
+    const { container } = render(<CommitteeSection document={committee()} tab={null} />);
+    const narrative = container.querySelector("[data-committee-narrative]")!;
+    expect(narrative).toHaveTextContent("<svg onload=window.pwned=1>");
+    expect(narrative).toHaveTextContent("CP-1 · p.7 · Coverage 2.1x");
+    expect(narrative.querySelector("svg, img, script")).toBeNull();
+  });
 });
