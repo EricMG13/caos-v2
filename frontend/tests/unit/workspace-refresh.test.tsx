@@ -16,6 +16,25 @@ const OTHER = "00000000-0000-4000-8000-0000000000ff";
 const RUN = "00000000-0000-4000-8000-0000000000b2";
 const analysis = () => json("../../fixtures/analysis.json");
 const otherCase = () => JSON.parse(text("../../fixtures/analysis.json").replaceAll(CASE, OTHER));
+const model = () => ({
+  chrome: {
+    subject: { case_id: CASE, title: "Issuer" },
+    served_role: { global_role: "READER", standing: "READER" },
+    actions: [],
+  },
+  body: {
+    case_id: CASE,
+    latest_run_id: RUN,
+    displayed_run_id: RUN,
+    subject: null,
+    forecast: null,
+    unavailable_reason: "NO_ACCEPTED_FORECAST",
+  },
+  observed_at: "2026-09-14T10:00:00Z",
+  observed_empty: false,
+  status: "complete",
+  notes: [],
+});
 
 class FakeSource {
   static CONNECTING = 0;
@@ -137,6 +156,19 @@ describe("the workspace under its event tail", () => {
     expect(sent).toHaveLength(1);
     await fire("handoff_accepted");
     expect(sent).toHaveLength(2);
+  });
+
+  test("Model refetches only its named document events", async () => {
+    await mount("model", `/model/?case=${CASE}&run=${RUN}`);
+    expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/model?run=${RUN}`);
+    await answer(0, model());
+    await fire("run_progress");
+    expect(sent).toHaveLength(1);
+    for (const name of ["handoff_accepted", "run_terminal", "sources_changed", "runs_changed"]) {
+      await fire(name);
+      await answer(sent.length - 1, model());
+    }
+    expect(sent).toHaveLength(5);
   });
 
   test("test_names_arriving_mid_flight_cause_exactly_one_more_fetch", async () => {

@@ -9,7 +9,7 @@ import { Workspace } from "@/app/Workspace";
 import { Rail } from "@/chrome/Rail";
 import { composeChrome, markDisabled } from "@/chrome/compose";
 import { SECTIONS } from "@/wire";
-import { parseUploadDocument } from "@/wire/v1";
+import { parseModelDocument, parseUploadDocument } from "@/wire/v1";
 
 const CASE = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const OTHER_CASE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
@@ -22,6 +22,28 @@ function v1Upload(role: { global_role: string; standing: string | null }, caseId
   return {
     chrome: { subject: { case_id: caseId, title: "Acme" }, served_role: role, actions: [] },
     body: { case_id: caseId, sources: [], set_versions: [] },
+    observed_at: AT,
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  };
+}
+
+function v1Model(runId = RUN) {
+  return {
+    chrome: {
+      subject: { case_id: CASE, title: "Acme" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: CASE,
+      latest_run_id: runId,
+      displayed_run_id: runId,
+      subject: null,
+      forecast: null,
+      unavailable_reason: "NO_ACCEPTED_FORECAST",
+    },
     observed_at: AT,
     observed_empty: false,
     status: "complete",
@@ -100,9 +122,13 @@ describe("the transport", () => {
       `/api/v1/cases/${CASE}/run?run=${RUN}`,
     );
     expect(sectionUrl("analysis", { case: CASE })).toBe(`/api/v1/cases/${CASE}/analysis`);
+    expect(sectionUrl("model", { case: "a/b?c", run: RUN })).toBe(
+      `/api/v1/cases/a%2Fb%3Fc/model?run=${RUN}`,
+    );
+    expect(sectionUrl("model", { case: CASE })).toBe(`/api/v1/cases/${CASE}/model`);
     expect(sectionUrl("run", { case: "a/b?c" })).toBe("/api/v1/cases/a%2Fb%3Fc/run");
     // A caseless case section, or a disabled section, has no URL at all.
-    for (const section of ["upload", "run", "analysis"] as const) {
+    for (const section of ["upload", "run", "analysis", "model"] as const) {
       expect(sectionUrl(section, { run: RUN })).toBeNull();
     }
     for (const section of DISABLED) expect(sectionUrl(section, { case: CASE })).toBeNull();
@@ -122,7 +148,7 @@ describe("the transport", () => {
   test("a caseless case section is unavailable and sends no request", async () => {
     const spy = vi.fn();
     vi.stubGlobal("fetch", spy);
-    for (const section of ["upload", "run", "analysis"] as const) {
+    for (const section of ["upload", "run", "analysis", "model"] as const) {
       expect(await fetchSection(section, {})).toEqual({ kind: "unavailable" });
     }
     for (const section of DISABLED) {
@@ -132,8 +158,8 @@ describe("the transport", () => {
   });
 
   test("test_disabled_sections_render_unavailable_without_a_request", async () => {
-    expect([...ENABLED_SECTIONS]).toEqual(["directory", "upload", "run", "analysis"]);
-    expect(DISABLED).toEqual(["book", "model", "report", "committee", "admin"]);
+    expect([...ENABLED_SECTIONS]).toEqual(["directory", "upload", "run", "analysis", "model"]);
+    expect(DISABLED).toEqual(["book", "report", "committee", "admin"]);
     const spy = vi.fn();
     const tail = vi.fn();
     vi.stubGlobal("fetch", spy);
@@ -161,6 +187,18 @@ describe("the transport", () => {
     }
     expect(spy).not.toHaveBeenCalled();
     expect(tail).not.toHaveBeenCalled();
+  });
+
+  test("a supplied Model run is parser-bound to the displayed run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(v1Model(OTHER_CASE)))),
+    );
+    expect(await fetchSection("model", { case: CASE, run: RUN })).toEqual({
+      kind: "error",
+      refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+    });
+    expect(parseModelDocument(v1Model()).body.displayed_run_id).toBe(RUN);
   });
 
   test("test_served_role_is_displayed_and_enables_nothing", () => {

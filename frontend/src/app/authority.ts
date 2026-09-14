@@ -75,10 +75,10 @@ export function release(authority: Authority, caseId: string): Authority {
 /** Which sections each event name refetches (brief 4.4, decision 2). */
 export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> = {
   run_progress: ["run"],
-  handoff_accepted: ["run", "analysis"],
-  run_terminal: ["run", "analysis"],
-  sources_changed: ["upload", "run", "analysis"],
-  runs_changed: ["run", "analysis"],
+  handoff_accepted: ["run", "analysis", "model"],
+  run_terminal: ["run", "analysis", "model"],
+  sources_changed: ["upload", "run", "analysis", "model"],
+  runs_changed: ["run", "analysis", "model"],
 };
 
 export function refetches(name: EventName, section: Section): boolean {
@@ -90,6 +90,7 @@ export function displayedRunIdOf(section: Section, doc: SectionDocument): string
   const body = doc.body;
   if (section === "run" && "run" in body) return body.run?.run_id ?? null;
   if (section === "analysis" && "handoffs" in body) return body.displayed_run_id;
+  if (section === "model" && "forecast" in body) return body.displayed_run_id;
   return null;
 }
 
@@ -102,6 +103,10 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
   if (section === "analysis" && "handoffs" in body) {
     const records = body.handoffs.map((handoff) => handoff.record_sha256).sort();
     return `${body.displayed_run_id ?? ""}|${records.join(",")}`;
+  }
+  if (section === "model" && "forecast" in body) {
+    const forecast = body.forecast;
+    return `${body.displayed_run_id ?? ""}|${forecast ? `${forecast.record_sha256}|${forecast.artifact_sha256}` : "NO_ACCEPTED_FORECAST"}`;
   }
   return null;
 }
