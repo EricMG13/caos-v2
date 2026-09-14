@@ -64,6 +64,7 @@ from server.api.identity import Actor, actor_from_headers
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
+from server.api.reads import model as model_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
 from server.api.reads.analysis import RunQuery
@@ -196,7 +197,14 @@ app = FastAPI(
 app.add_middleware(EdgeGuard)
 # One router per section read (Task 4.1), so each slice adds its route in its
 # own module and none edits this one.
-for _section in (directory_read, upload_read, run_read, analysis_read, evidence_read):
+for _section in (
+    directory_read,
+    upload_read,
+    run_read,
+    analysis_read,
+    model_read,
+    evidence_read,
+):
     app.include_router(_section.router)
 app.include_router(health.router)
 for _commands in (cases_command, runs_command, execution_command):
