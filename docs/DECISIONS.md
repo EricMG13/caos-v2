@@ -1407,3 +1407,30 @@ this file's shape in CI; the pre-existing `vendor/**` entry is the same kind
 of unenforced exclusion.
 
 **Rollback.** Drop `,**/*.sql` from the one line.
+
+## 2026-09-14 §44 — Evidence admission limits, dispatch and PDF geometry
+
+**Decision.** For Phase 3 Task 3.2:
+
+1. **Limits (host policy).** Per pack at most 50 documents and 100 MiB; per
+   document at most 20 MiB, 500 pages, 500,000 tokens and 60 s of extraction.
+   Checked before the expensive step each bounds; refusals are typed
+   (`SOURCE_TOO_LARGE`, `SOURCE_EXTRACTION_TIMEOUT`).
+2. **Time.** The deadline is cooperative (checked per page and per line). A
+   single pathological page can overrun it; that residual is recorded in the
+   `CLAUDE.md` ledger. No process isolation or new dependency.
+3. **Geometry.** PDF tokens are normalised to the CropBox origin, top-left,
+   y down, in rotated displayed space; tokens not wholly inside the crop are
+   dropped. The convention and the effective layout parameters are declared in
+   extractor identity version 2. Output format v1 and its verifiers are
+   unchanged; no migration.
+4. **Existing v1 PDF extractions** still verify and re-anchor as recorded;
+   readmission is how a source gains v2 geometry.
+5. **Ambiguity** is counted over the whole page, delivered or not; glyph merging
+   follows pdfminer's `word_margin` with no custom heuristic.
+6. **Dispatch.** `admit_pack` chooses the extractor per document from its bytes;
+   the single-extractor parameter is removed, not kept as a bypass.
+
+**Why.** The repair plan requires limits before expensive work and specific safe
+outcomes, without new dependencies or speculative infrastructure; option 3
+keeps every v1 pin byte-identical while fixing the geometry new admissions carry.
