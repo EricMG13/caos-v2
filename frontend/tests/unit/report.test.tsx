@@ -4,8 +4,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { ReportSection, nextRevisionId } from "@/sections/report/ReportSection";
+import { RevisionEditor } from "@/sections/report/RevisionEditor";
 import { segments } from "@/sections/report/text";
 import type { DocumentOf } from "@/wire";
+import type { Paragraph, Revision } from "@/wire/report";
 
 // Vitest runs from frontend/; the fixtures sit beside the tests' package root.
 const report = JSON.parse(
@@ -173,6 +175,37 @@ describe("Report", () => {
     expect(figures.container.querySelector('[data-figure-row="$95M"]')).toHaveTextContent(
       "UNCITED",
     );
+  });
+
+  test("test_report_text_is_preserved_byte_for_byte_with_an_unmatched_figure", () => {
+    // F12: a figure whose text does not occur in the paragraph must never be
+    // inserted into the rendered prose. "$99" is not in "Revenue was $10."
+    const revision: Revision = {
+      id: "rev_x",
+      digest: "0".repeat(64),
+      saved_at: "2026-09-14T00:00:00Z",
+      author: "Test Author",
+    };
+    const paragraph: Paragraph = {
+      id: "p1",
+      kind: "MODULE",
+      module_id: "mod1",
+      text: "Revenue was $10.",
+      figures: [
+        { text: "$10", citation: null },
+        { text: "$99", citation: null },
+      ],
+    };
+    const { container } = render(
+      <MemoryRouter>
+        <EvidenceProvider>
+          <RevisionEditor revision={revision} paragraphs={[paragraph]} next="rev_y" />
+        </EvidenceProvider>
+      </MemoryRouter>,
+    );
+    const p = q(container, '[data-paragraph="p1"]');
+    expect(p.textContent).not.toContain("$99");
+    expect(p.textContent).toBe("¶1 · MODULE · mod1 Revenue was $10.");
   });
 
   test("segments place each figure where it sits in the sentence", () => {

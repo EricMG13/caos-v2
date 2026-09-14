@@ -235,4 +235,38 @@ describe("the snapshot binding", () => {
       "snp_chtr_q3_2026",
     );
   });
+
+  test("test_book_notes_show_no_value_from_a_refused_snapshot", () => {
+    // F13: once a case's lens is refused (its served snapshot no longer
+    // matches the bound one), no value from that refused snapshot may reach
+    // the deviation notes below the grid.
+    const view = render(
+      <MemoryRouter>
+        <LedgerProvider>
+          <EvidenceProvider>
+            <BookSection document={fixture} tab="compare" />
+          </EvidenceProvider>
+        </LedgerProvider>
+      </MemoryRouter>,
+    );
+    const moved = structuredClone(fixture);
+    const chtr = moved.body.compare.cases.find((entry) => entry.case_id === "CASE-2026-CHTR03")!;
+    // The refused snapshot's own net_leverage cell now carries a distinctive
+    // value that must never surface anywhere once the lens is refused.
+    chtr.cells["net_leverage"]!.value = "99.9x";
+    chtr.snapshot = "snp_chtr_q3_2026";
+    moved.observed_at = "2026-09-10T09:00:00Z";
+    view.rerender(
+      <MemoryRouter>
+        <LedgerProvider>
+          <EvidenceProvider>
+            <BookSection document={moved} tab="compare" />
+          </EvidenceProvider>
+        </LedgerProvider>
+      </MemoryRouter>,
+    );
+    expect(view.container.querySelector("[data-refusal='SNAPSHOT_MISMATCH']")).not.toBeNull();
+    expect(view.container.textContent).not.toContain("99.9x");
+    expect(view.container.querySelector("[data-deviation-note='chtr.net_leverage']")).toBeNull();
+  });
 });

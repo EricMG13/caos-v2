@@ -23,13 +23,7 @@ const TEXT = 4096;
 const hash = string({ max: 64, pattern: "^[0-9a-f]{64}$" });
 const short = string({ max: SHORT });
 const text = string({ max: TEXT });
-const RUN_STATUSES = [
-  "RUNNING",
-  "COMPLETE",
-  "FAILED",
-  "BLOCKED",
-  "CANCELLED",
-] as const;
+const RUN_STATUSES = ["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"] as const;
 
 const GlobalRole = enumOf(["READER", "ANALYST", "ADMIN"]);
 const Standing = enumOf(["READER", "WRITER", "APPROVER", "ADMIN"]);
