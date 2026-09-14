@@ -141,7 +141,7 @@ def test_create_case_title_crosses_boundary_text(
     case: tuple[StoreConnection, UUID], command_client: TestClient
 ) -> None:
     conn, _ = case
-    refused = _create(command_client, uuid4(), "Acme ‮7202")
+    refused = _create(command_client, uuid4(), "Acme \u202e7202")
     assert (refused.status_code, refused.json()["code"]) == (
         400,
         "BOUNDARY_TEXT_INVALID",
@@ -260,7 +260,7 @@ def test_a_replayed_admission_returns_the_original_receipt_and_no_second_rows(
 @pytest.mark.parametrize(
     ("name", "code"),
     [
-        ("evil‮txt.pdf", "BOUNDARY_TEXT_INVALID"),
+        ("evil\u202etxt.pdf", "BOUNDARY_TEXT_INVALID"),
         ("   ", "BOUNDARY_TEXT_INVALID"),
         ("n" * 256, "BOUNDARY_TEXT_TOO_LONG"),
     ],

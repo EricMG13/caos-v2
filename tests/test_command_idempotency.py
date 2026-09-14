@@ -33,7 +33,7 @@ from server.api.commands._request import (
     require_case_writer,
 )
 from server.api.deps import Caller, Store, store_connection
-from server.api.identity import Actor, GlobalRole
+from server.api.identity import TRUST_SWITCH, Actor, GlobalRole
 from server.api.wire import CaseCreated, CreateCase
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
@@ -187,6 +187,12 @@ probe = FastAPI()
 for _error, _handler in app.exception_handlers.items():
     probe.add_exception_handler(_error, _handler)
 probe.include_router(router)
+
+
+@pytest.fixture(autouse=True)
+def _groups_not_role_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Identity comes from groups; a developer's trusted role header stays out."""
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
 
 
 @pytest.fixture

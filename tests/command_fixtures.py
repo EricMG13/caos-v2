@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from server.api import app as app_module
 from server.api.app import app, blob_store, store_connection
+from server.api.identity import TRUST_SWITCH
 from server.blobs import BlobStore
 from server.store import StoreConnection
 from server.store.members import Standing, grant
@@ -59,6 +60,8 @@ def command_client(
 ) -> Iterator[TestClient]:
     """The real app, booted against the test database, on the case's connection."""
     conn, _case_id = case
+    # Identity comes from groups: a developer's trusted role header must not leak in.
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     app.dependency_overrides[store_connection] = constant(conn)
     app.dependency_overrides[blob_store] = constant(BlobStore(tmp_path / "blobs"))
