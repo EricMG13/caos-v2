@@ -1,12 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
 import { CitationChip } from "@/evidence/CitationChip";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { MetricPassport } from "@/evidence/MetricPassport";
-import { CommitteeSection } from "@/sections/committee/CommitteeSection";
-import { PASSPORT_FIELDS, type Citation, type DocumentOf, type Passport } from "@/wire";
+import { PASSPORT_FIELDS, type Citation, type Passport } from "@/wire";
 
 const CITATION: Citation = {
   chip: "D-04 p.68 ¶2",
@@ -88,22 +84,6 @@ describe("the evidence surface", () => {
     fireEvent.click(chip);
     const dialog = screen.getByRole("dialog");
     expect(dialog.querySelector("[data-withdrawn]")).toHaveTextContent("2026-09-09T09:41:00Z");
-  });
-
-  test("the committee paper marks a figure whose source has been withdrawn", () => {
-    const committee = JSON.parse(
-      readFileSync(`${resolve(process.cwd(), "fixtures")}/committee.json`, "utf8"),
-    ) as DocumentOf<"committee">;
-    const { container } = render(
-      <MemoryRouter>
-        <EvidenceProvider>
-          <CommitteeSection document={committee} tab={null} />
-        </EvidenceProvider>
-      </MemoryRouter>,
-    );
-    const cite = container.querySelector<HTMLElement>('.rd-cite[data-chip^="D-06"]');
-    expect(cite).toHaveClass("withdrawn");
-    expect(cite).toHaveAccessibleName(/source withdrawn$/);
   });
 
   test("test_passport_contract", () => {

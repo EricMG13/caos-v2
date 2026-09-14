@@ -63,7 +63,8 @@ export function devProxy(env: Record<string, string | undefined>): Record<string
 function sectionOf(pathname: string): string | null {
   if (pathname === "/api/v1/directory") return "directory";
   return (
-    /^\/api\/v1\/cases\/[^/]+\/(upload|run|analysis|model|report)$/.exec(pathname)?.[1] ?? null
+    /^\/api\/v1\/cases\/[^/]+\/(upload|run|analysis|model|report|committee)$/.exec(pathname)?.[1] ??
+    null
   );
 }
 
@@ -111,7 +112,12 @@ async function serveSection(section: string, fixture: string | null, res: Server
       JSON.stringify({ code: "STORE_UNAVAILABLE", clears: "the store answers again" }),
     );
   }
-  let path = section === "report" ? "report-v1.json" : `${section}.json`;
+  let path =
+    section === "report"
+      ? "report-v1.json"
+      : section === "committee"
+        ? "committee-v1.json"
+        : `${section}.json`;
   if (fixture && !STREAM_FIXTURES.has(fixture)) path = `states/${section}.${fixture}.json`;
   else if (section === "run" && runFrame > 0) path = `run/frames/${runFrame}.json`;
   const body = await readJson(path);

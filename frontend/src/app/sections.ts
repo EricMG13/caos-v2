@@ -13,6 +13,7 @@ export const ENABLED_SECTIONS = [
   "analysis",
   "model",
   "report",
+  "committee",
 ] as const;
 export type EnabledSection = (typeof ENABLED_SECTIONS)[number];
 
