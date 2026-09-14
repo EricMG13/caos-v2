@@ -791,3 +791,28 @@ and the hashed lock, and Trivy scans the loaded result either way.
 call sites (the dependency can stay unused), restore `docker build -t
 caos:ci .` in the `image` job, or drop any one cache block without touching
 the others.
+
+## 2026-09-14 §30 — `.sql` files are excluded from SonarCloud analysis, not run through a Data Dictionary
+
+**Decision.** `sonar.exclusions` in `sonar-project.properties` adds `**/*.sql`
+beside the existing `vendor/**`.
+
+**Reason.** `sonar.sources` lists `scripts` and `server`, and both hold plain
+PostgreSQL DDL: `server/store/schema.sql`, its thirteen numbered migrations,
+and `scripts/dev-init.sql`. SonarCloud's PL/SQL sensor claims `.sql` files by
+extension regardless of dialect, and the analysis logged: "The Data
+Dictionary is not configured for the PLSQL analyzer, which prevents rule(s)
+S3641, S3921, S3651, S3618 from raising issues." A Data Dictionary is an
+imported catalog of Oracle schema metadata (SonarCloud's own PL/SQL docs);
+this project has no Oracle database and nothing that would produce one. The
+four rules cannot fire correctly against non-Oracle SQL even if one were
+supplied, so excluding the files is the fix, not the dictionary the message
+suggests.
+
+**Cost.** Rule-based findings, if SonarCloud ever added a real PostgreSQL
+sensor, would need this exclusion revisited. `test_dependency_pins.py`'s
+class of gate does not cover `sonar-project.properties`, so nothing enforces
+this file's shape in CI; the pre-existing `vendor/**` entry is the same kind
+of unenforced exclusion.
+
+**Rollback.** Drop `,**/*.sql` from the one line.
