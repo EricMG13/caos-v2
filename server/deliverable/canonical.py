@@ -26,7 +26,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute, RouteNode
+from server.engine.route import MODEL_MODULE, ResolvedRoute, RouteNode
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import captured_blocks
@@ -187,7 +187,10 @@ class _Reader:
         ):
             raise mismatch
         markdown = self.blobs.get(artifact)
-        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+        gate = frozenset(n.module_id for n in route.nodes) - {
+            GATE_MODULE,
+            MODEL_MODULE,
+        }
         projections = None
         with suppress(Refusal):  # a stored handoff that no longer validates
             projections = validate_markdown(

@@ -162,6 +162,7 @@ def test_forecast_route_accepts_real_host_calculated_artifact(
     from conftest import priced
     from test_loop_charges import ESTIMATE
 
+    from server.deliverable.revisions import save_revision
     from server.engine.runtime import Execution, accepted_artifacts, run_route
 
     answers = ForecastCompletions(harness.source_id)
@@ -189,6 +190,16 @@ def test_forecast_route_accepts_real_host_calculated_artifact(
     )
     result = forecast_projection(answers.answers[-1])
     assert result["rows"][0]["cash"]["closing"] == "145.000000"
+    revision = save_revision(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        case_id=harness.case_id,
+        run_id=harness.run_id,
+        actor_id=harness.approver,
+        narrative=[],
+    )
+    assert isinstance(revision, UUID)
 
 
 @pytest.mark.parametrize("defect", ["missing", "wrong-owner", "result"])
