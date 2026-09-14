@@ -1,20 +1,40 @@
 // One evidence drawer and one passport for the whole workspace. Openers are
 // passed from the click that opened them; there is no second inspector.
+//
+// A v1 source fact is opened by its identity, never by a copy of the citation
+// (brief 4.4, decision 9): each render re-resolves it against the visible
+// snapshot, so a case or run switch closes it, a withdrawal updates it, and a
+// pending document the user has not reloaded never reaches it.
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { EvidenceDrawer } from "./EvidenceDrawer";
 import { MetricPassport } from "./MetricPassport";
+import { SourceDrawer } from "./SourceDrawer";
+import { useVisibleSnapshot, type VisibleSnapshot } from "@/app/snapshot";
 import type { Citation, Passport } from "@/wire";
+import type { CitationView } from "@/wire/v1";
+
+/** Which citation of which accepted record: `index` within its source facts. */
+export interface FactIdentity {
+  record_sha256: string;
+  source_id: string;
+  page: number;
+  index: number;
+}
 
 interface Evidence {
   openCitation(citation: Citation, opener: HTMLElement): void;
   openPassport(passport: Passport, opener: HTMLElement): void;
+  openFact(identity: FactIdentity, opener: HTMLElement): void;
   activeChip: string | null;
+  activeFact: FactIdentity | null;
 }
 
 const Context = createContext<Evidence>({
   openCitation() {},
   openPassport() {},
+  openFact() {},
   activeChip: null,
+  activeFact: null,
 });
 
 export function useEvidence(): Evidence {
@@ -26,9 +46,23 @@ interface Open<T> {
   opener: HTMLElement;
 }
 
+function resolveFact(snapshot: VisibleSnapshot, identity: FactIdentity): CitationView | null {
+  const body = snapshot.document.body;
+  if (!("handoffs" in body)) return null;
+  for (const handoff of body.handoffs) {
+    if (handoff.record_sha256 !== identity.record_sha256) continue;
+    const fact = handoff.source_facts[identity.index];
+    if (fact && fact.source_id === identity.source_id && fact.page === identity.page) return fact;
+  }
+  return null;
+}
+
 export function EvidenceProvider({ children }: { children: ReactNode }) {
+  const snapshot = useVisibleSnapshot();
   const [citation, setCitation] = useState<Open<Citation> | null>(null);
   const [passport, setPassport] = useState<Open<Passport> | null>(null);
+  const [fact, setFact] = useState<(Open<FactIdentity> & { key: string }) | null>(null);
+  const snapshotKey = snapshot?.key ?? null;
   const openCitation = useCallback(
     (subject: Citation, opener: HTMLElement) => setCitation({ subject, opener }),
     [],
@@ -37,10 +71,32 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
     (subject: Passport, opener: HTMLElement) => setPassport({ subject, opener }),
     [],
   );
-  const value = useMemo(
-    () => ({ openCitation, openPassport, activeChip: citation?.subject.chip ?? null }),
-    [openCitation, openPassport, citation],
+  const openFact = useCallback(
+    (subject: FactIdentity, opener: HTMLElement) => {
+      if (snapshotKey !== null) setFact({ subject, opener, key: snapshotKey });
+    },
+    [snapshotKey],
   );
+  // Bound to the snapshot it was opened on: another key, or a citation that
+  // is no longer there, closes it for good rather than hiding it.
+  const resolved =
+    fact && snapshot && snapshot.key === fact.key ? resolveFact(snapshot, fact.subject) : null;
+  if (fact && !resolved) setFact(null);
+  const shown = resolved ? fact : null;
+  const value = useMemo(
+    () => ({
+      openCitation,
+      openPassport,
+      openFact,
+      activeChip: citation?.subject.chip ?? null,
+      activeFact: shown?.subject ?? null,
+    }),
+    [openCitation, openPassport, openFact, citation, shown],
+  );
+  const address =
+    snapshot?.caseId && snapshot.displayedRunId
+      ? { caseId: snapshot.caseId, runId: snapshot.displayedRunId }
+      : null;
   return (
     <Context.Provider value={value}>
       {children}
@@ -56,6 +112,16 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
           citation={citation.subject}
           opener={citation.opener}
           onClose={() => setCitation(null)}
+        />
+      ) : null}
+      {shown && resolved && snapshot ? (
+        <SourceDrawer
+          key={snapshot.key}
+          fact={resolved}
+          address={address}
+          withdrawnAt={snapshot.withdrawals.get(resolved.source_id) ?? resolved.withdrawn_at}
+          opener={shown.opener}
+          onClose={() => setFact(null)}
         />
       ) : null}
     </Context.Provider>
