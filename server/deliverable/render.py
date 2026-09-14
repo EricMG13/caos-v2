@@ -195,11 +195,30 @@ def _citation(citation: object) -> str:
 
 
 def _narrative(narrative: object) -> str:
-    if narrative is None:
+    if narrative is None or narrative == []:
         return ""
-    if not isinstance(narrative, str):
+    # Historical payloads remain renderable; the save boundary accepts only spans.
+    if isinstance(narrative, str):
+        return f"<h2>Analyst narrative</h2>\n<p>{escape(narrative)}</p>\n"
+    if not isinstance(narrative, list) or len(narrative) > 64:
         raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
-    return f"<h2>Analyst narrative</h2>\n<p>{escape(narrative)}</p>\n"
+    paragraphs = []
+    for paragraph in narrative:
+        if not isinstance(paragraph, list) or not 1 <= len(paragraph) <= 64:
+            raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
+        paragraphs.append(
+            "<div>" + "".join(_span(span) for span in paragraph) + "</div>\n"
+        )
+    return "<h2>Analyst narrative</h2>\n" + "".join(paragraphs)
+
+
+def _span(span: object) -> str:
+    if isinstance(span, Mapping):
+        if set(span) == {"text"}:
+            return escape(_text(span, "text"))
+        if set(span) == {"figure"}:
+            return _citation(span["figure"])
+    raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
 
 
 def _provenance(artifacts: Sequence[object]) -> str:

@@ -70,8 +70,8 @@ def governed_write(
     conn: StoreConnection,
     action: GovernedAction,
     write: Callable[[StoreConnection], None],
-) -> None:
-    """Run `write` and record it, under the actor's live standing.
+) -> str:
+    """Run `write` and return its committed audit link under live standing.
 
     `write` receives this transaction and must not commit: the whole point is
     that its state and this function's audit event are one commit or none.
@@ -114,6 +114,7 @@ def governed_write(
         # thing transactional pairing exists to prevent.
         rollback_or_close(conn)
         raise
+    return entry_sha256
 
 
 def _require_standing(conn: StoreConnection, action: GovernedAction) -> None:

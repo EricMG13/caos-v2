@@ -2056,3 +2056,49 @@ rejection, total malformed-input handling, concurrent exclusive writes,
 deterministic members, renderer-pin checks, and forged declared lengths/CRC/
 count failures. Existing render, filing and LITE route tests remain required;
 this decision does not enable filing routes.
+
+## 2026-09-14 §57 — Save the host revision before sign, freeze and file
+
+Task 5.3 replaces caller-supplied revision labels, digests and freeze payloads
+with a host-minted UUID and immutable stored payload. `save_revision` derives
+every accepted canonical artifact in pinned route order under the governed
+case lock, obtains the case title from the store, validates the narrative and
+stores its canonical bytes in the content-addressed blob store. An incomplete
+or refused route cannot be saved; accepted restrictions and limitations remain
+in the exact records and render. No provider is involved.
+
+Migration `0015_revisions` adds immutable `deliverable_revisions` rows. The
+legacy opinion/publication keys are text, so a generated canonical UUID text
+key enables composite `(case_id, revision_id)` foreign keys without converting
+legacy labels. `NOT VALID` preserves existing history while enforcing every
+new signature/publication's saved case/revision ownership. No old labels are
+backfilled with fabricated revisions.
+
+Narrative is at most 64 paragraphs of 1–64 spans: bounded text or an accepted
+artifact's `(route_node_id, citation_index)` reference. Text is normalized by
+BoundaryText with a 2,000-character ceiling; ASCII digits refuse
+`NARRATIVE_FIGURE_UNREFERENCED`. References resolve to the accepted anchored
+document, page and matched text, with unknown/malformed references refused.
+This syntactic control is not semantic detection of numbers spelled in words
+or misleading qualitative prose; the independent human review still owns that.
+
+Sign reads the stored digest under the lock. Freeze re-proves the stored
+revision inside the same governed write, compares exact bytes and the current
+signature, then records the frozen digest. No signer can freeze; no signer or
+freezer can file. A frozen revision admits no later signature and can freeze
+and file only once. `read_revision` and `prove_revision` participate in their
+caller's transaction; the latter requires the caller to hold the case lock
+for a governed transition. Live withdrawal or moved authority refuses re-proof;
+archived package consistency remains independent of live source availability.
+
+Filing returns case/run/revision identity, all three actors, payload and
+renderer digests, and `filed_event_sha256` returned by its own governed write.
+The receipt never reads the possibly advanced audit head after commit. The
+renderer digest is computed before filing and included in its audit payload.
+The portable renderer accepts the new spans, and its verifier pin changes with
+its exact source bytes; historical string narratives remain renderable only
+for old payloads, never accepted by the new save boundary.
+
+Codex execution uses Astra high for this high-risk revision boundary. Ordinary
+task review and scoped gates precede integration; phase confidence/adversarial
+reviews remain coordinator-owned at actual xhigh after the whole phase.

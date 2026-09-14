@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from uuid import uuid4
 
 from canonical_fixtures import CATALOG, fields_from_prompt
@@ -35,6 +36,7 @@ from server.deliverable.canonical import (
 from server.deliverable.filing import sign_opinion
 from server.deliverable.package import build_package, verify_package
 from server.deliverable.render import render
+from server.deliverable.revisions import read_revision, save_revision
 from server.engine.route import resolve_route
 from server.engine.runtime import Execution, run_route
 from server.methodology.runner import ModuleProvider
@@ -95,9 +97,19 @@ def test_realistic_lite_route_completes_proves_and_freezes(harness: _Harness) ->
     assert proof.citations >= 3
     assert {module for module, _, _ in proof.anchored} == {"CP-0", "CP-L10", "CP-5"}
 
-    payload = canonical_payload(
-        harness.conn, harness.blobs, harness.bundle, _revision(harness)
+    saved = save_revision(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        case_id=harness.case_id,
+        run_id=harness.run_id,
+        actor_id=harness.approver,
+        narrative=[],
     )
+    payload = read_revision(
+        harness.conn, harness.blobs, case_id=harness.case_id, revision_id=saved
+    )
+    harness.conn.rollback()
     assert [a["route_node_id"] for a in payload["artifacts"]] == [
         n.route_node_id for n in LITE.nodes
     ]
@@ -107,8 +119,7 @@ def test_realistic_lite_route_completes_proves_and_freezes(harness: _Harness) ->
         harness.conn,
         case_id=harness.case_id,
         actor_id=harness.approver,
-        revision_id=BoundaryText.of(REVISION),
-        payload_sha256=hashlib.sha256(data).hexdigest(),
+        revision_id=saved,
     )
     freezer = uuid4()
     grant(
@@ -122,7 +133,7 @@ def test_realistic_lite_route_completes_proves_and_freezes(harness: _Harness) ->
         harness.conn,
         harness.blobs,
         harness.bundle,
-        _revision(harness),
+        replace(_revision(harness), revision_id=BoundaryText.of(str(saved))),
         actor_id=freezer,
     )
     assert digest == hashlib.sha256(data).hexdigest()
@@ -132,7 +143,7 @@ def test_realistic_lite_route_completes_proves_and_freezes(harness: _Harness) ->
         harness.blobs,
         harness.bundle,
         case_id=harness.case_id,
-        revision_id=BoundaryText.of(REVISION),
+        revision_id=saved,
         payload=data,
     )
 

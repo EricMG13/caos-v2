@@ -109,14 +109,17 @@ def run_completed(
 
 def test_relative_value_route_completes_proves_and_freezes(harness: _Harness) -> None:
     import hashlib
+    from dataclasses import replace
     from uuid import uuid4
 
+    from server.boundary_text import BoundaryText
     from server.deliverable.canonical import (
         freeze_canonical,
         payload_bytes,
         verify_frozen,
     )
     from server.deliverable.filing import sign_opinion
+    from server.deliverable.revisions import read_revision, save_revision
     from server.store.members import Standing, grant
 
     answers = run_completed(harness)
@@ -126,8 +129,20 @@ def test_relative_value_route_completes_proves_and_freezes(harness: _Harness) ->
     harness.conn.rollback()
     assert proof.artifacts == proof.citations == 9
     assert {m for m, _, _ in proof.anchored} == set(MODULES)
-    revision = _revision(harness)
-    payload = canonical_payload(harness.conn, harness.blobs, BUNDLE, revision)
+    saved = save_revision(
+        harness.conn,
+        harness.blobs,
+        BUNDLE,
+        case_id=harness.case_id,
+        run_id=harness.run_id,
+        actor_id=harness.approver,
+        narrative=[],
+    )
+    revision = replace(_revision(harness), revision_id=BoundaryText.of(str(saved)))
+    payload = read_revision(
+        harness.conn, harness.blobs, case_id=harness.case_id, revision_id=saved
+    )
+    harness.conn.rollback()
     assert [a["route_node_id"] for a in payload["artifacts"]] == [
         n.route_node_id for n in ROUTE.nodes
     ]
@@ -136,8 +151,7 @@ def test_relative_value_route_completes_proves_and_freezes(harness: _Harness) ->
         harness.conn,
         case_id=harness.case_id,
         actor_id=harness.approver,
-        revision_id=revision.revision_id,
-        payload_sha256=hashlib.sha256(data).hexdigest(),
+        revision_id=saved,
     )
     freezer = uuid4()
     grant(
@@ -158,7 +172,7 @@ def test_relative_value_route_completes_proves_and_freezes(harness: _Harness) ->
         harness.blobs,
         BUNDLE,
         case_id=harness.case_id,
-        revision_id=revision.revision_id,
+        revision_id=saved,
         payload=data,
     )
     cp3 = fields_from_prompt(answers.prompts[-1])

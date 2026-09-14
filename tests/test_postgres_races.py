@@ -62,6 +62,83 @@ CHARGE = Decimal("0.0142")
 APPENDERS = 8
 
 
+def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
+    empty_database: str, tmp_path: Path
+) -> None:
+    import inspect
+    from dataclasses import replace
+    from typing import cast
+
+    from test_deliverable_canonical import LITE, _accept
+    from test_execution_freshness import _Harness, harness
+    from test_filing_chain import _actor, _freeze, _sign
+    from test_revisions import _save
+
+    from server.deliverable.filing import file_deliverable
+    from server.store.audit import audit_trail, verify_chain
+
+    make_harness = cast(
+        Callable[[tuple[StoreConnection, UUID], Path, ResolvedRoute], _Harness],
+        inspect.unwrap(harness),
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        cases = []
+        for index in range(2):
+            case_id = create_case(conn, BoundaryText.of(f"Issuer {index}"))
+            conn.commit()
+            held = make_harness((conn, case_id), tmp_path / str(index), LITE)
+            for module in ("CP-0", "CP-L10", "CP-5"):
+                _accept(held, module)
+            cases.append((held, _save(held), _actor(held), _actor(held)))
+
+        for stage in ("sign", "freeze", "file"):
+            barrier = Barrier(4)
+
+            def race(index: int, stage: str = stage, barrier: Barrier = barrier) -> str:
+                held, revision, freezer, filer = cases[index // 2]
+                with connect(empty_database) as other:
+                    current = replace(held, conn=other)
+                    barrier.wait(10)
+                    try:
+                        if stage == "sign":
+                            _sign(current, revision)
+                        elif stage == "freeze":
+                            _freeze(current, revision, freezer)
+                        else:
+                            receipt = file_deliverable(
+                                other,
+                                case_id=held.case_id,
+                                actor_id=filer,
+                                revision_id=revision,
+                            )
+                            assert (receipt.case_id, receipt.run_id) == (
+                                held.case_id,
+                                held.run_id,
+                            )
+                    except Refusal as refused:
+                        return refused.code.value
+                    return "OK"
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                outcomes = list(pool.map(race, range(4)))
+            expected = {
+                "sign": ["OK", "OK"],
+                "freeze": ["OK", "DELIVERABLE_ALREADY_FROZEN"],
+                "file": ["OK", "DELIVERABLE_ALREADY_FILED"],
+            }[stage]
+            for pair in (outcomes[:2], outcomes[2:]):
+                assert sorted(pair) == sorted(expected)
+        for held, _, _, _ in cases:
+            actions = [entry.action for entry in audit_trail(conn, held.case_id)]
+            assert (
+                actions.count("DELIVERABLE_FROZEN")
+                == actions.count("DELIVERABLE_FILED")
+                == 1
+            )
+            assert verify_chain(conn, held.case_id)
+
+
 @pytest.fixture
 def prepared_run(empty_database: str) -> tuple[UUID, UUID]:
     with connect(empty_database) as conn:
