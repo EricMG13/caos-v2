@@ -416,6 +416,37 @@ schema at startup exists to catch. This repository has never deployed, so there
 is no data a migration would have to carry; the day there is, that is the entry
 which overrides this one.
 
+## 2026-09-12 §20a — Ordered PostgreSQL migrations preserve the legacy baseline
+
+Supersedes §20's refusal-only upgrade policy for REPAIR_PLAN Phase 2.
+`server/store/schema.sql` remains byte-for-byte the legacy baseline. The explicit
+host-owned `MIGRATIONS` tuple starts with `0001_legacy`; append reviewed SQL files
+under `server/store/` in order. Never modify an applied entry. No ORM, dependency,
+application table, or externally selected migration SQL is added by this slice.
+
+`store_migrations` records ordered version, name, SHA-256 and application time.
+The singleton `store_schema.applied_digest` becomes the SHA-256 of the JSON
+encoding of all ordered `(version, name, digest)` entries. This also binds history
+length, so a missing final row cannot masquerade as an older prefix. A verified
+legacy schema digest with no history is adopted without rerunning its DDL.
+Fresh creation and legacy adoption then use the same prefix advancement path.
+Unknown, edited, reordered, missing, or newer applied history refuses startup.
+
+The existing advisory transaction lock serializes starters. Migration DDL,
+history, and the head digest commit together; failures roll back and release
+the lock, including interruptions. Schema/PostgreSQL failures carry only the
+typed `STORE_SCHEMA_DRIFT` code. Autocommit refuses before mutation. Startup
+continues to use a fresh connection. `apply_schema` owns and finishes the caller's
+transaction, including an implicit read transaction, as it did before; call it
+before business writes. There is no new pre-commit. Repeat startup does not
+update existing history timestamps or business records.
+
+Checksums detect declared migration/history disagreement, not arbitrary DBA
+changes to both schema and metadata. Migrations must be transactional SQL with
+no transaction-control statements or external effects. Future migrations must
+preserve existing data and pass the populated-database tests. No automatic
+downgrade exists. See [the backup/restore procedure](MIGRATIONS.md).
+
 ## 2026-09-10 §21 — PDF text is extracted with `pdfminer.six`
 
 `pdfminer.six==20260107`, the second runtime dependency. It is what turns a real
