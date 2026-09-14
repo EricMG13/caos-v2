@@ -61,6 +61,9 @@ services:
 
   # The deterministic journey provider (decision 10). `./tests` is read-only
   # and never in the image; the same blob volume as `api`, the image's own uid.
+  # Mounted at /app/tests, not /opt/caos-tests as the brief's decision 10 says:
+  # `tests/canonical_fixtures.py` finds `vendor/deploy-v` as its parent's
+  # sibling, and the image keeps `vendor/` under /app.
   journey-worker:
     image: ${IMAGE:-caos-workbench:local}
     command: ["python", "-m", "journey.worker"]
@@ -73,13 +76,17 @@ services:
     environment:
       CAOS_DATABASE_URL: postgresql://caos_smoke:local-smoke-only@smoke-postgres:5432/caos_smoke
       CAOS_BLOB_ROOT: /blobs
-      PYTHONPATH: /opt/caos-tests:/app
+      PYTHONPATH: /app/tests:/app
       JOURNEY_EXIT_AFTER_FIRST_ACCEPT: ${JOURNEY_EXIT_AFTER_FIRST_ACCEPT:-}
-      JOURNEY_STATE_DIR: /journey-state
+      # The exit-once marker lives in the blob volume: the image created
+      # /blobs as uid 10001, so a fresh named volume there is writable and
+      # survives `restart`. A host bind mount is not -- Docker Desktop's
+      # file sharing presents it as root:root 0755 whatever the host mode.
+      # Nothing lists the blob root, and the name is no sha256 address.
+      JOURNEY_STATE_DIR: /blobs
     volumes:
       - smoke-blobs:/blobs
-      - ./tests:/opt/caos-tests:ro
-      - ${JOURNEY_STATE_DIR:-/tmp}:/journey-state
+      - ./tests:/app/tests:ro
 
 volumes:
   smoke-blobs:
