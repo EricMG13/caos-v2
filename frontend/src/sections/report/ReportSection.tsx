@@ -22,6 +22,12 @@ function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][
         </dl>
         <pre>{artifact.markdown}</pre>
         <pre>{artifact.record}</pre>
+        <div className="note" data-report-limitations>
+          <b>Limitations.</b> {artifact.limitation_flags.join(", ") || "none"}
+        </div>
+        <div className="note" data-report-warnings>
+          <b>Validation warnings.</b> {artifact.validation_warnings.join(", ") || "none"}
+        </div>
       </div>
     </section>
   );

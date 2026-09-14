@@ -31,6 +31,12 @@ describe("Report v1", () => {
       root.querySelector("img, script, a, button, input, textarea, [contenteditable]"),
     ).toBeNull();
     expect(root).toHaveTextContent(document.body.artifacts[0]!.record);
+    expect(root.querySelector("[data-report-limitations]")).toHaveTextContent(
+      document.body.artifacts[0]!.limitation_flags[0]!,
+    );
+    expect(root.querySelector("[data-report-warnings]")).toHaveTextContent(
+      document.body.artifacts[0]!.validation_warnings[0]!,
+    );
     expect(root).toHaveTextContent(document.body.narrative[0]![1]!.figure!.matched_text);
     expect(root.querySelectorAll("[data-report-artifact]")).toHaveLength(
       document.body.artifacts.length,
