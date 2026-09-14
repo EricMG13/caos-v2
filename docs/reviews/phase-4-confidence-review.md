@@ -107,5 +107,11 @@
 ## Remediation
 
 `b8d905f`: the worker parks an unexpected fault `INTERNAL_FAULT`, with its RED
-test. Re-verified with `tests/test_worker.py`, `tests/test_postgres_races.py`,
-ruff, mypy and `check_tested`, then the backend wave gate.
+test. The first backend gate after it then failed once on
+`test_store_unavailable_backs_off_without_holding_a_claim`: `pause_seconds`
+summed `0.8 + 400 / 1000` to `1.2000000000000002`, so one jitter draw in 401
+overshot the +20% bound (pre-existing, not caused by the fix). `9e6247f`
+computes the jitter in integer thousandths and pins both bounds with
+`test_the_widest_jitter_stays_within_twenty_percent`. Re-verified with
+`tests/test_worker.py`, `tests/test_postgres_races.py`, ruff, mypy and
+`check_tested`, then the backend wave gate.
