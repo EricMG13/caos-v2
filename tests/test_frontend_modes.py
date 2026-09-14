@@ -172,6 +172,24 @@ def test_size_gate_main_is_measured_in_process(
         check_pr_size.changed_lines(base)
 
 
+def test_size_gate_refuses_a_base_git_could_read_as_an_option(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A base starting with "-" is argument injection, not shell injection:
+    the argv list already stops shell metacharacters, but git itself would
+    still read `--upload-pack=...` as an option rather than a revision."""
+    repo, _base = _size_repo(tmp_path, 1)
+    monkeypatch.chdir(repo)
+    with pytest.raises(ValueError, match="not a plain git revision"):
+        check_pr_size.changed_lines("--evil")
+
+    monkeypatch.setattr(sys, "argv", ["check_pr_size.py", "--evil"])
+    assert check_pr_size.main() == 2
+    assert "--evil" in capsys.readouterr().err
+
+
 def test_size_gate_rejects_over_limit_and_invalid_base(tmp_path: Path) -> None:
     repo, base = _size_repo(tmp_path, 801)
 
