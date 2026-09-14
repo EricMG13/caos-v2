@@ -15,6 +15,8 @@ import {
   parse,
   parseAnalysisDocument,
   parseModelDocument,
+  parseReportDocument,
+  parseCommitteeDocument,
   parseCaseCreated,
   parseDirectoryDocument,
   parseGateApproved,
@@ -39,6 +41,69 @@ const OTHER_RUN = "11111111-2222-4333-8444-555555555555";
 const AT = "2026-09-14T10:00:00.123456Z";
 const SHA = "a".repeat(64);
 const SOURCE = "216ec234-c70c-4a5f-8ae6-f4a0262bbe84";
+
+test("Report and Committee bind case/run/revision and exact receipt identity", () => {
+  const body = {
+    case_id: CASE,
+    displayed_run_id: RUN,
+    revision_id: SOURCE,
+    payload_sha256: SHA,
+    case_title: "Issuer",
+    artifacts: [],
+    narrative: [[{ text: "<script>plain text</script>", figure: null }]],
+  };
+  const expected = { caseId: CASE, runId: RUN, revisionId: SOURCE };
+  const report = parseReportDocument(envelope(body, { case_id: CASE, title: "Issuer" }));
+  expect(report.body.narrative).toEqual(body.narrative);
+  const filed = {
+    ...body,
+    state: "filed",
+    signed_by: [CASE],
+    frozen_by: RUN,
+    filed_by: SOURCE,
+    receipt: {
+      case_id: CASE,
+      run_id: RUN,
+      revision_id: SOURCE,
+      payload_sha256: SHA,
+      signed_by: CASE,
+      frozen_by: RUN,
+      filed_by: SOURCE,
+      renderer_sha256: SHA,
+      filed_event_sha256: SHA,
+    },
+  };
+  const committee = parseCommitteeDocument(envelope(filed, { case_id: CASE, title: "Issuer" }));
+  for (const doc of [report, committee]) {
+    expect(() => requireIdentity(doc, expected)).not.toThrow();
+    for (const changed of [
+      { caseId: OTHER_CASE },
+      { runId: OTHER_RUN },
+      { revisionId: OTHER_RUN },
+    ]) {
+      expect(() => requireIdentity(doc, { ...expected, ...changed })).toThrow(WireIdentityError);
+    }
+  }
+  const wrong = parseCommitteeDocument(
+    envelope(
+      { ...filed, receipt: { ...filed.receipt, revision_id: OTHER_RUN } },
+      { case_id: CASE, title: "Issuer" },
+    ),
+  );
+  expect(() => requireIdentity(wrong, expected)).toThrow(WireIdentityError);
+  expect(() =>
+    parseReportDocument(envelope({ ...body, html: "unsafe" }, { case_id: CASE, title: "Issuer" })),
+  ).toThrow(WireShapeError);
+  expect(() =>
+    parse(V1_SHAPES.NarrativeFigure, {
+      route_node_id: "CP-0",
+      citation_index: -1,
+      document_sha256: SHA,
+      page: 1,
+      matched_text: "figure",
+    }),
+  ).toThrow(WireShapeError);
+});
 
 test("Model is closed and binds the displayed run independently of latest", () => {
   const document = {
