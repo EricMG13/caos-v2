@@ -199,6 +199,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and in unit tests, not in the workbench. *Upgrade:* correct the clearance
   text, and fixture actions when a workbench spec needs an available control.
 
+- **An evidence page holds a read transaction while its frame is extracted.**
+  `read_evidence_page` reads standing and the page's lines, then
+  `server/evidence/page.py` reads the whole document blob and, for a PDF, runs
+  the §47 child for its frame, under the admission deadline (60 s) and decoded
+  budget -- all with the request's read transaction open and its unpooled
+  connection held. Each request pays an interpreter start and a full blob read,
+  and nothing caches a frame, so a reader paging a large PDF repeats both.
+  *Upgrade:* a frame stored at admission beside the extraction, or a cache
+  keyed by `(document_sha256, extractor identity, page)`, and the transaction
+  closed before the child, the day page latency is measured.
+- **The demonstration event stream keeps one process-wide frame counter.**
+  `frontend/vite.config.ts`'s fixture stream advances a single `runFrame`
+  (and `staleAdvanced`) for the whole dev server, reset when a fresh stream
+  opens, so two tabs or two concurrent workbench specs tailing it move each
+  other's Run document. The evidence workbench specs refuse the demo stream
+  for that reason. Demo mode only; the real stream has no shared state.
+  *Upgrade:* per-stream frames the day a spec needs two tails at once.
+
 **Repair Phase 3.**
 
 - **A letter-spaced heading cannot be quoted as a word.** (a) ~~The PDF
@@ -762,41 +780,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
-- **The real workspace reads the v1 section routes, but events, evidence pages
-  and commands are not wired yet.** Phase 4 Task 4.1 (§50) closed the reads:
-  Directory, Upload, Run and Analysis are served at `/api/v1/…`, validated whole
-  in the browser and bound to their case and run, with one `{code, clears}`
-  refusal body; the other five sections are unavailable. Phase 4 Task 4.2
-  (§51) closed the governed writes the journey needs: create case, admit
-  sources, create run, pin input, preview and approve both gates, start, retry
-  and cancel, each rendered from the server's `chrome.actions`. Withdraw, sign,
-  freeze, file and membership grants still have no route. What follows is the
-  entry as it stood, kept for the parts still open — the event vocabulary
-  (Task 4.4) and evidence pages (4.4):
-  **The real workspace is not yet wired to backend section routes.**
-  `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
-  section document and `sse.ts` tails `/api/events` for six lower-case event
-  names, while `server/api/app.py` serves `/api/runs/{id}` and its
-  `/events`, whose stream carries `RunEvent` names (`ROUTE_PINNED` …
-  `RUN_FAILED`). The refusal bodies differ as well: the client reads
-  `{code, clears}` and the server sends `{refusal}`, so a real server refusal
-  is classed `RESPONSE_INVALID`. Ordinary development and production preview
-  now use the real API path and fail visibly; only the explicitly labelled
-  read-only demo serves fixtures. No governed write — commit,
-  withdraw, pin, approve, accept, sign, freeze, file — has a route. A control
-  refused for want of one now says so (`READ_ONLY_API`) instead of naming a
-  build phase that had already exited; a control refused for a domain reason —
-  `APPROVER_NOT_INDEPENDENT`, `RUN_NOT_TERMINAL` — still gives that reason,
-  which is the one its route will owe, although meeting it opens no route
-  today. The fixtures are the contract those routes owe, including two fields
-  the workspace now reads: `withdrawn_at` on a citation of a withdrawn source,
-  and `tab` on a ribbon action that opens one of the section's own tabs. This
-  entry was missing — the gap was found by driving every user story
-  (`docs/feature-status.csv`), not by the ledger.
-  *Upgrade:* a named model per section document behind `/api/sections/<s>`,
-  one event vocabulary chosen for both halves, and a refusal body that carries
-  what clears it; then a write route per governed action over the store call
-  that already exists.
+- ~~**The real workspace reads the v1 section routes, but events, evidence
+  pages and commands are not wired yet.**~~ Closed by Phase 4: Task 4.1 (§50)
+  served Directory, Upload, Run and Analysis at `/api/v1/…` with one `{code,
+  clears}` refusal body; Task 4.2 (§51) the governed writes the journey needs;
+  Task 4.4 (§52) one name-only case stream whose names the browser refetches
+  by, and an authorized evidence page. Withdraw, sign, freeze, file and
+  membership grants still have no route, and Book, Model, Report, Committee
+  and Admin stay unavailable.
 
 **Phase 8.**
 
@@ -846,7 +837,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 - **Identity before the store rests on parameter order.** Every section read
   (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
-  `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
+  `read_case_events` declare `actor: Caller` ahead of `conn: Store`, and that is
   the whole of what refuses an anonymous request before a connection is opened:
   FastAPI builds a route's dependency list in signature order (`get_dependant`)
   and solves it sequentially (`solve_dependencies`), so the ordering is a
@@ -857,13 +848,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
   inserts at the front of the list whatever the parameters say; worth taking the
   day a third route arrives and the order has to be remembered three times.
-- **A run tail polls.** `server/api/app.py` re-reads `run_events` every
-  `POLL_INTERVAL` until the run is terminal, standing is lost, or
-  `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
-  watcher still costs `EVENTS_IO_BUDGET` queries every half second — six a
-  second, per open connection. *Upgrade:* `LISTEN`/`NOTIFY` on the event append,
-  making the poll a fallback rather than the mechanism; worth doing when there
-  are enough concurrent watchers to measure it, not before.
+- **A case stream polls.** `server/api/stream.py`'s `case_tail` re-reads the
+  case's audit actions, the run's events and the caller's standing every
+  `POLL_INTERVAL` (0.5 s) until `TAIL_DEADLINE` (300 s) or standing is lost,
+  on one store connection held for the stream's life. Every §9 rule holds and
+  events are timely, but an idle watcher costs three queries a poll -- six a
+  second -- while its run is open, and two a poll once the run's terminal is
+  delivered, per open connection, with one more standing check per named
+  frame. *Upgrade:* `LISTEN`/`NOTIFY` on the event and audit appends, making
+  the poll a fallback rather than the mechanism; worth doing when there are
+  enough concurrent watchers to measure it, not before.
 - **The role an actor carries is global, and nothing reads it.**
   `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
   asserts, which is what the actor matrix is about; but every authority decision

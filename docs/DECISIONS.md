@@ -1630,3 +1630,75 @@ store pins could not share a transaction with an audit event or a receipt, and
 stood. A key per intent is what makes a retried request after a lost
 acknowledgement safe to send, and recording only committed successes means a
 refusal never has to be un-remembered.
+
+## 2026-09-14 §52 — One name-only case stream, and evidence pages from the token index
+
+**Decision.** Phase 4 Task 4.4 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.4-brief.md`):
+
+1. **One stream per case.** `GET /api/v1/cases/{case_id}/events?run=` needs
+   READER standing (else the private 404; a run of another case is
+   `RUN_NOT_FOUND`) and carries the case's audit actions plus the named run's
+   `run_events`. `/api/runs/{run_id}/events` is retired. Directory opens no
+   stream.
+2. **Closed names, no payloads.** `EventName` is `run_progress`,
+   `handoff_accepted`, `run_terminal`, `sources_changed` and `runs_changed`
+   (`server/api/events.py` `STREAM_NAMES`). Admission and withdrawal are
+   `sources_changed`; create run, pin input, both gate releases, start, retry
+   and cancel are `runs_changed`; `CASE_CREATED`, `OPINION_SIGNED`,
+   `DELIVERABLE_FROZEN` and `DELIVERABLE_FILED` are silent. A test fails a
+   `RunEvent` or audit action that is neither named nor declared silent. The
+   browser's `REFETCHES` table says which sections each name refetches;
+   revocation has no name.
+3. **Composite cursor.** Each frame is `id: {audit_seq}.{run_seq}`, `event:
+   {name}`, `data: {}`; the first frame is the cursor alone, at the heads. A
+   `Last-Event-ID` that is missing, not ASCII digits in that shape, longer than
+   sixteen digits a half, or ahead of the heads resumes from the heads, and
+   delivery is strictly after the marker. Silent rows advance the cursor.
+4. **Lifetime.** Standing is rechecked before each named frame and on each
+   poll; losing it closes the stream, and the reconnect's 404 closes the
+   browser's `EventSource`. Once the run's terminal event is delivered, or the
+   marker is past it, `run_events` is not read again (F16). The stream closes
+   at `TAIL_DEADLINE` (300 s) and the browser reconnects with its marker.
+5. **Refetch.** One fetch per section in flight; a name arriving mid-flight
+   causes exactly one more. A case or run change closes the tail, aborts the
+   fetch and discards any late answer. A refetch under the same analytical
+   identity (Run: the shown run; Analysis: the displayed run and its sorted
+   `record_sha256`s) replaces the view; another identity is held as pending
+   until Reload, while withdrawals from the latest document still mark the
+   shown one. The view mounts under `case|displayedRun`, so a refresh keeps
+   selection, and a section that throws renders `RENDER_FAILED`.
+6. **A closed stream refetches.** `EventSource` cannot tell a refusal from a
+   connection that never opened (Firefox closes both), so a closed tail
+   triggers a document read, and that answer decides: 404 is unavailable, no
+   connection is offline. Every reopen refetches the visible documents.
+7. **Evidence pages.**
+   `GET /api/v1/cases/{case}/runs/{run}/sources/{source}/pages/{page}` checks
+   identity, READER standing, then the run's case, and serves a source only
+   while it is live and a member of the run's pinned source-set version with
+   matching document, extractor identity and output digests. Anything else --
+   a page outside 1..500, a malformed source id, a withdrawn or re-extracted
+   source, bytes that no longer hash to the pin, a child that refuses -- is one
+   404 `PAGE_NOT_AVAILABLE` with no text. It is a new code because
+   `EVIDENCE_NOT_AVAILABLE` is a command's 409 (§51.5). Responses are
+   `no-store`.
+8. **A text layer, not a rendering.** The page is its `source_tokens` grouped
+   by `(region_id, line_id)` into joined text and union rectangles in stored
+   coordinates, at most 2,000 lines (else `partial`, `LIST_TRUNCATED`). The
+   frame follows the stored identity: `caos.pdfminer` v2 is the crop with y
+   down, v1 the layout crop with y up (§44.4), `caos.plain-text` its recorded
+   cells; PDF frames come from the §47 child under the admission deadline and
+   decoded-byte budget. The browser places lines and citation rectangles with
+   one `toFraction`, draws no rectangle outside the frame and says how many it
+   did not draw. The drawer is labelled "Text layer from the token index".
+9. **The drawer is bound to the visible snapshot.** It holds a citation's
+   identity `(record_sha256, source_id, page, index)` and the snapshot key it
+   was opened on, and re-resolves both each render: another key or a citation
+   no longer present closes it; a withdrawal shows in it; a pending document
+   the user has not reloaded never reaches it.
+
+**Why.** REPAIR_PLAN Phase 4 work items 1, 5 and 6. Withdrawal is an audit
+action, which a run tail never read, so a stream per case is the one that can
+say it. A payload would be a second copy of state the client is about to fetch
+under its own authority check. A page renderer would put an untrusted-PDF
+parser with its own CVE stream on a request path; the token index is the
+coordinate space citations were anchored in (invariant 11).
