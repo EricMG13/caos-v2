@@ -173,6 +173,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Repair Phase 3.**
 
+- **The PDF extractor's identity no longer predicts its output for positioned
+  text, and a letter-spaced heading cannot be quoted as a word.** (a) Slice
+  3.2c changed `_runs` to follow pdfminer's own `word_margin` word-break rule
+  (§44.5) instead of a custom heuristic, so `caos.pdfminer` v1 -- the identity
+  `PdfExtractor.identity` still reports -- no longer predicts the tokens a
+  positioned-text page produces from its `laparams`; stored rows are
+  unaffected, since nothing re-extracts an already-admitted document.
+  *Upgrade:* slice 3.2d bumps the identity to v2 the day a caller needs the
+  old and new behavior distinguishable. (b) The same rule means glyphs spread
+  by `Tc` character tracking beyond `word_margin` -- a heading tracked for
+  display rather than readability -- split into single-letter tokens, so the
+  word cannot be quoted as itself; `test_tracked_glyphs_beyond_word_margin_split_into_letters`
+  pins it. *Upgrade:* quote normalisation, Phase 5.
 - **Two vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
   vendor ships no code for `semantic_rules` or `document_substrings_casefold`.

@@ -104,8 +104,7 @@ def tracked_pdf(word: str, tc: float) -> bytes:
     """One word, drawn glyph by glyph with `Tc` character-tracking spacing
     applied between every pair -- no `TJ` offsets, no drawn spaces."""
     content = (
-        f"BT\n/F1 12 Tf\n1 0 0 1 {LEFT_MARGIN:.0f} 700 Tm\n"
-        f"{tc} Tc\n({word}) Tj\nET\n"
+        f"BT\n/F1 12 Tf\n1 0 0 1 {LEFT_MARGIN:.0f} 700 Tm\n{tc} Tc\n({word}) Tj\nET\n"
     ).encode("ascii")
     return raw_pdf(content)
 
@@ -264,7 +263,9 @@ def test_words_separated_by_positioning_are_separate_tokens() -> None:
 
 
 def test_tracked_glyphs_within_word_margin_form_one_token() -> None:
-    """`Tc` character tracking spreads every glyph of a word, including the
+    """Guard, not a failing-first RED: this passed before 83fe083 too.
+
+    `Tc` character tracking spreads every glyph of a word, including the
     ones inside it -- a real PDF a designer tracked for readability. The gaps
     it introduces stay under pdfminer's `word_margin` threshold, so pdfminer
     inserts no word break and the word is still one token."""
@@ -272,6 +273,17 @@ def test_tracked_glyphs_within_word_margin_form_one_token() -> None:
 
     assert len(tokens) == 1
     assert tokens[0].text == "Hello"
+
+
+def test_tracked_glyphs_beyond_word_margin_split_into_letters() -> None:
+    """`§44.5`: widen the same `Tc` tracking past pdfminer's `word_margin`
+    threshold and the glyph-merging rule that keeps a tracked word as one
+    token (above) flips -- pdfminer inserts a virtual word break between every
+    pair, so a heading tracked for display, not readability, comes back as one
+    token per letter rather than one token for the word."""
+    tokens = PdfExtractor().extract(tracked_pdf("Hello", 3))
+
+    assert [token.text for token in tokens] == ["H", "e", "l", "l", "o"]
 
 
 def test_widely_spaced_glyphs_refuse_the_joined_quote(
@@ -297,13 +309,20 @@ RIGHT_COLUMN = ["South region held steady margins", "through the same period ins
 def test_a_quote_wrapping_within_a_column_gets_one_rectangle_per_line(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
-    """Two independent columns on the page, and the quote still wraps cleanly
+    """Guard, not a failing-first RED: this passed before 83fe083 too.
+
+    Two independent columns on the page, and the quote still wraps cleanly
     within the one it lives in -- the region grouping that makes a column a
     column is what lets a quote cross a line inside it at all."""
     conn, case_id = case
-    source_id = _ingest_pdf(
-        conn, case_id, tmp_path, two_column_pdf(LEFT_COLUMN, RIGHT_COLUMN)
-    )
+    two_column_bytes = two_column_pdf(LEFT_COLUMN, RIGHT_COLUMN)
+    source_id = _ingest_pdf(conn, case_id, tmp_path, two_column_bytes)
+
+    tokens = PdfExtractor().extract(two_column_bytes)
+    left_tokens = [token for token in tokens if token.text == "North"]
+    right_tokens = [token for token in tokens if token.text == "South"]
+    assert left_tokens and left_tokens[0].region_id == 0
+    assert right_tokens and right_tokens[0].region_id == 1
 
     boxes = anchor_citation(
         conn, source_id=source_id, page=1, matched_text="growth in the fourth"
@@ -311,19 +330,28 @@ def test_a_quote_wrapping_within_a_column_gets_one_rectangle_per_line(
 
     assert len(boxes) == 2
     assert boxes[0].y0 != boxes[1].y0
+    # Both rectangles stay inside the left column, well short of the gutter.
+    assert boxes[0].x1 < COLUMN_X and boxes[1].x1 < COLUMN_X
 
 
 def test_a_quote_across_the_column_gutter_is_not_located(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
-    """`alone` ends the left column's second line and `South` opens the right
-    column's first -- adjacent in the token stream, on the same row of the
-    page, and never a phrase: they are two regions, and invariant 11 never
-    assembles a quote across that gutter."""
+    """Guard, not a failing-first RED: this passed before 83fe083 too.
+
+    `alone` ends the left column's second line (y≈682) and `South` opens the
+    right column's first (y≈698) -- adjacent in the token stream, but not on
+    the same row of the page, and never a phrase: they are two regions, and
+    invariant 11 never assembles a quote across that gutter."""
     conn, case_id = case
-    source_id = _ingest_pdf(
-        conn, case_id, tmp_path, two_column_pdf(LEFT_COLUMN, RIGHT_COLUMN)
-    )
+    two_column_bytes = two_column_pdf(LEFT_COLUMN, RIGHT_COLUMN)
+    source_id = _ingest_pdf(conn, case_id, tmp_path, two_column_bytes)
+
+    tokens = PdfExtractor().extract(two_column_bytes)
+    left_tokens = [token for token in tokens if token.text == "alone"]
+    right_tokens = [token for token in tokens if token.text == "South"]
+    assert left_tokens and left_tokens[0].region_id == 0
+    assert right_tokens and right_tokens[0].region_id == 1
 
     with pytest.raises(Refusal) as caught:
         anchor_citation(conn, source_id=source_id, page=1, matched_text="alone South")
@@ -334,7 +362,9 @@ def test_a_quote_across_the_column_gutter_is_not_located(
 def test_a_quote_repeated_on_the_page_is_ambiguous(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
-    """Ambiguity is counted over the whole page (§44.5): the same sentence
+    """Guard, not a failing-first RED: this passed before 83fe083 too.
+
+    Ambiguity is counted over the whole page (§44.5): the same sentence
     drawn twice gives the host two equally good matches and no way to choose
     between them, so it refuses rather than silently picking the first."""
     conn, case_id = case
