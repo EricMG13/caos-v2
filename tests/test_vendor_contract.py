@@ -3,13 +3,18 @@ interpreter's import state (Phase 3 Task 3.1, brief correction 4)."""
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 import pytest
 
 from server.methodology.bundle import Bundle
-from server.methodology.vendor import load_vendor_contract
+from server.methodology.vendor import (
+    VendorContract,
+    authority_bundle_sha256,
+    load_vendor_contract,
+)
 from server.refusals import Refusal, RefusalCode
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
@@ -35,6 +40,7 @@ def test_vendor_loader_leaves_sys_path_untouched() -> None:
     before = _import_state()
     contract = load_vendor_contract(Bundle(VENDORED))
     assert _import_state() == before
+    assert isinstance(contract, VendorContract)
     # Standard-library imports the vendor code makes are ordinary; no vendor
     # module, generic or privately named, is left registered.
     assert not any(
@@ -44,6 +50,27 @@ def test_vendor_loader_leaves_sys_path_untouched() -> None:
     assert not list(VENDORED.rglob("__pycache__"))
     # The loaded code is the vendor's: its validator rejects an empty handoff.
     assert contract.validate_handoff.validate_text("", filename="x.md").exit_code != 0
+
+
+def test_authority_bundle_sha256_reads_the_vendor_declared_digest() -> None:
+    digest = authority_bundle_sha256(Bundle(VENDORED))
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+
+
+def test_authority_bundle_sha256_refuses_undeclared_or_malformed_digests(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    root = tmp_path / "bundle"
+    shutil.copytree(VENDORED, root)
+    anchor = (
+        root / "skills/cp-os-credit-os/references/CREDIT_OS_V_AUTHORITY_BUNDLE_v2.json"
+    )
+    anchor.write_text("{}")
+    with pytest.raises(Refusal) as refused:
+        authority_bundle_sha256(Bundle(root))
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
 
 
 def test_vendor_code_that_moved_refuses(tmp_path: Path) -> None:
