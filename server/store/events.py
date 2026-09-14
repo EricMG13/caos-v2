@@ -21,6 +21,7 @@ from uuid import UUID
 
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
+from server.store.cases import lock_case
 
 
 class RunEvent(StrEnum):
@@ -45,17 +46,17 @@ class Event:
 
 
 def lock_run(conn: StoreConnection, run_id: UUID) -> RunStatus:
-    """Take the run row lock and return the status held under it.
+    """Lock the immutable owner case, then the run; caller owns commit.
 
-    Every ordering guarantee in this module is this lock. Re-taking it inside one
-    transaction is free, so callers that already hold it lose nothing by the
-    functions below taking it again.
-
-    The status comes back from the same statement rather than a second `SELECT`:
-    a caller that locks in order to decide on the status would otherwise pay two
-    round trips for one answer, and excessive I/O is the largest measured
-    multiple in `docs/AI_CODE_QUALITY.md` section 1.
+    Read status in a new statement after waiting for the case, so a transition
+    committed during the wait is visible under READ COMMITTED.
     """
+    owner = conn.execute(
+        "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
+    ).fetchone()
+    if owner is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    lock_case(conn, UUID(str(owner[0])), missing=RefusalCode.RUN_NOT_FOUND)
     row = conn.execute(
         "SELECT status FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
     ).fetchone()

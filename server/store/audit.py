@@ -12,7 +12,7 @@ and its audit event in one transaction, or neither. The caller's write runs
 inside this function's transaction for exactly that reason: it cannot commit on
 its own, so it cannot land without its event.
 
-`audit_events` is hash-chained per case under an `audit_chain_heads` lock row.
+`audit_events` is hash-chained per case under the existing case row lock.
 The chain has no external anchor, so what it gives is *detection*: an entry
 edited in place no longer hashes to what the next one says came before it, and a
 retained package's head no longer matches the live one.
@@ -28,8 +28,11 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
+import psycopg
+
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, rollback_or_close
+from server.store.cases import lock_case
 from server.store.members import Standing, satisfies, standing_of
 
 # The first entry's predecessor. A fixed, obviously-not-a-hash value, so the
@@ -71,50 +74,53 @@ def governed_write(
     `write` receives this transaction and must not commit: the whole point is
     that its state and this function's audit event are one commit or none.
     """
-    previous, seq = _lock_head(conn, action.case_id)
-
-    # Inside the transaction that will commit, not at the request that started
-    # it. This is the line SYSTEM_SPEC.md section 8 is about.
-    if not satisfies(
-        standing_of(conn, case_id=action.case_id, user_id=action.actor_id),
-        action.requires,
-    ):
-        conn.rollback()
-        raise Refusal(RefusalCode.NOT_AUTHORISED)
-
     try:
+        lock_case(conn, action.case_id, missing=RefusalCode.NOT_AUTHORISED)
+        previous, seq = _lock_head(conn, action.case_id)
+        _require_standing(conn, action)
         write(conn)
+        payload_sha256 = _digest_of(action.payload)
+        entry_sha256 = _link(action, seq, previous, payload_sha256)
+        conn.execute(
+            "INSERT INTO audit_events (case_id, seq, actor_id, action, payload_sha256,"
+            " previous_sha256, entry_sha256) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (
+                action.case_id,
+                seq,
+                action.actor_id,
+                action.action,
+                payload_sha256,
+                previous,
+                entry_sha256,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO audit_chain_heads (case_id, seq, head_sha256)"
+            " VALUES (%s, %s, %s) ON CONFLICT (case_id) DO UPDATE"
+            " SET seq = EXCLUDED.seq, head_sha256 = EXCLUDED.head_sha256",
+            (action.case_id, seq, entry_sha256),
+        )
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     except BaseException:
         # Any failure at all, cancellation included. Letting this propagate with
         # the transaction still open leaves the state `write` managed to make
         # sitting in it, ready to be committed by whatever the caller does next
         # -- state that landed without the event recording it, which is the one
         # thing transactional pairing exists to prevent.
-        conn.rollback()
+        rollback_or_close(conn)
         raise
 
-    payload_sha256 = _digest_of(action.payload)
-    entry_sha256 = _link(action, seq, previous, payload_sha256)
-    conn.execute(
-        "INSERT INTO audit_events (case_id, seq, actor_id, action, payload_sha256,"
-        " previous_sha256, entry_sha256) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (
-            action.case_id,
-            seq,
-            action.actor_id,
-            action.action,
-            payload_sha256,
-            previous,
-            entry_sha256,
-        ),
-    )
-    conn.execute(
-        "INSERT INTO audit_chain_heads (case_id, seq, head_sha256)"
-        " VALUES (%s, %s, %s) ON CONFLICT (case_id) DO UPDATE"
-        " SET seq = EXCLUDED.seq, head_sha256 = EXCLUDED.head_sha256",
-        (action.case_id, seq, entry_sha256),
-    )
-    conn.commit()
+
+def _require_standing(conn: StoreConnection, action: GovernedAction) -> None:
+    """Read live authority only after the caller holds the case lock."""
+    if not satisfies(
+        standing_of(conn, case_id=action.case_id, user_id=action.actor_id),
+        action.requires,
+    ):
+        raise Refusal(RefusalCode.NOT_AUTHORISED)
 
 
 def audit_trail(conn: StoreConnection, case_id: UUID) -> list[AuditEntry]:
@@ -174,12 +180,7 @@ def verify_chain(conn: StoreConnection, case_id: UUID) -> bool:
 
 
 def _lock_head(conn: StoreConnection, case_id: UUID) -> tuple[str, int]:
-    """Take the case's chain lock and return (head, next seq).
-
-    `FOR UPDATE` on the head row is what serialises two governed writes to one
-    case: without it both read the same head and both chain onto it, and one of
-    the two entries is orphaned from the sequence it claims to extend.
-    """
+    """Read (head, next seq) after locking the case, including an absent head."""
     row = conn.execute(
         "SELECT head_sha256, seq FROM audit_chain_heads WHERE case_id = %s FOR UPDATE",
         (case_id,),

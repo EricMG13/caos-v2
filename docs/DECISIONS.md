@@ -841,6 +841,35 @@ unpinned OS upgrade changes unrelated runtime state. Four exact in-place
 security upgrades are the smallest reproducible repair until an official fixed
 base digest replaces them.
 
+## 2026-09-12 §32 — Existing case row orders all case mutations
+
+Case writes acquire the existing `cases` row before membership, run, audit or
+gate rows. This includes source admission after CPU extraction and packing,
+source withdrawal, grant/revoke, run creation, and run/route transitions through
+`lock_run`. An absent audit head cannot serialize first approvals. Standing is
+read after the case lock and retained through the governed commit, so revocation
+and governed writes have one observable commit order. The whole governed unit,
+including digest generation and audit/head insertion, rolls back on failure.
+
+Supported mutations require explicit transactions at READ COMMITTED. The lock
+helper checks the actual transaction isolation, including caller SQL settings;
+autocommit and other isolation levels refuse `STORE_NOT_TRANSACTIONAL`. A
+REPEATABLE READ snapshot taken before waiting could otherwise retain revoked
+standing even after obtaining an unchanged case row. No automatic retries are
+introduced. Existing implicit read transactions at READ COMMITTED remain valid.
+
+Grant/revoke, admission and run creation leave commit/rollback to their caller.
+Governed writes and existing run/route transitions complete their own units.
+Callers must follow this order for all case mutations and must finish a setup
+transaction before provider I/O. Runtime attempt creation and reservation each
+commit before the provider call. Governed callbacks must not commit or perform
+provider/network I/O. Source extraction occurs before taking the admission lock;
+a caller already holding a setup lock remains responsible for its transaction.
+
+**Ceiling.** Writes within one case serialize; different cases remain independent.
+Finer locks are warranted only by measured throughput, not speculative parallelism.
+No table, dependency, migration or global mutex is needed for this repair.
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a

@@ -55,6 +55,14 @@ def connect(url: str) -> StoreConnection:
     return psycopg.connect(url, autocommit=False)
 
 
+def rollback_or_close(conn: StoreConnection) -> None:
+    """A failed rollback must not mask the refusal or leave a committable unit."""
+    try:
+        conn.rollback()
+    except psycopg.Error:
+        conn.close()
+
+
 def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
     """Advance a verified migration prefix atomically, or refuse sanitized.
 
@@ -67,10 +75,10 @@ def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
         _migrate(conn, sql)
         conn.commit()
     except (Refusal, psycopg.Error):
-        conn.rollback()
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
     except BaseException:
-        conn.rollback()
+        rollback_or_close(conn)
         raise
 
 

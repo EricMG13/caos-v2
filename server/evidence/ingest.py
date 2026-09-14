@@ -20,6 +20,7 @@ from server.boundary_text import BoundaryText
 from server.evidence.extract import Extractor, PlainTextExtractor, Token
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.cases import lock_case
 
 # One block per line while small. `SYSTEM_SPEC.md` section 5 bounds line groups
 # once a document is not small; this build packs a line per block and the group
@@ -104,6 +105,7 @@ def admit_pack(
         for document, tokens in extracted
     ]
 
+    lock_case(conn, case_id)
     return [_admit_one(conn, blobs, case_id, one) for one in packed]
 
 

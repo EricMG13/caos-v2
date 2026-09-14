@@ -16,6 +16,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from server.store import StoreConnection
+from server.store.cases import lock_case
 
 
 class Standing(StrEnum):
@@ -41,7 +42,8 @@ _RANK = {
 def grant(
     conn: StoreConnection, *, case_id: UUID, user_id: UUID, standing: Standing
 ) -> None:
-    """Give a user standing on a case, or replace what they had."""
+    """Give or replace standing under the case lock; caller commits."""
+    lock_case(conn, case_id)
     conn.execute(
         "INSERT INTO case_members (case_id, user_id, standing)"
         " VALUES (%s, %s, %s)"
@@ -54,6 +56,7 @@ def grant(
 def revoke(conn: StoreConnection, *, case_id: UUID, user_id: UUID) -> None:
     """End a membership. The row stays: a run that already cited this actor's
     approval has to remain explicable."""
+    lock_case(conn, case_id)
     conn.execute(
         "UPDATE case_members SET revoked_at = now()"
         " WHERE case_id = %s AND user_id = %s AND revoked_at IS NULL",
