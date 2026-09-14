@@ -23,7 +23,7 @@ from uuid import UUID
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import verify_citations
-from server.evidence.read import Block, read_block
+from server.evidence.read import read_run_block
 from server.methodology import CLAIMS_ADAPTER_VERSION as CLAIMS_ADAPTER_VERSION
 from server.methodology.bundle import (
     Authority,
@@ -154,7 +154,6 @@ class Assignment:
     """What the host hands one module for one node of one run."""
 
     module_id: str
-    delivered: list[Delivery]
     run_id: UUID
     node: RouteNode
     route: ResolvedRoute
@@ -169,29 +168,31 @@ class Assignment:
     upstream: tuple[Upstream, ...] = ()
 
 
-def deliver(
-    conn: StoreConnection, deliveries: list[tuple[UUID, str]]
-) -> list[Delivery]:
-    """Read the blocks this node is to receive, through the evidence boundary.
+# Every block of the run's pinned source-set version, never the case's live set.
+_CAPTURED = (
+    "SELECT b.source_id, b.block_id FROM run_inputs i"
+    " JOIN source_set_members m"
+    " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
+    " JOIN source_blocks b ON b.source_id = m.source_id"
+    " WHERE i.run_id = %s ORDER BY b.source_id, b.block_id"
+)
 
-    Through the evidence boundary rather than around it: withdrawal is checked
-    live at every use (invariant 1), and a delivery assembled by a different
-    query would be the one path that skipped the check.
+
+def _delivered(conn: StoreConnection, run_id: UUID) -> list[Delivery]:
+    """Every captured block of the run, read through the run-bound reader.
+
+    Derived from the pin, never handed in: a block outside the captured set
+    cannot reach the prompt (invariant 1), and withdrawal is still checked live
+    by the reader at every use.
     """
-    return [
-        _delivery(
-            source_id,
-            block_id,
-            read_block(conn, source_id=source_id, block_id=block_id),
+    delivered = []
+    for source, block in conn.execute(_CAPTURED, (run_id,)).fetchall():
+        source_id = UUID(str(source))
+        read = read_run_block(
+            conn, run_id=run_id, source_id=source_id, block_id=str(block)
         )
-        for source_id, block_id in deliveries
-    ]
-
-
-def _delivery(source_id: UUID, block_id: str, block: Block) -> Delivery:
-    return Delivery(
-        source_id=source_id, block_id=block_id, page=block.page, text=block.text
-    )
+        delivered.append(Delivery(source_id, str(block), read.page, read.text))
+    return delivered
 
 
 def _upstream(upstream: Sequence[Upstream]) -> str:
@@ -257,7 +258,8 @@ def execute_module(
 
     Supplied run/node identity must match the actual attempt, and the complete
     current input, whole stored route, node and module must match the
-    assignment both before the call and again before analysis.
+    assignment both before the call and again before analysis. The evidence is
+    every captured block of the run, read in the same unit as that check.
     Billing commits before any analytical refusal and survives later cleanup.
 
     The order is the contract: authority is verified before the prompt is built,
@@ -267,18 +269,9 @@ def execute_module(
     happening before the artifact rather than after it -- and the envelope
     counts what it refused. An answer with no claim left is refused (§26).
 
-    `assignment` carries the module id, the delivered evidence, the gate
-    expectation and the upstream context as one thing rather than four loose
-    arguments, for the same reason `Execution` and `Accepted`
-    (`docs/DECISIONS.md` §25) are one thing each: a module id with no evidence
-    answers nothing, evidence with no module id has no authority to be read
-    against, and the gate expectation and the upstream context are each a fact
-    about *this* module-and-run pair, not independent inputs. Deciding what
-    they are belongs to `ModuleProvider.execute`, the caller that holds the
-    route -- this function only reads them off the assignment it was handed,
-    and hands `upstream` straight to the prompt: what keeps it from becoming
-    evidence is `verify_citations` refusing a quote that is not in
-    `assignment.delivered`, not anything this function does.
+    `upstream` goes straight to the prompt: what keeps it from becoming
+    evidence is `verify_citations` refusing a quote that is not in the
+    delivered evidence, not anything this function does.
     """
     with execution_reads(conn):
         check_call(
@@ -288,11 +281,12 @@ def execute_module(
             route_node_id=assignment.node.route_node_id,
         )
         _stored_identity(conn, assignment, bundle)
+        delivered = _delivered(conn, assignment.run_id)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_prompt(
         assignment.module_id,
         authority.files[SKILL],
-        assignment.delivered,
+        delivered,
         gate_expects=assignment.gate_expects,
         upstream=assignment.upstream,
     )
@@ -326,7 +320,7 @@ def execute_module(
             route_node_id=assignment.node.route_node_id,
         )
         _stored_identity(conn, assignment, bundle)
-        envelope = _envelope(conn, assignment, authority, completion.content)
+        envelope = _envelope(conn, assignment, delivered, authority, completion.content)
     return ModuleOutcome(
         envelope=envelope,
         charge=charge,
@@ -349,9 +343,13 @@ def _stored_identity(
 
 
 def _envelope(
-    conn: StoreConnection, assignment: Assignment, authority: Authority, content: str
+    conn: StoreConnection,
+    assignment: Assignment,
+    delivered: list[Delivery],
+    authority: Authority,
+    content: str,
 ) -> Envelope:
-    sources = {item.source_id for item in assignment.delivered}
+    sources = {item.source_id for item in delivered}
     # The map first: it is a pure read of the same body, and a map the host
     # cannot bound refuses this answer whatever the claims say. After the loop it
     # was reached only once every quote had been anchored against the token index

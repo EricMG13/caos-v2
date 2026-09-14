@@ -45,7 +45,6 @@ from server.methodology.executor import (
     Upstream,
     UpstreamClaim,
     build_prompt,
-    deliver,
     execute_module,
 )
 from server.methodology.runner import canonical
@@ -93,8 +92,8 @@ def bundle() -> Bundle:
 @pytest.fixture
 def admitted(
     case: tuple[StoreConnection, UUID], tmp_path: Path
-) -> tuple[StoreConnection, UUID, list[Delivery]]:
-    """A case with one source admitted and its blocks delivered to a node."""
+) -> tuple[StoreConnection, UUID]:
+    """A case with one source admitted; a run pinned after it delivers its blocks."""
     conn, case_id = case
     blobs = BlobStore(tmp_path / "blobs")
     [source_id] = admit_pack(
@@ -103,12 +102,7 @@ def admitted(
         case_id=case_id,
         documents=[Document(filename=BoundaryText.of("report.txt"), data=REPORT)],
     )
-    blocks = conn.execute(
-        "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
-        (source_id,),
-    ).fetchall()
-    delivered = deliver(conn, [(source_id, str(b[0])) for b in blocks])
-    return conn, source_id, delivered
+    return conn, source_id
 
 
 def _body(
@@ -136,7 +130,6 @@ def _body(
 
 def _attempt(
     conn: StoreConnection,
-    delivered: list[Delivery],
     module_id: str = "CP-1",
     *,
     gate_expects: frozenset[str] = frozenset(),
@@ -162,7 +155,6 @@ def _attempt(
         "attempt_id": attempt,
         "assignment": Assignment(
             module_id,
-            delivered,
             run,
             node,
             route,
@@ -184,16 +176,16 @@ def _catalog_route() -> ResolvedRoute:
 
 
 def test_the_envelope_carries_the_hosts_identity_not_the_modules(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """Invariant 3. The module is asked for CP-1 and the envelope says CP-1,
     whatever the module put in its own body."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=_Stub(_body(source_id)),
     )
 
@@ -206,17 +198,17 @@ def test_the_envelope_carries_the_hosts_identity_not_the_modules(
 
 
 def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """A `Claim` pairs the statement with what the *host* derived. The module
     sent a page and a phrase; what the claim holds is a document digest and a
     rectangle it never saw (invariant 11)."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=_Stub(_body(source_id)),
     )
 
@@ -229,18 +221,18 @@ def test_a_claim_carries_the_hosts_anchored_citations_not_the_modules(
 
 
 def test_the_outcome_keeps_the_charge_out_of_the_envelope(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """Two things, not one. The envelope is the module's output under invariant
     9; the charge is the provider's reported cost under invariant 8. Folding the
     charge into the envelope would put a figure inside a document the host
     claims to have derived from evidence."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=_Stub(_body(source_id)),
     )
 
@@ -273,12 +265,12 @@ def test_the_outcome_keeps_the_charge_out_of_the_envelope(
     ],
 )
 def test_executor_refuses_malformed_completion_facts(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]],
+    admitted: tuple[StoreConnection, UUID],
     bundle: Bundle,
     field: str,
     value: object,
 ) -> None:
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     class _Malformed(_Stub):
         def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
@@ -291,7 +283,7 @@ def test_executor_refuses_malformed_completion_facts(
         execute_module(
             conn,
             bundle,
-            **_attempt(conn, delivered),
+            **_attempt(conn),
             provider=_Malformed(_body(source_id)),
         )
     assert "private response text" not in repr(caught.value)
@@ -315,11 +307,11 @@ def test_executor_refuses_malformed_completion_facts(
 
 @pytest.mark.parametrize("charge", [Decimal("0"), Decimal("0.001")])
 def test_executor_captures_host_model_before_completion(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]],
+    admitted: tuple[StoreConnection, UUID],
     bundle: Bundle,
     charge: Decimal,
 ) -> None:
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     class _ChangesModel:
         reads = 0
@@ -342,7 +334,7 @@ def test_executor_captures_host_model_before_completion(
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=provider,
     )
     assert outcome.model == "a-model/for-the-test"
@@ -384,19 +376,19 @@ TWICE = "2026"
 
 @pytest.mark.parametrize("miss", [MISSING, TWICE])
 def test_a_quote_that_does_not_anchor_refuses_its_claim_not_the_answer(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle, miss: str
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle, miss: str
 ) -> None:
     """§26. Invariant 11 refuses the quote before it reaches the artifact, and
     the claim resting on it goes with it. The claims beside it that anchored
     are what the module established, and refusing them too turned one weak
     quote into a module that said nothing -- which is how a real issuer's
     CP-1 failed three times over sixteen citations, twelve of them good."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=_Stub(_claims(source_id, (GOOD,), (miss,))),
     )
 
@@ -406,16 +398,16 @@ def test_a_quote_that_does_not_anchor_refuses_its_claim_not_the_answer(
 
 
 def test_a_claim_survives_only_when_every_citation_anchors(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """A figure keeps all of its evidence or none of it: a claim resting on two
     quotes where one is missing would reach the page half-supported."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=_Stub(_claims(source_id, (GOOD, MISSING), (GOOD,))),
     )
 
@@ -424,12 +416,12 @@ def test_a_claim_survives_only_when_every_citation_anchors(
 
 
 def test_a_statement_the_boundary_refuses_still_refuses_the_answer(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """Only a quote that fails to anchor costs just its claim. A statement
     carrying a bidirectional override is the module breaking the contract, not
     missing a quote, and it refuses the whole answer as it always did."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
     body = json.loads(_claims(source_id, (GOOD,), (GOOD,)))
     body["claims"][1]["statement"] = "Leverage is \u202efine."
 
@@ -437,7 +429,7 @@ def test_a_statement_the_boundary_refuses_still_refuses_the_answer(
         execute_module(
             conn,
             bundle,
-            **_attempt(conn, delivered),
+            **_attempt(conn),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -445,16 +437,16 @@ def test_a_statement_the_boundary_refuses_still_refuses_the_answer(
 
 
 def test_the_stored_artifact_counts_the_claims_it_refused(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """The count travels in the bytes that are content-addressed, so a reader
     holding only the artifact can see the module said more than it kept."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=_Stub(_claims(source_id, (GOOD,), (MISSING,))),
     )
 
@@ -462,18 +454,18 @@ def test_the_stored_artifact_counts_the_claims_it_refused(
 
 
 def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """Invariant 11, before the artifact. The module quoted something plausible
     that is not in the evidence, and with its only claim refused there is no
     answer left: no envelope exists, and the refusal is the quote's (§26)."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
 
     with pytest.raises(Refusal) as caught:
         execute_module(
             conn,
             bundle,
-            **_attempt(conn, delivered),
+            **_attempt(conn),
             provider=_Stub(_body(source_id, quote="Total debt was USD 2,000.0m")),
         )
 
@@ -481,15 +473,15 @@ def test_a_quote_the_host_cannot_locate_refuses_the_envelope(
 
 
 def test_a_citation_naming_undelivered_evidence_is_refused(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
-    conn, _source_id, delivered = admitted
+    conn = admitted[0]
 
     with pytest.raises(Refusal) as caught:
         execute_module(
             conn,
             bundle,
-            **_attempt(conn, delivered),
+            **_attempt(conn),
             provider=_Stub(_body(uuid4())),
         )
 
@@ -497,11 +489,11 @@ def test_a_citation_naming_undelivered_evidence_is_refused(
 
 
 def test_an_undeclared_field_refuses_the_envelope(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """`extra="forbid"`. Dropping the key instead is how a module carries state
     past a reviewer reading the declared shape."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
     body = json.loads(_body(source_id))
     body["claims"][0]["confidence"] = 0.9
 
@@ -509,7 +501,7 @@ def test_an_undeclared_field_refuses_the_envelope(
         execute_module(
             conn,
             bundle,
-            **_attempt(conn, delivered),
+            **_attempt(conn),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -517,17 +509,17 @@ def test_an_undeclared_field_refuses_the_envelope(
 
 
 def test_an_uncited_claim_is_refused(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """This system does not store assertions."""
-    conn, _source_id, delivered = admitted
+    conn = admitted[0]
     body = {"claims": [{"statement": "Leverage looks fine.", "citations": []}]}
 
     with pytest.raises(Refusal) as caught:
         execute_module(
             conn,
             bundle,
-            **_attempt(conn, delivered),
+            **_attempt(conn),
             provider=_Stub(json.dumps(body)),
         )
 
@@ -555,15 +547,15 @@ def test_the_refusal_carries_none_of_the_module_output() -> None:
 
 
 def test_the_prompt_carries_the_authority_and_the_evidence(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
     stub = _Stub(_body(source_id))
 
     execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=stub,
     )
 
@@ -591,7 +583,7 @@ def test_build_prompt_names_every_delivered_source() -> None:
 
 @pytest.mark.live_provider
 def test_cp1_produces_canonical_envelope_with_anchored_citations(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """The Phase 5 exit test. A real model, a real answer, and a host that
     refuses everything it cannot re-derive.
@@ -605,12 +597,12 @@ def test_cp1_produces_canonical_envelope_with_anchored_citations(
         if PROVIDER_REQUIRED:
             pytest.fail(_NO_CREDENTIAL)
         pytest.skip(_NO_CREDENTIAL)
-    conn, _source_id, delivered = admitted
+    conn = admitted[0]
 
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered),
+        **_attempt(conn),
         provider=OpenRouter(api_key=LIVE_KEY, model=LIVE_MODEL),
     )
 
@@ -657,20 +649,11 @@ def test_a_delivery_announces_the_page_its_block_sits_on(
         (source_id,),
     ).fetchone()
     assert last is not None and last[1] == 2
-    delivered = deliver(conn, [(source_id, str(last[0]))])
-
-    prompt = build_prompt("CP-1", b"authority", delivered)
-    assert [line for line in prompt.splitlines() if line.startswith("page:")] == [
-        "page: 2"
-    ]
+    stub = _Stub(_body(source_id, page=2))
 
     # And the citation a module makes from that prompt anchors.
-    outcome = execute_module(
-        conn,
-        bundle,
-        **_attempt(conn, delivered),
-        provider=_Stub(_body(source_id, page=2)),
-    )
+    outcome = execute_module(conn, bundle, **_attempt(conn), provider=stub)
+    assert "page: 2\nTotal debt at 31 December 2026" in stub.prompt
     [claim] = outcome.envelope.claims
     assert [citation.page for citation in claim.citations] == [2]
 
@@ -780,11 +763,11 @@ def test_a_module_that_is_not_the_gate_is_asked_for_no_verdict() -> None:
 
 
 def test_the_stored_gate_artifact_carries_its_readiness(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """The rows live in the canonical bytes, so the artifact digest covers what
     the gate decided."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
     verdict = _row(
         readiness_status="READY_WITH_LIMITATIONS",
         readiness_effect="no audited statements",
@@ -794,7 +777,7 @@ def test_the_stored_gate_artifact_carries_its_readiness(
     outcome = execute_module(
         conn,
         bundle,
-        **_attempt(conn, delivered, "CP-0", gate_expects=frozenset({"CP-1"})),
+        **_attempt(conn, "CP-0", gate_expects=frozenset({"CP-1"})),
         provider=_Stub(json.dumps(body)),
     )
 
@@ -852,13 +835,13 @@ def test_the_upstream_section_says_it_is_not_evidence() -> None:
 
 
 def test_an_upstream_statement_is_not_citable_evidence(
-    admitted: tuple[StoreConnection, UUID, list[Delivery]], bundle: Bundle
+    admitted: tuple[StoreConnection, UUID], bundle: Bundle
 ) -> None:
     """Invariant 11 does not soften for the chain: a module quoting an earlier
     module's sentence rather than the document is refused. On this tree that
     refuses the module's whole answer; §26 is what narrows it to the claim the
     quote rests on."""
-    conn, source_id, delivered = admitted
+    conn, source_id = admitted
     sentence = "Leverage stood at 4.0x on the agreed basis."
     stub = _Stub(_body(source_id, quote=sentence))
 
@@ -868,7 +851,6 @@ def test_an_upstream_statement_is_not_citable_evidence(
             bundle,
             **_attempt(
                 conn,
-                delivered,
                 "CP-2",
                 upstream=(
                     Upstream(

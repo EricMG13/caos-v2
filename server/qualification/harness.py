@@ -385,7 +385,6 @@ def _perform_one(
     try:
         with execution_reads(conn):
             route = _eligible(conn, harness, case, prepared)
-            delivered = _delivered(conn, run_id)
         run_route(
             conn,
             blobs,
@@ -397,7 +396,6 @@ def _perform_one(
                     bundle=harness.bundle,
                     blobs=blobs,
                     completions=harness.completions,
-                    delivered=delivered,
                     route=route,
                     run_id=run_id,
                 ),
@@ -503,19 +501,6 @@ def _accepted(
             (run_id,),
         ).fetchall()
         return {str(row[0]): {} for row in rows}
-
-
-def _delivered(conn: StoreConnection, run_id: UUID) -> list[tuple[UUID, str]]:
-    """Captured block IDs, selected beside current eligibility in its owned unit."""
-    rows = conn.execute(
-        "SELECT b.source_id,b.block_id FROM run_inputs i"
-        " JOIN source_set_members m"
-        " ON (m.case_id,m.version)=(i.case_id,i.source_version)"
-        " JOIN source_blocks b ON b.source_id=m.source_id"
-        " WHERE i.run_id=%s ORDER BY b.source_id,b.block_id",
-        (run_id,),
-    ).fetchall()
-    return [(UUID(str(row[0])), str(row[1])) for row in rows]
 
 
 def _answerable(qualification: QualificationSet) -> None:

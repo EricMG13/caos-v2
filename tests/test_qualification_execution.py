@@ -25,13 +25,14 @@ from test_qualification_prepare import Fixture, ready
 
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import admit_pack
+from server.methodology import executor
 from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.provider import Completion
 from server.qualification import harness as subject
 from server.qualification.matrix import QualificationSet
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
-from server.store.gates import Gate, gate_preview, withdraw_source
+from server.store.gates import Gate, execution_input, gate_preview, withdraw_source
 from server.store.members import Standing, grant, revoke
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route, resolved_route
@@ -42,7 +43,7 @@ from server.store.source_sets import snapshot_source_set
 __all__ = ["ready"]
 
 _MEMBERS = "SELECT m.filename,m.document_sha256 FROM source_set_members m"
-_BLOCKS = "SELECT b.source_id,b.block_id FROM run_inputs i"
+_BLOCKS = "SELECT b.source_id, b.block_id FROM run_inputs i"
 _PROOF = "SELECT a.artifact_sha256, t.route_node_id, a.case_id"
 
 
@@ -523,26 +524,25 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
             ("build_matrix", "matrix"),
         ):
             patch.setattr(subject, name, boundary(label, getattr(subject, name)))
+        # Each node's own authority unit, where its evidence is now read.
+        patch.setattr(executor, "execution_input", boundary("node", execution_input))
         patch.setattr(psycopg.Connection, "execute", sql)
         result = _run(ready, prepared)
+    # Per node: evidence is read in the pre-call authority unit, then the
+    # post-call unit rechecks input.
+    node = ["node", "blocks", "node"]
+    case = ["input", "members", *node, *node, "record"]
     assert [name for name, _ in observed] == [
-        "input",
-        "members",
-        "input",
-        "members",
-        "input",
-        "members",
-        "blocks",
-        "record",
-        "input",
-        "members",
-        "blocks",
-        "record",
+        *["input", "members"] * 2,
+        *case,
+        *case,
         "matrix",
     ]
-    for start, length in ((0, 2), (2, 2), (4, 3), (8, 3)):
-        assert len({unit for _, unit in observed[start : start + length]}) == 1
-    assert len({observed[i][1] for i in (0, 2, 4, 7, 8, 11, 12)}) == 7
+    shared = (0, 2, 4, 6, 9, 13, 15, 18)
+    for start in shared:
+        assert observed[start][1] == observed[start + 1][1]
+    units = (*shared, 8, 11, 12, 17, 20, 21, 22)
+    assert len({observed[i][1] for i in units}) == len(units)
     assert conn.info.transaction_status.name == "IDLE"
     assert result.matrix is not None and len(result.matrix.rows) == 2
     assert len(cast(_Completions, harness.completions).prompts) == 4
@@ -630,7 +630,13 @@ def test_native_execution_read_failures_clean_owned_work_and_retain_purchases(
             "budget_ledger",
             "artifacts",
         ):
-            assert _count(observer, "SELECT count(*) FROM " + table) == paid
+            # A blocks read now fails inside the node's unit, after its
+            # reservation and before any call.
+            held = int(
+                fault in {"blocks", "rollback"}
+                and table in {"run_attempts", "budget_reservations"}
+            )
+            assert _count(observer, "SELECT count(*) FROM " + table) == paid + held
         for [digest] in observer.execute("SELECT artifact_sha256 FROM artifacts"):
             assert blobs.get(digest)
         if paid == 2:
