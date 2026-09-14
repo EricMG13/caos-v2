@@ -14,7 +14,7 @@ import {
   withWithdrawals,
   withdrawalsOf,
 } from "@/app/authority";
-import { parseAnalysisDocument, parseRunSectionDocument } from "@/wire/v1";
+import { parseAnalysisDocument, parseModelDocument, parseRunSectionDocument } from "@/wire/v1";
 
 const load = (path: string): unknown =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -73,14 +73,33 @@ describe("the authority machine", () => {
 describe("what a name refetches and what a view is", () => {
   const analysis = parseAnalysisDocument(load("../../fixtures/analysis.json"));
   const run = parseRunSectionDocument(load("../../fixtures/run/frames/1.json"));
+  const model = parseModelDocument({
+    chrome: {
+      subject: { case_id: "00000000-0000-4000-8000-000000000001", title: "Issuer" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: "00000000-0000-4000-8000-000000000001",
+      latest_run_id: "00000000-0000-4000-8000-0000000000a1",
+      displayed_run_id: "00000000-0000-4000-8000-0000000000a1",
+      subject: null,
+      forecast: null,
+      unavailable_reason: "NO_ACCEPTED_FORECAST",
+    },
+    observed_at: "2026-09-14T10:00:00Z",
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  });
 
   test("each event name refetches exactly the sections decision 2 names", () => {
     expect(REFETCHES).toEqual({
       run_progress: ["run"],
-      handoff_accepted: ["run", "analysis"],
-      run_terminal: ["run", "analysis"],
-      sources_changed: ["upload", "run", "analysis"],
-      runs_changed: ["run", "analysis"],
+      handoff_accepted: ["run", "analysis", "model"],
+      run_terminal: ["run", "analysis", "model"],
+      sources_changed: ["upload", "run", "analysis", "model"],
+      runs_changed: ["run", "analysis", "model"],
     });
     expect(refetches("run_progress", "analysis")).toBe(false);
     expect(refetches("sources_changed", "upload")).toBe(true);
@@ -104,6 +123,10 @@ describe("what a name refetches and what a view is", () => {
     expect(analyticalIdentity("upload", analysis)).toBeNull();
     expect(displayedRunIdOf("run", run)).toBe(run.body.run!.run_id);
     expect(displayedRunIdOf("analysis", analysis)).toBe(analysis.body.displayed_run_id);
+    expect(displayedRunIdOf("model", model)).toBe(model.body.displayed_run_id);
+    expect(analyticalIdentity("model", model)).toBe(
+      `${model.body.displayed_run_id}|NO_ACCEPTED_FORECAST`,
+    );
   });
 
   test("withdrawals overlay a document without touching its figures", () => {

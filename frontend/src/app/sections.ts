@@ -4,9 +4,9 @@
 import routes from "./routes.json";
 import { SECTIONS, type Section } from "@/wire/shared";
 
-/** The sections served in every mode (brief 4.1, decision 9). The other five
+/** The sections served in every mode (brief 4.1, decision 9). The other four
     render `unavailable` with no request and no event tail, demo included. */
-export const ENABLED_SECTIONS = ["directory", "upload", "run", "analysis"] as const;
+export const ENABLED_SECTIONS = ["directory", "upload", "run", "analysis", "model"] as const;
 export type EnabledSection = (typeof ENABLED_SECTIONS)[number];
 
 export function isEnabledSection(section: Section): section is EnabledSection {
