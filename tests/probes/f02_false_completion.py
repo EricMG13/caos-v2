@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -26,6 +27,8 @@ from server.engine.route import resolve_route  # noqa: E402
 from server.engine.runtime import Execution, ProviderResult, run_route  # noqa: E402
 from server.evidence.ingest import Document, admit_pack  # noqa: E402
 from server.methodology.bundle import Bundle  # noqa: E402
+from server.pricing import ModelPrice  # noqa: E402
+from server.provider import MAX_COMPLETION_TOKENS  # noqa: E402
 from server.store import RunStatus, apply_schema, connect  # noqa: E402
 from server.store.budget import reserve  # noqa: E402
 from server.store.gates import (  # noqa: E402
@@ -58,6 +61,8 @@ class ProviderWasCalled(AssertionError):
 
 
 class NoProvider:
+    model = "probe"
+
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
@@ -146,7 +151,16 @@ def main() -> None:
                 blobs,
                 run_id=run_id,
                 route=route,
-                execution=Execution(NoProvider(), Decimal("0.01"), bundle),
+                execution=Execution(
+                    NoProvider(),
+                    ModelPrice(
+                        "probe",
+                        Decimal(0),
+                        Decimal("0.01") / MAX_COMPLETION_TOKENS,
+                        date(2026, 9, 13),
+                    ),
+                    bundle,
+                ),
             )
             status = run_status(conn, run_id)
             accepted_row = conn.execute(

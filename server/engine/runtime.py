@@ -34,6 +34,7 @@ from server.engine.route import (
     node_states,
 )
 from server.methodology.bundle import Bundle
+from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
@@ -70,7 +71,14 @@ class ProviderResult:
 
 
 class Provider(Protocol):
-    """The seam Phase 5 fills with a real OpenRouter call."""
+    """The seam Phase 5 fills with a real OpenRouter call.
+
+    `model` is the configured model identity the call is billed as; a run's price
+    must be for exactly that model.
+    """
+
+    @property
+    def model(self) -> str: ...
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -81,13 +89,14 @@ class Provider(Protocol):
 class Execution:
     """How this run executes: who to ask, and what to set aside before asking.
 
-    One thing rather than two loose arguments, because neither is meaningful
-    without the other -- an estimate with no provider reserves against nothing,
-    and a provider with no estimate is a call invariant 8 forbids.
+    One thing rather than loose arguments, because none is meaningful without
+    the others -- a price with no provider reserves against nothing, and a
+    provider with no price is a call invariant 8 forbids. Every call reserves
+    `worst_case(price)`, never a caller's guess (F06).
     """
 
     provider: Provider
-    estimate: Decimal
+    price: ModelPrice
     bundle: Bundle
 
 
@@ -107,6 +116,10 @@ def run_route(
     owns its frontier reads and never adopts pending caller writes.
     """
     require_idle(conn)
+    # Priced for the configured model, or no attempt at all.
+    if execution.price.model != getattr(execution.provider, "model", None):
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    worst_case(execution.price)
     route = _execution_route(conn, run_id, route, execution.bundle)
     while True:
         with execution_reads(conn):
@@ -186,7 +199,7 @@ def _run_node(
         node.module_id for node in route.nodes if node.route_node_id == route_node_id
     )
     attempt_id = start_attempt(conn, run_id, route_node_id)
-    reserve(conn, attempt_id, execution.estimate)
+    reserve(conn, attempt_id, worst_case(execution.price))
 
     _execution_route(conn, run_id, route, execution.bundle)
     result = execution.provider.execute(route_node_id, module_id, attempt_id=attempt_id)

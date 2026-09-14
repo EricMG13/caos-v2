@@ -1207,6 +1207,28 @@ untracked continuation records, and a size check run before its commit existed.
 One maintained authority and explicit phase inputs/outputs prevent repeating
 those mistakes without introducing a second build system.
 
+## 2026-09-13 §40 — Reservations are priced at the configured model's worst case
+
+**Decision.** A run executes with a dated `ModelPrice(model, input_per_token,
+output_per_token, as_of)` instead of a caller estimate. Before any attempt,
+`run_route` refuses `PROVIDER_NOT_CONFIGURED` unless the price names the
+provider's configured model, and refuses invalid money as `validate_spend`
+does. Every call reserves `worst_case(price) = MAX_REQUEST_BYTES × input +
+MAX_COMPLETION_TOKENS × output`, computed exactly. This realises §16's price
+clause for reservations and supersedes §38's "no pricing claim" for them.
+
+**Why this bound.** Without a tokenizer, one token per request byte is the
+conservative input bound the §38 request ceiling allows, and the output cap is
+already sent with every request. The known charge is still reconciled after the
+call; an overrun consumes the remaining capacity, so the next reservation is
+refused (REPAIR_PLAN F06, Phase 2 budget exit). An application price cannot
+guarantee a vendor bill.
+
+**Not decided here.** The price's source. Phase 2 takes it from the caller, so a
+real price for the live model is a user-supplied, dated fact; the byte bound is
+large for a real model against the default ceiling, and pricing the encoded
+request once it is built is the upgrade (CLAUDE.md known gaps).
+
 ## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
 
 **Decision.** Eight changes, none touching a required check's name, a

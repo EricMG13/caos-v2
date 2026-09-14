@@ -562,13 +562,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
   retrieval index the bundle ships (`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`) is
   what selects the references a question actually needs.
-- **No per-model price table, so the reservation is still a flat estimate.**
-  `docs/DECISIONS.md` §16 wants each configured model to carry a dated
-  `(input, output)` price as `Decimal` driving the reservation ceiling. The
-  provider reports `usage.cost`, which is the *actual* charge and is what the
-  ledger records; the number reserved *before* the call is still the caller's
-  single estimate. *Upgrade:* the price table lands with the module executor
-  that knows the prompt's size, and retires the Phase 4 gap below with it.
+- **A run's price is supplied by its caller, not read from a table.**
+  `docs/DECISIONS.md` §40: every call reserves `pricing.worst_case(price)` --
+  every byte of the largest request (§38) as an input token plus the output cap
+  -- and `run_route` refuses a price for any model but the provider's configured
+  one before an attempt exists. Nothing in the tree says what the live model
+  costs, so `tests/test_live_run.py` still prices it from its flat estimate, and
+  the byte bound makes a real model's reservation large against the $5 default
+  ceiling. *Upgrade:* a user-confirmed dated price for the configured live model,
+  and pricing the actual encoded request once the prompt is built before the
+  reservation.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the
@@ -650,10 +653,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* the phase that makes the provider call real (Phase 5) is where the
   latency starts to matter and where an async store connection has to arrive
   anyway; the loop's shape does not change, only the `for` becomes a `gather`.
-- **The reservation estimate is the caller's number.** `run_route` takes one
-  `estimate` and reserves it for every node. A real estimate is per module and
-  comes from the model's price and the prompt's size (`docs/DECISIONS.md` §16).
-  *Upgrade:* Phase 5, with the provider that knows both.
+- ~~**The reservation estimate is the caller's number.**~~ Closed by §40:
+  `Execution` carries a dated `ModelPrice` bound to the provider's model, and
+  each call reserves its worst case. The price's source is the remaining gap,
+  recorded in the Phase 5 entry above.
 
 **Phase 3.**
 

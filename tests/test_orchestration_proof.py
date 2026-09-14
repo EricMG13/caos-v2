@@ -31,7 +31,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from conftest import approve_run, gate_verdict, route_fault
+from conftest import approve_run, gate_verdict, priced, route_fault
 from tracked import tracked_python
 
 from server.blobs import BlobStore
@@ -170,7 +170,7 @@ def ran(
         route=catalog_route,
         execution=Execution(
             provider,
-            ESTIMATE,
+            priced(ESTIMATE),
             bundle,
         ),
     )

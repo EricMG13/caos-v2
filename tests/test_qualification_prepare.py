@@ -11,6 +11,7 @@ from typing import cast
 
 import psycopg
 import pytest
+from conftest import priced
 from test_qualification_harness import (
     CATALOG,
     ESTIMATE,
@@ -50,7 +51,7 @@ def ready(empty_database: str, tmp_path: Path) -> Iterator[Fixture]:
             conn,
             BlobStore(tmp_path / "blobs"),
             subject.Harness(
-                Bundle(VENDORED), CATALOG, _Completions(), ESTIMATE, SET_CEILING
+                Bundle(VENDORED), CATALOG, _Completions(), priced(ESTIMATE), SET_CEILING
             ),
             QualificationSet((_case("first", REPORT), _case("second", OTHER))),
         )
@@ -76,7 +77,7 @@ def _unapproved_and_unspent(conn: StoreConnection, harness: subject.Harness) -> 
 def test_aggregate_ceiling_is_exact_under_decimal_context(precision: int) -> None:
     qualification = QualificationSet(tuple(_case(str(i), REPORT) for i in range(3)))
     harness = subject.Harness(
-        Bundle(VENDORED), CATALOG, _Completions(), ESTIMATE, Decimal("10")
+        Bundle(VENDORED), CATALOG, _Completions(), priced(ESTIMATE), Decimal("10")
     )
     with localcontext() as context:
         context.prec, context.rounding = precision, ROUND_DOWN

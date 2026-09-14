@@ -23,7 +23,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from conftest import _url_for, approve_run
+from conftest import _url_for, approve_run, priced
 from psycopg.pq import TransactionStatus
 
 from server.blobs import BlobStore
@@ -77,9 +77,12 @@ class _Boom(Exception):
 class _Provider:
     """Records what it was asked for, and can die on a chosen node."""
 
+    model = "a-model/for-the-test"
+
     blobs: BlobStore
     die_on: str | None = None
     qa_status: str = "Passed"
+    charge: Decimal = Decimal("0.01")
     at_call: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
@@ -100,7 +103,7 @@ class _Provider:
         digest = self.blobs.put(json.dumps(payload).encode("utf-8"))
         return ProviderResult(
             artifact_sha256=digest,
-            charge=Decimal("0.01"),
+            charge=self.charge,
             model="a-model/for-the-test",
             generation_id="gen-runtime-test",
         )
@@ -199,7 +202,7 @@ def test_an_unapproved_run_never_reaches_the_provider(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert provider.calls == []
@@ -224,7 +227,7 @@ def test_a_historical_route_without_a_complete_input_never_reaches_the_provider(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert provider.calls == []
@@ -264,7 +267,7 @@ def test_each_current_gate_is_required_before_work(  # noqa: PLR0913
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert provider.calls == []
@@ -316,7 +319,7 @@ def test_live_authority_is_required_before_work(  # noqa: PLR0913
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert provider.calls == []
@@ -359,7 +362,7 @@ def test_the_final_pre_call_check_sees_a_late_revocation(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert provider.calls == ["CP-0"]
@@ -400,7 +403,7 @@ def test_provider_transport_is_idle_and_holds_no_case_or_run_lock(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE, bundle),
+        execution=Execution(provider, priced(ESTIMATE), bundle),
     )
 
     assert provider.calls == ["CP-0", "CP-1", "CP-2", "CP-2D"]
@@ -436,7 +439,7 @@ def test_runtime_entry_preserves_caller_transaction_ownership(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert provider.calls == []
@@ -485,7 +488,7 @@ def test_caller_identity_cannot_replace_stored_authority(  # noqa: PLR0913
             blobs,
             run_id=run_id,
             route=requested,
-            execution=Execution(provider, ESTIMATE, executing),
+            execution=Execution(provider, priced(ESTIMATE), executing),
         )
 
     assert provider.calls == []
@@ -507,7 +510,7 @@ def test_a_route_runs_to_completion(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(provider, ESTIMATE, bundle),
+        execution=Execution(provider, priced(ESTIMATE), bundle),
     )
 
     assert provider.calls == ["CP-0", "CP-1", "CP-2", "CP-2D"]
@@ -535,7 +538,7 @@ def test_recovery_is_recomputation(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(dying, ESTIMATE, bundle),
+            execution=Execution(dying, priced(ESTIMATE), bundle),
         )
 
     assert dying.calls == ["CP-0", "CP-1", "CP-2"]
@@ -551,7 +554,7 @@ def test_recovery_is_recomputation(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(restarted, ESTIMATE, bundle),
+        execution=Execution(restarted, priced(ESTIMATE), bundle),
     )
 
     assert restarted.calls == ["CP-2", "CP-2D"], "completed nodes are not run again"
@@ -583,7 +586,7 @@ def test_no_checkpoint_is_written_anywhere(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(_Provider(blobs), ESTIMATE, bundle),
+        execution=Execution(_Provider(blobs), priced(ESTIMATE), bundle),
     )
 
     tables = conn.execute(
@@ -610,7 +613,9 @@ def test_a_failed_attempt_leaves_its_row_and_its_reservation(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(_Provider(blobs, die_on="CP-1"), ESTIMATE, bundle),
+            execution=Execution(
+                _Provider(blobs, die_on="CP-1"), priced(ESTIMATE), bundle
+            ),
         )
 
     row = conn.execute(
@@ -637,7 +642,7 @@ def test_the_run_stops_when_the_ceiling_is_reached(
             blobs,
             run_id=run_id,
             route=route,
-            execution=Execution(provider, ESTIMATE, bundle),
+            execution=Execution(provider, priced(ESTIMATE), bundle),
         )
 
     assert caught.value.code is RefusalCode.BUDGET_CEILING_REACHED
@@ -659,7 +664,7 @@ def test_accepted_artifacts_reads_cp0s_payload_and_no_other(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(_Provider(blobs), ESTIMATE, bundle),
+        execution=Execution(_Provider(blobs), priced(ESTIMATE), bundle),
     )
 
     accepted = accepted_artifacts(conn, blobs, route=route, run_id=run_id)
@@ -689,7 +694,7 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
         blobs,
         run_id=run_id,
         route=route,
-        execution=Execution(_Provider(blobs), ESTIMATE, bundle),
+        execution=Execution(_Provider(blobs), priced(ESTIMATE), bundle),
     )
 
     digests = artifact_digests(conn, run_id)
@@ -723,7 +728,7 @@ def test_a_blocked_cp5_does_not_release_cp6(
         blobs,
         run_id=run_id,
         route=full,
-        execution=Execution(provider, ESTIMATE, bundle),
+        execution=Execution(provider, priced(ESTIMATE), bundle),
     )
 
     assert "CP-5" in provider.calls
