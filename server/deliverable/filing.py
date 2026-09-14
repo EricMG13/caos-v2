@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
@@ -111,14 +111,20 @@ def freeze(  # noqa: PLR0913 -- exact revision and authority for its re-proof
 
 
 def file_deliverable(
-    conn: StoreConnection, *, case_id: UUID, actor_id: UUID, revision_id: UUID
+    conn: StoreConnection,
+    blobs: BlobStore,
+    *,
+    case_id: UUID,
+    actor_id: UUID,
+    revision_id: UUID,
 ) -> Receipt:
     """File once, independently of every signer and the freezer, naming this event."""
     payload = {"revision_id": str(revision_id)}
     action = GovernedAction(
         case_id, actor_id, "DELIVERABLE_FILED", Standing.APPROVER, payload
     )
-    facts: list[tuple[UUID, str, UUID, UUID]] = []
+    receipts: list[Receipt] = []
+    renderer = sha256(Path(__file__).with_name("render.py").read_bytes()).hexdigest()
 
     def write(unit: StoreConnection) -> None:
         run_id, digest = _revision(unit, case_id, revision_id)
@@ -129,9 +135,12 @@ def file_deliverable(
         if frozen_digest != digest:
             raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
         signatures = _signatures(unit, case_id, revision_id)
-        if not signatures or signatures[0][1] != digest:
+        if not signatures or any(
+            signed_digest != digest for _, signed_digest in signatures
+        ):
             raise Refusal(RefusalCode.DELIVERABLE_NOT_SIGNED)
-        if actor_id in {who for who, _ in signatures} | {frozen_by}:
+        signers = {who for who, _ in signatures}
+        if frozen_by in signers or actor_id in signers | {frozen_by}:
             raise Refusal(RefusalCode.APPROVER_NOT_INDEPENDENT)
         filed = unit.execute(
             "UPDATE deliverable_publications SET filed_by=%s,filed_at=now()"
@@ -140,25 +149,41 @@ def file_deliverable(
         ).rowcount
         if not filed:
             raise Refusal(RefusalCode.DELIVERABLE_ALREADY_FILED)
-        payload["payload_sha256"] = digest
-        facts.append((run_id, digest, signatures[0][0], frozen_by))
+        receipt = Receipt(
+            case_id,
+            run_id,
+            revision_id,
+            digest,
+            signatures[0][0],
+            frozen_by,
+            actor_id,
+            renderer,
+            "",
+        )
+        payload.update(_filing_payload(receipt))
+        receipts.append(receipt)
 
-    payload["renderer_sha256"] = sha256(
-        Path(__file__).with_name("render.py").read_bytes()
-    ).hexdigest()
-    event = governed_write(conn, action, write)
-    run_id, digest, signer, freezer = facts[0]
-    return Receipt(
-        case_id,
-        run_id,
-        revision_id,
-        digest,
-        signer,
-        freezer,
-        actor_id,
-        payload["renderer_sha256"],
-        event,
-    )
+    def persist(unit: StoreConnection, event: str) -> None:
+        receipts[0] = replace(receipts[0], filed_event_sha256=event)
+        digest = blobs.put(receipt_bytes(receipts[0]))
+        unit.execute(
+            "INSERT INTO deliverable_receipts"
+            " (case_id,revision_id,receipt_sha256,renderer_sha256,filed_event_sha256)"
+            " VALUES (%s,%s,%s,%s,%s)",
+            (case_id, str(revision_id), digest, renderer, event),
+        )
+
+    governed_write(conn, action, write, after_event=persist)
+    return receipts[0]
+
+
+def _filing_payload(receipt: Receipt) -> dict[str, str]:
+    """The event binds every receipt field except its own resulting link."""
+    return {
+        key: str(value)
+        for key, value in asdict(receipt).items()
+        if key != "filed_event_sha256"
+    }
 
 
 def receipt_bytes(receipt: Receipt) -> bytes:

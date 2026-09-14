@@ -70,11 +70,14 @@ def governed_write(
     conn: StoreConnection,
     action: GovernedAction,
     write: Callable[[StoreConnection], None],
+    *,
+    after_event: Callable[[StoreConnection, str], None] | None = None,
 ) -> str:
     """Run `write` and return its committed audit link under live standing.
 
-    `write` receives this transaction and must not commit: the whole point is
+    `write` and optional `after_event` must not commit: the whole point is
     that its state and this function's audit event are one commit or none.
+    `after_event` can persist an object naming this exact link before commit.
     """
     try:
         lock_case(conn, action.case_id, missing=RefusalCode.NOT_AUTHORISED)
@@ -102,6 +105,8 @@ def governed_write(
             " SET seq = EXCLUDED.seq, head_sha256 = EXCLUDED.head_sha256",
             (action.case_id, seq, entry_sha256),
         )
+        if after_event is not None:
+            after_event(conn, entry_sha256)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
