@@ -786,6 +786,12 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/runs/{run_id}/cancel": "cancel_run",
         "/api/v1/cases": "create_case_command",
         "/api/v1/cases/{case_id}/sources": "admit_sources",
+        "/api/v1/cases/{case_id}/runs": "create_run",
+        "/api/v1/cases/{case_id}/runs/{run_id}/input": "pin_input",
+        "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/preview": (
+            "read_gate_preview"
+        ),
+        "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval": "approve",
     }
 
 

@@ -447,12 +447,7 @@ def test_case_standing_is_visibility_then_global_role_then_floor(
 
 def test_the_real_app_includes_the_command_routers_and_statuses() -> None:
     from server.api import app as app_module
-    from server.api.commands import runs
 
-    # `execution` and `cases` have their routes (slices 4.2f and 4.2d).
-    for module in (runs,):
-        assert module.IO_BUDGET == 0
-        assert module.router.routes == []
     status = app_module._STATUS
     assert status[RefusalCode.NOT_AUTHORISED] == 403
     assert status[RefusalCode.SOURCE_TOO_LARGE] == 413
