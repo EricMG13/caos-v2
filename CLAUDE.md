@@ -141,11 +141,13 @@ Standing rules that back them:
   `make doctor`, and `make dev-up`. This creates the locked Python 3.14/3.12
   and Node 24 environments, starts the persistent dev database on 55436 and
   the ephemeral test-admin database on 55437, and preserves local blobs.
-- `make dev-api` (`make dev` is an alias) — the API alone on port 8000. It
-  needs `CAOS_DATABASE_URL` and `CAOS_BLOB_ROOT`, both read per request, and
-  advances the verified migration prefix at startup. No worker, nothing seeded.
-- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000. It
-  fails visibly for routes not built yet. `make dev-ui-demo` is the separately
+- `make dev-api` (`make dev` is an alias) — the guarded site application on
+  127.0.0.1:8000, loopback only (§53). It needs `CAOS_DATABASE_URL` and
+  `CAOS_BLOB_ROOT`, both read per request, and advances the verified migration
+  prefix at startup. `make dev-worker` is the worker; nothing is seeded.
+- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000 as
+  the local actor `CAOS_DEV_USER` (role `CAOS_DEV_ROLE`, default ANALYST);
+  without it the API answers 401. `make dev-ui-demo` is the separately
   labelled, read-only fixture workbench; it is never integration evidence.
 - `make test` — the offline suite with PostgreSQL required; paid provider tests
   remain deselected.
@@ -154,7 +156,9 @@ Standing rules that back them:
   fails rather than skips without them.
 - `make check` — the complete offline engineering gate: required PostgreSQL,
   backend lint/types/tests/coverage/I/O/races/security, frontend lint/types/unit/
-  production and demo builds/a11y/workbench, then the image gate, sequentially.
+  production and demo builds/a11y/workbench, the image gate, then
+  `make smoke-production` (the production image and real-stack journey),
+  sequentially.
   `make check-fast` is explicitly partial; `make check-size PR_BASE=<commit>` is
   the separate PR-only size gate.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
@@ -216,6 +220,41 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   other's Run document. The evidence workbench specs refuse the demo stream
   for that reason. Demo mode only; the real stream has no shared state.
   *Upgrade:* per-stream frames the day a spec needs two tails at once.
+
+- **The edge proves itself with one static shared secret.** Edge mode trusts
+  any request carrying `CAOS_EDGE_TOKEN` (§53.2): anything on the private
+  network that learns it can assert any subject and groups, the process holds
+  one token at a time so rotating it means restarting the API, and nothing
+  binds a request to the edge's authentication of it. *Upgrade:* verifying the
+  identity provider's signed assertion (a dependency and a dated decision), or
+  mutual TLS between edge and API.
+- **The API cannot tell whether the edge stripped a client's identity.** The
+  guard refuses a repeated or lookalike identity header, which catches an edge
+  that appends; an edge that forwards a client's `x-forwarded-groups` and sets
+  none of its own is indistinguishable from a correct one, and that client
+  chooses its global role. The contract lives in `server/api/edge.py`, §53.1
+  and the test edge (`tests/journey/edge.py`), not in anything the API can
+  check. *Upgrade:* the signed assertion above, which makes the groups the
+  identity provider's rather than a header's.
+- **The worker has no readiness.** The API's `/api/health` probes the store,
+  bundle and blob root it uses; `server/engine/worker.py` serves no listener,
+  and `compose.smoke.yaml` gives the worker no healthcheck. A worker that
+  exited 2 (`PROVIDER_NOT_CONFIGURED`) or is backing off on store faults is
+  visible only in its exit code and logs, and a queued run simply waits.
+  *Upgrade:* a heartbeat the worker writes and health reads, the day an
+  operator has to alert on a stalled queue.
+- **The test edge's session cookie is weaker than the contract's.** Over
+  `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
+  drops `Secure` and the `__Host-` prefix the contract names and keeps
+  `HttpOnly` and `SameSite=Lax`. The journey therefore proves SameSite and the
+  Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
+  TLS material, which this task was not authorized to create.
+- **The production image and journey are proven locally, not in CI.**
+  `make smoke-production` is the last step of `make check`, and no CI
+  job runs it. At `943f57f` its journey step refuses with exit 2 because
+  `frontend/playwright.journey.config.ts` (slice 4.5e2) does not exist yet, so
+  a complete `make check` fails there until that slice lands. *Upgrade:* the
+  journey slice, then a CI job over the smoke stack (Phase 6).
 
 **Repair Phase 3.**
 
@@ -858,27 +897,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   frame. *Upgrade:* `LISTEN`/`NOTIFY` on the event and audit appends, making
   the poll a fallback rather than the mechanism; worth doing when there are
   enough concurrent watchers to measure it, not before.
-- **The role an actor carries is global, and nothing reads it.**
-  `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
-  asserts, which is what the actor matrix is about; but every authority decision
-  that matters is per case and is taken at commit time against `case_members`
-  (`SYSTEM_SPEC.md` §8), so no code path consults the global role today. It is
-  derived rather than deferred because deriving it later, once routes exist that
-  assume a role is present, is how a role header gets trusted "just for now".
-  *Upgrade:* the first authority that is genuinely account-wide rather than
-  case-scoped. This entry used to name administration in Phase 10; Phase 10 came
-  and went without it, and `docs/REBUILD_PLAN.md` lists an admin UI under what is
-  deliberately not in the plan — so there is no scheduled upgrade, and saying so
-  is better than pointing at a phase that has closed.
-- **`GET /api/health` is specified and not served.** `SYSTEM_SPEC.md` §11 wants
-  liveness and readiness on one strict model — store, bundle, blob store, 200
-  when all hold and 503 otherwise, probed on a shared background task — and the
-  route answers FastAPI's own 404. The Admin section's document said
-  `HEALTH · 200` and listed a worker the one-process deployment does not have;
-  it now names the route as not served. Until the route exists a drifted schema
-  stops the process at boot, and every other store fault surfaces only on the
-  request that meets it. *Upgrade:* the route and its three probes, the day a
-  proxy or an operator has to ask whether the process can serve.
+- ~~**The role an actor carries is global, and nothing reads it.**~~ Closed
+  by Phase 4 Task 4.2 (§51.2): every command reads the global role -- create
+  case and every case-scoped write refuse a global READER `NOT_AUTHORISED`
+  whatever its case standing -- and the section reads' availability does the
+  same. Case standing is still the authority checked at commit.
+
+- ~~**`GET /api/health` is specified and not served.**~~ Closed by Phase 4
+  Task 4.5b (§53.8): `server/api/health.py` serves a closed `HealthDocument`
+  from probes of store, bundle and blob root run every 10 s on one lifespan
+  task, 503 unless all three are `OK` and fresh, with no identity, token or
+  I/O on the request. The worker still serves none (Repair Phase 4 above).
 
 **Phase 5.**
 

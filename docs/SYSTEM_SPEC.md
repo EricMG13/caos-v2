@@ -388,9 +388,14 @@ the export from the frozen payload.
 
 ## 8. Identity and authority
 
-- Development trusts a role header. Production derives role from OIDC groups
-  only; a client role header never escalates.
-- Unknown runs and unauthorized runs return the same 404.
+- Development trusts a role header, and only a loopback peer on a loopback
+  `Host` is served without an edge token. Production is edge mode: a request
+  without the operator edge's token is refused before routing, role comes from
+  OIDC groups only, and a client role header never escalates
+  (`docs/DECISIONS.md` §53).
+- A repeated or lookalike identity header is not authenticated; an unsafe API
+  request needs a same-origin fetch or the allowed `Origin`.
+- Unknown and unauthorized cases and runs return the same 404.
 - Case standing (`READER`/`WRITER`/`APPROVER`/`ADMIN`) and global role are
   separate and both are rechecked at commit time, not only at request time.
 - **Persona is not authority.** The workspace section a user is looking at
@@ -435,15 +440,18 @@ arrives with the first logger (`docs/DECISIONS.md` §45).
 
 ## 11. Deployment and failure
 
-Repair Phase 4 target: one API instance, one worker, one PostgreSQL, one blob
-store and one reverse proxy. API and worker use the same verified schema/bundle
-and blob configuration. Bound request and worker concurrency explicitly; do not
-assume an instance ceiling without enforcing it.
+One image, run as two containers -- the API (`server.api.site:application`,
+one uvicorn worker, `--limit-concurrency 32`, `--no-proxy-headers`) and the
+polling worker -- beside one PostgreSQL, one blob store and the operator's
+authenticating edge, which is not in the image. The API serves the static
+export and `/api` from one origin behind the edge guard. API and worker use the
+same verified schema, bundle and blob configuration (`docs/DECISIONS.md` §53).
 
-`GET /api/health` serves liveness and readiness on one strict model — store,
-bundle, blob store — 200 when all hold, 503 otherwise. The
-probes really run, at most once per TTL, on a shared background task with a
-deadline. The route skips auth and the rate ceiling.
+`GET /api/health` serves readiness on one closed model -- store, bundle, blob
+store -- 200 when all three hold and the last round is fresh, 503 otherwise.
+The probes run every 10 s on one background task, each under a 2 s deadline;
+the route reads the cached round, needs no identity or edge token, and does no
+I/O. The worker serves no health route.
 
 Failure posture, in order of preference: refuse before acting; if acting,
 commit exactly once; if uncertain, recompute rather than restore.

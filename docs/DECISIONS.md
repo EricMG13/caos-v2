@@ -1702,3 +1702,94 @@ say it. A payload would be a second copy of state the client is about to fetch
 under its own authority check. A page renderer would put an untrusted-PDF
 parser with its own CVE stream on a request path; the token index is the
 coordinate space citations were anchored in (invariant 11).
+
+## 2026-09-14 §53 — The edge guard, one site application, readiness and the smoke stack
+
+**Decision.** Phase 4 Task 4.5 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.5-brief.md`):
+
+1. **The edge contract** (`server/api/edge.py`'s docstring). The operator's
+   edge authenticates with OIDC and forwards only to a private listener. It
+   strips inbound `x-caos-user`, `x-forwarded-groups`, `x-caos-role`,
+   `x-caos-edge-token`, every header whose name contains `_`, and its own
+   session cookie; it sets exactly one `x-caos-user`, `x-forwarded-groups` and
+   `x-caos-edge-token`; it passes `origin`, `sec-fetch-*`, `idempotency-key`,
+   `last-event-id`, `content-type` and `content-length`. Its cookie is
+   `__Host-`, `Secure; HttpOnly; SameSite=Lax` (Strict breaks the OIDC
+   return); SSE is unbuffered with an idle timeout above 300 s.
+2. **Two modes, from the environment on every use.** *Edge mode*
+   (`CAOS_EDGE_TOKEN` set): the token is at least 32 bytes,
+   `CAOS_PUBLIC_ORIGIN` a bare `scheme://host[:port]`, and
+   `CAOS_TRUST_ROLE_HEADER` absent, or the lifespan fails
+   `EDGE_CONFIG_INVALID`; every request but `GET|HEAD /api/health` carries
+   exactly one token equal under `hmac.compare_digest`, or is 403
+   `EDGE_NOT_TRUSTED` before routing, identity or body. *Dev mode* (no token):
+   both socket ends are loopback and `Host` is `localhost`, `127.0.0.1` or
+   `[::1]`, or 403. A tokenless image on a published port answers health and
+   nothing else. The token header is removed from the scope before anything
+   downstream runs.
+3. **Identity switch rule.** `actor_from_headers` believes `x-caos-role` only
+   when the switch is `1` and no edge token is set; otherwise the role comes
+   from groups.
+4. **Header hygiene, both modes.** A repeated identity header, or a name that
+   differs from one only by case or `_` for `-`, is 401 `NOT_AUTHENTICATED`.
+5. **Origin, the second half of §51.10.** Under `/api`: an `Origin` outside
+   the allowed set (`CAOS_PUBLIC_ORIGIN`, or `http://{localhost,127.0.0.1,[::1]}:{5173,8000}`
+   in dev mode) is refused; a safe method needs `Sec-Fetch-Site` absent,
+   `none` or `same-origin`; an unsafe one `same-origin`, or no
+   `Sec-Fetch-Site` with an allowed `Origin`. Otherwise 403 `ORIGIN_REFUSED`.
+   No CORS middleware.
+6. **Every response** carries the CSP `default-src 'none'; script-src 'self';
+   style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self';
+   base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src
+   'none'; require-trusted-types-for 'script'; trusted-types 'none'`,
+   `nosniff`, `no-referrer`, COOP and CORP `same-origin`, and a cache policy
+   (`/api` `no-store`, `/assets/` immutable for a year, else `no-cache`); any
+   `set-cookie` or `access-control-*` header is dropped. FastAPI's docs,
+   ReDoc and OpenAPI routes are not served. A directive is widened only for a
+   named violation recorded here; none has been.
+7. **One site application.** `server.api.site:application` is `EdgeGuard`
+   over a dispatcher: `/api` and `/api/*` (and the lifespan) go to
+   `server.api.app:app`, so routing's 404 and 405 there stay
+   `ENDPOINT_NOT_FOUND`; everything else is a GET/HEAD read of
+   `CAOS_SITE_ROOT` without symlinks, where `/` and each section path serve
+   `index.html` and any other method is a bodiless 405. With the root unset
+   non-API paths are 404; set without `index.html`, the lifespan fails.
+8. **`GET /api/health`.** A closed `HealthDocument{status, store, bundle,
+   blobs, checked_at}`, 200 only when all three probes are `OK` and the round
+   is under 30 s old (`PROBE_STALE` after, `PROBE_NOT_RUN` before the first).
+   One lifespan task probes every 10 s, each probe in a thread under 2 s
+   (`PROBE_TIMEOUT`), never two rounds at once: store connects with a 2 s
+   timeout and runs a read-only `verify_schema`; bundle compares a fresh
+   manifest with the process's; blobs checks the root is a usable directory,
+   writing nothing. The route needs no token or identity and does no I/O.
+9. **One image, two commands, no proxy inside.** A digest-pinned
+   `node:24-slim` build stage runs `npm ci --ignore-scripts && npm run build`
+   and only `dist` reaches the runtime (`/app/site`, `CAOS_SITE_ROOT`). The
+   API runs `uvicorn server.api.site:application --workers 1
+   --no-proxy-headers --no-server-header --limit-concurrency 32`; the worker
+   is `python -m server.engine.worker`. `make dev-api` serves the same
+   application on 127.0.0.1 with `--no-proxy-headers`.
+10. **Dev identity lives in the Vite proxy.** It removes every client
+    `x-caos-*`, `x-forwarded-*`, `forwarded` and `_` header, then sets
+    `x-caos-user` from `CAOS_DEV_USER` and `x-caos-role` from `CAOS_DEV_ROLE`
+    (default ANALYST); without `CAOS_DEV_USER` it sets nothing and the API
+    answers 401.
+11. **Smoke stack.** `compose.smoke.yaml`, project `caos-workbench-smoke`: a
+    digest-pinned PostgreSQL on tmpfs with no host port, the API on
+    `127.0.0.1:18000` in edge mode with its own blob volume, a credential-less
+    `worker` (profile `smoke`) and the deterministic `journey-worker` (profile
+    `journey`, `./tests` mounted read-only; `tests/` is never in the image).
+    `make smoke-production` builds the image, runs `pytest -m production_image`
+    with `CAOS_REQUIRE_IMAGE=1`, then `tests/journey/run.py`, which starts the
+    stack, the host test edge on 127.0.0.1:18080 and Playwright, and always
+    takes the stack down with its volumes. It is the last step of `make
+    check`; `make test` deselects `production_image`.
+
+**Why.** REPAIR_PLAN Phase 4 work item 7. The image listened on `0.0.0.0` and
+believed any well-formed identity header, and nothing proved a request had
+passed the edge; a shared token is the proof available with the standard
+library alone (JWT verification needs a dependency, mTLS certificates).
+Mounting static files inside FastAPI shadowed API refusals and served a CDN
+script the policy refuses; a dispatcher keeps the two surfaces apart. A
+proxy inside the image would be packages to scan and a supervisor to run for
+what is operator infrastructure anyway.
