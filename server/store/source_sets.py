@@ -206,3 +206,81 @@ def pinned_live_sources(conn: StoreConnection, run_id: UUID) -> dict[str, UUID]:
         resolved.setdefault(str(document), UUID(str(source)))
         outputs.setdefault(str(document), set()).add(str(output))
     return {doc: source for doc, source in resolved.items() if len(outputs[doc]) == 1}
+
+
+@dataclass(frozen=True, slots=True)
+class CaseSource:
+    """One source of a case, admitted or withdrawn, with its set versions."""
+
+    source_id: UUID
+    filename: str
+    document_sha256: str
+    admitted_at: datetime
+    withdrawn_at: datetime | None
+    # The stored canonical identity; None for a source admitted before
+    # extraction provenance was recorded (UNKNOWN, never today's adapter).
+    extractor_identity: str | None
+    set_versions: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CaseSetVersion:
+    version: int
+    fingerprint: str
+    member_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CaseSources:
+    """What a case holds, bounded: `truncated` when either list met `limit`."""
+
+    sources: tuple[CaseSource, ...]
+    set_versions: tuple[CaseSetVersion, ...]
+    truncated: bool
+
+
+def case_sources(conn: StoreConnection, *, case_id: UUID, limit: int) -> CaseSources:
+    """Every source of a case -- withdrawal read live -- and its set versions.
+
+    Two queries whatever the size. Sources are listed in admission order, at
+    most `limit`; set versions are the newest `limit`, ascending, and each
+    source names only its versions among those. This is a listing, not
+    snapshot authority: membership is not re-verified here (`load_source_set`
+    is what does that). Caller owns the read transaction.
+    """
+    versions = conn.execute(
+        "SELECT version, fingerprint, member_count FROM source_set_versions"
+        " WHERE case_id = %s ORDER BY version DESC LIMIT %s",
+        (case_id, limit + 1),
+    ).fetchall()
+    kept = versions[:limit]
+    oldest = int(kept[-1][0]) if kept else 1
+    rows = conn.execute(
+        "SELECT s.source_id, s.filename, s.document_sha256, s.admitted_at,"
+        " s.withdrawn_at, e.extractor_identity,"
+        " ARRAY(SELECT m.version FROM source_set_members m"
+        "  WHERE m.case_id = s.case_id AND m.source_id = s.source_id"
+        "  AND m.version >= %s ORDER BY m.version DESC LIMIT %s)"
+        " FROM sources s LEFT JOIN source_extractions e USING (source_id)"
+        " WHERE s.case_id = %s ORDER BY s.admitted_at, s.source_id LIMIT %s",
+        (oldest, limit, case_id, limit + 1),
+    ).fetchall()
+    return CaseSources(
+        sources=tuple(
+            CaseSource(
+                source_id=row[0],
+                filename=row[1],
+                document_sha256=row[2],
+                admitted_at=row[3],
+                withdrawn_at=row[4],
+                extractor_identity=row[5],
+                set_versions=tuple(sorted(int(v) for v in row[6])),
+            )
+            for row in rows[:limit]
+        ),
+        set_versions=tuple(
+            CaseSetVersion(int(row[0]), row[1], int(row[2]))
+            for row in reversed(versions[:limit])
+        ),
+        truncated=len(rows) > limit or len(versions) > limit,
+    )
