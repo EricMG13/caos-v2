@@ -41,7 +41,13 @@ from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.methodology import canonical, executor, invocation
-from server.methodology.canonical import accepted_projections, blocked_verdict
+from server.methodology.canonical import (
+    Replayed,
+    Verdict,
+    accepted_projections,
+    blocked_verdict,
+    replay_billed,
+)
 from server.methodology.handoff import (
     Projections,
     _decoded_record,
@@ -292,6 +298,21 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     # The captured pins are read once, by the reader the verdict re-anchors on.
     assert statements.count(executor._CAPTURED) == 1
     harness.conn.rollback()
+    replayed = replay_billed(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        run_id=harness.run_id,
+        route=harness.route,
+        route_node_ids=[screen],
+    )
+    harness.conn.rollback()
+    assert isinstance(replayed, Replayed)
+    assert (replayed.verdict, replayed.outcome, replayed.code) == (
+        Verdict.BLOCKED,
+        None,
+        None,
+    )
     # Resume: no attempt, reservation or call; the run ends BLOCKED once.
     assert _run_route(harness, provider) is None
     assert len(answers.prompts) == 3
