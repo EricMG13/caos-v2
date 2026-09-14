@@ -82,6 +82,10 @@ MIGRATIONS = (
         "0015_revisions",
         Path(__file__).with_name("0015_revisions.sql").read_text(encoding="utf-8"),
     ),
+    (
+        "0016_filed_receipts",
+        Path(__file__).with_name("0016_filed_receipts.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
