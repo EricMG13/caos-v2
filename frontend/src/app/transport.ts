@@ -15,6 +15,7 @@ import {
   parseDirectoryDocument,
   parseModelDocument,
   parsePageDocument,
+  parseCommitteeDocument,
   parseReportDocument,
   parseRefusalBody,
   parseRunSectionDocument,
@@ -59,6 +60,7 @@ const V1_PARSERS: Record<EnabledSection, (value: unknown) => V1Document> = {
   analysis: parseAnalysisDocument,
   model: parseModelDocument,
   report: parseReportDocument,
+  committee: parseCommitteeDocument,
 };
 
 /** The section's document URL, or null when no request may be sent: a
@@ -67,19 +69,27 @@ export function sectionUrl(section: Section, query: SectionQuery): string | null
   if (!isEnabledSection(section)) return null;
   const params = new URLSearchParams();
   if (
-    (section === "run" || section === "analysis" || section === "model" || section === "report") &&
+    (section === "run" ||
+      section === "analysis" ||
+      section === "model" ||
+      section === "report" ||
+      section === "committee") &&
     query.run
   ) {
     params.set("run", query.run);
   }
-  if (section === "report" && query.revision) params.set("revision", query.revision);
+  if ((section === "report" || section === "committee") && query.revision) {
+    params.set("revision", query.revision);
+  }
   // Only the demo build names a fixture; production folds this branch away.
   if (import.meta.env.MODE === "demo" && query.fixture) params.set("fixture", query.fixture);
   const search = params.toString();
   const suffix = search ? `?${search}` : "";
   if (section === "directory") return `/api/v1/directory${suffix}`;
   if (!query.case) return null;
-  if (section === "report" && (!query.run || !query.revision)) return null;
+  if ((section === "report" || section === "committee") && (!query.run || !query.revision)) {
+    return null;
+  }
   return `/api/v1/cases/${encodeURIComponent(query.case)}/${section}${suffix}`;
 }
 
@@ -112,13 +122,19 @@ function classifyV1(section: EnabledSection, body: unknown, query: SectionQuery)
   try {
     document = V1_PARSERS[section](body);
     const runId =
-      section === "run" || section === "analysis" || section === "model" || section === "report"
+      section === "run" ||
+      section === "analysis" ||
+      section === "model" ||
+      section === "report" ||
+      section === "committee"
         ? query.run
         : null;
     requireIdentity(document, {
       caseId: section === "directory" ? null : (query.case ?? null),
       ...(runId ? { runId } : {}),
-      ...(section === "report" && query.revision ? { revisionId: query.revision } : {}),
+      ...((section === "report" || section === "committee") && query.revision
+        ? { revisionId: query.revision }
+        : {}),
     });
   } catch (error) {
     if (error instanceof WireShapeError) {

@@ -56,6 +56,17 @@ const report = () => ({
   status: "complete",
   notes: [],
 });
+const committee = () => ({
+  ...report(),
+  body: {
+    ...report().body,
+    state: "frozen",
+    signed_by: [CASE],
+    frozen_by: RUN,
+    filed_by: null,
+    receipt: null,
+  },
+});
 
 class FakeSource {
   static CONNECTING = 0;
@@ -198,6 +209,20 @@ describe("the workspace under its event tail", () => {
     await mount("report", `/report/?case=${CASE}&run=${RUN}&revision=${REVISION}`);
     expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/report?run=${RUN}&revision=${REVISION}`);
     await answer(0, report());
+    for (const name of ["run_progress", "handoff_accepted", "run_terminal", "runs_changed"]) {
+      await fire(name);
+    }
+    expect(sent).toHaveLength(1);
+    await fire("sources_changed");
+    expect(sent).toHaveLength(2);
+  });
+
+  test("Committee requires the same exact selection and refreshes when its saved source changes", async () => {
+    await mount("committee", `/committee/?case=${CASE}&run=${RUN}`);
+    expect(sent).toHaveLength(0);
+    await mount("committee", `/committee/?case=${CASE}&run=${RUN}&revision=${REVISION}`);
+    expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/committee?run=${RUN}&revision=${REVISION}`);
+    await answer(0, committee());
     for (const name of ["run_progress", "handoff_accepted", "run_terminal", "runs_changed"]) {
       await fire(name);
     }

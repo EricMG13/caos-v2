@@ -58,7 +58,7 @@ test("demo fixture HTTP is read-only before fixture selection", async ({ request
   });
 });
 
-test("demo Model and Report routes render parsed v1 content", async ({ page }) => {
+test("demo Model, Report, and Committee routes render parsed v1 content", async ({ page }) => {
   await page.goto("/model/?case=00000000-0000-4000-8000-000000000001");
   await expect(page.locator("[data-model-v1]")).toBeVisible();
   await expect(page.locator("[data-model-periods]")).toContainText("123.45");
@@ -68,4 +68,12 @@ test("demo Model and Report routes render parsed v1 content", async ({ page }) =
   );
   await expect(page.locator("[data-report-v1]")).toBeVisible();
   await expect(page.locator("[data-report-narrative]")).toContainText("Coverage 2.1x");
+  await page.goto(
+    "/committee/?case=00000000-0000-4000-8000-000000000001&run=00000000-0000-4000-8000-0000000000b2&revision=00000000-0000-4000-8000-0000000000c3",
+  );
+  await expect(page.locator("[data-committee-v1]")).toBeVisible();
+  await expect(page.locator("[data-committee-filing]")).toHaveAttribute("data-state", "filed");
+  await expect(page.locator("[data-committee-v1] button, [data-committee-v1] input")).toHaveCount(
+    0,
+  );
 });

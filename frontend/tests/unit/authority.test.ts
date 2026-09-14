@@ -123,7 +123,7 @@ describe("what a name refetches and what a view is", () => {
       run_progress: ["run"],
       handoff_accepted: ["run", "analysis", "model"],
       run_terminal: ["run", "analysis", "model"],
-      sources_changed: ["upload", "run", "analysis", "model", "report"],
+      sources_changed: ["upload", "run", "analysis", "model", "report", "committee"],
       runs_changed: ["run", "analysis", "model"],
     });
     expect(refetches("run_progress", "analysis")).toBe(false);

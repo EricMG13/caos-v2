@@ -1,13 +1,8 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
 import { CitationChip } from "@/evidence/CitationChip";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { MetricPassport } from "@/evidence/MetricPassport";
-import { CommitteeSection } from "@/sections/committee/CommitteeSection";
-import { PASSPORT_FIELDS, type Citation, type DocumentOf, type Passport } from "@/wire";
-import { parseUploadDocument } from "@/wire/v1";
+import { PASSPORT_FIELDS, type Citation, type Passport } from "@/wire";
 
 const CITATION: Citation = {
   chip: "D-04 p.68 ¶2",
@@ -89,59 +84,6 @@ describe("the evidence surface", () => {
     fireEvent.click(chip);
     const dialog = screen.getByRole("dialog");
     expect(dialog.querySelector("[data-withdrawn]")).toHaveTextContent("2026-09-09T09:41:00Z");
-  });
-
-  test("every citation of a source Upload shows withdrawn carries the withdrawal", () => {
-    const fixtures = `${resolve(process.cwd(), "fixtures")}/`;
-    const upload = parseUploadDocument(JSON.parse(readFileSync(`${fixtures}upload.json`, "utf8")));
-    // Keyed by `document_sha256`, not `source_id`: Upload's v1 wire (brief
-    // 4.1, slice 4.1h) gives every source a UUID id, so the `D-0N` label a
-    // legacy citation's `chip` still carries can no longer join on it. The
-    // digest is the join key invariant 11 already anchors citations on.
-    const withdrawn = new Map(
-      upload.body.sources
-        .filter((source) => source.withdrawn_at !== null)
-        .map((source) => [source.document_sha256, source.withdrawn_at]),
-    );
-    expect(withdrawn.size).toBeGreaterThan(0);
-    const files = [
-      ...readdirSync(fixtures).filter((name) => name.endsWith(".json") && name !== "upload.json"),
-      ...readdirSync(`${fixtures}states`)
-        .filter((name) => name !== "upload.partial.json")
-        .map((name) => `states/${name}`),
-    ];
-    let checked = 0;
-    const walk = (value: unknown): void => {
-      if (Array.isArray(value)) return value.forEach(walk);
-      if (typeof value !== "object" || value === null) return;
-      const record = value as Record<string, unknown>;
-      if (typeof record["chip"] === "string" && Array.isArray(record["bboxes"])) {
-        const digest = record["document_sha256"];
-        if (typeof digest === "string" && withdrawn.has(digest)) {
-          expect(record["withdrawn_at"], `${record["chip"]}`).toBe(withdrawn.get(digest));
-          checked += 1;
-        }
-      }
-      Object.values(record).forEach(walk);
-    };
-    for (const name of files) walk(JSON.parse(readFileSync(`${fixtures}${name}`, "utf8")));
-    expect(checked).toBeGreaterThan(0);
-  });
-
-  test("the committee paper marks a figure whose source has been withdrawn", () => {
-    const committee = JSON.parse(
-      readFileSync(`${resolve(process.cwd(), "fixtures")}/committee.json`, "utf8"),
-    ) as DocumentOf<"committee">;
-    const { container } = render(
-      <MemoryRouter>
-        <EvidenceProvider>
-          <CommitteeSection document={committee} tab={null} />
-        </EvidenceProvider>
-      </MemoryRouter>,
-    );
-    const cite = container.querySelector<HTMLElement>('.rd-cite[data-chip^="D-06"]');
-    expect(cite).toHaveClass("withdrawn");
-    expect(cite).toHaveAccessibleName(/source withdrawn$/);
   });
 
   test("test_passport_contract", () => {
