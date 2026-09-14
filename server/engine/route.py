@@ -27,7 +27,7 @@ the same path (invariant 10).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 from json import dumps
@@ -115,7 +115,10 @@ class NodeResult:
 class NamedObjects:
     """The vendor's named-object boundary, handed in as data (§46.1).
 
-    `owned` maps a module to the object its catalog artifact contract owns;
+    `owned` maps a module to the object its catalog artifact contract owns, and
+    `carried` maps a catalog edge `(source, target)` to the object it declares
+    it carries (`accepted_object_id`) -- an input meets the boundary through
+    either, since a screen can carry more objects than the one it owns;
     `accepted_ids` maps a module whose verified LITE compatibility block
     retains `NAMED_LITE_OBJECT_ACCEPTED` for this route's profile to the object
     ids it accepts. Read from verified bundle bytes by
@@ -125,6 +128,15 @@ class NamedObjects:
 
     owned: Mapping[str, str]
     accepted_ids: Mapping[str, frozenset[str]]
+    carried: Mapping[tuple[str, str], str] = field(default_factory=dict)
+
+    def offers(self, source: str, target: str) -> frozenset[str]:
+        """The objects `source`'s accepted artifact offers `target`."""
+        return frozenset(
+            value
+            for value in (self.owned.get(source), self.carried.get((source, target)))
+            if value is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,7 +312,7 @@ def lite_object_unmet(
     return tuple(
         edge
         for edge in route.edges
-        if edge.target == module_id and named.owned.get(edge.source) in wanted
+        if edge.target == module_id and named.offers(edge.source, module_id) & wanted
     )
 
 
@@ -456,7 +468,7 @@ def _named_object_met(
     return any(
         edge.target == module_id
         and edge.source in complete
-        and named.owned.get(edge.source) in wanted
+        and bool(named.offers(edge.source, module_id) & wanted)
         for edge in route.edges
     )
 

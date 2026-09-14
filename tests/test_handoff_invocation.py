@@ -28,7 +28,14 @@ from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
 from server.boundary_text import BoundaryText
-from server.engine.route import NamedObjects, ResolvedRoute, RouteNode, resolve_route
+from server.engine.route import (
+    NodeResult,
+    NodeState,
+    ResolvedRoute,
+    RouteNode,
+    node_states,
+    resolve_route,
+)
 from server.evidence.citations import AnchoredCitation, Rect
 from server.methodology.bundle import (
     delivered_authority,
@@ -651,10 +658,10 @@ def test_the_lite_compatibility_block_is_read_from_verified_vendor_bytes() -> No
         with pytest.raises(Refusal) as refused:
             lite_object_requirement(malformed.encode(), "CP-5", "LITE_CREDIT_22")
         assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
-    assert named_objects(BUNDLE, LITE_ROUTE) == NamedObjects(
-        owned={"CP-L10": "lite_financial_change_screen"},
-        accepted_ids={"CP-5": ids},
-    )
+    named = named_objects(BUNDLE, LITE_ROUTE)
+    assert named.owned == {"CP-L10": "lite_financial_change_screen"}
+    assert named.accepted_ids == {"CP-5": ids}
+    assert named.carried[("CP-L10", "CP-5")] == "lite_financial_change_screen"
 
 
 def test_allowed_uses_are_the_pinned_edges_catalog_labels() -> None:
@@ -749,3 +756,31 @@ def test_a_node_receives_its_direct_predecessors_accepted_claims(
     """Phase 11 exit, on the canonical adapter: a node's prompt carries each
     direct predecessor's accepted handoff, byte for byte."""
     test_the_prompt_carries_exact_upstream_bytes_and_every_block(harness)
+
+
+@pytest.mark.parametrize(
+    "selection", ["LITE_FULL_CREDIT_SCREEN", "LITE_DISTRESSED_RESTRUCTURING"]
+)
+def test_an_edge_carried_object_meets_the_boundary_on_other_lite_routes(
+    selection: str,
+) -> None:
+    """CP-L10 owns one object but its edges carry others (e.g. to CP-2H): a
+    module accepting a carried object is not held forever (§46.1 review)."""
+    route = resolve_route(CATALOG, "LITE_CREDIT_22", selection)
+    named = named_objects(BUNDLE, route)
+    assert named.accepted_ids, "the route must exercise the boundary"
+    accepted: dict[str, NodeResult] = {}
+    while True:
+        states = node_states(route, accepted, named)
+        ready = [
+            node
+            for node, state in states.items()
+            if node not in accepted
+            and state in {NodeState.RUNNABLE, NodeState.RESTRICTED}
+        ]
+        if not ready:
+            break
+        accepted[ready[0]] = NodeResult()
+    held = [n.route_node_id for n in route.nodes if n.module_id in named.accepted_ids]
+    stuck = [node for node in held if node not in accepted]
+    assert not stuck, (stuck, states)

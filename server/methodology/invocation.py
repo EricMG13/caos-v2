@@ -605,7 +605,44 @@ def named_objects(bundle: Bundle, route: ResolvedRoute) -> NamedObjects:
         ids = lite_object_requirement(skill, node.module_id, route.profile_id)
         if ids is not None:
             accepted_ids[node.module_id] = ids
-    return NamedObjects(owned=owned, accepted_ids=accepted_ids)
+    carried = _carried_objects(catalog, route.profile_id)
+    offered = NamedObjects(owned=owned, accepted_ids={}, carried=carried)
+    # A boundary no input on this pinned route can meet -- the vendor names an
+    # object no module on it owns or carries -- is not enforced: holding the
+    # node forever would be a host-invented graph, not the vendor's (§46.1
+    # review). Only CP-5's boundary on the LITE earnings route is executable.
+    meetable = {
+        module: ids
+        for module, ids in accepted_ids.items()
+        if any(
+            offered.offers(edge.source, module) & ids
+            for edge in route.edges
+            if edge.target == module
+        )
+    }
+    return NamedObjects(owned=owned, accepted_ids=meetable, carried=carried)
+
+
+def _carried_objects(
+    catalog: Mapping[str, Any], profile_id: str
+) -> dict[tuple[str, str], str]:
+    """Each catalog edge's declared `accepted_object_id`, keyed by the edge."""
+    carried: dict[tuple[str, str], str] = {}
+    try:
+        edges = catalog["profiles"][profile_id]["edges"]
+        pairs = [
+            ((str(edge["source"]), str(edge["target"])), edge.get("accepted_object_id"))
+            for edge in edges
+        ]
+    except (KeyError, TypeError, AttributeError):
+        pairs = None
+    if pairs is None or any(
+        value is not None and (not isinstance(value, str) or not value)
+        for _, value in pairs
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    carried.update((key, value) for key, value in pairs if value is not None)
+    return carried
 
 
 def _utf8(data: bytes, code: RefusalCode) -> str:

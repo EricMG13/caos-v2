@@ -639,3 +639,20 @@ def test_a_named_object_boundary_blocks_until_an_accepted_input_owns_one() -> No
     assert node_states(route, done, other)["RN-T"] is NodeState.BLOCKED
     assert lite_object_unmet(route, done, "T", other) == ()
     assert lite_object_unmet(route, {}, "S", named) == ()
+
+
+def test_an_object_carried_by_the_edge_meets_a_named_boundary() -> None:
+    route = ResolvedRoute(
+        profile_id="P",
+        selection_id="S",
+        nodes=(RouteNode("RN-S", "S", 1), RouteNode("RN-T", "T", 2)),
+        edges=(Edge("S", "T", EdgeType.ADVISORY),),
+    )
+    named = NamedObjects(
+        owned={"S": "owned"},
+        accepted_ids={"T": frozenset({"carried"})},
+        carried={("S", "T"): "carried"},
+    )
+    done = {"RN-S": NodeResult()}
+    assert node_states(route, done, named)["RN-T"] is NodeState.RUNNABLE
+    assert lite_object_unmet(route, {}, "T", named) == (route.edges[0],)
