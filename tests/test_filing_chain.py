@@ -155,10 +155,36 @@ def test_filing_refuses_the_signer_and_the_freezer(lite: _Harness) -> None:
 def test_the_receipt_names_its_case_run_and_filing_event(
     lite: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from collections.abc import Callable
+
+    from server.deliverable import filing
+    from server.store import StoreConnection
+    from server.store.audit import GovernedAction, governed_write
+
+    def followed_by_another_event(
+        conn: StoreConnection,
+        action: GovernedAction,
+        write: Callable[[StoreConnection], None],
+    ) -> str:
+        link = governed_write(conn, action, write)
+        governed_write(
+            conn,
+            GovernedAction(
+                action.case_id,
+                action.actor_id,
+                "FOLLOWING_EVENT",
+                Standing.APPROVER,
+                {},
+            ),
+            lambda unit: None,
+        )
+        return link
+
     revision = _save(lite)
     _sign(lite, revision)
     freezer, filer = _actor(lite), _actor(lite)
     _freeze(lite, revision, freezer)
+    monkeypatch.setattr(filing, "governed_write", followed_by_another_event)
     receipt = file_deliverable(
         lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
     )
@@ -171,6 +197,10 @@ def test_the_receipt_names_its_case_run_and_filing_event(
         if e.action == "DELIVERABLE_FILED"
     )
     assert receipt.filed_event_sha256 == event.entry_sha256
+    assert (
+        audit_trail(lite.conn, lite.case_id)[-1].entry_sha256
+        != receipt.filed_event_sha256
+    )
     assert "audit_head" not in json.loads(receipt_bytes(receipt))
     path = Path(__file__).parents[1] / "server/deliverable/render.py"
     assert receipt.renderer_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()

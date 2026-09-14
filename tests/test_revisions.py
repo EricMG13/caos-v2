@@ -161,3 +161,33 @@ def test_typed_narrative_renders_resolved_figures_and_restrictions(
     assert page == render(json.loads(json.dumps(payload)))
     assert b"Analyst narrative" in page and QUOTE.encode() in page
     assert b"Interim period only" in page
+
+
+def test_an_empty_text_span_renders_from_a_valid_saved_revision(lite: _Harness) -> None:
+    from server.deliverable.render import render
+
+    payload = _read(lite, _save(lite, [[{"text": ""}, {"text": "Assessment"}]]))
+    assert b"<div>Assessment</div>" in render(payload)
+
+
+@pytest.mark.parametrize(
+    "narrative",
+    [
+        "unstructured",
+        False,
+        [[{"text": "ok", "extra": "bad"}]],
+        [[]],
+        [[{"text": "a" * 2001}]],
+        [[{"text": "a"}]] * 65,
+        [[{"text": "a"}] * 65],
+        [[{"text": "bad\u202e"}]],
+    ],
+)
+def test_invalid_or_over_ceiling_narrative_leaves_no_revision(
+    lite: _Harness, narrative: object
+) -> None:
+    with pytest.raises(Refusal):
+        _save(lite, narrative)
+    assert lite.conn.execute(
+        "SELECT count(*) FROM deliverable_revisions"
+    ).fetchone() == (0,)

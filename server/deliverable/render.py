@@ -214,8 +214,8 @@ def _narrative(narrative: object) -> str:
 
 def _span(span: object) -> str:
     if isinstance(span, Mapping):
-        if set(span) == {"text"}:
-            return escape(_text(span, "text"))
+        if set(span) == {"text"} and isinstance(span["text"], str):
+            return escape(span["text"])
         if set(span) == {"figure"}:
             return _citation(span["figure"])
     raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
