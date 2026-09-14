@@ -9,12 +9,13 @@ import { Workspace } from "@/app/Workspace";
 import { Rail } from "@/chrome/Rail";
 import { composeChrome, markDisabled } from "@/chrome/compose";
 import { SECTIONS } from "@/wire";
-import { parseModelDocument, parseUploadDocument } from "@/wire/v1";
+import { parseModelDocument, parseReportDocument, parseUploadDocument } from "@/wire/v1";
 
 const CASE = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const OTHER_CASE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const RUN = "7e6d5c4b-3a29-4817-a6f5-e4d3c2b1a098";
 const AT = "2026-09-14T10:00:00.123456Z";
+const REVISION = "4f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
 
 /** A v1 Upload document for `CASE`, served under `role`. */
@@ -43,6 +44,33 @@ function v1Model(runId = RUN) {
       subject: null,
       forecast: null,
       unavailable_reason: "NO_ACCEPTED_FORECAST",
+    },
+    observed_at: AT,
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  };
+}
+
+function v1Report({
+  caseId = CASE,
+  runId = RUN,
+  revisionId = REVISION,
+}: { caseId?: string; runId?: string; revisionId?: string } = {}) {
+  return {
+    chrome: {
+      subject: { case_id: caseId, title: "Acme" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: caseId,
+      displayed_run_id: runId,
+      revision_id: revisionId,
+      payload_sha256: "a".repeat(64),
+      case_title: "Acme",
+      artifacts: [],
+      narrative: [],
     },
     observed_at: AT,
     observed_empty: false,
@@ -126,9 +154,12 @@ describe("the transport", () => {
       `/api/v1/cases/a%2Fb%3Fc/model?run=${RUN}`,
     );
     expect(sectionUrl("model", { case: CASE })).toBe(`/api/v1/cases/${CASE}/model`);
+    expect(sectionUrl("report", { case: "a/b?c", run: RUN, revision: REVISION })).toBe(
+      `/api/v1/cases/a%2Fb%3Fc/report?run=${RUN}&revision=${REVISION}`,
+    );
     expect(sectionUrl("run", { case: "a/b?c" })).toBe("/api/v1/cases/a%2Fb%3Fc/run");
     // A caseless case section, or a disabled section, has no URL at all.
-    for (const section of ["upload", "run", "analysis", "model"] as const) {
+    for (const section of ["upload", "run", "analysis", "model", "report"] as const) {
       expect(sectionUrl(section, { run: RUN })).toBeNull();
     }
     for (const section of DISABLED) expect(sectionUrl(section, { case: CASE })).toBeNull();
@@ -158,8 +189,15 @@ describe("the transport", () => {
   });
 
   test("test_disabled_sections_render_unavailable_without_a_request", async () => {
-    expect([...ENABLED_SECTIONS]).toEqual(["directory", "upload", "run", "analysis", "model"]);
-    expect(DISABLED).toEqual(["book", "report", "committee", "admin"]);
+    expect([...ENABLED_SECTIONS]).toEqual([
+      "directory",
+      "upload",
+      "run",
+      "analysis",
+      "model",
+      "report",
+    ]);
+    expect(DISABLED).toEqual(["book", "committee", "admin"]);
     const spy = vi.fn();
     const tail = vi.fn();
     vi.stubGlobal("fetch", spy);
@@ -199,6 +237,50 @@ describe("the transport", () => {
       refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
     });
     expect(parseModelDocument(v1Model()).body.displayed_run_id).toBe(RUN);
+  });
+
+  test("Report requires and binds the exact case, run and revision", async () => {
+    const mismatches = [
+      v1Report({ caseId: OTHER_CASE }),
+      v1Report({ runId: OTHER_CASE }),
+      v1Report({ revisionId: OTHER_CASE }),
+    ];
+    const spy = vi.fn(async () => new Response(JSON.stringify(mismatches.shift())));
+    vi.stubGlobal("fetch", spy);
+    for (const query of [
+      { case: CASE, run: RUN },
+      { case: CASE, revision: REVISION },
+      { run: RUN, revision: REVISION },
+    ]) {
+      expect(await fetchSection("report", query)).toEqual({ kind: "unavailable" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    for (let index = 0; index < 3; index += 1) {
+      expect(await fetchSection("report", { case: CASE, run: RUN, revision: REVISION })).toEqual({
+        kind: "error",
+        refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+      });
+    }
+    expect(parseReportDocument(v1Report()).body.revision_id).toBe(REVISION);
+  });
+
+  test("the rail preserves an exact Report selection for every section", () => {
+    render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(Rail, {
+          section: "report",
+          entries: null,
+          local: null,
+          servedRole: null,
+          search: `?case=${CASE}&run=${RUN}&revision=${REVISION}`,
+        }),
+      ),
+    );
+    for (const link of screen.getAllByRole("link")) {
+      expect(link.getAttribute("href")).toContain(`case=${CASE}&run=${RUN}&revision=${REVISION}`);
+    }
   });
 
   test("test_served_role_is_displayed_and_enables_nothing", () => {
