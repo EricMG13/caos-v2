@@ -73,13 +73,42 @@ def case(empty_database: str) -> Iterator[tuple[object, UUID]]:
         yield conn, case_id
 
 
+@pytest.fixture(scope="session")
+def _migrated_template() -> Iterator[str]:
+    """One database with the schema applied, cloned by every test using `case`.
+
+    Nothing connects to it after this fixture closes its connection, which is
+    what `CREATE DATABASE ... TEMPLATE` needs.
+    """
+    import psycopg
+
+    from server.store import apply_schema, connect
+
+    assert POSTGRES_URL is not None
+    name = f"caos_test_template_{uuid4().hex}"
+    with psycopg.connect(POSTGRES_URL, autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+    try:
+        with connect(_url_for(name)) as conn:
+            apply_schema(conn)
+            conn.commit()
+        yield name
+    finally:
+        with psycopg.connect(POSTGRES_URL, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
 @pytest.fixture
-def empty_database() -> Iterator[str]:
+def empty_database(request: pytest.FixtureRequest) -> Iterator[str]:
     """A database of its own, created empty and dropped after the test.
 
     A namespace inside one shared database would be cheaper and would not answer
     the question these tests ask: what a process finds when it starts against a
     database no schema has been applied to yet.
+
+    A test that uses `case` applies the schema anyway, so its database is cloned
+    from a migrated template instead; `case` still runs `apply_schema`, which
+    verifies the recorded migration prefix on the clone.
     """
     if POSTGRES_URL is None:
         if POSTGRES_REQUIRED:
@@ -88,10 +117,16 @@ def empty_database() -> Iterator[str]:
 
     import psycopg
 
+    template = (
+        request.getfixturevalue("_migrated_template")
+        if "case" in request.fixturenames
+        else None
+    )
     name = f"caos_test_{uuid4().hex}"
     with psycopg.connect(POSTGRES_URL, autocommit=True) as admin:
-        # The name is a uuid4 hex this function minted, never caller input.
-        admin.execute(f'CREATE DATABASE "{name}"')
+        # Both names are uuid4 hex this module minted, never caller input.
+        suffix = f' TEMPLATE "{template}"' if template else ""
+        admin.execute(f'CREATE DATABASE "{name}"{suffix}')
     try:
         yield _url_for(name)
     finally:

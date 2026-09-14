@@ -30,7 +30,7 @@ types:
 	$(PY) -m mypy scripts tests server
 
 test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarqube job
-	$(PY) -m pytest
+	$(PY) -m pytest -n auto
 	$(PY) scripts/scan_floors.py coverage.xml --cobertura
 	$(PY) scripts/io_budget.py --assert
 
