@@ -31,14 +31,15 @@ from server.methodology.bundle import (
     authority_digest,
 )
 from server.methodology.envelope import Claim, Envelope, parse_claims, parse_readiness
-from server.provider import CompletionProvider
+from server.provider import CompletionProvider, _reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.budget import validate_spend
 from server.store.outcomes import (
+    CallOutcome,
     check_call,
     execution_reads,
     producer_identifier,
+    record_outcome,
     require_idle,
 )
 
@@ -254,6 +255,7 @@ def execute_module(
     Supplied run/node identity must match the actual attempt; the node's module
     must match the assignment. Stored route/input authority remains a separate
     runtime obligation.
+    Billing commits before any analytical refusal and survives later cleanup.
 
     The order is the contract: authority is verified before the prompt is built,
     the provider is asked once, and every citation is re-derived against the
@@ -299,28 +301,26 @@ def execute_module(
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     require_idle(conn)
     completion = provider.complete(prompt, json_object=True)
+    charge = _reported_charge(
+        completion.charge if isinstance(completion.charge, Decimal) else None
+    )
+    generation = producer_identifier(completion.generation_id, limit=512)
     require_idle(conn)
+    record_outcome(
+        conn, attempt_id=attempt_id, outcome=CallOutcome(charge, model, generation)
+    )
     if completion.refusal is not None:
         code = completion.refusal
         if not isinstance(code, RefusalCode):
             code = RefusalCode.PROVIDER_RESPONSE_INVALID
         raise Refusal(code) from None
-    generation = producer_identifier(completion.generation_id, limit=512)
-    if (
-        not isinstance(completion.content, str)
-        or not isinstance(completion.charge, Decimal)
-        or generation is None
-    ):
+    if not isinstance(completion.content, str) or charge is None or generation is None:
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
-    try:
-        validate_spend(completion.charge)
-    except Refusal:
-        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID) from None
     with execution_reads(conn):
         envelope = _envelope(conn, assignment, authority, completion.content)
     return ModuleOutcome(
         envelope=envelope,
-        charge=completion.charge,
+        charge=charge,
         model=model,
         generation_id=generation,
     )

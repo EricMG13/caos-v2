@@ -182,6 +182,16 @@ def test_two_attempts_are_attributed_explicitly_and_transport_reads_are_idle(
     )
     transport.response = (200, _wire("stop", str(REPORTED), content=second_body or ""))
     result = provider.execute(second.route_node_id, second.module_id, attempt_id=a2)
+    with connect(_url_for(provider.conn.info.dbname)) as observer:
+        assert observer.execute(
+            "SELECT attempt_id,amount FROM budget_ledger ORDER BY charged_at"
+        ).fetchall() == [(a1, REPORTED), (a2, REPORTED)]
+        assert observer.execute(
+            "SELECT attempt_id FROM call_outcomes ORDER BY recorded_at"
+        ).fetchall() == [(a1,), (a2,)]
+        assert observer.execute("SELECT attempt_id FROM artifacts").fetchall() == [
+            (a1,)
+        ]
     accept_attempt(
         provider.conn,
         attempt_id=a2,
@@ -202,23 +212,24 @@ def test_two_attempts_are_attributed_explicitly_and_transport_reads_are_idle(
 
 @pytest.mark.parametrize("entry", ["module", "executor"])
 @pytest.mark.parametrize(
-    "fault",
+    "fault,code",
     [
-        "run",
-        "node",
-        "module",
-        "missing",
-        "unreserved",
-        "used",
-        "ledger",
-        "artifact",
-        "terminal",
+        ("run", "ATTEMPT_NOT_FOUND"),
+        ("node", "ATTEMPT_NOT_FOUND"),
+        ("module", "ROUTE_IDENTITY_INVALID"),
+        ("missing", "ATTEMPT_NOT_FOUND"),
+        ("unreserved", "BUDGET_NOT_RESERVED"),
+        ("used", "CALL_OUTCOME_CONFLICT"),
+        ("ledger", "CALL_OUTCOME_LEGACY"),
+        ("artifact", "CALL_OUTCOME_LEGACY"),
+        ("terminal", "RUN_NOT_RUNNING"),
     ],
 )
 def test_invalid_or_used_attempt_cannot_reach_completion(
     provider: ModuleProvider,
     entry: str,
     fault: str,
+    code: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """check_call refuses before either evidence or upstream context is read."""
@@ -239,7 +250,6 @@ def test_invalid_or_used_attempt_cannot_reach_completion(
             lock_run(blocker, actual_run)
             conn.execute("SET lock_timeout = '100ms'")
             conn.commit()
-        code = "ATTEMPT_NOT_FOUND" if fault == "run" else ".*"
         with pytest.raises(Refusal, match=f"^{code}$"):
             _invoke(provider, attempt, entry, node, module)
     assert conn.info.transaction_status is TransactionStatus.IDLE
