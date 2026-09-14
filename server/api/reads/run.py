@@ -19,6 +19,8 @@ from uuid import UUID
 
 from fastapi import APIRouter
 
+from server import methodology
+from server.api.commands.availability import RunFacts, run_actions
 from server.api.deps import Blobs, Caller, Methodology, Store
 from server.api.identity import Actor
 from server.api.wire import (
@@ -29,6 +31,7 @@ from server.api.wire import (
     EdgeView,
     GateView,
     NodeView,
+    RouteChoice,
     RunBody,
     RunSectionDocument,
     RunSubjectView,
@@ -37,6 +40,7 @@ from server.api.wire import (
     SectionNote,
     ServedRole,
     Subject,
+    WorkView,
 )
 from server.blobs import BlobStore
 from server.engine.route import (
@@ -55,17 +59,29 @@ from server.engine.route import (
 )
 from server.engine.runtime import accepted_artifacts
 from server.methodology.bundle import Bundle
+from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.gates import Gate, gate_state
+from server.store.gates import (
+    Gate,
+    GateState,
+    gate_state,
+    require_adapter_route,
+    sources_live,
+)
 from server.store.members import Standing, satisfies
 from server.store.routes import resolved_route
 from server.store.run_inputs import load_run_input
 
-# The case, the caller's standing and the store's `now()` in one row; the
-# bounded run list; the attempts; the pinned route; the accepted artifacts.
+# The case, the caller's standing, its live-source count and the store's
+# `now()` in one row; the bounded run list; the attempts; the pinned route; the
+# accepted artifacts.
 _FIXED_IO = 5
+# The displayed run's `run_work` row (Task 4.2 decision 14).
+WORK_IO = 1
+# Whether the pinned sources are still live, read once a pin exists.
+LIVE_IO = 1
 # Of those, the accepted artifacts are read only once a route is pinned.
 ACCEPTED_IO = 1
 # The displayed run, read by id only when the bounded list does not hold it.
@@ -77,8 +93,8 @@ PINNED_INPUT_IO = 5
 # approver's standing and the live-source check.
 GATE_IO = PINNED_INPUT_IO + 3
 # Before an input is pinned, the input read and each gate's find no row.
-UNPINNED_INPUT_IO = _FIXED_IO + 1 + len(Gate)
-SECTION_READ_IO = _FIXED_IO + PINNED_INPUT_IO + len(Gate) * GATE_IO
+UNPINNED_INPUT_IO = _FIXED_IO + WORK_IO + 1 + len(Gate)
+SECTION_READ_IO = _FIXED_IO + WORK_IO + LIVE_IO + PINNED_INPUT_IO + len(Gate) * GATE_IO
 # A canonical readiness row (§42.4) is read from its record under the host
 # identity the store rebuilds: the run input, the pinned route, the attempt's
 # owner and ordinal, the accepted digests, and the call-time narrowing's
@@ -114,7 +130,7 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
     422 quoting the input back.
     """
     case = _uuid(case_id, RefusalCode.CASE_NOT_FOUND)
-    title, standing, observed_at = _visible_case(conn, case, actor)
+    title, standing, live_sources, observed_at = _visible_case(conn, case, actor)
     wanted = None if run is None else _uuid(run, RefusalCode.RUN_NOT_FOUND)
 
     rows = conn.execute(
@@ -130,15 +146,15 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
         displayed = next((s for s in runs if s.run_id == wanted), None)
         displayed = displayed or _displayed_beyond_the_list(conn, case, wanted)
 
-    view = None
+    view = facts = None
     if displayed is not None:
-        view, run_notes = _run_view(conn, blobs, bundle, displayed)
+        view, facts, run_notes = _run_view(conn, blobs, bundle, displayed)
         notes.extend(run_notes)
     return RunSectionDocument(
         chrome=Chrome(
             subject=Subject(case_id=case, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
-            actions=[],
+            actions=run_actions(actor.role, standing, facts, live_sources),
         ),
         body=RunBody(
             case_id=case,
@@ -146,7 +162,10 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
             displayed_run_id=None if displayed is None else displayed.run_id,
             runs=runs,
             run=view,
-            route_choices=[],
+            route_choices=[
+                RouteChoice(profile_id=profile, selection_id=selection)
+                for profile, selection in sorted(ADAPTER_ROUTES)
+            ],
         ),
         observed_at=observed_at,
         observed_empty=not runs,
@@ -169,14 +188,17 @@ def _uuid(value: str, code: RefusalCode) -> UUID:
 
 def _visible_case(
     conn: StoreConnection, case_id: UUID, actor: Actor
-) -> tuple[str, Standing, Any]:
-    """The case's title, the caller's live standing and the store's `now()`.
+) -> tuple[str, Standing, int, Any]:
+    """The case's title, the caller's live standing, the case's live sources
+    and the store's `now()`.
 
     One query. An unknown case and a case the caller may not read are the same
     refusal, or the difference between them is the disclosure.
     """
     row = conn.execute(
-        "SELECT c.title, m.standing, now() FROM cases c"
+        "SELECT c.title, m.standing, now(),"
+        " (SELECT count(*) FROM live_sources s WHERE s.case_id = c.case_id)"
+        " FROM cases c"
         " LEFT JOIN case_members m ON m.case_id = c.case_id"
         " AND m.user_id = %s AND m.revoked_at IS NULL"
         " WHERE c.case_id = %s",
@@ -185,7 +207,7 @@ def _visible_case(
     standing = None if row is None or row[1] is None else Standing(row[1])
     if row is None or standing is None or not satisfies(standing, READ_REQUIRES):
         raise Refusal(RefusalCode.CASE_NOT_FOUND)
-    return str(row[0]), standing, row[2]
+    return str(row[0]), standing, int(row[3]), row[2]
 
 
 def _summary(row: tuple[Any, ...]) -> RunSummary:
@@ -216,10 +238,26 @@ def _displayed_beyond_the_list(
 
 def _run_view(
     conn: StoreConnection, blobs: BlobStore, bundle: Bundle, summary: RunSummary
-) -> tuple[RunView, list[SectionNote]]:
+) -> tuple[RunView, RunFacts, list[SectionNote]]:
     run_id = summary.run_id
     pin = load_run_input(conn, run_id)
     gates = [GateView(gate=gate, state=gate_state(conn, run_id, gate)) for gate in Gate]
+    work_row = conn.execute(
+        "SELECT state, stop_code, cancel_requested_at IS NOT NULL FROM run_work"
+        " WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    work = (
+        None
+        if work_row is None
+        else WorkView.model_validate(
+            {
+                "state": work_row[0],
+                "stop_code": work_row[1],
+                "cancel_requested": work_row[2],
+            }
+        )
+    )
     attempts = conn.execute(
         "SELECT a.attempt_id, a.route_node_id, a.ordinal, a.started_at,"
         " f.attempt_id IS NOT NULL FROM run_attempts a"
@@ -264,9 +302,37 @@ def _run_view(
             )
             for row in attempts[:ATTEMPTS_MAX]
         ],
-        work=None,
+        work=work,
     )
-    return view, list(dict.fromkeys(notes))
+    facts = RunFacts(
+        running=summary.status == "RUNNING",
+        route_pinned=route is not None,
+        input_pinned=pin is not None,
+        this_build=pin is not None
+        and (pin.build_id, pin.manifest_sha256, pin.adapter_version)
+        == (
+            bundle.build_id,
+            bundle.manifest_sha256,
+            methodology.CANONICAL_ADAPTER_VERSION,
+        ),
+        # The very predicate approval and start refuse on, so the advertised
+        # EVIDENCE_NOT_AVAILABLE cannot drift from the commands'.
+        sources_live=pin is not None and sources_live(conn, run_id),
+        gates_released=all(g.state is GateState.RELEASED for g in gates),
+        adapter_route=route is not None and _adapter_route(route),
+        work_state=None if work is None else work.state,
+        cancel_requested=work is not None and work.cancel_requested,
+    )
+    return view, facts, list(dict.fromkeys(notes))
+
+
+def _adapter_route(route: ResolvedRoute) -> bool:
+    """Whether `execution_input` would accept the route's modules and pathway."""
+    try:
+        require_adapter_route(route)
+    except Refusal:
+        return False
+    return True
 
 
 def _node_views(

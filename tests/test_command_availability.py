@@ -1,0 +1,317 @@
+"""Task 4.2 slice 4.2g: `Chrome.actions` against the commands themselves.
+
+Each action is judged by the section document read immediately before it is
+sent: an action shown available must succeed, and an action shown refused must
+refuse with exactly the code shown. The journey walks a run through every state
+the Run section distinguishes, so no advertised answer goes unchecked.
+Availability grants nothing: the command rechecks at commit.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from uuid import UUID, uuid4
+
+import pytest
+from command_fixtures import command_client, command_headers, member
+from fastapi.testclient import TestClient
+from httpx import Response
+
+from server import methodology
+from server.api.commands.availability import (
+    RunFacts,
+    directory_actions,
+    run_actions,
+    upload_actions,
+)
+from server.api.identity import TRUST_SWITCH, GlobalRole
+from server.api.wire import (
+    ActionName,
+    ActionView,
+    DirectoryDocument,
+    RunSectionDocument,
+    UploadDocument,
+)
+from server.boundary_text import BoundaryText
+from server.refusals import RefusalCode
+from server.store import StoreConnection
+from server.store.gates import sources_live, withdraw_source
+from server.store.members import Standing, revoke
+from server.store.work import claim_run, stop
+
+__all__ = ["command_client"]
+
+A = ActionName
+ROUTE = {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"}
+SUBJECT = {
+    "issuer_id": "EXAMPLE",
+    "issuer_name": "Example Holdings plc",
+    "reporting_period": "FY2025",
+    "analysis_date": "2026-09-08",
+}
+ZERO = "0" * 64
+GATE_SLUG = {
+    A.APPROVE_SOURCE_SET: "source-set",
+    A.APPROVE_RESEARCH_PLAN: "research-plan",
+}
+TAIL = {A.START_RUN: "start", A.RETRY_RUN: "retry", A.CANCEL_RUN: "cancel"}
+
+
+@pytest.fixture(autouse=True)
+def _groups_decide(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Identity from the groups header, whatever the developer environment set."""
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    yield
+
+
+class _Journey:
+    """One actor's view of one case, and the commands it sends."""
+
+    def __init__(
+        self, client: TestClient, case_id: UUID, user: UUID, role: str
+    ) -> None:
+        self.client, self.case_id, self.user, self.role = client, case_id, user, role
+        self.run_id: UUID | None = None
+
+    def _headers(self) -> dict[str, str]:
+        return command_headers(self.user, role=self.role)
+
+    def document(self) -> RunSectionDocument:
+        query = "" if self.run_id is None else f"?run={self.run_id}"
+        answer = self.client.get(
+            f"/api/v1/cases/{self.case_id}/run{query}", headers=self._headers()
+        )
+        assert answer.status_code == 200, answer.text
+        return RunSectionDocument.model_validate(answer.json())
+
+    def _digests(self, slug: str = "source-set") -> dict[str, str]:
+        """The digests a preview shows this actor, or stale ones when it shows none."""
+        preview = self.client.get(
+            f"/api/v1/cases/{self.case_id}/runs/{self.run_id}/gates/{slug}/preview",
+            headers=self._headers(),
+        )
+        if preview.status_code != 200:
+            return {"preview_sha256": ZERO, "input_fingerprint": ZERO}
+        return {k: preview.json()[k] for k in ("preview_sha256", "input_fingerprint")}
+
+    def send(self, action: ActionName) -> Response:
+        runs = f"/api/v1/cases/{self.case_id}/runs"
+        run = f"{runs}/{self.run_id or uuid4()}"
+        body: dict[str, object]
+        if action is A.CREATE_RUN:
+            path, body = runs, dict(ROUTE)
+        elif action is A.PIN_RUN_INPUT:
+            path, body = f"{run}/input", {"subject": SUBJECT}
+        elif action in GATE_SLUG:
+            slug = GATE_SLUG[action]
+            path, body = f"{run}/gates/{slug}/approval", dict(self._digests(slug))
+        elif action is A.CANCEL_RUN:
+            path, body = f"{run}/cancel", {}
+        else:
+            fingerprint = self._digests()["input_fingerprint"]
+            path, body = f"{run}/{TAIL[action]}", {"input_fingerprint": fingerprint}
+        answer: Response = self.client.post(path, headers=self._headers(), json=body)
+        return answer
+
+    def check(self, *actions: ActionName) -> list[str]:
+        """Send each action as the document read just before it judged it.
+
+        Returns each answer as `status code`, for the reader of the journey."""
+        answers = []
+        for action in actions:
+            [shown] = [v for v in self.document().chrome.actions if v.action is action]
+            answer = self.send(action)
+            if shown.refusal is None:
+                assert answer.status_code in (200, 201, 202), (action, answer.text)
+                if action is A.CREATE_RUN:
+                    self.run_id = UUID(answer.json()["run_id"])
+            else:
+                assert answer.json()["code"] == shown.refusal.code, (action, shown)
+            answers.append(f"{action} {shown.refusal and shown.refusal.code}")
+        return answers
+
+
+def _admit(client: TestClient, case_id: UUID, user: UUID) -> Response:
+    answer: Response = client.post(
+        f"/api/v1/cases/{case_id}/sources",
+        headers=command_headers(user),
+        files=[("document", ("report.txt", b"Total debt was USD 1,240.0m\n", "x"))],
+    )
+    return answer
+
+
+def _upload(client: TestClient, case_id: UUID, user: UUID, role: str) -> ActionView:
+    answer = client.get(
+        f"/api/v1/cases/{case_id}/upload", headers=command_headers(user, role=role)
+    )
+    [action] = UploadDocument.model_validate(answer.json()).chrome.actions
+    return action
+
+
+def _stop_the_claimed_run(conn: StoreConnection) -> None:
+    conn.rollback()  # the section read's transaction; a claim commits alone
+    lease = claim_run(conn, worker=BoundaryText.of("w"), lease_seconds=60)
+    assert lease is not None
+    stop(conn, lease, RefusalCode.CITATION_NOT_LOCATED)
+    conn.commit()
+
+
+EVERY_RUN_ACTION = (
+    A.PIN_RUN_INPUT,
+    A.APPROVE_SOURCE_SET,
+    A.APPROVE_RESEARCH_PLAN,
+    A.START_RUN,
+    A.RETRY_RUN,
+    A.CANCEL_RUN,
+)
+TO_START = (A.PIN_RUN_INPUT, A.APPROVE_SOURCE_SET, A.APPROVE_RESEARCH_PLAN, A.START_RUN)
+
+
+def test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code(
+    command_client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, case_id = case
+    lead = _Journey(
+        command_client, case_id, member(conn, case_id, Standing.ADMIN), "ANALYST"
+    )
+
+    # No run and no source: run-scoped actions are RUN_NOT_FOUND; then a run.
+    assert lead.check(*EVERY_RUN_ACTION)[0].endswith("RUN_NOT_FOUND")
+    lead.check(A.CREATE_RUN)
+    assert lead.check(*EVERY_RUN_ACTION)[0].endswith("SOURCE_PACK_EMPTY")
+    lead.check(*EVERY_RUN_ACTION)  # the cancelled run refuses everything
+
+    # Upload's one action, for a writer and a reader.
+    assert _upload(command_client, case_id, lead.user, "ANALYST").refusal is None
+    assert _admit(command_client, case_id, lead.user).status_code == 201
+    reader = member(conn, case_id, Standing.READER)
+    refused = _upload(command_client, case_id, reader, "ANALYST").refusal
+    assert refused is not None and refused.code == "NOT_AUTHORISED"
+    assert _admit(command_client, case_id, reader).json()["code"] == "NOT_AUTHORISED"
+
+    # A run walked to its queue, stopped, retried and cancelled.
+    lead.check(A.CREATE_RUN, *TO_START, A.RETRY_RUN, A.START_RUN)
+    assert lead.document().body.run.work.state == "QUEUED"  # type: ignore[union-attr]
+    _stop_the_claimed_run(conn)
+    lead.check(A.START_RUN, A.PIN_RUN_INPUT, A.RETRY_RUN, A.CANCEL_RUN)
+    lead.check(*EVERY_RUN_ACTION)
+    assert lead.document().body.run.status == "CANCELLED"  # type: ignore[union-attr]
+
+    # A claimed run: cancel requests once, then is refused.
+    lead.check(A.CREATE_RUN, *TO_START)
+    conn.rollback()
+    assert claim_run(conn, worker=BoundaryText.of("w"), lease_seconds=60) is not None
+    conn.commit()
+    assert lead.check(A.CANCEL_RUN, A.CANCEL_RUN)[1].endswith("RUN_CANCEL_REQUESTED")
+
+    # Another adapter, then a withdrawn source: conflicts, never faults.
+    lead.check(A.CREATE_RUN, A.PIN_RUN_INPUT, A.APPROVE_SOURCE_SET)
+    adapter = methodology.CANONICAL_ADAPTER_VERSION
+    monkeypatch.setattr(methodology, "CANONICAL_ADAPTER_VERSION", "another-adapter")
+    assert lead.check(A.START_RUN)[0].endswith("ORCHESTRATION_BUILD_MOVED")
+    monkeypatch.setattr(methodology, "CANONICAL_ADAPTER_VERSION", adapter)
+    assert lead.check(A.START_RUN)[0].endswith("GATE_APPROVAL_MISMATCH")
+    [source] = conn.execute("SELECT source_id FROM sources").fetchall()[0]
+    conn.rollback()
+    withdraw_source(conn, case_id=case_id, source_id=source, actor_id=lead.user)
+    assert lead.run_id is not None and not sources_live(conn, lead.run_id)
+    conn.rollback()
+    answers = lead.check(A.APPROVE_RESEARCH_PLAN, A.START_RUN, A.RETRY_RUN)
+    assert all(answer.endswith("EVIDENCE_NOT_AVAILABLE") for answer in answers)
+
+    # Below the floor, or a global READER holding WRITER standing: all refused.
+    for user, role in ((reader, "ANALYST"), (member(conn, case_id), "READER")):
+        viewer = _Journey(command_client, case_id, user, role)
+        viewer.run_id = lead.run_id
+        answers = viewer.check(A.CREATE_RUN, *EVERY_RUN_ACTION)
+        assert all(answer.endswith("NOT_AUTHORISED") for answer in answers)
+
+
+def test_served_role_and_actions_come_only_from_the_server(
+    command_client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    conn, case_id = case
+    reader = member(conn, case_id, Standing.READER)
+    claimed = {
+        **command_headers(reader, role="READER"),
+        "x-caos-role": "ADMIN",
+        "x-caos-standing": "ADMIN",
+    }
+
+    asked = command_client.get(
+        f"/api/v1/cases/{case_id}/run?role=ADMIN&standing=ADMIN", headers=claimed
+    )
+    directory = command_client.get("/api/v1/directory", headers=claimed)
+
+    document = RunSectionDocument.model_validate(asked.json())
+    served = document.chrome.served_role
+    assert (served.global_role, served.standing) == ("READER", "READER")
+    assert {view.refusal.code for view in document.chrome.actions if view.refusal} == {
+        "NOT_AUTHORISED"
+    }
+    assert all(view.refusal for view in document.chrome.actions)
+    [create] = DirectoryDocument.model_validate(directory.json()).chrome.actions
+    assert create.refusal is not None and create.refusal.code == "NOT_AUTHORISED"
+
+    # Shown available, then standing is lost: the command decides at commit.
+    writer = _Journey(command_client, case_id, member(conn, case_id), "ANALYST")
+    assert writer.check(A.CREATE_RUN) == ["CREATE_RUN None"]
+    [shown] = [v for v in writer.document().chrome.actions if v.action is A.CREATE_RUN]
+    assert shown.refusal is None
+    revoke(conn, case_id=case_id, user_id=writer.user)
+    conn.commit()
+    lost = writer.send(A.CREATE_RUN)
+    assert (lost.status_code, lost.json()["code"]) == (404, "CASE_NOT_FOUND")
+
+
+def test_the_pure_judgements_follow_each_command_order() -> None:
+    """The functions the reads call, over facts no store could hold at once."""
+    facts = RunFacts(
+        running=False,
+        route_pinned=True,
+        input_pinned=True,
+        this_build=False,
+        sources_live=False,
+        gates_released=False,
+        adapter_route=True,
+        work_state="CLAIMED",
+        cancel_requested=True,
+    )
+
+    judged = {
+        view.action: view.refusal and view.refusal.code
+        for view in run_actions(GlobalRole.ANALYST, Standing.APPROVER, facts, 1)
+    }
+
+    assert judged == {
+        A.CREATE_RUN: None,
+        A.PIN_RUN_INPUT: "RUN_INPUT_ALREADY_PINNED",
+        A.APPROVE_SOURCE_SET: "RUN_NOT_RUNNING",
+        A.APPROVE_RESEARCH_PLAN: "RUN_NOT_RUNNING",
+        A.START_RUN: "ORCHESTRATION_BUILD_MOVED",
+        A.RETRY_RUN: "ORCHESTRATION_BUILD_MOVED",
+        A.CANCEL_RUN: "RUN_NOT_RUNNING",
+    }
+    ready = RunFacts(
+        running=True,
+        route_pinned=True,
+        input_pinned=True,
+        this_build=True,
+        sources_live=True,
+        gates_released=True,
+        adapter_route=True,
+        work_state="STOPPED",
+        cancel_requested=True,
+    )
+    [retry] = [
+        view
+        for view in run_actions(GlobalRole.ANALYST, Standing.WRITER, ready, 1)
+        if view.action is A.RETRY_RUN
+    ]
+    # `requeue_run` requeues only a stopped run with no cancel requested.
+    assert retry.refusal is not None and retry.refusal.code == "RUN_NOT_STOPPED"
+    assert [v.refusal for v in directory_actions(GlobalRole.ADMIN)] == [None]
+    [admit] = upload_actions(GlobalRole.ADMIN, Standing.READER)
+    assert admit.refusal is not None and admit.refusal.code == "NOT_AUTHORISED"

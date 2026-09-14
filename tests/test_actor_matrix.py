@@ -18,12 +18,23 @@ failure is silent and total.
 
 from __future__ import annotations
 
-from uuid import uuid4
+from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
+from command_fixtures import command_client, command_headers, member
+from fastapi.testclient import TestClient
+from test_execution_commands import ROUTE, _ready, _Run
 
 from server.api.identity import TRUST_SWITCH, GlobalRole, actor_from_headers
 from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection
+from server.store import commands as store_commands
+from server.store.gates import Gate, gate_preview
+from server.store.members import Standing, revoke
+from server.store.routes import pin_route
+
+__all__ = ["command_client"]
 
 USER = uuid4()
 
@@ -207,3 +218,169 @@ def test_the_switch_is_read_at_the_request_not_at_import(
     after = actor_from_headers(_headers(**{"x-caos-role": "ADMIN"}))
 
     assert (before.role, after.role) == (GlobalRole.READER, GlobalRole.ADMIN)
+
+
+# Task 4.2's actor matrix, every command endpoint in one table. `None` is the
+# brief's "n/a": create case has no case to hold standing on.
+ACTORS = "anonymous nonmember reader writer approver revoked admin reader_writer"
+MATRIX: dict[str, tuple[int | None, ...]] = {
+    "create-case": (401, 201, None, None, None, None, 201, 403),
+    "admit": (401, 404, 403, 201, 201, 404, 404, 403),
+    "runs": (401, 404, 403, 201, 201, 404, 404, 403),
+    "input": (401, 404, 403, 200, 200, 404, 404, 403),
+    "preview": (401, 404, 200, 200, 200, 404, 404, 200),
+    "approval": (401, 404, 403, 403, 200, 404, 404, 403),
+    "start": (401, 404, 403, 202, 202, 404, 404, 403),
+    "retry": (401, 404, 403, 202, 202, 404, 404, 403),
+    "cancel": (401, 404, 403, 202, 202, 404, 404, 403),
+}
+SUBJECT = {
+    "issuer_id": "EXAMPLE",
+    "issuer_name": "Example Holdings plc",
+    "reporting_period": "FY2025",
+    "analysis_date": "2026-09-08",
+}
+
+
+def _actors(conn: StoreConnection, case_id: UUID) -> list[tuple[UUID | None, str]]:
+    """Each actor's user and global role, in `ACTORS` order."""
+    revoked = member(conn, case_id, Standing.ADMIN)
+    revoke(conn, case_id=case_id, user_id=revoked)
+    conn.commit()
+    return [
+        (None, "ANALYST"),
+        (uuid4(), "ANALYST"),
+        (member(conn, case_id, Standing.READER), "ANALYST"),
+        (member(conn, case_id, Standing.WRITER), "ANALYST"),
+        (member(conn, case_id, Standing.APPROVER), "ANALYST"),
+        (revoked, "ANALYST"),
+        (uuid4(), "ADMIN"),
+        (member(conn, case_id, Standing.WRITER), "READER"),
+    ]
+
+
+def _target(
+    conn: StoreConnection, case_id: UUID, tmp_path: Path, endpoint: str
+) -> tuple[str, dict[str, object] | None]:
+    """A fresh path and JSON body on which `endpoint` succeeds for its floor."""
+    runs = f"/api/v1/cases/{case_id}/runs"
+    if endpoint in ("start", "retry", "cancel"):
+        run_id, fingerprint = _ready(conn, case_id, tmp_path, endpoint)
+        body: dict[str, object] = (
+            {} if fingerprint is None else {"input_fingerprint": fingerprint}
+        )
+        return f"{runs}/{run_id}/{endpoint}", body
+    if endpoint == "input":
+        run = _Run(conn, case_id, tmp_path, pinned=False)
+        pin_route(conn, run.run_id, ROUTE)
+        return f"{runs}/{run.run_id}/input", {"subject": SUBJECT}
+    if endpoint in ("preview", "approval"):
+        run = _Run(conn, case_id, tmp_path, pinned=True)
+        preview = gate_preview(conn, run.run_id, Gate.SOURCE_SET)
+        conn.rollback()
+        gate = f"{runs}/{run.run_id}/gates/source-set"
+        if endpoint == "preview":
+            return f"{gate}/preview", None
+        digests = (preview.preview_sha256, preview.input_fingerprint)
+        return f"{gate}/approval", dict(
+            zip(("preview_sha256", "input_fingerprint"), digests, strict=True)
+        )
+    if endpoint == "runs":
+        return runs, {
+            "profile_id": ROUTE.profile_id,
+            "selection_id": ROUTE.selection_id,
+        }
+    if endpoint == "admit":
+        return f"/api/v1/cases/{case_id}/sources", None
+    return "/api/v1/cases", {"title": "Acme 2027"}
+
+
+def _ask(
+    client: TestClient,
+    target: tuple[str, dict[str, object] | None],
+    headers: dict[str, str],
+) -> int:
+    path, body = target
+    if path.endswith("/sources"):
+        files = [("document", ("a.txt", b"Supplied report text.\n", "text/plain"))]
+        return int(client.post(path, headers=headers, files=files).status_code)
+    if body is None:
+        return int(client.get(path, headers=headers).status_code)
+    return int(client.post(path, headers=headers, json=body).status_code)
+
+
+@pytest.mark.parametrize("endpoint", sorted(MATRIX))
+def test_every_command_across_the_seven_actors_and_a_global_reader_writer(
+    command_client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+) -> None:
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    conn, case_id = case
+    actors = _actors(conn, case_id)
+    # Every target is prepared before any request: a retry target's claim would
+    # otherwise take a run an earlier success requeued.
+    targets = [_target(conn, case_id, tmp_path, endpoint) for _ in actors]
+
+    observed = {
+        name: _ask(
+            command_client,
+            target,
+            {} if user is None else command_headers(user, role=role),
+        )
+        for name, (user, role), target, expected in zip(
+            ACTORS.split(), actors, targets, MATRIX[endpoint], strict=True
+        )
+        if expected is not None
+    }
+
+    expected = dict(zip(ACTORS.split(), MATRIX[endpoint], strict=True))
+    assert observed == {k: v for k, v in expected.items() if v is not None}
+
+
+@pytest.mark.parametrize("endpoint", ["admit", "runs", "input", "approval", "start"])
+def test_a_commit_time_revocation_answers_the_private_404(
+    command_client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+) -> None:
+    """Standing held at the precheck and lost before the governed unit commits:
+    the unit refuses, nothing lands, and the answer is the stranger's 404."""
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    conn, case_id = case
+    target = _target(conn, case_id, tmp_path, endpoint)
+    user = member(conn, case_id, Standing.APPROVER)
+    real_lookup = store_commands._lookup
+
+    revocations: list[UUID] = []
+
+    def revoked_meanwhile(unit: StoreConnection, row: object) -> object:
+        revocations.append(user)
+        revoke(conn, case_id=case_id, user_id=user)
+        conn.commit()
+        return real_lookup(unit, row)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_commands, "_lookup", revoked_meanwhile)
+    audited = conn.execute("SELECT count(*) FROM audit_events").fetchone()
+    conn.rollback()
+
+    headers = command_headers(user)
+    path, body = target
+    if body is None:
+        answer = command_client.post(
+            path, headers=headers, files=[("document", ("a.txt", b"Text.\n", "x"))]
+        )
+    else:
+        answer = command_client.post(path, headers=headers, json=body)
+
+    assert (answer.status_code, answer.json()["code"]) == (404, "CASE_NOT_FOUND")
+    receipts = conn.execute("SELECT count(*) FROM command_requests").fetchone()
+    after = conn.execute("SELECT count(*) FROM audit_events").fetchone()
+    conn.rollback()
+    assert receipts == (0,)
+    assert after == audited, "the revocation writes no event; the command wrote none"
+    assert revocations == [user], "standing was lost after the precheck, not before"
