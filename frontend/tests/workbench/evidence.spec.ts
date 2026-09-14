@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("Escape returns focus to the chip that opened the drawer", async ({ page }) => {
-  await page.goto("/analysis/");
+  await page.goto("/analysis/?case=CASE-2026-CVNA01");
   const chip = page.locator("[data-chip='D-04 p.68 ¶2']").first();
   await chip.click();
   const drawer = page.locator("[data-evidence-drawer]");
