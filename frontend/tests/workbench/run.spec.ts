@@ -1,29 +1,36 @@
 import { expect, test } from "@playwright/test";
 
+// The v1 fixture's ids (brief 4.1, slice 4.1i): fixture-routes.mjs's
+// `DEMO_CASE` is not a UUID and is shared with sections not yet cut over, so
+// this file names its own case and run ids to match `fixtures/run.json` and
+// `fixtures/states/*.json` directly (see the deviation note in the task report).
+const CASE = "00000000-0000-4000-8000-000000000001";
+const RUN_LATEST = "00000000-0000-4000-8000-0000000000b2";
+const RUN_OLDER = "00000000-0000-4000-8000-0000000000a1";
+
 test("the route reads as a DAG, the QA gate as a gate, and the stream advances a frame", async ({
   page,
 }) => {
-  await page.goto("/run/?case=CASE-2026-CVNA01");
+  await page.goto(`/run/?case=${CASE}&run=${RUN_LATEST}`);
   await expect(page.locator(".dag[data-route]")).toBeVisible();
   await expect(page.locator("[data-gate]")).toContainText("QA_GATE");
   const cp6 = page.locator("button.node[data-node='CP-6']");
-  await expect(cp6).toHaveAttribute("data-state", /RUNNABLE|COMPLETE/);
+  await expect(cp6).toHaveAttribute("data-state", "RUNNABLE");
   // The fixture stream emits node_state_changed; the client refetches and
   // renders the later frame.
   await expect(cp6).toHaveAttribute("data-state", "COMPLETE", { timeout: 10_000 });
-  await expect(page.locator("header.ribbon [data-refusal='RUN_NOT_TERMINAL']")).toBeVisible();
 });
 
-test("the plan gate binds a digest and offers approval live", async ({ page }) => {
-  await page.goto("/run/?case=CASE-2026-CVNA01&fixture=gate");
-  const gate = page.locator("[data-plan-gate]");
-  await expect(gate).toBeVisible();
-  await expect(page.locator("[data-plan-gate][data-gate-state='RESOLVED_NOT_PINNED']")).toHaveCount(
-    1,
-  );
-  // Visible and refused with the clearing phase named: never a live no-op.
-  await expect(page.getByRole("button", { name: "Approve plan" }).first()).toHaveAttribute(
-    "data-refusal",
-    "ACTION_UNPLACED",
-  );
+test("the route is a preview, not yet pinned", async ({ page }) => {
+  await page.goto(`/run/?case=${CASE}&fixture=gate`);
+  await expect(page.locator("[data-route-not-pinned]")).toBeVisible();
+  await expect(page.locator(".dag[data-route]")).toHaveAttribute("data-route", "0 nodes · 0 edges");
+});
+
+test("a displayed run behind the latest is labelled, never silently swapped", async ({ page }) => {
+  await page.goto(`/run/?case=${CASE}&run=${RUN_OLDER}&fixture=superseded`);
+  await expect(page.locator("[data-stale-run]")).toBeVisible();
+  const row = page.locator(`[data-run-row='${RUN_OLDER}']`);
+  await expect(row).toHaveAttribute("data-displayed", "true");
+  await expect(row).toHaveAttribute("data-latest", "false");
 });

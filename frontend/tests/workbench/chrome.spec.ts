@@ -5,7 +5,7 @@ import { DISABLED_SECTIONS, SECTIONS, sectionRoute } from "../../scripts/fixture
 // (brief 4.1, decision 5) composes an empty `ribbon.actions` for every v1
 // section, because 4.1 offers no action. Run and Analysis still read the
 // legacy wire, with their fixtures' own primary action, until slices 4.1i-j.
-const V1_SECTIONS = ["directory", "upload"];
+const V1_SECTIONS = ["directory", "upload", "run"];
 
 /** The API paths a page asked for while it loaded. */
 function apiRequests(page: Page): string[] {
