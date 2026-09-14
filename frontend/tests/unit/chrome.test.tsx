@@ -11,7 +11,7 @@ import { SECTIONS, type AnyDocument, type Severity } from "@/wire";
 
 const FIXTURES = `${resolve(process.cwd(), "fixtures")}/`;
 // Every enabled section reads the v1 wire (brief 4.1, decision 9; slices
-// 4.1h-j): its document's `chrome` carries only `{subject, served_role}`
+// 4.1h-k): its document's `chrome` carries only `{subject, served_role}`
 // (composed into the legacy `Chrome` shape by `@/chrome/compose`, not stored
 // on the fixture itself), so the generic legacy-chrome fixtures this file
 // scans are exactly the five disabled sections' own.
