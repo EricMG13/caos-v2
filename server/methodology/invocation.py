@@ -17,10 +17,13 @@ call, and once under `prospective_identity` before the attempt exists.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
 import re
 import threading
+import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
@@ -725,11 +728,25 @@ def _citation_register(
     )
 
 
+def _authority_text(module_id: str, name: str, data: bytes) -> str:
+    # §56: only these manifest-verified CP-3 workbook references are binary.
+    if module_id == "CP-3" and name in {
+        "references/REF_CP-3B_Portfolio_Constraints.xlsx",
+        "references/REF_CP-3_Sector_RV.xlsx",
+    }:
+        if not zipfile.is_zipfile(io.BytesIO(data)):
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+        return "ENCODING: base64 (complete XLSX reference bytes)\n" + base64.b64encode(
+            data
+        ).decode("ascii")
+    return _utf8(data, RefusalCode.AUTHORITY_BYTES_MISMATCH)
+
+
 def _authority_sections(authority: DeliveredAuthority, tag: str) -> str:
     return "".join(
         f"\n--- AUTHORITY {tag} FILE {name} SHA256 "
         f"{hashlib.sha256(data).hexdigest()} ---\n"
-        f"{_utf8(data, RefusalCode.AUTHORITY_BYTES_MISMATCH)}"
+        f"{_authority_text(authority.module_id, name, data)}"
         f"\n--- END AUTHORITY {tag} FILE {name} ---\n"
         for name, data in authority.files
     )

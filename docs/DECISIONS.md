@@ -1959,3 +1959,37 @@ rejection, total malformed-input handling, concurrent exclusive writes,
 deterministic members, renderer-pin checks, and forged declared lengths/CRC/
 count failures. Existing render, filing and LITE route tests remain required;
 this decision does not enable filing routes.
+## 2026-09-14 §56 — Prove the smallest forecast-owner catalog pathway
+
+**Decision.** Phase 5.2a selects `FULL_CREDIT_32` / `RELATIVE_VALUE`, the
+nine-node pathway containing CP-1, CP-2G, CP-4 and every required predecessor.
+`DISTRESSED_RESTRUCTURING` needs thirteen nodes and `FULL_CREDIT_ASSESSMENT`
+nineteen. Those larger pathways remain disabled. The adapter adds only this
+pathway beside LITE earnings, after deterministic canonical contract proofs
+for CP-1, CP-1C, CP-2, CP-4, CP-3D, CP-2A, CP-2G and CP-3.
+Run choices continue to derive from the same adapter allowlist.
+
+The real runtime must preserve every direct accepted upstream digest, exact
+Markdown and anchored citation; Restricted limitations survive downstream;
+Blocked CP-1 accepts nothing and prevents further calls. OPTIONAL and ADVISORY
+edges retain the catalog engine's semantics. The request ceiling is unchanged.
+Offline structural and lineage evidence does not qualify economic conclusions
+or authorize live-provider evaluation.
+
+**CP-2G boundary.** Its vendor schema declares twelve columns and exactly 42
+rows: BASE/DOWNSIDE, three fiscal years, three division-growth slots plus four
+financing/investing drivers. Its `driver_id` vocabulary is `division_growth`,
+`acquisitions_disposals`, `net_equity_issue_repay`, `dividends_paid`,
+`other_investing_financing`; `status` is READY/NOT_APPLICABLE. This is not the
+CP-CF movement vocabulary. Task 5.2b must map it explicitly and obtain any
+missing operational movements from accepted owners; 5.2a does not rename
+vendor columns, fabricate missing inputs or enable CP-CF.
+
+**Binary authority.** CP-3's manifest lists two XLSX references,
+`REF_CP-3B_Portfolio_Constraints.xlsx` and `REF_CP-3_Sector_RV.xlsx`. The
+UTF-8-only prompt previously refused them. These exact CP-3 references now
+retain their complete verified bytes as explicitly labelled base64 in the
+authority section; both the manifest and delivered-authority digests still
+bind the original bytes. Invalid ZIP containers and other non-UTF-8 authority
+still refuse. No workbook is executed, extracted or restored as a deliverable;
+the existing whole-request ceiling also bounds the encoded representation.
