@@ -1855,3 +1855,16 @@ Mounting static files inside FastAPI shadowed API refusals and served a CDN
 script the policy refuses; a dispatcher keeps the two surfaces apart. A
 proxy inside the image would be packages to scan and a supervisor to run for
 what is operator infrastructure anyway.
+
+## 2026-09-14 §51 refinement — one extraction deadline for the whole pack
+
+**Decision.** `AdmissionLimits.max_pack_seconds` (300 s) bounds a pack's
+extraction as a whole: each document's deadline is the earlier of its own
+`max_seconds` (60 s, §44.1) and the pack's, and a pack past it refuses
+`SOURCE_EXTRACTION_TIMEOUT` with nothing written.
+
+**Why.** The Phase 4 adversarial audit found that only the per-document
+deadline existed, so one authenticated writer's fifty-document pack could hold
+an admission request, its thread and one of the image's 32 concurrency slots
+for fifty minutes. 300 s matches the edge's idle timeout (§53.1), past which
+the request would be cut anyway.

@@ -17,7 +17,7 @@ import time
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-from math import isfinite
+from math import inf, isfinite
 from uuid import UUID, uuid4
 
 from server.blobs import BlobStore
@@ -138,7 +138,10 @@ def prepare_pack(
 
     # Extract everything first. A document that cannot be read must refuse the
     # pack before any of it is written, not after some of it is.
-    extracted = [_extract(dispatch, document, limits) for document in documents]
+    pack_deadline = time.monotonic() + limits.max_pack_seconds
+    extracted = [
+        _extract(dispatch, document, limits, pack_deadline) for document in documents
+    ]
     if any(not tokens for _identity, tokens in extracted):
         # Readable bytes, no text: a scanned page. Admitting it would put a
         # source in the pinned set that can never support a citation, and
@@ -191,7 +194,10 @@ def _check_pack_limits(documents: Sequence[Document], limits: AdmissionLimits) -
 
 
 def _extract(
-    dispatch: ExtractorDispatch, document: Document, limits: AdmissionLimits
+    dispatch: ExtractorDispatch,
+    document: Document,
+    limits: AdmissionLimits,
+    pack_deadline: float = inf,
 ) -> tuple[str, list[Token]]:
     """One document's canonical extractor identity and tokens, or a typed code.
 
@@ -203,7 +209,7 @@ def _extract(
     try:
         reader = dispatch(document.data)
         identity = _identity(reader)
-        deadline = time.monotonic() + limits.max_seconds
+        deadline = min(time.monotonic() + limits.max_seconds, pack_deadline)
         tokens = reader.extract(document.data, limits=limits, deadline=deadline)
     except Refusal as refusal:
         code = refusal.code
