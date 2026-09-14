@@ -47,6 +47,7 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         "GATE_RELEASED:SOURCE_SET": "runs_changed",
         "GATE_RELEASED:RESEARCH_PLAN": "runs_changed",
         # Report and Committee are not enabled: nothing on screen reads these.
+        "REVISION_SAVED": None,
         "OPINION_SIGNED": None,
         "DELIVERABLE_FROZEN": None,
         "DELIVERABLE_FILED": None,
