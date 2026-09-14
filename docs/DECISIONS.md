@@ -731,3 +731,63 @@ its context for evidence loses the answer rather than the sentence.
 that is what the envelope holds. The bundle's registers — the tables a module's
 own payload schema declares — are a later phase, and until then a chained module
 inherits sentences rather than a financial base.
+
+## 2026-09-14 §29 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
+
+**Decision.** Eight changes, none touching a required check's name, a
+threshold or a scanner rule:
+
+1. **`push` runs on `main` only.** A branch with an open pull request is
+   checked by its `pull_request` run; a push-triggered run of the same head
+   sat in a different concurrency group and was never cancelled by it.
+2. **The workflow token is `contents: read`** unless a job widens it; only
+   `security` does, to read pull requests for gitleaks.
+3. **One pin per action.** Every job uses `actions/checkout` v7.0.1 and
+   `actions/setup-python` v7.0.0; `frontend`'s `actions/upload-artifact`
+   matches `test`'s, v7.0.1. Each commit-pinned.
+4. **`astral-sh/setup-uv` v10.1.0**, commit-pinned, installs uv 0.12.5 (the
+   version `make venv` already installs with) with its download cache keyed
+   on the job's lock. Every Python job runs `uv pip install --system
+   --require-hashes --only-binary :all:` in place of `pip install`.
+5. **`.mypy_cache`** is cached in the `types` job, keyed on the dev lock.
+6. **Playwright's browsers** are cached in the `frontend` job, keyed on
+   `frontend/package-lock.json`; `--with-deps` still installs the OS
+   libraries the cache does not cover.
+7. **`pytest-xdist==3.8.0`** (bringing `execnet==2.1.2`) joins the
+   development lock, hashed and wheels-only. `make test` and the `test` CI
+   job run `pytest -n auto`. Each worker builds its own migrated template
+   database (below) and every test still mints a uniquely named database, so
+   no worker shares state with another. `test-provider`, the `postgres` job
+   and the live provider suite stay single-process.
+8. **`tests/conftest.py`'s `case` fixture clones a session-scoped, already
+   migrated template database** (`CREATE DATABASE ... TEMPLATE`) instead of
+   applying every migration to a fresh database per test; `case` still calls
+   `apply_schema`, which verifies the clone's recorded migration prefix.
+   `empty_database` stays genuinely empty for every test that does not
+   request `case`.
+9. **`.dockerignore`** limits the `image` job's build context to what the
+   Dockerfile copies (`requirements.txt`, `server/`, `vendor/`), and the
+   `image` job builds with commit-pinned `docker/setup-buildx-action` v4.3.0
+   and `docker/build-push-action` v7.3.0, with `cache-from/to: type=gha`.
+   The image is loaded for Trivy and never pushed.
+
+**Reason.** Measured locally against a real PostgreSQL: the offline suite ran
+in a fraction of its serial time under `-n auto`, with the coverage floor
+still holding, because most of its wall time is round trips to PostgreSQL
+rather than CPU. A push to a branch with an open pull request started CI
+twice for no reason `cancel-in-progress` could catch. The default workflow
+token may carry write scopes no job needs. Mixed action versions are two
+things to maintain per action, and `pip install` with no cache re-downloaded
+every wheel on every run.
+
+**Cost.** A test that depended on another test's side effects or on global
+collection order could now fail intermittently under `-n auto`; every worker
+must collect the identical test set, which `pytest-xdist` itself refuses if
+they disagree. The GitHub Actions cache is a mutable input to the image
+build, but every layer it restores is still keyed on the pinned base digest
+and the hashed lock, and Trivy scans the loaded result either way.
+
+**Rollback.** Each item reverts independently: drop `-n auto` from the two
+call sites (the dependency can stay unused), restore `docker build -t
+caos:ci .` in the `image` job, or drop any one cache block without touching
+the others.
