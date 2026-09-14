@@ -1,0 +1,264 @@
+"""Exercise read_report, read_committee and revision_query through real HTTP reads."""
+
+import json
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+from test_analysis_section import _as, _CountingConnection, _serving, client
+from test_deliverable_canonical import QUOTE, harness, lite, route
+from test_execution_freshness import _Harness
+from test_filed_receipts import _corrupt, _file
+from test_filing_chain import _freeze, _sign
+from test_revisions import _read, _save
+
+from server.api.app import app, store_connection
+from server.boundary_text import BoundaryText
+from server.deliverable.filing import receipt_bytes
+from server.store.gates import withdraw_source
+from server.store.members import Standing, grant, revoke
+from server.store.runs import create_case, start_run
+
+__all__ = ["client", "harness", "lite", "route"]
+
+
+def _path(lite: _Harness, revision: object, section: str = "report") -> str:
+    return (
+        f"/api/v1/cases/{lite.case_id}/{section}?run={lite.run_id}&revision={revision}"
+    )
+
+
+def _get(
+    client: TestClient, lite: _Harness, revision: UUID, section: str
+) -> dict[str, Any]:
+    response = client.get(_path(lite, revision, section), headers=_as(lite.approver))
+    lite.conn.rollback()
+    assert response.status_code == 200, response.json()
+    return dict(response.json()["body"])
+
+
+def test_report_reads_the_exact_saved_revision(
+    client: TestClient, lite: _Harness
+) -> None:
+    node = lite.route.nodes[0].route_node_id
+    revision = _save(
+        lite,
+        [
+            [
+                {"text": "Debt: "},
+                {"figure": {"route_node_id": node, "citation_index": 0}},
+            ]
+        ],
+    )
+    saved = _read(lite, revision)
+    _save(lite, [[{"text": "New draft"}]])
+    start_run(lite.conn, lite.case_id)
+    lite.conn.commit()
+    body = _get(client, lite, revision, "report")
+    assert body["revision_id"] == str(revision)
+    assert body["displayed_run_id"] == str(lite.run_id)
+    assert body["narrative"][0][0] == {"text": "Debt: ", "figure": None}
+    assert body["narrative"][0][1]["figure"] == saved["narrative"][0][1]["figure"]
+    assert body["narrative"][0][1]["figure"]["matched_text"] == QUOTE
+    assert [a["route_node_id"] for a in body["artifacts"]] == [
+        n.route_node_id for n in lite.route.nodes
+    ]
+    for actual, expected in zip(body["artifacts"], saved["artifacts"], strict=True):
+        assert {k: actual[k] for k in expected} == expected
+        projections = json.loads(expected["record"])["projections"]
+        assert actual["limitation_flags"] == projections["limitation_flags"]
+        assert actual["decision_scope"] == projections["decision_scope"]
+
+
+def test_committee_reads_the_exact_frozen_payload_and_receipt(
+    client: TestClient, lite: _Harness
+) -> None:
+    receipt = _file(lite)
+    saved = _read(lite, receipt.revision_id)
+    _save(lite, [[{"text": "Later draft"}]])
+    body = _get(client, lite, receipt.revision_id, "committee")
+    assert body["state"] == "filed"
+    assert body["receipt"] == json.loads(receipt_bytes(receipt))
+    assert body["payload_sha256"] == receipt.payload_sha256
+    assert body["frozen_by"] == str(receipt.frozen_by)
+    assert body["filed_by"] == str(receipt.filed_by)
+    assert body["signed_by"] == [str(receipt.signed_by)]
+    assert body["artifacts"][0]["markdown"] == saved["artifacts"][0]["markdown"]
+
+
+def test_committee_distinguishes_frozen_from_filed(
+    client: TestClient, lite: _Harness
+) -> None:
+    revision = _save(lite)
+    assert (
+        client.get(
+            _path(lite, revision, "committee"), headers=_as(lite.approver)
+        ).status_code
+        != 200
+    )
+    lite.conn.rollback()
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    counter = _Counter(lite.conn)
+    app.dependency_overrides[store_connection] = _serving(counter)
+    body = _get(client, lite, revision, "committee")
+    assert (body["state"], body["filed_by"], body["receipt"]) == ("frozen", None, None)
+    from server.api.reads.reports import IO_BUDGET
+
+    assert counter.executed == IO_BUDGET["frozen"]
+
+
+@pytest.mark.parametrize("section", ["report", "committee"])
+@pytest.mark.parametrize(
+    "damage", ["payload", "record", "source", "receipt", "actor", "corrupt"]
+)
+def test_financial_section_reads_fail_closed_before_returning_text(
+    client: TestClient, lite: _Harness, section: str, damage: str
+) -> None:
+    receipt = _file(lite)
+    if damage == "source":
+        withdraw_source(
+            lite.conn,
+            case_id=lite.case_id,
+            source_id=lite.source_id,
+            actor_id=lite.approver,
+        )
+    elif damage == "actor":
+        _corrupt(
+            lite, "UPDATE deliverable_publications SET frozen_by=%s", lite.approver
+        )
+    else:
+        digest = receipt.payload_sha256
+        if damage == "record":
+            row = lite.conn.execute(
+                "SELECT record_sha256 FROM artifacts LIMIT 1"
+            ).fetchone()
+            assert row is not None
+            digest = row[0]
+        elif damage == "receipt":
+            row = lite.conn.execute(
+                "SELECT receipt_sha256 FROM deliverable_receipts"
+            ).fetchone()
+            assert row is not None
+            digest = row[0]
+        if damage == "corrupt":
+            lite.blobs.path_of(digest).write_bytes(b"corrupt saved payload")
+        else:
+            lite.blobs.path_of(digest).unlink()
+    lite.conn.commit()
+    response = client.get(
+        _path(lite, receipt.revision_id, section), headers=_as(lite.approver)
+    )
+    lite.conn.rollback()
+    if section == "report" and damage in {"receipt", "actor"}:
+        assert response.status_code == 200  # A saved report is not a filing claim.
+    else:
+        assert response.status_code != 200
+        assert set(response.json()) == {"code", "clears"}
+
+
+@pytest.mark.parametrize("section", ["report", "committee"])
+def test_revision_selection_is_private_and_exact(
+    client: TestClient, lite: _Harness, section: str
+) -> None:
+    receipt = _file(lite)
+    for revision in (uuid4(), "malformed", ""):
+        response = client.get(
+            _path(lite, revision, section), headers=_as(lite.approver)
+        )
+        lite.conn.rollback()
+        assert response.status_code == 404
+        assert response.json()["code"] == "DELIVERABLE_NOT_FOUND"
+    other = start_run(lite.conn, lite.case_id)
+    lite.conn.commit()
+    path = _path(lite, receipt.revision_id, section).replace(
+        str(lite.run_id), str(other)
+    )
+    assert client.get(path, headers=_as(lite.approver)).status_code == 404
+    lite.conn.rollback()
+    foreign = create_case(lite.conn, BoundaryText.of("Other case"))
+    grant(lite.conn, case_id=foreign, user_id=lite.approver, standing=Standing.READER)
+    foreign_run = start_run(lite.conn, foreign)
+    lite.conn.commit()
+    for moved in (
+        path.replace(str(lite.case_id), str(foreign)),
+        path.replace(str(other), str(foreign_run)),
+    ):
+        response = client.get(moved, headers=_as(lite.approver))
+        lite.conn.rollback()
+        assert response.status_code == 404
+        assert response.json()["code"] == "DELIVERABLE_NOT_FOUND"
+
+
+class _Counter(_CountingConnection):
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+@pytest.mark.parametrize("field", ["frozen_by", "signed_by"])
+def test_frozen_actors_must_match_the_saved_events(
+    client: TestClient, lite: _Harness, field: str
+) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    table = (
+        "deliverable_publications" if field == "frozen_by" else "deliverable_opinions"
+    )
+    _corrupt(lite, f"UPDATE {table} SET {field}=%s", uuid4())
+    lite.conn.commit()
+    response = client.get(
+        _path(lite, revision, "committee"), headers=_as(lite.approver)
+    )
+    assert response.status_code != 200
+    assert response.json()["code"] == "DELIVERABLE_PAYLOAD_INVALID"
+
+
+@pytest.mark.parametrize("section", ["report", "committee"])
+def test_revision_http_actor_matrix_and_declared_io(
+    client: TestClient, lite: _Harness, section: str
+) -> None:
+    from server.api.reads.reports import IO_BUDGET
+
+    receipt = _file(lite)
+    readers = [uuid4() for _ in range(4)]
+    for actor, standing in zip(readers, Standing, strict=True):
+        grant(lite.conn, case_id=lite.case_id, user_id=actor, standing=standing)
+    revoked = uuid4()
+    grant(lite.conn, case_id=lite.case_id, user_id=revoked, standing=Standing.READER)
+    revoke(lite.conn, case_id=lite.case_id, user_id=revoked)
+    lite.conn.commit()
+    for actor in [*readers, uuid4(), revoked]:
+        counter = _Counter(lite.conn)
+        app.dependency_overrides[store_connection] = _serving(counter)
+        response = client.get(
+            _path(lite, receipt.revision_id, section),
+            headers=_as(actor, "caos-admins" if actor not in readers else None),
+        )
+        lite.conn.rollback()
+        if actor in readers:
+            assert response.status_code == 200, response.json()
+            assert counter.executed == IO_BUDGET[section]
+            assert response.json()["chrome"]["actions"] == []
+        else:
+            assert response.json()["code"] == "CASE_NOT_FOUND"
+            assert counter.executed == 2  # isolation and live standing only
+
+
+@pytest.mark.parametrize("section", ["report", "committee"])
+def test_revision_authentication_and_syntax_precede_connection(
+    client: TestClient, lite: _Harness, section: str
+) -> None:
+    def unexpected() -> None:
+        pytest.fail("opened store before authentication and syntax checks")
+
+    app.dependency_overrides[store_connection] = unexpected
+    assert client.get(_path(lite, uuid4(), section)).status_code == 401
+    for path in (
+        _path(lite, "bad", section),
+        _path(lite, uuid4(), section).replace(str(lite.run_id), "bad"),
+        _path(lite, uuid4(), section).replace(str(lite.case_id), "bad"),
+        f"/api/v1/cases/{lite.case_id}/{section}?run={lite.run_id}",
+    ):
+        assert client.get(path, headers=_as(lite.approver)).status_code == 404

@@ -65,6 +65,7 @@ from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
 from server.api.reads import model as model_read
+from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
 from server.api.reads.analysis import RunQuery
@@ -104,6 +105,7 @@ _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
     RefusalCode.RUN_NOT_FOUND: 404,
     RefusalCode.CASE_NOT_FOUND: 404,
+    RefusalCode.DELIVERABLE_NOT_FOUND: 404,
     # Every unavailable evidence page is one private answer (decision 7).
     RefusalCode.PAGE_NOT_AVAILABLE: 404,
     RefusalCode.STORE_NOT_CONFIGURED: 503,
@@ -203,6 +205,7 @@ for _section in (
     run_read,
     analysis_read,
     model_read,
+    reports_read,
     evidence_read,
 ):
     app.include_router(_section.router)
