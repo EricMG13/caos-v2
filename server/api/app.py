@@ -66,20 +66,34 @@ from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
+from server.api.reads.analysis import RunQuery
+from server.api.reads.upload import CasePath
+from server.api.stream import (
+    CONNECT_IO,
+    POLL_IO,
+    TERMINAL,
+    StreamEvent,
+    _CaseEvent,
+    case_tail,
+    tail,
+)
 from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
-from server.api.stream import TERMINAL, StreamEvent, tail
 from server.api.wire import CLEARS, RefusalBody
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
 
-# `GET /api/runs/{run_id}/events`, the one path this module serves: the run and
-# its case, the caller's standing, then whatever the tail costs -- and that
-# again on every poll. The section reads declare their own budgets.
-EVENTS_IO_BUDGET = 2 + TAIL_IO_BUDGET
+# `GET /api/v1/cases/{case_id}/events`, the one path this module serves: the
+# caller's standing and the run's case, the heads, the cursor frame's recheck,
+# then the first poll -- after which each poll costs `POLL_IO` again and each
+# frame one recheck. Measured in `tests/test_case_events.py`. The section reads
+# declare their own budgets.
+EVENTS_IO_BUDGET = 2 + CONNECT_IO + 1 + POLL_IO
+# The retired `GET /api/runs/{run_id}/events`, until p3 removes it.
+RUN_EVENTS_IO_BUDGET = 2 + TAIL_IO_BUDGET
 IO_BUDGET = EVENTS_IO_BUDGET
 
-# Tailing a run is reading its case. Anything the tail shows, a reader of the
+# Tailing a case is reading it. Anything the tail shows, a reader of the
 # case may see; holding it grants nothing further.
 READ_REQUIRES = Standing.READER
 
@@ -243,6 +257,67 @@ async def _malformed_run_id(
     except Refusal as refusal:
         return _refused(request, refusal)
     return _refused(request, Refusal(code))
+
+
+@app.get("/api/v1/cases/{case_id}/events")
+def read_case_events(
+    actor: Caller, case_id: CasePath, run: RunQuery, request: Request, conn: Store
+) -> StreamingResponse:
+    """The case's events as `text/event-stream`, resuming after `Last-Event-ID`.
+
+    The authority read happens here, before the first byte, so an unauthorised
+    watcher gets the private 404 a missing case gets rather than an empty 200.
+    Identity, then the path and query parsers, then the store: the order is
+    what keeps an anonymous or malformed request off a connection.
+    """
+    _case_visible(conn, case_id, run, actor)
+    # Read at request time rather than bound as defaults, so a corrected value
+    # needs no restart (and a test can shorten them).
+    events = case_tail(
+        conn,
+        case_id=case_id,
+        run_id=run,
+        actor_id=actor.user_id,
+        after=request.headers.get("last-event-id"),
+        deadline=TAIL_DEADLINE,
+        poll=POLL_INTERVAL,
+    )
+    return StreamingResponse(
+        (_case_frame(event) for event in events),
+        media_type="text/event-stream",
+        # No store, and no proxy buffering: a tail that arrived in one block
+        # when the deadline passed would not be a tail.
+        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
+    )
+
+
+def _case_frame(event: _CaseEvent) -> bytes:
+    """One SSE frame. The cursor frame is `id` alone, which sets the browser's
+    `lastEventId` and dispatches nothing. A named frame's `data` is a
+    placeholder because the spec dispatches no event without one."""
+    if event.name is None:
+        return f"id: {event.id}\n\n".encode()
+    return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
+
+
+def _case_visible(
+    conn: StoreConnection, case_id: UUID, run_id: UUID | None, actor: Actor
+) -> None:
+    """Refuse a case this actor may not read, then a run that is not the case's.
+
+    Standing first: a stranger learns nothing about which runs a case holds.
+    """
+    if not satisfies(
+        standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
+    ):
+        raise Refusal(RefusalCode.CASE_NOT_FOUND)
+    if run_id is None:
+        return
+    row = conn.execute(
+        "SELECT 1 FROM runs WHERE run_id = %s AND case_id = %s", (run_id, case_id)
+    ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
 
 
 @app.get("/api/runs/{run_id}/events")
