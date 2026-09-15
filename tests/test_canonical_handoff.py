@@ -240,3 +240,20 @@ def test_the_wire_carries_the_exact_markdown_bytes() -> None:
     )
     assert set(body) == {"canonical_markdown", "citations"}
     assert body["canonical_markdown"].encode() == L10_MD
+
+
+def test_a_gate_answer_missing_a_pinned_module_is_refused() -> None:
+    """Phase 11 exit, on the canonical gate: a T8 register that omits a pinned
+    module is not this run's readiness."""
+    omitted = _markdown(CP0, readiness={}, override=None)
+    assert (
+        _refused(CP0, omitted, gate_expects=PINNED | {"CP-1"}).code
+        is RefusalCode.HANDOFF_INCOMPLETE
+    )
+
+
+def test_only_the_gate_module_may_return_a_readiness_map() -> None:
+    """Phase 11 exit, on the canonical adapter: readiness is projected from
+    CP-0's T8 alone; any other module's handoff carries none."""
+    assert _validate(CP0, CP0_MD).readiness
+    assert _validate(L10, L10_MD).readiness == ()

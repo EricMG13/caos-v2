@@ -21,6 +21,9 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.gates import execution_input
 
+# The skill is the authority; the reference files are what it may consult. Only
+# the skill goes into the prompt, because the reference set of one module runs to
+# tens of thousands of tokens and the budget is invariant 8's, not a suggestion.
 SKILL = "SKILL.md"
 
 
@@ -53,9 +56,11 @@ class Assignment:
     run_id: UUID
     node: RouteNode
     route: ResolvedRoute
+    # The reserved attempt this call is made under.
     attempt_id: UUID
 
 
+# Every block of the run's pinned source-set version, never the case's live set.
 _CAPTURED = (
     "SELECT b.source_id, b.block_id FROM run_inputs i"
     " JOIN source_set_members m"
