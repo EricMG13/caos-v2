@@ -24,7 +24,7 @@ No code blocker was found beyond the already-remediated browser assertion. Secur
 
 Effort: `xhigh`, run separately after confidence remediation and verification.
 
-**Scope:** owned `dc25c65..working-tree` provider, qualification, adapter,
+**Scope:** owned `dc25c65..f95e8ba` provider, qualification, adapter,
 environment, tests and evidence documentation. **Verdict:** CLEAN after
 remediation.
 
