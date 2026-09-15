@@ -4,7 +4,13 @@
 
 ### Warnings
 
-1. **Release evidence remains incomplete.** Saboteur and Security Auditor both found that deterministic qualification is not an authorization to advertise a live provider route. The code correctly returns unqualified/restricted states without a current authenticated verdict, but the required capped live evaluation has not been authorized or run. Do not release a route as qualified until explicit provider/model/route/call/token/cost/time-window authority is supplied and its result is persisted.
+1. **Release evidence remains incomplete.** The authorized capped DeepSeek
+   smoke run and production UI checks are now complete, and the live test
+   reserves from a dated configured price plus an explicit run ceiling rather
+   than a flat estimate. That does not authorize the application to advertise
+   a route as qualified: qualification still requires an externally
+   authenticated verdict for the exact provider/model/route/call/token/cost/
+   time window. Do not mint or substitute that evidence locally.
 
 ### Notes
 

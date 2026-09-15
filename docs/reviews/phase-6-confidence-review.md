@@ -27,4 +27,23 @@ Verified fine: exact identity binding, reader non-disclosure, verdict time valid
 
 By design: no live provider call was made; the UI therefore cannot claim a release-qualified live route.
 
-Still open: authorized capped live qualification and hosted required-check confirmation.
+7. The live-provider smoke test could reserve a placeholder rather than the
+   configured model's maximum possible call cost.
+   Investigated → the production worker already parses one dated model price
+   and reserves `worst_case(price)`, but the direct live test constructed its
+   execution with a flat `0.10` estimate.
+   Verdict → fixed locally: the test now requires the same dated price input
+   as the worker plus a positive, explicit run ceiling, and CI supplies both
+   only as repository variables. The authorized three-call DeepSeek run used
+   the configured ceiling; the focused price/configuration suite passed.
+8. Production evidence could be confused with a fixture-only browser result.
+   Investigated → rebuilt the production image without its stale local Docker
+   cache; the production-image suite passed and the disposable Chromium
+   journey completed its real text/PDF, restricted-reader, crash/restart and
+   cleanup flow. The reader assertion is deliberately `RESTRICTED`, never a
+   fabricated qualification.
+   Verdict → automated evidence is current.
+
+Still open: an external, authenticated qualification verdict for the exact
+provider/model/route/time window and hosted required-check confirmation. The
+application correctly refuses to mint that release evidence itself.

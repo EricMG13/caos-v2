@@ -26,25 +26,28 @@ from __future__ import annotations
 
 import json
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import approve_run, priced
+from conftest import approve_run
 from test_pdf_extraction import minimal_pdf
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
 from server.engine.runtime import Execution, run_route
+from server.engine.worker import price_from_environment
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
+from server.pricing import ModelPrice
 from server.provider import OpenRouter
 from server.qualification.proof import assert_orchestration_proof
-from server.refusals import Refusal
+from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
+from server.store.budget import validate_spend
 from server.store.runs import run_status, start_run
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
@@ -53,12 +56,8 @@ CATALOG = (
 )
 PROFILE = os.environ.get("CAOS_LIVE_PROFILE", "LITE_CREDIT_22")
 PATHWAY = os.environ.get("CAOS_LIVE_PATHWAY", "LITE_EARNINGS_UPDATE")
-# The flat per-node reservation (CLAUDE.md, Phase 4). Nineteen of them -- the
-# full assessment -- fit `server/store/budget.py`'s five-dollar `CEILING`, and a
-# call on gpt-4o-mini costs about a tenth of a cent. It is what is set aside,
-# not a cap on the call: a model priced like a frontier one can charge more per
-# call than this, which is the per-model price table's gap (CLAUDE.md, Phase 5).
-ESTIMATE = Decimal("0.10")
+MODEL_PRICE = "CAOS_MODEL_PRICE"
+LIVE_BUDGET_CEILING = "CAOS_LIVE_BUDGET_CEILING"
 
 PROVIDER_REQUIRED = os.environ.get("CAOS_REQUIRE_PROVIDER") == "1"
 _NO_CREDENTIAL = (
@@ -82,6 +81,45 @@ STATEMENT = minimal_pdf(
 )
 
 
+def _live_configuration(model: str) -> tuple[ModelPrice, Decimal]:
+    """The live test uses the worker's dated price and an explicit run ceiling."""
+    price = price_from_environment(model, os.environ.get(MODEL_PRICE, ""))
+    try:
+        ceiling = Decimal(os.environ.get(LIVE_BUDGET_CEILING, ""))
+    except InvalidOperation:
+        raise Refusal(RefusalCode.MONEY_INVALID) from None
+    validate_spend(ceiling)
+    if not ceiling:
+        raise Refusal(RefusalCode.MONEY_INVALID)
+    return price, ceiling
+
+
+def test_live_configuration_uses_the_configured_price_and_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CAOS_MODEL_PRICE", "a-model/for-the-test,0.000001,0.000004,2026-09-15"
+    )
+    monkeypatch.setenv("CAOS_LIVE_BUDGET_CEILING", "22.00")
+
+    price, ceiling = _live_configuration("a-model/for-the-test")
+
+    assert price.model == "a-model/for-the-test"
+    assert ceiling == Decimal("22.00")
+
+
+def test_live_configuration_refuses_a_zero_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CAOS_MODEL_PRICE", "a-model/for-the-test,0.000001,0.000004,2026-09-15"
+    )
+    monkeypatch.setenv("CAOS_LIVE_BUDGET_CEILING", "0")
+
+    with pytest.raises(Refusal, match=r"^MONEY_INVALID$"):
+        _live_configuration("a-model/for-the-test")
+
+
 @pytest.mark.live_provider
 def test_a_live_run_admits_documents_and_completes_its_route(
     case: tuple[StoreConnection, UUID], tmp_path: Path
@@ -94,6 +132,7 @@ def test_a_live_run_admits_documents_and_completes_its_route(
         pytest.skip(_NO_CREDENTIAL)
 
     conn, case_id = case
+    price, ceiling = _live_configuration(completions.model)
     blobs = BlobStore(tmp_path / "blobs")
     bundle = Bundle(root=VENDORED)
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -103,7 +142,7 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     text = Document(filename=BoundaryText.of("report.txt"), data=REPORT)
     pdf = Document(filename=BoundaryText.of("statement.pdf"), data=STATEMENT)
     admit_pack(conn, blobs, case_id=case_id, documents=[text, pdf])
-    run_id = start_run(conn, case_id)
+    run_id = start_run(conn, case_id, budget_ceiling=ceiling)
     conn.commit()
     approve_run(conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle)
     conn.rollback()
@@ -123,9 +162,7 @@ def test_a_live_run_admits_documents_and_completes_its_route(
         route=route,
         execution=Execution(
             module_provider,
-            # No dated price for the live model is in the tree yet (CLAUDE.md
-            # known gaps, Phase 5): this reserves ESTIMATE, not a real worst case.
-            priced(ESTIMATE, completions.model),
+            price,
             bundle,
         ),
     )
