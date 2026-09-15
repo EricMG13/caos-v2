@@ -3,7 +3,13 @@ import { resolve } from "node:path";
 import { createElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { UNAVAILABLE_WORDING, fetchSection, sectionUrl } from "@/app/transport";
+import {
+  UNAVAILABLE_WORDING,
+  fetchQualification,
+  fetchSection,
+  qualificationUrl,
+  sectionUrl,
+} from "@/app/transport";
 import { ENABLED_SECTIONS, isEnabledSection } from "@/app/sections";
 import { Workspace } from "@/app/Workspace";
 import { Rail } from "@/chrome/Rail";
@@ -22,6 +28,7 @@ const RUN = "7e6d5c4b-3a29-4817-a6f5-e4d3c2b1a098";
 const AT = "2026-09-14T10:00:00.123456Z";
 const REVISION = "4f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
+const QUALIFICATION = "a".repeat(64);
 
 /** A v1 Upload document for `CASE`, served under `role`. */
 function v1Upload(role: { global_role: string; standing: string | null }, caseId = CASE) {
@@ -129,6 +136,42 @@ describe("the transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })));
     expect(await fetchSection("analysis", { case: CASE })).toEqual({ kind: "unavailable" });
     expect(UNAVAILABLE_WORDING).toBe("Unavailable or not permitted.");
+  });
+
+  test("qualification reads bind the returned state to the requested evidence", async () => {
+    const body = {
+      evidence_sha256: QUALIFICATION,
+      state: "RESTRICTED",
+      qualification_set_sha256: null,
+      performed_sha256: null,
+      build_id: null,
+      adapter_version: null,
+      provider: null,
+      model: null,
+      reviewer: null,
+      decided_at: null,
+      expires_at: null,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body))));
+
+    expect(qualificationUrl(QUALIFICATION)).toBe(`/api/v1/qualification/${QUALIFICATION}`);
+    expect(await fetchQualification(QUALIFICATION)).toEqual({ kind: "ready", document: body });
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ ...body, evidence_sha256: "b".repeat(64) })),
+        ),
+    );
+    expect(await fetchQualification(QUALIFICATION)).toEqual({
+      kind: "error",
+      refusal: {
+        code: "WIRE_IDENTITY_MISMATCH",
+        clears: "the qualification result is bound to the requested evidence",
+      },
+    });
   });
 
   test("any other non-2xx is a typed refusal, never exception text", async () => {

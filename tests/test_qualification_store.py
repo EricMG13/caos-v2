@@ -4,6 +4,7 @@ from uuid import uuid4
 from server.qualification.store import (
     Evidence,
     current_verdict,
+    evidence_at,
     record_evidence,
     record_verdict,
 )
@@ -35,6 +36,8 @@ def test_record_evidence_is_idempotent_and_bound(empty_database: str) -> None:
         evidence = _evidence()
         assert record_evidence(conn, evidence) == evidence.sha256
         assert record_evidence(conn, evidence) == evidence.sha256
+        assert evidence_at(conn, evidence_sha256=evidence.sha256) == evidence
+        assert evidence_at(conn, evidence_sha256="c" * 64) is None
         conn.rollback()
 
 

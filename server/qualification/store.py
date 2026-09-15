@@ -51,6 +51,21 @@ def record_evidence(conn: StoreConnection, evidence: Evidence) -> str:
     return digest
 
 
+def evidence_at(conn: StoreConnection, *, evidence_sha256: str) -> Evidence | None:
+    """Return the exact stored evidence identity, never a similar candidate."""
+    row = conn.execute(
+        "SELECT qualification_set_sha256,performed_sha256,build_id,adapter_version,"
+        " provider,model FROM qualification_evidence WHERE evidence_sha256=%s",
+        (evidence_sha256,),
+    ).fetchone()
+    if row is None:
+        return None
+    evidence = Evidence(*row)
+    if evidence.sha256 != evidence_sha256:
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    return evidence
+
+
 def record_verdict(
     conn: StoreConnection,
     *,
@@ -98,7 +113,7 @@ def current_verdict(
         (evidence.sha256,),
     ).fetchone()
     if row is None:
-        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+        raise Refusal(RefusalCode.VERDICT_INCOMPLETE)
     reviewer, decided_at, expires_at, set_digest, build_id, provider, model = row
     if (set_digest, build_id, provider, model) != (
         evidence.qualification_set_sha256,
