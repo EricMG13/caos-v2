@@ -267,7 +267,7 @@ def node_states(
     """Each node's state, recomputed from the accepted attempts. Never stored.
 
     With `named`, a node retaining the named-object boundary is BLOCKED until
-    an accepted direct input owns one of its accepted objects (§46.1),
+    an accepted direct input offers one of its accepted objects (§46.1),
     whatever its edges' types say.
     """
     readiness = readiness_from(route, accepted)
@@ -461,7 +461,7 @@ def _named_object_met(
     route: ResolvedRoute, complete: set[str], module_id: str, named: NamedObjects
 ) -> bool:
     """True unless `module_id` retains the boundary and no accepted direct
-    input owns one of the object ids it accepts."""
+    input offers one of the object ids it accepts."""
     wanted = named.accepted_ids.get(module_id)
     if wanted is None:
         return True
