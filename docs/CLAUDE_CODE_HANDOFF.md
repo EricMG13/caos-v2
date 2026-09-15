@@ -88,6 +88,7 @@ this documentation update has not rerun their gates or accepted new code.
 - **Gate evidence:** `make check` passed all code, test, scan, frontend, accessibility and workbench gates before its pinned Trivy prerequisite; the verified temporary Trivy 0.70.0 completed `make image smoke-production`. Backend: 2,833 passed; races: 21 passed; frontend unit: 230 passed; workbench: 90 passed; production image: 8 passed. Firefox and WebKit subsequently passed the 14-test production journey after `d4bdde5`; Chromium had passed in the preceding smoke run.
 - **Phase-end reviews:** [confidence](reviews/phase-6-confidence-review.md) and [adversarial](reviews/phase-6-adversarial-audit.md). The browser journey's transient-success assertion was the sole confirmed defect and is repaired in `d4bdde5`.
 - **Not accepted as release qualification:** no explicit live-provider authorization was supplied, so 6.5 was not run; GitHub-hosted required checks have not been confirmed for this candidate. Keep release status blocked until both are satisfied.
+- **CI size gate:** `PR_BASE=eebb1327a5b77ea75775e793b420251595336f29 make check-size` currently fails at 75,566 counted changed lines against `main` (ceiling: 800). This accumulated repair branch must be split into reviewable PRs before it can satisfy the repository CI policy.
 
 ## Phase 4 acceptance record — 14 September 2026
 
