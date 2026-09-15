@@ -49,7 +49,12 @@ IO_BUDGET = 2
 
 # The events that close this analytical-progress stream.
 TERMINAL = frozenset(
-    {RunEvent.RUN_COMPLETE.value, RunEvent.RUN_FAILED.value, RunEvent.RUN_BLOCKED.value}
+    {
+        RunEvent.RUN_COMPLETE.value,
+        RunEvent.RUN_FAILED.value,
+        RunEvent.RUN_BLOCKED.value,
+        RunEvent.RUN_CANCELLED.value,
+    }
 )
 
 # Watching a run is reading it. Anything a stream can reveal, the run document
