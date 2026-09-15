@@ -1,72 +1,48 @@
 """Reproduce F02 without a provider call or a normal-suite failure.
 
 Run from the repository root with CAOS_TEST_POSTGRES_URL set. The probe creates
-and drops a UUID-named database; exit 1 is the expected result until F02 is fixed.
+and drops a UUID-named database and runs the canonical LITE route (CP-0 ->
+CP-L10 -> CP-5) through the real runtime, answered by the deterministic
+`CanonicalCompletions` fixture -- never a live model. CP-0's T8 register marks
+CP-L10 BLOCKED, so CP-L10 is never called and the run must end BLOCKED. It
+prints `stored_status=BLOCKED`; exit 1 means F02 regressed (a false COMPLETE).
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
-from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import psycopg
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tests"))
+
+from canonical_fixtures import (  # noqa: E402
+    CATALOG,
+    LITE_PROFILE,
+    LITE_SELECTION,
+    QUOTE,
+    VENDORED,
+    CanonicalCompletions,
+)
+from conftest import approve_run, priced  # noqa: E402
 
 from server.blobs import BlobStore  # noqa: E402
 from server.boundary_text import BoundaryText  # noqa: E402
 from server.engine.route import resolve_route  # noqa: E402
-from server.engine.runtime import Execution, ProviderResult, run_route  # noqa: E402
+from server.engine.runtime import Execution, run_route  # noqa: E402
 from server.evidence.ingest import Document, admit_pack  # noqa: E402
 from server.methodology.bundle import Bundle  # noqa: E402
-from server.pricing import ModelPrice  # noqa: E402
-from server.provider import MAX_COMPLETION_TOKENS  # noqa: E402
+from server.methodology.runner import ModuleProvider  # noqa: E402
 from server.store import RunStatus, apply_schema, connect  # noqa: E402
-from server.store.budget import reserve  # noqa: E402
-from server.store.gates import (  # noqa: E402
-    Gate,
-    GateApproval,
-    approve_gate,
-    gate_preview,
-)
-from server.store.members import Standing, grant  # noqa: E402
-from server.store.routes import pin_route  # noqa: E402
-from server.store.run_inputs import pin_run_input  # noqa: E402
-from server.store.runs import (  # noqa: E402
-    Accepted,
-    accept_attempt,
-    create_case,
-    run_status,
-    start_attempt,
-    start_run,
-)
-from server.store.source_sets import snapshot_source_set  # noqa: E402
-
-CATALOG = REPO / (
-    "vendor/deploy-v/skills/cp-os-credit-os/references/"
-    "CREDIT_OS_V_MODULE_CATALOG_v2.json"
-)
-
-
-class ProviderWasCalled(AssertionError):
-    pass
-
-
-class NoProvider:
-    model = "probe"
-
-    def execute(
-        self, route_node_id: str, module_id: str, *, attempt_id: UUID
-    ) -> ProviderResult:
-        raise ProviderWasCalled
+from server.store.runs import create_case, run_status, start_run  # noqa: E402
 
 
 def _url_for(base: str, database: str) -> str:
@@ -76,11 +52,7 @@ def _url_for(base: str, database: str) -> str:
 def main() -> None:
     base = os.environ["CAOS_TEST_POSTGRES_URL"]
     database = f"caos_test_{uuid4().hex}"
-    route = resolve_route(
-        json.loads(CATALOG.read_text(encoding="utf-8")),
-        "FULL_CREDIT_32",
-        "LIQUIDITY_REVIEW",
-    )
+    route = resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
 
     with psycopg.connect(base, autocommit=True) as admin:
         admin.execute(f'CREATE DATABASE "{database}"')
@@ -92,75 +64,32 @@ def main() -> None:
             apply_schema(conn)
             case_id = create_case(conn, BoundaryText.of("F02 isolated probe"))
             blobs = BlobStore(Path(tmp) / "blobs")
-            admit_pack(
+            [source_id] = admit_pack(
                 conn,
                 blobs,
                 case_id=case_id,
                 documents=[
-                    Document(filename=BoundaryText.of("f02.txt"), data=b"F02 input\n")
+                    Document(
+                        filename=BoundaryText.of("f02.txt"),
+                        data=QUOTE.encode() + b" was USD 1,240.0m\n",
+                    )
                 ],
             )
             run_id = start_run(conn, case_id)
             conn.commit()
-            source = snapshot_source_set(conn, case_id)
-            bundle = Bundle(REPO / "vendor/deploy-v")
-            pin_route(conn, run_id, route)
-            pin_run_input(conn, run_id, source.version, bundle)
-            approver = uuid4()
-            grant(
-                conn,
-                case_id=case_id,
-                user_id=approver,
-                standing=Standing.APPROVER,
-            )
-            conn.commit()
-            for gate in Gate:
-                preview = gate_preview(conn, run_id, gate)
-                approve_gate(
-                    conn,
-                    GateApproval(
-                        run_id=run_id,
-                        gate=gate,
-                        actor_id=approver,
-                        preview_sha256=preview.preview_sha256,
-                        input_fingerprint=preview.input_fingerprint,
-                    ),
-                )
-
-            cp0 = next(node for node in route.nodes if node.module_id == "CP-0")
-            body = {
-                "content_to_module_map": [
-                    {
-                        "module_id": module,
-                        "readiness_status": "BLOCKED",
-                    }
-                    for module in ("CP-1", "CP-2", "CP-2D")
-                ]
-            }
-            digest = blobs.put(json.dumps(body).encode())
-            attempt_id = start_attempt(conn, run_id, cp0.route_node_id)
-            reserve(conn, attempt_id, Decimal("0.01"))
-            accept_attempt(
-                conn,
-                attempt_id=attempt_id,
-                accepted=Accepted(digest, Decimal("0.00"), "probe", "probe"),
+            bundle = Bundle(VENDORED)
+            approve_run(
+                conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle
             )
 
+            answers = CanonicalCompletions(source_id, readiness={"CP-L10": "BLOCKED"})
+            provider = ModuleProvider(conn, bundle, blobs, answers, route, run_id)
             run_route(
                 conn,
                 blobs,
                 run_id=run_id,
                 route=route,
-                execution=Execution(
-                    NoProvider(),
-                    ModelPrice(
-                        "probe",
-                        Decimal(0),
-                        Decimal("0.01") / MAX_COMPLETION_TOKENS,
-                        date(2026, 9, 13),
-                    ),
-                    bundle,
-                ),
+                execution=Execution(provider, priced(Decimal("0.01")), bundle),
             )
             status = run_status(conn, run_id)
             accepted_row = conn.execute(
@@ -170,11 +99,13 @@ def main() -> None:
             accepted = accepted_row[0]
             print(
                 f"stored_status={status.value} "
-                f"accepted_nodes={accepted}/{len(route.nodes)}"
+                f"accepted_nodes={accepted}/{len(route.nodes)} "
+                f"calls={len(answers.prompts)}"
             )
-            assert status is not RunStatus.COMPLETE, (
+            assert status is RunStatus.BLOCKED, (
                 "F02: blocked downstream nodes wrongly allowed terminal COMPLETE"
             )
+            assert accepted < len(route.nodes)
     finally:
         with psycopg.connect(base, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')

@@ -2,6 +2,7 @@
 
 The reservation covers the worst case the transport allows (§38): every byte of
 the largest request as an input token, and the output cap as output tokens.
+Runtime-driven cases run the canonical LITE route (Task 3.1 slice e-2).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from test_runtime import _approved_run, _Provider, blobs, bundle, route
+from test_runtime import _approved_run, blobs, bundle, route
 
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute
@@ -67,18 +68,19 @@ def test_reservation_is_the_worst_case_charge_for_the_configured_model(
     bundle: Bundle,
 ) -> None:
     conn, case_id = case
-    run_id = _approved_run(conn, case_id, route, bundle, blobs)
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    provider = run.provider()
     run_route(
         conn,
         blobs,
-        run_id=run_id,
+        run_id=run.run_id,
         route=route,
-        execution=Execution(_Provider(blobs), PRICE, bundle),
+        execution=Execution(provider, PRICE, bundle),
     )
     attempts = conn.execute(
-        "SELECT attempt_id FROM run_attempts WHERE run_id = %s", (run_id,)
+        "SELECT attempt_id FROM run_attempts WHERE run_id = %s", (run.run_id,)
     ).fetchall()
-    assert attempts
+    assert len(attempts) == len(provider.calls) == len(route.nodes)
     assert {reserved_for(conn, row[0]) for row in attempts} == {worst_case(PRICE)}
 
 
@@ -89,20 +91,21 @@ def test_a_price_for_another_model_refuses_before_any_attempt(
     bundle: Bundle,
 ) -> None:
     conn, case_id = case
-    run_id = _approved_run(conn, case_id, route, bundle, blobs)
-    provider = _Provider(blobs)
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    provider = run.provider()
     with pytest.raises(Refusal) as caught:
         run_route(
             conn,
             blobs,
-            run_id=run_id,
+            run_id=run.run_id,
             route=route,
             execution=Execution(provider, replace(PRICE, model="other/model"), bundle),
         )
     assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
     assert provider.calls == []
+    assert provider.answers.prompts == []
     assert conn.execute(
-        "SELECT count(*) FROM run_attempts WHERE run_id = %s", (run_id,)
+        "SELECT count(*) FROM run_attempts WHERE run_id = %s", (run.run_id,)
     ).fetchone() == (0,)
 
 
@@ -117,15 +120,16 @@ def test_an_overrun_charge_stops_the_next_node_before_its_call(
     small = ModelPrice(
         MODEL, Decimal(0), Decimal("0.10") / MAX_COMPLETION_TOKENS, PRICE.as_of
     )
-    run_id = _approved_run(conn, case_id, route, bundle, blobs, ceiling=Decimal("1.05"))
-    provider = _Provider(blobs, charge=Decimal("1.00"))
+    run = _approved_run(conn, case_id, route, bundle, blobs, ceiling=Decimal("1.05"))
+    provider = run.provider(charge=Decimal("1.00"))
     with pytest.raises(Refusal) as caught:
         run_route(
             conn,
             blobs,
-            run_id=run_id,
+            run_id=run.run_id,
             route=route,
             execution=Execution(provider, small, bundle),
         )
     assert caught.value.code is RefusalCode.BUDGET_CEILING_REACHED
     assert provider.calls == ["CP-0"]
+    assert len(provider.answers.prompts) == 1
