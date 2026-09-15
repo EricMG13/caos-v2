@@ -51,6 +51,33 @@ with `acf334d`. The tracked `CLAUDE.md` at `694660b` records acceptance
 through Task17e. Original logs and detailed reviews remain local supplements;
 this documentation update has not rerun their gates or accepted new code.
 
+## Phase 6 offline implementation checkpoint — 15 September 2026
+
+- **State:** Tasks 6.1 and the verdict-clock guard are partly implemented and
+  verified locally; Phase 6 is **not accepted**.  The next accepted checkpoint
+  still requires Tasks 6.2–6.4 and all end-of-phase gates and reviews.
+- **Committed guards:** `5524f2c` binds preparation to the exact qualification
+  set; `e55ab19` additionally binds provider and model; `5cedb95` rejects
+  duplicate case labels and duplicate citation answer keys; `373ee07` and
+  `032e497` reject future-dated verdicts and validate the supplied review
+  clock before comparison.  The execution and qualification-focused pytest
+  suites, Ruff format/check, diff check, and pre-commit hooks passed for each
+  slice.  No provider credentials or live calls were used.
+- **Index evidence:** GitNexus was incrementally refreshed at `032e497`
+  (8,617 nodes, 22,063 edges, 372 clusters, 300 flows).  Its caller trace
+  confirms that existing governed writes and commands are case-scoped, while
+  a qualification verdict covers a complete, potentially multi-case set;
+  do not bind one to an arbitrary application case merely to reuse that API.
+- **Remaining design constraint:** the enabled canonical routes currently
+  expose citation keys but no typed, independently determinable credit
+  conclusion (value, unit, period, perimeter, scenario and limitation).  The
+  only existing deterministic forecast projection is CP-CF, which is not an
+  enabled route.  Do not falsely qualify prose or model-authored balancing
+  figures.  Before Task 6.2, select and implement an explicit, validated
+  canonical conclusion contract (or explicitly keep the affected routes
+  unqualified); that choice must then drive persisted evidence, the UI, and
+  restore/release checks in Tasks 6.3–6.4.
+
 ## Phase 4 acceptance record — 14 September 2026
 
 - **Candidate:** `codex/execute-repair-plan` at `0deb4a4`; GitNexus index-only
