@@ -271,14 +271,20 @@ so a post-cutover receipt cannot be bypassed by backdating. The receipt
 migration regressions prove both legacy preservation and the ambiguous-prefix
 refusal.
 
-## Versions 18 and 19 — qualification evidence and one current verdict
+## Versions 18–20 — qualification evidence, performed snapshots and one current verdict
 
 `0018_qualification_verdicts` adds global immutable qualification evidence and
 authenticated reviewer verdicts. Qualification sets can span cases, so these
 rows deliberately do not use the case-scoped governed-write tables. Migration
 19 makes one evidence identity resolve to exactly one reviewer decision; a
-reader cannot select a convenient verdict by row order.
-Neither migration backfills a qualification claim.
+reader cannot select a convenient verdict by row order. Migration 20 adds the
+immutable performed snapshot that supplies the evidence digest and binds its
+set, build, adapter, provider and model identities. New evidence rows refuse
+unless that exact snapshot already exists; a detached performed hash cannot be
+reviewed or shown as qualified. Partial snapshots remain auditable but cannot
+receive or read as a current verdict.
+Migration 20 deliberately does not backfill old evidence: rows without a
+snapshot remain audit history but cannot read as qualified.
 
 The owned restore probe now writes one synthetic current verdict over exact set,
 performed, build, adapter, provider, and model identities into its current

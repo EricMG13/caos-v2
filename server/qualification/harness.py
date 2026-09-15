@@ -357,16 +357,44 @@ def perform(
             break
 
     if any(record.stopped is not None for record in performed):
-        return PerformedSet(tuple(performed), None)
-    with execution_reads(conn):
-        matrix = build_matrix(
-            conn,
-            blobs,
-            harness.bundle,
-            qualification=qualification,
-            runs={record.case_label: record.run_id for record in performed},
-        )
-    return PerformedSet(tuple(performed), matrix)
+        result = PerformedSet(tuple(performed), None)
+    else:
+        with execution_reads(conn):
+            matrix = build_matrix(
+                conn,
+                blobs,
+                harness.bundle,
+                qualification=qualification,
+                runs={record.case_label: record.run_id for record in performed},
+            )
+        result = PerformedSet(tuple(performed), matrix)
+    _persist_performed(conn, prepared, result)
+    return result
+
+
+def _persist_performed(
+    conn: StoreConnection,
+    prepared: tuple[PreparedCase, ...],
+    performed: PerformedSet,
+) -> None:
+    """Persist the exact result before a caller can discard its run database."""
+    from server.qualification.store import (
+        performed_evidence,
+        record_evidence,
+        record_performed,
+    )
+
+    try:
+        snapshot = performed_evidence(prepared=prepared, performed=performed)
+        record_performed(conn, snapshot)
+        record_evidence(conn, snapshot.evidence)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
 
 
 def _provider_identity(provider: object) -> str:

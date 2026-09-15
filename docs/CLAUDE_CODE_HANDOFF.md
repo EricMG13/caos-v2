@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Phase 6.5 changed candidate `691637b` was executed as `openrouter/google-ai-studio/high/65536`, but its temporary result collector crashed after `perform()` and erased its disposable run record; Phase 6 remains release-blocked** |
-| Next task | Do not repeat the indeterminate paid run. Obtain fresh authorization only after deciding how to reconcile or capture a new attempt's per-generation facts; no result may be represented as qualified. |
+| Latest accepted task | **Phase 6.5 candidate `691637b` was indeterminate because its temporary collector crashed after `perform()`; the durable-handoff recovery candidate now persists the performed snapshot and bound evidence before return, and its full local gate is green. Phase 6 remains release-blocked.** |
+| Next task | From the committed durable-handoff candidate, make exactly one separately authorized, capped Gemini retry; retain the disposable database/blob root, reconcile every generation, and obtain an external authenticated verdict. No result may be represented as qualified before that verdict. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -145,8 +145,11 @@ this documentation update has not rerun their gates or accepted new code.
   reconciliation is unavailable to this account without a management key
   (`403`). Treat the external work and its cost as indeterminate; it creates no
   qualification evidence or verdict and must not be repeated without fresh
-  authorization. The collector has been fixed to serialize proof fields
-  explicitly for any future authorized run.
+authorization. The collector has been fixed to serialize proof fields
+explicitly for any future authorized run. The shared `perform()` boundary now
+also persists an immutable performed snapshot and its bound evidence row before
+it returns; retain the disposable database and matching blob root until an
+external reviewer records the verdict against the emitted evidence digest.
 
 ## Phase 4 acceptance record — 14 September 2026
 

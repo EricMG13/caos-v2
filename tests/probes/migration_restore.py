@@ -22,6 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from qualification_fixtures import qualification_performed
 from test_frozen_evidence import _insert
 from test_run_inputs import SUBJECT, _prepare, pin_version_one
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
@@ -31,7 +32,12 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute
 from server.evidence.read import read_block
-from server.qualification.store import Evidence, current_verdict, record_verdict
+from server.qualification.store import (
+    Evidence,
+    current_verdict,
+    record_performed,
+    record_verdict,
+)
 from server.qualification.verdict import read_verdict
 from server.refusals import Refusal, RefusalCode
 from server.store import MIGRATIONS, StoreConnection, apply_schema, connect
@@ -122,17 +128,12 @@ def _backup_schema(conn: StoreConnection, prefix_seven: bool) -> None:
 def _record_qualification(conn: StoreConnection) -> tuple[Evidence, datetime]:
     """A current, exact verdict that the restored application must still read."""
     now = datetime(2026, 9, 15, tzinfo=UTC)
-    evidence = Evidence(
-        "a" * 64,
-        "b" * 64,
-        "restore-build",
-        "restore-adapter",
-        "restore-provider",
-        "restore-model",
-    )
+    performed = qualification_performed()
+    evidence = performed.evidence
+    record_performed(conn, performed)
     verdict = read_verdict(
         {
-            "provider": "restore-provider:restore-model",
+            "provider": evidence.provider + ":" + evidence.model,
             "qualification_set_sha256": evidence.qualification_set_sha256,
             "build_id": evidence.build_id,
             "decided_at": now.isoformat(),
