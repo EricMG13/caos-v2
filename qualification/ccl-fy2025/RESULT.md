@@ -36,3 +36,21 @@ an accepted canonical handoff:
 Recorded charge: `$0.465377216`. No artifact or matrix was produced, so no
 evidence row or verdict was recorded. A qualification verdict must never turn
 this failed host validation into `QUALIFIED`.
+
+## Canonical compatibility diagnosis
+
+All three stored provider bodies used the required closed JSON transport. The
+canonical Markdown inside them failed for three concrete instruction-following
+reasons: a non-canonical snake-case T8 header, an omitted T8 register, and
+citations whose `matched_text` was not repeated verbatim in the Markdown body.
+The request had placed its response contract before the large evidence section
+and ended on evidence, leaving those constraints far from the generation point.
+
+The host now closes the tagged evidence section and repeats the closed transport,
+six-heading order, register, CP-0 T8-header, and citation checks at the end of the
+prompt. Strict handoff and citation validation is unchanged.
+
+A fresh validation run, `90dc1bb3-6301-4af7-955e-717824672a90`, reached the
+provider twice but stopped both times with `PROVIDER_UNAVAILABLE`. Neither
+attempt returned a body, generation ID, or charge, so live confirmation remains
+pending and the model remains **not qualified**.

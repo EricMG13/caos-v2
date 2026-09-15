@@ -405,6 +405,22 @@ def test_the_prompt_carries_exact_upstream_bytes_and_every_block(
     assert unreadable.value.__context__ is None
 
 
+@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def test_the_prompt_repeats_the_closed_contract_after_evidence(
+    module_id: str,
+) -> None:
+    prompt = _prompt(identity(module_id))
+    tag = _tag(prompt)
+    reminder = prompt.split(f"--- END EVIDENCE {tag} ---\n", 1)[1]
+
+    assert "Return exactly one JSON object" in reminder
+    assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
+    assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
+    t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"
+    assert (t8_header in reminder) is (module_id == "CP-0")
+    assert "matched_text" in reminder and "Markdown body" in reminder
+
+
 def _missing(of: HostIdentity) -> UpstreamRef:
     ref = of.upstream[0]
     return UpstreamRef(
@@ -721,7 +737,8 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
     whole = evidence(fits)
     prompt = within_request_ceiling(provider, _prompt(gate, whole))
     assert len(provider.request_bytes(prompt, json_object=True)) == MAX_REQUEST_BYTES
-    assert prompt.endswith(whole[0].text.value)
+    tag = _tag(prompt)
+    assert f"\n{whole[0].text.value}\n--- END EVIDENCE {tag} ---\n" in prompt
     over = _prompt(gate, evidence(fits + 1))
     # Its JSON encoding alone fits with room to spare; the request does not.
     assert len(json.dumps(over)) < MAX_REQUEST_BYTES
@@ -745,8 +762,8 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     prompt = _prompt(gate, delivered)
     tag = _tag(prompt)
     files = len(delivered_authority(BUNDLE, "CP-0").files)
-    # Instructions, front matter (2), host steps, each file (2), evidence.
-    assert prompt.count(tag) == 5 + 2 * files and tag not in forged
+    # Instructions, front matter (2), host steps, each file (2), evidence (2), check.
+    assert prompt.count(tag) == 7 + 2 * files and tag not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
 
 
