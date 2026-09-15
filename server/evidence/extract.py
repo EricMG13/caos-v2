@@ -17,6 +17,7 @@ extractor implements the same protocol and nothing above this module changes.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -46,6 +47,35 @@ class Token:
     y0: float
     x1: float
     y1: float
+
+
+@dataclass(frozen=True, slots=True)
+class AdmissionLimits:
+    """Host policy ceilings, checked before the expensive step each bounds (§44.1).
+
+    `max_documents` and `max_pack_bytes` bound the whole pack; `max_document_bytes`
+    bounds one document, before its extractor ever runs. `max_pages`, `max_tokens`
+    and `max_seconds` bound one document's extraction, checked cooperatively by the
+    extractor itself -- per page for a PDF, per line for plain text -- so a
+    document that crosses one refuses before the rest of it is read, not after.
+    """
+
+    max_documents: int
+    max_document_bytes: int
+    max_pack_bytes: int
+    max_pages: int
+    max_tokens: int
+    max_seconds: float
+
+
+DEFAULT_LIMITS = AdmissionLimits(
+    max_documents=50,
+    max_document_bytes=20 * 1024 * 1024,
+    max_pack_bytes=100 * 1024 * 1024,
+    max_pages=500,
+    max_tokens=500_000,
+    max_seconds=60.0,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +116,13 @@ class Extractor(Protocol):
     @property
     def identity(self) -> ExtractorIdentity: ...
 
-    def extract(self, data: bytes) -> list[Token]: ...
+    def extract(
+        self,
+        data: bytes,
+        *,
+        limits: AdmissionLimits = DEFAULT_LIMITS,
+        deadline: float = float("inf"),
+    ) -> list[Token]: ...
 
 
 class ExtractorDispatch(Protocol):
@@ -138,7 +174,13 @@ class PlainTextExtractor:
             },
         )
 
-    def extract(self, data: bytes) -> list[Token]:
+    def extract(
+        self,
+        data: bytes,
+        *,
+        limits: AdmissionLimits = DEFAULT_LIMITS,
+        deadline: float = float("inf"),
+    ) -> list[Token]:
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
@@ -147,12 +189,21 @@ class PlainTextExtractor:
         tokens: list[Token] = []
         region_id = 0
         for line_number, line in enumerate(text.splitlines()):
+            # Checked per line (§44.2): cooperative, not preemptive -- one
+            # pathological line can still overrun it (CLAUDE.md ledger).
+            if time.monotonic() > deadline:
+                raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
+            page = line_number // LINES_PER_PAGE + 1
+            if page > limits.max_pages:
+                raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
             if not line.strip():
                 # A blank line closes the paragraph; the next non-blank one opens
                 # a new region, so a quote cannot wrap across the gap.
                 region_id += 1
                 continue
             tokens.extend(_line_tokens(line, line_number, region_id))
+            if len(tokens) > limits.max_tokens:
+                raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
         return tokens
 
 

@@ -200,6 +200,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   evidence. *Upgrade:* per-node evidence selection -- the Phase 5 entry "The
   gate's evidence demands are dropped" -- is what first delivers less than a
   whole source, and its callers already pass exactly what they delivered.
+- **The extraction deadline is cooperative, not preemptive (§44.2).**
+  `AdmissionLimits.max_seconds` bounds one document's extraction, and
+  `PdfExtractor`/`PlainTextExtractor` each check `time.monotonic()` against the
+  deadline they are handed -- per page, per line -- before doing that unit's
+  work, not while it runs. A single pathological page (one `LTTextBox` pdfminer's
+  own layout analysis takes disproportionately long to resolve) or a single
+  pathological line can still overrun the deadline before the next check point
+  is reached; nothing here interrupts work already in progress. That is the
+  decision §44 states, not an oversight: process isolation or a hard timeout
+  would be a new dependency and a new failure mode (a killed worker mid-
+  transaction) for a residual this narrow. *Upgrade:* none planned while
+  admission stays in-process; a hard per-call timeout is the upgrade the day a
+  single page is shown to overrun it by more than the ceiling can absorb.
 
 - **Two vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
@@ -894,12 +907,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and there is no provider call yet. *Upgrade:* Phase 4 reserves before the call
   and reconciles after, and its three named tests
   (`docs/REBUILD_PLAN.md` Phase 4) are what make the ceiling bite.
-- **A blob is read whole into memory and has no size ceiling.** `BlobStore.get`
-  returns `bytes`, so a source document's size is bounded by nothing but the
-  process. Nothing admits documents yet, so nothing can reach it. *Upgrade:*
-  Phase 2 is where bytes first enter a case, and where the ceiling and a
-  streaming read belong — a ceiling here would be a number invented ahead of the
-  ingestion contract that has to state it.
+- **A blob is read whole into memory and has no size ceiling of its own.**
+  `BlobStore.get` still returns `bytes`, with nothing bounding a read but the
+  process. What has changed since this entry was written: `admit_pack` now
+  refuses a document over `AdmissionLimits.max_document_bytes` (20 MiB) or a
+  pack over `max_pack_bytes` (100 MiB) or `max_documents` (50) before dispatch,
+  extraction, or any write to the blob store (§44.1, Phase 3 Task 3.2c) — so no
+  document admission puts bytes past those ceilings into the store to begin
+  with. What stays open is `BlobStore.get` itself: a caller reading a blob back
+  (or any bytes that reached the store some other way) is still bounded by
+  nothing this class declares. *Upgrade:* the ceiling and a streaming read on
+  `BlobStore.get` itself, the day a caller other than admission needs one.
 - **`BlobStore.path_of` hands out a filesystem path.** It validates the address
   first, so no caller can name a path outside the root, but it does let one
   write to the store without going through `put` and its digest. It is public
