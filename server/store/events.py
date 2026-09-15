@@ -37,6 +37,7 @@ class RunEvent(StrEnum):
     RUN_COMPLETE = "RUN_COMPLETE"
     RUN_FAILED = "RUN_FAILED"
     RUN_BLOCKED = "RUN_BLOCKED"
+    RUN_CANCELLED = "RUN_CANCELLED"
 
 
 @dataclass(frozen=True, slots=True)

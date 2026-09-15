@@ -68,6 +68,10 @@ MIGRATIONS = (
         .with_name("0012_artifact_record.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0013_run_work",
+        Path(__file__).with_name("0013_run_work.sql").read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
@@ -102,6 +106,8 @@ class RunStatus(StrEnum):
     FAILED = "FAILED"
     # Recoverable: the route has required work no accepted result can release.
     BLOCKED = "BLOCKED"
+    # A requested cancel took effect before any worker drove the run further.
+    CANCELLED = "CANCELLED"
 
 
 def connect(url: str) -> StoreConnection:

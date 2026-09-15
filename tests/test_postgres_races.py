@@ -11,6 +11,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
+from threading import Barrier
 from uuid import UUID
 
 import pytest
@@ -27,6 +28,7 @@ from server.store.runs import (
     start_attempt,
     start_run,
 )
+from server.store.work import Lease, claim_run, enqueue_run
 
 # The producer the store records beside every accepted artifact: what the
 # host configured, and the provider's own handle for the call.
@@ -71,6 +73,33 @@ def test_concurrent_appenders_never_share_a_seq(
         assert [event.seq for event in events_of(conn, run_id)] == list(
             range(1, APPENDERS + 1)
         )
+
+
+def test_two_connections_claiming_one_queued_run_claim_it_once(
+    empty_database: str, prepared_run: tuple[UUID, UUID]
+) -> None:
+    """`FOR UPDATE SKIP LOCKED` and the token increment make one claim (D3, I1)."""
+    _case_id, run_id = prepared_run
+    with connect(empty_database) as conn:
+        enqueue_run(conn, run_id)
+        conn.commit()
+    start = Barrier(APPENDERS)
+
+    def claim(worker: int) -> Lease | None:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            return claim_run(
+                conn, worker=BoundaryText.of(f"worker-{worker}"), lease_seconds=60
+            )
+
+    with ThreadPoolExecutor(max_workers=APPENDERS) as pool:
+        claims = list(pool.map(claim, range(APPENDERS)))
+
+    assert [lease for lease in claims if lease is not None] == [Lease(run_id, 1)]
+    with connect(empty_database) as conn:
+        assert conn.execute(
+            "SELECT state, lease_token FROM run_work WHERE run_id = %s", (run_id,)
+        ).fetchone() == ("CLAIMED", 1)
 
 
 def test_two_connections_completing_one_run_produce_one_terminal_event(
