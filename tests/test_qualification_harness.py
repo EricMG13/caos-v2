@@ -99,7 +99,7 @@ def test_openrouter_qualification_requires_an_upstream_pin() -> None:
         _provider_identity(
             OpenRouter(api_key="k", model="m", upstream_provider="ionstream")
         )
-        == "openrouter/ionstream/default"
+        == "openrouter/ionstream/default/65536"
     )
 
 

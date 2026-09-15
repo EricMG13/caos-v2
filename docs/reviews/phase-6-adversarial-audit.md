@@ -64,3 +64,39 @@ remains; release qualification remains correctly negative.
 Post-remediation verification passed 2,844 PostgreSQL-backed tests, 21 race
 tests, all I/O budgets, repository lint/types/security, frontend build, 230
 units, 171 accessibility entries and 90 three-engine workbench tests.
+
+## Adversarial review addendum — 65,536-token Gemini retry
+
+Effort: `xhigh`, after the confidence remediation and before the authorized
+live call. **Verdict:** CLEAN after remediation.
+
+### Remediated findings
+
+1. **Saboteur — 32k and 65k calls could obtain interchangeable qualification
+   evidence (critical).** The vendor `build_id` does not fingerprint the host
+   completion policy. The provider identity now appends the exact ceiling;
+   changing it forces a fresh prepared identity and rejects stale preparation.
+2. **New Hire — the new profile contract was implicit (warning).** A bare
+   numeric suffix would otherwise be easy to mistake for a model revision.
+   The decision record names it as the completion ceiling and provider/harness
+   regressions assert the complete profile string.
+3. **Security Auditor — an allowlist change could turn a false-positive fix
+   into a secret-scanning blind spot (warning).** The exception is anchored to
+   the two public enum values exactly; it neither ignores a file nor broadens
+   to arbitrary `key=value` content. A full-history gitleaks scan remains
+   clean.
+
+### Notes
+
+1. Raising a shared ceiling may make an unrelated future configured endpoint
+   unavailable if it does not accept 65,536 output tokens. Required parameters
+   and disabled fallbacks make that a safe refusal rather than a silent provider
+   change. Make a per-model policy only if a supported configured model needs a
+   different bound.
+2. The 4 MiB response-byte limit can still fail closed on an exceptionally
+   large encoded response. It is a separate transport guard, intentionally not
+   relaxed by this narrowly scoped output-token change.
+
+No unresolved code or security blocker remains for the single authorized
+Gemini call. Its result can create execution evidence only; it cannot create a
+qualification verdict without external authenticated review.

@@ -38,7 +38,7 @@ TIMEOUT_SECONDS = 120.0
 # Oversized requests/responses refuse; no prefix is accepted as a whole answer.
 MAX_REQUEST_BYTES = 1_048_576
 MAX_RESPONSE_BYTES = 4_194_304
-MAX_COMPLETION_TOKENS = 32_768
+MAX_COMPLETION_TOKENS = 65_536
 REASONING_EFFORTS = frozenset(
     {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -274,6 +274,7 @@ class OpenRouter:
                 "openrouter",
                 self.upstream_provider or "auto",
                 self.reasoning_effort or "default",
+                str(MAX_COMPLETION_TOKENS),
             )
         )
 

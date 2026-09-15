@@ -334,7 +334,7 @@ def test_the_call_forbids_provider_fallbacks() -> None:
     _provider(_Recorder()).complete(PROMPT)
 
     assert sent["provider"] == {"allow_fallbacks": False, "require_parameters": True}
-    assert sent["max_completion_tokens"] == 32_768
+    assert sent["max_completion_tokens"] == 65_536
     assert "max_tokens" not in sent
     assert sent["stream"] is False
     assert str(sent["_url"]).endswith("/chat/completions")
@@ -367,7 +367,7 @@ def test_a_pinned_provider_and_reasoning_profile_are_sent_and_bound() -> None:
         "order": ["deepseek"],
     }
     assert sent["reasoning"] == {"effort": "max", "exclude": True}
-    assert provider.qualification_identity == "openrouter/deepseek/max"
+    assert provider.qualification_identity == "openrouter/deepseek/max/65536"
 
 
 @pytest.mark.parametrize(
@@ -917,7 +917,7 @@ def test_the_provider_is_configured_from_the_environment(
     assert provider.base_url == "https://gateway.example/api/v1"
     assert provider.upstream_provider == "deepseek"
     assert provider.reasoning_effort == "max"
-    assert provider.qualification_identity == "openrouter/deepseek/max"
+    assert provider.qualification_identity == "openrouter/deepseek/max/65536"
 
 
 def test_the_base_url_defaults_when_the_environment_names_none(
