@@ -269,3 +269,19 @@ current receipt. Readers trust the sealed set, never a live event timestamp,
 so a post-cutover receipt cannot be bypassed by backdating. The receipt
 migration regressions prove both legacy preservation and the ambiguous-prefix
 refusal.
+
+## Versions 18 and 19 — qualification evidence and one current verdict
+
+`0018_qualification_verdicts` adds global immutable qualification evidence and
+authenticated reviewer verdicts. Qualification sets can span cases, so these
+rows deliberately do not use the case-scoped governed-write tables. Migration
+19 makes one evidence identity resolve to exactly one reviewer decision; a
+reader cannot select a convenient verdict by row order.
+Neither migration backfills a qualification claim.
+
+The owned restore probe now writes one synthetic current verdict over exact set,
+performed, build, adapter, provider, and model identities into its current
+backup. After restoring into a newly created database and copied blob root, it
+reads that same verdict through `current_verdict` at the recorded clock. This
+proves migration history, immutable qualification rows, and the current-reader
+binding survive the same-revision restore; it does not perform a provider call.
