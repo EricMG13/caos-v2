@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID
 
 import pytest
+from test_run_events import RECORD, approved_nodes
 
 from server.boundary_text import BoundaryText
 from server.store import RunStatus, apply_schema, connect
@@ -72,7 +74,7 @@ def test_concurrent_appenders_never_share_a_seq(
 
 
 def test_two_connections_completing_one_run_produce_one_terminal_event(
-    empty_database: str, prepared_run: tuple[UUID, UUID]
+    empty_database: str, prepared_run: tuple[UUID, UUID], tmp_path: Path
 ) -> None:
     """Exactly-once under real contention rather than under replay.
 
@@ -81,7 +83,8 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
     """
     _case_id, run_id = prepared_run
     with connect(empty_database) as conn:
-        attempt_id = start_attempt(conn, run_id, "CP-1")
+        nodes = approved_nodes(conn, run_id, tmp_path)
+        attempt_id = start_attempt(conn, run_id, next(iter(nodes.values())))
         conn.commit()
 
     def complete() -> bool:
@@ -94,11 +97,13 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
                     charge=CHARGE,
                     model=MODEL,
                     generation_id=GENERATION,
+                    record_sha256=RECORD,
                 ),
             )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = sorted(pool.submit(complete).result() for _ in range(2))
+        futures = [pool.submit(complete) for _ in range(2)]
+        outcomes = sorted(future.result() for future in futures)
 
     assert outcomes == [False, True], "exactly one caller completed the run"
     with connect(empty_database) as conn:

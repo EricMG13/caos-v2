@@ -15,11 +15,19 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
+from conftest import approve_run
+from test_loop_charges import VENDORED
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute, resolve_route
+from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect
 from server.store.events import Event, RunEvent, events_of, lock_run
@@ -41,6 +49,8 @@ MODEL = "a-model/for-the-test"
 GENERATION = "gen-for-the-test"
 
 ARTIFACT = "b" * 64
+# Every accepted artifact carries its host record (§42.1).
+RECORD = "c" * 64
 CHARGE = Decimal("0.0142")
 
 
@@ -53,6 +63,38 @@ def run(empty_database: str) -> Iterator[tuple[StoreConnection, UUID, UUID]]:
         run_id = start_run(conn, case_id)
         conn.commit()
         yield conn, case_id, run_id
+
+
+def approved_nodes(
+    conn: StoreConnection,
+    run_id: UUID,
+    blobs: Path,
+    bundle: Bundle | None = None,
+    route: ResolvedRoute | None = None,
+) -> dict[str, str]:
+    """Admit evidence, then pin and govern this run on the canonical LITE route
+    (acceptance refuses any other, §42.2); acceptance checks that authority at
+    the store boundary."""
+    row = conn.execute(
+        "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
+    ).fetchone()
+    assert row is not None
+    case_id = row[0]
+    admit_pack(
+        conn,
+        BlobStore(blobs),
+        case_id=case_id,
+        documents=[Document(filename=BoundaryText.of("pack.txt"), data=b"Pack.\n")],
+    )
+    route = route or resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
+    approve_run(
+        conn,
+        case_id=case_id,
+        run_id=run_id,
+        route=route,
+        bundle=bundle or Bundle(VENDORED),
+    )
+    return {node.module_id: node.route_node_id for node in route.nodes}
 
 
 def _names(conn: StoreConnection, run_id: UUID) -> list[str]:
@@ -70,7 +112,7 @@ def _count(conn: StoreConnection, table: str, run_id: UUID) -> int:
 
 
 def test_terminal_event_is_exactly_once(
-    run: tuple[StoreConnection, UUID, UUID], empty_database: str
+    run: tuple[StoreConnection, UUID, UUID], empty_database: str, tmp_path: Path
 ) -> None:
     """The Phase 1 exit test.
 
@@ -79,7 +121,8 @@ def test_terminal_event_is_exactly_once(
     replays it. One artifact, one charge, one terminal event.
     """
     conn, _case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     conn.commit()
 
     completed = complete_attempt(
@@ -90,6 +133,7 @@ def test_terminal_event_is_exactly_once(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
     assert completed is True
@@ -103,6 +147,7 @@ def test_terminal_event_is_exactly_once(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -114,9 +159,13 @@ def test_terminal_event_is_exactly_once(
     # list -- which is exactly what Phase 4 did when ATTEMPT_ACCEPTED arrived.
     names = _names(conn, run_id)
     assert names.count(RunEvent.RUN_COMPLETE.value) == 1
+    assert names.count(RunEvent.CALL_OUTCOME_RECORDED.value) == 1
     assert names.count(RunEvent.ATTEMPT_ACCEPTED.value) == 1
     assert names == [
+        RunEvent.ROUTE_PINNED.value,
+        RunEvent.INPUT_PINNED.value,
         RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
@@ -124,15 +173,16 @@ def test_terminal_event_is_exactly_once(
 
 
 def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
-    run: tuple[StoreConnection, UUID, UUID], empty_database: str
+    run: tuple[StoreConnection, UUID, UUID], empty_database: str, tmp_path: Path
 ) -> None:
     """The other side of the gap. The work happened; the transaction did not.
 
-    Nothing may survive it -- a charge without its terminal event is the shape
-    that lets a run be billed twice on the retry.
+    The uncommitted analytical write leaves nothing. A committed independent
+    outcome would retain its bill even if the process died before acceptance.
     """
     conn, case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     conn.commit()
 
     with connect(empty_database) as dying:
@@ -146,7 +196,11 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
 
     assert _count(conn, "artifacts", run_id) == 0
     assert _count(conn, "budget_ledger", run_id) == 0
-    assert _names(conn, run_id) == [RunEvent.ATTEMPT_STARTED.value]
+    assert _names(conn, run_id) == [
+        RunEvent.ROUTE_PINNED.value,
+        RunEvent.INPUT_PINNED.value,
+        RunEvent.ATTEMPT_STARTED.value,
+    ]
 
     assert (
         complete_attempt(
@@ -157,6 +211,7 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
         is True
@@ -208,11 +263,12 @@ def test_an_event_carries_its_position_name_and_an_aware_time(
 
 
 def test_events_of_a_run_are_numbered_from_one_without_gaps(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     conn, _case_id, run_id = run
-    start_attempt(conn, run_id, "CP-0")
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    start_attempt(conn, run_id, nodes["CP-0"])
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     complete_attempt(
         conn,
         attempt_id=attempt_id,
@@ -221,20 +277,24 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
-    # CP-0 started, CP-1 started, CP-1 accepted, run complete.
-    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4]
+    # Route and input pinned, CP-0 started, CP-1 started, outcome recorded, CP-1
+    # accepted, run complete.
+    assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4, 5, 6, 7]
 
 
 def test_accept_attempt_records_the_artifact_without_ending_the_run(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     """A route has many nodes and only the last one ends the run. Accepting is
     therefore its own operation, and a replay of it appends no second event."""
     conn, _case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    attempt_id = start_attempt(
+        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-L10"]
+    )
 
     assert (
         accept_attempt(
@@ -245,6 +305,7 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
         is True
@@ -260,6 +321,7 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
         is False
@@ -302,19 +364,21 @@ def test_a_transition_that_changed_nothing_appends_no_event(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
     assert completed is False
+    assert _count(conn, "budget_ledger", run_id) == 1
     assert _names(conn, run_id) == [
         RunEvent.ATTEMPT_STARTED.value,
         RunEvent.RUN_FAILED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
     ], "a terminal run accepts nothing, so there is no ATTEMPT_ACCEPTED"
     assert run_status(conn, run_id) is RunStatus.FAILED
     # And it accepted nothing on the way past. A failed run holding an accepted
     # artifact is a node Phase 3 would recompute as COMPLETE.
     assert _count(conn, "artifacts", run_id) == 0
-    assert _count(conn, "budget_ledger", run_id) == 0
 
 
 def test_failing_a_run_twice_appends_one_event(
@@ -373,6 +437,7 @@ def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
                 charge=0.0142,  # type: ignore[arg-type]
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
 
@@ -381,10 +446,12 @@ def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
 
 
 def test_the_charge_survives_as_the_decimal_it_was_given(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     conn, _case_id, run_id = run
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    attempt_id = start_attempt(
+        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-L10"]
+    )
     complete_attempt(
         conn,
         attempt_id=attempt_id,
@@ -393,6 +460,7 @@ def test_the_charge_survives_as_the_decimal_it_was_given(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -435,6 +503,7 @@ def test_an_unknown_attempt_cannot_complete_a_run(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
 

@@ -1,4 +1,9 @@
-# Rebuild plan
+# Rebuild plan — historical baseline
+
+> Current implementation follows [REPAIR_PLAN.md](REPAIR_PLAN.md), repair
+> phases 0–6, and decisions §39. The thirteen phases below retain the original
+> build/test history; they do not select the current task or certify repairs.
+> Resume from [CLAUDE_CODE_HANDOFF.md](CLAUDE_CODE_HANDOFF.md).
 
 Thirteen phases (0–12). Each has an exit test — a named, runnable check that fails
 before the phase and passes after. A phase is not done because the code exists;
@@ -230,8 +235,9 @@ has ever seen came from a test fixture.
   `RESTRICTED` and carries its limitation, `READY` leaves the edges in charge.
   The gate is not gated by itself, and before it is accepted the edges decide —
   which is what already keeps the route behind CP-0. A node the gate blocked
-  costs no call and no charge, and leaves the run COMPLETE with that node
-  reported unrun rather than failing it. `readiness_from` refuses a malformed
+  costs no call and no charge. The original COMPLETE-with-unrun rule is
+  superseded by repair decision §39: unfinished required work stays recoverably
+  blocked. Repair Phase 2 must prove this before acceptance. `readiness_from` refuses a malformed
   map with a typed code instead of raising `KeyError` out of a pure function.
 - **The chain.** `ModuleProvider` holds the pinned route and uses the
   `route_node_id` it is already handed. Each node's prompt carries its direct

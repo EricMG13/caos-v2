@@ -24,6 +24,14 @@ statements and citations and not typed figures (`server/methodology/envelope.py`
 A key saying "net leverage is 4.2x" has nothing to compare against until the
 envelope carries the figure as a number, which is the known-gaps entry this
 module ships with.
+
+**A canonical run is scored on its records** (`docs/DECISIONS.md` §42.4), and
+only on what the proof proved: the proof returns the citations it re-anchored
+under the pinned modules, and those are the run's -- nothing is read again, so
+an artifact accepted after the proof is not scored, and a source withdrawn since
+refuses the row. An unproven canonical run cites nothing. The matrix reports no
+status a record projects, so a SCREENING_ONLY record can never reach a reviewer
+through it as committee clearance.
 """
 
 from __future__ import annotations
@@ -32,16 +40,19 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Any
 from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.qualification.proof import assert_orchestration_proof
+from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.routes import resolved_route
+from server.store.run_inputs import RunSubject
+from server.store.source_sets import pinned_live_sources
 
 # A case label is authored and reaches a digest; it is a name, not prose.
 _LABEL_LIMIT = 128
@@ -80,6 +91,9 @@ class QualificationCase:
     profile_id: str
     selection_id: str
     expects: tuple[ExpectedCitation, ...]
+    # Who and when the run is about. A canonical-adapter route requires one
+    # (`pin_run_input`); a claims route leaves it None, as every case did before.
+    subject: RunSubject | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,27 +142,42 @@ def qualification_set_digest(qualification: QualificationSet) -> str:
     they become pinned state.
     """
     assert_measurable(qualification)
-    canonical = sorted(
-        [
-            BoundaryText.of(case.label.strip(), limit=_LABEL_LIMIT).value,
-            [case.profile_id, case.selection_id],
-            # The inputs, not only the answers. Two sets with identical keys
-            # over different documents are different sets, and a verdict binding
-            # one must not read as binding the other.
-            sorted(
-                [document.filename.value, sha256(document.data).hexdigest()]
-                for document in case.documents
-            ),
-            sorted(
-                [expect.module_id, expect.document_sha256, expect.matched_text]
-                for expect in case.expects
-            ),
-        ]
-        for case in qualification.cases
-    )
+    canonical = sorted(_digested(case) for case in qualification.cases)
     return sha256(
         json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _digested(case: QualificationCase) -> list[object]:
+    """One case's digested form. A subject is appended only when declared, so a
+    set of subject-free cases binds exactly the digest it bound before cases
+    could carry one."""
+    entry: list[Any] = [
+        BoundaryText.of(case.label.strip(), limit=_LABEL_LIMIT).value,
+        [case.profile_id, case.selection_id],
+        # The inputs, not only the answers. Two sets with identical keys
+        # over different documents are different sets, and a verdict binding
+        # one must not read as binding the other.
+        sorted(
+            [document.filename.value, sha256(document.data).hexdigest()]
+            for document in case.documents
+        ),
+        sorted(
+            [expect.module_id, expect.document_sha256, expect.matched_text]
+            for expect in case.expects
+        ),
+    ]
+    if case.subject is not None:
+        subject = case.subject
+        entry.append(
+            [
+                subject.issuer_id,
+                subject.issuer_name,
+                subject.reporting_period,
+                subject.analysis_date,
+            ]
+        )
+    return entry
 
 
 def build_matrix(
@@ -176,11 +205,12 @@ def build_matrix(
 
     return Matrix(
         qualification_set_sha256=qualification_set_digest(qualification),
-        build_id=bundle.build_id,
         rows=tuple(
             _row(conn, blobs, bundle, case=case, run_id=runs[case.label])
             for case in qualification.cases
         ),
+        # Validate the same manifest again after all proofs and citation reads.
+        build_id=bundle.build_id,
     )
 
 
@@ -199,12 +229,19 @@ def _row(
     see whether it found the right evidence.
     """
     refusal: RefusalCode | None = None
+    proof: OrchestrationProof | None = None
     try:
-        assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
+        proof = assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
     except Refusal as failed:
         refusal = failed.code
 
-    cited = _cited(conn, blobs, run_id)
+    try:
+        cited = _cited(conn, run_id, proof=proof)
+    except Refusal as unattributed:
+        if unattributed.code not in _ROW_REFUSALS:
+            raise
+        refusal = unattributed.code
+        cited = set()
     met = tuple(expect for expect in case.expects if _matches(expect, cited))
     return MatrixRow(
         case_label=case.label,
@@ -222,61 +259,43 @@ def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool
     return (expect.module_id, expect.document_sha256, expect.matched_text) in cited
 
 
+# A row's own uncertainty, not a reason to end the matrix: a pin that no longer
+# reads, or a proven source withdrawn before its quotes were scored.
+_ROW_REFUSALS = frozenset(
+    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED}
+)
+
+
 def _cited(
-    conn: StoreConnection, blobs: BlobStore, run_id: UUID
+    conn: StoreConnection, run_id: UUID, *, proof: OrchestrationProof | None
 ) -> set[tuple[str, str, str]]:
-    """Every (module, document, quote) this run's accepted artifacts carry.
+    """Every (module, document, quote) this run's proof re-anchored.
 
-    The module is taken from the route pin, not from the envelope that claims it
-    — the same reason `proof.py` does (invariant 3: the host owns identity). A
-    run with no pin cites nothing this function can attribute, which is a row
-    that misses every key rather than one that raises.
+    The module is taken from the route pin, as `proof.py` takes it (invariant
+    3: the host owns identity). A run with no pin cites nothing, which is a row
+    that misses every key; an invalid pin refuses so `_row` records uncertainty.
+    A run cites exactly what its `proof` re-anchored, and nothing without one:
+    no artifact is read as a claims envelope (§42.1).
     """
-    route = resolved_route(conn, run_id)
-    module_of = (
-        {} if route is None else {n.route_node_id: n.module_id for n in route.nodes}
-    )
-    rows = conn.execute(
-        "SELECT a.artifact_sha256, t.route_node_id"
-        " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
-        " WHERE a.run_id = %s",
-        (run_id,),
-    ).fetchall()
-
-    cited: set[tuple[str, str, str]] = set()
-    for artifact_sha256, route_node_id in rows:
-        module_id = module_of.get(str(route_node_id))
-        if module_id is None:
-            continue
-        cited |= _quotes(blobs, str(artifact_sha256), module_id)
-    return cited
+    if resolved_route(conn, run_id) is None:
+        return set()
+    return _proven(conn, run_id, proof)
 
 
-def _quotes(
-    blobs: BlobStore, artifact_sha256: str, module_id: str
+def _proven(
+    conn: StoreConnection, run_id: UUID, proof: OrchestrationProof | None
 ) -> set[tuple[str, str, str]]:
-    """One artifact's citations. Unreadable bytes cite nothing rather than
-    raising: `assert_orchestration_proof` is what judges an artifact, and it has
-    already run for this row."""
-    try:
-        envelope = json.loads(blobs.get(artifact_sha256))
-    except (ValueError, Refusal):
-        return set()
-    if not isinstance(envelope, dict) or not isinstance(envelope.get("claims"), list):
-        return set()
+    """A proven canonical run's anchored quotes, each document still live now.
 
-    found: set[tuple[str, str, str]] = set()
-    for claim in envelope["claims"]:
-        if not isinstance(claim, dict) or not isinstance(claim.get("citations"), list):
-            continue
-        for citation in claim["citations"]:
-            if not isinstance(citation, dict):
-                continue
-            document = citation.get("document_sha256")
-            quote = citation.get("matched_text")
-            if isinstance(document, str) and isinstance(quote, str):
-                found.add((module_id, document, quote))
-    return found
+    Scoring is a use, so a source withdrawn since the proof refuses the row
+    `ORCHESTRATION_SOURCE_NOT_PINNED`, as the proof itself would (invariant 1).
+    """
+    if proof is None:
+        return set()
+    live = pinned_live_sources(conn, run_id)
+    if any(document not in live for _module, document, _quote in proof.anchored):
+        raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
+    return set(proof.anchored)
 
 
 def assert_measurable(qualification: QualificationSet) -> None:

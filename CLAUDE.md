@@ -3,12 +3,45 @@
 CAOS turns governed source documents into committee-ready credit conclusions.
 This file is the contract. `docs/DECISIONS.md` is the binding record (later
 entries override earlier). `docs/SYSTEM_SPEC.md` is the structure,
-`docs/IA_SPEC.md` the workspace, `docs/MODEL_BUILDER_SPEC.md` the workbook,
+`docs/IA_SPEC.md` the workspace, `docs/archive/MODEL_BUILDER_SPEC.md` the
+archived workbook,
 `DESIGN.md` the visual language, `CONTEXT.md` the vocabulary.
 
 Most of this repository is written by an agent. `docs/AI_CODE_QUALITY.md` says
 what that costs and which tool stops each failure mode. Read it before your
 first commit.
+
+## Active continuation — Phase 3 repair
+
+The sole current task/checkpoint record is
+[`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md).
+Read its tracked scope and acceptance evidence before editing; ignored local
+reports are supplemental. Work only in `/Users/ericguei/Documents/caos-workbench`;
+the original `/Users/ericguei/Documents/caos-v2` stays read-only.
+
+Decision §39 reconciles the repair plan with older specifications. Phase 2 is
+accepted (the handoff's acceptance record); Phase 3 runs under
+[`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md)
+and its tracked task briefs in `docs/superpowers/plans/`.
+The complementary plan's Reasoning Modes section records both Opus 5 guides.
+
+Every shell command starts by unsetting `OPENROUTER_API_KEY`,
+`OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `CAOS_REQUIRE_PROVIDER`.
+Never invoke a live provider without explicit authorization. Index the current
+checkout with GitNexus and verify affected callers in source.
+
+The coordinator may use up to three concurrent implementers only in isolated
+worktrees with disjoint owned files, migrations and test resources. Each agent
+gets an exact base and task brief, commits its own tested concern, and receives
+ordinary exact-range review. The coordinator alone integrates reviewed commits,
+runs integration/phase gates and updates the handoff. Never share a branch,
+database/blob root or provider authority; an independently green branch is not
+task or phase acceptance.
+
+Ordinary review closes each task. One `confidence-review` and then one separate
+adversarial code audit close the whole phase, both at actual `xhigh` reasoning,
+with remediation/reverification between them. No per-task specialist review or
+rewrite tournament. Requested document reviews do not certify these code gates.
 
 ## The eleven invariants (never weaken)
 
@@ -78,11 +111,11 @@ Standing rules that back them:
 - `server/store/routes.py` — the pin. Resolution stays pure by keeping the one
   place it meets the store outside `server/engine/`.
 - `server/store/` — Postgres owns everything transactional; bytes are content-
-  addressed in the blob store. `schema.sql` is the declared schema, applied in
-  full at startup and refused when the database was built from a different one
-  (`docs/DECISIONS.md` §20, which corrected this line from `storage/`).
-- `methodology/` — bundle verification, the registry (the only seam for adding
-  or upgrading a module), and the calculator execution boundary.
+  addressed in the blob store. `schema.sql` is migration `0001_legacy`;
+  `apply_schema` verifies and atomically advances the ordered immutable
+  migration prefix (`docs/DECISIONS.md` §20a and `docs/MIGRATIONS.md`).
+- `server/methodology/` — bundle verification, the registry (the only seam for
+  adding or upgrading a module), and the calculator execution boundary.
 - `vendor/deploy-v/` — the methodology bundle, read-only, pinned
   (`docs/DECISIONS.md` §13). Gates do not scan it.
 - `server/deliverable/` — the renderer that turns a frozen snapshot into the
@@ -104,15 +137,26 @@ Standing rules that back them:
 
 ## Running
 
-- `make venv` — the two toolchains. `make lock` — recompile every lock.
-- `make dev` — the `api` process alone, on port 8000. It needs a Postgres URL
-  in `CAOS_DATABASE_URL` and a blob directory in `CAOS_BLOB_ROOT`, both read
-  per request, and applies `schema.sql` at startup. No worker, nothing seeded.
-- `make test` — the suite.
+- First setup: copy `.env.example` to `.env`, then run `make bootstrap`,
+  `make doctor`, and `make dev-up`. This creates the locked Python 3.14/3.12
+  and Node 24 environments, starts the persistent dev database on 55436 and
+  the ephemeral test-admin database on 55437, and preserves local blobs.
+- `make dev-api` (`make dev` is an alias) — the API alone on port 8000. It
+  needs `CAOS_DATABASE_URL` and `CAOS_BLOB_ROOT`, both read per request, and
+  advances the verified migration prefix at startup. No worker, nothing seeded.
+- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000. It
+  fails visibly for routes not built yet. `make dev-ui-demo` is the separately
+  labelled, read-only fixture workbench; it is never integration evidence.
+- `make test` — the offline suite with PostgreSQL required; paid provider tests
+  remain deselected.
 - `make test-provider` — the live suite against the real model. Needs
   `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and `CAOS_TEST_POSTGRES_URL`, and
   fails rather than skips without them.
-- `make check` — lint, types, tests, security, in that order.
+- `make check` — the complete offline engineering gate: required PostgreSQL,
+  backend lint/types/tests/coverage/I/O/races/security, frontend lint/types/unit/
+  production and demo builds/a11y/workbench, then the image gate, sequentially.
+  `make check-fast` is explicitly partial; `make check-size PR_BASE=<commit>` is
+  the separate PR-only size gate.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
 
 ## Known gaps (honest ledger)
@@ -120,6 +164,177 @@ Standing rules that back them:
 Every accepted limitation gets an entry here with its reason and its upgrade
 path, in the same breath as the code that creates it. An empty ledger on a
 system this size means nobody looked.
+
+The phase labels below are historical **rebuild** labels, not current repair
+phase numbers. Entries are not evidence of completion; the handoff and repair
+plan govern present work. Correct a stale entry when its owning task proves
+the replacement behavior. The legacy hook claims are currently unverified
+controls; see the tracked Phase 2 hook prerequisite in the handoff.
+
+**Repair Phase 3.**
+
+- **Two vendor rules have no Python implementation and are not enforced.**
+  `server/methodology/handoff.py` calls the vendor's own validators, and the
+  vendor ships no code for `semantic_rules` or `document_substrings_casefold`.
+  Reimplementing them would make the host a second conformance authority
+  beside the bundle (invariant 4). The catalog declares each LITE pathway
+  `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a
+  LITE handoff saying `Committee Ready` validates; the host projects the scope
+  beside the status and invents no refusal. *Upgrade:* enforce each rule the
+  day the vendor ships it, or by a dated decision that the host owns it.
+- **A LITE route runs through `run_route`, but only the runtime reads its
+  records.** Slice c-5b: `_run_node` replays the executor's outcome with its
+  diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
+  (identity held, every citation anchored -- an unanchorable Blocked handoff is
+  an ordinary refusal) keeps its bill and diagnostic, accepts nothing and ends
+  the run `BLOCKED` with one `RUN_BLOCKED`, no retry. The diagnostic is the
+  exact response body, and `blocked_verdict` re-derives that verdict from the
+  billed, unaccepted attempts -- before every frontier's attempts (so a crash
+  before `block_run` commits resumes BLOCKED without a second call) and before
+  ending the run; a raised `HANDOFF_BLOCKED` alone decides nothing. The
+  re-derivation reads the provider body back, but only through the full
+  validation and anchoring; it rebuilds identity from the upstream accepted
+  now, which holds only while no direct input is accepted after its target.
+  A billed attempt refused for another reason is re-validated on every pass
+  until the node is accepted. A stored body that will not read is a store
+  fault, never "not blocked", and a body that cannot be stored refuses the
+  attempt after its bill. The re-derivation checks current state: once a
+  captured source is withdrawn no verdict can be re-derived, so a Blocked node
+  is neither blocked nor re-paid (the pre-call read refuses) and each resume
+  adds an attempt row until the 256 ordinal cap. `accepted_artifacts`
+  reduces each row to a typed `route.NodeResult` (readiness rows, `qa_status`):
+  a canonical row's from its record, verified against its Markdown and the
+  identity rebuilt from the store (§42.4, no re-anchoring), refused without a
+  bundle. The API's `read_run` (the process's cached vendored bundle,
+  `methodology_bundle`) and the harness's `_unrun` (the harness bundle) pass
+  one (slice d-1). Every frontier pass and every run-document read re-runs the
+  vendor validators on each readiness node's Markdown, costing the host
+  identity's ten queries (with the call-time narrowing every reader shares) and
+  three blob reads per such node; `read_run`'s
+  `IO_BUDGET` is the bound for two such rows (the gate and the catalog's one
+  QA_GATE source), measured on LITE's one. The harness still falls back to
+  presence when a record will not verify. The call-time narrowing infers from
+  `now()` (transaction start) which soft inputs an attempt could name, sound
+  for one sequential loop but able to refuse a valid record once concurrent
+  workers interleave accepts (Phase 4 records visibility instead); and a
+  document pinned twice under different extractions resolves to no source, so
+  its citations can never be proven. Diagnostic blobs are
+  untrusted provider text, never `BoundaryText`: nothing may render them or
+  read them as analysis. The orchestration proof still refuses canonical
+  pins. The compiled vendor contract is cached per manifest digest, so a
+  vendor script changed on disk under an unchanged manifest is not re-verified
+  by the cached validator (every other read still is). The executor's pre-call
+  unit binds every upstream record it will put in the prompt to that
+  upstream's call-time identity and this build (`record_authority_matches`,
+  shared with the proof and the deliverable), costing the host identity's
+  queries per upstream under the case lock; the record is not re-checked after
+  the call (only the digests are). Since f-1a the shared loop fixtures run
+  LITE, so the claims executor has no freshness tests left while it still
+  ships. No HTTP test covers a canonical `read_run` over a QA_GATE verdict
+  other than `Passed`, because the catalog's only QA_GATE (CP-5 -> CP-6) sits
+  on a route the canonical adapter does not execute (§42.2); the view function
+  that projects a stored `qa_status` is tested directly instead. Since f-1c
+  the adapter is one constant: every reader refuses a row without its record
+  `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
+  `RUN_INPUT_INVALID`, and every route with a module outside CP-0, CP-L10 and
+  CP-5 -- FULL, DEEP and every other catalog pathway -- pins and passes its
+  gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
+  before any attempt, reservation or call) and at acceptance. A harness case
+  on such a route still prepares and is refused only when performed. The
+  claims executor, `envelope.py` and the claims deliverable render remain,
+  unreachable from any pin. *Upgrade:* f-2a/f-2b delete that dead code, and
+  the HTTP gap closes the day Phase 5 extends the canonical adapter (and its
+  contract tests) to a route carrying that QA_GATE.
+- **A frozen canonical deliverable binds its source record and Markdown.**
+  Slice d-4 re-derives the package payload, records, identity, projections,
+  and rectangles from the store before freezing and verifies those hashes and
+  derivations again when the revision is checked. It renders model text as
+  escaped preformatted text. Artifact rows can still change after derivation
+  and before the governed freeze write, so verification catches that movement
+  rather than the freeze itself. *Upgrade:* derive under the freeze lock once
+  artifact rows are immutable; d-2 and d-3b provide proof and matrix readers.
+- **The orchestration proof over a canonical run proves it now, not
+  continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
+  binds the record to the identity rebuilt from the store, requires the pin's
+  adapter and the bundle's build, manifest and authority, re-validates the
+  Markdown against the record's projections and re-anchors every recorded
+  citation in the run's pinned live sources on identical rectangles -- the
+  deliverable's verdicts, under the proof's codes, through the same two readers
+  (`pinned_live_sources`, `call_time_identity`): a withdrawn or re-extracted
+  source, or a doubly captured document, gets one verdict from both. A
+  `host_identity` refusal keeps its own code. It proves a BLOCKED run's
+  accepted artifacts and says nothing of the node that never ran. Beside its
+  counts it returns `anchored`, the `(module_id, document_sha256,
+  matched_text)` it re-anchored under the pinned modules, and the matrix (d-3b)
+  scores exactly that set with no second artifact or record read: an artifact
+  accepted after the proof is not scored, an unproven canonical run cites
+  nothing, and a proven document no longer among `pinned_live_sources` at
+  scoring refuses the row `ORCHESTRATION_SOURCE_NOT_PINNED`. Under READ
+  COMMITTED the proof's own statements can still see different snapshots, and
+  a withdrawal committed after the matrix's live check is not seen by that
+  row. Like every proof it holds only for the bundle and sources present now.
+  *Upgrade:* the proof and scoring in one REPEATABLE READ unit, the day a
+  reviewer relies on the matrix as one consistent snapshot.
+- **Every upstream carried into a canonical prompt is bound to this build.**
+  Before the call, each accepted upstream record is validated against its
+  call-time identity and current authority; a mismatch refuses the call.
+- **Canonical upstream refs ignore readiness and predicates.**
+  `server/methodology/invocation.py` names every accepted direct input and
+  refuses a blocking one that is missing, as the vendor's
+  `expected_upstream_digests` does, but omits two of its inputs: a CONDITIONAL
+  edge always blocks (no predicate is evaluated, the Phase 3 gap below), and a
+  soft edge whose unaccepted source CP-0 reported READY is omitted where the
+  vendor refuses. The route engine already BLOCKS such a node, so the runtime
+  never asks for its identity. `module_name` is read from the verified catalog
+  at call time rather than pinned, and the prompt is bounded on its JSON
+  encoding; the provider still re-checks the whole encoded request. *Upgrade:* readiness joins
+  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2).
+
+**Repair Phase 2.**
+
+- **Only a QA `Passed` releases CP-6; `Restricted` blocks it.** F03 asks which
+  QA results permit the downstream action, and §39 says restricted output is
+  usable but not QA-cleared, so `route._unmet` meets the CP-5 -> CP-6 QA_GATE
+  only on a stored `qa_status` of `Passed`; `Not Reviewed` is refused as a
+  verdict so the attempt can retry. A reading that let `Restricted` release
+  CP-6 as RESTRICTED is also defensible from the bundle. The value is the
+  module's own verdict, so text in the evidence that steers the model can steer
+  it too; human QA approval is not consulted in Phase 2.
+  *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
+  practice wants restricted clearance to proceed.
+- **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
+  with unfinished required work recoverably blocked, and `run_route` now ends
+  such a run `BLOCKED` with one `RUN_BLOCKED` (migration 0010). Nothing moves a
+  BLOCKED run back to RUNNING: every spend guard refuses it and its stream
+  closes. "Recoverable" means nothing failed and the reason is re-derived from
+  the pins and accepted artifacts, not stored. *Upgrade:* a governed resume --
+  a CAS back to RUNNING with its own event, taken by an authorized actor when
+  an input that could release the node has changed -- arrives with Phase 4's
+  commands and worker.
+- **The terminal decision reads outside the run lock, and the store does not
+  check it.** `run_route` decides COMPLETE or BLOCKED from a snapshot taken after
+  its last pass, and `complete_run`/`complete_attempt` still let a direct store
+  caller complete a run with unrun nodes (only tests do). Sound for the one
+  sequential loop Phase 2 has. *Upgrade:* with Phase 4's concurrent workers,
+  decide under `lock_run` in `_transition`, requiring an accepted artifact for
+  every pinned node before COMPLETE.
+- **Two workers can pay for one node.** Migration 0009 lets exactly one attempt
+  own a node's accepted result, but two attempts can each reserve and call
+  before either accepts; both bills are kept. The same window lets a second
+  worker that checked `blocked_verdict` before the first worker's Blocked bill
+  committed call again. *Upgrade:* Phase 4's PostgreSQL
+  claims/leases (§39) take the node before the call. `artifacts` rows are also
+  not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
+  a refusal trigger like 0007's is the upgrade.
+- **Acceptance does not recompare upstream, and context reads hold the case
+  lock.** `_accept_artifact` checks authority and ownership under the lock but
+  not the predecessor digests the post-call unit compared; with Phase 2's one
+  sequential loop no writer can accept a predecessor in between. The pre-call
+  unit also reads every captured block one query at a time under the case lock,
+  so a large pack holds governed writes on that case for the whole read.
+  *Upgrade:* Phase 4 rechecks upstream digests inside the accept unit (or fences
+  predecessors with the node's lease), and a batched block query when the first
+  large PDF pack measures the hold.
 
 **Phase 0.**
 
@@ -238,19 +453,12 @@ system this size means nobody looked.
   async store connection Phase 5's gap already owes; over a synchronous one a
   concurrent harness would serialise on the connection, for the same wall clock
   and harder reasoning.
-- **A document that will not admit still ends the set, after the cases before
-  it were paid for.** `perform` records a `Refusal` from `run_route` in
-  `Performed.stopped` and stops; what it cannot record is a refusal raised
-  before there is a run to record it against. Route resolution has left that
-  category — every case's route is now resolved in the pass over the whole set,
-  before anything is admitted, because resolution is pure and an unknown pathway
-  on the last case of ten was knowable from the catalog and the set alone. What
-  remains is `admit_pack` refusing `SOURCE_HAS_NO_TEXT` on a document whose
-  bytes carry none, which needs the extractor and therefore the case row, and so
-  cannot be answered before the earlier cases have run. *Upgrade:* extract once,
-  up front, and hand `admit_pack` what it already produced — which is worth
-  doing the day extraction is the expensive half, and is today a second pass
-  over bytes to answer a question about a set someone assembled badly.
+- ~~**A document that will not admit still ends the set, after the cases before
+  it were paid for.**~~ Closed by `prepare`, which resolves every route, creates
+  every case, admits every document and pins every input before `perform` may
+  spend anything: `SOURCE_HAS_NO_TEXT` on the last case of ten now refuses the
+  set before any provider call, with the earlier cases' prepared rows committed
+  and unspent.
 - **An unrun node's state is a weaker reading when the artifacts cannot be
   read.** `_unrun` asks `accepted_artifacts` for CP-0's body, which is where a
   soft edge's readiness comes from, and bytes that will not load would raise out
@@ -260,13 +468,12 @@ system this size means nobody looked.
   The run has already refused its proof by then, so the signal is not lost.
   *Upgrade:* none — a run whose artifacts are unreadable has a worse problem
   than the precision of this field.
-- **`Unrun` does not say whether a node was attempted.** A node the provider was
-  asked for and refused and a node execution never reached both come back
-  RUNNABLE, although `run_attempts` holds the difference: the first has a
-  started, unaccepted row and a reservation, the second has nothing. With the
-  frontier running its ready nodes in order this is at most one node per run.
-  *Upgrade:* read the attempt rows alongside the states, the day a wide frontier
-  runs concurrently and more than one node can be mid-flight.
+- ~~**`Unrun` does not say whether a node was attempted.**~~ Closed in Task17f-b:
+  each `Unrun` carries its stored `Attempted` rows -- whether the attempt was
+  reserved, whether its call was recorded (reserved and unrecorded is possible
+  spend), whether a known charge was billed (a recorded call without one is
+  unknown exposure), and the recorded model and generation, read from the store
+  and `None` when the call recorded none.
 - **A proof is held and not stored.** `perform` now holds each case's
   `OrchestrationProof` beside the run id it covers — and only for as long as the
   caller does. There is no table and no route that serves one, so a proof still
@@ -279,20 +486,18 @@ system this size means nobody looked.
   reader that can be handed one.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
-  re-deriving the proof and re-reading every artifact for its citations. Two of
+  re-deriving the proof (a run is scored from its proof, not by re-reading
+  artifacts). Two of
   those are deliberate: the matrix stands alone, and reading a proof back from
   the harness would make it trust a caller's copy of what the store said
   (invariant 3). Against a provider call per node none of it shows. *Upgrade:*
   hand the accepted mapping from `_perform_one` to the matrix the day a set is
   large enough for the reads to be measurable — which is the same day the
   per-set budget above starts to bite.
-- **`perform` returns with a read transaction open.** Its last writes commit
-  inside the store calls, and the proof, the status read, `_unrun` and the
-  matrix all read after them without committing or rolling back. Under the
-  `with connect(...)` every caller uses today the connection closes immediately
-  after; a caller that held one would leave a session idle-in-transaction,
-  pinning a snapshot. *Upgrade:* end the transaction on the way out, in the
-  phase that first gives this a caller which outlives one set.
+- ~~**`perform` returns with a read transaction open.**~~ Closed when
+  `_perform_one` and the matrix began reading inside `execution_reads`, which
+  rolls its unit back on the way out, so `perform` returns with the connection
+  idle.
 - **A bundle upgrade invalidates every earlier run's proof.** The authority is
   re-derived from the bundle that is here now, so after an upgrade a run that
   was correct under the old build refuses `ORCHESTRATION_BUILD_MOVED`. That is
@@ -356,15 +561,16 @@ system this size means nobody looked.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
-- **The workspace reads fixtures; the API serves none of its routes.**
+- **The real workspace is not yet wired to backend section routes.**
   `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
   section document and `sse.ts` tails `/api/events` for six lower-case event
   names, while `server/api/app.py` serves `/api/runs/{id}` and its
   `/events`, whose stream carries `RunEvent` names (`ROUTE_PINNED` …
   `RUN_FAILED`). The refusal bodies differ as well: the client reads
   `{code, clears}` and the server sends `{refusal}`, so a real server refusal
-  would be classed `RESPONSE_INVALID`. Every section therefore renders the
-  dev/preview fixtures and nothing else, and no governed write — commit,
+  is classed `RESPONSE_INVALID`. Ordinary development and production preview
+  now use the real API path and fail visibly; only the explicitly labelled
+  read-only demo serves fixtures. No governed write — commit,
   withdraw, pin, approve, accept, sign, freeze, file — has a route. A control
   refused for want of one now says so (`READ_ONLY_API`) instead of naming a
   build phase that had already exited; a control refused for a domain reason —
@@ -488,13 +694,21 @@ system this size means nobody looked.
   of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
   retrieval index the bundle ships (`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`) is
   what selects the references a question actually needs.
-- **No per-model price table, so the reservation is still a flat estimate.**
-  `docs/DECISIONS.md` §16 wants each configured model to carry a dated
-  `(input, output)` price as `Decimal` driving the reservation ceiling. The
-  provider reports `usage.cost`, which is the *actual* charge and is what the
-  ledger records; the number reserved *before* the call is still the caller's
-  single estimate. *Upgrade:* the price table lands with the module executor
-  that knows the prompt's size, and retires the Phase 4 gap below with it.
+- **A run's price is supplied by its caller, not read from a table.**
+  `docs/DECISIONS.md` §40: every call reserves `pricing.worst_case(price)` --
+  every byte of the largest request (§38) as an input token plus the output cap
+  -- and `run_route` refuses a price for any model but the provider's configured
+  one before an attempt exists. Nothing in the tree says what the live model
+  costs, so `tests/test_live_run.py` still prices it from its flat estimate. The
+  byte bound is severe for a real model: at about $3/M input and $15/M output one
+  call reserves about $3.64, so under the $5 default ceiling a two-node route
+  cannot finish; the qualification harness refuses a set whose route length
+  times that worst case exceeds a run's ceiling before any case is prepared.
+  `ModelPrice.as_of` is carried but not stored beside the reservation, so a
+  reservation row does not say which price produced it. *Upgrade:* a
+  user-confirmed dated price for the configured live model, recorded with the
+  reservation, and pricing the actual encoded request once the prompt is built
+  before the reservation.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the
@@ -502,16 +716,19 @@ system this size means nobody looked.
   dispatch only, never on a pull request, and it now carries Postgres beside
   the credential: `CAOS_REQUIRE_PROVIDER=1` and `CAOS_REQUIRE_POSTGRES=1` turn
   either one missing into a failure rather than a skip.
-- **The nightly live run proves one two-module pathway.**
+- **The nightly live run proves one three-module canonical pathway.**
   `test_a_live_run_admits_documents_and_completes_its_route` runs
-  `DEEP_RESEARCH` — CP-0 then CP-DR — because two calls cost under a cent and
-  the job exists to prove the chain: documents admitted, a route pinned and
-  run, every citation re-located. Most of `FULL_CREDIT_ASSESSMENT`'s nineteen
-  modules have never answered a live model in CI, and a run there rests on each
-  one quoting its evidence word for word (the Phase 2 gap below).
-  `CAOS_LIVE_PATHWAY=FULL_CREDIT_ASSESSMENT make test-provider` runs them on
-  demand. *Upgrade:* the full pathway in the nightly job, once on-demand runs
-  have said what it costs and how often a quote fails to locate.
+  `LITE_CREDIT_22`/`LITE_EARNINGS_UPDATE` — CP-0, CP-L10, CP-5 — the canonical
+  route (slice e-2): documents admitted, a subject and route pinned and run,
+  every node accepted with its host record, every citation re-located. The
+  retarget was made statically and has not yet answered a live model: whether
+  a real model returns vendor-valid handoffs with whole-token quotes is
+  unmeasured, and a validated `Blocked` ends the run BLOCKED and fails the
+  test. Most of `FULL_CREDIT_ASSESSMENT`'s modules have never answered a live
+  model in CI; `CAOS_LIVE_PROFILE`/`CAOS_LIVE_PATHWAY` name another route on
+  demand. *Upgrade:* a first authorized nightly run to measure the canonical
+  pathway, then the larger pathways once on-demand runs have said what they
+  cost and how often a quote fails to locate.
 - **`UrllibTransport`'s error path is tested at the director, not over a
   socket.** `test_an_error_status_arrives_as_an_http_error_the_transport_can_type`
   asks the real `_opener()` to convert a non-2xx, which is where the handler set
@@ -576,10 +793,10 @@ system this size means nobody looked.
   *Upgrade:* the phase that makes the provider call real (Phase 5) is where the
   latency starts to matter and where an async store connection has to arrive
   anyway; the loop's shape does not change, only the `for` becomes a `gather`.
-- **The reservation estimate is the caller's number.** `run_route` takes one
-  `estimate` and reserves it for every node. A real estimate is per module and
-  comes from the model's price and the prompt's size (`docs/DECISIONS.md` §16).
-  *Upgrade:* Phase 5, with the provider that knows both.
+- ~~**The reservation estimate is the caller's number.**~~ Closed by §40:
+  `Execution` carries a dated `ModelPrice` bound to the provider's model, and
+  each call reserves its worst case. The price's source is the remaining gap,
+  recorded in the Phase 5 entry above.
 
 **Phase 3.**
 
@@ -629,12 +846,12 @@ system this size means nobody looked.
 
 **Phase 1.**
 
-- **A schema change is refused, not migrated.** `apply_schema` refuses
-  `STORE_SCHEMA_DRIFT` against a database built from a different declared
-  schema, which is the right answer only while no deployment holds data — it
-  offers a running system no way forward. *Upgrade:* the first deployment brings
-  an ordered migration table and a decision entry overriding §20; the drift
-  refusal stays as the check that the migrations were actually run.
+- ~~**A schema change is refused, not migrated.**~~ Closed by the ordered,
+  checksum-verified `MIGRATIONS` prefix and `store_migrations` history in
+  `server/store/__init__.py`; append-only migration files now advance populated
+  databases under one transaction and advisory lock. Backup/restore and the
+  no-downgrade rule are recorded in `docs/MIGRATIONS.md` and
+  `docs/DECISIONS.md` §20a.
 - **The recorded digest proves the declared schema did not change, not that the
   database still matches it.** `apply_schema` compares the SHA-256 of
   `schema.sql` against what was applied; a table altered or dropped outside this
@@ -661,17 +878,16 @@ system this size means nobody looked.
   because proving the mismatch refusal means damaging a blob through the real
   filesystem. *Upgrade:* make it private the day a caller needs a streaming read
   instead, which is the only other reason to want it.
-- **The store suite skips without `CAOS_TEST_POSTGRES_URL`.** A local `make
-  test` with the variable unset reports success having exercised none of the
-  store. CI sets `CAOS_REQUIRE_POSTGRES=1`, which turns that skip into a
-  failure, so the gap is local only. *Upgrade:* none needed while CI is the
-  gate; the day a developer's green run is trusted on its own, the variable
-  becomes required everywhere.
+- ~~**The store suite skips without `CAOS_TEST_POSTGRES_URL`.**~~ Closed in
+  Phase 1. `make test` and `make check` set `CAOS_REQUIRE_POSTGRES=1`, and the
+  complete gate first refuses an absent or unreachable configured test
+  database. Only the explicitly partial `make check-fast` permits database
+  suites to skip.
 - ~~**`scan_floors.py --min-files 1` is a weak floor.**~~ Closed in Phase 1.
   The floor is now `--cover scripts server --unscanned tests`: a tracked `.py`
   under `--cover` that the report did not measure is a failure, and so is one
-  neither list claims. `methodology` joins `--cover` in Phase 5, which is when
-  the directory exists — naming it now would claim a tree that is not there.
+  neither list claims. `server/methodology` is already included by the `server`
+  coverage root; there is no separate top-level methodology tree to add.
 - **The record cites decisions this repository did not take.** The specs
   lifted from CAOS-Final at `cf8c3a9` cite its §18–§48; `docs/DECISIONS.md`
   §12 maps each to the entry here or to the phase that adopts it. *Upgrade:*

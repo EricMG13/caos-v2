@@ -11,15 +11,24 @@ is what makes "whole or not at all" true, and a refusal leaves it to roll back.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from math import isfinite
 from uuid import UUID, uuid4
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.evidence.extract import Extractor, PlainTextExtractor, Token
+from server.evidence.extract import (
+    Extractor,
+    ExtractorIdentity,
+    PlainTextExtractor,
+    Token,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.cases import lock_case
 
 # One block per line while small. `SYSTEM_SPEC.md` section 5 bounds line groups
 # once a document is not small; this build packs a line per block and the group
@@ -63,6 +72,9 @@ class _Packed:
     document: Document
     tokens: list[Token]
     blocks: list[_Block]
+    extractor_identity: str
+    output_sha256: str
+    extraction_sha256: str
 
 
 def admit_pack(
@@ -84,6 +96,16 @@ def admit_pack(
         raise Refusal(RefusalCode.SOURCE_PACK_EMPTY)
     _require_case(conn, case_id)
     reader = extractor if extractor is not None else PlainTextExtractor()
+    try:
+        declared = reader.identity
+    except (Refusal, AttributeError, TypeError, ValueError, OverflowError):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
+    if not isinstance(declared, ExtractorIdentity):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
+    try:
+        identity = declared.canonical()
+    except (Refusal, AttributeError, TypeError, ValueError, OverflowError):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
 
     # Extract everything first. A document that cannot be read must refuse the
     # pack before any of it is written, not after some of it is.
@@ -99,12 +121,61 @@ def admit_pack(
     # rather than at the write, for the same reason the check above is here:
     # a line the boundary refuses is a line `read_evidence` refuses, so
     # admitting it would pin a source no run can read.
-    packed = [
-        _Packed(document=document, tokens=tokens, blocks=_blocks(tokens))
-        for document, tokens in extracted
-    ]
+    packed = [_prepare(document, tokens, identity) for document, tokens in extracted]
 
+    lock_case(conn, case_id)
     return [_admit_one(conn, blobs, case_id, one) for one in packed]
+
+
+def _prepare(document: Document, tokens: list[Token], identity: str) -> _Packed:
+    prepared: list[Token] = []
+    try:
+        for token in tokens:
+            indices = (token.page, token.region_id, token.line_id)
+            coords = (token.x0, token.y0, token.x1, token.y1)
+            if any(type(i) is not int or not -(2**31) <= i < 2**31 for i in indices):
+                raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
+            if any(
+                type(c) not in (int, float) or not isfinite(c) or float(c) != c
+                for c in coords
+            ):
+                raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
+            if type(token.text) is not str:
+                raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
+            BoundaryText.of(token.text)
+            prepared.append(Token(token.text, *indices, *map(float, coords)))
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
+    blocks = _blocks(prepared)
+    output = _digest(
+        {
+            "format_version": 1,
+            "tokens": [asdict(token) for token in prepared],
+            "blocks": [
+                [block.block_id, block.page, block.text.value] for block in blocks
+            ],
+        }
+    )
+    extraction = _digest(
+        {
+            "format_version": 1,
+            "document_sha256": sha256(document.data).hexdigest(),
+            "extractor_identity": json.loads(identity),
+            "output_sha256": output,
+        }
+    )
+    return _Packed(document, prepared, blocks, identity, output, extraction)
+
+
+def _digest(value: object) -> str:
+    canonical = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _require_case(conn: StoreConnection, case_id: UUID) -> None:
@@ -131,6 +202,18 @@ def _admit_one(
     )
     _store_tokens(conn, source_id, packed.tokens)
     _store_blocks(conn, source_id, packed.blocks)
+    conn.execute(
+        "INSERT INTO source_extractions"
+        " (source_id, format_version, extractor_identity,"
+        " output_sha256, extraction_sha256)"
+        " VALUES (%s, 1, %s, %s, %s)",
+        (
+            source_id,
+            packed.extractor_identity,
+            packed.output_sha256,
+            packed.extraction_sha256,
+        ),
+    )
     return source_id
 
 

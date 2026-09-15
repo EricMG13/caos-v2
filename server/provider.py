@@ -25,13 +25,20 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 from typing import Any, Protocol
 
 from server.refusals import Refusal, RefusalCode
+from server.store.budget import validate_spend
+from server.store.outcomes import producer_identifier
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 TIMEOUT_SECONDS = 120.0
+# Host resource ceilings, not guarantees that every canonical handoff fits.
+# Oversized requests/responses refuse; no prefix is accepted as a whole answer.
+MAX_REQUEST_BYTES = 1_048_576
+MAX_RESPONSE_BYTES = 4_194_304
+MAX_COMPLETION_TOKENS = 32_768
 
 # A call that cannot succeed by being repeated. Retrying one of these spends a
 # second reservation on the same certain failure.
@@ -48,11 +55,16 @@ _FINISH_REFUSALS = {
 
 @dataclass(frozen=True, slots=True)
 class Completion:
-    """What one provider call returned, with nothing of the body kept."""
+    """Independent call facts beside usable content or an analytical refusal.
 
-    content: str
-    charge: Decimal
-    generation_id: str
+    None is unknown, never zero. Failed analytical content is discarded.
+    A returned refusal describes a call; pre-send rejection raises Refusal.
+    """
+
+    content: str | None = field(repr=False)
+    charge: Decimal | None
+    generation_id: str | None = field(repr=False)
+    refusal: RefusalCode | None = None
 
 
 class Transport(Protocol):
@@ -70,6 +82,18 @@ class Transport(Protocol):
 # about. A self-hosted endpoint that speaks only `http` is a decision entry, not
 # a default.
 ALLOWED_SCHEMES = frozenset({"https"})
+
+
+def _check_url(url: str) -> None:
+    if any(ord(char) <= 32 or ord(char) == 127 for char in url):
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    try:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme in ALLOWED_SCHEMES and parts.hostname and parts.port != 0:
+            return
+    except ValueError:
+        pass
+    raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED) from None
 
 
 def _opener() -> urllib.request.OpenerDirector:
@@ -109,16 +133,37 @@ class UrllibTransport:
     def post(
         self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
     ) -> tuple[int, bytes]:
-        if urllib.parse.urlsplit(url).scheme not in ALLOWED_SCHEMES:
-            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
-        request = urllib.request.Request(
-            url, data=body, headers=dict(headers), method="POST"
-        )
+        if not isinstance(body, bytes) or len(body) > MAX_REQUEST_BYTES:
+            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
+        try:
+            _check_url(url)
+            request = urllib.request.Request(
+                url, data=body, headers=dict(headers), method="POST"
+            )
+        except ValueError:
+            raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED) from None
         try:
             with _opener().open(request, timeout=timeout) as response:
-                return int(response.status), bytes(response.read())
+                return int(response.status), _read_body(response)
         except urllib.error.HTTPError as error:
-            return int(error.code), bytes(error.read())
+            with error:
+                return int(error.code), _read_body(error)
+
+
+def _read_body(response: http.client.HTTPResponse | urllib.error.HTTPError) -> bytes:
+    body = _response_bytes(response.read(MAX_RESPONSE_BYTES + 1))
+    # HTTPResponse.read(size) tolerates early EOF with Content-Length remaining.
+    # HTTPError delegates this native framing state to its underlying response.
+    remaining = getattr(response, "length", None)
+    if remaining is not None and remaining > 0:
+        raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE) from None
+    return body
+
+
+def _response_bytes(body: bytes) -> bytes:
+    if not isinstance(body, bytes) or len(body) > MAX_RESPONSE_BYTES:
+        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID) from None
+    return body
 
 
 class CompletionProvider(Protocol):
@@ -189,33 +234,54 @@ class OpenRouter:
         parsed and validated by the host, because a module's claim about its own
         output is exactly what invariant 3 says never survives.
         """
-        if not self.model:
+        if producer_identifier(self.model, limit=256) is None:
             raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
 
-        status, body = self._post(prompt, json_object=json_object)
+        try:
+            status, body = self._post(prompt, json_object=json_object)
+        except Refusal as failed:
+            if failed.code not in {
+                RefusalCode.PROVIDER_UNAVAILABLE,
+                RefusalCode.PROVIDER_RESPONSE_INVALID,
+            }:
+                raise
+            return Completion(None, None, None, failed.code)
+
+        refusal = None
         if status in NEVER_RETRIED:
-            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
-        if status in TRANSIENT or status >= 500:
-            raise Refusal(RefusalCode.PROVIDER_UNAVAILABLE)
-        if status != 200:
-            raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
-        return _completion(_decode(body))
+            refusal = RefusalCode.PROVIDER_CALL_INVALID
+        elif status in TRANSIENT or status >= 500:
+            refusal = RefusalCode.PROVIDER_UNAVAILABLE
+        elif status != 200:
+            refusal = RefusalCode.PROVIDER_RESPONSE_INVALID
+        try:
+            decoded = _decode(body)
+        except Refusal as failed:
+            return Completion(None, None, None, refusal or failed.code)
+        return _completion(decoded, refusal=refusal)
 
     def _post(self, prompt: str, *, json_object: bool = False) -> tuple[int, bytes]:
+        if not isinstance(prompt, str) or len(prompt) > MAX_REQUEST_BYTES:
+            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
         request: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "max_completion_tokens": MAX_COMPLETION_TOKENS,
             # One run, one provider identity. A fallback would move the run
             # to a model its charges were never priced against.
-            "provider": {"allow_fallbacks": False},
+            "provider": {"allow_fallbacks": False, "require_parameters": True},
         }
         if json_object:
             request["response_format"] = {"type": "json_object"}
         payload = json.dumps(request).encode("utf-8")
+        if len(payload) > MAX_REQUEST_BYTES:
+            raise Refusal(RefusalCode.PROVIDER_CALL_INVALID)
         try:
-            return self.transport.post(
-                f"{self.base_url}/chat/completions",
+            url = f"{self.base_url}/chat/completions"
+            _check_url(url)
+            status, body = self.transport.post(
+                url,
                 payload,
                 {
                     "Authorization": f"Bearer {self.api_key}",
@@ -240,41 +306,75 @@ class OpenRouter:
             # indeterminate -- nothing was sent -- and the message is the header
             # itself, `Bearer` and the key.
             raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED) from None
+        return status, _response_bytes(body)
 
 
 def _decode(body: bytes) -> Mapping[str, Any]:
     try:
-        decoded = json.loads(body, parse_float=Decimal)
-    except (ValueError, UnicodeDecodeError):
+        decoded = json.loads(
+            body, parse_float=Decimal, object_pairs_hook=_unambiguous_object
+        )
+    except (ValueError, UnicodeDecodeError, DecimalException, RecursionError):
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID) from None
     if not isinstance(decoded, Mapping):
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
     return decoded
 
 
-def _completion(body: Mapping[str, Any]) -> Completion:
+def _unambiguous_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Duplicate members are unknown; independent sibling facts survive."""
+    members: dict[str, Any] = {}
+    for name, value in pairs:
+        members[name] = None if name in members else value
+    return members
+
+
+def _reported_charge(value: object) -> Decimal | None:
+    if type(value) is int:
+        value = Decimal(value)
+    if isinstance(value, Decimal):
+        try:
+            validate_spend(value)
+        except Refusal:
+            return None
+        return value
+    return None
+
+
+def _completion(
+    body: Mapping[str, Any], *, refusal: RefusalCode | None = None
+) -> Completion:
+    usage = body.get("usage")
+    charge = _reported_charge(usage.get("cost") if isinstance(usage, Mapping) else None)
+    generation = producer_identifier(body.get("id"), limit=512)
+    if refusal is not None:
+        return Completion(None, charge, generation, refusal)
+    try:
+        content = _content(body)
+    except Refusal as failed:
+        return Completion(None, charge, generation, failed.code)
+    if charge is None or generation is None:
+        return Completion(
+            None, charge, generation, RefusalCode.PROVIDER_RESPONSE_INVALID
+        )
+    return Completion(content, charge, generation)
+
+
+def _content(body: Mapping[str, Any]) -> str:
     choice = _first_choice(body)
-    finish_reason = str(choice.get("finish_reason", ""))
+    finish_reason = choice.get("finish_reason")
+    if not isinstance(finish_reason, str):
+        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
     refusal = _FINISH_REFUSALS.get(finish_reason)
     if refusal is not None:
         raise Refusal(refusal)
-
     message = choice.get("message")
-    usage = body.get("usage")
-    if not isinstance(message, Mapping) or not isinstance(usage, Mapping):
+    if finish_reason != "stop" or not isinstance(message, Mapping):
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
-
-    cost = usage.get("cost")
-    if not isinstance(cost, Decimal | int):
-        # No cost is nothing to reconcile the reservation against, and a run
-        # that cannot be charged cannot be stopped at its ceiling.
+    content = message.get("content")
+    if not isinstance(content, str):
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
-
-    return Completion(
-        content=str(message.get("content", "")),
-        charge=Decimal(cost),
-        generation_id=str(body.get("id", "")),
-    )
+    return content
 
 
 def _first_choice(body: Mapping[str, Any]) -> Mapping[str, Any]:

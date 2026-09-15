@@ -22,6 +22,7 @@ one refusal that is about safety rather than shape.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from server.qualification.matrix import (
 )
 from server.qualification.on_disk import MANIFEST, load_qualification_set
 from server.refusals import Refusal, RefusalCode
+from server.store.run_inputs import RunSubject
 
 REPORT = b"""Acme Holdings plc annual report 2026
 Total debt at 31 December 2026 was USD 1,240.0m
@@ -306,5 +308,67 @@ def test_a_manifest_that_is_not_json_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(Refusal) as refused:
         load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+# `_in_memory()`'s digest before a case could carry a subject. A set whose cases
+# carry none must keep binding exactly this, or every earlier verdict is orphaned.
+GOLDEN = "64bc178c0010b0fe104e01f4f7fac2bce35d1dc09f21fea86ff996aa99233373"
+SUBJECT = {
+    "issuer_id": "ACME",
+    "issuer_name": "Acme Holdings plc",
+    "reporting_period": "FY2026",
+    "analysis_date": "2026-09-13",
+}
+
+
+def test_a_set_without_subjects_keeps_its_golden_digest(on_disk: Path) -> None:
+    assert qualification_set_digest(_in_memory()) == GOLDEN
+    loaded = load_qualification_set(on_disk)
+    assert all(case.subject is None for case in loaded.cases)
+    assert qualification_set_digest(loaded) == GOLDEN
+
+
+def test_a_declared_subject_round_trips_and_is_digested(tmp_path: Path) -> None:
+    manifest = _manifest()
+    manifest["cases"][0]["subject"] = dict(SUBJECT)  # type: ignore[index]
+    loaded = load_qualification_set(_write(tmp_path, manifest))
+
+    subject = RunSubject(**SUBJECT)
+    assert loaded.cases[0].subject == subject
+    assert loaded.cases[1].subject is None
+    with_subject = qualification_set_digest(loaded)
+    assert with_subject != GOLDEN
+    first, second = _in_memory().cases
+    built = QualificationSet((replace(first, subject=subject), second))
+    assert qualification_set_digest(built) == with_subject
+    for key, value in SUBJECT.items():
+        moved = replace(subject, **{key: value + "X"})
+        changed = QualificationSet((replace(first, subject=moved), second))
+        assert qualification_set_digest(changed) not in {with_subject, GOLDEN}, key
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        {k: v for k, v in SUBJECT.items() if k != "analysis_date"},
+        {**SUBJECT, "cos_run_id": "COS-1"},
+        {**SUBJECT, "issuer_id": 7},
+        {**SUBJECT, "issuer_name": ""},
+        {**SUBJECT, "issuer_name": " padded"},
+        {**SUBJECT, "analysis_date": "2026-02-30"},
+        [SUBJECT["issuer_id"]],
+        None,
+    ],
+)
+def test_a_subject_that_is_not_the_closed_shape_is_refused(
+    tmp_path: Path, declared: object
+) -> None:
+    manifest = _manifest()
+    manifest["cases"][0]["subject"] = declared  # type: ignore[index]
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(_write(tmp_path, manifest))
 
     assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID

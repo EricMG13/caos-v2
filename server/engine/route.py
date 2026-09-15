@@ -15,9 +15,9 @@ READY_WITH_LIMITATIONS, at which point the evidence exists and running without i
 would discard what the case has.
 
 *Readiness is read, never passed.* It comes from the accepted CP-0 artifact's
-`content_to_module_map` (`docs/DECISIONS.md` §12, adopting CAOS-Final §18). A
-caller able to assert readiness could assert its way past the gate that measures
-it.
+readiness rows, typed as a `NodeResult` (`docs/DECISIONS.md` §12, adopting
+CAOS-Final §18). A caller able to assert readiness could assert its way past the
+gate that measures it.
 
 *Resolution is pure.* No I/O, no clock. The resolved route is digested at the
 plan gate and execution reads only the pin, so a replay from the same pins takes
@@ -93,6 +93,22 @@ class Edge:
     source: str
     target: str
     type: EdgeType
+
+
+@dataclass(frozen=True, slots=True)
+class NodeResult:
+    """What the engine reads from one accepted artifact, and nothing more.
+
+    A node's presence in the accepted mapping is what makes it COMPLETE; this
+    value carries the two facts some nodes' artifacts add. `readiness` is the
+    gate's `(module_id, readiness_status)` rows, read only from the CP-0 node;
+    `qa_status` is the module's own QA verdict, which meets a QA_GATE edge only
+    when it is `Passed` (F03). A canonical record reduces to this, so the
+    engine never reads the Markdown.
+    """
+
+    readiness: tuple[tuple[str, str], ...] = ()
+    qa_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,25 +232,26 @@ def dependency_order(
 
 
 def node_states(
-    route: ResolvedRoute, accepted: Mapping[str, Any]
+    route: ResolvedRoute, accepted: Mapping[str, NodeResult]
 ) -> dict[str, NodeState]:
     """Each node's state, recomputed from the accepted attempts. Never stored."""
     readiness = readiness_from(route, accepted)
     complete = {
         node.module_id for node in route.nodes if node.route_node_id in accepted
     }
+    passed = _qa_passed(route, accepted)
 
     states = {}
     for node in route.nodes:
         if node.module_id in complete:
             states[node.route_node_id] = NodeState.COMPLETE
             continue
-        unmet = _unmet(route, node.module_id, complete)
+        unmet = _unmet(route, node.module_id, complete, passed)
         states[node.route_node_id] = _state_for(node.module_id, unmet, readiness)
     return states
 
 
-def frontier(route: ResolvedRoute, accepted: Mapping[str, Any]) -> list[str]:
+def frontier(route: ResolvedRoute, accepted: Mapping[str, NodeResult]) -> list[str]:
     """The nodes that may run now: RUNNABLE and RESTRICTED, in route order."""
     states = node_states(route, accepted)
     return [
@@ -245,7 +262,7 @@ def frontier(route: ResolvedRoute, accepted: Mapping[str, Any]) -> list[str]:
 
 
 def waiting_on(
-    route: ResolvedRoute, accepted: Mapping[str, Any], route_node_id: str
+    route: ResolvedRoute, accepted: Mapping[str, NodeResult], route_node_id: str
 ) -> tuple[Edge, ...]:
     """Every dependency this node is still waiting for, typed.
 
@@ -266,11 +283,11 @@ def waiting_on(
     node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
     if node is None:
         raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
-    return _unmet(route, node.module_id, complete)
+    return _unmet(route, node.module_id, complete, _qa_passed(route, accepted))
 
 
 def limitations_of(
-    route: ResolvedRoute, accepted: Mapping[str, Any], route_node_id: str
+    route: ResolvedRoute, accepted: Mapping[str, NodeResult], route_node_id: str
 ) -> tuple[Edge, ...]:
     """The soft edges a RESTRICTED node is running without.
 
@@ -295,31 +312,16 @@ def predecessors(route: ResolvedRoute, module_id: str) -> tuple[str, ...]:
     return tuple(node.module_id for node in route.nodes if node.module_id in sources)
 
 
-def readiness_from(route: ResolvedRoute, accepted: Mapping[str, Any]) -> dict[str, str]:
+def readiness_from(
+    route: ResolvedRoute, accepted: Mapping[str, NodeResult]
+) -> dict[str, str]:
     """Per-module readiness, read from the accepted gate artifact and nowhere else."""
     for node in route.nodes:
         if node.module_id != GATE_MODULE:
             continue
-        artifact = accepted.get(node.route_node_id)
-        if not isinstance(artifact, Mapping):
-            return {}
-        entries = artifact.get("content_to_module_map", [])
-        if not isinstance(entries, list):
-            raise Refusal(RefusalCode.READINESS_INVALID)
-        return {_verdict_module(entry): _verdict_status(entry) for entry in entries}
+        result = accepted.get(node.route_node_id)
+        return {} if result is None else dict(result.readiness)
     return {}
-
-
-def _verdict_module(entry: object) -> str:
-    if not isinstance(entry, Mapping) or "module_id" not in entry:
-        raise Refusal(RefusalCode.READINESS_INVALID)
-    return str(entry["module_id"])
-
-
-def _verdict_status(entry: object) -> str:
-    if not isinstance(entry, Mapping) or "readiness_status" not in entry:
-        raise Refusal(RefusalCode.READINESS_INVALID)
-    return str(entry["readiness_status"])
 
 
 def route_digest(route: ResolvedRoute) -> str:
@@ -370,13 +372,30 @@ def _state_for(
 
 
 def _unmet(
-    route: ResolvedRoute, module_id: str, complete: set[str]
+    route: ResolvedRoute, module_id: str, complete: set[str], passed: set[str]
 ) -> tuple[Edge, ...]:
+    """Edges into this module not yet met. A QA_GATE edge is met by its
+    source's validated `Passed`, never by the source merely being accepted (F03).
+    """
     return tuple(
         edge
         for edge in route.edges
-        if edge.target == module_id and edge.source not in complete
+        if edge.target == module_id
+        and (
+            edge.source not in complete
+            or (edge.type is EdgeType.QA_GATE and edge.source not in passed)
+        )
     )
+
+
+def _qa_passed(route: ResolvedRoute, accepted: Mapping[str, NodeResult]) -> set[str]:
+    """Modules whose accepted artifact carries the QA outcome `Passed`."""
+    return {
+        node.module_id
+        for node in route.nodes
+        if (result := accepted.get(node.route_node_id)) is not None
+        and result.qa_status == "Passed"
+    }
 
 
 def _profile(catalog: Mapping[str, Any], profile_id: str) -> Mapping[str, Any]:

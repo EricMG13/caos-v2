@@ -14,15 +14,31 @@ caller.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import psycopg
+
+from server import methodology
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
-from server.store.budget import CEILING
+from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store.budget import CEILING, validate_spend
+from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
+from server.store.gates import approved_run_input, require_adapter_route
+from server.store.outcomes import (
+    CallOutcome,
+    _attempt_owner,
+    _locked_attempt,
+    accepted_owner,
+    record_outcome,
+)
+
+# The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
+MAX_ATTEMPT_ORDINAL = 256
 
 
 def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
@@ -46,8 +62,8 @@ def start_run(
     gets.
     """
     ceiling = CEILING if budget_ceiling is None else budget_ceiling
-    if not isinstance(ceiling, Decimal):
-        raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
+    validate_spend(ceiling)
+    lock_case(conn, case_id)
     run_id = uuid4()
     conn.execute(
         "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
@@ -76,38 +92,59 @@ def start_attempt(conn: StoreConnection, run_id: UUID, route_node_id: str) -> UU
     completed (`docs/DECISIONS.md` §12, adopting CAOS-Final §21 with Phase 4).
     """
     if lock_run(conn, run_id) is not RunStatus.RUNNING:
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    if accepted_owner(conn, run_id, route_node_id) is not None:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
+    # Under the run lock, so two starts cannot take one ordinal. Counting rows
+    # rather than reading the maximum keeps attempts that predate ordinals.
+    counted = conn.execute(
+        "SELECT count(*) FROM run_attempts WHERE run_id = %s AND route_node_id = %s",
+        (run_id, route_node_id),
+    ).fetchone()
+    ordinal = (counted[0] if counted else 0) + 1
+    if ordinal > MAX_ATTEMPT_ORDINAL:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.ATTEMPT_LIMIT_REACHED)
     attempt_id = uuid4()
     conn.execute(
-        "INSERT INTO run_attempts (attempt_id, run_id, route_node_id)"
-        " VALUES (%s, %s, %s)",
-        (attempt_id, run_id, route_node_id),
+        "INSERT INTO run_attempts (attempt_id, run_id, route_node_id, ordinal)"
+        " VALUES (%s, %s, %s, %s)",
+        (attempt_id, run_id, route_node_id, ordinal),
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
     conn.commit()
     return attempt_id
 
 
+def attempt_ordinal(conn: StoreConnection, attempt_id: UUID) -> int:
+    """The stored ordinal the vendor attempt id is derived from, never recovered.
+
+    Refuses `ATTEMPT_NOT_FOUND` for an unknown attempt and for one that predates
+    ordinals, which no canonical handoff can name.
+    """
+    row = conn.execute(
+        "SELECT ordinal FROM run_attempts WHERE attempt_id = %s", (attempt_id,)
+    ).fetchone()
+    if row is None or row[0] is None:
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    return int(row[0])
+
+
 @dataclass(frozen=True, slots=True)
 class Accepted:
-    """What one completed call produced, as the store records it.
-
-    One thing rather than four loose arguments, for the reason `Execution` and
-    `Harness` are one thing each: none of these is meaningful without the
-    others. An artifact with no charge was never paid for, a charge with no
-    producer cannot be reconciled against a bill, and a producer with no
-    artifact is a call that returned nothing.
-
-    `model` is the host's own configuration and `generation_id` is the
-    provider's handle for the call — kept apart because only the first is a
-    fact the host owns (invariant 3).
-    """
+    """Analysis proposed for acceptance, beside independently durable call facts."""
 
     artifact_sha256: str
     charge: Decimal
     model: str
     generation_id: str
+    diagnostic_sha256: str | None = None
+    # The host record blob; present exactly when the run pins the canonical
+    # adapter (`docs/DECISIONS.md` §42.1).
+    record_sha256: str | None = None
 
 
 def accept_attempt(
@@ -116,61 +153,126 @@ def accept_attempt(
     attempt_id: UUID,
     accepted: Accepted,
 ) -> bool:
-    """Accept one attempt's artifact and charge it. Returns whether this call
-    was the one that accepted it.
+    """Commit call facts first, then independently accept eligible analysis.
 
-    Which run and which case are read from the attempt rather than taken from
-    the caller. The store already knows, and a caller that can name them can
-    name the wrong ones -- charging one run's ledger for another run's work
-    (invariant 3: the host owns identity).
-
-    The producer is written with the artifact rather than onto the attempt: the
-    attempt row exists before the call and knows nothing yet, and this insert is
-    already the one that says a call completed. One row, one write, and the
-    replay semantics below unchanged.
-
-    Written to survive being called twice with the same arguments, because a
-    caller that crashed after the commit cannot tell that it committed. The
-    artifact and the charge are keyed by `attempt_id`, so a replay lands on the
-    rows it already wrote; the ATTEMPT_ACCEPTED event rides the artifact insert's
-    row count, so a replay appends nothing.
-
-    A run that has already ended accepts nothing further -- not the artifact and
-    not the charge. Writing them anyway would leave a failed run holding an
-    accepted artifact, and Phase 3 recomputes node states from exactly those.
+    A later refusal/rollback cannot erase a committed bill. Each unit derives
+    and locks current ownership; no lock or mutable status survives the gap.
     """
-    if not isinstance(accepted.charge, Decimal):
-        # Before any write: a float that reached the ledger would already have
-        # lost the cent it cannot represent (invariant 7).
-        raise Refusal(RefusalCode.MONEY_NOT_DECIMAL)
+    try:
+        inserted = _accept(conn, attempt_id, accepted)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+    return inserted
 
-    run_id, case_id = _attempt_owner(conn, attempt_id)
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        conn.commit()  # nothing changed; release the row lock rather than hold it
+
+def _accept(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
+    if not isinstance(accepted, Accepted):
+        raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
+    validate_spend(accepted.charge)
+    try:
+        record_outcome(
+            conn,
+            attempt_id=attempt,
+            outcome=CallOutcome(
+                accepted.charge,
+                accepted.model,
+                accepted.generation_id,
+                accepted.diagnostic_sha256,
+            ),
+        )
+    except Refusal as refusal:
+        if refusal.code is not RefusalCode.CALL_OUTCOME_LEGACY:
+            raise
+        _legacy_replay(conn, attempt, accepted)
         return False
+    return _accept_artifact(conn, attempt, accepted)
 
-    inserted = conn.execute(
+
+def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
+    run, case, status = _locked_attempt(conn, attempt)
+    digests = [accepted.artifact_sha256]
+    if accepted.record_sha256 is not None:
+        digests.append(accepted.record_sha256)
+    if not all(
+        isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+        for digest in digests
+    ):
+        raise Refusal(RefusalCode.BLOB_ADDRESS_INVALID)
+    values = (
+        accepted.artifact_sha256,
+        run,
+        case,
+        accepted.model,
+        accepted.generation_id,
+        accepted.record_sha256,
+    )
+    row = conn.execute(
+        "SELECT artifact_sha256,run_id,case_id,model,generation_id,record_sha256"
+        " FROM artifacts WHERE attempt_id = %s",
+        (attempt,),
+    ).fetchone()
+    if row is not None:
+        if row != values:
+            raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
+        return False
+    if status is not RunStatus.RUNNING:
+        return False
+    # Fresh authority in this locked unit: governed writes take the case lock
+    # first, so nothing can commit between this check and the insert.
+    pin, route = approved_run_input(conn, run)
+    require_adapter_route(route)
+    if pin.adapter_version != methodology.CANONICAL_ADAPTER_VERSION:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    # Every accepted artifact is a canonical Markdown bound by its host record.
+    if accepted.record_sha256 is None:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    node = conn.execute(
+        "SELECT route_node_id FROM run_attempts WHERE attempt_id = %s", (attempt,)
+    ).fetchone()
+    if node is None or node[0] not in {n.route_node_id for n in route.nodes}:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    # One owner per node, under the run lock; the unique constraint backs it.
+    if accepted_owner(conn, run, node[0]) is not None:
+        raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
+    # `route_node_id` is filled from the attempt by the migration 0009 trigger.
+    conn.execute(
         "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
-        " model, generation_id)"
-        " VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
-        (
-            attempt_id,
+        " model, generation_id, record_sha256)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (attempt, *values),
+    )
+    append(conn, run, RunEvent.ATTEMPT_ACCEPTED)
+    return True
+
+
+def _legacy_replay(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> None:
+    run, case, _status = _locked_attempt(conn, attempt)
+    row = conn.execute(
+        "SELECT a.artifact_sha256,a.run_id,a.case_id,a.model,a.generation_id,"
+        " l.run_id,l.amount FROM artifacts a JOIN budget_ledger l USING (attempt_id)"
+        " WHERE a.attempt_id=%s",
+        (attempt,),
+    ).fetchone()
+    if (
+        accepted.diagnostic_sha256 is not None
+        or accepted.record_sha256 is not None
+        or row
+        != (
             accepted.artifact_sha256,
-            run_id,
-            case_id,
+            run,
+            case,
             accepted.model,
             accepted.generation_id,
-        ),
-    ).rowcount
-    conn.execute(
-        "INSERT INTO budget_ledger (attempt_id, run_id, amount)"
-        " VALUES (%s, %s, %s) ON CONFLICT (attempt_id) DO NOTHING",
-        (attempt_id, run_id, accepted.charge),
-    )
-    if inserted:
-        append(conn, run_id, RunEvent.ATTEMPT_ACCEPTED)
-    conn.commit()
-    return bool(inserted)
+            run,
+            accepted.charge,
+        )
+    ):
+        raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
 
 
 def complete_run(conn: StoreConnection, run_id: UUID) -> bool:
@@ -193,28 +295,20 @@ def complete_attempt(
     return complete_run(conn, _attempt_owner(conn, attempt_id)[0])
 
 
+def block_run(conn: StoreConnection, run_id: UUID) -> bool:
+    """End a run whose route has required work nothing can release (§39).
+
+    Returns whether this call ended it. No further attempt or reservation is
+    possible; the reason is re-derived from the pins and accepted artifacts.
+    """
+    lock_run(conn, run_id)
+    return _transition(conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED)
+
+
 def fail_run(conn: StoreConnection, run_id: UUID) -> bool:
     """End a run without an artifact. Returns whether this call ended it."""
     lock_run(conn, run_id)
     return _transition(conn, run_id, RunStatus.FAILED, RunEvent.RUN_FAILED)
-
-
-def _attempt_owner(conn: StoreConnection, attempt_id: UUID) -> tuple[UUID, UUID]:
-    """The run and case an attempt belongs to, or `ATTEMPT_NOT_FOUND`.
-
-    Safe to read before the run row lock is taken: `run_attempts` is append-only,
-    so an attempt's owner is fixed the moment the row exists.
-    """
-    row = conn.execute(
-        "SELECT attempts.run_id, runs.case_id"
-        " FROM run_attempts AS attempts"
-        " JOIN runs USING (run_id)"
-        " WHERE attempts.attempt_id = %s",
-        (attempt_id,),
-    ).fetchone()
-    if row is None:
-        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
-    return UUID(str(row[0])), UUID(str(row[1]))
 
 
 def _transition(

@@ -53,6 +53,11 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # cannot see that, which is why a phase is not closed on the strength of it
 # alone.
 NOT_YET_REACHED: set[str] = {
+    # Phase 5's own exit test ran the retired claims executor on CP-1 of the
+    # FULL route; f-1c already refuses that executor before any call, and f-2b
+    # deletes it itself. It is owed again when Phase 5 extends the canonical
+    # adapter to CP-1.
+    "test_cp1_produces_canonical_envelope_with_anchored_citations",
     # Phase 12, the handoff: no module payload exists yet, so a register, a
     # critical column and a cited figure are all things no artifact carries.
     "test_the_declared_register_schema_matches_the_bundles_own_contract",

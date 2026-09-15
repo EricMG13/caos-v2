@@ -14,15 +14,31 @@ first deployment happened to create.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
-from uuid import uuid4
+from hashlib import sha256
+from pathlib import Path
+from threading import Barrier, Event
+from typing import cast
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from test_case_ordering import _blocked, _wait_for_blocking
+from test_extraction_provenance import Reader
+from test_run_inputs import Prepared, _prepare, pin_version_one
 
+import server.store as store
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence.extract import Extractor, ExtractorIdentity, Token
+from server.evidence.ingest import Document, admit_pack
+from server.evidence.read import read_block
 from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
+from server.store.routes import resolved_route
+from server.store.run_inputs import RunInput, load_run_input
 from server.store.runs import create_case, run_status, start_run
 
 # A declared schema that differs from the repository's by one table -- the shape
@@ -40,6 +56,44 @@ def _columns(conn: StoreConnection) -> list[tuple[object, ...]]:
             " ORDER BY table_name, column_name"
         )
         return cursor.fetchall()
+
+
+def _catalog(conn: StoreConnection) -> list[object]:
+    """Compare native definitions, normalizing only each owned schema's name."""
+    schema = conn.execute("SELECT current_schema()").fetchone()
+    assert schema is not None
+    queries = (
+        "SELECT table_name,column_name,column_default,is_identity,is_generated"
+        " FROM information_schema.columns WHERE table_schema=current_schema()"
+        " ORDER BY table_name,ordinal_position",
+        "SELECT c.relname,k.conname,k.contype,k.condeferrable,k.condeferred,"
+        " k.convalidated,pg_get_constraintdef(k.oid) FROM pg_constraint k"
+        " JOIN pg_class c ON c.oid=k.conrelid"
+        " WHERE c.relnamespace=current_schema()::regnamespace"
+        " ORDER BY c.relname,k.conname",
+        "SELECT tablename,indexname,indexdef FROM pg_indexes"
+        " WHERE schemaname=current_schema() ORDER BY tablename,indexname",
+        "SELECT c.relname,t.tgname,t.tgenabled,pg_get_triggerdef(t.oid)"
+        " FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid"
+        " WHERE c.relnamespace=current_schema()::regnamespace AND NOT t.tgisinternal"
+        " ORDER BY c.relname,t.tgname",
+        "SELECT proname,pg_get_functiondef(oid) FROM pg_proc"
+        " WHERE pronamespace=current_schema()::regnamespace ORDER BY proname",
+        "SELECT table_name,view_definition FROM information_schema.views"
+        " WHERE table_schema=current_schema() ORDER BY table_name",
+    )
+    return [
+        [
+            tuple(
+                value.replace(schema[0] + ".", "<schema>.")
+                if isinstance(value, str)
+                else value
+                for value in row
+            )
+            for row in conn.execute(query).fetchall()
+        ]
+        for query in queries
+    ]
 
 
 def test_the_declared_schema_holds_a_case_and_its_run(empty_database: str) -> None:
@@ -124,3 +178,840 @@ def test_the_drift_refusal_carries_no_schema_text(empty_database: str) -> None:
 
         assert str(caught.value) == RefusalCode.STORE_SCHEMA_DRIFT.value
         assert "a_later_build_added_this" not in repr(caught.value)
+
+
+def _legacy(conn: StoreConnection) -> None:
+    conn.execute(SCHEMA)
+    conn.execute(store._BOOKKEEPING)
+    conn.execute(
+        "INSERT INTO store_schema (applied_digest) VALUES (%s)",
+        (sha256(SCHEMA.encode()).hexdigest(),),
+    )
+    conn.commit()
+
+
+def _populate(conn: StoreConnection, blobs: BlobStore) -> str:
+    """Synthetic legacy records spanning evidence, route, audit and billing."""
+    digest = blobs.put(b"synthetic legacy document and artifact")
+    case_id = create_case(conn, BoundaryText.of("legacy evidence"))
+    run_id = start_run(conn, case_id)
+    attempt_id, source_id = uuid4(), uuid4()
+    conn.execute(
+        "INSERT INTO sources (source_id, case_id, document_sha256, filename)"
+        " VALUES (%s, %s, %s, 'synthetic.txt')",
+        (source_id, case_id, digest),
+    )
+    conn.execute(
+        "INSERT INTO source_blocks VALUES (%s, 'b000000', 1, 'synthetic')", (source_id,)
+    )
+    conn.execute(
+        "INSERT INTO source_tokens VALUES (%s, 0, 1, 0, 0, 'synthetic', 1, 2, 3, 4)",
+        (source_id,),
+    )
+    conn.execute(
+        "INSERT INTO run_attempts (attempt_id, run_id, route_node_id)"
+        " VALUES (%s, %s, 'CP-DR')",
+        (attempt_id, run_id),
+    )
+    conn.execute(
+        "INSERT INTO artifacts"
+        " (attempt_id, artifact_sha256, run_id, case_id, model, generation_id)"
+        " VALUES (%s, %s, %s, %s, 'synthetic', 'synthetic')",
+        (attempt_id, digest, run_id, case_id),
+    )
+    conn.execute(
+        "INSERT INTO budget_ledger (attempt_id, run_id, amount) VALUES (%s, %s, 0.25)",
+        (attempt_id, run_id),
+    )
+    conn.execute(
+        "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
+        " VALUES (%s, %s, 0.50)",
+        (attempt_id, run_id),
+    )
+    conn.execute(
+        "INSERT INTO run_routes"
+        " (run_id, profile_id, selection_id, route_digest, resolved)"
+        " VALUES (%s, 'synthetic', 'synthetic', %s, '{}')",
+        (run_id, digest),
+    )
+    conn.execute(
+        "INSERT INTO run_events (run_id, seq, name) VALUES (%s, 1, 'ROUTE_PINNED')",
+        (run_id,),
+    )
+    conn.execute(
+        "INSERT INTO audit_events"
+        " (case_id, seq, actor_id, action, payload_sha256,"
+        " previous_sha256, entry_sha256)"
+        " VALUES (%s, 1, %s, 'synthetic', %s, %s, %s)",
+        (case_id, uuid4(), digest, digest, digest),
+    )
+    conn.commit()
+    return digest
+
+
+def _records(
+    conn: StoreConnection, columns: list[tuple[object, ...]] | None = None
+) -> dict[str, object]:
+    """Compare the original named tables/columns, including all their rows."""
+    tables: dict[str, list[str]] = {}
+    for table, column, *_ in _columns(conn) if columns is None else columns:
+        if table not in {"store_schema", "store_migrations"}:
+            tables.setdefault(str(table), []).append(str(column))
+    return {
+        table: conn.execute(
+            psycopg.sql.SQL("SELECT {} FROM {} ORDER BY {}").format(
+                psycopg.sql.SQL(", ").join(map(psycopg.sql.Identifier, names)),
+                psycopg.sql.Identifier(table),
+                psycopg.sql.SQL(", ").join(map(psycopg.sql.Identifier, names)),
+            )
+        ).fetchall()
+        for table, names in tables.items()
+    }
+
+
+def test_real_legacy_upgrade_preserves_evidence_with_unknown_provenance(
+    empty_database: str,
+    tmp_path: Path,
+) -> None:
+    with connect(empty_database) as conn:
+        _legacy(conn)
+        blobs = BlobStore(tmp_path)
+        digest = _populate(conn, blobs)
+        columns = _columns(conn)
+        before = _records(conn, columns)
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        assert conn.execute("SELECT count(*) FROM source_extractions").fetchone() == (
+            0,
+        )
+        row = conn.execute("SELECT source_id, case_id FROM sources").fetchone()
+        assert row is not None
+        source, case_id = row
+        assert (
+            read_block(conn, source_id=source, block_id="b000000").text.value
+            == "synthetic"
+        )
+        assert blobs.get(digest) == b"synthetic legacy document and artifact"
+        upgraded = _columns(conn)
+        catalog = _catalog(conn)
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        [new_source] = admit_pack(
+            conn,
+            blobs,
+            case_id=case_id,
+            documents=[Document(BoundaryText.of("new.txt"), b"known extraction")],
+        )
+        assert conn.execute("SELECT source_id FROM source_extractions").fetchall() == [
+            (new_source,)
+        ]
+        conn.commit()
+        conn.execute("CREATE SCHEMA real_fresh")
+        conn.execute("SET search_path TO real_fresh")
+        apply_schema(conn)
+        assert _columns(conn) == upgraded
+        assert _catalog(conn) == catalog
+
+
+@pytest.mark.parametrize("prefix", [2, 3, 4, 5, 6, 7])
+def test_real_extraction_upgrade_preserves_known_and_unknown_rows(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
+) -> None:
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:prefix])
+            apply_schema(conn)
+        blobs = BlobStore(tmp_path)
+        digest = _populate(conn, blobs)
+        case_id = conn.execute("SELECT case_id FROM cases LIMIT 1").fetchone()
+        assert case_id is not None
+        admit_pack(
+            conn,
+            blobs,
+            case_id=case_id[0],
+            documents=[Document(BoundaryText.of("known.txt"), b"known")],
+        )
+        conn.commit()
+        columns, before = _columns(conn), _records(conn)
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        apply_schema(conn)
+        assert _records(conn, columns) == before
+        assert conn.execute("SELECT count(*) FROM run_inputs").fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM call_outcomes").fetchone() == (0,)
+        assert blobs.get(digest) == b"synthetic legacy document and artifact"
+
+        [run] = conn.execute("SELECT run_id FROM runs").fetchone() or ()
+        with pytest.raises(Refusal, match=r"^ROUTE_IDENTITY_INVALID$"):
+            resolved_route(conn, run)
+
+
+def test_populated_legacy_advances_and_repeat_preserves_history(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    with connect(empty_database) as conn:
+        _legacy(conn)
+        blobs = BlobStore(tmp_path)
+        digest = _populate(conn, blobs)
+        columns = _columns(conn)
+        before = _records(conn, columns)
+        conn.commit()
+        monkeypatch.setattr(
+            store,
+            "MIGRATIONS",
+            (
+                ("0001_legacy", SCHEMA),
+                (
+                    "0002_probe",
+                    "ALTER TABLE cases ADD COLUMN migration_probe integer DEFAULT 7",
+                ),
+            ),
+        )
+        apply_schema(conn)
+        assert conn.execute("SELECT migration_probe FROM cases").fetchone() == (7,)
+        assert _records(conn, columns) == before
+        assert blobs.get(digest) == b"synthetic legacy document and artifact"
+        history = conn.execute(
+            "SELECT * FROM store_migrations ORDER BY version"
+        ).fetchall()
+        assert len(history) == 2
+        apply_schema(conn)
+        assert (
+            conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+            == history
+        )
+        upgraded_columns = _columns(conn)
+        conn.execute("CREATE SCHEMA fresh_equivalence")
+        conn.execute("SET search_path TO fresh_equivalence")
+        apply_schema(conn)
+        assert _columns(conn) == upgraded_columns
+        assert conn.execute(
+            "SELECT version, name, digest FROM store_migrations ORDER BY version"
+        ).fetchall() == [row[:3] for row in history]
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "UPDATE store_migrations SET digest = 'edited' WHERE version = 1",
+        "UPDATE store_migrations SET name = 'unknown' WHERE version = 1",
+        "UPDATE store_migrations SET version ="
+        " (SELECT max(version) + 1 FROM store_migrations) WHERE version = 1",
+        "DELETE FROM store_migrations",
+        "DROP TABLE store_migrations",
+        "DELETE FROM store_schema",
+        "UPDATE store_schema SET applied_digest = 'invalid'",
+    ],
+)
+def test_migration_history_tampering_refuses(empty_database: str, tamper: str) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.execute(tamper)
+        conn.commit()
+        with pytest.raises(Refusal) as caught:
+            apply_schema(conn)
+        assert str(caught.value) == RefusalCode.STORE_SCHEMA_DRIFT.value
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+
+
+@pytest.mark.parametrize("state", ["fresh", "legacy", "versioned"])
+def test_failed_migration_rolls_back_and_releases_lock(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+) -> None:
+    rollback = store.rollback_or_close
+    failed_states = []
+
+    def record_failure(connection: StoreConnection) -> None:
+        failed_states.append(connection.info.transaction_status)
+        rollback(connection)
+
+    monkeypatch.setattr(store, "rollback_or_close", record_failure)
+    with connect(empty_database) as conn:
+        if state == "legacy":
+            _legacy(conn)
+        elif state == "versioned":
+            apply_schema(conn)
+        before, catalog = _columns(conn), _catalog(conn)
+        conn.commit()
+        monkeypatch.setattr(
+            store,
+            "MIGRATIONS",
+            (
+                *store.MIGRATIONS,
+                (
+                    "probe_fails",
+                    "CREATE TABLE secret_probe (id integer); SELECT missing_secret",
+                ),
+            ),
+            raising=False,
+        )
+        with pytest.raises(Refusal) as caught:
+            apply_schema(conn)
+        assert "secret" not in str(caught.value)
+        assert failed_states == [psycopg.pq.TransactionStatus.INERROR]
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+        assert _columns(conn) == before
+        assert _catalog(conn) == catalog
+        with connect(empty_database) as other:
+            assert other.execute(
+                "SELECT pg_try_advisory_xact_lock(%s)", (store._SCHEMA_LOCK,)
+            ).fetchone() == (True,)
+
+
+@pytest.mark.parametrize("state", ["fresh", "legacy", "prefix"])
+def test_concurrent_starters_apply_once(
+    empty_database: str,
+    state: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if state != "fresh":
+        with connect(empty_database) as conn:
+            if state == "legacy":
+                _legacy(conn)
+            else:
+                with monkeypatch.context() as patch:
+                    patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:4])
+                    apply_schema(conn)
+            _populate(conn, BlobStore(tmp_path))
+    monkeypatch.setattr(
+        store,
+        "MIGRATIONS",
+        (*store.MIGRATIONS, ("probe_once", "CREATE TABLE once_only (id integer)")),
+    )
+    ready = Barrier(2)
+
+    def start() -> None:
+        with connect(empty_database) as conn:
+            ready.wait(timeout=10)
+            apply_schema(conn)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(start) for _ in range(2)]
+        for future in futures:
+            future.result(timeout=15)
+    with connect(empty_database) as conn:
+        assert conn.execute("SELECT count(*) FROM store_migrations").fetchone() == (
+            len(store.MIGRATIONS),
+        )
+
+
+def test_interruption_before_commit_rolls_back(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migrate = store._migrate
+
+    def interrupted(conn: StoreConnection, sql: str) -> None:
+        migrate(conn, sql)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(store, "_migrate", interrupted)
+    with connect(empty_database) as conn:
+        with pytest.raises(KeyboardInterrupt):
+            apply_schema(conn)
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+        assert _columns(conn) == []
+
+
+@pytest.mark.parametrize("manifest", [(), (("wrong_baseline", SCHEMA),)])
+def test_invalid_manifest_refuses_without_mutation(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: tuple[tuple[str, str], ...],
+) -> None:
+    monkeypatch.setattr(store, "MIGRATIONS", manifest)
+    with connect(empty_database) as conn:
+        with pytest.raises(Refusal):
+            apply_schema(conn)
+        assert _columns(conn) == []
+
+
+def test_invalid_legacy_digest_preserves_data(empty_database: str) -> None:
+    with connect(empty_database) as conn:
+        _legacy(conn)
+        case_id = create_case(conn, BoundaryText.of("preserved"))
+        conn.execute("UPDATE store_schema SET applied_digest = 'invalid'")
+        conn.commit()
+        with pytest.raises(Refusal):
+            apply_schema(conn)
+        assert conn.execute(
+            "SELECT title FROM cases WHERE case_id = %s", (case_id,)
+        ).fetchone() == ("preserved",)
+        assert conn.execute("SELECT to_regclass('store_migrations')").fetchone() == (
+            None,
+        )
+
+
+@pytest.mark.parametrize("change", ["older", "edited", "reordered", "missing_tail"])
+def test_newer_database_or_changed_applied_prefix_refuses(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    baseline = store.MIGRATIONS
+    later = (*baseline, ("probe_tail", "CREATE TABLE probe (id integer)"))
+    monkeypatch.setattr(store, "MIGRATIONS", later)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        if change == "older":
+            monkeypatch.setattr(store, "MIGRATIONS", baseline)
+        elif change == "edited":
+            monkeypatch.setattr(
+                store, "MIGRATIONS", (*baseline, ("probe_tail", "SELECT 1"))
+            )
+        elif change == "reordered":
+            conn.execute(
+                "UPDATE store_migrations SET version = version + %s", (len(later),)
+            )
+        else:
+            conn.execute(
+                "DELETE FROM store_migrations WHERE version = %s", (len(later),)
+            )
+        conn.commit()
+        with pytest.raises(Refusal):
+            apply_schema(conn)
+
+
+def test_apply_schema_closed_connection_is_sanitized(empty_database: str) -> None:
+    """rollback_or_close must retain the migration's safe refusal code."""
+    conn = connect(empty_database)
+    conn.close()
+    with pytest.raises(Refusal) as caught:
+        apply_schema(conn)
+    assert caught.value.code is RefusalCode.STORE_SCHEMA_DRIFT
+
+
+def test_apply_schema_cleanup_preserves_cancellation(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(conn: StoreConnection, sql: str) -> None:
+        conn.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(store, "_migrate", interrupted)
+    with connect(empty_database) as conn, pytest.raises(KeyboardInterrupt):
+        apply_schema(conn)
+
+
+@pytest.mark.parametrize(
+    "table,column",
+    [
+        ("runs", "budget_ceiling"),
+        ("budget_reservations", "amount"),
+        ("budget_ledger", "amount"),
+    ],
+)
+@pytest.mark.parametrize("value", ["-1", "NaN", "Infinity", "-Infinity"])
+def test_native_money_constraints_refuse_malformed_rows(
+    empty_database: str, tmp_path: Path, table: str, column: str, value: str
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _populate(conn, BlobStore(tmp_path))
+        if table == "budget_ledger":
+            assert conn.info.dbname.startswith("caos_test_")
+            conn.execute("ALTER TABLE budget_ledger DISABLE TRIGGER USER")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(f"UPDATE {table} SET {column} = %s", (Decimal(value),))
+        conn.rollback()
+
+
+@pytest.mark.parametrize("table", ["budget_reservations", "budget_ledger"])
+def test_budget_owner_keys_reject_existing_unrelated_run(
+    empty_database: str, tmp_path: Path, table: str
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _populate(conn, BlobStore(tmp_path))
+        other_case = create_case(conn, BoundaryText.of("unrelated owner"))
+        other_run = start_run(conn, other_case)
+        conn.commit()
+        if table == "budget_ledger":
+            assert conn.info.dbname.startswith("caos_test_")
+            conn.execute("ALTER TABLE budget_ledger DISABLE TRIGGER USER")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            conn.execute(f"UPDATE {table} SET run_id = %s", (other_run,))
+        conn.rollback()
+
+
+@pytest.mark.parametrize("prefix", [0, 5])
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        ("runs", "budget_ceiling", "-1"),
+        ("runs", "budget_ceiling", "NaN"),
+        ("budget_ledger", "amount", "-1"),
+        ("budget_ledger", "amount", "Infinity"),
+        ("budget_reservations", "amount", "NaN"),
+        ("budget_reservations", "amount", "Infinity"),
+        ("budget_reservations", "run_id", "unrelated"),
+        ("budget_ledger", "run_id", "unrelated"),
+    ],
+)
+def test_invalid_populated_money_upgrade_refuses_atomically(
+    empty_database: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prefix: int,
+    malformed: tuple[str, str, str],
+) -> None:
+    table, column, value = malformed
+    with connect(empty_database) as conn:
+        if prefix:
+            with monkeypatch.context() as patch:
+                patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:prefix])
+                apply_schema(conn)
+        else:
+            _legacy(conn)
+        _populate(conn, BlobStore(tmp_path))
+        invalid: Decimal | UUID
+        if value == "unrelated":
+            owner = create_case(conn, BoundaryText.of("unrelated historical owner"))
+            invalid = start_run(conn, owner)
+        else:
+            invalid = Decimal(value)
+        conn.execute(f"UPDATE {table} SET {column} = %s", (invalid,))
+        conn.commit()
+        before, columns, catalog = repr(_records(conn)), _columns(conn), _catalog(conn)
+        history = conn.execute("SELECT applied_digest FROM store_schema").fetchall()
+        migrations = (
+            conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+            if prefix
+            else None
+        )
+        conn.commit()
+        with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+            apply_schema(conn)
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+        assert repr(_records(conn)) == before
+        assert _columns(conn) == columns
+        assert _catalog(conn) == catalog
+        assert (
+            conn.execute("SELECT applied_digest FROM store_schema").fetchall()
+            == history
+        )
+        if prefix:
+            assert (
+                conn.execute(
+                    "SELECT * FROM store_migrations ORDER BY version"
+                ).fetchall()
+                == migrations
+            )
+
+
+# The version-1 pin each prefix-7 fixture wrote; an older schema cannot be
+# read back through today's loader.
+_PINNED: dict[UUID, RunInput] = {}
+
+
+@pytest.fixture
+def known_prefix(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Prepared]:
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:7])
+            apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("prefix seven"))
+        run, sources, bundle, route = _prepare(conn, case_id, tmp_path)
+        _PINNED[run] = pin_version_one(conn, run, sources, bundle, route)
+        yield conn, run, sources, bundle, route
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "UPDATE source_blocks SET text = 'changed'",
+        "UPDATE source_blocks SET page = 2",
+        "UPDATE source_blocks SET block_id = 'b000001'",
+        "DELETE FROM source_blocks",
+        "INSERT INTO source_blocks SELECT source_id, 'b000001', page, text"
+        " FROM source_blocks",
+        "UPDATE source_tokens SET token_id = 1",
+        "UPDATE source_tokens SET text = 'changed'",
+        *[
+            f"UPDATE source_tokens SET {field} = {field} + 1"
+            for field in ("page", "region_id", "line_id", "x0", "y0", "x1", "y1")
+        ],
+        "DELETE FROM source_tokens",
+        "INSERT INTO source_tokens SELECT source_id, 1, page, region_id, line_id,"
+        " text, x0, y0, x1, y1 FROM source_tokens",
+        "UPDATE sources SET document_sha256 = repeat('a', 64)",
+        "UPDATE source_extractions SET output_sha256 = repeat('a', 64)",
+        "UPDATE source_extractions SET extraction_sha256 = repeat('a', 64)",
+        "UPDATE source_extractions SET extractor_identity = '{}'",
+        "UPDATE source_extractions SET extractor_identity = '[]'",
+        "UPDATE source_extractions SET extractor_identity = '{'",
+        "UPDATE source_extractions SET extractor_identity ="
+        " replace(extractor_identity, 'caos.plain-text', 'retired.writer')",
+    ],
+)
+def test_corrupt_known_upgrade_refuses_without_any_change(
+    known_prefix: Prepared, empty_database: str, mutation: str
+) -> None:
+    conn, _, _, _, _ = known_prefix
+    assert conn.info.dbname.startswith("caos_test_")
+    with conn.transaction():
+        if "UPDATE source_extractions" in mutation:
+            conn.execute(
+                "ALTER TABLE source_extractions DISABLE TRIGGER extraction_is_immutable"
+            )
+        conn.execute(mutation)
+        if "UPDATE source_extractions" in mutation:
+            conn.execute(
+                "ALTER TABLE source_extractions ENABLE TRIGGER extraction_is_immutable"
+            )
+    conn.commit()
+    before, catalog = repr(_records(conn)), _catalog(conn)
+    history = conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+    head = conn.execute("SELECT * FROM store_schema").fetchall()
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+        apply_schema(conn)
+    assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+    assert repr(_records(conn)) == before and _catalog(conn) == catalog
+    assert (
+        conn.execute("SELECT * FROM store_migrations ORDER BY version").fetchall()
+        == history
+    )
+    assert conn.execute("SELECT * FROM store_schema").fetchall() == head
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '1s'")
+        other.execute(
+            "LOCK TABLE sources, source_tokens, source_blocks, source_extractions"
+            " IN SHARE ROW EXCLUSIVE MODE"
+        )
+        assert other.execute(
+            "SELECT pg_try_advisory_xact_lock(%s)", (store._SCHEMA_LOCK,)
+        ).fetchone() == (True,)
+
+
+@pytest.mark.parametrize("digits", [3, 0, -15])
+def test_exact_historical_unicode_float_output_and_complete_pin_upgrade(
+    known_prefix: Prepared, tmp_path: Path, digits: int
+) -> None:
+    conn, run, sources, _, _ = known_prefix
+    pin = _PINNED[run]
+    identity = ExtractorIdentity("retired-custom", "historical-v1", {"signed": -0.0})
+    coordinate = 0.12345678901234566
+    reader = Reader(
+        identity,
+        [
+            Token("e\u0301", 1, 0, 0, -0.0, coordinate, 1.7976931348623157e308, 5e-324),
+            Token("雪", 2, 1, 1, -1.7976931348623157e308, 0.0, 0.3, -5e-324),
+        ],
+    )
+    admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=sources.case_id,
+        documents=[Document(BoundaryText.of("custom.txt"), b"custom")],
+        extractor=cast(Extractor, reader),
+    )
+    conn.commit()
+    # Later migrations add columns; the rows that existed must not move.
+    columns = _columns(conn)
+    before = repr(_records(conn, columns))
+    conn.execute(f"SET extra_float_digits = {digits}")
+    apply_schema(conn)
+    conn.execute("SET extra_float_digits = 3")
+    assert repr(_records(conn, columns)) == before
+    assert load_run_input(conn, run) == pin
+    assert conn.execute("SELECT count(*) FROM source_extractions").fetchone() == (2,)
+    catalog = _catalog(conn)
+    apply_schema(conn)
+    conn.execute("CREATE SCHEMA fresh_frozen; SET search_path TO fresh_frozen")
+    apply_schema(conn)
+    assert _catalog(conn) == catalog
+
+
+@pytest.mark.parametrize("ordinal", [0, 999999, 1000000, 1000001])
+def test_v1_block_ordinals_keep_minted_spelling(ordinal: int) -> None:
+    from server.store.extraction_integrity import _block_ordinal_v1
+
+    assert _block_ordinal_v1(f"b{ordinal:06d}") == ordinal
+    assert sorted(["b1000000", "b999999"], key=_block_ordinal_v1) == [
+        "b999999",
+        "b1000000",
+    ]
+    with pytest.raises((Refusal, ValueError)):
+        _block_ordinal_v1(f"b0{ordinal:06d}")
+
+
+@pytest.mark.parametrize("commit", [False, True])
+def test_migration_reads_only_after_waiting_for_all_old_writers(
+    known_prefix: Prepared, empty_database: str, commit: bool
+) -> None:
+    conn, _, _, _, _ = known_prefix
+    conn.execute("UPDATE source_tokens SET text = 'changed'")
+    with connect(empty_database) as other:
+
+        def migrate() -> None:
+            if commit:
+                with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+                    apply_schema(other)
+            else:
+                apply_schema(other)
+            assert other.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+
+        with _blocked(conn, other, migrate):
+            if not commit:
+                conn.rollback()
+    assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
+        7 if commit else len(store.MIGRATIONS),
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", ["cancel", "closed", "repeatable read", "serializable"]
+)
+def test_verifier_failure_preserves_cleanup_and_history(
+    known_prefix: Prepared, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from server.store import extraction_integrity
+
+    conn, _, _, _, _ = known_prefix
+    if failure in {"cancel", "closed"}:
+
+        def interrupted(c: StoreConnection, source: UUID) -> str:
+            if failure == "closed":
+                c.close()
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(extraction_integrity, "_stored_output_v1", interrupted)
+    else:
+        conn.execute(f"SET TRANSACTION ISOLATION LEVEL {failure}")
+    with pytest.raises(
+        KeyboardInterrupt if failure in {"cancel", "closed"} else Refusal
+    ):
+        apply_schema(conn)
+    assert (
+        conn.closed or conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+    )
+
+
+def test_v1_dispatch_is_exact_and_only_once(
+    known_prefix: Prepared, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.store import extraction_integrity
+
+    conn, _, _, _, _ = known_prefix
+    verify, calls = extraction_integrity._verify_extractions_v1, []
+
+    def counted(c: StoreConnection) -> None:
+        calls.append(True)
+        verify(c)
+
+    monkeypatch.setattr(extraction_integrity, "_verify_extractions_v1", counted)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            store,
+            "MIGRATIONS",
+            (*store.MIGRATIONS[:7], ("synthetic_eight", "SELECT 1")),
+        )
+        with conn.transaction():
+            store._migrate(conn, SCHEMA)
+            assert calls == []
+            raise psycopg.Rollback
+    apply_schema(conn)
+    apply_schema(conn)
+    assert calls == [True]
+
+
+def test_migration_holds_writers_until_native_guards_exist(
+    known_prefix: Prepared, empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.store import extraction_integrity
+
+    conn, _, _, _, _ = known_prefix
+    original = extraction_integrity._stored_output_v1
+    ready, release = Event(), Event()
+
+    def pause(c: StoreConnection, source: UUID) -> str:
+        output = original(c, source)
+        ready.set()
+        assert release.wait(5)
+        return output
+
+    monkeypatch.setattr(extraction_integrity, "_stored_output_v1", pause)
+    with connect(empty_database) as writer, ThreadPoolExecutor(max_workers=2) as pool:
+
+        def mutate() -> None:
+            with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+                writer.execute("UPDATE source_tokens SET text = 'late'")
+            writer.rollback()
+
+        migration = pool.submit(apply_schema, conn)
+        try:
+            assert ready.wait(3)
+            mutation = pool.submit(mutate)
+            _wait_for_blocking(conn, writer)
+        finally:
+            release.set()
+        migration.result(timeout=6)
+        mutation.result(timeout=6)
+    assert conn.execute("SELECT text FROM source_tokens").fetchone() == ("one",)
+
+
+def test_migration_deadlock_refuses_and_releases_its_partial_locks(
+    known_prefix: Prepared, empty_database: str
+) -> None:
+    conn, _, _, _, _ = known_prefix
+    # Writer owns the child table; migration will own sources before waiting for it.
+    conn.execute("SET deadlock_timeout = '5s'; UPDATE source_tokens SET text = text")
+    with (
+        connect(empty_database) as migration,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        migration.execute("SET deadlock_timeout = '100ms'")
+        migration.commit()
+
+        def upgrade() -> None:
+            with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+                apply_schema(migration)
+            assert (
+                migration.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+            )
+
+        future = pool.submit(upgrade)
+        try:
+            _wait_for_blocking(conn, migration)
+            conn.execute("UPDATE sources SET filename = filename")
+        finally:
+            conn.rollback()
+        future.result(timeout=6)
+        migration.execute("SET lock_timeout = '1s'")
+        apply_schema(migration)
+    assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
+        len(store.MIGRATIONS),
+    )
+
+
+def test_reordered_contiguous_tokens_refuse_upgrade(
+    known_prefix: Prepared, tmp_path: Path
+) -> None:
+    conn, _, sources, _, _ = known_prefix
+    [source] = admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=sources.case_id,
+        documents=[Document(BoundaryText.of("order.txt"), b"first second")],
+    )
+    conn.execute(
+        "UPDATE source_tokens SET token_id = token_id + 2 WHERE source_id = %s",
+        (source,),
+    )
+    conn.execute(
+        "UPDATE source_tokens SET token_id = 3 - token_id WHERE source_id = %s",
+        (source,),
+    )
+    conn.commit()
+    before = _records(conn)
+    with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+        apply_schema(conn)
+    assert _records(conn) == before

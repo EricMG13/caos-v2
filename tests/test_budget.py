@@ -16,17 +16,36 @@ record of money that was actually spent.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from decimal import Decimal
+from decimal import Decimal, Inexact, Rounded, localcontext
+from pathlib import Path
+from threading import Event
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
+from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
+from psycopg.pq import TransactionStatus
+from test_case_ordering import _blocked, _wait_for_blocking
+from test_run_events import RECORD, approved_nodes
 
 from server.boundary_text import BoundaryText
+from server.engine.route import resolve_route
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, apply_schema, connect
+from server.store import StoreConnection, apply_schema, budget, connect
 from server.store.budget import CEILING, remaining, reserve, reserved_for
-from server.store.runs import create_case, start_attempt, start_run
+from server.store.cases import lock_case
+from server.store.events import lock_run
+from server.store.runs import (
+    Accepted,
+    accept_attempt,
+    complete_run,
+    create_case,
+    fail_run,
+    start_attempt,
+    start_run,
+)
 
 # The producer an accepted artifact carries.
 MODEL = "a-model/for-the-test"
@@ -34,6 +53,11 @@ GENERATION = "gen-for-the-test"
 
 CEILING_FOR_TEST = Decimal("1.00")
 HALF = Decimal("0.60")
+# Acceptance requires a governed run on the real route (Task17d3a).
+NODES = [
+    node.route_node_id
+    for node in resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION).nodes
+]
 
 
 def _run_with_ceiling(conn: StoreConnection, case_id: UUID) -> UUID:
@@ -221,3 +245,382 @@ def test_a_run_without_a_stated_ceiling_gets_the_declared_default(
     conn.commit()
 
     assert remaining(conn, run_id) == CEILING
+
+
+@pytest.fixture
+def money_run(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> tuple[StoreConnection, UUID, UUID]:
+    conn, case_id = case
+    run = _run_with_ceiling(conn, case_id)
+    conn.commit()
+    approved_nodes(conn, run, tmp_path)
+    return conn, run, start_attempt(conn, run, NODES[0])
+
+
+def _accept(conn: StoreConnection, attempt: UUID, charge: Decimal) -> None:
+    accept_attempt(
+        conn,
+        attempt_id=attempt,
+        accepted=Accepted("b" * 64, charge, MODEL, GENERATION, record_sha256=RECORD),
+    )
+
+
+@pytest.mark.parametrize("entry", ["ceiling", "reserve", "charge"])
+@pytest.mark.parametrize(
+    "amount",
+    [
+        True,
+        1,
+        0.1,
+        "0.1",
+        Decimal("NaN"),
+        Decimal("sNaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+        Decimal("-0.01"),
+        Decimal("1e131072"),
+        Decimal("1e-16384"),
+        Decimal("0e-16384"),
+        Decimal("0e131072"),
+        Decimal("1.00e-16383"),
+    ],
+)
+def test_invalid_money_refuses_at_each_store_entrance(
+    money_run: tuple[StoreConnection, UUID, UUID], entry: str, amount: object
+) -> None:
+    """validate_spend guards all three real entrances before arithmetic or writes."""
+    conn, run, attempt = money_run
+    owner = conn.execute(
+        "SELECT case_id FROM runs WHERE run_id = %s", (run,)
+    ).fetchone()
+    assert owner is not None
+    conn.commit()
+    expected = "MONEY_INVALID" if isinstance(amount, Decimal) else "MONEY_NOT_DECIMAL"
+    with pytest.raises(Refusal, match=f"^{expected}$"):
+        if entry == "ceiling":
+            start_run(conn, owner[0], budget_ceiling=amount)  # type: ignore[arg-type]
+        elif entry == "reserve":
+            reserve(conn, attempt, amount)  # type: ignore[arg-type]
+        else:
+            _accept(conn, attempt, amount)  # type: ignore[arg-type]
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    assert conn.execute("SELECT count(*) FROM runs").fetchone() == (1,)
+    for table in ("budget_reservations", "budget_ledger", "artifacts"):
+        assert conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
+
+
+@pytest.mark.parametrize("value", ["0", "-0.00", "0.2500", "1e131071", "1e-16383"])
+def test_native_money_boundaries_round_trip_at_all_entrances(
+    case: tuple[StoreConnection, UUID], value: str, tmp_path: Path
+) -> None:
+    conn, case_id = case
+    amount = Decimal(value)
+    run = start_run(conn, case_id, budget_ceiling=amount)
+    conn.commit()
+    approved_nodes(conn, run, tmp_path)
+    attempt = start_attempt(conn, run, NODES[0])
+    reserve(conn, attempt, amount)
+    _accept(conn, attempt, amount)
+    assert reserved_for(conn, attempt) == amount
+    assert conn.execute("SELECT amount FROM budget_ledger").fetchone() == (amount,)
+    assert conn.execute("SELECT budget_ceiling FROM runs").fetchone() == (amount,)
+    assert remaining(conn, run) == 0
+
+
+@pytest.mark.parametrize(
+    ("estimate", "charge", "left"),
+    [("0.25", "1.20", "-0.20"), ("0.50", "0.20", "0.50"), ("0", "0", "1")],
+)
+def test_known_charge_raises_exposure_but_never_releases_a_reservation(
+    money_run: tuple[StoreConnection, UUID, UUID], estimate: str, charge: str, left: str
+) -> None:
+    conn, run, attempt = money_run
+    reserve(conn, attempt, Decimal(estimate))
+    _accept(conn, attempt, Decimal(charge))
+    assert remaining(conn, run) == Decimal(left)
+    assert reserved_for(conn, attempt) == Decimal(estimate)
+    next_attempt = start_attempt(conn, run, NODES[1])
+    if Decimal(left) < 0:
+        with pytest.raises(Refusal, match=r"^BUDGET_CEILING_REACHED$"):
+            reserve(conn, next_attempt, Decimal(0))
+        assert conn.info.transaction_status is TransactionStatus.IDLE
+        assert reserved_for(conn, next_attempt) is None
+    else:
+        reserve(conn, next_attempt, Decimal(left))
+        assert remaining(conn, run) == 0
+
+
+def test_mixed_historical_exposure_counts_each_attempt_once(
+    money_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run, unresolved = money_run
+    reserve(conn, unresolved, Decimal("0.30"))
+    retry = start_attempt(conn, run, NODES[0])
+    reserve(conn, retry, Decimal("0.20"))
+    _accept(conn, retry, Decimal("0.40"))
+    historical = start_attempt(conn, run, NODES[1])
+    _accept(conn, historical, Decimal("0.25"))
+    start_attempt(conn, run, NODES[2])
+    assert remaining(conn, run) == Decimal("0.05")
+    assert reserved_for(conn, unresolved) == Decimal("0.30")
+    assert reserved_for(conn, historical) is None
+
+
+def test_remaining_is_independent_of_decimal_context(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    conn, case_id = case
+    run = start_run(
+        conn, case_id, budget_ceiling=Decimal("1.000000000000000000000000000001")
+    )
+    conn.commit()
+    approved_nodes(conn, run, tmp_path)
+    attempt = start_attempt(conn, run, NODES[0])
+    with localcontext() as context:
+        context.prec = 2
+        context.traps[Inexact] = context.traps[Rounded] = True
+        reserve(conn, attempt, Decimal("0.000000000000000000000000000001"))
+        _accept(conn, attempt, Decimal("0.000000000000000000000000000002"))
+        assert remaining(conn, run) == Decimal("0.999999999999999999999999999999")
+
+
+@pytest.mark.parametrize("existing", ["reservation", "charge"])
+@pytest.mark.parametrize("amount", ["0.25", "0.30"])
+def test_same_attempt_never_authorizes_another_spend(
+    money_run: tuple[StoreConnection, UUID, UUID], existing: str, amount: str
+) -> None:
+    conn, run, attempt = money_run
+    (reserve if existing == "reservation" else _accept)(conn, attempt, Decimal("0.25"))
+    with pytest.raises(Refusal, match=r"^BUDGET_ALREADY_RESERVED$"):
+        reserve(conn, attempt, Decimal(amount))
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    assert remaining(conn, run) == Decimal("0.75")
+    assert reserved_for(conn, attempt) == (
+        Decimal("0.25") if existing == "reservation" else None
+    )
+
+
+@pytest.mark.parametrize("terminal", [complete_run, fail_run])
+def test_reserve_observes_terminal_transition_after_waiting(
+    money_run: tuple[StoreConnection, UUID, UUID],
+    empty_database: str,
+    terminal: Callable[[StoreConnection, UUID], bool],
+) -> None:
+    conn, run, attempt = money_run
+    lock_run(conn, run)
+    with connect(empty_database) as other:
+
+        def refused() -> None:
+            with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+                reserve(other, attempt, Decimal("0.25"))
+            assert other.info.transaction_status is TransactionStatus.IDLE
+
+        with _blocked(conn, other, refused):
+            terminal(conn, run)
+    assert reserved_for(conn, attempt) is None
+
+
+def test_reservation_holds_order_until_commit(
+    money_run: tuple[StoreConnection, UUID, UUID],
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, run, attempt = money_run
+    ready, release = Event(), Event()
+    original = budget._remaining
+
+    def pause(c: StoreConnection, owner: UUID) -> Decimal:
+        result = original(c, owner)
+        ready.set()
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(budget, "_remaining", pause)
+    with connect(empty_database) as other, ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(reserve, conn, attempt, Decimal("0.25"))
+        try:
+            assert ready.wait(3)
+            second = pool.submit(complete_run, other, run)
+            _wait_for_blocking(conn, other)
+        finally:
+            release.set()
+        first.result(timeout=6)
+        assert second.result(timeout=6)
+    assert reserved_for(conn, attempt) == Decimal("0.25")
+
+
+@pytest.mark.parametrize(
+    "failure", ["missing", "owner", "lock", "insert", "commit", "cancel", "broken"]
+)
+def test_reservation_failure_is_atomic_and_releases_locks(
+    money_run: tuple[StoreConnection, UUID, UUID],
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    conn, run, attempt = money_run
+    owner = conn.execute(
+        "SELECT case_id FROM runs WHERE run_id = %s", (run,)
+    ).fetchone()
+    assert owner is not None
+    if failure in {"owner", "lock", "insert"}:
+        conn.execute(
+            {
+                "owner": "ALTER TABLE run_attempts RENAME TO hidden_attempts",
+                "lock": "ALTER TABLE cases RENAME TO hidden_cases",
+                "insert": "ALTER TABLE budget_reservations ADD CHECK (false)",
+            }[failure]
+        )
+    elif failure == "commit":
+        conn.execute(
+            "CREATE FUNCTION budget_failure() RETURNS trigger LANGUAGE plpgsql AS $$"
+            " BEGIN RAISE EXCEPTION 'private'; END; $$;"
+            " CREATE CONSTRAINT TRIGGER budget_failure"
+            " AFTER INSERT ON budget_reservations DEFERRABLE INITIALLY DEFERRED"
+            " FOR EACH ROW EXECUTE FUNCTION budget_failure()"
+        )
+    conn.commit()
+    if failure in {"cancel", "broken"}:
+        execute = psycopg.Connection.execute
+
+        def cancel(
+            c: StoreConnection, query: object, *args: object, **kwargs: object
+        ) -> object:
+            result = execute(c, query, *args, **kwargs)  # type: ignore[arg-type]
+            if str(query).startswith("INSERT INTO budget_reservations"):
+                if failure == "broken":
+                    c.close()
+                raise KeyboardInterrupt
+            return result
+
+        monkeypatch.setattr(psycopg.Connection, "execute", cancel)
+    with pytest.raises(
+        KeyboardInterrupt if failure in {"cancel", "broken"} else Refusal
+    ) as caught:
+        reserve(conn, uuid4() if failure == "missing" else attempt, Decimal("0.25"))
+    if isinstance(caught.value, Refusal):
+        assert caught.value.code.value == (
+            "ATTEMPT_NOT_FOUND" if failure == "missing" else "STORE_UNAVAILABLE"
+        )
+    assert conn.closed or conn.info.transaction_status is TransactionStatus.IDLE
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '1s'")
+        if failure != "lock":
+            lock_case(other, owner[0])
+        assert other.execute("SELECT count(*) FROM budget_reservations").fetchone() == (
+            0,
+        )
+
+
+@pytest.mark.parametrize("read", ["remaining", "reserved_for"])
+def test_budget_reads_preserve_caller_transaction_on_success_and_error(
+    money_run: tuple[StoreConnection, UUID, UUID], read: str
+) -> None:
+    conn, run, attempt = money_run
+    conn.execute("CREATE TABLE caller_work (id integer)")
+    reader, key = (remaining, run) if read == "remaining" else (reserved_for, attempt)
+    reader(conn, key)
+    assert conn.info.transaction_status is TransactionStatus.INTRANS
+    conn.execute("ALTER TABLE budget_reservations RENAME TO hidden_reservations")
+    with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$"):
+        reader(conn, key)
+    assert conn.info.transaction_status.name == "INERROR"
+    conn.rollback()
+    assert conn.execute("SELECT to_regclass('caller_work')").fetchone() == (None,)
+    assert reserved_for(conn, attempt) is None
+
+
+def test_validation_respects_transaction_ownership(
+    money_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, _run, attempt = money_run
+    conn.execute("CREATE TABLE caller_work (id integer)")
+    with pytest.raises(Refusal, match=r"^MONEY_INVALID$"):
+        start_run(conn, uuid4(), budget_ceiling=Decimal("NaN"))
+    assert conn.info.transaction_status is TransactionStatus.INTRANS
+    conn.commit()
+    conn.execute("INSERT INTO caller_work VALUES (1)")
+    with pytest.raises(Refusal, match=r"^MONEY_INVALID$"):
+        reserve(conn, attempt, Decimal("NaN"))
+    assert conn.info.transaction_status.name == "IDLE"
+    assert conn.execute("SELECT * FROM caller_work").fetchall() == []
+
+
+def test_reserve_revalidates_attempt_owner_after_waiting(
+    money_run: tuple[StoreConnection, UUID, UUID], empty_database: str
+) -> None:
+    conn, run, attempt = money_run
+    owner = conn.execute(
+        "SELECT case_id FROM runs WHERE run_id = %s", (run,)
+    ).fetchone()
+    assert owner is not None
+    new_run = start_run(conn, owner[0])
+    conn.commit()
+    lock_case(conn, owner[0])
+    with connect(empty_database) as other:
+
+        def refused() -> None:
+            with pytest.raises(Refusal, match=r"^ATTEMPT_NOT_FOUND$"):
+                reserve(other, attempt, Decimal("0.25"))
+            assert other.info.transaction_status is TransactionStatus.IDLE
+
+        with _blocked(conn, other, refused):
+            conn.execute(
+                "UPDATE run_attempts SET run_id = %s WHERE attempt_id = %s",
+                (new_run, attempt),
+            )
+    assert reserved_for(conn, attempt) is None
+
+
+@pytest.mark.parametrize("isolation", ["autocommit", "repeatable read", "serializable"])
+def test_reserve_refuses_transaction_modes_that_cannot_order_money(
+    money_run: tuple[StoreConnection, UUID, UUID], isolation: str
+) -> None:
+    conn, _run, attempt = money_run
+    if isolation == "autocommit":
+        conn.autocommit = True
+    else:
+        conn.execute(f"SET TRANSACTION ISOLATION LEVEL {isolation}")
+    with pytest.raises(Refusal, match=r"^STORE_NOT_TRANSACTIONAL$"):
+        reserve(conn, attempt, Decimal("0.25"))
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    assert reserved_for(conn, attempt) is None
+
+
+def test_concurrent_same_attempt_reserves_only_once(
+    money_run: tuple[StoreConnection, UUID, UUID], empty_database: str
+) -> None:
+    conn, run, attempt = money_run
+
+    def take() -> str:
+        with connect(empty_database) as other:
+            try:
+                reserve(other, attempt, Decimal("0.25"))
+            except Refusal as refusal:
+                assert other.info.transaction_status is TransactionStatus.IDLE
+                return refusal.code.value
+            return "taken"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(take) for _ in range(2)]
+        assert sorted(f.result(timeout=6) for f in futures) == [
+            "BUDGET_ALREADY_RESERVED",
+            "taken",
+        ]
+    assert remaining(conn, run) == Decimal("0.75")
+
+
+@pytest.mark.parametrize("operation", ["reserve", "remaining", "reserved_for"])
+def test_budget_closed_connection_failure_is_sanitized(
+    money_run: tuple[StoreConnection, UUID, UUID], operation: str
+) -> None:
+    conn, run, attempt = money_run
+    conn.close()
+    with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$"):
+        if operation == "reserve":
+            reserve(conn, attempt, Decimal("0.25"))
+        else:
+            (remaining if operation == "remaining" else reserved_for)(
+                conn, run if operation == "remaining" else attempt
+            )

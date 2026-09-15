@@ -1,99 +1,30 @@
-"""Running one module: authority in, canonical envelope out.
+"""Evidence delivery and stored-identity checks shared by the canonical executor.
 
-The seam where four things meet, each of which the host owns and the module does
-not: the bundle's verified authority (invariant 4), the evidence actually
-delivered to this node (invariant 2), the provider call and its charge
-(invariant 8), and the citation anchoring that decides whether a quote may reach
-an artifact at all (invariant 11).
-
-A module is asked a question and returns JSON. Everything it says about itself is
-discarded: the envelope the host stores carries the module id the host asked for,
-the build the host read, and the authority digest the host computed. That is
-invariant 3, and it is the reason `execute_module` returns an `Envelope` built
-here rather than the object the provider sent.
+The claims executor that once lived here -- `execute_module`, its envelope
+parsing and its prompt building -- is retired (`docs/DECISIONS.md` §42.1) and
+deleted in slice f-2b. What remains is what `server/methodology/canonical.py`
+still imports: the evidence reader every module call delivers from
+(`Delivery`, `_delivered`), the call identity (`Assignment`) and the check that
+a pin's adapter matches the executor reading it (`_stored_identity`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
-from server.evidence.citations import verify_citations
-from server.evidence.read import Block, read_block
-from server.methodology.bundle import Bundle, assemble_authority, authority_digest
-from server.methodology.envelope import Claim, Envelope, parse_claims, parse_readiness
-from server.provider import CompletionProvider
+from server.engine.route import ResolvedRoute, RouteNode
+from server.evidence.read import read_run_block
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-
-# The two ways a quote fails to anchor. Either costs the claim resting on it and
-# nothing more (docs/DECISIONS.md §26); any other refusal is the module breaking
-# the contract, and refuses the answer.
-QUOTE_MISSES = frozenset(
-    {RefusalCode.CITATION_NOT_LOCATED, RefusalCode.CITATION_AMBIGUOUS}
-)
+from server.store.gates import execution_input
 
 # The skill is the authority; the reference files are what it may consult. Only
 # the skill goes into the prompt, because the reference set of one module runs to
 # tens of thousands of tokens and the budget is invariant 8's, not a suggestion.
 SKILL = "SKILL.md"
-
-_INSTRUCTION = """\
-You are executing methodology module {module_id}. The authority for this module
-follows, then the evidence you have been delivered. Use no other knowledge.
-
-Return one JSON object and nothing else, with exactly this shape:
-
-{{"claims": [{{"statement": "...", "citations": [
-  {{"source_id": "...", "page": 1, "matched_text": "..."}}]}}]}}
-
-Rules that will cause your answer to be refused if broken:
-- Every claim carries at least one citation. Uncited claims are discarded.
-- `matched_text` must be copied character for character from the evidence below,
-  and must be a phrase that appears on one line of it. Do not paraphrase, do not
-  join text across a blank line, do not add or remove punctuation.
-- `source_id` must be one of the ids given below.
-- Use no keys other than those shown.
-"""
-
-_GATE_INSTRUCTION = """\
-You are also this run's source-readiness gate. Beside `claims`, return
-`content_to_module_map`: one object for each module id listed here and no
-others.
-
-{module_ids}
-
-Each object has exactly these keys:
-
-{{"module_id": "...", "readiness_status": "READY", "readiness_effect": "..."}}
-
-Rules that will cause your answer to be refused if broken:
-- Every module id listed above appears exactly once, and no other id appears.
-- `readiness_status` is one of READY, READY_WITH_LIMITATIONS, CONDITIONAL,
-  BLOCKED.
-- `readiness_effect` says in one sentence what the source set allows or
-  prevents for that module.
-"""
-
-
-@dataclass(frozen=True, slots=True)
-class ModuleOutcome:
-    """What one module execution produced, and what the call cost.
-
-    Two things rather than one because they answer to different rules: the
-    envelope is the module's output under invariant 9, and the charge is the
-    provider's reported `usage.cost` under invariant 8. The loop needs both and
-    they must not be conflated -- a charge folded into the envelope would be a
-    figure inside a document the host claims to have derived.
-    """
-
-    envelope: Envelope
-    charge: Decimal
-    model: str
-    generation_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,201 +43,57 @@ class Delivery:
 
 
 @dataclass(frozen=True, slots=True)
-class UpstreamClaim:
-    """One thing an earlier module established, and the quotes under it.
-
-    Plain `str`, not `BoundaryText`: this is transient prompt context that is
-    never persisted, and the text was already validated at the boundary once,
-    when the upstream module's own claim was stored.
-    """
-
-    statement: str
-    quotes: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class Upstream:
-    """What one direct predecessor accepted, as the host stored it."""
-
-    module_id: str
-    claims: tuple[UpstreamClaim, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class Assignment:
-    """What the host hands one module for one node of one run."""
+    """What the host hands one module for one node of one run.
+
+    Identity only. What the module reads -- the evidence, the gate's
+    expectation and its predecessors' results -- is derived from the run's pins
+    inside each executor's own authority unit, so no caller's copy of it
+    survives.
+    """
 
     module_id: str
-    delivered: list[Delivery]
-    # The modules this one must return a readiness verdict for: the pinned
-    # route less itself when it is the gate, and empty for everyone else.
-    gate_expects: frozenset[str] = frozenset()
-    # This node's direct predecessors' accepted results
-    # (`predecessors(route, module_id)` in `server/engine/route.py`), read
-    # from the store by the caller that holds the route -- this dataclass
-    # only carries what it was handed, the same division `gate_expects`
-    # already draws.
-    upstream: tuple[Upstream, ...] = ()
+    run_id: UUID
+    node: RouteNode
+    route: ResolvedRoute
+    # The reserved attempt this call is made under.
+    attempt_id: UUID
 
 
-def deliver(
-    conn: StoreConnection, deliveries: list[tuple[UUID, str]]
-) -> list[Delivery]:
-    """Read the blocks this node is to receive, through the evidence boundary.
+# Every block of the run's pinned source-set version, never the case's live set.
+_CAPTURED = (
+    "SELECT b.source_id, b.block_id FROM run_inputs i"
+    " JOIN source_set_members m"
+    " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
+    " JOIN source_blocks b ON b.source_id = m.source_id"
+    " WHERE i.run_id = %s ORDER BY b.source_id, b.block_id"
+)
 
-    Through the evidence boundary rather than around it: withdrawal is checked
-    live at every use (invariant 1), and a delivery assembled by a different
-    query would be the one path that skipped the check.
-    """
-    return [
-        _delivery(
-            source_id,
-            block_id,
-            read_block(conn, source_id=source_id, block_id=block_id),
+
+def _delivered(conn: StoreConnection, run_id: UUID) -> list[Delivery]:
+    """Every captured block of the run, each through the run-bound reader."""
+    delivered = []
+    for source, block in conn.execute(_CAPTURED, (run_id,)).fetchall():
+        source_id = UUID(str(source))
+        read = read_run_block(
+            conn, run_id=run_id, source_id=source_id, block_id=str(block)
         )
-        for source_id, block_id in deliveries
-    ]
+        delivered.append(Delivery(source_id, str(block), read.page, read.text))
+    return delivered
 
 
-def _delivery(source_id: UUID, block_id: str, block: Block) -> Delivery:
-    return Delivery(
-        source_id=source_id, block_id=block_id, page=block.page, text=block.text
-    )
-
-
-def _upstream(upstream: Sequence[Upstream]) -> str:
-    """Earlier modules' accepted results, as context.
-
-    Marked as not evidence in the text, and enforced by the rule that was
-    already there: a citation names delivered evidence or it does not anchor.
-    """
-    if not upstream:
-        return ""
-    sections = []
-    for module in upstream:
-        lines = [f"module_id: {module.module_id}"]
-        for claim in module.claims:
-            lines.append(f"- {claim.statement}")
-            lines.extend(f"  quoted: {quote}" for quote in claim.quotes)
-        sections.append("\n".join(lines))
-    return (
-        "\n--- UPSTREAM (earlier modules' accepted results: context, not "
-        "evidence; cite only the evidence below) ---\n" + "\n\n".join(sections)
-    )
-
-
-def build_prompt(
-    module_id: str,
-    authority: bytes,
-    delivered: list[Delivery],
-    *,
-    gate_expects: frozenset[str] = frozenset(),
-    upstream: Sequence[Upstream] = (),
-) -> str:
-    """The question, the authority, what the chain established, and the
-    evidence -- in that order."""
-    evidence = "\n\n".join(
-        f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}"
-        for item in delivered
-    )
-    gate = (
-        _GATE_INSTRUCTION.format(module_ids=", ".join(sorted(gate_expects)))
-        if gate_expects
-        else ""
-    )
-    return (
-        _INSTRUCTION.format(module_id=module_id)
-        + gate
-        + "\n--- AUTHORITY ---\n"
-        + authority.decode("utf-8", errors="replace")
-        + _upstream(upstream)
-        + "\n--- EVIDENCE ---\n"
-        + evidence
-    )
-
-
-def execute_module(
-    conn: StoreConnection,
-    bundle: Bundle,
-    *,
-    assignment: Assignment,
-    provider: CompletionProvider,
-) -> ModuleOutcome:
-    """Run one module and return the envelope the host is willing to store.
-
-    The order is the contract: authority is verified before the prompt is built,
-    the provider is asked once, and every citation is re-derived against the
-    token index *before* an envelope exists to be stored. A quote the host
-    cannot locate exactly once refuses the claim resting on it -- invariant 11
-    happening before the artifact rather than after it -- and the envelope
-    counts what it refused. An answer with no claim left is refused (§26).
-
-    `assignment` carries the module id, the delivered evidence, the gate
-    expectation and the upstream context as one thing rather than four loose
-    arguments, for the same reason `Execution` and `Accepted`
-    (`docs/DECISIONS.md` §25) are one thing each: a module id with no evidence
-    answers nothing, evidence with no module id has no authority to be read
-    against, and the gate expectation and the upstream context are each a fact
-    about *this* module-and-run pair, not independent inputs. Deciding what
-    they are belongs to `ModuleProvider.execute`, the caller that holds the
-    route -- this function only reads them off the assignment it was handed,
-    and hands `upstream` straight to the prompt: what keeps it from becoming
-    evidence is `verify_citations` refusing a quote that is not in
-    `assignment.delivered`, not anything this function does.
-    """
-    authority = assemble_authority(bundle, assignment.module_id)
-    prompt = build_prompt(
-        assignment.module_id,
-        authority.files[SKILL],
-        assignment.delivered,
-        gate_expects=assignment.gate_expects,
-        upstream=assignment.upstream,
-    )
-
-    completion = provider.complete(prompt, json_object=True)
-
-    sources = {item.source_id for item in assignment.delivered}
-    # The map first: it is a pure read of the same body, and a map the host
-    # cannot bound refuses this answer whatever the claims say. After the loop it
-    # was reached only once every quote had been anchored against the token index
-    # -- a query per citation spent on an answer already refused.
-    readiness = parse_readiness(completion.content, expected=assignment.gate_expects)
-
-    claims = []
-    misses: list[RefusalCode] = []
-    for statement, citations in parse_claims(completion.content, delivered=sources):
-        # Before the quotes: a statement the boundary refuses is the module
-        # breaking the contract, which costs the answer rather than the claim.
-        text = BoundaryText.of(statement)
-        try:
-            anchored = verify_citations(conn, delivered=sources, citations=citations)
-        except Refusal as missed:
-            if missed.code not in QUOTE_MISSES:
-                raise
-            misses.append(missed.code)
-            continue
-        claims.append(Claim(statement=text, citations=tuple(anchored)))
-    if not claims:
-        # Nothing the module established survived. Refused with the first
-        # quote's code, as an answer that anchored nothing always was.
-        raise Refusal(misses[0])
-
-    envelope = Envelope(
-        # The host's, not the module's. Whatever it claimed about its own
-        # identity did not survive this line (invariant 3).
-        module_id=assignment.module_id,
-        build_id=authority.build_id,
-        authority_digest=authority_digest(authority),
-        claims=tuple(claims),
-        readiness=tuple(readiness),
-        claims_refused=len(misses),
-    )
-    return ModuleOutcome(
-        envelope=envelope,
-        charge=completion.charge,
-        # What the host asked, and what the provider called the call. The first
-        # is a fact the host holds, the second is the provider's own handle and
-        # is kept for reconciling a bill rather than for trusting.
-        model=provider.model,
-        generation_id=completion.generation_id,
-    )
+def _stored_identity(
+    conn: StoreConnection, assignment: Assignment, bundle: Bundle, *, adapter: str
+) -> None:
+    """Current input with the actual Bundle, the exact pinned route/node, and
+    the pinned adapter this executor implements (§42.1): a pin never runs
+    under the other adapter, whoever calls."""
+    pin, stored = execution_input(conn, assignment.run_id, bundle)
+    if pin.adapter_version != adapter:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if (
+        stored != assignment.route
+        or assignment.node not in stored.nodes
+        or assignment.node.module_id != assignment.module_id
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)

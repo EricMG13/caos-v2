@@ -116,6 +116,16 @@ waiving (`SYSTEM_SPEC.md` §11) — this is the first instance of that rule.
 dependency of its own, so the lock and the installer cannot disagree. The two
 interpreter versions are forced by §4 of `docs/AI_CODE_QUALITY.md`.
 
+## 2026-09-12 §10a — Pre-commit is part of the pinned development toolchain
+
+Pre-commit 4.6.2 is locked in `requirements-dev.txt`, and `make venv` installs
+hooks through `.venv/bin/pre-commit`. It does not install or invoke a global
+tool and does not hide installation failure.
+
+**Reason.** The hook runner enforces repository gates, so its version and
+installation must be reproduced by the same hashed, wheels-only development
+lock as the hooks it drives.
+
 ## 2026-09-08 §11 — A CI job arrives with the code it scans
 
 Phase 0 ships `lint`, `types`, `test`, `security` and `size`. `postgres`,
@@ -207,7 +217,9 @@ file the host renders from the frozen snapshot — the accepted artifacts in
 route order, every figure carrying its citation — never overwriting, printing
 to paper. The host's chain around it is unchanged: opinion on the exact
 revision, freeze, filing that refuses the signer and the freezer, the detached
-receipt, the package verifiable with the standard library. One process.
+receipt, the package verifiable with the standard library. The original
+one-process deployment is superseded for repair Phase 4 by §39's single API
+plus one PostgreSQL-backed worker; no workbook/publication service is restored.
 Nothing installs LibreOffice or poppler. The Model section shows CP-CF's
 projection, read-only. The workbook and publication contracts are archived
 verbatim under `docs/archive/` for a build that brings them back; `make
@@ -405,6 +417,37 @@ unmentioned until the first write to it, which is the one failure applying a
 schema at startup exists to catch. This repository has never deployed, so there
 is no data a migration would have to carry; the day there is, that is the entry
 which overrides this one.
+
+## 2026-09-12 §20a — Ordered PostgreSQL migrations preserve the legacy baseline
+
+Supersedes §20's refusal-only upgrade policy for REPAIR_PLAN Phase 2.
+`server/store/schema.sql` remains byte-for-byte the legacy baseline. The explicit
+host-owned `MIGRATIONS` tuple starts with `0001_legacy`; append reviewed SQL files
+under `server/store/` in order. Never modify an applied entry. No ORM, dependency,
+application table, or externally selected migration SQL is added by this slice.
+
+`store_migrations` records ordered version, name, SHA-256 and application time.
+The singleton `store_schema.applied_digest` becomes the SHA-256 of the JSON
+encoding of all ordered `(version, name, digest)` entries. This also binds history
+length, so a missing final row cannot masquerade as an older prefix. A verified
+legacy schema digest with no history is adopted without rerunning its DDL.
+Fresh creation and legacy adoption then use the same prefix advancement path.
+Unknown, edited, reordered, missing, or newer applied history refuses startup.
+
+The existing advisory transaction lock serializes starters. Migration DDL,
+history, and the head digest commit together; failures roll back and release
+the lock, including interruptions. Schema/PostgreSQL failures carry only the
+typed `STORE_SCHEMA_DRIFT` code. Autocommit refuses before mutation. Startup
+continues to use a fresh connection. `apply_schema` owns and finishes the caller's
+transaction, including an implicit read transaction, as it did before; call it
+before business writes. There is no new pre-commit. Repeat startup does not
+update existing history timestamps or business records.
+
+Checksums detect declared migration/history disagreement, not arbitrary DBA
+changes to both schema and metadata. Migrations must be transactional SQL with
+no transaction-control statements or external effects. Future migrations must
+preserve existing data and pass the populated-database tests. No automatic
+downgrade exists. See [the backup/restore procedure](MIGRATIONS.md).
 
 ## 2026-09-10 §21 — PDF text is extracted with `pdfminer.six`
 
@@ -686,7 +729,9 @@ about a module would be a gate that cleared it by omission.
 **A module's own verdict decides its state.** CONDITIONAL and BLOCKED are both
 "not cleared"; READY_WITH_LIMITATIONS is RESTRICTED, which runs and carries the
 limitation; READY leaves the edges in charge. A blocked node costs no call and
-no charge, and the run completes with it reported unrun. The run surface carries
+no charge. Repair decision §39 supersedes the original blocked-but-complete
+rule: unresolved required obligations keep the run recoverably blocked. This
+is a repair target until its implementation and phase exit tests are accepted. The run surface carries
 the verdict as `NodeView.gate_verdict`, because a node the gate blocked has no
 unmet edge for `waiting_on` to name — and a state with no cause is the thing
 `NodeView` ("a node's state and the reason for it") and `waiting_on` ("a surface
@@ -731,3 +776,634 @@ its context for evidence loses the answer rather than the sentence.
 that is what the envelope holds. The bundle's registers — the tables a module's
 own payload schema declares — are a later phase, and until then a chained module
 inherits sentences rather than a financial base.
+
+## 2026-09-12 §29 — Canonical Markdown is the authoritative handoff
+
+Deploy V's exact, validated canonical Markdown remains the analytical authority
+and the downstream handoff. Typed UI fields are closed, validated sidecar
+projections of it. The UI and host-rendered report are presentations of the
+accepted Markdown and projections, not a second model-authored authority.
+
+The host owns identities a module cannot establish: run, immutable source set,
+extractor and extraction manifest, resolved route, bundle manifest/build,
+adapter version, and accepted upstream artifacts. Those identities travel with
+the handoff and are checked by the adapter; provider-claimed identity is never
+substituted for them.
+
+The catalog-selected CP-0 remains the single executable preparation/readiness
+node. The host's extraction manifest is preparation metadata supplied to CP-0,
+not another LLM route stage. `CP-PARSE` remains only as an authority alias for
+archived compatibility; it is not inserted into the catalog route, so extraction
+and preparation do not run twice. The no-Excel/no-Word decision and archived
+workbook/publication contracts remain unchanged.
+
+**Reason.** The current claims JSON discards the bundle's complete registers and
+cannot become canonical merely because the host stores it. Adding a second model
+summary would create competing authority; preserving the exact validated
+Markdown and deriving presentation fields mechanically preserves one handoff.
+
+## 2026-09-12 §30 — Local development uses one project-scoped Compose stack
+
+Development uses the CI-pinned PostgreSQL image in two isolated services: a
+persistent database reached by a least-privilege application role, and a
+tmpfs-backed test-admin database. Both bind loopback-only deterministic ports;
+blobs remain in the ignored project-local `.dev-data/blobs` directory. Stopping
+the named Compose project removes neither the development volume nor blobs.
+
+Python 3.14, security Python 3.12, Node 24, and pinned pre-commit remain the
+existing toolchain; no dependency was added. GitNexus indexing uses only a
+runner already present locally or installed on the machine and runs
+`--index-only`.
+
+**Reason.** Separate named resources make test cleanup unable to reach durable
+development data, while one native Compose file is the smallest reproducible
+service layer. Fixed synthetic local credentials are configuration examples,
+not deployable secrets or permission to call a provider.
+
+## 2026-09-12 §31 — Repair the pinned runtime base with four exact OS upgrades
+
+The live official `python:3.14-slim` tag still resolved to the image's existing
+digest, so changing the pin would not repair its twelve fixable HIGH/CRITICAL
+OS findings. The image instead upgrades only the four affected installed
+packages to the fixed trixie candidates: `gzip=1.13-1+deb13u1`,
+`libpcre2-8-0=10.46-1~deb13u2`, `libsqlite3-0=3.46.1-7+deb13u2`, and
+`perl-base=5.40.1-6+deb13u1`. `--only-upgrade` keeps the package set closed;
+the verified simulation and build each reported four upgrades, zero additions,
+and zero removals.
+
+The dated provenance is Debian's package index plus its primary security
+tracker entries for [gzip](https://security-tracker.debian.org/tracker/source-package/gzip),
+[pcre2](https://security-tracker.debian.org/tracker/source-package/pcre2),
+[sqlite3](https://security-tracker.debian.org/tracker/source-package/sqlite3),
+and [perl](https://security-tracker.debian.org/tracker/source-package/perl).
+The local image gate requires the same Trivy 0.70.0 as CI, proves that the JSON
+scan examined targets, then rejects any fixable HIGH/CRITICAL finding with
+`--ignore-unfixed`; no suppression or policy relaxation is permitted.
+
+**Reason.** A no-op base re-pin leaves the findings in place, while a broad
+unpinned OS upgrade changes unrelated runtime state. Four exact in-place
+security upgrades are the smallest reproducible repair until an official fixed
+base digest replaces them.
+
+## 2026-09-12 §32 — Existing case row orders all case mutations
+
+Case writes acquire the existing `cases` row before membership, run, audit or
+gate rows. This includes source admission after CPU extraction and packing,
+source withdrawal, grant/revoke, run creation, and run/route transitions through
+`lock_run`. An absent audit head cannot serialize first approvals. Standing is
+read after the case lock and retained through the governed commit, so revocation
+and governed writes have one observable commit order. The whole governed unit,
+including digest generation and audit/head insertion, rolls back on failure.
+
+Supported mutations require explicit transactions at READ COMMITTED. The lock
+helper checks the actual transaction isolation, including caller SQL settings;
+autocommit and other isolation levels refuse `STORE_NOT_TRANSACTIONAL`. A
+REPEATABLE READ snapshot taken before waiting could otherwise retain revoked
+standing even after obtaining an unchanged case row. No automatic retries are
+introduced. Existing implicit read transactions at READ COMMITTED remain valid.
+
+Grant/revoke, admission and run creation leave commit/rollback to their caller.
+Governed writes and existing run/route transitions complete their own units.
+Callers must follow this order for all case mutations and must finish a setup
+transaction before provider I/O. Runtime attempt creation and reservation each
+commit before the provider call. Governed callbacks must not commit or perform
+provider/network I/O. Source extraction occurs before taking the admission lock;
+a caller already holding a setup lock remains responsible for its transaction.
+
+**Ceiling.** Writes within one case serialize; different cases remain independent.
+Finer locks are warranted only by measured throughput, not speculative parallelism.
+No table, dependency, migration or global mutex is needed for this repair.
+
+## 2026-09-12 §33 — Record extraction provenance without inventing legacy history
+
+Migration `0002_extraction` adds append-only `source_extractions`, keyed by the
+admitted source. A missing row explicitly means UNKNOWN; migration never guesses
+which adapter produced historical tokens. Existing live-source evidence remains
+readable. Recovery for future executable source sets is explicit readmission and
+re-extraction by a known host adapter, never a provenance backfill.
+
+Format version 1 stores canonical extractor identity JSON (`name`, algorithm
+`version`, flat effective `config`, maximum 4096 characters), an output SHA-256,
+and an extraction SHA-256. Config values are finite JSON scalars; text must
+already satisfy BoundaryText normalization and bounds. Host implementations own
+this identity: plain text declares its UTF-8/fixed-cell/page settings; PDF declares
+its algorithm and installed pdfminer version/default layout settings. Filename
+does not select an adapter. Custom host extractors explicitly declare an identity.
+
+The output digest hashes a JSON object with `format_version: 1`, ordered `tokens`
+(each token's text/page/region_id/line_id/x0/y0/x1/y1) and ordered `blocks`
+(`[block_id, page, text]`). Coordinates are finite exact binary64 values before
+both hashing and writing. Token text is recorded exactly as stored; packing still
+applies the existing BoundaryText normalization. The extraction digest hashes
+`format_version: 1`, document SHA-256, the extractor identity object and output
+SHA-256. Both serializations use sorted keys, compact separators, UTF-8 with
+`ensure_ascii=False` and `allow_nan=False`. Source/case IDs and preview metadata
+will belong to the subsequent immutable source-set identity, not this content
+identity.
+
+All preparation and identity validation precede the shared case lock and writes.
+Admission retains caller-owned commit/rollback; it adds no provider operation.
+Database triggers refuse updates, deletes and truncation of provenance. These
+constraints protect normal SQL mutations, not privileged schema/trigger removal.
+
+This is a storage prerequisite only. Immutable source sets, run bindings and
+runtime approval enforcement are subsequent slices; F04 remains open. The old
+whole-case `source_set_fingerprint` remains compatibility behavior and is not an
+enforced execution pin. Mixed-PDF dispatch and geometry fidelity remain Phase 3.
+
+## 2026-09-12 §34 — Immutable source-set versions retain complete membership
+
+Migration `0003_source_sets` stores a case-local positive version, format version
+1, fingerprint and positive member count, with explicit immutable member rows.
+`snapshot_source_set` takes Task6's shared case-first lock at READ COMMITTED,
+captures all live sources and owns commit/rollback, including unchanged replay.
+Call it after unrelated setup has committed. No provider/network I/O or retries
+occur under its lock. `load_source_set` reads an exact case/version with a
+caller-owned transaction and verifies count, provenance bindings and fingerprint.
+
+The fingerprint uses §33's canonical JSON serialization and hashes an object
+with `format_version: 1`, string `case_id`, and `members` ordered by source UUID.
+Each member includes string source UUID, document SHA-256, filename, admission
+timestamp normalized to UTC ISO-8601, canonical extractor identity JSON string,
+output SHA-256 and extraction SHA-256. These fields are captured, not reloaded
+from mutable source metadata. The stored extraction binding is recomputed from
+document/extractor/output identity; output text/geometry remain bound by §33.
+Empty, UNKNOWN and malformed sets refuse. No legacy identities are fabricated.
+
+Unchanged current content returns the latest version. Changed content allocates
+latest version plus one; returning to an earlier content state creates another
+version with the same content fingerprint. Later admission never joins existing
+membership; withdrawal preserves history. Historical loading does not authorize
+withdrawn evidence: the existing live read predicate and one-query reads remain.
+The old whole-case fingerprint remains compatibility behavior, not a run pin.
+Run/approval/UI integration and automatic snapshots remain subsequent work.
+
+Native PK/FKs enforce source/case consistency. UPDATE/DELETE/TRUNCATE refuse;
+deferred INSERT checks on both tables require the exact immutable positive
+count. A completed set cannot accept another member: every inserter sees at
+least its existing complete membership plus its own row, so even concurrent
+extra insertions fail. Missing headers refuse. This protects normal SQL changes,
+not privileged trigger removal. The row checks cost O(N²) counts over sources,
+not tokens; batch validation is warranted only by measured throughput.
+
+## 2026-09-12 §35 — One immutable raw manifest governs bundle authority
+
+`Bundle` selects its manifest during construction, before sharing with callers.
+It retains only immutable raw bytes: the build ID, manifest SHA-256, selected
+module entry and file hash expectations all derive from that one snapshot.
+Parsed dictionaries returned to callers are fresh copies, never mutable cached
+authority. Every identity/entry/file read verifies the current manifest against
+the snapshot; verification also runs after assembly, immediately before provider
+completion and after qualification matrix rows. A changed manifest refuses; an
+existing Bundle never adopts a replacement, including whitespace-only changes.
+
+The manifest ceiling is exactly 131,072 bytes (128 KiB), above the pinned
+68,657-byte document. Each read requests at most the ceiling plus one byte and
+refuses excess before JSON parsing. The consumed form requires authority
+`DEPLOY_V_INTEGRITY_v1`, schema version `1.0`, a lower-case 64-hex build ID,
+nonempty skills with unique module IDs, single-component folder names, and
+file-hash objects including nonempty `SKILL.md`. Hashes are lower-case 64-hex;
+declared lengths are nonnegative integers (not booleans), positive for the skill.
+Duplicate JSON keys, non-JSON numeric constants, malformed/missing metadata,
+invalid text and decoder failures refuse `AUTHORITY_BYTES_MISMATCH`. The byte
+cap is the only explicit resource ceiling; no independent JSON nesting limit is
+enforced. An absent module in an otherwise valid manifest remains
+`AUTHORITY_MODULE_UNKNOWN`.
+Refusals carry only the existing code, with underlying parse/filesystem errors
+suppressed. Additional legitimate manifest fields remain intact and unconsumed;
+this is no format upgrade or manifest rewrite.
+
+Manifest-supplied paths are canonical relative POSIX names. Absolute paths,
+parent traversal, alternate separator/normalization spellings and resolved
+symlink escapes refuse before reading outside the manifest root, skills root or
+selected module. `Path.resolve`/containment uses the standard library pattern
+already present in the qualification loader without importing that layer.
+Authority reads require resolved targets to be regular files, so static special
+files refuse before open. This assumes host-owned paths are not maliciously
+replaced concurrently between the file-type check and open; it is not a
+privileged filesystem adversary sandbox. Module bytes are still read whole and
+checked against both declared length and SHA-256; this slice introduces no
+general module-file size ceiling.
+
+Whole skill and module reference delivery, host CP-PARSE carve-out and the
+existing `authority_digest` serialization are unchanged. Parsing a fresh copy
+costs O(manifest bytes) per entry lookup; there is no additional cache or lock.
+Persisted run comparisons, source/research/approval bindings, shared root
+reference delivery and the §29 canonical Markdown runtime remain subsequent
+work. This prerequisite does not close F01/F04 or change the claims-only runtime.
+
+## 2026-09-12 §36 — Verify stored route identity and refuse late pin creation
+
+Both `resolved_route` and `pinned_route` use one verified read of stored JSON,
+profile, selection and digest. Decode the exact consumed object shape without
+string/integer coercion; require nonempty unique route-node/module identities,
+known unique typed edges with present endpoints, an acyclic closed graph in the
+existing dependency order, and unique predicate keys paired with bounded text.
+Malformed or inconsistent state refuses `ROUTE_IDENTITY_INVALID`; API readers
+report this as the established sanitized 503 store failure. Missing pins remain
+`None`; read transactions stay owned by their caller.
+
+The installed catalog was measured: 18 selectable routes, at most 19 nodes and
+88 edges, stages 1–19, node IDs at most 57 characters and module IDs at most 6.
+Resource bounds are 128 nodes, 1024 edges, 128 predicates, 128-character ASCII
+identifiers, stages 1–100 and the existing 4096-character `BoundaryText` predicate
+value limit. Host research/model slots 99/100 remain supported. The coarse JSON
+parse ceiling is 8,388,608 **characters**, enough for all bounded fields even
+with worst-case ASCII Unicode escapes; this is not a byte-size claim or a
+database transfer limit. Exact field/count bounds are the primary validation.
+The vendor identity helper's two-digit stage grammar is not substituted.
+
+The existing `route_digest` contract is unchanged: node arrays, sorted edge
+arrays and the original predicate ordering. Stored JSON keeps its object shape;
+predicate containers reach JSON serialization directly so malformed strings or
+mapping pairs cannot become valid pairs through iteration. No second route
+hash, catalog upgrade or generic serialization framework is introduced.
+
+`pin_route` validates the same invariants, takes the shared case-first/run lock,
+and owns one commit for the row and ROUTE_PINNED event. A valid exact replay
+checks actual stored content and can return the historical digest after the run
+is terminal, without adding an event. A new pin requires RUNNING and no attempt;
+otherwise it refuses RUN_NOT_RUNNING or ROUTE_PIN_TOO_LATE. Conflicts leave the
+existing pin/event intact. Autocommit is refused; refusal, database failure and
+cancellation roll back or close the connection, including commit-time failures.
+
+Append-only migration `0004_route_integrity` forbids normal UPDATE, DELETE and
+TRUNCATE of route pins, including TRUNCATE CASCADE. Historical rows are preserved
+without guessed inputs or automatic repair. Privileged trigger removal remains
+outside this guarantee; corruption regressions explicitly disable only the
+named row guard inside a transaction in their own disposable test databases,
+restore it before asserting reader/proof outcomes, and verify failure cleanup.
+Both legacy-upgrade and already-migrated backup/restore proofs retain native
+catalogs, original rows and synthetic blobs; see MIGRATIONS.md.
+
+This is a Phase2 prerequisite for complete run-input pins. It does not enforce
+execution approvals, certify methodology selection, change canonical handoffs,
+or close F01. Source version/fingerprint, coherent bundle identity, host adapter
+and actual research content still need one complete run binding; runtime must
+later reject route-only legacy runs before execution.
+
+## 2026-09-12 §37 — Complete immutable run-input storage
+
+`run_inputs` holds at most one complete pin per run, separately from the existing
+route and captured source-set stores. The host derives the owner from the real
+run, loads the selected case-local source version through `load_source_set`,
+verifies the recorded route through `resolved_route`, and derives build/manifest
+identity from one coherent `Bundle`. The caller selects only the run, source
+version and research content. The existing executor now declares its actual
+adapter as `claims-json-v1`; this does not claim the future Markdown adapter.
+
+The format-1 fingerprint reuses §33's sorted, compact, UTF-8, ensure_ascii=False,
+finite JSON hashing helper. It binds case UUID, source version AND verified
+source fingerprint, verified route digest, Bundle build ID, exact raw-manifest
+SHA-256, adapter version and canonical research JSON string (or JSON null for
+absence). Run UUID owns the row but is excluded from this content fingerprint;
+two runs with identical inputs may therefore share the same fingerprint.
+Returning from source A to A+B and then A preserves the later distinct source
+version even though the first and last source-content fingerprints agree.
+
+Research accepts an exact JSON object or None. Object keys must already be
+strings; tuple/bytes/custom values are refused. Every key/string must already
+satisfy BoundaryText and NFC: reject normalization changes, do not silently
+change reviewed content. The storage bounds are depth 16 (root depth zero),
+4096 visited values including object keys and containers, 4096 characters per
+key/string, signed 64-bit integers, finite JSON floats, and 65,536 canonical
+UTF-8 bytes. None, {}, empty strings, booleans, integers and floats remain
+distinct. Canonical serialization sorts object keys only and preserves array
+order and exact accepted Unicode/text. The frozen slotted RunInput retains
+only the immutable canonical string; callers parse fresh copies when needed.
+These are storage safety bounds, not validation of the CP_DR linked lifecycle,
+approved-plan hash, CP-0 anchoring or any source/tool authorization.
+
+`pin_run_input` owns the case-first/run-locked transaction. `pin_route` and
+`snapshot_source_set` commit and must be prepared separately; neither is called
+inside complete-pin creation. Missing/unverified dependencies refuse. New pins
+require RUNNING and no attempts; a valid exact replay can return after terminal
+status without another event. Changing any bound input refuses rather than
+rewriting history. One INSERT and one INPUT_PINNED event commit together;
+refusal, database failure, cancellation and commit failure roll back or close.
+Autocommit is refused. There is no network/provider call under these locks.
+
+The historical loader verifies stored shape and canonical research, recomputes
+the input fingerprint and compares source/route identities with their verified
+records and the real run owner. It retains the caller-owned read transaction.
+It never adopts today's Bundle/adapter identity: runtime must later compare
+the recorded identity with actual executing authority before spend.
+
+Append-only migration 0005 uses native PK and composite FKs for real run/case,
+source case/version/fingerprint and route run/digest consistency. Native
+UPDATE/DELETE/TRUNCATE guards preserve pins; original migrations and legacy
+rows are unchanged. Privileged trigger removal is outside normal SQL guarantees
+and is used only in owned disposable corruption regressions.
+
+Real PostgreSQL evidence covers independent fingerprint components (including
+pairwise different research briefs), exact replay/one event, first/second-write
+and deferred-commit failure, cancellation/closed connection cleanup, observed
+blocking same/conflicting first pins, independent cases, malformed dependencies
+and content, native FKs/immutability, populated current-prefix upgrade and native
+catalog parity. The 94 focused storage/migration cases passed; the owned restore
+probe additionally restored a complete input with real captured provenance.
+See MIGRATIONS.md and the task report for executed gate details. Approval/API/
+runtime/evidence integration remains sequential work. F01 is still open, and
+route-only legacy runs receive no invented complete input or execution bypass.
+
+## 2026-09-13 §38 — Provider transport resource ceilings
+
+The host permits at most 1,048,576 bytes in the complete encoded UTF-8 JSON
+request and 4,194,304 bytes in a response body. Non-string prompts and non-byte
+transport bodies refuse. Oversized requests make no transport call; successful
+and HTTP-error streams read at most the response ceiling plus one byte and close
+on every path. Oversized responses refuse before JSON parsing; no prefix is
+accepted as a complete answer. Injected transports face the same byte checks.
+Incomplete native HTTP framing refuses `PROVIDER_UNAVAILABLE`, including when
+the received prefix happens to be valid JSON; bounded reads retain this check.
+
+Every request sets `max_completion_tokens: 32768`, `allow_fallbacks: false`, and
+`require_parameters: true`. The current [OpenRouter chat contract](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion)
+names `max_completion_tokens` and deprecates `max_tokens`; its [routing contract](https://openrouter.ai/docs/guides/routing/provider-selection)
+documents the required-parameter restriction. HTTPS-only, no redirects or retries,
+and the existing 120-second transport/socket timeout remain. That timeout is not
+a newly guaranteed end-to-end deadline. Malformed URL errors remain code-only.
+
+These are host resource ceilings, not vendor-mandated values or a guarantee that
+every canonical handoff fits. The bundle requires complete Markdown and appendix
+registers; its 90–150-word opening is expressly not a token budget. A handoff may
+not be shortened to fit. Phase 3 must prove the selected canonical route fits or
+deliberately revise the host policy. No live compatibility or pricing claim is
+made. Attempt-bound billing propagation, ending database read transactions before
+calls, conservative priced reservations, runtime authority/evidence binding,
+generation fencing, and blocked/QA terminal semantics remain separate repairs.
+
+## 2026-09-13 §39 — Reconcile the repair plan, acceptance and continuation
+
+The user requested correction of the plan and supporting documents after an
+adversarial documentation review. This entry records the already-requested
+repair target; it does not certify implementation or expand enabled routes.
+
+**Authority.** The user's current instructions govern. This decision record
+resolves design choices; `docs/REPAIR_PLAN.md` owns repair phases 0–6.
+`docs/REBUILD_PLAN.md` and its phase labels remain historical baseline/test
+records. System and IA specifications describe the target, with unfinished
+repairs labelled. `docs/CLAUDE_CODE_HANDOFF.md` alone owns current task status
+and exact accepted checkpoints; other entry documents link to it. Tracked
+task briefs contain enough scope and evidence to resume without ignored logs.
+An implementation commit is not task acceptance. A saved copy of the plan
+points to the maintained repository document.
+
+**Terminal semantics, superseding §27's old completion rule.** A run is
+successful only when all required selected obligations and gates are satisfied.
+An empty frontier with unfinished required work is recoverably blocked.
+Validated `RESTRICTED` output remains usable within its declared limitations;
+it is not inherently malformed, blocked or QA-cleared. CP-5 clearance is
+validated independently. These are pending Phase 2/3 implementation gates,
+not statements that the existing loop already enforces them.
+
+**Execution shape, superseding §14's one-process limit.** Phase 3 proves one
+canonical route through the existing runtime/validation boundary using a
+deterministic provider. Phase 4 adds one durable worker beside the API, using
+PostgreSQL claims/leases and the same runtime/validator; no new broker,
+checkpointer or database. Worker crash/restart and deployed authentication
+proof belong to Phase 4. There is no Phase 3 dependency on that future worker.
+
+**Phase acceptance.** Phase 3 engineering acceptance is offline and distinct
+from live qualification. Every dependent phase still requires its predecessor's
+recorded acceptance and the user's applicable authorization. Phase 6 release
+acceptance requires capped, separately authorized live evaluation of the final
+candidate and authenticated verdicts. Review-driven changes to candidate
+identities invalidate affected evidence: rerun relevant engineering/hosted
+checks, and repeat affected live qualification only within explicit spend
+authorization. Without that evidence, release acceptance remains blocked.
+
+**Forecast prerequisite.** Before enabling CP-CF in Phase 5, choose a catalog
+route containing CP-1, CP-2G and CP-4 and prove their canonical contracts and
+required predecessors. The LITE earnings route cannot supply those owners.
+Do not invent upstream artifacts or weaken the extension's owner checks.
+
+**Process.** Ordinary review closes each task. One confidence review, then one
+separate adversarial code audit, close each whole phase with actual `xhigh`
+reasoning. Neither runs per edit/task; rewrite tournaments are disabled.
+Requested document audits do not certify those code gates. Opus planning-mode
+preferences are recorded in the complementary plan's Reasoning Modes section:
+`max` for an initial complex blueprint, `medium` for task/runbook drafting,
+`low` for faithful formatting, and targeted `ultrathink` for plan stress tests.
+Planning modes do not change code-review cadence.
+
+**Coordinated implementation.** The coordinator may use at most three
+concurrent implementers for disjoint concerns in isolated worktrees. Each has
+an exact base, ownership boundary and isolated test resources; it cannot edit
+the integration branch or invoke a provider. Task review follows each exact
+concern range. The coordinator alone resolves findings, serially integrates,
+runs cross-task/phase gates and records acceptance. Independent branch results
+cannot satisfy an integrated task, PR or phase gate.
+
+**Gate evidence.** Final size checks run after the candidate commit and review
+remediation, over the actual proposed PR range, at the existing 800-line limit.
+Pre-commit estimates cannot certify a committed-only size check. The documented
+Claude hooks have an unresolved JSON-stdin input defect: repair and test them
+in a dedicated Phase 2 prerequisite; do not treat prose as enforcement.
+
+**Reason.** The audit found diverging plan copies, incompatible completion and
+worker rules, restricted-output rejection, missing forecast predecessors,
+untracked continuation records, and a size check run before its commit existed.
+One maintained authority and explicit phase inputs/outputs prevent repeating
+those mistakes without introducing a second build system.
+
+## 2026-09-13 §40 — Reservations are priced at the configured model's worst case
+
+**Decision.** A run executes with a dated `ModelPrice(model, input_per_token,
+output_per_token, as_of)` instead of a caller estimate. Before any attempt,
+`run_route` refuses `PROVIDER_NOT_CONFIGURED` unless the price names the
+provider's configured model, and refuses invalid money as `validate_spend`
+does. Every call reserves `worst_case(price) = MAX_REQUEST_BYTES × input +
+MAX_COMPLETION_TOKENS × output`, computed exactly. This realises §16's price
+clause for reservations and supersedes §38's "no pricing claim" for them.
+
+**Why this bound.** Without a tokenizer, one token per request byte is the
+conservative input bound the §38 request ceiling allows, and the output cap is
+already sent with every request. The known charge is still reconciled after the
+call; an overrun consumes the remaining capacity, so the next reservation is
+refused (REPAIR_PLAN F06, Phase 2 budget exit). An application price cannot
+guarantee a vendor bill.
+
+**Not decided here.** The price's source. Phase 2 takes it from the caller, so a
+real price for the live model is a user-supplied, dated fact; the byte bound is
+large for a real model against the default ceiling, and pricing the encoded
+request once it is built is the upgrade (CLAUDE.md known gaps).
+
+## 2026-09-13 §41 — The canonical Markdown handoff's identity, storage and citations
+
+(This repository's §41; the inherited table above maps CAOS-Final's own §41.)
+
+**Decision.** For the Phase 3 adapter (`canonical-markdown-v1`, modules CP-0,
+CP-L10 and CP-5 only):
+
+1. **Host identity is pinned and reproduced.** A run's subject — issuer id and
+   name, reporting period, analysis date — is immutable run input covered by
+   the plan-gate fingerprint. The host derives the vendor run id
+   (`COS-<UTC run creation>-<run id hex>`) and the attempt ordinal, builds the
+   vendor invocation fields with the bundle's own envelope code, hands them to
+   the module to copy, and checks them with the vendor's reproduce-and-match.
+   Provider-claimed identity never survives (invariant 3).
+2. **Storage.** The accepted artifact's `artifact_sha256` is the SHA-256 of the
+   exact Markdown bytes, which are the only analytical authority and what
+   downstream modules receive. A host record blob, referenced by
+   `artifacts.record_sha256` and written in the same acceptance transaction,
+   holds adapter/build/authority identity, the attempt ordinal, call-time
+   upstream digests, typed projections and verified citations. Readers verify
+   both blobs and their binding, re-parse projections from the Markdown and
+   compare them; the record is never read back as fact.
+3. **Citations.** The provider answers on a closed transport
+   `{"canonical_markdown": ..., "citations": [{source_id, page, matched_text}]}`.
+   Each quote must occur verbatim in the Markdown and anchor exactly once in
+   the delivered evidence (invariant 11); any citation that fails refuses the
+   whole handoff, since the Markdown cannot be edited, and a handoff with no
+   citation is refused. The accepted identity is the pair of the Markdown hash
+   and the host record hash; citations are a host-verified attachment bound by
+   the record, not derived data. This refines §26 for Markdown. The transport is not JSON inside the
+   Markdown, which the vendor forbids.
+
+**Why.** §29 makes the exact Markdown the authority and names run, route,
+bundle and upstream as host-owned; the vendor treats invocation reproduction as
+a completion condition, so skipping the `credit_os_*` fields would be a quiet
+non-conformance. Lineage requires the Markdown hash as the artifact identity.
+Coordinates cannot be recovered from vendor register locators, and editing the
+Markdown to add them is forbidden, so quotes travel beside it.
+
+**Not decided here.** Vendor rules with no Python implementation are not
+reimplemented by the host; they are recorded as known gaps when the adapter
+lands.
+
+## 2026-09-13 §42 — Migrating to the canonical adapter without a lasting bypass
+
+**Decision.** Task 3.1 replaces the claims-JSON carrier in bounded, gate-green
+slices (the binding re-slice in the Task 3.1 brief):
+
+1. **Temporary dispatch from pinned facts.** Until slice f-1, the adapter
+   version pinned in a run input is derived from the pinned route alone:
+   `canonical-markdown-v1` when every node's module is a canonical adapter
+   module, `claims-json-v1` otherwise. No flag, environment value or caller
+   argument chooses it, and a canonical route cannot run as claims. Acceptance
+   requires `artifacts.record_sha256` exactly when the pin is canonical. Slice
+   f-1 makes the adapter a single constant and removes every claims branch;
+   Task 3.1 is not accepted while `claims-json-v1` execution exists.
+   *Retired 2026-09-13 (slice f-1c):* `adapter_for` is gone; every new pin is
+   `canonical-markdown-v1` with a subject, a stored `claims-json-v1` pin
+   refuses `RUN_INPUT_INVALID` at `execution_input`, runner and acceptance,
+   acceptance always requires `record_sha256`, and the runtime, API, proof and
+   matrix refuse a NULL record `ARTIFACT_RECORD_MISMATCH` rather than read a
+   claims body. The unreachable claims executor and envelope parser remain for
+   deletion in f-2a/f-2b.
+2. **Other routes are disabled at execution, not at pinning.** After f-1,
+   `execution_input` and acceptance refuse a route with a non-adapter module,
+   before any attempt, reservation or call. Route resolution, pinning and gates
+   stay general, because they are governance proven independently and Phase 5
+   extends the adapter to further owners. *Implemented in f-1c:* both points
+   call `gates.require_adapter_route` and refuse
+   `HANDOFF_MODULE_UNSUPPORTED`; `run_route` reads `execution_input` before its
+   first attempt.
+3. **Blocked handoffs are diagnostics.** The canonical Markdown of every
+   response is stored as a blob before validation and its hash recorded as the
+   attempt's `diagnostic_sha256` with the call outcome; a response that
+   validates with `qa_status: Blocked` ends the run `BLOCKED` and is never an
+   accepted artifact. *Refined 2026-09-13 (c-5b remediation):* the diagnostic
+   blob holds the exact response body (the whole closed transport), so the
+   runtime re-derives a Blocked verdict -- identity, validation and anchoring --
+   from committed facts before every attempt and before ending a run BLOCKED.
+4. **Where citations are re-anchored.** Every reader verifies both blobs, their
+   binding and the re-parsed projections. Citations are re-anchored against the
+   token index by the proof, the qualification matrix and deliverable freezing,
+   not on every frontier pass or API read, whose I/O budgets stay fixed.
+
+**Why.** Moving tests first has nothing to run against, and one switch commit
+would exceed 3,000 changed lines. Deriving the adapter from the pinned route
+keeps each intermediate commit correct and replayable; the dated expiry and
+acceptance blocker keep the dispatch from becoming a compatibility path.
+`call_outcomes` is written before analysis and is immutable, so diagnostic bytes
+must be addressed before validation.
+
+**Rollback.** Before f-1 each slice reverts alone, and migration 0012 only adds
+a nullable column. After f-1 rollback is a revert of commits, never a switch.
+
+## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
+
+**Decision.** Eight changes, none touching a required check's name, a
+threshold or a scanner rule:
+
+1. **`push` runs on `main` only.** A branch with an open pull request is
+   checked by its `pull_request` run; a push-triggered run of the same head
+   sat in a different concurrency group and was never cancelled by it.
+2. **The workflow token is `contents: read`** unless a job widens it; only
+   `security` does, to read pull requests for gitleaks.
+3. **One pin per action.** Every job uses `actions/checkout` v7.0.1 and
+   `actions/setup-python` v7.0.0; `frontend`'s `actions/upload-artifact`
+   matches `test`'s, v7.0.1. Each commit-pinned.
+4. **`astral-sh/setup-uv` v10.1.0**, commit-pinned, installs uv 0.12.5 (the
+   version `make venv` already installs with) with its download cache keyed
+   on the job's lock. Every Python job runs `uv pip install --system
+   --require-hashes --only-binary :all:` in place of `pip install`.
+5. **`.mypy_cache`** is cached in the `types` job, keyed on the dev lock.
+6. **Playwright's browsers** are cached in the `frontend` job, keyed on
+   `frontend/package-lock.json`; `--with-deps` still installs the OS
+   libraries the cache does not cover.
+7. **`pytest-xdist==3.8.0`** (bringing `execnet==2.1.2`) joins the
+   development lock, hashed and wheels-only. `make test` and the `test` CI
+   job run `pytest -n auto`. Each worker builds its own migrated template
+   database (below) and every test still mints a uniquely named database, so
+   no worker shares state with another. `test-provider`, the `postgres` job
+   and the live provider suite stay single-process.
+8. **`tests/conftest.py`'s `case` fixture clones a session-scoped, already
+   migrated template database** (`CREATE DATABASE ... TEMPLATE`) instead of
+   applying every migration to a fresh database per test; `case` still calls
+   `apply_schema`, which verifies the clone's recorded migration prefix.
+   `empty_database` stays genuinely empty for every test that does not
+   request `case`.
+9. **`.dockerignore`** limits the `image` job's build context to what the
+   Dockerfile copies (`requirements.txt`, `server/`, `vendor/`), and the
+   `image` job builds with commit-pinned `docker/setup-buildx-action` v4.3.0
+   and `docker/build-push-action` v7.3.0, with `cache-from/to: type=gha`.
+   The image is loaded for Trivy and never pushed.
+
+**Reason.** Measured locally against a real PostgreSQL: the offline suite ran
+in a fraction of its serial time under `-n auto`, with the coverage floor
+still holding, because most of its wall time is round trips to PostgreSQL
+rather than CPU. A push to a branch with an open pull request started CI
+twice for no reason `cancel-in-progress` could catch. The default workflow
+token may carry write scopes no job needs. Mixed action versions are two
+things to maintain per action, and `pip install` with no cache re-downloaded
+every wheel on every run.
+
+**Cost.** A test that depended on another test's side effects or on global
+collection order could now fail intermittently under `-n auto`; every worker
+must collect the identical test set, which `pytest-xdist` itself refuses if
+they disagree. The GitHub Actions cache is a mutable input to the image
+build, but every layer it restores is still keyed on the pinned base digest
+and the hashed lock, and Trivy scans the loaded result either way.
+
+**Rollback.** Each item reverts independently: drop `-n auto` from the two
+call sites (the dependency can stay unused), restore `docker build -t
+caos:ci .` in the `image` job, or drop any one cache block without touching
+the others.
+
+## 2026-09-14 §49 — `.sql` files are excluded from SonarCloud analysis, not run through a Data Dictionary
+
+**Decision.** `sonar.exclusions` in `sonar-project.properties` adds `**/*.sql`
+beside the existing `vendor/**`.
+
+**Reason.** `sonar.sources` lists `scripts` and `server`, and both hold plain
+PostgreSQL DDL: `server/store/schema.sql`, its thirteen numbered migrations,
+and `scripts/dev-init.sql`. SonarCloud's PL/SQL sensor claims `.sql` files by
+extension regardless of dialect, and the analysis logged: "The Data
+Dictionary is not configured for the PLSQL analyzer, which prevents rule(s)
+S3641, S3921, S3651, S3618 from raising issues." A Data Dictionary is an
+imported catalog of Oracle schema metadata (SonarCloud's own PL/SQL docs);
+this project has no Oracle database and nothing that would produce one. The
+four rules cannot fire correctly against non-Oracle SQL even if one were
+supplied, so excluding the files is the fix, not the dictionary the message
+suggests.
+
+**Cost.** Rule-based findings, if SonarCloud ever added a real PostgreSQL
+sensor, would need this exclusion revisited. `test_dependency_pins.py`'s
+class of gate does not cover `sonar-project.properties`, so nothing enforces
+this file's shape in CI; the pre-existing `vendor/**` entry is the same kind
+of unenforced exclusion.
+
+**Rollback.** Drop `,**/*.sql` from the one line.

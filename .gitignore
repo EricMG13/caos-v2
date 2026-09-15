@@ -5,6 +5,7 @@ __pycache__/
 .claude/worktrees/
 node_modules/
 frontend/dist/
+frontend/dist-demo/
 frontend/playwright-report/
 frontend/test-results/
 frontend/a11y-results/
@@ -14,6 +15,7 @@ frontend/a11y-results/
 .DS_Store
 .env
 bandit.json
+/trivy.json
 coverage.xml
 .coverage
 uv.lock

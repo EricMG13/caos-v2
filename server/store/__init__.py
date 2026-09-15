@@ -1,19 +1,8 @@
-"""The store: one PostgreSQL, and the schema it is required to already have.
-
-`docs/REBUILD_PLAN.md` Phase 1 asks for the schema "in full at startup", which is
-a claim about what a running process may assume. `apply_schema` is what makes the
-claim true, and the reason it records a digest rather than re-running idempotent
-DDL is in `schema.sql`: statements that quietly do nothing cannot tell a process
-started against last month's database that a column it is about to write is not
-there.
-
-Drift is a refusal, not a migration. This repository has never deployed, so there
-is no upgrade path to honour yet; the day there is, it is a decision entry and a
-migration table, not an `IF NOT EXISTS` (CLAUDE.md known gaps).
-"""
+"""One PostgreSQL store with ordered, immutable host-owned migrations."""
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
@@ -26,15 +15,68 @@ from server.refusals import Refusal, RefusalCode
 type StoreConnection = psycopg.Connection[tuple[Any, ...]]
 
 SCHEMA = (Path(__file__).with_name("schema.sql")).read_text(encoding="utf-8")
+# Append reviewed SQL files here; never edit an applied entry or schema.sql.
+MIGRATIONS = (
+    ("0001_legacy", SCHEMA),
+    (
+        "0002_extraction",
+        Path(__file__).with_name("0002_extraction.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0003_source_sets",
+        Path(__file__).with_name("0003_source_sets.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0004_route_integrity",
+        Path(__file__)
+        .with_name("0004_route_integrity.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0005_run_inputs",
+        Path(__file__).with_name("0005_run_inputs.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0006_budget",
+        Path(__file__).with_name("0006_budget.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0007_call_outcomes",
+        Path(__file__).with_name("0007_call_outcomes.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0008_frozen_evidence",
+        Path(__file__)
+        .with_name("0008_frozen_evidence.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0009_accepted_owner",
+        Path(__file__).with_name("0009_accepted_owner.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0010_blocked_runs",
+        Path(__file__).with_name("0010_blocked_runs.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0011_run_subject",
+        Path(__file__).with_name("0011_run_subject.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0012_artifact_record",
+        Path(__file__)
+        .with_name("0012_artifact_record.sql")
+        .read_text(encoding="utf-8"),
+    ),
+)
 
 # One well-known lock, held for the applying transaction only, so two processes
 # starting at once do not both read an empty bookkeeping table and both apply.
 # The value is arbitrary and permanent; it identifies this lock, nothing else.
 _SCHEMA_LOCK = 0x0CA05_5CE_1
-# The one table declared here rather than in schema.sql, because it is what
-# decides whether schema.sql has been applied and so has to exist first. `IF NOT
-# EXISTS` is right here and wrong there for the same reason: this statement is
-# meant to do nothing on every start after the first.
+# Metadata lives outside the immutable baseline. The legacy digest is replaced
+# by a digest of the full ordered history on adoption. IF NOT EXISTS only
+# bootstraps metadata; it never substitutes for a business-schema migration.
 #
 # One row, enforced by the database rather than argued from the lock above: the
 # primary key admits only `true` and the CHECK admits only `true`, so a second
@@ -44,6 +86,12 @@ _BOOKKEEPING = (
     " only_row boolean PRIMARY KEY DEFAULT true CHECK (only_row),"
     " applied_digest text NOT NULL)"
 )
+_HISTORY = (
+    "CREATE TABLE IF NOT EXISTS store_migrations ("
+    " version integer PRIMARY KEY CHECK (version > 0),"
+    " name text NOT NULL UNIQUE, digest text NOT NULL,"
+    " applied_at timestamptz NOT NULL DEFAULT now())"
+)
 
 
 class RunStatus(StrEnum):
@@ -52,6 +100,8 @@ class RunStatus(StrEnum):
     RUNNING = "RUNNING"
     COMPLETE = "COMPLETE"
     FAILED = "FAILED"
+    # Recoverable: the route has required work no accepted result can release.
+    BLOCKED = "BLOCKED"
 
 
 def connect(url: str) -> StoreConnection:
@@ -59,29 +109,77 @@ def connect(url: str) -> StoreConnection:
     return psycopg.connect(url, autocommit=False)
 
 
-def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
-    """Apply `sql` to a database nothing has applied a schema to; else check it.
+def rollback_or_close(conn: StoreConnection) -> None:
+    """A failed rollback must not mask the refusal or leave a committable unit."""
+    try:
+        conn.rollback()
+    except psycopg.Error:
+        conn.close()
 
-    Refuses `STORE_SCHEMA_DRIFT` when the database was built from a different
-    declared schema. The refusal carries the code alone: the schema body would
-    put table and column names into whatever logs it.
+
+def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
+    """Advance a verified migration prefix atomically, or refuse sanitized.
+
+    Owns and completes the caller transaction, as before: call before business
+    writes. `sql` is retained for compatibility but must match the legacy file.
     """
     if conn.autocommit:
-        # Both guarantees below are properties of one transaction: the advisory
-        # lock is transaction-scoped, and the DDL has to land with the digest
-        # that records it or not at all. Autocommit voids both silently, so it
-        # is refused rather than supported.
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
-    digest = sha256(sql.encode("utf-8")).hexdigest()
+    try:
+        _migrate(conn, sql)
+        conn.commit()
+    except (Refusal, psycopg.Error):
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+
+
+def _migrate(conn: StoreConnection, sql: str) -> None:
+    """Validate the complete applied prefix under the lock before advancing it."""
+    if sql != SCHEMA or not MIGRATIONS or MIGRATIONS[0] != ("0001_legacy", SCHEMA):
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
+    expected = [
+        (version, name, sha256(body.encode("utf-8")).hexdigest())
+        for version, (name, body) in enumerate(MIGRATIONS, 1)
+    ]
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK,))
     conn.execute(_BOOKKEEPING)
+    conn.execute(_HISTORY)
     applied = conn.execute("SELECT applied_digest FROM store_schema").fetchone()
-    if applied is None:
-        conn.execute(sql)
-        conn.execute("INSERT INTO store_schema (applied_digest) VALUES (%s)", (digest,))
-    elif applied[0] != digest:
-        # Rolling back here rather than leaving it to the caller releases the
-        # advisory lock now; a refused startup should not hold it while it dies.
-        conn.rollback()
+    history = conn.execute(
+        "SELECT version, name, digest FROM store_migrations ORDER BY version"
+    ).fetchall()
+    applied_count = len(history)
+    # The head digest also binds the history length: deleting a trailing
+    # applied row cannot turn a newer database into a valid older prefix.
+    head = sha256(json.dumps(history).encode("utf-8")).hexdigest()
+    legacy = applied == (expected[0][2],) and not history
+    if (
+        history != expected[:applied_count]
+        or (applied is None and history)
+        or (applied is not None and not legacy and applied != (head,))
+    ):
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
-    conn.commit()
+    if applied_count == len(expected):
+        return
+    for version, name, digest in expected[applied_count:]:
+        if (version, name) == (8, "0008_frozen_evidence"):
+            # Historical v1 verification belongs only to this migration.
+            from server.store.extraction_integrity import _verify_extractions_v1
+
+            _verify_extractions_v1(conn)
+        if not (legacy and version == 1):
+            conn.execute(MIGRATIONS[version - 1][1])
+        conn.execute(
+            "INSERT INTO store_migrations (version, name, digest) VALUES (%s, %s, %s)",
+            (version, name, digest),
+        )
+    digest = sha256(json.dumps(expected).encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO store_schema (applied_digest) VALUES (%s)"
+        " ON CONFLICT (only_row)"
+        " DO UPDATE SET applied_digest = EXCLUDED.applied_digest",
+        (digest,),
+    )

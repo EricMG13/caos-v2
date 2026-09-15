@@ -1,32 +1,30 @@
-"""Human gates, bound to the content that was reviewed.
+"""Human approval binds a run's exact host-derived preview and complete input.
 
-Invariant 5: approval binds the exact reviewed content -- the preview digest plus
-the input fingerprint. Not the run, and not the moment.
-
-That choice does the work of a whole invalidation mechanism. An approval stores
-the fingerprint of what the approver was shown; `gate_state` compares it with the
-fingerprint of what is there *now*. So a gate reopens when the content moves, and
-nothing has to go looking for approvals to cancel -- there is no list to keep
-correct, and no way for a withdrawal to be applied to the sources and forgotten
-at the gate.
-
-`withdraw_source` is the other half of invariant 1. It removes evidence a
-conclusion may already rest on, so it is a governed write: recorded in the chain,
-refused to someone who may not do it, and never a delete. The source keeps its
-row and leaves `live_sources`, which is what makes every later read refuse.
+Historical previews grant no authority: use also checks live sources and standing.
+Runtime must call under its execution-boundary locks and recheck at acceptance.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from hashlib import sha256
 from uuid import UUID
 
+import psycopg
+
+from server import methodology
+from server.engine.route import ResolvedRoute
+from server.methodology.bundle import Bundle
+from server.methodology.handoff import ADAPTER_MODULES
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
-from server.store.members import Standing
+from server.store.events import lock_run
+from server.store.members import Standing, satisfies, standing_of
+from server.store.run_inputs import RunInput, _load_run_input, input_fields
+from server.store.source_sets import SourceSet
 
 
 class Gate(StrEnum):
@@ -56,6 +54,82 @@ class GateApproval:
     input_fingerprint: str
 
 
+@dataclass(frozen=True, slots=True)
+class GatePreview:
+    """Show `content` exactly; submit its digests as expectations, never authority."""
+
+    run_id: UUID
+    case_id: UUID
+    gate: Gate
+    content: str
+    preview_sha256: str
+    input_fingerprint: str
+
+
+def gate_preview(conn: StoreConnection, run_id: UUID, gate: Gate) -> GatePreview:
+    """Historical content, even after withdrawal; caller owns the read transaction."""
+    preview = _preview(conn, run_id, gate)
+    if preview is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return preview
+
+
+def _preview(conn: StoreConnection, run_id: UUID, gate: Gate) -> GatePreview | None:
+    loaded = _load_run_input(conn, run_id)
+    return None if loaded is None else _historical_preview(*loaded, gate)
+
+
+def _historical_preview(
+    pin: RunInput, route: ResolvedRoute, source: SourceSet, gate: Gate
+) -> GatePreview:
+    data: dict[str, object] = {
+        "format_version": pin.format_version,
+        "gate": gate.value,
+        "input": {
+            **input_fields(pin),
+            "run_id": str(pin.run_id),
+            "case_id": str(pin.case_id),
+        },
+    }
+    if gate is Gate.SOURCE_SET:
+        data["sources"] = [
+            {**asdict(member), "source_id": str(member.source_id)}
+            for member in source.members
+        ]
+    else:
+        data["route"] = asdict(route)
+    content = json.dumps(
+        data, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2
+    )
+    return GatePreview(
+        pin.run_id,
+        pin.case_id,
+        gate,
+        content,
+        sha256(content.encode("utf-8")).hexdigest(),
+        pin.input_fingerprint,
+    )
+
+
+def _sources_live(conn: StoreConnection, run_id: UUID) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM run_inputs i JOIN source_set_members m"
+            " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
+            " LEFT JOIN live_sources s"
+            " ON (s.case_id, s.source_id) = (m.case_id, m.source_id)"
+            " LEFT JOIN source_extractions e ON e.source_id = s.source_id"
+            " WHERE i.run_id = %s AND (s.source_id IS NULL OR"
+            " (s.document_sha256, e.extractor_identity, e.output_sha256,"
+            " e.extraction_sha256) IS DISTINCT FROM"
+            " (m.document_sha256, m.extractor_identity, m.output_sha256,"
+            " m.extraction_sha256)) LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        is None
+    )
+
+
 def approve_gate(conn: StoreConnection, approval: GateApproval) -> None:
     """Release a gate, as a governed write requiring APPROVER standing.
 
@@ -78,6 +152,14 @@ def approve_gate(conn: StoreConnection, approval: GateApproval) -> None:
     )
 
     def write(connection: StoreConnection) -> None:
+        preview = gate_preview(connection, approval.run_id, approval.gate)
+        if (approval.preview_sha256, approval.input_fingerprint) != (
+            preview.preview_sha256,
+            preview.input_fingerprint,
+        ):
+            raise Refusal(RefusalCode.GATE_APPROVAL_MISMATCH)
+        if not _sources_live(connection, approval.run_id):
+            raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
         connection.execute(
             "INSERT INTO run_gates (run_id, gate, preview_sha256, input_fingerprint,"
             " approved_by) VALUES (%s, %s, %s, %s, %s)"
@@ -97,31 +179,106 @@ def approve_gate(conn: StoreConnection, approval: GateApproval) -> None:
     governed_write(conn, action, write)
 
 
-def gate_state(
-    conn: StoreConnection, run_id: UUID, gate: Gate, current_fingerprint: str
-) -> GateState:
-    """Whether the gate is released *for the content that is there now*.
-
-    An approval whose fingerprint no longer matches releases nothing. It is an
-    answer to a question nobody is asking any more, and treating it as current
-    is how a run executes against a set its approver never saw.
-    """
-    row = conn.execute(
-        "SELECT input_fingerprint FROM run_gates WHERE run_id = %s AND gate = %s",
-        (run_id, gate.value),
-    ).fetchone()
-    if row is None or str(row[0]) != current_fingerprint:
-        return GateState.OPEN
+def gate_state(conn: StoreConnection, run_id: UUID, gate: Gate) -> GateState:
+    """Current eligibility in the caller's transaction; corrupt identity refuses."""
+    try:
+        preview = _preview(conn, run_id, gate)
+        if preview is None:
+            return GateState.OPEN
+        if not _approved(conn, preview) or not _sources_live(conn, run_id):
+            return GateState.OPEN
+    except psycopg.Error:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     return GateState.RELEASED
+
+
+def _approved(conn: StoreConnection, preview: GatePreview) -> bool:
+    row = conn.execute(
+        "SELECT preview_sha256, input_fingerprint, approved_by FROM run_gates"
+        " WHERE run_id = %s AND gate = %s",
+        (preview.run_id, preview.gate.value),
+    ).fetchone()
+    return (
+        row is not None
+        and row[:2] == (preview.preview_sha256, preview.input_fingerprint)
+        and satisfies(
+            standing_of(conn, case_id=preview.case_id, user_id=row[2]),
+            Standing.APPROVER,
+        )
+    )
+
+
+def approved_run_input(
+    conn: StoreConnection, run_id: UUID
+) -> tuple[RunInput, ResolvedRoute]:
+    """Live authority under case/run locks; caller owns the whole transaction.
+
+    Runtime and acceptance integration remain separate. This read is not an
+    atomic provider-call claim and does not prove frozen block/token contents.
+    """
+    try:
+        try:
+            status = lock_run(conn, run_id)
+        except Refusal as refused:
+            if refused.code is RefusalCode.RUN_NOT_FOUND:
+                raise Refusal(RefusalCode.RUN_INPUT_INVALID) from None
+            raise
+        if status is not RunStatus.RUNNING:
+            raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+        loaded = _load_run_input(conn, run_id)
+        if loaded is None:
+            raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+        if not _sources_live(conn, run_id):
+            raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        for gate in Gate:
+            if not _approved(conn, _historical_preview(*loaded, gate)):
+                raise Refusal(RefusalCode.GATE_APPROVAL_MISMATCH)
+    except psycopg.Error:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    pin, route, _source = loaded
+    return pin, route
+
+
+def execution_input(
+    conn: StoreConnection, run_id: UUID, bundle: Bundle
+) -> tuple[RunInput, ResolvedRoute]:
+    """Require the actual executing Bundle/host adapter beside live authority.
+
+    `RUN_INPUT_INVALID` for a pin of another build, manifest or adapter (a
+    `claims-json-v1` pin among them); `HANDOFF_MODULE_UNSUPPORTED` for a route
+    with a module the adapter does not own (§42.2) -- before any attempt,
+    reservation or call, since every executing caller reads this first.
+    """
+    pin, route = approved_run_input(conn, run_id)
+    if not isinstance(bundle, Bundle):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if (pin.build_id, pin.manifest_sha256, pin.adapter_version) != (
+        bundle.build_id,
+        bundle.manifest_sha256,
+        methodology.CANONICAL_ADAPTER_VERSION,
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    require_adapter_route(route)
+    return pin, route
+
+
+def require_adapter_route(route: ResolvedRoute) -> None:
+    """Refuse a route the canonical adapter does not own every module of (§42.2).
+
+    Pinning, gates and resolution stay general; execution and acceptance do not.
+    """
+    if any(node.module_id not in ADAPTER_MODULES for node in route.nodes):
+        raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
 
 
 def source_set_fingerprint(conn: StoreConnection, case_id: UUID) -> str:
     """A digest over the case's live sources.
 
+    Compatibility only, not an enforced run pin; new snapshots use source_sets.
     Order-independent, because the order documents were admitted in is not a
     change to the evidence and must not reopen a gate. Over `live_sources`, so a
-    withdrawal moves it -- which is the whole mechanism by which withdrawal
-    reopens a gate.
+    withdrawal moves this compatibility digest. Approval uses complete pins and
+    checks current withdrawal separately.
     """
     rows = conn.execute(
         "SELECT document_sha256 FROM live_sources WHERE case_id = %s"
@@ -143,7 +300,7 @@ def withdraw_source(
     Never a delete: a run that already cited this document has to stay
     explicable, so the row keeps its place and leaves `live_sources`. Every later
     `read_evidence` refuses because it reads through that view, and every gate
-    bound to the old fingerprint reopens because the fingerprint moved.
+    bound to that captured member reopens because the member is no longer live.
     """
     action = GovernedAction(
         case_id=case_id,
@@ -170,9 +327,17 @@ def withdraw_source(
 
 
 def _case_of(conn: StoreConnection, run_id: UUID) -> UUID:
-    row = conn.execute(
-        "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
+        ).fetchone()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
     if row is None:
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     return UUID(str(row[0]))

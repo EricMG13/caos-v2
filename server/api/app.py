@@ -28,11 +28,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager
+from functools import cache
 from json import dumps
 from os import environ
 from pathlib import Path
 from time import monotonic, sleep
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
@@ -48,6 +49,7 @@ from server.api.stream import TERMINAL, StreamEvent, tail
 from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
+    NodeResult,
     NodeState,
     ResolvedRoute,
     RouteNode,
@@ -57,6 +59,7 @@ from server.engine.route import (
     waiting_on,
 )
 from server.engine.runtime import accepted_artifacts
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
@@ -65,7 +68,19 @@ from server.store.routes import resolved_route
 # `GET /api/runs/{run_id}`: the run and its case in one row, the caller's
 # standing, the pinned route, the accepted attempts. Four, and it does not grow
 # with the size of the route -- which is the shape the predecessor got wrong.
-IO_BUDGET = 4
+RUN_READ_IO = 4
+# A canonical readiness row (§42.4) is read from its record under the host
+# identity the store rebuilds: the run input, the pinned route, the attempt's
+# owner and ordinal, the accepted digests, and the call-time narrowing's
+# artifact read. Measured on a LITE run
+# (`tests/test_canonical_readers.py`), per such row. A row without its record
+# refuses `ARTIFACT_RECORD_MISMATCH` (503) at no further cost.
+CANONICAL_READINESS_IO = 10
+# Readiness rows are the gate's and each QA_GATE source's. The catalog carries
+# one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a
+# constant, not a function of route length.
+READINESS_ROWS = 2
+IO_BUDGET = RUN_READ_IO + READINESS_ROWS * CANONICAL_READINESS_IO
 
 # `GET /api/runs/{run_id}/events`: the same two authority reads, then whatever
 # the tail costs -- and that again on every poll. Named separately because it is
@@ -88,6 +103,8 @@ POLL_INTERVAL = 0.5
 
 DATABASE_URL = "CAOS_DATABASE_URL"
 BLOB_ROOT = "CAOS_BLOB_ROOT"
+# The vendored methodology bundle the image ships (`Dockerfile` copies it).
+VENDORED_BUNDLE = Path(__file__).resolve().parents[2] / "vendor" / "deploy-v"
 
 # The status for each refusal that can leave a route here. Unauthorised is
 # absent on purpose: it is answered as RUN_NOT_FOUND before it can be raised.
@@ -108,6 +125,23 @@ _STATUS = {
     # bound is bytes this server wrote -- a store fault like the three above it,
     # and nothing the caller holds could be corrected to avoid it.
     RefusalCode.READINESS_INVALID: 503,
+    RefusalCode.ROUTE_IDENTITY_INVALID: 503,
+    RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
+    # A canonical record that no longer binds its Markdown, pin or bundle is
+    # likewise the server's own bytes failing verification.
+    RefusalCode.ARTIFACT_RECORD_MISMATCH: 503,
+    RefusalCode.RUN_INPUT_INVALID: 503,
+    RefusalCode.AUTHORITY_BYTES_MISMATCH: 503,
+    # Re-validating an accepted handoff: it passed these under the same pin,
+    # so failing now is stored bytes or authority moving, never the request.
+    RefusalCode.HANDOFF_MALFORMED: 503,
+    RefusalCode.HANDOFF_BLOCKED: 503,
+    RefusalCode.HANDOFF_IDENTITY_MISMATCH: 503,
+    RefusalCode.HANDOFF_INCOMPLETE: 503,
+    RefusalCode.HANDOFF_UNDECLARED_FIELD: 503,
+    RefusalCode.HANDOFF_MODULE_UNSUPPORTED: 503,
+    RefusalCode.ATTEMPT_NOT_FOUND: 503,
+    RefusalCode.AUTHORITY_MODULE_UNKNOWN: 503,
 }
 
 
@@ -117,8 +151,9 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     without a database.
 
     "Postgres schema in full at startup" is the store's rule, and `apply_schema`
-    is idempotent -- it applies to an empty database, checks the digest against
-    an applied one, and refuses `STORE_SCHEMA_DRIFT` when they disagree. Doing it
+    is idempotent -- it advances a verified migration prefix on this fresh
+    connection and refuses `STORE_SCHEMA_DRIFT` for unknown or edited history.
+    It commits the migration transaction before requests begin. Doing it
     here rather than lazily means a process pointed at the wrong database dies at
     boot instead of serving 500s that look like a bug in the route.
     """
@@ -148,10 +183,10 @@ class NodeView(BaseModel):
     module_id: str
     state: str
     waiting_on: list[EdgeView]
-    # The one QA_GATE in the catalog is `CP-5 -> CP-6`. A node held by it is
-    # waiting for a person, not a module, and that is the only thing on this
-    # page a reviewer can act on -- so it is said, not left to be inferred from
-    # an edge type in a list.
+    # The one QA_GATE in the catalog is `CP-5 -> CP-6`. True while the node
+    # waits for the QA source's verdict. Once CP-5 answered anything but
+    # `Passed`, nothing is awaited: the node is BLOCKED by that verdict and
+    # `waiting_on` still names the edge (F03). Human QA approval is not here.
     awaiting_gate: bool
     # The gate's own verdict on this module, when the gate has given one. After
     # Phase 11 a node can be BLOCKED because CP-0 did not clear it, and no edge
@@ -231,9 +266,25 @@ def actor_from_request(request: Request) -> Actor:
     return actor_from_headers(request.headers)
 
 
+def methodology_bundle() -> Bundle:
+    """The process's one bundle, which canonical records are verified under.
+
+    Built once: its manifest snapshot is taken at construction and every use
+    re-verifies the bytes (invariant 4), so a moved manifest refuses rather than
+    being adopted.
+    """
+    return _vendored_bundle()
+
+
+@cache
+def _vendored_bundle() -> Bundle:
+    return Bundle(VENDORED_BUNDLE)
+
+
 Caller = Annotated[Actor, Depends(actor_from_request)]
 Store = Annotated[StoreConnection, Depends(store_connection)]
 Blobs = Annotated[BlobStore, Depends(blob_store)]
+Methodology = Annotated[Bundle, Depends(methodology_bundle)]
 
 
 @app.exception_handler(Refusal)
@@ -269,7 +320,9 @@ async def _malformed_run_id(
 
 
 @app.get("/api/runs/{run_id}", response_model=RunDocument)
-def read_run(run_id: UUID, actor: Caller, conn: Store, blobs: Blobs) -> RunDocument:
+def read_run(
+    run_id: UUID, actor: Caller, conn: Store, blobs: Blobs, bundle: Methodology
+) -> RunDocument:
     """The run, its pinned route, and each node's state with its reason.
 
     `actor` is declared first, and the order is load-bearing: see
@@ -281,11 +334,12 @@ def read_run(run_id: UUID, actor: Caller, conn: Store, blobs: Blobs) -> RunDocum
     if route is None:
         return RunDocument(run_id=run_id, status=status, route_digest=None, nodes=[])
 
-    accepted = accepted_artifacts(conn, blobs, route, run_id)
+    # The bundle is what reads a canonical run's gate and QA records (§42.4).
+    accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
     states = node_states(route, accepted)
-    # `accepted` already carries CP-0's body -- `accepted_artifacts` fetches it
-    # for exactly this reason -- so reading the verdict out of it here costs no
-    # further round trip and `IO_BUDGET` does not move.
+    # `accepted` already carries CP-0's readiness -- `accepted_artifacts` reads
+    # it for exactly this reason -- so reading the verdict out of it here costs
+    # no further round trip.
     readiness = readiness_from(route, accepted)
     return RunDocument(
         run_id=run_id,
@@ -296,7 +350,14 @@ def read_run(run_id: UUID, actor: Caller, conn: Store, blobs: Blobs) -> RunDocum
         # here rather than being reported over the top of it.
         route_digest=route_digest(route),
         nodes=[
-            _node_view(route, accepted, node, states, readiness) for node in route.nodes
+            # Nothing is awaited on a run that is no longer running.
+            view
+            if status == "RUNNING"
+            else view.model_copy(update={"awaiting_gate": False})
+            for view in (
+                _node_view(route, accepted, node, states, readiness)
+                for node in route.nodes
+            )
         ],
     )
 
@@ -385,18 +446,23 @@ def _marker(headers: object) -> int:
 
 def _node_view(
     route: ResolvedRoute,
-    accepted: Mapping[str, Any],
+    accepted: Mapping[str, NodeResult],
     node: RouteNode,
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
 ) -> NodeView:
-    unmet = waiting_on(route, accepted, node.route_node_id)
+    done = states[node.route_node_id] is NodeState.COMPLETE
+    unmet = () if done else waiting_on(route, accepted, node.route_node_id)
+    answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
     return NodeView(
         route_node_id=node.route_node_id,
         module_id=node.module_id,
         state=states[node.route_node_id].value,
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
-        awaiting_gate=any(edge.type is EdgeType.QA_GATE for edge in unmet),
+        awaiting_gate=any(
+            edge.type is EdgeType.QA_GATE and edge.source not in answered
+            for edge in unmet
+        ),
         # `.get`, not `[]`: a module the gate has not ruled on -- every module,
         # until CP-0's own artifact is accepted -- has no verdict rather than a
         # false one, and None is that absence on the wire.

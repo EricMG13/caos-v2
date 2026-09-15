@@ -17,17 +17,22 @@ them. The framework arrives with the route that needs it.
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from test_run_events import RECORD, approved_nodes
 
 from server.api.stream import IO_BUDGET, StreamEvent, tail
+from server.refusals import Refusal
 from server.store import StoreConnection
-from server.store.events import RunEvent
+from server.store.events import RunEvent, events_of
 from server.store.members import Standing, grant, revoke
 from server.store.runs import (
     Accepted,
+    block_run,
     complete_attempt,
+    complete_run,
     fail_run,
     start_attempt,
     start_run,
@@ -53,12 +58,18 @@ def watched(case: tuple[StoreConnection, UUID]) -> tuple[StoreConnection, UUID, 
     return conn, run_id, viewer
 
 
+def _approved(conn: StoreConnection, run_id: UUID, blobs: Path) -> str:
+    """Govern the run on the real route; acceptance requires it."""
+    return next(iter(approved_nodes(conn, run_id, blobs).values()))
+
+
 def _names(events: list[StreamEvent]) -> list[str]:
     return [event.name for event in events]
 
 
 def test_sse_closes_after_terminal_delivery(
     watched: tuple[StoreConnection, UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """The Phase 6 exit test.
 
@@ -67,7 +78,8 @@ def test_sse_closes_after_terminal_delivery(
     for events that a completed run will never produce.
     """
     conn, run_id, viewer = watched
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    node = _approved(conn, run_id, tmp_path)
+    attempt_id = start_attempt(conn, run_id, node)
     complete_attempt(
         conn,
         attempt_id=attempt_id,
@@ -76,28 +88,32 @@ def test_sse_closes_after_terminal_delivery(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
-    # An event queued behind the terminal one. Nothing the host writes puts one
-    # there -- a terminal run accepts no further transition -- so it is inserted
-    # directly. Without it this test would pass whether or not the tail stopped,
-    # because the terminal event happens to be last.
+    # Late billing may follow a terminal event; it must not keep this tail open.
     conn.execute(
         "INSERT INTO run_events (run_id, seq, name) VALUES (%s, %s, %s)",
-        (run_id, 4, RunEvent.ATTEMPT_STARTED.value),
+        (run_id, 7, RunEvent.CALL_OUTCOME_RECORDED.value),
     )
     conn.commit()
 
     delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
 
     assert _names(delivered) == [
+        RunEvent.ROUTE_PINNED.value,
+        RunEvent.INPUT_PINNED.value,
         RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
     assert delivered[-1].name == RunEvent.RUN_COMPLETE.value, "the last thing sent"
-    assert len(delivered) == 3, "delivery stopped at the terminal event"
+    assert len(delivered) == 6, "delivery stopped at the terminal event"
+    assert _names(
+        list(tail(conn, run_id=run_id, actor_id=viewer, last_event_id=6))
+    ) == [RunEvent.CALL_OUTCOME_RECORDED.value]
 
 
 def test_a_failed_run_closes_the_stream_too(
@@ -109,6 +125,30 @@ def test_a_failed_run_closes_the_stream_too(
     delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
 
     assert _names(delivered) == [RunEvent.RUN_FAILED.value]
+
+
+def test_a_blocked_run_closes_the_stream_too(
+    watched: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, viewer = watched
+    assert block_run(conn, run_id)
+    assert not block_run(conn, run_id), "the terminal event is exactly-once"
+
+    delivered = list(tail(conn, run_id=run_id, actor_id=viewer))
+
+    assert _names(delivered) == [RunEvent.RUN_BLOCKED.value]
+
+
+def test_a_blocked_run_refuses_new_attempts(
+    watched: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    conn, run_id, _viewer = watched
+    block_run(conn, run_id)
+    with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+        start_attempt(conn, run_id, "CP-1")
+    # Blocked is not a way station to success: completion adds nothing.
+    assert not complete_run(conn, run_id)
+    assert [e.name for e in events_of(conn, run_id)] == [RunEvent.RUN_BLOCKED.value]
 
 
 def test_a_running_run_delivers_what_there_is_and_stops(
@@ -126,6 +166,7 @@ def test_a_running_run_delivers_what_there_is_and_stops(
 
 def test_a_tail_resumes_after_last_event_id(
     watched: tuple[StoreConnection, UUID, UUID],
+    tmp_path: Path,
 ) -> None:
     """`Last-Event-ID` is the seq of the last event the client actually got.
 
@@ -134,7 +175,8 @@ def test_a_tail_resumes_after_last_event_id(
     closes a stream that was already closed.
     """
     conn, run_id, viewer = watched
-    attempt_id = start_attempt(conn, run_id, "CP-1")
+    node = _approved(conn, run_id, tmp_path)
+    attempt_id = start_attempt(conn, run_id, node)
     complete_attempt(
         conn,
         attempt_id=attempt_id,
@@ -143,19 +185,21 @@ def test_a_tail_resumes_after_last_event_id(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
     first = list(tail(conn, run_id=run_id, actor_id=viewer))
 
     resumed = list(
-        tail(conn, run_id=run_id, actor_id=viewer, last_event_id=first[0].id)
+        tail(conn, run_id=run_id, actor_id=viewer, last_event_id=first[2].id)
     )
 
     assert _names(resumed) == [
+        RunEvent.CALL_OUTCOME_RECORDED.value,
         RunEvent.ATTEMPT_ACCEPTED.value,
         RunEvent.RUN_COMPLETE.value,
     ]
-    assert [event.id for event in resumed] == [2, 3]
+    assert [event.id for event in resumed] == [4, 5, 6]
 
 
 def test_resuming_from_the_last_event_delivers_nothing(

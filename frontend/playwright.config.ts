@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // The workbench smoke: three engines, no retries — a flake is a defect. Runs
-// against the static export served by `vite preview`, whose fixture
+// against the separate demo export served by `vite preview`, whose fixture
 // middleware answers the wire.
 export default defineConfig({
   testDir: "tests/workbench",
@@ -11,9 +11,9 @@ export default defineConfig({
   reporter: process.env.CI ? "line" : "list",
   use: { baseURL: "http://localhost:4173", trace: "retain-on-failure" },
   webServer: {
-    command: "npm run preview",
+    command: "npm run preview:demo",
     url: "http://localhost:4173/directory/",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
   projects: [

@@ -55,6 +55,7 @@ from server.qualification.matrix import (
     QualificationSet,
 )
 from server.refusals import Refusal, RefusalCode
+from server.store.run_inputs import RunSubject, valid_subject
 
 # The manifest's name inside the set's directory. Named, because "the JSON file
 # in there" is not a declared form.
@@ -65,6 +66,12 @@ MANIFEST = "qualification.json"
 # loader ignores is a statement the author believed they had made.
 _CASE_KEYS = frozenset({"label", "profile_id", "selection_id", "documents", "expects"})
 _EXPECT_KEYS = frozenset({"module_id", "document_sha256", "matched_text"})
+# Optional on a case, closed when present. Whether the values are a subject a
+# pin accepts is `prepare`'s question, asked before it writes anything.
+_SUBJECT_KEY = "subject"
+_SUBJECT_KEYS = frozenset(
+    {"issuer_id", "issuer_name", "reporting_period", "analysis_date"}
+)
 
 # The same bound `matrix.py` puts on a label when it digests one. Stated here
 # too because this is where an authored label first arrives.
@@ -99,7 +106,9 @@ def _manifest(root: Path) -> Mapping[str, Any]:
 
 def _case(root: Path, entry: object) -> QualificationCase:
     """One declared case, with its documents read from beside the manifest."""
-    fields = _closed(entry, _CASE_KEYS)
+    declared = isinstance(entry, dict) and _SUBJECT_KEY in entry
+    keys = _CASE_KEYS | {_SUBJECT_KEY} if declared else _CASE_KEYS
+    fields = _closed(entry, keys)
     documents = _declared(fields, "documents")
     expects = _declared(fields, "expects")
     return QualificationCase(
@@ -108,7 +117,23 @@ def _case(root: Path, entry: object) -> QualificationCase:
         profile_id=_text(fields, "profile_id"),
         selection_id=_text(fields, "selection_id"),
         expects=tuple(_expect(item) for item in expects),
+        subject=_subject(fields[_SUBJECT_KEY]) if declared else None,
     )
+
+
+def _subject(item: object) -> RunSubject:
+    """The run subject a case declares: exactly its four strings."""
+    fields = _closed(item, _SUBJECT_KEYS)
+    declared = RunSubject(
+        issuer_id=_text(fields, "issuer_id"),
+        issuer_name=_text(fields, "issuer_name"),
+        reporting_period=_text(fields, "reporting_period"),
+        analysis_date=_text(fields, "analysis_date"),
+    )
+    # The pin's own rule: a manifest cannot digest a subject no pin accepts.
+    if not valid_subject(declared):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return declared
 
 
 def _document(root: Path, declared: object) -> Document:

@@ -9,21 +9,36 @@ A process that dies mid-run leaves accepted attempts behind. The next one
 recomputes `node_states` over exactly those rows and continues from the frontier
 that falls out. A node that completed is not run again, because it is COMPLETE,
 not because anything remembered that it was.
+
+Every run here is the canonical LITE route (CP-0 -> CP-L10 -> CP-5) through the
+real `ModuleProvider`, answered by `CanonicalCompletions` (Task 3.1 slice e-2).
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
+import psycopg
 import pytest
+from canonical_fixtures import (
+    CATALOG,
+    LITE_PROFILE,
+    LITE_SELECTION,
+    QUOTE,
+    VENDORED,
+    CanonicalCompletions,
+)
+from conftest import _url_for, approve_run, priced
+from psycopg.pq import TransactionStatus
 
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute, resolve_route
+from server.boundary_text import BoundaryText
+from server.engine import runtime as subject
+from server.engine.route import NodeResult, ResolvedRoute, resolve_route
 from server.engine.runtime import (
     Execution,
     Provider,
@@ -32,29 +47,24 @@ from server.engine.runtime import (
     artifact_digests,
     run_route,
 )
+from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import MANIFEST_NAME, Bundle
+from server.methodology.runner import ModuleProvider
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, connect
+from server.store.budget import reserve as reserve_budget
 from server.store.events import RunEvent, events_of
+from server.store.gates import Gate, withdraw_source
+from server.store.members import Standing, grant, revoke
+from server.store.routes import pin_route
 from server.store.runs import run_status, start_run
 
-CATALOG_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "vendor/deploy-v/skills/cp-os-credit-os/references"
-    / "CREDIT_OS_V_MODULE_CATALOG_v2.json"
-)
-PROFILE = "FULL_CREDIT_32"
-# Four nodes: CP-0, CP-1, CP-2, CP-2D. Small enough to count attempts by hand.
-SELECTION = "LIQUIDITY_REVIEW"
 ESTIMATE = Decimal("0.10")
-
-# CP-0's artifact says every module's evidence is there, so no soft edge is left
-# soft and the route runs straight through.
-READY_EVERYWHERE: dict[str, Any] = {
-    "content_to_module_map": [
-        {"module_id": module, "readiness_status": "READY"}
-        for module in ("CP-1", "CP-2", "CP-2D")
-    ]
-}
+# What `CanonicalCompletions` reports per call unless told otherwise.
+REPORTED = Decimal("0.0000041")
+LITE_ORDER = ["CP-0", "CP-L10", "CP-5"]
+# One line, so the fixtures' quote anchors on page 1 of the one source.
+REPORT = QUOTE.encode() + b" was USD 1,240.0m\n"
 
 
 class _Boom(Exception):
@@ -63,51 +73,105 @@ class _Boom(Exception):
 
 @dataclass
 class _Provider:
-    """Records what it was asked for, and can die on a chosen node."""
+    """The real module provider, recording what it was asked for; can die on a
+    chosen node after its attempt and reservation exist."""
 
-    blobs: BlobStore
+    inner: ModuleProvider
+    answers: CanonicalCompletions
     die_on: str | None = None
+    calls: list[str] = field(default_factory=list)
 
-    def __post_init__(self) -> None:
-        self.calls: list[str] = []
+    @property
+    def model(self) -> str:
+        return self.inner.model
 
-    def execute(self, route_node_id: str, module_id: str) -> ProviderResult:
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
         self.calls.append(module_id)
         if module_id == self.die_on:
             raise _Boom(module_id)
-        payload: dict[str, Any] = (
-            READY_EVERYWHERE if module_id == "CP-0" else {"module_id": module_id}
+        return self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
+
+
+@dataclass(frozen=True)
+class _Run:
+    conn: StoreConnection
+    blobs: BlobStore
+    bundle: Bundle
+    route: ResolvedRoute
+    run_id: UUID
+    source_id: UUID
+
+    def provider(
+        self,
+        die_on: str | None = None,
+        at_call: Callable[[], None] | None = None,
+        charge: Decimal = REPORTED,
+    ) -> _Provider:
+        answers = CanonicalCompletions(self.source_id, charge=charge, during=at_call)
+        inner = ModuleProvider(
+            self.conn, self.bundle, self.blobs, answers, self.route, self.run_id
         )
-        digest = self.blobs.put(json.dumps(payload).encode("utf-8"))
-        return ProviderResult(
-            artifact_sha256=digest,
-            charge=Decimal("0.01"),
-            model="a-model/for-the-test",
-            generation_id="gen-runtime-test",
+        return _Provider(inner, answers, die_on)
+
+    def run(self, provider: Provider, *, bundle: Bundle | None = None) -> None:
+        run_route(
+            self.conn,
+            self.blobs,
+            run_id=self.run_id,
+            route=self.route,
+            execution=Execution(provider, priced(ESTIMATE), bundle or self.bundle),
         )
-
-
-def test_the_fake_provider_satisfies_the_protocol(blobs: BlobStore) -> None:
-    """`Provider` is the seam Phase 5 fills with a real OpenRouter call. If the
-    stand-in here did not satisfy it, these tests would be exercising a shape
-    the real provider will not have."""
-    provider: Provider = _Provider(blobs)
-
-    result = provider.execute("RN-x", "CP-1")
-
-    assert result.artifact_sha256
-    assert result.charge == Decimal("0.01")
 
 
 @pytest.fixture
 def route() -> ResolvedRoute:
-    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    return resolve_route(catalog, PROFILE, SELECTION)
+    return resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
 
 
 @pytest.fixture
 def blobs(tmp_path: Path) -> BlobStore:
     return BlobStore(tmp_path / "blobs")
+
+
+@pytest.fixture
+def bundle() -> Bundle:
+    return Bundle(VENDORED)
+
+
+def _started(  # noqa: PLR0913
+    conn: StoreConnection,
+    case_id: UUID,
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    *,
+    ceiling: Decimal | None = None,
+) -> _Run:
+    [source_id] = admit_pack(
+        conn,
+        blobs,
+        case_id=case_id,
+        documents=[Document(filename=BoundaryText.of("runtime.txt"), data=REPORT)],
+    )
+    run_id = start_run(conn, case_id, budget_ceiling=ceiling)
+    conn.commit()
+    return _Run(conn, blobs, bundle, route, run_id, source_id)
+
+
+def _approved_run(  # noqa: PLR0913
+    conn: StoreConnection,
+    case_id: UUID,
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    *,
+    ceiling: Decimal | None = None,
+) -> _Run:
+    run = _started(conn, case_id, route, bundle, blobs, ceiling=ceiling)
+    approve_run(conn, case_id=case_id, run_id=run.run_id, route=route, bundle=bundle)
+    return run
 
 
 def _attempts_per_module(conn: StoreConnection, run_id: UUID) -> dict[str, int]:
@@ -119,89 +183,364 @@ def _attempts_per_module(conn: StoreConnection, run_id: UUID) -> dict[str, int]:
     return {str(node_id): int(count) for node_id, count in rows}
 
 
-def test_a_route_runs_to_completion(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+_WORK_TABLES = (
+    "run_attempts",
+    "budget_reservations",
+    "call_outcomes",
+    "budget_ledger",
+    "artifacts",
+)
+
+
+def _assert_no_work(run: _Run, provider: _Provider) -> None:
+    assert provider.calls == []
+    assert provider.answers.prompts == []
+    for table in _WORK_TABLES:
+        assert run.conn.execute(
+            "SELECT count(*) FROM " + table + " WHERE run_id=%s", (run.run_id,)
+        ).fetchone() == (0,), table
+
+
+def test_the_fake_provider_satisfies_the_protocol(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    """The recording wrapper must have the shape `run_route` calls, or these
+    tests would exercise a seam the real provider does not have."""
+    conn, case_id = case
+    provider: Provider = _started(conn, case_id, route, bundle, blobs).provider()
+
+    assert provider.model == "a-model/for-the-test"
+
+
+def test_an_unapproved_run_never_reaches_the_provider(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
     conn, case_id = case
-    run_id = start_run(conn, case_id)
+    run = _started(conn, case_id, route, bundle, blobs)
+    provider = run.provider(die_on="CP-0")
+
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        run.run(provider)
+
+    _assert_no_work(run, provider)
+
+
+def test_a_historical_route_without_a_complete_input_never_reaches_the_provider(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _started(conn, case_id, route, bundle, blobs)
+    pin_route(conn, run.run_id, route)
+    provider = run.provider()
+
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        run.run(provider)
+
+    _assert_no_work(run, provider)
+
+
+@pytest.mark.parametrize("gate", list(Gate))
+@pytest.mark.parametrize("fault", ["missing", "preview", "input"])
+def test_each_current_gate_is_required_before_work(  # noqa: PLR0913
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    gate: Gate,
+    fault: str,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    if fault == "missing":
+        conn.execute(
+            "DELETE FROM run_gates WHERE run_id=%s AND gate=%s", (run.run_id, gate)
+        )
+    else:
+        column = "preview_sha256" if fault == "preview" else "input_fingerprint"
+        conn.execute(
+            psycopg.sql.SQL(
+                "UPDATE run_gates SET {}=%s WHERE run_id=%s AND gate=%s"
+            ).format(psycopg.sql.Identifier(column)),
+            ("0" * 64, run.run_id, gate),
+        )
     conn.commit()
-    provider = _Provider(blobs)
+    provider = run.provider()
 
-    run_route(
-        conn, blobs, run_id=run_id, route=route, execution=Execution(provider, ESTIMATE)
-    )
+    with pytest.raises(Refusal, match=r"^GATE_APPROVAL_MISMATCH$"):
+        run.run(provider)
 
-    assert provider.calls == ["CP-0", "CP-1", "CP-2", "CP-2D"]
-    assert run_status(conn, run_id) is RunStatus.COMPLETE
-    assert [e.name for e in events_of(conn, run_id)].count(
+    _assert_no_work(run, provider)
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ("revoked", RefusalCode.GATE_APPROVAL_MISMATCH),
+        ("downgraded", RefusalCode.GATE_APPROVAL_MISMATCH),
+        ("withdrawn", RefusalCode.EVIDENCE_NOT_AVAILABLE),
+    ],
+)
+def test_live_authority_is_required_before_work(  # noqa: PLR0913
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    change: str,
+    code: RefusalCode,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    actor = conn.execute(
+        "SELECT DISTINCT approved_by FROM run_gates WHERE run_id=%s", (run.run_id,)
+    ).fetchone()
+    assert actor is not None
+    actor_id = UUID(str(actor[0]))
+    if change == "revoked":
+        revoke(conn, case_id=case_id, user_id=actor_id)
+        conn.commit()
+    elif change == "downgraded":
+        grant(conn, case_id=case_id, user_id=actor_id, standing=Standing.READER)
+        conn.commit()
+    else:
+        withdraw_source(
+            conn, case_id=case_id, source_id=run.source_id, actor_id=actor_id
+        )
+    provider = run.provider()
+
+    with pytest.raises(Refusal, match=f"^{code.value}$"):
+        run.run(provider)
+
+    _assert_no_work(run, provider)
+
+
+def test_the_final_pre_call_check_sees_a_late_revocation(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    actor = conn.execute(
+        "SELECT DISTINCT approved_by FROM run_gates WHERE run_id=%s", (run.run_id,)
+    ).fetchone()
+    assert actor is not None
+    conn.rollback()
+    original = reserve_budget
+    reservations = 0
+
+    def reserve_then_revoke(
+        connection: StoreConnection, attempt_id: UUID, amount: Decimal
+    ) -> None:
+        nonlocal reservations
+        original(connection, attempt_id, amount)
+        reservations += 1
+        if reservations == 2:
+            revoke(connection, case_id=case_id, user_id=UUID(str(actor[0])))
+            connection.commit()
+
+    monkeypatch.setattr(subject, "reserve", reserve_then_revoke)
+    provider = run.provider()
+
+    with pytest.raises(Refusal, match=r"^GATE_APPROVAL_MISMATCH$"):
+        run.run(provider)
+
+    assert provider.calls == ["CP-0"]
+    assert len(provider.answers.prompts) == 1
+    for table, count in (
+        ("run_attempts", 2),
+        ("budget_reservations", 2),
+        ("artifacts", 1),
+    ):
+        assert conn.execute(
+            "SELECT count(*) FROM " + table + " WHERE run_id=%s", (run.run_id,)
+        ).fetchone() == (count,), table
+
+
+def test_provider_transport_is_idle_and_holds_no_case_or_run_lock(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    checked: list[str] = []
+
+    def unlocked() -> None:
+        assert conn.info.transaction_status is TransactionStatus.IDLE
+        with connect(_url_for(conn.info.dbname)) as observer:
+            observer.execute(
+                "SELECT 1 FROM cases WHERE case_id=%s FOR UPDATE NOWAIT", (case_id,)
+            )
+            observer.execute(
+                "SELECT 1 FROM runs WHERE run_id=%s FOR UPDATE NOWAIT", (run.run_id,)
+            )
+            observer.rollback()
+        checked.append("transport")
+
+    # Inside the completion call itself: the moment the model is answering.
+    provider = run.provider(at_call=unlocked)
+    run.run(provider)
+
+    assert provider.calls == LITE_ORDER
+    assert checked == ["transport"] * 3
+
+
+@pytest.mark.parametrize(
+    "mode", ["pending", "autocommit", "repeatable", "serializable"]
+)
+def test_runtime_entry_preserves_caller_transaction_ownership(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    mode: str,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    if mode == "pending":
+        conn.execute("CREATE TABLE caller_work (id integer)")
+    elif mode == "autocommit":
+        conn.autocommit = True
+    else:
+        conn.isolation_level = (
+            psycopg.IsolationLevel.REPEATABLE_READ
+            if mode == "repeatable"
+            else psycopg.IsolationLevel.SERIALIZABLE
+        )
+    provider = run.provider()
+
+    with pytest.raises(Refusal, match=r"^STORE_NOT_TRANSACTIONAL$"):
+        run.run(provider)
+
+    assert provider.calls == []
+    if mode == "pending":
+        assert conn.info.transaction_status is TransactionStatus.INTRANS
+        assert conn.execute("SELECT to_regclass('caller_work')").fetchone() == (
+            "caller_work",
+        )
+    else:
+        assert conn.info.transaction_status is TransactionStatus.IDLE
+    conn.rollback()
+    conn.autocommit = False
+    conn.isolation_level = None
+    _assert_no_work(run, provider)
+
+
+@pytest.mark.parametrize("wrong", ["route", "bundle"])
+def test_caller_identity_cannot_replace_stored_authority(  # noqa: PLR0913
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+    tmp_path: Path,
+    wrong: str,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    executing = bundle
+    code = RefusalCode.ROUTE_IDENTITY_INVALID
+    if wrong == "route":
+        # Another canonical LITE route, so only the identity differs.
+        other = resolve_route(CATALOG, LITE_PROFILE, "LITE_DEEP_RESEARCH")
+        assert other != route
+        run = _Run(conn, blobs, bundle, other, run.run_id, run.source_id)
+    else:
+        raw = (bundle.root / MANIFEST_NAME).read_text(encoding="utf-8")
+        (tmp_path / MANIFEST_NAME).write_text(
+            raw.replace(bundle.build_id, "d" * 64), encoding="utf-8"
+        )
+        executing = Bundle(tmp_path)
+        code = RefusalCode.RUN_INPUT_INVALID
+    provider = run.provider()
+
+    with pytest.raises(Refusal, match=f"^{code.value}$"):
+        run.run(provider, bundle=executing)
+
+    _assert_no_work(run, provider)
+
+
+def test_a_route_runs_to_completion(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    conn, case_id = case
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    provider = run.provider()
+
+    run.run(provider)
+
+    assert provider.calls == LITE_ORDER
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
+    assert [e.name for e in events_of(conn, run.run_id)].count(
         RunEvent.RUN_COMPLETE.value
     ) == 1
 
 
 def test_recovery_is_recomputation(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
     """The Phase 4 exit test. Kill mid-run, restart, and the run completes
     without restarting completed nodes and without a checkpoint file."""
     conn, case_id = case
-    run_id = start_run(conn, case_id)
-    conn.commit()
+    run = _approved_run(conn, case_id, route, bundle, blobs)
 
-    dying = _Provider(blobs, die_on="CP-2")
+    dying = run.provider(die_on="CP-L10")
     with pytest.raises(_Boom):
-        run_route(
-            conn,
-            blobs,
-            run_id=run_id,
-            route=route,
-            execution=Execution(dying, ESTIMATE),
-        )
+        run.run(dying)
 
-    assert dying.calls == ["CP-0", "CP-1", "CP-2"]
-    assert run_status(conn, run_id) is RunStatus.RUNNING
-    before = _attempts_per_module(conn, run_id)
+    assert dying.calls == ["CP-0", "CP-L10"]
+    assert run_status(conn, run.run_id) is RunStatus.RUNNING
+    before = _attempts_per_module(conn, run.run_id)
 
     # The restart. Nothing was restored: node_states is recomputed over the rows
     # that survived, and the frontier falls out of them.
-    restarted = _Provider(blobs)
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(restarted, ESTIMATE),
-    )
+    restarted = run.provider()
+    conn.rollback()
+    run.run(restarted)
 
-    assert restarted.calls == ["CP-2", "CP-2D"], "completed nodes are not run again"
-    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    assert restarted.calls == ["CP-L10", "CP-5"], "completed nodes are not run again"
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
 
-    after = _attempts_per_module(conn, run_id)
+    after = _attempts_per_module(conn, run.run_id)
     completed_before = [
-        node_id
-        for node_id, count in before.items()
-        if node_id != _node_id(route, "CP-2")
+        node_id for node_id in before if node_id != _node_id(route, "CP-L10")
     ]
+    assert completed_before == [_node_id(route, "CP-0")]
     for node_id in completed_before:
         assert after[node_id] == 1, "an accepted node was attempted a second time"
 
 
 def test_no_checkpoint_is_written_anywhere(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
     """`docs/DECISIONS.md` §3: no checkpointer. The store's own tables are the
     execution state, so there is no second place for it to disagree from."""
     conn, case_id = case
-    run_id = start_run(conn, case_id)
-    conn.commit()
+    run = _approved_run(conn, case_id, route, bundle, blobs)
 
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(_Provider(blobs), ESTIMATE),
-    )
+    run.run(run.provider())
 
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE
     tables = conn.execute(
         "SELECT table_name FROM information_schema.tables"
         " WHERE table_schema = current_schema()"
@@ -210,101 +549,122 @@ def test_no_checkpoint_is_written_anywhere(
 
 
 def test_a_failed_attempt_leaves_its_row_and_its_reservation(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
     """One attempt row per try. The row and the reservation outlive the failure,
     because the call may have reached the provider and may be billed."""
     conn, case_id = case
-    run_id = start_run(conn, case_id)
-    conn.commit()
+    run = _approved_run(conn, case_id, route, bundle, blobs)
 
     with pytest.raises(_Boom):
-        run_route(
-            conn,
-            blobs,
-            run_id=run_id,
-            route=route,
-            execution=Execution(_Provider(blobs, die_on="CP-1"), ESTIMATE),
-        )
+        run.run(run.provider(die_on="CP-L10"))
 
+    assert _attempts_per_module(conn, run.run_id) == {
+        _node_id(route, "CP-0"): 1,
+        _node_id(route, "CP-L10"): 1,
+    }
     row = conn.execute(
-        "SELECT count(*) FROM budget_reservations WHERE run_id = %s", (run_id,)
+        "SELECT count(*) FROM budget_reservations WHERE run_id = %s", (run.run_id,)
     ).fetchone()
     assert row is not None
-    assert row[0] == 2, "CP-0 and the failed CP-1 both reserved"
+    assert row[0] == 2, "CP-0 and the failed CP-L10 both reserved"
 
 
 def test_the_run_stops_when_the_ceiling_is_reached(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
     """Invariant 8 reaching the loop: the next node is refused, not attempted."""
     conn, case_id = case
-    run_id = start_run(conn, case_id, budget_ceiling=Decimal("0.15"))
-    conn.commit()
-    provider = _Provider(blobs)
+    run = _approved_run(conn, case_id, route, bundle, blobs, ceiling=Decimal("0.15"))
+    provider = run.provider()
 
     with pytest.raises(Refusal) as caught:
-        run_route(
-            conn,
-            blobs,
-            run_id=run_id,
-            route=route,
-            execution=Execution(provider, ESTIMATE),
-        )
+        run.run(provider)
 
     assert caught.value.code is RefusalCode.BUDGET_CEILING_REACHED
     assert provider.calls == ["CP-0"], "the second node never reached the provider"
+    assert len(provider.answers.prompts) == 1
 
 
 def test_accepted_artifacts_reads_cp0s_payload_and_no_other(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
     """`node_states` needs CP-0's readiness and nothing else's body, so nothing
     else's body is fetched from the blob store."""
     conn, case_id = case
-    run_id = start_run(conn, case_id)
-    conn.commit()
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(_Provider(blobs), ESTIMATE),
+    run = _approved_run(conn, case_id, route, bundle, blobs)
+    run.run(run.provider())
+
+    accepted = accepted_artifacts(conn, blobs, route, run.run_id, bundle=bundle)
+
+    assert accepted[_node_id(route, "CP-0")].readiness == (
+        ("CP-5", "READY"),
+        ("CP-L10", "READY"),
     )
-
-    accepted = accepted_artifacts(conn, blobs, route=route, run_id=run_id)
-
-    assert accepted[_node_id(route, "CP-0")] == READY_EVERYWHERE
-    assert accepted[_node_id(route, "CP-1")] == {}
+    assert accepted[_node_id(route, "CP-L10")] == NodeResult()
+    assert accepted[_node_id(route, "CP-5")] == NodeResult()
 
 
 def test_artifact_digests_maps_accepted_attempts_to_their_digest(
-    case: tuple[StoreConnection, UUID], route: ResolvedRoute, blobs: BlobStore
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
 ) -> None:
-    """The join `accepted_artifacts` above and `runner.ModuleProvider._upstream`
+    """The join `accepted_artifacts` above and `executor._upstream_digests`
     both read now lives in this one function -- proved here in isolation from
     either caller, since a test that only ever saw it through one of them could
     not tell a coincidence from the shared row set the fix depends on."""
     conn, case_id = case
-    run_id = start_run(conn, case_id)
-    conn.commit()
+    run = _approved_run(conn, case_id, route, bundle, blobs)
 
-    assert artifact_digests(conn, run_id) == {}, "nothing accepted yet"
+    assert artifact_digests(conn, run.run_id) == {}, "nothing accepted yet"
+    conn.rollback()
 
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(_Provider(blobs), ESTIMATE),
-    )
+    provider = run.provider()
+    run.run(provider)
 
-    digests = artifact_digests(conn, run_id)
-    assert set(digests) == {
-        _node_id(route, module) for module in ("CP-0", "CP-1", "CP-2", "CP-2D")
-    }
-    assert json.loads(blobs.get(digests[_node_id(route, "CP-0")])) == READY_EVERYWHERE
+    digests = artifact_digests(conn, run.run_id)
+    assert set(digests) == {_node_id(route, module) for module in LITE_ORDER}
+    # Each digest addresses the exact Markdown that node's call answered.
+    for module, markdown in zip(LITE_ORDER, provider.answers.answers, strict=True):
+        assert blobs.get(digests[_node_id(route, module)]) == markdown
 
 
 def _node_id(route: ResolvedRoute, module_id: str) -> str:
     return next(n.route_node_id for n in route.nodes if n.module_id == module_id)
+
+
+def test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt(
+    case: tuple[StoreConnection, UUID],
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    """REPAIR_PLAN Phase 2 exit, check 5, after Task 3.1 slice f-1c.
+
+    The catalog's one QA_GATE (CP-5 -> CP-6) is on the FULL route, which the
+    canonical adapter does not execute (§42.2). The rule itself -- a CP-5 that
+    is not `Passed` never releases CP-6 -- is the pure
+    `test_qa_gate_blocks_cp6_until_cp5_accepted`; at runtime the route is
+    refused, approved end to end, before any attempt, reservation or call.
+    """
+    conn, case_id = case
+    full = resolve_route(CATALOG, "FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
+    run = _approved_run(conn, case_id, full, bundle, blobs)
+    provider = run.provider()
+
+    with pytest.raises(Refusal) as caught:
+        run.run(provider)
+
+    assert caught.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
+    _assert_no_work(run, provider)
+    assert run_status(conn, run.run_id) is RunStatus.RUNNING

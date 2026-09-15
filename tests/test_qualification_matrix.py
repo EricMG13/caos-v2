@@ -22,22 +22,26 @@ question they would ask is what the other cases did.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
+import shutil
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
-from conftest import gate_verdict
+from canonical_fixtures import LITE_PROFILE, LITE_SELECTION, CanonicalCompletions
+from conftest import approve_run, priced, route_fault
+from test_canonical_proof import _token_fault
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
-from server.methodology.bundle import Bundle
+from server.methodology.bundle import MANIFEST_NAME, Bundle
+from server.methodology.handoff import Projections
 from server.methodology.runner import ModuleProvider
-from server.provider import Completion
 from server.qualification.matrix import (
     ExpectedCitation,
     Matrix,
@@ -47,56 +51,24 @@ from server.qualification.matrix import (
     build_matrix,
     qualification_set_digest,
 )
+from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.routes import pin_route
+from server.store.gates import withdraw_source
+from server.store.members import Standing, grant
+from server.store.routes import resolved_route
 from server.store.runs import start_run
 
 REPO = Path(__file__).resolve().parents[1]
 VENDORED = REPO / "vendor/deploy-v"
-PROFILE = "FULL_CREDIT_32"
-SELECTION = "DEEP_RESEARCH"
+PROFILE = LITE_PROFILE
+SELECTION = LITE_SELECTION
 ESTIMATE = Decimal("0.50")
 
 QUOTE = "Total debt at 31 December 2026"
 REPORT = b"""Acme Holdings plc annual report 2026
 Total debt at 31 December 2026 was USD 1,240.0m
 """
-
-
-@dataclass
-class _Completions:
-    source_id: UUID
-    calls: list[str] = field(default_factory=list)
-
-    # What the host configured; with fallbacks off it is what answers.
-    model: str = "a-model/for-the-test"
-
-    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.calls.append(prompt[:24])
-        return Completion(
-            content=json.dumps(
-                {
-                    "claims": [
-                        {
-                            "statement": "Total debt was USD 1,240.0m.",
-                            "citations": [
-                                {
-                                    "source_id": str(self.source_id),
-                                    "page": 1,
-                                    "matched_text": QUOTE,
-                                }
-                            ],
-                        }
-                    ],
-                    # A verdict on the rest of the route, when the prompt is the
-                    # gate's. `catalog_route` below is CP-0 and CP-DR alone.
-                    **gate_verdict(prompt),
-                }
-            ),
-            charge=Decimal("0.0000041"),
-            generation_id="gen-matrix-test",
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,14 +81,14 @@ class Ran:
 
 
 @pytest.fixture
-def catalog_route() -> ResolvedRoute:
+def catalog_route(request: pytest.FixtureRequest) -> ResolvedRoute:
     catalog = json.loads(
         (
             VENDORED / "skills/cp-os-credit-os/references"
             "/CREDIT_OS_V_MODULE_CATALOG_v2.json"
         ).read_text(encoding="utf-8")
     )
-    return resolve_route(catalog, PROFILE, SELECTION)
+    return resolve_route(catalog, *getattr(request, "param", (PROFILE, SELECTION)))
 
 
 @pytest.fixture
@@ -134,27 +106,32 @@ def ran(
     )
     run_id = start_run(conn, case_id)
     conn.commit()
-    pin_route(conn, run_id, catalog_route)
-    blocks = conn.execute(
-        "SELECT block_id FROM source_blocks WHERE source_id = %s ORDER BY block_id",
-        (source_id,),
-    ).fetchall()
+    bundle = Bundle(root=VENDORED)
+    approve_run(
+        conn,
+        case_id=case_id,
+        run_id=run_id,
+        route=catalog_route,
+        bundle=bundle,
+    )
+    conn.rollback()
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=bundle,
+        blobs=blobs,
+        completions=CanonicalCompletions(source_id),
+        route=catalog_route,
+        run_id=run_id,
+    )
     run_route(
         conn,
         blobs,
         run_id=run_id,
         route=catalog_route,
         execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=Bundle(root=VENDORED),
-                blobs=blobs,
-                completions=_Completions(source_id),
-                delivered=[(source_id, str(row[0])) for row in blocks],
-                route=catalog_route,
-                run_id=run_id,
-            ),
-            ESTIMATE,
+            provider,
+            priced(ESTIMATE),
+            bundle,
         ),
     )
     digest = conn.execute(
@@ -198,6 +175,34 @@ def _matrix(ran: Ran, qualification: QualificationSet) -> Matrix:
     )
 
 
+def test_matrix_refuses_manifest_changed_after_its_last_proof(
+    ran: Ran, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.qualification import matrix
+
+    root = tmp_path / "bundle"
+    shutil.copytree(VENDORED, root)
+    bundle = Bundle(root)
+    original = matrix._cited
+
+    def mutate(*args: object, **kwargs: bool) -> set[tuple[str, str, str]]:
+        cited = original(*args, **kwargs)  # type: ignore[arg-type]
+        manifest = root / MANIFEST_NAME
+        manifest.write_bytes(manifest.read_bytes() + b" ")
+        return cited
+
+    monkeypatch.setattr(matrix, "_cited", mutate)
+    with pytest.raises(Refusal) as caught:
+        build_matrix(
+            ran.conn,
+            ran.blobs,
+            bundle,
+            qualification=QualificationSet(cases=(_one_case(ran),)),
+            runs={"acme-2026-refinancing": ran.run_id},
+        )
+    assert caught.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
 def test_the_matrix_reports_every_case_and_concludes_nothing(ran: Ran) -> None:
     """The deliverable of this slice, and the line it must not cross.
 
@@ -220,7 +225,10 @@ def test_the_matrix_reports_every_case_and_concludes_nothing(ran: Ran) -> None:
 
     # The structural half, from this side: no field on the matrix or its rows
     # answers "is it qualified". A reviewer reads the rows.
+    # Nor any status a record projects: a SCREENING_ONLY record's committee
+    # status must never reach a reviewer through the matrix as clearance.
     forbidden = {"qualified", "verdict", "passed", "score", "assurance"}
+    forbidden |= {f.lower() for f in Projections.__dataclass_fields__} | {"status"}
     for holder in (matrix, row):
         named = {name.lower() for name in type(holder).__dataclass_fields__}
         assert not (named & forbidden), f"{type(holder).__name__} concludes: {named}"
@@ -267,7 +275,11 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
     word for itself -- a match the host cannot stand behind is worse to a
     reviewer than an honest miss beside a refusal that explains it.
     """
-    ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    with route_fault(ran.conn):
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
     ran.conn.commit()
 
     key = _one_case(ran)
@@ -276,6 +288,31 @@ def test_a_row_carries_the_refusal_rather_than_ending_the_matrix(ran: Ran) -> No
     assert row.refusal is RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED
     assert row.met == ()
     assert row.missed == key.expects
+
+
+_SECONDARY_REFUSALS = (
+    RefusalCode.ROUTE_IDENTITY_INVALID,
+    RefusalCode.STORE_UNAVAILABLE,
+    RefusalCode.RUN_NOT_FOUND,
+)
+
+
+@pytest.mark.parametrize("code", _SECONDARY_REFUSALS)
+def test_refusal(ran: Ran, monkeypatch: pytest.MonkeyPatch, code: RefusalCode) -> None:
+    from server.qualification import matrix
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise Refusal(code)
+
+    monkeypatch.setattr(matrix, "_cited", refuse)
+    key = _one_case(ran)
+    if code is not RefusalCode.ROUTE_IDENTITY_INVALID:
+        with pytest.raises(Refusal, match=f"^{code}$"):
+            _matrix(ran, QualificationSet(cases=(key,)))
+        return
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is code
+    assert not row.proven and not row.met and row.missed == key.expects
 
 
 def test_the_matrix_refuses_a_key_with_no_run(ran: Ran) -> None:
@@ -379,23 +416,8 @@ def test_a_case_label_crosses_the_boundary_where_it_is_digested(ran: Ran) -> Non
     assert refused.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
 
 
-# Every shape a stored artifact can take that is not a readable envelope. The
-# matrix must survive each: the proof is what judges an artifact, and it has
-# already run for the row by the time the comparison reads it.
-UNREADABLE: list[bytes] = [
-    b"{]not json at all",
-    b'"a string, validly encoded"',
-    b'{"claims": "not a list"}',
-    b'{"claims": [["not a mapping"]]}',
-    b'{"claims": [{"citations": "not a list"}]}',
-    b'{"claims": [{"citations": ["not a mapping"]}]}',
-    b'{"claims": [{"citations": [{"document_sha256": 7, "matched_text": 7}]}]}',
-]
-
-
-@pytest.mark.parametrize("stored", UNREADABLE)
 def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
-    ran: Ran, stored: bytes
+    ran: Ran,
 ) -> None:
     """The comparison reads artifacts it did not write, at every depth.
 
@@ -404,7 +426,8 @@ def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     says what is true: the host could not prove this case, and it cites nothing
     this key asked for.
     """
-    digest = ran.blobs.put(stored)
+    # Bytes no record binds: the proof refuses, and nothing is read as claims.
+    digest = ran.blobs.put(b"{]not json at all")
     ran.conn.execute(
         "UPDATE artifacts SET artifact_sha256 = %s WHERE run_id = %s",
         (digest, ran.run_id),
@@ -414,11 +437,138 @@ def test_an_unreadable_artifact_cites_nothing_and_does_not_end_the_matrix(
     key = _one_case(ran)
     [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
     assert row.proven is False
-    # Which code fires depends on which of the proof's checks the shape trips
-    # first -- a valid JSON object with no `build_id` is a moved build before it
-    # is an unreadable claim list. `tests/test_orchestration_proof.py` pins that
-    # ordering; what matters here is that the row carries *a* reason and the
-    # comparison still ran.
-    assert row.refusal is not None
+    assert row.refusal is RefusalCode.ARTIFACT_RECORD_MISMATCH
     assert row.met == ()
     assert row.missed == key.expects
+
+
+def test_a_canonical_run_is_scored_on_its_records_anchored_citations(ran: Ran) -> None:
+    """Every node's record cites under the module the pin names (§42.4)."""
+    keys = tuple(
+        ExpectedCitation(module, ran.document_sha256, QUOTE)
+        for module in ("CP-0", "CP-L10", "CP-5")
+    )
+    case = replace(_one_case(ran), expects=keys)
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert (row.proven, row.refusal, row.met, row.missed) == (True, None, keys, ())
+
+
+def test_a_canonical_run_that_does_not_prove_scores_nothing(ran: Ran) -> None:
+    """A record is read only after the proof holds: an unproven quote is no answer."""
+    with _token_fault(ran.conn):
+        ran.conn.execute("DELETE FROM source_tokens")
+    ran.conn.commit()
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is RefusalCode.ORCHESTRATION_CITATION_LOST
+    assert (row.proven, row.met, row.missed) == (False, (), key.expects)
+
+
+def _after_proof(
+    monkeypatch: pytest.MonkeyPatch,
+    before: Callable[[], object],
+    after: Callable[[], object],
+) -> None:
+    """Run `before`, the real proof, then `after`, inside the matrix's row."""
+    from server.qualification import matrix
+    from server.qualification.proof import assert_orchestration_proof as proof
+
+    def around(*args: object, **kwargs: object) -> object:
+        before()
+        proven = proof(*args, **kwargs)  # type: ignore[arg-type]
+        after()
+        return proven
+
+    monkeypatch.setattr(matrix, "assert_orchestration_proof", around)
+
+
+def test_a_record_that_moves_after_the_proof_does_not_change_the_score(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The matrix scores what the proof proved; it reads no record again."""
+    _after_proof(
+        monkeypatch,
+        lambda: None,
+        lambda: ran.conn.execute("UPDATE run_attempts SET ordinal = ordinal + 1"),
+    )
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert (row.proven, row.refusal, row.met, row.missed) == (
+        True,
+        None,
+        key.expects,
+        (),
+    )
+
+
+def test_a_source_withdrawn_after_the_proof_is_not_scored(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant 1: scoring is a use, so withdrawal is checked at it too."""
+    actor = uuid4()
+    grant(ran.conn, case_id=ran.case_id, user_id=actor, standing=Standing.APPROVER)
+    ran.conn.commit()
+    [source_id] = [
+        UUID(str(r[0]))
+        for r in ran.conn.execute(
+            "SELECT source_id FROM live_sources WHERE case_id = %s", (ran.case_id,)
+        ).fetchall()
+    ]
+    ran.conn.rollback()
+    _after_proof(
+        monkeypatch,
+        lambda: None,
+        lambda: withdraw_source(
+            ran.conn, case_id=ran.case_id, actor_id=actor, source_id=source_id
+        ),
+    )
+    key = _one_case(ran)
+    [row] = _matrix(ran, QualificationSet(cases=(key,))).rows
+    assert row.refusal is RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED
+    assert (row.proven, row.met, row.missed) == (False, (), key.expects)
+
+
+def test_an_artifact_accepted_after_the_proof_is_not_scored(
+    ran: Ran, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CP-5 is held out of the store while the proof runs and returns after it:
+    a second read would score a record the proof never saw."""
+    held = "SELECT * FROM artifacts WHERE run_id = %s AND route_node_id = %s"
+    [cp5] = [n.route_node_id for n in _route_of(ran).nodes if n.module_id == "CP-5"]
+
+    def hold() -> None:
+        ran.conn.execute("CREATE TEMP TABLE held_cp5 AS " + held, (ran.run_id, cp5))
+        ran.conn.execute(
+            "DELETE FROM artifacts"
+            " WHERE attempt_id IN (SELECT attempt_id FROM held_cp5)"
+        )
+
+    def accept() -> None:
+        ran.conn.execute("INSERT INTO artifacts SELECT * FROM held_cp5")
+
+    _after_proof(monkeypatch, hold, accept)
+    keys = tuple(
+        ExpectedCitation(module, ran.document_sha256, QUOTE)
+        for module in ("CP-0", "CP-L10", "CP-5")
+    )
+    case = replace(_one_case(ran), expects=keys)
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert (row.proven, row.refusal) == (True, None)
+    assert (row.met, row.missed) == (keys[:2], keys[2:])
+
+
+def _route_of(ran: Ran) -> ResolvedRoute:
+    route = resolved_route(ran.conn, ran.run_id)
+    ran.conn.rollback()
+    assert route is not None
+    return route
+
+
+def test_a_canonical_proof_names_exactly_the_quotes_it_anchored(ran: Ran) -> None:
+    proof = assert_orchestration_proof(
+        ran.conn, ran.blobs, Bundle(root=VENDORED), run_id=ran.run_id
+    )
+    ran.conn.rollback()
+    assert proof.anchored == {
+        (module, ran.document_sha256, QUOTE) for module in ("CP-0", "CP-L10", "CP-5")
+    }

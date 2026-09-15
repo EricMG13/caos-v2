@@ -8,15 +8,18 @@ This does, with the provider built the way the application builds it: from the
 environment (`OpenRouter.from_environment`, `docs/DECISIONS.md` §16).
 
 Two documents, one per extractor, so the case holds a PDF as well as text. The
-pathway is `DEEP_RESEARCH` -- CP-0 then CP-DR, the smallest route with an edge
-in it -- because two calls cost under a cent and a nightly job exists to prove
-the chain, not the catalog. `CAOS_LIVE_PATHWAY` names a larger one on demand.
+pathway is `LITE_EARNINGS_UPDATE` on `LITE_CREDIT_22` -- CP-0, CP-L10, CP-5 --
+the canonical route (§41, §42): each module answers a vendor-validated Markdown
+handoff for the host-owned subject `approve_run` pins, and the host anchors its
+citations. Three calls, because a nightly job exists to prove the canonical
+chain, not the catalog. `CAOS_LIVE_PROFILE` and `CAOS_LIVE_PATHWAY` name
+another route on demand.
 
 What is asserted is what the host can prove, never the model's wording: the run
-finished, every pinned node was accepted, and the proof re-derived every
-citation against the documents (`server/qualification/proof.py`). It skips with
-its reason without a credential, and `CAOS_REQUIRE_PROVIDER=1` turns the skip
-into a failure.
+finished, every pinned node was accepted with its host record, and the proof
+re-derived every record and citation against the documents
+(`server/qualification/proof.py`). It skips with its reason without a
+credential, and `CAOS_REQUIRE_PROVIDER=1` turns the skip into a failure.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import approve_run, priced
 from test_pdf_extraction import minimal_pdf
 
 from server.blobs import BlobStore
@@ -42,15 +46,14 @@ from server.provider import OpenRouter
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal
 from server.store import RunStatus, StoreConnection
-from server.store.routes import pin_route
 from server.store.runs import run_status, start_run
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 CATALOG = (
     VENDORED / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
-PROFILE = "FULL_CREDIT_32"
-PATHWAY = os.environ.get("CAOS_LIVE_PATHWAY", "DEEP_RESEARCH")
+PROFILE = os.environ.get("CAOS_LIVE_PROFILE", "LITE_CREDIT_22")
+PATHWAY = os.environ.get("CAOS_LIVE_PATHWAY", "LITE_EARNINGS_UPDATE")
 # The flat per-node reservation (CLAUDE.md, Phase 4). Nineteen of them -- the
 # full assessment -- fit `server/store/budget.py`'s five-dollar `CEILING`, and a
 # call on gpt-4o-mini costs about a tenth of a cent. It is what is set aside,
@@ -80,6 +83,7 @@ STATEMENT = minimal_pdf(
 )
 
 
+@pytest.mark.live_provider
 def test_a_live_run_admits_documents_and_completes_its_route(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
@@ -105,54 +109,47 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     )
     run_id = start_run(conn, case_id)
     conn.commit()
-    pin_route(conn, run_id, route)
+    approve_run(conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle)
+    conn.rollback()
 
+    module_provider = ModuleProvider(
+        conn=conn,
+        bundle=bundle,
+        blobs=blobs,
+        completions=completions,
+        route=route,
+        run_id=run_id,
+    )
     run_route(
         conn,
         blobs,
         run_id=run_id,
         route=route,
         execution=Execution(
-            ModuleProvider(
-                conn=conn,
-                bundle=bundle,
-                blobs=blobs,
-                completions=completions,
-                delivered=_every_block(conn, source_ids),
-                route=route,
-                run_id=run_id,
-            ),
-            ESTIMATE,
+            module_provider,
+            # No dated price for the live model is in the tree yet (CLAUDE.md
+            # known gaps, Phase 5): this reserves ESTIMATE, not a real worst case.
+            priced(ESTIMATE, completions.model),
+            bundle,
         ),
     )
 
     assert run_status(conn, run_id) is RunStatus.COMPLETE
-    # A run whose frontier emptied with nodes still BLOCKED is COMPLETE too, so
-    # the count is what says every pinned node was accepted.
+    # COMPLETE now means every pinned node was accepted (§39); the count says so
+    # again from the proof's side.
     proof = assert_orchestration_proof(conn, blobs, bundle, run_id=run_id)
     assert proof.artifacts == len(route.nodes)
 
     producers = conn.execute(
-        "SELECT model, generation_id FROM artifacts WHERE run_id = %s", (run_id,)
+        "SELECT model, generation_id, record_sha256 FROM artifacts WHERE run_id = %s",
+        (run_id,),
     ).fetchall()
     assert {row[0] for row in producers} == {completions.model}
     assert all(row[1] for row in producers), "a call left no handle for the bill"
+    assert all(row[2] for row in producers), "an accepted node has no record"
 
     charges = conn.execute(
         "SELECT amount FROM budget_ledger WHERE run_id = %s", (run_id,)
     ).fetchall()
     assert len(charges) == len(route.nodes)
     assert all(isinstance(row[0], Decimal) and row[0] >= 0 for row in charges)
-
-
-def _every_block(
-    conn: StoreConnection, source_ids: list[UUID]
-) -> list[tuple[UUID, str]]:
-    """Every block of every admitted document, delivered to every node: what the
-    qualification harness delivers, for the same reason."""
-    rows = conn.execute(
-        "SELECT source_id, block_id FROM source_blocks"
-        " WHERE source_id = ANY(%s) ORDER BY source_id, block_id",
-        (source_ids,),
-    ).fetchall()
-    return [(UUID(str(row[0])), str(row[1])) for row in rows]

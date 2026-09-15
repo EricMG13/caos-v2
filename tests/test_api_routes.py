@@ -16,50 +16,56 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from decimal import Decimal
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from canonical_fixtures import CanonicalCompletions
+from conftest import route_fault
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from test_canonical_execution import _accept, _node, _run, harness, route
+from test_execution_freshness import _Harness
 
 from server.api import app as app_module
 from server.api.app import (
     IO_BUDGET,
+    RUN_READ_IO,
     TAIL_DEADLINE,
     EdgeView,
     NodeView,
     RefusalBody,
     RunDocument,
+    _node_view,
     app,
     blob_store,
+    methodology_bundle,
     read_run,
     read_run_events,
     store_connection,
 )
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute, resolve_route
+from server.engine.route import (
+    EdgeType,
+    NodeResult,
+    node_states,
+    readiness_from,
+    resolve_route,
+)
+from server.methodology.bundle import Bundle
+from server.methodology.handoff import _decoded_record, record_bytes
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke, standing_of
 from server.store.routes import pin_route, pinned_route
-from server.store.runs import (
-    Accepted,
-    accept_attempt,
-    complete_attempt,
-    start_attempt,
-    start_run,
-)
+from server.store.runs import block_run, complete_run, start_attempt, start_run
 
-# The producer the store records beside every accepted artifact: what the
-# host configured, and the provider's own handle for the call.
-MODEL = "a-model/for-the-test"
-GENERATION = "gen-for-the-test"
+__all__ = ["harness", "route"]
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1]
@@ -67,8 +73,9 @@ CATALOG_PATH = (
     / "CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
 PROFILE = "FULL_CREDIT_32"
-ARTIFACT = "e" * 64
-CHARGE = Decimal("0.01")
+# Every run that accepts an artifact here is a canonical LITE run (§42): its
+# gate verdicts are read from CP-0's host record, never from a claims body.
+LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
 
 
 @pytest.fixture(scope="module")
@@ -112,6 +119,32 @@ def run(case: tuple[StoreConnection, UUID]) -> tuple[UUID, UUID]:
     grant(conn, case_id=case_id, user_id=viewer, standing=Standing.READER)
     conn.commit()
     return run_id, viewer
+
+
+@pytest.fixture
+def lite(harness: _Harness, client: TestClient) -> tuple[_Harness, UUID]:
+    """An approved canonical LITE run on the client's store, and a READER of it.
+
+    The harness shares the `case` connection and the `tmp_path / "blobs"` root
+    the client serves, and its bundle is the one records are verified under.
+    """
+    app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
+    viewer = uuid4()
+    grant(
+        harness.conn, case_id=harness.case_id, user_id=viewer, standing=Standing.READER
+    )
+    harness.conn.commit()
+    return harness, viewer
+
+
+def _answer(
+    harness: _Harness, module_id: str, readiness: dict[str, str] | None = None
+) -> None:
+    """One node called through the canonical executor and accepted with its
+    record; the run stays RUNNING."""
+    answers = CanonicalCompletions(harness.source_id, readiness=readiness or {})
+    attempt, result = _run(harness, module_id, answers)
+    _accept(harness, attempt, result)
 
 
 def _as(user_id: UUID) -> dict[str, str]:
@@ -230,10 +263,16 @@ def test_an_anonymous_request_opens_no_store_connection(
         opened.append(store_connection.__name__)
         return conn
 
+    def counted_bundle() -> Bundle:
+        opened.append(methodology_bundle.__name__)
+        raise AssertionError  # never reached before identity
+
     app.dependency_overrides[store_connection] = counted
+    app.dependency_overrides[methodology_bundle] = counted_bundle
 
     for path in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/events"):
         assert client.get(path).status_code == 401, path
+    del app.dependency_overrides[methodology_bundle]
     assert opened == [], (
         "an anonymous request resolved the store dependency; identity is "
         "declared before it so that it does not"
@@ -434,7 +473,7 @@ def test_the_run_document_carries_node_states_with_their_reasons(
     tells a reader the run is stuck without telling them what it is stuck on."""
     conn, _case_id = case
     run_id, viewer = run
-    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW"))
+    pin_route(conn, run_id, resolve_route(catalog, *LITE))
 
     body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
 
@@ -442,98 +481,74 @@ def test_the_run_document_carries_node_states_with_their_reasons(
     by_module = {node["module_id"]: node for node in body["nodes"]}
     assert by_module["CP-0"]["state"] == "RUNNABLE"
     assert by_module["CP-0"]["waiting_on"] == []
-    assert by_module["CP-1"]["state"] == "BLOCKED"
+    assert by_module["CP-L10"]["state"] == "BLOCKED"
     assert {
-        (edge["source"], edge["type"]) for edge in by_module["CP-1"]["waiting_on"]
+        (edge["source"], edge["type"]) for edge in by_module["CP-L10"]["waiting_on"]
     } == {("CP-0", "REQUIRED")}
     # No CP-0 artifact is accepted in this run, so the gate has not spoken for
     # any module -- `gate_verdict` is the absence of a verdict, not a state
     # this test happens not to exercise.
-    assert by_module["CP-1"]["gate_verdict"] is None
-
-
-def _accept_gate(
-    conn: StoreConnection,
-    run_id: UUID,
-    route: ResolvedRoute,
-    tmp_path: Path,
-    verdicts: object,
-) -> None:
-    """Accept a CP-0 artifact whose readiness map is `verdicts`. The blob store
-    is on the same root the `client` fixture points the app's injected one at --
-    not a second store, but the one the request is about to read from."""
-    cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
-    digest = BlobStore(tmp_path / "blobs").put(
-        json.dumps({"content_to_module_map": verdicts}).encode("utf-8")
-    )
-    accept_attempt(
-        conn,
-        attempt_id=start_attempt(conn, run_id, cp0),
-        accepted=Accepted(
-            artifact_sha256=digest, charge=CHARGE, model=MODEL, generation_id=GENERATION
-        ),
-    )
+    assert by_module["CP-L10"]["gate_verdict"] is None
 
 
 def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
-    client: TestClient,
-    case: tuple[StoreConnection, UUID],
-    run: tuple[UUID, UUID],
-    catalog: dict[str, Any],
-    tmp_path: Path,
+    client: TestClient, lite: tuple[_Harness, UUID]
 ) -> None:
     """Phase 6 asked for "node states with their reasons", and after Phase 11 a
     node can be BLOCKED by the gate rather than by an edge. `waiting_on` cannot
     carry that cause -- there is no edge to name -- so the verdict travels
-    beside it, or the surface reports a state with no reason at all."""
-    conn, _case_id = case
-    run_id, viewer = run
-    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
-    pin_route(conn, run_id, route)
-    _accept_gate(
-        conn,
-        run_id,
-        route,
-        tmp_path,
-        [
-            {"module_id": "CP-1", "readiness_status": "BLOCKED"},
-            {"module_id": "CP-2", "readiness_status": "READY"},
-            {"module_id": "CP-2D", "readiness_status": "READY"},
-        ],
-    )
+    beside it, read from CP-0's canonical T8 readiness, or the surface reports a
+    state with no reason at all."""
+    harness, viewer = lite
+    _answer(harness, "CP-0", readiness={"CP-L10": "BLOCKED"})
 
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+    body = client.get(f"/api/runs/{harness.run_id}", headers=_as(viewer)).json()
 
+    assert body["status"] == "RUNNING"
     by_module = {node["module_id"]: node for node in body["nodes"]}
-    assert by_module["CP-1"]["state"] == "BLOCKED"
-    assert by_module["CP-1"]["waiting_on"] == []
-    assert by_module["CP-1"]["gate_verdict"] == "BLOCKED"
-    assert by_module["CP-2"]["gate_verdict"] == "READY"
+    assert by_module["CP-0"]["state"] == "COMPLETE"
+    assert by_module["CP-L10"]["state"] == "BLOCKED"
+    assert by_module["CP-L10"]["waiting_on"] == []
+    assert by_module["CP-L10"]["gate_verdict"] == "BLOCKED"
+    assert by_module["CP-5"]["gate_verdict"] == "READY"
 
 
-def test_a_stored_gate_map_the_host_cannot_bound_is_a_server_fault(
-    client: TestClient,
-    case: tuple[StoreConnection, UUID],
-    run: tuple[UUID, UUID],
-    catalog: dict[str, Any],
-    tmp_path: Path,
+def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
+    client: TestClient, lite: tuple[_Harness, UUID]
 ) -> None:
-    """`READINESS_INVALID` became reachable here in Phase 11: the verdict is read
-    out of an artifact this server wrote, so a map it cannot bound is the
-    server's own fault. Absent from `_STATUS` it answered 400 -- telling the
-    caller their request was the problem, about bytes they do not hold."""
-    conn, _case_id = case
-    run_id, viewer = run
-    route = resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW")
-    pin_route(conn, run_id, route)
-    _accept_gate(conn, run_id, route, tmp_path, "READY")
+    """The verdict is read out of a record this server wrote, so readiness the
+    Markdown does not say is the server's own fault. A 400 would tell the caller
+    their request was the problem, about bytes they do not hold."""
+    harness, viewer = lite
+    _answer(harness, "CP-0")
+    attempt, record = _gate_record(harness)
+    stored = _decoded_record(harness.blobs.get(record))
+    lying = replace(
+        stored,
+        projections=replace(stored.projections, readiness=(("CP-5", "READY"),)),
+    )
+    harness.conn.execute(
+        "UPDATE artifacts SET record_sha256 = %s WHERE attempt_id = %s",
+        (harness.blobs.put(record_bytes(lying)), attempt),
+    )
+    harness.conn.commit()
 
-    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+    response = client.get(f"/api/runs/{harness.run_id}", headers=_as(viewer))
 
     assert (response.status_code, response.json()) == (
         503,
-        {"refusal": "READINESS_INVALID"},
+        {"refusal": "ARTIFACT_RECORD_MISMATCH"},
     )
+
+
+def _gate_record(harness: _Harness) -> tuple[UUID, str]:
+    row = harness.conn.execute(
+        "SELECT attempt_id, record_sha256 FROM artifacts WHERE route_node_id = %s",
+        (_node(harness, "CP-0").route_node_id,),
+    ).fetchone()
+    harness.conn.rollback()
+    assert row is not None and row[1] is not None
+    return UUID(str(row[0])), str(row[1])
 
 
 def test_the_one_qa_gate_reads_as_a_gate(
@@ -543,9 +558,8 @@ def test_the_one_qa_gate_reads_as_a_gate(
     catalog: dict[str, Any],
 ) -> None:
     """The catalog holds exactly one QA_GATE edge, `CP-5 -> CP-6`. A node held by
-    it is waiting for a person; every other BLOCKED node is waiting for a
-    module, and a surface that rendered both the same way would hide the one
-    thing a reviewer can act on."""
+    it waits for the QA verdict; every other BLOCKED node is waiting for a
+    module, and a surface that rendered both the same way would hide it."""
     conn, _case_id = case
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
@@ -556,6 +570,79 @@ def test_the_one_qa_gate_reads_as_a_gate(
     assert by_module["CP-6"]["awaiting_gate"] is True
     assert by_module["CP-1"]["awaiting_gate"] is False
     assert sum(node["awaiting_gate"] for node in body["nodes"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("qa_status", "held"), [("Blocked", True), ("Restricted", True), ("Passed", False)]
+)
+def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
+    catalog: dict[str, Any], qa_status: str, held: bool
+) -> None:
+    """F03: CP-5 answered something other than `Passed`, so CP-6 is blocked by
+    that verdict and nothing is awaited -- not a wait for a person.
+
+    The one QA_GATE is on a route the canonical adapter does not yet execute
+    (§42.2), so the view is asked directly over the typed result the reader
+    reduces any accepted record to; `test_canonical_readers` serves a record's
+    readiness over HTTP.
+    """
+    full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    cp5 = next(n.route_node_id for n in full.nodes if n.module_id == "CP-5")
+    accepted = {cp5: NodeResult(qa_status=qa_status)}
+    states = node_states(full, accepted)
+    readiness = readiness_from(full, accepted)
+
+    by_module = {
+        node.module_id: _node_view(full, accepted, node, states, readiness)
+        for node in full.nodes
+    }
+
+    cp6 = by_module["CP-6"]
+    assert (cp6.state, cp6.awaiting_gate) == ("BLOCKED", False)
+    gate = EdgeView(source="CP-5", type=EdgeType.QA_GATE)
+    assert (gate in cp6.waiting_on) is held
+    assert by_module["CP-5"].waiting_on == []
+
+
+def test_nothing_is_awaited_on_a_run_that_is_no_longer_running(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+) -> None:
+    conn, _case_id = case
+    run_id, viewer = run
+    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
+    block_run(conn, run_id)
+
+    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+
+    assert body["status"] == "BLOCKED"
+    assert not any(node["awaiting_gate"] for node in body["nodes"])
+
+
+@pytest.mark.parametrize("which", [0, 1], ids=["markdown", "record"])
+def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
+    client: TestClient, lite: tuple[_Harness, UUID], which: int
+) -> None:
+    harness, viewer = lite
+    _answer(harness, "CP-0")
+    row = harness.conn.execute(
+        "SELECT artifact_sha256, record_sha256 FROM artifacts WHERE run_id = %s",
+        (harness.run_id,),
+    ).fetchone()
+    harness.conn.rollback()
+    assert row is not None
+    path = harness.blobs.path_of(str(row[which]))
+    path.chmod(0o644)
+    path.write_bytes(b"not a handoff")
+
+    response = client.get(f"/api/runs/{harness.run_id}", headers=_as(viewer))
+
+    assert (response.status_code, response.json()) == (
+        503,
+        {"refusal": "ARTIFACT_RECORD_MISMATCH"},
+    )
 
 
 def test_a_run_with_no_pinned_route_has_no_nodes(
@@ -664,6 +751,23 @@ def test_the_reported_digest_is_the_one_that_was_pinned(
     assert body["route_digest"] == pinned == pinned_route(conn, run_id)
 
 
+def test_corrupt_route_is_a_sanitized_store_failure(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+) -> None:
+    conn, _ = case
+    run_id, viewer = run
+    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW"))
+    with route_fault(conn):
+        conn.execute("UPDATE run_routes SET route_digest = 'synthetic-corruption'")
+    conn.commit()
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+    assert response.status_code == 503
+    assert response.json() == {"refusal": "ROUTE_IDENTITY_INVALID"}
+
+
 def test_each_request_path_declares_what_it_costs_the_store(
     client: TestClient,
     case: tuple[StoreConnection, UUID],
@@ -682,20 +786,20 @@ def test_each_request_path_declares_what_it_costs_the_store(
 
     assert client.get(f"/api/runs/{run_id}", headers=_as(viewer)).status_code == 200
 
-    assert counter.executed == IO_BUDGET, (
+    assert counter.executed == RUN_READ_IO <= IO_BUDGET, (
         "the run document costs what it says it costs; a read that grew with "
         "the size of the route would show up here first"
     )
 
 
 def test_the_tail_is_served_as_an_event_stream(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    lite: tuple[_Harness, UUID],
 ) -> None:
     """The transport half of `server/api/stream.py`: the same contract, now over
     a socket."""
-    conn, _case_id = case
-    run_id, viewer = run
-    _finish(conn, run_id)
+    harness, viewer = lite
+    run_id = _finish(harness)
 
     response = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer))
 
@@ -703,63 +807,66 @@ def test_the_tail_is_served_as_an_event_stream(
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.headers["cache-control"] == "no-store"
     assert [name for _, name in _sse(response.text)] == [
+        "ROUTE_PINNED",
+        "INPUT_PINNED",
         "ATTEMPT_STARTED",
+        "CALL_OUTCOME_RECORDED",
         "ATTEMPT_ACCEPTED",
         "RUN_COMPLETE",
     ]
 
 
 def test_every_frame_carries_an_id_and_a_name_and_no_state(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    lite: tuple[_Harness, UUID],
 ) -> None:
     """The client never reads a payload -- a name triggers a refetch. A payload
     on the wire would be a second copy of state the client is about to fetch
     properly, and the first thing to go stale."""
-    conn, _case_id = case
-    run_id, viewer = run
-    _finish(conn, run_id)
+    harness, viewer = lite
+    run_id = _finish(harness)
 
     text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
 
     assert [line for line in text.splitlines() if line.startswith("data:")] == [
         "data: {}"
-    ] * 3
-    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3"]
+    ] * 6
+    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3", "4", "5", "6"]
 
 
 def test_last_event_id_resumes_after_the_marker(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    lite: tuple[_Harness, UUID],
 ) -> None:
     """`Last-Event-ID` is the last event the client actually received, so
     delivery starts strictly after it. Re-delivering it would make a client that
     refetches on every name do the work twice."""
-    conn, _case_id = case
-    run_id, viewer = run
-    _finish(conn, run_id)
+    harness, viewer = lite
+    run_id = _finish(harness)
 
     text = client.get(
-        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "2"}
+        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "5"}
     ).text
 
     assert [name for _, name in _sse(text)] == ["RUN_COMPLETE"]
 
 
 def test_a_last_event_id_that_is_not_a_number_starts_from_the_beginning(
-    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+    client: TestClient,
+    lite: tuple[_Harness, UUID],
 ) -> None:
     """A resume marker is a browser-supplied string. Refusing the connection
     would strand a client that can only fix it by clearing storage; starting
     over re-delivers, which is what the contract already tolerates."""
-    conn, _case_id = case
-    run_id, viewer = run
-    _finish(conn, run_id)
+    harness, viewer = lite
+    run_id = _finish(harness)
 
     text = client.get(
         f"/api/runs/{run_id}/events",
         headers={**_as(viewer), "last-event-id": "; DROP TABLE runs"},
     ).text
 
-    assert len(_sse(text)) == 3
+    assert len(_sse(text)) == 6
 
 
 def test_an_unauthorised_tail_is_the_same_private_404(
@@ -890,20 +997,12 @@ def test_startup_applies_the_declared_schema(
     assert applied[0] == 4
 
 
-def _finish(conn: StoreConnection, run_id: UUID) -> None:
-    """Three events: started, accepted, complete."""
-    attempt_id = start_attempt(conn, run_id, "CP-1")
-    complete_attempt(
-        conn,
-        attempt_id=attempt_id,
-        accepted=Accepted(
-            artifact_sha256=ARTIFACT,
-            charge=CHARGE,
-            model=MODEL,
-            generation_id=GENERATION,
-        ),
-    )
-    conn.commit()
+def _finish(harness: _Harness) -> UUID:
+    """Six events: two pins, started, outcome recorded, accepted, complete --
+    on a canonical LITE run whose CP-0 is accepted with its record."""
+    _answer(harness, "CP-0")
+    complete_run(harness.conn, harness.run_id)
+    return harness.run_id
 
 
 def _sse(text: str) -> list[tuple[str, str]]:
