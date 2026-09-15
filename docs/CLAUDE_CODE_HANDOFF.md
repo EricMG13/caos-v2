@@ -5,7 +5,7 @@ This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/REPAIR_PLAN.md` owns phase outcomes. Historical rebuild phases and
 ignored reports cannot override those contracts.
 
-## Current checkpoint — observed 13 September 2026
+## Current checkpoint — observed 14 September 2026
 
 | Item | Recorded state |
 |---|---|
@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
-| Latest observed implementation | `161e8a2`, Task 3.1b (slices 3.1a `5691b30` `2af18a8` `8ecb97a`, 3.1b `161e8a2`; each reviewed, backend gate green; not accepted) |
-| Next task | Task 3.1c: executor wire, artifact record migration 0012, acceptance, adapter version ([brief](superpowers/plans/2026-09-13-phase-3-task-3.1-brief.md)) |
+| Latest accepted task | **Phase 3 Task 3.2 accepted at `fffe5c8`** (Task 3.1 at `a8acbc6`; records below; phase not accepted) |
+| Next task | Phase 3 Task 3.3: complete instructions and upstream lineage ([brief](superpowers/plans/2026-09-14-phase-3-task-3.3-brief.md)) |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -241,3 +241,73 @@ covers continuation. The Phase 3–6 goal prompt points to the complementary
 phase cards and Opus settings. Update this handoff at phase acceptance with
 the final commit, both review records, disabled features and next authorized
 phase. Keep `CLAUDE.md` as a contract/link, not a second task ledger.
+
+
+## Phase 3 Task 3.1 acceptance record — 14 September 2026
+
+Task 3.1 (canonical record and adapter boundary) is accepted at `a8acbc6` on
+`codex/execute-repair-plan`. The phase is not accepted: Tasks 3.2–3.4, the
+complete `make check`, and the whole-phase `xhigh` confidence review and
+adversarial audit remain.
+
+- **Scope delivered** (brief `docs/superpowers/plans/2026-09-13-phase-3-task-3.1-brief.md`,
+  decisions §41, §42): vendor validators loaded from verified bytes; canonical
+  Markdown validated with type-exact host identity; run subject, UTC COS run id
+  and attempt ordinal pinned (migration 0011); closed provider transport and
+  host record bound by `record_sha256` (migration 0012); canonical executor
+  with billing before analysis, diagnostics re-derivable for Blocked, all
+  citations anchored or the handoff refused; runtime, API, proof, matrix and
+  deliverable read records through one call-time identity and one pinned
+  live-source reader; one adapter constant, routes outside CP-0/CP-L10/CP-5
+  refused before any attempt, reservation or call; the claims-JSON executor,
+  envelope and readers deleted.
+- **Exit checks**: claims-only JSON, changed Markdown, missing registers,
+  mismatched identity, undeclared fields and a wrong adapter all refuse
+  (`tests/test_handoff_record.py`, `test_canonical_handoff.py`,
+  `test_canonical_execution.py`, `test_disabled_routes.py`); the LITE route
+  completes through the real runtime with a deterministic provider
+  (`tests/test_canonical_runtime.py`); Restricted keeps limitations; Blocked
+  ends the run BLOCKED without retry, including after a crash.
+- **Review**: every server slice had an ordinary review with remediation
+  (models per the complementary plan's routing table; from 14 September
+  test-only/deletion slices skip review by user decision).
+- **Gate at `a8acbc6`**: serial backend gate (`make -j1 check-postgres lint
+  types test test-postgres-races security`) green, 2108 passed with
+  pytest-xdist; F02 probe `BLOCKED 2/3`; Docker restore probe passed in all
+  three modes. The frontend/image half of `make check` has not been rerun
+  since Phase 2 and is owed at phase exit.
+- **Owed / limits**: the live Phase 5 exit
+  `test_cp1_produces_canonical_envelope_with_anchored_citations` was removed
+  with the claims executor and is listed as not yet reached; no HTTP test covers
+  a canonical QA_GATE verdict other than Passed; remaining limits are in the
+  `CLAUDE.md` "Repair Phase 3." ledger. Branch history exceeds the 800-line PR
+  gate and needs stacked PRs; deletion commits are exempt by user decision.
+
+
+## Phase 3 Task 3.2 acceptance record — 14 September 2026
+
+Task 3.2 (evidence admission and PDF geometry) is accepted at `fffe5c8`. The
+phase is not accepted.
+
+- **Scope delivered** (brief `docs/superpowers/plans/2026-09-14-phase-3-task-3.2-brief.md`,
+  decision §44): per-document extractor dispatch from bytes with typed
+  `SOURCE_ENCRYPTED`/`SOURCE_NOT_READABLE` mapping and pdfminer logs detached;
+  admission limits before expensive work with a cooperative deadline and lazy
+  pages (`SOURCE_TOO_LARGE`, `SOURCE_EXTRACTION_TIMEOUT`); PDF words split on
+  pdfminer's word-margin breaks; rectangles normalised to crop origin, top-left,
+  rotated displayed space, tokens outside the visible crop dropped (an empty
+  crop drops the page); extractor identity v2 for PDF and plain text with v1
+  rows still verifying; citations anchor only within delivered blocks through
+  one shared block numbering.
+- **Exit checks**: mixed packs atomic with specific safe outcomes
+  (`tests/test_extractor_dispatch.py`, `test_admission_limits.py`); spaced
+  glyphs, wrapped quotes, columns, repeated quotes, rotation and crop covered
+  (`tests/test_pdf_extraction.py`); undelivered pages of a delivered source
+  cannot be cited (`tests/test_awkward_evidence.py`) — enforced at the anchoring
+  rule; no run yet delivers less than whole sources until per-node evidence
+  selection (ledger).
+- **Review**: each server slice had an ordinary review and remediation
+  (3.2a/3.2e/3.2d on Opus, 3.2c on Sonnet per the routing table).
+- **Gate at `fffe5c8`**: serial backend gate green, 2167 passed; F02 probe
+  `BLOCKED 2/3`; Docker restore probe passed. Frontend/image half of
+  `make check` owed at phase exit.

@@ -164,9 +164,12 @@ class PlainTextExtractor:
     def identity(self) -> ExtractorIdentity:
         return ExtractorIdentity(
             "caos.plain-text",
-            "1",
+            "2",
             {
                 "encoding": "utf-8",
+                # Cells from the page's top-left corner, y down: the PDF
+                # extractor's convention, with no crop or rotation to apply.
+                "coordinates": "cell-top-left-pt",
                 "cell_width": CELL_WIDTH,
                 "cell_height": CELL_HEIGHT,
                 "margin": MARGIN,
