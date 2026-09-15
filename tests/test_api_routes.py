@@ -39,7 +39,6 @@ from server.api.app import (
     TAIL_DEADLINE,
     EdgeView,
     NodeView,
-    RefusalBody,
     RunDocument,
     _node_view,
     app,
@@ -49,6 +48,7 @@ from server.api.app import (
     read_run_events,
     store_connection,
 )
+from server.api.wire import CLEARS, RefusalBody
 from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
@@ -147,6 +147,11 @@ def _answer(
     _accept(harness, attempt, result)
 
 
+def _refused(code: str) -> dict[str, str]:
+    """The one refusal body: the code and its host-constant clearance."""
+    return {"code": code, "clears": CLEARS[RefusalCode(code)]}
+
+
 def _as(user_id: UUID) -> dict[str, str]:
     """Headers for an authenticated caller with no asserted groups."""
     return {"x-caos-user": str(user_id)}
@@ -168,7 +173,7 @@ def test_unauthorised_case_is_private_404(
     response = client.get(f"/api/runs/{run_id}", headers=_as(stranger))
 
     assert response.status_code == 404
-    assert response.json() == {"refusal": "RUN_NOT_FOUND"}
+    assert response.json() == _refused("RUN_NOT_FOUND")
 
 
 def test_an_unknown_run_is_the_same_404(client: TestClient) -> None:
@@ -177,7 +182,7 @@ def test_an_unknown_run_is_the_same_404(client: TestClient) -> None:
     response = client.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
 
     assert response.status_code == 404
-    assert response.json() == {"refusal": "RUN_NOT_FOUND"}
+    assert response.json() == _refused("RUN_NOT_FOUND")
 
 
 def test_a_revoked_reader_stops_being_able_to_read_it(
@@ -205,7 +210,7 @@ def test_a_request_with_no_identity_is_401_not_404(
     response = client.get(f"/api/runs/{run_id}")
 
     assert response.status_code == 401
-    assert response.json() == {"refusal": "NOT_AUTHENTICATED"}
+    assert response.json() == _refused("NOT_AUTHENTICATED")
 
 
 @pytest.mark.parametrize(
@@ -238,7 +243,7 @@ def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
 
         assert (response.status_code, response.json()) == (
             401,
-            {"refusal": "NOT_AUTHENTICATED"},
+            _refused("NOT_AUTHENTICATED"),
         ), path
 
 
@@ -343,7 +348,7 @@ def test_a_misconfigured_store_is_a_server_fault_not_a_bad_request(
         app.dependency_overrides.clear()
 
     assert response.status_code == 503
-    assert response.json() == {"refusal": "STORE_NOT_CONFIGURED"}
+    assert response.json() == _refused("STORE_NOT_CONFIGURED")
 
 
 def test_a_store_that_does_not_answer_is_a_server_fault(
@@ -374,7 +379,7 @@ def test_a_store_that_does_not_answer_is_a_server_fault(
     for response in (document, tail):
         assert (response.status_code, response.json()) == (
             503,
-            {"refusal": "STORE_UNAVAILABLE"},
+            _refused("STORE_UNAVAILABLE"),
         )
     with pytest.raises(Refusal) as caught:
         next(store_connection())
@@ -424,7 +429,7 @@ def test_the_malformed_id_handler_derives_identity_of_its_own() -> None:
 
     assert (response.status_code, response.json()) == (
         401,
-        {"refusal": "NOT_AUTHENTICATED"},
+        _refused("NOT_AUTHENTICATED"),
     )
 
 
@@ -449,7 +454,7 @@ def test_a_malformed_run_id_is_answered_like_any_unknown_run(
         assert (named.status_code, named.json()) == (404, unknown.json())
         assert (anonymous.status_code, anonymous.json()) == (
             401,
-            {"refusal": "NOT_AUTHENTICATED"},
+            _refused("NOT_AUTHENTICATED"),
         )
 
 
@@ -537,7 +542,7 @@ def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
 
     assert (response.status_code, response.json()) == (
         503,
-        {"refusal": "ARTIFACT_RECORD_MISMATCH"},
+        _refused("ARTIFACT_RECORD_MISMATCH"),
     )
 
 
@@ -641,7 +646,7 @@ def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
 
     assert (response.status_code, response.json()) == (
         503,
-        {"refusal": "ARTIFACT_RECORD_MISMATCH"},
+        _refused("ARTIFACT_RECORD_MISMATCH"),
     )
 
 
@@ -701,18 +706,65 @@ def test_the_wire_key_sets_are_pinned() -> None:
         "gate_verdict",
     }
     assert set(EdgeView.model_fields) == {"source", "type"}
-    assert set(RefusalBody.model_fields) == {"refusal"}
+    assert set(RefusalBody.model_fields) == {"code", "clears"}
 
 
-def test_a_refusal_says_the_code_and_nothing_else(client: TestClient) -> None:
-    """The typed refusal, on the wire. A body that also carried a message would
-    be the one place a document's contents could still get out."""
-    response = client.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+def test_every_refusal_body_is_code_and_clears_and_nothing_else(
+    client: TestClient,
+) -> None:
+    """The typed refusal, on the wire (brief 4.1, decision 3). A body that also
+    carried a message would be the one place a document's contents could still
+    get out, so `clears` is the host's constant for the code and never text
+    from the request, whichever answer the route gave."""
+    answers = {
+        RefusalCode.RUN_NOT_FOUND: client.get(
+            f"/api/runs/{uuid4()}", headers=_as(uuid4())
+        ),
+        RefusalCode.NOT_AUTHENTICATED: client.get(f"/api/runs/{uuid4()}"),
+        RefusalCode.ENDPOINT_NOT_FOUND: client.get("/api/runs-not-declared"),
+    }
 
-    assert set(response.json()) == set(RefusalBody.model_fields)
-    assert RefusalBody.model_validate(response.json()).refusal is (
-        RefusalCode.RUN_NOT_FOUND
-    )
+    for code, response in answers.items():
+        body = response.json()
+        assert set(body) == {"code", "clears"} == set(RefusalBody.model_fields)
+        assert RefusalBody.model_validate(body) == RefusalBody(
+            code=code, clears=CLEARS[code]
+        )
+        assert body["clears"] == CLEARS[code]
+    assert RefusalBody.model_config.get("frozen") is True
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        RefusalBody.model_validate(
+            {"code": "RUN_NOT_FOUND", "clears": "x", "refusal": "RUN_NOT_FOUND"}
+        )
+
+
+def test_every_refusal_code_has_a_constant_clearance() -> None:
+    """`CLEARS` is total over `RefusalCode`, and each entry is a finished
+    sentence: nothing in it could be filled in from a request or a document."""
+    assert set(CLEARS) == set(RefusalCode)
+    for code in RefusalCode:
+        clears = CLEARS[code]
+        assert isinstance(clears, str) and clears.strip(), code
+        assert "{" not in clears and "}" not in clears and "%" not in clears, code
+
+
+def test_an_undeclared_api_path_or_method_answers_endpoint_not_found_in_the_refusal_body(  # noqa: E501 -- the brief's name
+    client: TestClient,
+) -> None:
+    """Starlette's own `{"detail": ...}` is a second refusal body, and two
+    cannot coexist under `/api/`. An undeclared path is 404 and an undeclared
+    method on a declared path is 405, both `ENDPOINT_NOT_FOUND`; nothing
+    outside `/api/` is this contract's to answer."""
+    missing = client.get("/api/not-declared", headers=_as(uuid4()))
+    anonymous = client.get("/api/not-declared")
+    wrong_method = client.post(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+
+    for response, status in ((missing, 404), (anonymous, 404), (wrong_method, 405)):
+        assert (response.status_code, response.json()) == (
+            status,
+            _refused("ENDPOINT_NOT_FOUND"),
+        )
+    assert client.get("/not-api").json() == {"detail": "Not Found"}
 
 
 def test_the_surface_is_exactly_the_routes_it_declares(
@@ -765,7 +817,7 @@ def test_corrupt_route_is_a_sanitized_store_failure(
     conn.commit()
     response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
     assert response.status_code == 503
-    assert response.json() == {"refusal": "ROUTE_IDENTITY_INVALID"}
+    assert response.json() == _refused("ROUTE_IDENTITY_INVALID")
 
 
 def test_each_request_path_declares_what_it_costs_the_store(
@@ -879,7 +931,7 @@ def test_an_unauthorised_tail_is_the_same_private_404(
     response = client.get(f"/api/runs/{run_id}/events", headers=_as(uuid4()))
 
     assert response.status_code == 404
-    assert response.json() == {"refusal": "RUN_NOT_FOUND"}
+    assert response.json() == _refused("RUN_NOT_FOUND")
 
 
 def test_the_tail_closes_at_its_deadline(

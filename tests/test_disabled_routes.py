@@ -34,6 +34,7 @@ from test_source_sets import _admit
 
 from server import methodology
 from server.api.app import app, store_connection
+from server.api.wire import CLEARS
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, resolve_route
 from server.engine.runtime import (
@@ -246,4 +247,7 @@ def test_readers_refuse_an_artifact_without_its_record(
     app.dependency_overrides[store_connection] = lambda: harness.conn
     response = client.get(f"/api/runs/{harness.run_id}", headers=headers)
     assert response.status_code == 503
-    assert response.json() == {"refusal": "ARTIFACT_RECORD_MISMATCH"}
+    assert response.json() == {
+        "code": "ARTIFACT_RECORD_MISMATCH",
+        "clears": CLEARS[RefusalCode.ARTIFACT_RECORD_MISMATCH],
+    }

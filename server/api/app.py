@@ -37,15 +37,20 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
-from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg import OperationalError
 from pydantic import BaseModel, ConfigDict
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api.identity import Actor, actor_from_headers
 from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
 from server.api.stream import TERMINAL, StreamEvent, tail
+from server.api.wire import CLEARS, RefusalBody
 from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
@@ -209,14 +214,6 @@ class RunDocument(BaseModel):
     nodes: list[NodeView]
 
 
-class RefusalBody(BaseModel):
-    """Everything a declined request says. The code, and nothing else."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    refusal: RefusalCode
-
-
 def _database_url() -> str:
     url = environ.get(DATABASE_URL)
     if not url:
@@ -290,13 +287,32 @@ Blobs = Annotated[BlobStore, Depends(blob_store)]
 Methodology = Annotated[Bundle, Depends(methodology_bundle)]
 
 
+def _body(code: RefusalCode, status: int) -> Response:
+    return JSONResponse(
+        status_code=status,
+        content=RefusalBody(code=code, clears=CLEARS[code]).model_dump(mode="json"),
+    )
+
+
 @app.exception_handler(Refusal)
 def _refused(_request: Request, refusal: Refusal) -> Response:
-    """A refusal on the wire: the code, and no part of what caused it."""
-    return JSONResponse(
-        status_code=_STATUS.get(refusal.code, 400),
-        content=RefusalBody(refusal=refusal.code).model_dump(mode="json"),
-    )
+    """A refusal on the wire: the code, its constant clearance, and no part of
+    what caused it."""
+    return _body(refusal.code, _STATUS.get(refusal.code, 400))
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _undeclared(request: Request, error: StarletteHTTPException) -> Response:
+    """Routing's own 404 and 405 under `/api/` answer in the one refusal body.
+
+    Routing decides before any dependency runs, so this discloses no case and
+    needs no identity. Outside `/api/`, and for any other status, the default
+    stands: that surface is not this contract's.
+    """
+    under_api = request.url.path == "/api" or request.url.path.startswith("/api/")
+    if under_api and error.status_code in (404, 405):
+        return _body(RefusalCode.ENDPOINT_NOT_FOUND, error.status_code)
+    return await http_exception_handler(request, error)
 
 
 @app.exception_handler(RequestValidationError)
