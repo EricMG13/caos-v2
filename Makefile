@@ -43,6 +43,7 @@ types:
 
 test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarqube job
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
 		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 \
 		$(PY) -m pytest -n auto -m "not production_image"
 	$(PY) scripts/scan_floors.py coverage.xml --cobertura
@@ -50,6 +51,7 @@ test:  # writes coverage.xml (pyproject.toml addopts); CI reads it in the sonarq
 
 test-fast:  ## partial: provider, PostgreSQL and image suites are skipped
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
 		-u CAOS_REQUIRE_PROVIDER -u CAOS_TEST_POSTGRES_URL CAOS_REQUIRE_POSTGRES=0 \
 		$(PY) -m pytest --no-cov -m "not production_image"
 
@@ -58,6 +60,7 @@ check-postgres:  ## fail before complete gates when the configured test DB is ab
 
 test-postgres-races:
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
 		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_POSTGRES=1 \
 		$(PY) -m pytest --no-cov tests/test_postgres_races.py
 
@@ -85,9 +88,11 @@ image:  ## build and run the exact CI Trivy floor and severity gate
 smoke-production:  ## disposable production-image stack, then the real-browser journey
 	docker build -t "$(IMAGE)" .
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
 		-u CAOS_REQUIRE_PROVIDER CAOS_REQUIRE_IMAGE=1 IMAGE="$(IMAGE)" \
 		$(PY) -m pytest --no-cov -m production_image tests/test_production_image.py
 	env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+		-u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
 		-u CAOS_REQUIRE_PROVIDER IMAGE="$(IMAGE)" $(PY) tests/journey/run.py
 
 frontend-check:

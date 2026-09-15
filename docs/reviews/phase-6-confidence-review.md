@@ -47,3 +47,69 @@ By design: no live provider call was made; the UI therefore cannot claim a relea
 Still open: an external, authenticated qualification verdict for the exact
 provider/model/route/time window and hosted required-check confirmation. The
 application correctly refuses to mint that release evidence itself.
+
+## Confidence review addendum — provider-profile remediation
+
+Effort: `xhigh`, over the whole Phase 6 completion candidate after the live
+qualification outcome.
+
+Scope: owned changes after `dc25c65`; user-owned `CLAUDE.md`, `.claude/skills/`,
+`AGENTS.md` and `gemini-audit.md` were excluded.
+
+Least confident about (ranked):
+
+1. OpenRouter's fallback switch might not bind the first selected endpoint.
+   Investigated → official routing documentation and generation reconciliation
+   confirmed that `allow_fallbacks: false` alone still let OpenRouter select
+   Ionstream first.
+   Verdict → confirmed bug.
+   Patch → send one lowercase endpoint tag in `provider.order`, retain disabled
+   fallbacks, and bind endpoint/reasoning into qualification identity.
+2. A future qualification could still use the legacy automatic provider pool.
+   Investigated → reasoning-only or unset configuration produced an identity
+   that did not name the endpoint OpenRouter would choose.
+   Verdict → confirmed bug.
+   Patch → the qualification boundary now refuses OpenRouter without an
+   explicit upstream pin; ordinary non-qualification calls retain legacy auto
+   routing. Regression covers refusal and pinned identity.
+3. Endpoint display names might be accepted as routing tags.
+   Investigated → OpenRouter's endpoint catalog separates display name
+   `DeepSeek` from tag `deepseek`; the display name produced repeatable 404s.
+   Verdict → confirmed configuration defect.
+   Patch → provider tags must be lowercase and the example names the tag.
+4. The DeepSeek failure might still be fallback routing, disabled reasoning or
+   truncation.
+   Investigated → the frozen-v2 Ionstream/xhigh generation reconciled to 6,286
+   native reasoning tokens and `finish_reason=stop`; the host refused exact
+   citation delivery.
+   Verdict → fine: the failure classification is evidence-backed and remains
+   non-qualification.
+5. Ambient live-profile variables might leak into offline gates.
+   Investigated → all Make test/smoke entry points and the restore probe scrub
+   both new names; focused tests, Ruff and mypy passed.
+   Verdict → fine.
+6. Citation-candidate guidance might add undeclared work to accepted reads.
+   Investigated → `_context` served prompt construction, replay and accepted
+   read validation, so the later candidate-guidance change added three database
+   operations to the model read path and broke its declared I/O budget.
+   Verdict → confirmed bug.
+   Patch → candidate generation is now requested only by the two prompt-building
+   callers; replay and accepted reads retain their original bounded work. The
+   exact model budget plus prompt/citation regression set passed (40 tests).
+
+Fixed: endpoint pinning, qualification refusal for automatic routing, tag
+validation/documentation, adapter revision identity, prompt-only candidate work.
+
+Verified fine: one-call/no-retry behavior, fail-closed first-party 404, exact
+profile binding across prepare/perform, offline environment scrubbing, no
+qualification verdict on failure.
+
+By design: model pricing remains explicit dated operator input; external
+generation reconciliation is reviewer evidence, not provider self-identity.
+
+Still open: first-party DeepSeek is excluded by current OpenRouter account or
+workspace policy; DeepSeek remains unqualified for the canonical route.
+
+Final verification: 2,844 PostgreSQL-backed tests, 21 race tests, all 22 I/O
+budgets, repository lint/types/security, frontend build, 230 units, 171
+accessibility entries and 90 three-engine workbench tests passed.

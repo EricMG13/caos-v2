@@ -78,6 +78,13 @@ requires `CAOS_MODEL_PRICE` (`model,input_per_token,output_per_token,YYYY-MM-DD`
 and `CAOS_LIVE_BUDGET_CEILING` (a positive decimal). The test reserves the
 configured worst-case price before each call and refuses the next call before
 that per-run ceiling would be exceeded; it never prints credential values.
+`OPENROUTER_PROVIDER` may pin one upstream endpoint by its lowercase OpenRouter
+provider slug (for example, `deepseek`) and
+`OPENROUTER_REASONING_EFFORT` may select `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh` or `max`. A qualification verdict binds that execution profile;
+qualification therefore requires an explicit provider slug. Ordinary live calls
+may leave both unset for the legacy automatic/default profile. Changing the
+provider changes the external data recipient and requires fresh authorization.
 
 Sample screens are available only in explicit demonstration mode. They carry a
 prominent read-only banner and fixture handlers reject commands:

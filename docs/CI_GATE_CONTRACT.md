@@ -67,6 +67,7 @@ the exact eventual PR head; local checks do not post those statuses.
   plan obligation.
 - Live provider job is scheduled/dispatched, never on push/PR. It requires the
   secret `OPENROUTER_API_KEY` plus repository variables `OPENROUTER_MODEL`,
+  optional `OPENROUTER_PROVIDER` and `OPENROUTER_REASONING_EFFORT`,
   `CAOS_MODEL_PRICE` (dated per-token price) and
   `CAOS_LIVE_BUDGET_CEILING` (positive per-run ceiling). Do not invoke paid
   tests or workflow dispatch without explicit spend authorization.

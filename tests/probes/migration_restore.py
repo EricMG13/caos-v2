@@ -160,6 +160,8 @@ def main(  # noqa: C901, PLR0915 -- the three restore scenarios share one proof
             "BASE_URL",
             "OPENROUTER_MODEL",
             "OPENROUTER_BASE_URL",
+            "OPENROUTER_PROVIDER",
+            "OPENROUTER_REASONING_EFFORT",
             "CAOS_REQUIRE_PROVIDER",
         }
     }

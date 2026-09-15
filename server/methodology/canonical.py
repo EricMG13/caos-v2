@@ -183,7 +183,9 @@ def execute_handoff(
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
-        context = _context(conn, blobs, bundle, assignment, identity)
+        context = _context(
+            conn, blobs, bundle, assignment, identity, include_candidates=True
+        )
     # The record binds exactly the authority this prompt carries (§45.1).
     carried = delivered_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
@@ -334,7 +336,9 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
         identity = prospective_identity(
             conn, bundle, run_id=run_id, route=route, node=node
         )
-        context = _context(conn, blobs, bundle, assignment, identity)
+        context = _context(
+            conn, blobs, bundle, assignment, identity, include_candidates=True
+        )
     authority = delivered_authority(bundle, node.module_id)
     within_request_ceiling(
         provider, _prompt(bundle, assignment, identity, context, authority)
@@ -357,12 +361,14 @@ class _Context:
     candidates: tuple[Citation, ...]
 
 
-def _context(
+def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
+    *,
+    include_candidates: bool = False,
 ) -> _Context:
     """The delivered evidence, the verified upstream, its whole accepted lineage
     and its citation register, read inside the caller's unit after it checked
@@ -373,12 +379,17 @@ def _context(
     records, lineage = _upstream_records(
         conn, blobs, bundle, assignment, identity.upstream
     )
-    candidates = citation_candidates(
-        conn,
-        delivered=_by_source(delivered),
-        proposed=tuple(
-            Citation(item.source_id, item.page, item.text.value) for item in delivered
-        ),
+    candidates = (
+        citation_candidates(
+            conn,
+            delivered=_by_source(delivered),
+            proposed=tuple(
+                Citation(item.source_id, item.page, item.text.value)
+                for item in delivered
+            ),
+        )
+        if include_candidates
+        else ()
     )
     return _Context(
         delivered=delivered,
