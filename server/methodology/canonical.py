@@ -33,6 +33,7 @@ from server.methodology.bundle import (
     Bundle,
     assemble_authority,
     authority_digest,
+    delivered_authority,
     verified_bytes,
 )
 from server.methodology.executor import (
@@ -58,6 +59,7 @@ from server.methodology.invocation import (
     build_handoff_prompt,
     call_time_identity,
     host_identity,
+    prospective_identity,
     record_authority_matches,
     upstream_markdown,
 )
@@ -167,20 +169,12 @@ def execute_handoff(
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
-        delivered = _delivered(conn, assignment.run_id)
-        # Records first: what binds and re-validates is then read as context.
-        _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
-        upstream = upstream_markdown(blobs, identity.upstream)
+        delivered, upstream = _context(conn, blobs, bundle, assignment, identity)
     contract = _contract(bundle)
     authority = assemble_authority(bundle, assignment.module_id)
-    prompt = build_handoff_prompt(
-        contract,
-        identity=identity,
-        skill=authority.files[SKILL],
-        delivered=delivered,
-        upstream=upstream,
-        route=assignment.route,
-    )
+    # Met before reservation by `check_context`; built again here so the call
+    # carries exactly this attempt's identity, and refused again if it moved.
+    prompt = _prompt(bundle, assignment, identity, delivered, upstream)
 
     bundle.verify_manifest()
     model = producer_identifier(provider.model, limit=256)
@@ -261,6 +255,74 @@ def execute_handoff(
         model=model,
         generation_id=generation,
         diagnostic_sha256=diagnostic,
+    )
+
+
+def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
+    conn: StoreConnection,
+    bundle: Bundle,
+    blobs: BlobStore,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    node: RouteNode,
+) -> None:
+    """Build the node's whole prompt before any attempt, reservation or call.
+
+    The pre-call unit `execute_handoff` runs, under `prospective_identity`, so
+    every refusal the prompt would raise -- `CONTEXT_OVER_CEILING` above all,
+    and a delivered file whose bytes moved -- is raised while nothing has been
+    started or set aside (§45.3, invariant 8). Nothing is kept: the attempt's
+    own prompt is rebuilt from its own read unit.
+    """
+    assignment = Assignment(node.module_id, run_id, node, route, _NO_ATTEMPT)
+    with execution_reads(conn):
+        _stored_identity(
+            conn, assignment, bundle, adapter=methodology.CANONICAL_ADAPTER_VERSION
+        )
+        identity = prospective_identity(
+            conn, bundle, run_id=run_id, route=route, node=node
+        )
+        delivered, upstream = _context(conn, blobs, bundle, assignment, identity)
+    _prompt(bundle, assignment, identity, delivered, upstream)
+
+
+# `check_context` runs before an attempt exists; nothing it reads uses the id.
+_NO_ATTEMPT = UUID(int=0)
+
+
+def _context(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    assignment: Assignment,
+    identity: HostIdentity,
+) -> tuple[list[Delivery], tuple[tuple[UpstreamRef, bytes], ...]]:
+    """The delivered evidence and the verified upstream, read inside the
+    caller's unit after it checked the stored pin."""
+    delivered = _delivered(conn, assignment.run_id)
+    # Records first: what binds and re-validates is then read as context.
+    _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
+    return delivered, upstream_markdown(blobs, identity.upstream)
+
+
+def _prompt(
+    bundle: Bundle,
+    assignment: Assignment,
+    identity: HostIdentity,
+    delivered: Sequence[Delivery],
+    upstream: Sequence[tuple[UpstreamRef, bytes]],
+) -> str:
+    """The prompt over exactly the delivered authority (§45.1): names from the
+    manifest and the verified SKILL.md, never from evidence or upstream text."""
+    return build_handoff_prompt(
+        _contract(bundle),
+        identity=identity,
+        authority=delivered_authority(bundle, assignment.module_id),
+        catalog=_catalog(bundle),
+        delivered=delivered,
+        upstream=upstream,
+        route=assignment.route,
     )
 
 
