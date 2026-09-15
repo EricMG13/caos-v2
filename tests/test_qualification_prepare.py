@@ -21,6 +21,7 @@ from test_qualification_harness import (
     REPORT,
     SET_CEILING,
     VENDORED,
+    _approve,
     _case,
     _Completions,
     _count,
@@ -34,7 +35,7 @@ from server.methodology.bundle import Bundle
 from server.qualification import harness as subject
 from server.qualification.matrix import QualificationCase, QualificationSet
 from server.refusals import Refusal
-from server.store import StoreConnection, apply_schema, connect, run_inputs
+from server.store import RunStatus, StoreConnection, apply_schema, connect, run_inputs
 from server.store.budget import CEILING
 from server.store.gates import Gate, GateState, gate_preview, gate_state
 from server.store.routes import resolved_route
@@ -107,6 +108,44 @@ def test_a_price_whose_route_cannot_fit_a_run_is_refused_before_any_case(
         subject.prepare(conn, blobs, half, qualification=qualification)
     assert _count(conn, "SELECT count(*) FROM cases") == 0
     _unapproved_and_unspent(conn, half)
+
+
+def test_preparation_uses_an_explicit_run_ceiling(ready: Fixture) -> None:
+    """An authorized live route may need more than the default per-run cap."""
+    conn, blobs, harness, qualification = ready
+    route = resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
+    # Three conservative reservations total more than the default five-dollar
+    # cap but less than the explicit authorized ceiling.
+    price = priced(Decimal("1.90"))
+    authorized = replace(
+        harness,
+        price=price,
+        ceiling=Decimal("22.00"),
+        run_ceiling=Decimal("22.00"),
+    )
+
+    prepared = subject.prepare(
+        conn,
+        blobs,
+        authorized,
+        qualification=QualificationSet((qualification.cases[0],)),
+    )
+
+    assert len(route.nodes) == 3
+    assert conn.execute(
+        "SELECT budget_ceiling FROM runs WHERE run_id=%s", (prepared[0].input.run_id,)
+    ).fetchone() == (Decimal("22.00"),)
+
+    _approve(conn, prepared)
+    performed = subject.perform(
+        conn,
+        blobs,
+        authorized,
+        qualification=QualificationSet((qualification.cases[0],)),
+        prepared=prepared,
+    )
+
+    assert performed.performed[0].status is RunStatus.COMPLETE
 
 
 @pytest.mark.parametrize(
