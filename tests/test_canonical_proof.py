@@ -427,7 +427,14 @@ def test_a_moved_or_lost_quote_refuses(ran: _Harness, fault: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "field", ["adapter_version", "build_id", "manifest_sha256", "authority_digest"]
+    "field",
+    [
+        "adapter_version",
+        "build_id",
+        "manifest_sha256",
+        "authority_digest",
+        "delivered_authority_digest",
+    ],
 )
 def test_a_record_from_another_build_refuses(ran: _Harness, field: str) -> None:
     changes: dict[str, Any] = {field: "b" * 64}

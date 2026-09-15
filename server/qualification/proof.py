@@ -56,6 +56,7 @@ from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import captured_blocks
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
 from server.methodology.invocation import (
+    accepted_lineage,
     call_time_identity,
     host_identity,
     record_authority_matches,
@@ -238,8 +239,9 @@ class _CanonicalReader:
         `ROUTE_IDENTITY_INVALID` for a blocking input with no accepted artifact),
         raised by it outside any handler and meaning what it means at the call;
         `ARTIFACT_RECORD_MISMATCH` for everything else that does not bind -- a
-        missing record, a rebuilt identity the record does not carry, the
-        projections.
+        missing record, a rebuilt identity the record does not carry, a lineage
+        that is not the accepted chain now (an ancestor's record rewritten
+        after its consumer was accepted), the projections.
         """
         mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
         if record_sha256 is None:
@@ -274,6 +276,14 @@ class _CanonicalReader:
             record, bundle=bundle, module_id=node.module_id
         ):
             raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
+        upstream = record.identity.upstream
+        lineage = _unless_refused(
+            lambda: accepted_lineage(
+                self.conn, self.blobs, run_id=self.run_id, upstream=upstream
+            )
+        )
+        if lineage is None or lineage != record.lineage:
+            raise mismatch
         skill = verified_bytes(bundle, node.module_id, "SKILL.md")
         gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
         projections = _unless_refused(

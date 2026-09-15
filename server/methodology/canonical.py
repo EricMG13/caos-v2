@@ -31,9 +31,11 @@ from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import verify_citations
 from server.methodology.bundle import (
     Bundle,
+    DeliveredAuthority,
     assemble_authority,
     authority_digest,
     delivered_authority,
+    delivered_authority_digest,
     verified_bytes,
 )
 from server.methodology.executor import (
@@ -48,14 +50,17 @@ from server.methodology.handoff import (
     MAX_TRANSPORT_CHARS,
     CanonicalRecord,
     HostIdentity,
+    LineageRef,
     Projections,
     UpstreamRef,
     parse_response,
     read_record,
     record_bytes,
+    stored_lineage,
     validate_markdown,
 )
 from server.methodology.invocation import (
+    accepted_lineage,
     build_handoff_prompt,
     call_time_identity,
     host_identity,
@@ -170,13 +175,17 @@ def execute_handoff(
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
-        delivered, upstream = _context(conn, blobs, bundle, assignment, identity)
+        delivered, upstream, lineage = _context(
+            conn, blobs, bundle, assignment, identity
+        )
     contract = _contract(bundle)
     authority = assemble_authority(bundle, assignment.module_id)
+    # The record binds exactly the authority this prompt carries (§45.1).
+    carried = delivered_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
     # carries exactly this attempt's identity, and refused again if it moved.
     prompt = within_request_ceiling(
-        provider, _prompt(bundle, assignment, identity, delivered, upstream)
+        provider, _prompt(bundle, assignment, identity, delivered, upstream, carried)
     )
 
     bundle.verify_manifest()
@@ -221,6 +230,9 @@ def execute_handoff(
         # comparison also catches an upstream rewritten during the call.
         if _identity(conn, bundle, assignment) != identity:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        # ...and every ancestor's accepted pair, a record rewritten included.
+        if _lineage_moved(conn, assignment.run_id, lineage):
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         # Exactly what the prompt was built from: pins are immutable, so the
         # pre-call reading is this unit's too, without a second query.
         blocks = _by_source(delivered)
@@ -247,7 +259,9 @@ def execute_handoff(
         manifest_sha256=bundle.manifest_sha256,
         authority_bundle_sha256=identity.authority_bundle_sha256,
         authority_digest=authority_digest(authority),
+        delivered_authority_digest=delivered_authority_digest(carried),
         identity=identity,
+        lineage=lineage,
         projections=projections,
         citations=tuple(anchored),
     )
@@ -287,9 +301,12 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
         identity = prospective_identity(
             conn, bundle, run_id=run_id, route=route, node=node
         )
-        delivered, upstream = _context(conn, blobs, bundle, assignment, identity)
+        delivered, upstream, _lineage = _context(
+            conn, blobs, bundle, assignment, identity
+        )
+    authority = delivered_authority(bundle, node.module_id)
     within_request_ceiling(
-        provider, _prompt(bundle, assignment, identity, delivered, upstream)
+        provider, _prompt(bundle, assignment, identity, delivered, upstream, authority)
     )
 
 
@@ -303,28 +320,45 @@ def _context(
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
-) -> tuple[list[Delivery], tuple[tuple[UpstreamRef, bytes], ...]]:
-    """The delivered evidence and the verified upstream, read inside the
-    caller's unit after it checked the stored pin."""
+) -> tuple[
+    list[Delivery], tuple[tuple[UpstreamRef, bytes], ...], tuple[LineageRef, ...]
+]:
+    """The delivered evidence, the verified upstream and its whole accepted
+    lineage, read inside the caller's unit after it checked the stored pin."""
     delivered = _delivered(conn, assignment.run_id)
     # Records first: what binds and re-validates is then read as context.
-    _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
-    return delivered, upstream_markdown(blobs, identity.upstream)
+    lineage = _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
+    return delivered, upstream_markdown(blobs, identity.upstream), lineage
 
 
-def _prompt(
+def _lineage_moved(
+    conn: StoreConnection, run_id: UUID, lineage: tuple[LineageRef, ...]
+) -> bool:
+    """Whether any ancestor's accepted (artifact, record) pair is no longer the
+    one the prompt's lineage named. One query, none without lineage."""
+    if not lineage:
+        return False
+    accepted = {row[0]: (row[2], row[3]) for row in accepted_rows(conn, run_id)}
+    return any(
+        accepted.get(link.route_node_id) != (link.artifact_sha256, link.record_sha256)
+        for link in lineage
+    )
+
+
+def _prompt(  # noqa: PLR0913 -- one prompt's inputs, each already verified
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
     delivered: Sequence[Delivery],
     upstream: Sequence[tuple[UpstreamRef, bytes]],
+    authority: DeliveredAuthority,
 ) -> str:
     """The prompt over exactly the delivered authority (§45.1): names from the
     manifest and the verified SKILL.md, never from evidence or upstream text."""
     return build_handoff_prompt(
         _contract(bundle),
         identity=identity,
-        authority=delivered_authority(bundle, assignment.module_id),
+        authority=authority,
         catalog=_catalog(bundle),
         delivered=delivered,
         upstream=upstream,
@@ -551,7 +585,8 @@ def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
 ) -> CanonicalRecord:
     """An accepted row's record, bound to its call-time identity and this build.
 
-    `ARTIFACT_RECORD_MISMATCH` when it does not bind (`read_record`);
+    `ARTIFACT_RECORD_MISMATCH` when it does not bind (`read_record`) or its
+    lineage is not the accepted chain the store holds now (§45.4);
     `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
     build, manifest or authority, as the proof maps it. Caller owns the read.
     """
@@ -576,6 +611,11 @@ def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
     )
     if not record_authority_matches(record, bundle=bundle, module_id=node.module_id):
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
+    upstream = record.identity.upstream
+    if record.lineage != accepted_lineage(
+        conn, blobs, run_id=run_id, upstream=upstream
+    ):
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
     return record
 
 
@@ -585,9 +625,10 @@ def _upstream_records(
     bundle: Bundle,
     assignment: Assignment,
     refs: tuple[UpstreamRef, ...],
-) -> None:
+) -> tuple[LineageRef, ...]:
     """Every upstream the prompt will carry is an accepted record of this build
-    whose projections re-derive from its Markdown.
+    whose projections re-derive from its Markdown and whose own lineage is the
+    accepted chain; returns the whole lineage behind them, from those records.
 
     Inside the pre-call read unit, so nothing another build wrote, and no record
     that disagrees with its own Markdown, reaches the prompt (invariant 4; the
@@ -597,7 +638,7 @@ def _upstream_records(
     No query when there is no upstream.
     """
     if not refs:
-        return
+        return ()
     rows = {row[0]: row for row in accepted_rows(conn, assignment.run_id)}
     nodes = {n.route_node_id: n for n in assignment.route.nodes}
     for ref in refs:
@@ -618,6 +659,8 @@ def _upstream_records(
             artifact_sha256=digest,
             record_sha256=record,
         )
+    accepted = {row[0]: (row[2], row[3]) for row in rows.values()}
+    return stored_lineage(blobs, refs, accepted)
 
 
 def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
