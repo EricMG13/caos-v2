@@ -281,7 +281,9 @@ def _handoff_view(  # noqa: PLR0913 -- one accepted handoff and its lookups
         source_facts=[_citation(c, documents) for c in record.citations],
         # Model-authored and rendered as text, never as markup (§46.3).
         model_analysis=markdown.decode("utf-8"),
-        host_calculation="NONE",
+        host_calculation=(
+            "CP_CF_FORECAST" if projections.module_id == "CP-CF" else "NONE"
+        ),
     )
 
 

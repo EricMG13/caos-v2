@@ -1,5 +1,15 @@
 import type { CommitteeDocument } from "@/wire/v1";
+import type { KeyboardEvent } from "react";
 
+function scrollArtifact(event: KeyboardEvent<HTMLPreElement>) {
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    event.preventDefault();
+    event.currentTarget.scrollBy({ left: event.key === "ArrowRight" ? 40 : -40 });
+  }
+}
+
+/* Keyboard scroll makes static, wide canonical text reachable in every browser. */
+/* eslint-disable jsx-a11y/no-noninteractive-element-interactions */
 function Values({ label, values }: { label: string; values: readonly string[] }) {
   return (
     <div className="note">
@@ -26,14 +36,33 @@ function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts
           <dt>Scope</dt>
           <dd>{artifact.decision_scope}</dd>
         </dl>
-        <div data-committee-artifact-text>{artifact.markdown}</div>
-        <div data-committee-artifact-record>{artifact.record}</div>
+        <pre
+          className="tscroll artifact-scroll"
+          data-committee-artifact-text
+          aria-label="Saved artifact markdown"
+          role="region"
+          tabIndex={0}
+          onKeyDown={scrollArtifact}
+        >
+          {artifact.markdown}
+        </pre>
+        <pre
+          className="tscroll artifact-scroll"
+          data-committee-artifact-record
+          aria-label="Saved artifact record"
+          role="region"
+          tabIndex={0}
+          onKeyDown={scrollArtifact}
+        >
+          {artifact.record}
+        </pre>
         <Values label="Limitations." values={artifact.limitation_flags} />
         <Values label="Validation warnings." values={artifact.validation_warnings} />
       </div>
     </section>
   );
 }
+/* eslint-enable jsx-a11y/no-noninteractive-element-interactions */
 
 function Filing({ document }: { document: CommitteeDocument }) {
   const { body } = document;

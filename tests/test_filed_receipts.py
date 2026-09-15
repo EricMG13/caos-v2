@@ -18,7 +18,15 @@ from server.deliverable.filing import Receipt, file_deliverable, receipt_bytes
 from server.deliverable.receipts import read_filed_receipt
 from server.refusals import Refusal
 from server.store import connect
-from server.store.audit import audit_trail, verify_chain
+from server.store.audit import (
+    GENESIS,
+    GovernedAction,
+    _digest_of,
+    _link,
+    audit_trail,
+    verify_chain,
+)
+from server.store.members import Standing
 
 __all__ = ["harness", "lite", "route"]
 
@@ -399,6 +407,26 @@ def test_receipt_migration_preserves_legacy_filing_without_inventing_bytes(
             " VALUES (%s,%s,%s,%s,%s,now())",
             (str(revision), case_id, "a" * 64, freezer, filer),
         )
+        payload = {
+            "revision_id": str(revision),
+            "payload_sha256": "a" * 64,
+            "renderer_sha256": "b" * 64,
+        }
+        action = GovernedAction(
+            case_id, filer, "DELIVERABLE_FILED", Standing.APPROVER, payload
+        )
+        digest = _digest_of(payload)
+        event = _link(action, 1, GENESIS, digest)
+        conn.execute(
+            "INSERT INTO audit_events"
+            " (case_id,seq,actor_id,action,payload_sha256,previous_sha256,entry_sha256)"
+            " VALUES (%s,1,%s,%s,%s,%s,%s)",
+            (case_id, filer, action.action, digest, GENESIS, event),
+        )
+        conn.execute(
+            "INSERT INTO audit_chain_heads (case_id,seq,head_sha256) VALUES (%s,1,%s)",
+            (case_id, event),
+        )
         conn.commit()
         before = conn.execute("SELECT * FROM deliverable_publications").fetchall()
         store.apply_schema(conn)
@@ -408,3 +436,48 @@ def test_receipt_migration_preserves_legacy_filing_without_inventing_bytes(
         assert conn.execute("SELECT count(*) FROM deliverable_receipts").fetchone() == (
             0,
         )
+        assert conn.execute("SELECT * FROM legacy_filing_events").fetchall() == [
+            (case_id, event)
+        ]
+        assert verify_chain(conn, case_id)
+
+
+def test_released_receipt_prefix_refuses_an_ambiguous_receiptless_filing(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import server.store as store
+    from server.boundary_text import BoundaryText
+    from server.store.runs import create_case
+
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:16])
+            store.apply_schema(conn)
+        case_id, filer, revision = (
+            create_case(conn, BoundaryText.of("Ambiguous")),
+            uuid4(),
+            uuid4(),
+        )
+        payload = {
+            "revision_id": str(revision),
+            "payload_sha256": "a" * 64,
+            "renderer_sha256": "b" * 64,
+        }
+        action = GovernedAction(
+            case_id, filer, "DELIVERABLE_FILED", Standing.APPROVER, payload
+        )
+        digest = _digest_of(payload)
+        event = _link(action, 1, GENESIS, digest)
+        conn.execute(
+            "INSERT INTO audit_events"
+            " (case_id,seq,actor_id,action,payload_sha256,previous_sha256,entry_sha256)"
+            " VALUES (%s,1,%s,%s,%s,%s,%s)",
+            (case_id, filer, action.action, digest, GENESIS, event),
+        )
+        conn.execute(
+            "INSERT INTO audit_chain_heads (case_id,seq,head_sha256) VALUES (%s,1,%s)",
+            (case_id, event),
+        )
+        conn.commit()
+        with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+            store.apply_schema(conn)

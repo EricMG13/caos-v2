@@ -79,6 +79,7 @@ export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> =
   run_terminal: ["run", "analysis", "model"],
   sources_changed: ["upload", "run", "analysis", "model", "report", "committee"],
   runs_changed: ["run", "analysis", "model"],
+  filing_changed: ["report", "committee"],
 };
 
 export function refetches(name: EventName, section: Section): boolean {
