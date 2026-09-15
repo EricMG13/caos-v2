@@ -47,6 +47,7 @@ from server.methodology.handoff import (
     CanonicalRecord,
     HostIdentity,
     Projections,
+    UpstreamRef,
     parse_response,
     read_record,
     record_bytes,
@@ -56,6 +57,7 @@ from server.methodology.invocation import (
     build_handoff_prompt,
     call_time_identity,
     host_identity,
+    record_authority_matches,
     upstream_markdown,
 )
 from server.methodology.vendor import (
@@ -68,6 +70,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import (
     CallOutcome,
+    accepted_rows,
     check_attempt,
     check_call,
     execution_reads,
@@ -165,6 +168,7 @@ def execute_handoff(
         identity = _identity(conn, bundle, assignment)
         delivered = _delivered(conn, assignment.run_id)
         upstream = upstream_markdown(blobs, identity.upstream)
+        _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
     contract = _contract(bundle)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_handoff_prompt(
@@ -421,6 +425,56 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
     if node is None:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    record = _accepted_record(
+        conn,
+        blobs,
+        bundle,
+        route,
+        node,
+        run_id=run_id,
+        attempt_id=attempt_id,
+        artifact_sha256=artifact_sha256,
+        record_sha256=record_sha256,
+    )
+    identity = record.identity
+    try:
+        markdown = blobs.get(artifact_sha256)
+    except (Refusal, OSError):
+        markdown = None
+    if markdown is None:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    authority = assemble_authority(bundle, node.module_id)
+    projections = validate_markdown(
+        _contract(bundle),
+        _catalog(bundle),
+        authority.files[SKILL],
+        markdown,
+        identity=identity,
+        gate_expects=_gate_expects(route, node.module_id),
+    )
+    if projections != record.projections:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    return projections
+
+
+def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    node: RouteNode,
+    *,
+    run_id: UUID,
+    attempt_id: UUID,
+    artifact_sha256: str,
+    record_sha256: str,
+) -> CanonicalRecord:
+    """An accepted row's record, bound to its call-time identity and this build.
+
+    `ARTIFACT_RECORD_MISMATCH` when it does not bind (`read_record`);
+    `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
+    build, manifest or authority, as the proof maps it. Caller owns the read.
+    """
     try:
         stored = blobs.get(record_sha256)
     except (Refusal, OSError):
@@ -440,24 +494,47 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
         record_sha256=record_sha256,
         expected=identity,
     )
-    try:
-        markdown = blobs.get(artifact_sha256)
-    except (Refusal, OSError):
-        markdown = None
-    if markdown is None:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    authority = assemble_authority(bundle, node.module_id)
-    projections = validate_markdown(
-        _contract(bundle),
-        _catalog(bundle),
-        authority.files[SKILL],
-        markdown,
-        identity=identity,
-        gate_expects=_gate_expects(route, node.module_id),
-    )
-    if projections != record.projections:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    return projections
+    if not record_authority_matches(record, bundle=bundle, module_id=node.module_id):
+        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
+    return record
+
+
+def _upstream_records(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    assignment: Assignment,
+    refs: tuple[UpstreamRef, ...],
+) -> None:
+    """Every upstream the prompt will carry is an accepted record of this build.
+
+    Inside the pre-call read unit, so nothing another build wrote reaches the
+    prompt (invariant 4). A row whose digest is not the ref's is
+    `ROUTE_IDENTITY_INVALID`; a row without a record `ARTIFACT_RECORD_MISMATCH`.
+    No query when there is no upstream.
+    """
+    if not refs:
+        return
+    rows = {row[0]: row for row in accepted_rows(conn, assignment.run_id)}
+    nodes = {n.route_node_id: n for n in assignment.route.nodes}
+    for ref in refs:
+        row = rows.get(ref.route_node_id)
+        if row is None or row[2] != ref.sha256 or ref.route_node_id not in nodes:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        _, attempt, digest, record = row
+        if record is None:
+            raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+        _accepted_record(
+            conn,
+            blobs,
+            bundle,
+            assignment.route,
+            nodes[ref.route_node_id],
+            run_id=assignment.run_id,
+            attempt_id=attempt,
+            artifact_sha256=digest,
+            record_sha256=record,
+        )
 
 
 def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:

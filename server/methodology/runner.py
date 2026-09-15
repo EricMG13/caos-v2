@@ -94,12 +94,22 @@ class ModuleProvider:
                 assignment=assignment,
                 provider=self.completions,
             )
+            # Billed before analysis; a write failing here accepts nothing.
+            stored: tuple[str, str] | None = None
+            try:
+                markdown = self.blobs.put(handoff.markdown)
+                stored = markdown, self.blobs.put(handoff.record)
+            except (OSError, Refusal):
+                pass  # raised below, outside the handler: no context carried
+            if stored is None:
+                raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+            artifact, record = stored
             return ProviderResult(
-                artifact_sha256=self.blobs.put(handoff.markdown),
+                artifact_sha256=artifact,
                 charge=handoff.charge,
                 model=handoff.model,
                 generation_id=handoff.generation_id,
-                record_sha256=self.blobs.put(handoff.record),
+                record_sha256=record,
                 diagnostic_sha256=handoff.diagnostic_sha256,
             )
         outcome = execute_module(

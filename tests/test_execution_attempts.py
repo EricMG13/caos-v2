@@ -239,7 +239,7 @@ def test_invalid_or_used_attempt_cannot_reach_completion(
         pytest.fail("invalid attempt reached evidence or upstream reads")
 
     monkeypatch.setattr(executor, "read_run_block", forbidden)
-    monkeypatch.setattr(canonical, "upstream_markdown", forbidden)
+    monkeypatch.setattr(canonical, "_identity", forbidden)
     node = provider.route.nodes[0]
     attempt = _reserve(provider, node)
     actual_run = provider.run_id
@@ -343,7 +343,8 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
 
     owner, name = {
         "delivery": (executor, "read_run_block"),
-        "upstream": (canonical, "upstream_markdown"),
+        # The host identity is the store read that derives the upstream refs.
+        "upstream": (canonical, "_identity"),
         "frontier": (runtime, "accepted_artifacts"),
     }[stage]
     monkeypatch.setattr(owner, name, fail)
