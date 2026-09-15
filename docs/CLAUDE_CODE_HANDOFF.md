@@ -12,9 +12,9 @@ ignored reports cannot override those contracts.
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 2 accepted at `b4298dc`** (record below) |
-| Latest accepted task | **Phase 3 Task 3.4 integrated at `f9120d4`** (3.1 `a8acbc6`, 3.2 `fffe5c8`, 3.3 `1bb0cfd`; wave gate green; phase not accepted) |
-| Next task | Phase 3 exit: `make check`, whole-phase confidence review and adversarial audit at actual `xhigh` ([evidence](PHASE_3_EXIT_EVIDENCE.md)) |
+| Latest accepted phase | **Phase 3 accepted at `3400b6c`** (Phase 2 `b4298dc`; records below) |
+| Latest accepted task | **Phase 3 Task 3.4 accepted at `3400b6c`** (3.1 `a8acbc6`, 3.2 `fffe5c8`, 3.3 `1bb0cfd`) |
+| Next task | Phase 4 entry: refresh GitNexus, review the Phase 4 documents, write the Phase 4 task brief |
 | Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -28,6 +28,54 @@ at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
 with `acf334d`. The tracked `CLAUDE.md` at `694660b` records acceptance
 through Task17e. Original logs and detailed reviews remain local supplements;
 this documentation update has not rerun their gates or accepted new code.
+
+## Phase 3 acceptance record — 14 September 2026
+
+- **Candidate:** `codex/execute-repair-plan` at `3400b6c`; GitNexus index-only
+  refreshed at `3400b6c`.
+- **Task 3.4** (the LITE route end to end; brief
+  `docs/superpowers/plans/2026-09-14-phase-3-task-3.4-brief.md`, decision §46)
+  is accepted with the phase: realistic fixtures `1b60263`, read-model labels
+  `ea4f2f5`, CP-5 held for its named LITE object `4f0879b` with review
+  remediation `8abaefd` (owned or edge-carried objects; waiting reason), end to
+  end positive and negative `f9120d4` (characterisation, all passed first),
+  exit evidence and ledger `8736158`.
+- **Exit evidence:** every REPAIR_PLAN Phase 3 exit check maps to named tests
+  in [PHASE_3_EXIT_EVIDENCE.md](PHASE_3_EXIT_EVIDENCE.md), with slice commits.
+- **Complete gate at `3400b6c`:** `make check` with the pinned Trivy 0.70.0 exit
+  0: backend 2291 passed, races 2 passed, lint/types/Bandit/pip-audit/
+  gitleaks clean, frontend 157 unit tests, accessibility, 90
+  browser workbench tests, image built and scanned with no fixable
+  HIGH/CRITICAL.
+- **Whole-phase confidence review:** Claude Opus 5 (`claude-opus-5`) at
+  **xhigh**, set with the app's session-effort control and read back from the
+  session record (`effort: "xhigh"`, 05:50:11Z) before the review turn
+  ([report](reviews/phase-3-confidence-review.md)). One confirmed P2 -- the
+  adapter-module LITE portfolio pathway executed and accepted with no contract
+  test (work item 6) -- fixed in `147ecf7` (`ADAPTER_ROUTES`); P3 docs fixed; a
+  pre-existing crash-gap re-pay recorded for Phase 4. Wave gate after
+  remediation: 2286 passed.
+- **Whole-phase adversarial audit:** same model and effort, read back at
+  06:05:49Z ([report](reviews/phase-3-adversarial-audit.md)). Verdict CONCERNS:
+  one P1 (promoted) -- a 16,926-byte PDF page overran a 2 s deadline to 23.2 s
+  and a 261,529-byte page held 806 MiB -- fixed in `3400b6c` by extracting PDFs
+  in a `python -I` child killed at the deadline with a budgeted inflater (§47,
+  superseding §44.2; probes then refused at 2.0 s and 0.2 s); plain-text token
+  ceiling P3 fixed; transaction-held extraction P3 recorded for Phase 4; gate
+  naming P3 fixed.
+- **Accepted limits:** the CLAUDE.md "Repair Phase 3" ledger (vendor
+  `semantic_rules`, `document_substrings_casefold` and LITE
+  `required_payload_fields` unenforced; undelivered-page citation never fires
+  while every block is delivered; letter-spaced headings; crop-edge drops;
+  named-object boundary read from prose headings; register states
+  acceptance-time anchoring; lineage re-checked, not re-proven; LZW streams
+  bounded by the kill, not bytes; extraction inside the caller's transaction)
+  and the Phase 2 entries it extends. No paid call and no worker; every
+  provider is deterministic.
+- **Size:** each slice passed the 800-line gate against its parent except
+  `be6710a` (211 added, 1,343 deleted: the claims executor's deletion, allowed
+  as deletion-dominated). Landing the cumulative range needs stacked PRs along
+  the slice boundaries; hosted checks remain unverified.
 
 ## Phase 2 acceptance record — 13 September 2026
 

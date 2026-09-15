@@ -1,6 +1,6 @@
 """Running one canonical module: a conforming Markdown handoff and its record (§41).
 
-The claims executor's unit structure with the canonical adapter's contract. The
+One pre-call read unit and one post-call read unit around the call. The
 attempt, the stored input, the pinned route and node, the pinned adapter and
 the host identity are read in one unit before the call and again after it;
 the upstream the prompt named must be unchanged. The call is billed before any
