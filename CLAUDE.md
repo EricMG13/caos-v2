@@ -401,6 +401,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   by the executor's prompt (which reads every delivered byte) and no longer by
   a reader's comparison. *Upgrade:* Phase 4's lease fencing ancestors for the
   node's whole attempt, and immutable `artifacts` rows.
+- **The upstream citation register states acceptance-time anchoring, not a
+  fresh one.** Since slice 3.3d a consumer's prompt carries, after the
+  upstream handoffs, an `UPSTREAM CITATION REGISTER` section: for each direct
+  upstream, one line per citation of its verified record (`document_sha256`,
+  `page`, `matched_text`) labelled `quote_existence:
+  HOST_VERIFIED_IN_DELIVERED_EVIDENCE` and `support: NOT_ASSESSED_BY_HOST
+  (CP-5 audit)`, under a header saying it is context, not evidence. The lines
+  come from the record the pre-call unit just verified against its Markdown
+  and identity, but the rectangles are not re-derived there: the quote was
+  located when that upstream was accepted, and the proof and deliverable are
+  what re-anchor it. Citations still anchor only in the consumer's own
+  delivered blocks, so a quote found only in upstream text or the register
+  refuses `CITATION_NOT_LOCATED`; the register rides inside the request
+  ceiling like every other section and has no bound of its own. *Upgrade:*
+  re-anchoring in the pre-call unit if a consumer ever relies on the register
+  for more than orientation, and a per-section bound with the one "An upstream
+  section is unbounded" owes.
 
 **Repair Phase 2.**
 

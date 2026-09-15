@@ -29,6 +29,7 @@ from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, RouteNode, resolve_route
+from server.evidence.citations import AnchoredCitation, Rect
 from server.methodology.bundle import (
     delivered_authority,
     verified_bytes,
@@ -70,6 +71,13 @@ END = "--- END HOST-OWNED FRONT MATTER"
 LITE_ROUTE = resolve_route(CATALOG, *LITE)
 
 
+ANCHORED = (
+    AnchoredCitation(
+        "c" * 64, 1, "Recorded source p1", (Rect(page=1, x0=1, y0=2, x1=3, y1=4),)
+    ),
+)
+
+
 def _prompt(
     of: HostIdentity,
     delivered: list[Delivery] | None = None,
@@ -82,6 +90,7 @@ def _prompt(
         catalog=CATALOG,
         delivered=_delivered() if delivered is None else delivered,
         upstream=upstream,
+        upstream_citations={ref.route_node_id: ANCHORED for ref in of.upstream},
         route=LITE_ROUTE,
     )
 
@@ -508,6 +517,7 @@ def test_an_authority_that_is_not_this_modules_utf8_refuses() -> None:
                 catalog=CATALOG,
                 delivered=_delivered(),
                 upstream=(),
+                upstream_citations={},
                 route=LITE_ROUTE,
             )
         assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH

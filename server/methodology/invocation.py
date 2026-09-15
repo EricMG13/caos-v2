@@ -5,10 +5,11 @@ run input's subject and vendor run id, the attempt's stored ordinal, the pinned
 route and the accepted upstream artifacts -- so no caller's copy of an identity
 survives (invariant 3). `build_handoff_prompt` hands the module those exact
 front-matter lines to copy, every delivered authority file whole, the exact
-upstream Markdown as context labelled with its edge's `allowed_use`, and every
-delivered block as evidence. `within_request_ceiling` bounds the whole encoded
-request the provider would send, and refuses an over-ceiling context rather than
-cut anything out of it (§45).
+upstream Markdown as context labelled with its edge's `allowed_use`, a register
+of each upstream's host-anchored citations (quote existence proven, support left
+to CP-5), and every delivered block as evidence. `within_request_ceiling`
+bounds the whole encoded request the provider would send, and refuses an
+over-ceiling context rather than cut anything out of it (§45).
 
 `canonical.py` calls both for every canonical attempt, before and after the
 call, and once under `prospective_identity` before the attempt exists.
@@ -27,6 +28,7 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import BLOCKING, ResolvedRoute, RouteNode
+from server.evidence.citations import AnchoredCitation
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -217,7 +219,7 @@ def call_time_identity(
 
 
 def record_authority_matches(
-    record: CanonicalRecord, *, bundle: Bundle, module_id: str
+    record: CanonicalRecord, *, bundle: Bundle, module_id: str, verify: bool = False
 ) -> bool:
     """Whether a record was written under this bundle for this pinned module.
 
@@ -227,6 +229,11 @@ def record_authority_matches(
     the bytes here now. `read_record` binds
     the invocation; this binds the methodology. `module_id` is the pin's, never
     the record's. Each caller raises its own code on False.
+
+    `verify=True` re-reads and verifies every authority file now instead of
+    answering from the per-manifest cache: the proof and the deliverable use it,
+    so a file tampered on disk under an unchanged manifest refuses there whatever
+    this process read before (invariant 4).
     """
     manifest_sha256, build_id = bundle.manifest_sha256, bundle.build_id
     return (
@@ -239,7 +246,11 @@ def record_authority_matches(
         methodology.CANONICAL_ADAPTER_VERSION,
         build_id,
         manifest_sha256,
-        *_authority_digests(bundle, module_id, manifest_sha256, build_id),
+        *(
+            _read_authority_digests(bundle, module_id)
+            if verify
+            else _authority_digests(bundle, module_id, manifest_sha256, build_id)
+        ),
     )
 
 
@@ -255,17 +266,21 @@ _AUTHORITY_LOCK = threading.Lock()
 def _authority_digests(
     bundle: Bundle, module_id: str, manifest_sha256: str, build_id: str
 ) -> tuple[str, str]:
-    key = (str(bundle.root), manifest_sha256, build_id, module_id)
+    key = (str(bundle.root.resolve()), manifest_sha256, build_id, module_id)
     with _AUTHORITY_LOCK:
         cached = _AUTHORITY_DIGESTS.get(key)
     if cached is None:
-        cached = (
-            authority_digest(assemble_authority(bundle, module_id)),
-            delivered_authority_digest(delivered_authority(bundle, module_id)),
-        )
+        cached = _read_authority_digests(bundle, module_id)
         with _AUTHORITY_LOCK:
             _AUTHORITY_DIGESTS[key] = cached
     return cached
+
+
+def _read_authority_digests(bundle: Bundle, module_id: str) -> tuple[str, str]:
+    return (
+        authority_digest(assemble_authority(bundle, module_id)),
+        delivered_authority_digest(delivered_authority(bundle, module_id)),
+    )
 
 
 def accepted_lineage(
@@ -368,7 +383,8 @@ _INSTRUCTION = """\
 You are executing methodology module {module_id} ({module_name}) at route node
 {route_node_id}. The steps the host performs itself follow, then every authority
 file for this module, each whole in its own section, then the accepted upstream
-handoffs, then the evidence you have been delivered. Use no other knowledge.
+handoffs and the host's register of their located citations, then the evidence
+you have been delivered. Use no other knowledge.
 
 Return one JSON object and nothing else, with exactly this shape:
 
@@ -516,6 +532,49 @@ def _upstream_section(
     )
 
 
+# Each register line's two host labels (§41.3, brief 3.3 scope 4): the host
+# proved the quote exists in delivered evidence; nobody here judged support.
+QUOTE_EXISTENCE = "quote_existence: HOST_VERIFIED_IN_DELIVERED_EVIDENCE"
+SUPPORT = "support: NOT_ASSESSED_BY_HOST (CP-5 audit)"
+
+
+def _citation_register(
+    upstream: Sequence[tuple[UpstreamRef, bytes]],
+    citations: Mapping[str, tuple[AnchoredCitation, ...]],
+    tag: str = "",
+) -> str:
+    """Each direct upstream's anchored citations, as host-owned context.
+
+    Exactly the citations the host re-located when that upstream was accepted,
+    in the record's order; never read from its Markdown. Labelled context, not
+    evidence: a quote here is not citable, and its listing says nothing about
+    whether it supports anything the handoff states.
+    """
+    if not upstream:
+        return ""
+    sections = []
+    for ref, _data in upstream:
+        lines = [
+            f"module_id: {ref.module_id}\nroute_node_id: {ref.route_node_id}\n"
+            f"handoff_sha256: {ref.sha256}"
+        ]
+        lines += [
+            f"- document_sha256: {c.document_sha256} page: {c.page} "
+            f"matched_text: {json.dumps(c.matched_text, ensure_ascii=False)} "
+            f"{QUOTE_EXISTENCE} {SUPPORT}"
+            for c in citations[ref.route_node_id]
+        ]
+        sections.append("\n".join(lines))
+    return (
+        f"\n--- UPSTREAM CITATION REGISTER {tag} (host-owned context, not "
+        "evidence: each line is a quote an accepted upstream handoff cited, which "
+        "the host located word for word in the evidence delivered to that module "
+        "when it was accepted. The host has not assessed whether any quote "
+        "supports any statement; that is CP-5's audit. Never cite these lines; "
+        "cite only the evidence below) ---\n" + "\n\n".join(sections) + "\n"
+    )
+
+
 def _authority_sections(authority: DeliveredAuthority, tag: str) -> str:
     return "".join(
         f"\n--- AUTHORITY {tag} FILE {name} SHA256 "
@@ -534,17 +593,21 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     catalog: Mapping[str, Any],
     delivered: Sequence[Delivery],
     upstream: Sequence[tuple[UpstreamRef, bytes]],
+    upstream_citations: Mapping[str, tuple[AnchoredCitation, ...]],
     route: ResolvedRoute,
 ) -> str:
     """The task, the host-owned front matter, the host's own steps, every
-    delivered authority file, upstream, evidence.
+    delivered authority file, upstream, its citation register, evidence.
 
     `authority` is this module's delivered set (§45.1): each file whole, UTF-8,
     in its own section named with its digest, `SKILL.md` first; any other
     module's set, or a file that is not UTF-8, refuses
     `AUTHORITY_BYTES_MISMATCH`. `upstream` must be exactly `identity.upstream`
     with bytes that hash to each ref, each labelled with its edge's
-    `allowed_use` from `catalog`. CP-0's T8 modules are the pinned route's,
+    `allowed_use` from `catalog`. `upstream_citations` maps exactly those refs'
+    route nodes to their accepted records' anchored citations, each non-empty
+    (`ROUTE_IDENTITY_INVALID` otherwise), rendered as a register that is
+    context, never evidence. CP-0's T8 modules are the pinned route's,
     never a caller's list. Section markers carry a tag derived from every
     section's own bytes, the host-owned front matter included, so neither a
     section's text nor a host-owned field value can reproduce one. Nothing is
@@ -552,8 +615,11 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     """
     if identity.module_id not in ADAPTER_MODULES:
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
-    if tuple(ref for ref, _ in upstream) != identity.upstream or (
-        identity.route_node_id not in {n.route_node_id for n in route.nodes}
+    if (
+        tuple(ref for ref, _ in upstream) != identity.upstream
+        or identity.route_node_id not in {n.route_node_id for n in route.nodes}
+        or set(upstream_citations) != {ref.route_node_id for ref in identity.upstream}
+        or not all(upstream_citations.values())
     ):
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     if (
@@ -581,6 +647,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         _HOST_STEPS
         + _authority_sections(authority, "")
         + _upstream_section(upstream, uses)
+        + _citation_register(upstream, upstream_citations)
         + evidence
     )
     # Host-owned values join the derivation: none of them can pre-compute a tag.
@@ -603,6 +670,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _HOST_STEPS
         + _authority_sections(authority, tag)
         + _upstream_section(upstream, uses, tag)
+        + _citation_register(upstream, upstream_citations, tag)
         + f"\n--- EVIDENCE {tag} ---\n"
         + evidence
     )

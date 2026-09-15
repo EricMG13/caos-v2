@@ -28,7 +28,7 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
-from server.evidence.citations import verify_citations
+from server.evidence.citations import AnchoredCitation, verify_citations
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -175,9 +175,8 @@ def execute_handoff(
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
-        delivered, upstream, lineage = _context(
-            conn, blobs, bundle, assignment, identity
-        )
+        context = _context(conn, blobs, bundle, assignment, identity)
+    delivered, lineage = context.delivered, context.lineage
     contract = _contract(bundle)
     authority = assemble_authority(bundle, assignment.module_id)
     # The record binds exactly the authority this prompt carries (§45.1).
@@ -185,7 +184,7 @@ def execute_handoff(
     # Met before reservation by `check_context`; built again here so the call
     # carries exactly this attempt's identity, and refused again if it moved.
     prompt = within_request_ceiling(
-        provider, _prompt(bundle, assignment, identity, delivered, upstream, carried)
+        provider, _prompt(bundle, assignment, identity, context, carried)
     )
 
     bundle.verify_manifest()
@@ -301,17 +300,26 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
         identity = prospective_identity(
             conn, bundle, run_id=run_id, route=route, node=node
         )
-        delivered, upstream, _lineage = _context(
-            conn, blobs, bundle, assignment, identity
-        )
+        context = _context(conn, blobs, bundle, assignment, identity)
     authority = delivered_authority(bundle, node.module_id)
     within_request_ceiling(
-        provider, _prompt(bundle, assignment, identity, delivered, upstream, authority)
+        provider, _prompt(bundle, assignment, identity, context, authority)
     )
 
 
 # `check_context` runs before an attempt exists; nothing it reads uses the id.
 _NO_ATTEMPT = UUID(int=0)
+
+
+@dataclass(frozen=True, slots=True)
+class _Context:
+    """What one prompt is built from, each part read in one pre-call unit."""
+
+    delivered: list[Delivery]
+    upstream: tuple[tuple[UpstreamRef, bytes], ...]
+    lineage: tuple[LineageRef, ...]
+    # Each direct upstream's anchored citations, from its verified record.
+    citations: dict[str, tuple[AnchoredCitation, ...]]
 
 
 def _context(
@@ -320,15 +328,22 @@ def _context(
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
-) -> tuple[
-    list[Delivery], tuple[tuple[UpstreamRef, bytes], ...], tuple[LineageRef, ...]
-]:
-    """The delivered evidence, the verified upstream and its whole accepted
-    lineage, read inside the caller's unit after it checked the stored pin."""
+) -> _Context:
+    """The delivered evidence, the verified upstream, its whole accepted lineage
+    and its citation register, read inside the caller's unit after it checked
+    the stored pin. Only accepted rows reach any part: a Blocked or refused
+    attempt's diagnostic body is never read here."""
     delivered = _delivered(conn, assignment.run_id)
     # Records first: what binds and re-validates is then read as context.
-    lineage = _upstream_records(conn, blobs, bundle, assignment, identity.upstream)
-    return delivered, upstream_markdown(blobs, identity.upstream), lineage
+    records, lineage = _upstream_records(
+        conn, blobs, bundle, assignment, identity.upstream
+    )
+    return _Context(
+        delivered=delivered,
+        upstream=upstream_markdown(blobs, identity.upstream),
+        lineage=lineage,
+        citations={node: record.citations for node, record in records.items()},
+    )
 
 
 def _lineage_moved(
@@ -345,12 +360,11 @@ def _lineage_moved(
     )
 
 
-def _prompt(  # noqa: PLR0913 -- one prompt's inputs, each already verified
+def _prompt(
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
-    delivered: Sequence[Delivery],
-    upstream: Sequence[tuple[UpstreamRef, bytes]],
+    context: _Context,
     authority: DeliveredAuthority,
 ) -> str:
     """The prompt over exactly the delivered authority (§45.1): names from the
@@ -360,8 +374,9 @@ def _prompt(  # noqa: PLR0913 -- one prompt's inputs, each already verified
         identity=identity,
         authority=authority,
         catalog=_catalog(bundle),
-        delivered=delivered,
-        upstream=upstream,
+        delivered=context.delivered,
+        upstream=context.upstream,
+        upstream_citations=context.citations,
         route=assignment.route,
     )
 
@@ -658,10 +673,11 @@ def _upstream_records(
     bundle: Bundle,
     assignment: Assignment,
     refs: tuple[UpstreamRef, ...],
-) -> tuple[LineageRef, ...]:
+) -> tuple[dict[str, CanonicalRecord], tuple[LineageRef, ...]]:
     """Every upstream the prompt will carry is an accepted record of this build
     whose projections re-derive from its Markdown and whose own lineage is the
-    accepted chain; returns the whole lineage behind them, from those records.
+    accepted chain; returns those records by route node and the whole lineage
+    behind them, read from those records.
 
     Inside the pre-call read unit, so nothing another build wrote, and no record
     that disagrees with its own Markdown, reaches the prompt (invariant 4; the
@@ -673,11 +689,12 @@ def _upstream_records(
     that verified record is what the lineage is read from.
     """
     if not refs:
-        return ()
+        return {}, ()
     rows = {row[0]: row for row in accepted_rows(conn, assignment.run_id)}
     accepted = {row[0]: (row[2], row[3]) for row in rows.values()}
     nodes = {n.route_node_id: n for n in assignment.route.nodes}
     verified: dict[str, CanonicalRecord] = {}
+    by_node: dict[str, CanonicalRecord] = {}
     for ref in refs:
         row = rows.get(ref.route_node_id)
         if row is None or row[2] != ref.sha256 or ref.route_node_id not in nodes:
@@ -685,7 +702,7 @@ def _upstream_records(
         _, attempt, digest, record_sha256 = row
         if record_sha256 is None:
             raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        verified[record_sha256], _projections = _verified_accepted(
+        record, _projections = _verified_accepted(
             conn,
             blobs,
             bundle,
@@ -697,7 +714,8 @@ def _upstream_records(
             record_sha256=record_sha256,
             accepted=accepted,
         )
-    return stored_lineage(blobs, refs, accepted, verified=verified)
+        verified[record_sha256] = by_node[ref.route_node_id] = record
+    return by_node, stored_lineage(blobs, refs, accepted, verified=verified)
 
 
 def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
