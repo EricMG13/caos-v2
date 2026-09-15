@@ -9,6 +9,7 @@ Blocked handoff. The freshness guarantees are proven over both adapters.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -37,9 +38,11 @@ from test_execution_freshness import (
 )
 from test_loop_charges import ESTIMATE, MODEL, REPORTED, _Completions
 
+from server.blobs import BlobStore
+from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.methodology import canonical, executor
-from server.methodology.canonical import accepted_projections
+from server.methodology.canonical import accepted_projections, blocked_verdict
 from server.methodology.handoff import (
     Projections,
     _decoded_record,
@@ -50,9 +53,10 @@ from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
-from server.store import connect
+from server.store import StoreConnection, connect
 from server.store.events import lock_run
 from server.store.outcomes import accepted_rows
+from server.store.runs import block_run
 
 __all__ = ["harness", "route"]
 
@@ -146,7 +150,9 @@ def _projections(harness: _Harness) -> dict[str, Projections]:
             node=node,
             attempt_id=attempt,
         )
-        assert diagnostic == artifact
+        # The diagnostic is the whole response body the Markdown came out of.
+        said = json.loads(harness.blobs.get(diagnostic))
+        assert said["canonical_markdown"].encode() == harness.blobs.get(artifact)
         found = read_record(
             harness.blobs,
             artifact_sha256=artifact,
@@ -202,7 +208,7 @@ def test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry(
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
     assert _events(harness, "RUN_COMPLETE") == 0
     # The Blocked answer is the attempt's diagnostic, never an artifact.
-    blocked = hashlib.sha256(answers.answers[2]).hexdigest()
+    blocked = hashlib.sha256(answers.bodies[2].encode()).hexdigest()
     with connect(harness.url) as observer:
         row = observer.execute(
             "SELECT count(*) FROM call_outcomes o JOIN run_attempts t"
@@ -243,6 +249,116 @@ class _UnbilledBlocked:
 def test_an_unbilled_blocked_claim_never_ends_the_run(harness: _Harness) -> None:
     assert _run_route(harness, _UnbilledBlocked()) is RefusalCode.HANDOFF_BLOCKED
     assert _counts(harness) == (0, [], 0, 1, 1)
+    _still_running(harness)
+
+
+def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The verdict is re-derived from the stored bill and diagnostic (P1)."""
+    crashes = [RefusalCode.STORE_UNAVAILABLE]
+
+    def crashing(conn: StoreConnection, run_id: UUID) -> bool:
+        if crashes:
+            raise Refusal(crashes.pop())
+        return block_run(conn, run_id)
+
+    monkeypatch.setattr(runtime, "block_run", crashing)
+    answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
+    provider = _module_provider(harness, answers)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    _still_running(harness)
+    screen = _node(harness, "CP-5").route_node_id
+    assert blocked_verdict(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        run_id=harness.run_id,
+        route=harness.route,
+        route_node_ids=[screen],
+    )
+    harness.conn.rollback()
+    # Resume: no attempt, reservation or call; the run ends BLOCKED once.
+    assert _run_route(harness, provider) is None
+    assert len(answers.prompts) == 3
+    assert _counts(harness) == (3, [REPORTED] * 3, 2, 3, 3)
+    assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+
+
+def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A diagnostic blob that will not read never counts as "not blocked"."""
+    crashes = [RefusalCode.STORE_UNAVAILABLE]
+
+    def crashing(conn: StoreConnection, run_id: UUID) -> bool:
+        if crashes:
+            raise Refusal(crashes.pop())
+        return block_run(conn, run_id)
+
+    monkeypatch.setattr(runtime, "block_run", crashing)
+    answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
+    provider = _module_provider(harness, answers)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    blocked = hashlib.sha256(answers.bodies[2].encode()).hexdigest()
+    harness.blobs.path_of(blocked).unlink()
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    assert len(answers.prompts) == 3
+    _still_running(harness)
+
+
+def test_a_body_that_cannot_be_stored_refuses_after_its_bill(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = CanonicalCompletions(harness.source_id)
+    provider = _module_provider(harness, answers)
+    real_put = BlobStore.put
+
+    def failing(self: BlobStore, data: bytes) -> str:
+        if answers.bodies and data == answers.bodies[-1].encode():
+            raise OSError
+        return real_put(self, data)
+
+    monkeypatch.setattr(BlobStore, "put", failing)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    assert _counts(harness)[:2] == (1, [REPORTED])
+    _still_running(harness)
+
+
+@dataclass
+class _ClaimsBlocked:
+    """Makes a real, billed call, then says Blocked whatever the answer was."""
+
+    inner: ModuleProvider
+    module: str = "CP-0"
+    model: str = MODEL
+
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        try:
+            result = self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
+        except Refusal:
+            result = None
+        if module_id == self.module:
+            raise Refusal(RefusalCode.HANDOFF_BLOCKED)
+        assert result is not None
+        return result
+
+
+@pytest.mark.parametrize(
+    "knobs",
+    [{}, {"qa_status": "Blocked", "quotes": (UNANCHORED,)}],
+    ids=["passed", "unanchorable-blocked"],
+)
+def test_a_blocked_claim_without_a_validated_diagnostic_never_ends_the_run(
+    harness: _Harness, knobs: dict[str, Any]
+) -> None:
+    answers = CanonicalCompletions(harness.source_id, **knobs)
+    lying = _ClaimsBlocked(_module_provider(harness, answers))
+    assert _run_route(harness, lying) is RefusalCode.HANDOFF_BLOCKED
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    assert _events(harness, "RUN_BLOCKED") == 0
     _still_running(harness)
 
 

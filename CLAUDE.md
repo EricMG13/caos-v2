@@ -187,13 +187,28 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
   (identity held, every citation anchored -- an unanchorable Blocked handoff is
   an ordinary refusal) keeps its bill and diagnostic, accepts nothing and ends
-  the run `BLOCKED` with one `RUN_BLOCKED`, no retry. `accepted_artifacts`
+  the run `BLOCKED` with one `RUN_BLOCKED`, no retry. The diagnostic is the
+  exact response body, and `blocked_verdict` re-derives that verdict from the
+  billed, unaccepted attempts -- before every frontier's attempts (so a crash
+  before `block_run` commits resumes BLOCKED without a second call) and before
+  ending the run; a raised `HANDOFF_BLOCKED` alone decides nothing. The
+  re-derivation reads the provider body back, but only through the full
+  validation and anchoring; it rebuilds identity from the upstream accepted
+  now, which holds only while no direct input is accepted after its target.
+  A billed attempt refused for another reason is re-validated on every pass
+  until the node is accepted. A stored body that will not read is a store
+  fault, never "not blocked", and a body that cannot be stored refuses the
+  attempt after its bill. The re-derivation checks current state: once a
+  captured source is withdrawn no verdict can be re-derived, so a Blocked node
+  is neither blocked nor re-paid (the pre-call read refuses) and each resume
+  adds an attempt row until the 256 ordinal cap. `accepted_artifacts`
   reads CP-0 readiness and `qa_status` of a canonical row from its record,
   verified against its Markdown and the identity rebuilt from the store
   (§42.4, no re-anchoring), and refuses such a row without a bundle -- which
   the API's `read_run` and the harness's `_unrun` do not yet pass, so they
   refuse (or fall back to presence) on a canonical run. Every frontier pass
-  re-runs the vendor validators on CP-0's Markdown. Diagnostic blobs are
+  re-runs the vendor validators on each readiness node's Markdown, costing the
+  host identity's queries and two blob reads per such node. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The orchestration proof still refuses canonical
   pins. The compiled vendor contract is cached per manifest digest, so a
@@ -252,7 +267,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   every pinned node before COMPLETE.
 - **Two workers can pay for one node.** Migration 0009 lets exactly one attempt
   own a node's accepted result, but two attempts can each reserve and call
-  before either accepts; both bills are kept. *Upgrade:* Phase 4's PostgreSQL
+  before either accepts; both bills are kept. The same window lets a second
+  worker that checked `blocked_verdict` before the first worker's Blocked bill
+  committed call again. *Upgrade:* Phase 4's PostgreSQL
   claims/leases (§39) take the node before the call. `artifacts` rows are also
   not UPDATE/DELETE-immutable, so a privileged edit could move ownership;
   a refusal trigger like 0007's is the upgrade.

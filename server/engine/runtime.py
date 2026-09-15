@@ -34,7 +34,7 @@ from server.engine.route import (
     node_states,
 )
 from server.methodology.bundle import Bundle
-from server.methodology.canonical import accepted_projections
+from server.methodology.canonical import accepted_projections, blocked_verdict
 from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -73,7 +73,7 @@ class ProviderResult:
     charge: Decimal
     model: str
     generation_id: str
-    # A canonical pin's host record and the call's diagnostic Markdown (§42).
+    # A canonical pin's host record and the call's diagnostic body (§42).
     record_sha256: str | None = None
     diagnostic_sha256: str | None = None
 
@@ -134,11 +134,20 @@ def run_route(
         with execution_reads(conn):
             accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
             ready = frontier(route, accepted)
+            # Before any attempt: a Blocked verdict whose bill committed but
+            # whose block did not (a crash in that gap) is never paid twice.
+            blocked = bool(ready) and blocked_verdict(
+                conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=ready
+            )
+        if blocked:
+            block_run(conn, run_id)
+            return
         if not ready:
             break
         for route_node_id in ready:
             if not _run_node(
                 conn,
+                blobs,
                 run_id=run_id,
                 route=route,
                 route_node_id=route_node_id,
@@ -172,10 +181,12 @@ def accepted_artifacts(
     would be a blob read per node per pass for data nobody looks at -- the ~8x
     shape `docs/AI_CODE_QUALITY.md` section 1 measures.
 
-    One query either way. A claims row (`record_sha256` NULL) is read as its
-    JSON body; a canonical row's readiness and `qa_status` come from its record,
-    verified against its Markdown under `bundle` (§42.4), and without a bundle
-    such a row refuses rather than be read as JSON.
+    One query for the rows, then per readiness node: a claims row
+    (`record_sha256` NULL) is one blob read of its JSON body; a canonical row's
+    readiness and `qa_status` come from its record, verified against its
+    Markdown under `bundle` (§42.4) -- the host identity's queries, two blob
+    reads and the vendor validators, per pass. Without a bundle such a row
+    refuses rather than be read as JSON.
     """
     qa_sources = {e.source for e in route.edges if e.type is EdgeType.QA_GATE}
     readiness_nodes = {
@@ -220,8 +231,9 @@ def _claims_body(blobs: BlobStore, digest: str) -> object:
         raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
 
 
-def _run_node(
+def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
     conn: StoreConnection,
+    blobs: BlobStore,
     *,
     run_id: UUID,
     route: ResolvedRoute,
@@ -252,7 +264,14 @@ def _run_node(
             raise
         result = None
     if result is None:
-        _end_blocked(conn, run_id, attempt_id)
+        _end_blocked(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            node=route_node_id,
+            bundle=execution.bundle,
+        )
         return False
 
     require_idle(conn)
@@ -284,17 +303,31 @@ def _run_node(
     return True
 
 
-def _end_blocked(conn: StoreConnection, run_id: UUID, attempt_id: UUID) -> None:
+def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    node: str,
+    bundle: Bundle,
+) -> None:
     """End the run BLOCKED on a validated Blocked handoff (brief correction 6).
 
-    Only a call whose outcome is recorded counts: a Blocked claim nothing
-    billed is not a validated handoff, and refuses as an ordinary refusal.
+    The raised code is not trusted: the verdict is re-derived from the stored
+    bill and response body by the same `blocked_verdict` crash recovery uses,
+    and a Blocked claim it does not confirm is an ordinary refusal.
     """
     with execution_reads(conn):
-        recorded = conn.execute(
-            "SELECT 1 FROM call_outcomes WHERE attempt_id = %s", (attempt_id,)
-        ).fetchone()
-    if recorded is None:
+        blocked = blocked_verdict(
+            conn,
+            blobs,
+            bundle,
+            run_id=run_id,
+            route=route,
+            route_node_ids=(node,),
+        )
+    if not blocked:
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
     block_run(conn, run_id)
 

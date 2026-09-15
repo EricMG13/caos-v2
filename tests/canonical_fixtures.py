@@ -250,6 +250,8 @@ class CanonicalCompletions:
     during: Callable[[], None] | None = None
     prompts: list[str] = field(default_factory=list)
     answers: list[bytes] = field(default_factory=list)
+    # Every response body exactly as sent: what the attempt's diagnostic holds.
+    bodies: list[str] = field(default_factory=list)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         assert json_object
@@ -257,6 +259,7 @@ class CanonicalCompletions:
         if self.during is not None:
             self.during()
         if self.content is not None:
+            self.bodies.append(self.content)
             return Completion(self.content, self.charge, self.generation_id)
         fields = fields_from_prompt(prompt)
         if self.mutate is not None:
@@ -275,4 +278,5 @@ class CanonicalCompletions:
             {"source_id": str(self.source_id), "page": 1, "matched_text": quote}
             for quote in self.quotes
         ]
-        return Completion(wire(markdown, citations), self.charge, self.generation_id)
+        self.bodies.append(wire(markdown, citations))
+        return Completion(self.bodies[-1], self.charge, self.generation_id)
