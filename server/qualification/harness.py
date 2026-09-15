@@ -63,6 +63,7 @@ import psycopg
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import (
+    MODEL_MODULE,
     NodeResult,
     NodeState,
     ResolvedRoute,
@@ -416,12 +417,9 @@ def _eligible(
         owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
         or (route.profile_id, route.selection_id)
         != (case.profile_id, case.selection_id)
-        or route
-        != resolve_route(
-            harness.catalog,
-            case.profile_id,
-            case.selection_id,
-            extensions=RouteExtensions(model_extension=case.model_extension),
+        or (
+            any(node.module_id == MODEL_MODULE for node in route.nodes)
+            != case.model_extension
         )
         or pin.research_json is not None
         or sorted(members)
