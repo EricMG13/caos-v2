@@ -100,6 +100,8 @@ def read_verdict(document: object, *, now: datetime) -> Verdict:
         # Never current for an instant. Refused as unreadable rather than as
         # expired: "it has expired" would suggest it once was not.
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    if decided_at > now:
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
     if now >= expires_at:
         raise Refusal(RefusalCode.VERDICT_EXPIRED)
 
