@@ -21,7 +21,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CanonicalCompletions
-from conftest import approve_run, every_block, priced, route_fault
+from conftest import (
+    approve_run,
+    every_block,
+    priced,
+    recorded_statements,
+    route_fault,
+)
 from test_canonical_execution import _node, harness, route
 from test_deliverable_canonical import RESTRICTED, _accept
 from test_execution_freshness import _guard_disabled, _Harness
@@ -160,6 +166,18 @@ def test_a_lite_run_completed_through_the_runtime_proves(ran: _Harness) -> None:
     assert proof.assurance is Assurance.ORCHESTRATION_PROOF
     assert (proof.run_id, proof.build_id) == (ran.run_id, ran.bundle.build_id)
     assert (proof.artifacts, proof.citations) == (3, 3)
+
+
+def test_a_proof_reads_each_cited_page_and_numbering_once(
+    ran: _Harness,
+) -> None:
+    """Three records quoting one page of one source: one `TokenIndex` for the
+    proof reads that page, its digest and its line numbering once, not once
+    per citation."""
+    with recorded_statements(ran.conn) as statements:
+        assert _prove(ran).citations == 3
+    reads = ("FROM source_tokens AS tokens", "SELECT DISTINCT line_id")
+    assert [sum(read in s for s in statements) for read in reads] == [1, 1]
 
 
 def test_a_host_control_reads_orchestration_proof_never_qualified(

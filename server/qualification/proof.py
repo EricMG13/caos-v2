@@ -46,7 +46,12 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
-from server.evidence.citations import AnchoredCitation, Citation, verify_citations
+from server.evidence.citations import (
+    AnchoredCitation,
+    Citation,
+    TokenIndex,
+    verify_citations,
+)
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import captured_blocks
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
@@ -209,6 +214,9 @@ class _CanonicalReader:
         self.conn, self.blobs, self.bundle = conn, blobs, bundle
         self.route, self.run_id, self.live = route, run_id, live
         self.delivered = delivered
+        # One reading of the token index for the whole proof: records cluster
+        # on the same pages of the same sources.
+        self.index = TokenIndex()
         self.contract = load_vendor_contract(bundle)
         self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
 
@@ -280,30 +288,25 @@ class _CanonicalReader:
         )
         if projections is None or projections != record.projections:
             raise mismatch
+        requests = []
         for citation in record.citations:
             source_id = self.live.get(citation.document_sha256)
             if source_id is None:
                 raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
-            blocks = self.delivered[source_id]
-            if not _anchors_as_recorded(self.conn, source_id, blocks, citation):
-                raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
+            requests.append(Citation(source_id, citation.page, citation.matched_text))
+        anchored = _unless_refused(
+            lambda: verify_citations(
+                self.conn,
+                delivered=self.delivered,
+                citations=requests,
+                index=self.index,
+            )
+        )
+        # Same quotes, same rectangles, inside the captured blocks; any one
+        # refusal loses the record.
+        if anchored != list(record.citations):
+            raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
         return tuple(record.citations)
-
-
-def _anchors_as_recorded(
-    conn: StoreConnection,
-    source_id: UUID,
-    blocks: frozenset[str],
-    citation: AnchoredCitation,
-) -> bool:
-    """The recorded citation re-anchors to itself, inside the captured blocks:
-    same quote, same rectangles."""
-    request = Citation(source_id, citation.page, citation.matched_text)
-    delivered = {source_id: blocks}
-    anchored = _unless_refused(
-        lambda: verify_citations(conn, delivered=delivered, citations=[request])
-    )
-    return anchored == [citation]
 
 
 def _pinned_digest(conn: StoreConnection, run_id: UUID) -> str:

@@ -25,10 +25,10 @@ single enclosing rectangle would cover text the quote does not contain.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
-from server.evidence.ingest import BLOCK_PREFIX
+from server.evidence.ingest import block_ids_by_line
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -79,9 +79,11 @@ def anchor_citation(
 ) -> list[Rect]:
     """Find `matched_text` on `page` of a live source; return its rectangles.
 
-    Refuses `CITATION_NOT_LOCATED` when the quote is not there and
-    `CITATION_AMBIGUOUS` when it is there more than once. Neither refusal carries
-    the quote.
+    No server path calls this: it judges no delivery, so a run's citations go
+    through `verify_citations`. It remains the extractor suites' probe of the
+    search rule alone (`tests/test_pdf_extraction.py`). Refuses
+    `CITATION_NOT_LOCATED` when the quote is not there and `CITATION_AMBIGUOUS`
+    when it is there more than once. Neither refusal carries the quote.
     """
     return _locate(_page_tokens(conn, source_id, page), page, matched_text)
 
@@ -106,11 +108,26 @@ def _unique_run(tokens: list[_Token], matched_text: str) -> list[_Token]:
     return matches[0]
 
 
+@dataclass(slots=True)
+class TokenIndex:
+    """What `verify_citations` read from the token index, keyed per page and
+    per source, so several calls inside one read unit read each once.
+
+    Holds only what the store returned; delivery is judged per call against
+    that call's `delivered`, never cached.
+    """
+
+    pages: dict[tuple[UUID, int], list[_Token]] = field(default_factory=dict)
+    digests: dict[UUID, str] = field(default_factory=dict)
+    line_blocks: dict[UUID, dict[int, str]] = field(default_factory=dict)
+
+
 def verify_citations(
     conn: StoreConnection,
     *,
     delivered: Mapping[UUID, frozenset[str]],
     citations: Sequence[Citation],
+    index: TokenIndex | None = None,
 ) -> list[AnchoredCitation]:
     """Re-derive every citation, or refuse the set.
 
@@ -131,11 +148,12 @@ def verify_citations(
     page of one source is the normal shape. Both lookups are therefore fetched
     once per distinct page and per distinct source rather than once per citation,
     which is the N+1 that `docs/AI_CODE_QUALITY.md` section 1 measures at ~8x on
-    exactly this kind of list.
+    exactly this kind of list. A caller verifying several lists in one unit
+    passes one `TokenIndex` to share those reads across them.
     """
-    pages: dict[tuple[UUID, int], list[_Token]] = {}
-    digests: dict[UUID, str] = {}
-    ordinals: dict[UUID, dict[int, str]] = {}
+    if index is None:
+        index = TokenIndex()
+    pages, digests, ordinals = index.pages, index.digests, index.line_blocks
 
     anchored = []
     for citation in citations:
@@ -180,20 +198,13 @@ def _page_tokens(conn: StoreConnection, source_id: UUID, page: int) -> list[_Tok
 
 
 def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, str]:
-    """Line id to the block admission wrote for it.
-
-    Admission packs one block per line, numbering the source's distinct line
-    ids in ascending order (`server/evidence/ingest.py` `_blocks`); this is
-    that numbering read back from the token index, once per source.
-    """
+    """Line id to the block admission wrote for it, once per source: admission's
+    own numbering (`block_ids_by_line`) over the token index's line ids."""
     rows = conn.execute(
-        "SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s"
-        " ORDER BY line_id",
+        "SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s",
         (source_id,),
     ).fetchall()
-    return {
-        int(row[0]): f"{BLOCK_PREFIX}{ordinal:06d}" for ordinal, row in enumerate(rows)
-    }
+    return block_ids_by_line(int(row[0]) for row in rows)
 
 
 def _match_at(tokens: list[_Token], start: int, words: Sequence[str]) -> list[_Token]:

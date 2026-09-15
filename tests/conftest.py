@@ -252,6 +252,27 @@ def priced(estimate: Decimal, model: str = "a-model/for-the-test") -> ModelPrice
     )
 
 
+@contextmanager
+def recorded_statements(conn: object) -> Iterator[list[str]]:
+    """Every statement `conn.execute` runs inside the block, in order: for
+    suites pinning how often a path reads the store."""
+    from server.store import StoreConnection
+
+    store = cast(StoreConnection, conn)
+    statements: list[str] = []
+    execute = store.execute
+
+    def recorded(query: str, *args: object, **kwargs: object) -> object:
+        statements.append(str(query))
+        return execute(query, *args, **kwargs)  # type: ignore[arg-type]
+
+    store.execute = recorded  # type: ignore[method-assign,assignment]
+    try:
+        yield statements
+    finally:
+        vars(store).pop("execute", None)
+
+
 def every_block(conn: object, *sources: UUID) -> dict[UUID, frozenset[str]]:
     """Each source mapped to every block it holds: a whole-source delivery,
     for suites calling `verify_citations` outside a run."""
