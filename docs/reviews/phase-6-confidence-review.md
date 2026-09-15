@@ -161,5 +161,8 @@ Verified: provider/pricing regression suite (219 tests), targeted identity
 red/green regression (3 tests), lint, format, vocabulary, mypy, Bandit,
 pip-audit and gitleaks.
 
-Still open: the one authorized live Gemini attempt and an external,
-authenticated qualification verdict. No local check can substitute for either.
+The authorized live Gemini attempt subsequently became indeterminate: the
+temporary result collector failed after `perform()` returned and deleted the
+disposable database before it printed per-generation facts. Its serializer has
+been repaired outside the repository; it does not retrospectively create
+evidence or authorize a repeat. An external authenticated verdict remains open.

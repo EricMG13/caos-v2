@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Phase 6.5 replacement `openrouter/google-ai-studio/high` was authorized and executed; it exhausted the shipped output ceiling at CP-0, so Phase 6 remains release-blocked** |
-| Next task | Decide whether to raise the bound completion ceiling from 32,768 to Gemini's 65,536 maximum, verify the changed build, then obtain fresh authorization. Do not repeat either unchanged failed call. |
+| Latest accepted task | **Phase 6.5 changed candidate `691637b` was executed as `openrouter/google-ai-studio/high/65536`, but its temporary result collector crashed after `perform()` and erased its disposable run record; Phase 6 remains release-blocked** |
+| Next task | Do not repeat the indeterminate paid run. Obtain fresh authorization only after deciding how to reconcile or capture a new attempt's per-generation facts; no result may be represented as qualified. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -137,6 +137,16 @@ this documentation update has not rerun their gates or accepted new code.
   `finish_reason=length`, cost `$0.25356225`. The shipped 32,768 ceiling—not
   citation validation—was the controlling failure. No qualification evidence
   or verdict exists.
+- **65,536 follow-up:** committed candidate `691637b` bound the changed profile
+  `openrouter/google-ai-studio/high/65536` and reached `perform()` under the
+  same `$22.00` ceiling. Its temporary collector then failed while JSON-
+  encoding the proof's `frozenset`, and cleanup deleted the disposable database
+  before run/generation/charge facts were printed. OpenRouter activity
+  reconciliation is unavailable to this account without a management key
+  (`403`). Treat the external work and its cost as indeterminate; it creates no
+  qualification evidence or verdict and must not be repeated without fresh
+  authorization. The collector has been fixed to serialize proof fields
+  explicitly for any future authorized run.
 
 ## Phase 4 acceptance record — 14 September 2026
 
