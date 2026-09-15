@@ -55,7 +55,7 @@ from server.qualification.matrix import (
     QualificationSet,
 )
 from server.refusals import Refusal, RefusalCode
-from server.store.run_inputs import RunSubject
+from server.store.run_inputs import RunSubject, valid_subject
 
 # The manifest's name inside the set's directory. Named, because "the JSON file
 # in there" is not a declared form.
@@ -124,12 +124,16 @@ def _case(root: Path, entry: object) -> QualificationCase:
 def _subject(item: object) -> RunSubject:
     """The run subject a case declares: exactly its four strings."""
     fields = _closed(item, _SUBJECT_KEYS)
-    return RunSubject(
+    declared = RunSubject(
         issuer_id=_text(fields, "issuer_id"),
         issuer_name=_text(fields, "issuer_name"),
         reporting_period=_text(fields, "reporting_period"),
         analysis_date=_text(fields, "analysis_date"),
     )
+    # The pin's own rule: a manifest cannot digest a subject no pin accepts.
+    if not valid_subject(declared):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return declared
 
 
 def _document(root: Path, declared: object) -> Document:

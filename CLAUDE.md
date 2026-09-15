@@ -209,10 +209,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `methodology_bundle`) and the harness's `_unrun` (the harness bundle) pass
   one (slice d-1). Every frontier pass and every run-document read re-runs the
   vendor validators on each readiness node's Markdown, costing the host
-  identity's nine queries and two blob reads per such node; `read_run`'s
+  identity's ten queries (with the call-time narrowing every reader shares) and
+  three blob reads per such node; `read_run`'s
   `IO_BUDGET` is the bound for two such rows (the gate and the catalog's one
   QA_GATE source), measured on LITE's one. The harness still falls back to
-  presence when a record will not verify. Diagnostic blobs are
+  presence when a record will not verify. The call-time narrowing infers from
+  `now()` (transaction start) which soft inputs an attempt could name, sound
+  for one sequential loop but able to refuse a valid record once concurrent
+  workers interleave accepts (Phase 4 records visibility instead); and a
+  document pinned twice under different extractions resolves to no source, so
+  its citations can never be proven. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
   read them as analysis. The orchestration proof still refuses canonical
   pins. The compiled vendor contract is cached per manifest digest, so a
@@ -231,8 +237,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **The canonical orchestration proof binds the accepted record to live proof.**
   Slice d-2 re-reads both blobs, rebuilds identity, validates projections and
   citations against pinned live sources, and requires the pin's adapter and
-  bundle authority. It returns counts only, so the matrix cannot yet surface
-  canonical quotes. *Upgrade:* d-3b reads proven canonical citations.
+  bundle authority. It returns the re-anchored citations, so the matrix scores
+  exactly what the proof proved without a second record read. *Upgrade:* read
+  proof and scoring in one repeatable-read transaction when a reviewer needs a
+  single snapshot.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's

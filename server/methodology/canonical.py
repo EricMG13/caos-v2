@@ -54,6 +54,7 @@ from server.methodology.handoff import (
 )
 from server.methodology.invocation import (
     build_handoff_prompt,
+    call_time_identity,
     host_identity,
     upstream_markdown,
 )
@@ -355,9 +356,21 @@ def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
     sources: frozenset[UUID],
 ) -> bool:
     try:
-        # The same identity rule as `accepted_projections`: see the note there.
-        identity = host_identity(
-            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
+        # The call-time identity every reader shares: an unaccepted attempt has
+        # no record, so it names its blocking inputs and those accepted before.
+        identity = call_time_identity(
+            conn,
+            route,
+            host_identity(
+                conn,
+                bundle,
+                run_id=run_id,
+                route=route,
+                node=node,
+                attempt_id=attempt_id,
+            ),
+            attempt_id=attempt_id,
+            record=None,
         )
         markdown, citations = parse_response(body, delivered=sources)
         authority = assemble_authority(bundle, node.module_id)
@@ -401,21 +414,25 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     projections re-parsed from the Markdown must equal the record's (§42.4).
     Citations are not re-anchored here; the proof and freezing do that.
 
-    The identity is rebuilt from the upstream accepted *now*, which equals the
-    call-time upstream because no direct input can be accepted after its
-    target: a blocking edge waits for its source, and `route._state_for`
-    BLOCKS a soft edge whose unaccepted source the gate called READY or
-    READY_WITH_LIMITATIONS. On the canonical routes every module waits on a
-    REQUIRED edge from the gate, the gate must name every route module
-    (`_gate_expects`), and a module it does not clear never runs. Were that
-    rule to loosen, this refuses and `blocked_verdict` reads "not blocked"
-    rather than misread.
+    The identity is `call_time_identity`, the one rule the proof and the
+    deliverable use too, so a soft input accepted after its target never makes
+    the runtime refuse a record the other readers accept.
     """
     node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
     if node is None:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-    identity = host_identity(
-        conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
+    try:
+        stored = blobs.get(record_sha256)
+    except (Refusal, OSError):
+        stored = None
+    identity = call_time_identity(
+        conn,
+        route,
+        host_identity(
+            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
+        ),
+        attempt_id=attempt_id,
+        record=stored,
     )
     record = read_record(
         blobs,

@@ -92,11 +92,11 @@ def test_a_price_whose_route_cannot_fit_a_run_is_refused_before_any_case(
     ready: Fixture,
 ) -> None:
     """Every node reserves one worst case against its run's ceiling, so a
-    two-node route priced above half the ceiling would pay for a call it could
-    never finish (the whole-phase confidence review's F-1)."""
+    three-node route priced above a third of the ceiling would pay for a call it
+    could never finish (the whole-phase confidence review's F-1)."""
     conn, blobs, harness, qualification = ready
-    half = replace(harness, price=priced(CEILING / 2 + Decimal("0.01")))
-    route = resolve_route(CATALOG, qualification.cases[0].profile_id, "DEEP_RESEARCH")
+    half = replace(harness, price=priced(CEILING / 3 + Decimal("0.01")))
+    route = resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
     # Exact whatever the ambient precision (the whole-phase audit's W-1).
     with localcontext() as context:
         context.prec = 1
@@ -354,6 +354,12 @@ LITE_SUBJECT = run_inputs.RunSubject(
 )
 
 
+def _claims(case: QualificationCase) -> QualificationCase:
+    return replace(
+        case, profile_id="FULL_CREDIT_32", selection_id="DEEP_RESEARCH", subject=None
+    )
+
+
 def _lite(case: QualificationCase, subject_: object) -> QualificationCase:
     return replace(
         case,
@@ -366,7 +372,7 @@ def _lite(case: QualificationCase, subject_: object) -> QualificationCase:
 def test_a_canonical_case_pins_its_declared_subject(ready: Fixture) -> None:
     conn, blobs, harness, qualification = ready
     first, second = qualification.cases
-    mixed = QualificationSet((first, _lite(second, LITE_SUBJECT)))
+    mixed = QualificationSet((_claims(first), _lite(second, LITE_SUBJECT)))
 
     claims, canonical = subject.prepare(conn, blobs, harness, qualification=mixed)
 
@@ -411,4 +417,16 @@ def test_a_canonical_case_without_a_valid_subject_leaves_no_setup(
     assert conn.info.transaction_status.name == "IDLE"
     assert _count(conn, "SELECT count(*) FROM cases") == 0
     assert not blobs.root.exists()
+    _unapproved_and_unspent(conn, harness)
+
+
+def test_a_claims_case_declaring_a_subject_leaves_no_setup(ready: Fixture) -> None:
+    conn, blobs, harness, qualification = ready
+    first, second = qualification.cases
+    declared = replace(_claims(second), subject=LITE_SUBJECT)
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        subject.prepare(
+            conn, blobs, harness, qualification=QualificationSet((first, declared))
+        )
+    assert _count(conn, "SELECT count(*) FROM cases") == 0
     _unapproved_and_unspent(conn, harness)
