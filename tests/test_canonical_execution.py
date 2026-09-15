@@ -39,7 +39,7 @@ from server.engine.runtime import ProviderResult
 from server.methodology import runner
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import HandoffOutcome, execute_handoff
-from server.methodology.executor import Assignment, execute_module
+from server.methodology.executor import Assignment
 from server.methodology.handoff import read_record, validate_markdown
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
@@ -225,27 +225,17 @@ class _ClaimsJson:
 
 
 def test_a_wrong_adapter_cannot_become_authority(harness: _Harness) -> None:
+    """RED 6. A claims-JSON body is not a conforming handoff for any pin: the
+    canonical executor is the only one that can run on a canonical pin (the
+    claims executor itself is retired and deleted, f-2b), and it refuses this
+    body as malformed rather than parsing it as claims."""
     claims = _ClaimsJson(harness.source_id)
     assert _refused(harness, "CP-0", claims) is RefusalCode.HANDOFF_MALFORMED
     # Not a canonical transport, but still exactly what was said.
     said = _ClaimsJson(harness.source_id).complete(claims.prompts[0], json_object=True)
     assert isinstance(said.content, str)
     assert _diagnostic(harness) == _body(said.content)
-    # Claims-only until f-2: a canonical pin never runs as claims, whoever calls
-    # the claims executor.
-    attempt = _reserved(harness, "CP-0")
-    with pytest.raises(Refusal) as refused:
-        execute_module(
-            harness.conn,
-            harness.bundle,
-            harness.blobs,
-            assignment=Assignment(
-                "CP-0", harness.run_id, _node(harness, "CP-0"), harness.route, attempt
-            ),
-            provider=claims,
-        )
-    assert refused.value.code is RefusalCode.RUN_INPUT_INVALID
-    assert _counts(harness) == (1, [REPORTED], 0, 2, 2)
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
 
 
 @pytest.mark.parametrize("route", [CLAIMS], indirect=True)

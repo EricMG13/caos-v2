@@ -9,10 +9,9 @@ words with spaces. Every ingestion fixture was short and clean.
 So this fixture is awkward on purpose -- a tab-separated table row, a
 non-breaking space, runs of spaces, a blank line, and enough lines that the
 quote a module is asked to find sits on page two. It is driven through the real
-`admit_pack`, the real `read_block`, the real `build_prompt` and the real
-`verify_citations`, and the property it asserts is the one the system actually
-promises: **text this repository delivered can be quoted back to it, and the
-rectangle comes back.**
+`admit_pack`, the real `read_block` and the real `verify_citations`, and the
+property it asserts is the one the system actually promises: **text this
+repository delivered can be quoted back to it, and the rectangle comes back.**
 
 A unit test for each of those four steps would pass on a clean fixture and say
 nothing about this one. The value here is the whole round trip over input
@@ -32,7 +31,6 @@ from server.evidence.citations import Citation, verify_citations
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_block
-from server.methodology.executor import Delivery, build_prompt
 from server.store import StoreConnection
 
 # Sixty filler lines, a blank one to close the region, then the table. The
@@ -71,26 +69,14 @@ def _block(conn: StoreConnection, source_id: UUID, needle: str) -> str:
 def test_an_awkward_document_can_be_quoted_back_to_the_host(
     admitted: tuple[StoreConnection, UUID],
 ) -> None:
-    """Admit, read, announce, cite. The whole promise in one pass."""
+    """Admit, read, cite. The whole promise in one pass."""
     conn, source_id = admitted
     block_id = _block(conn, source_id, "Term loan B")
     block = read_block(conn, source_id=source_id, block_id=block_id)
 
-    # The host knows which page it read, and says so in the prompt.
+    # The host knows which page it read: a citation on it is exactly what a
+    # module would have been told to name, page two, not page one.
     assert block.page == 2
-    prompt = build_prompt(
-        "CP-1",
-        b"AUTHORITY",
-        [
-            Delivery(
-                source_id=source_id,
-                block_id=block_id,
-                page=block.page,
-                text=block.text,
-            )
-        ],
-    )
-    assert f"page: {block.page}" in prompt
 
     # A module quoting the delivered line verbatim is anchored, not refused.
     [anchored] = verify_citations(
