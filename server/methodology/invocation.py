@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
@@ -227,6 +228,7 @@ def record_authority_matches(
     the invocation; this binds the methodology. `module_id` is the pin's, never
     the record's. Each caller raises its own code on False.
     """
+    manifest_sha256, build_id = bundle.manifest_sha256, bundle.build_id
     return (
         record.adapter_version,
         record.build_id,
@@ -235,11 +237,35 @@ def record_authority_matches(
         record.delivered_authority_digest,
     ) == (
         methodology.CANONICAL_ADAPTER_VERSION,
-        bundle.build_id,
-        bundle.manifest_sha256,
-        authority_digest(assemble_authority(bundle, module_id)),
-        delivered_authority_digest(delivered_authority(bundle, module_id)),
+        build_id,
+        manifest_sha256,
+        *_authority_digests(bundle, module_id, manifest_sha256, build_id),
     )
+
+
+# (bundle root, manifest sha256, build, module) to the module's two authority
+# digests. The manifest pins every file's hash and each digest is over those
+# hashes, so for one manifest the values cannot differ; a moved manifest is
+# another key. What a cached reading gives up is re-reading the files: the
+# executor's prompt still verifies every delivered byte at use.
+_AUTHORITY_DIGESTS: dict[tuple[str, str, str, str], tuple[str, str]] = {}
+_AUTHORITY_LOCK = threading.Lock()
+
+
+def _authority_digests(
+    bundle: Bundle, module_id: str, manifest_sha256: str, build_id: str
+) -> tuple[str, str]:
+    key = (str(bundle.root), manifest_sha256, build_id, module_id)
+    with _AUTHORITY_LOCK:
+        cached = _AUTHORITY_DIGESTS.get(key)
+    if cached is None:
+        cached = (
+            authority_digest(assemble_authority(bundle, module_id)),
+            delivered_authority_digest(delivered_authority(bundle, module_id)),
+        )
+        with _AUTHORITY_LOCK:
+            _AUTHORITY_DIGESTS[key] = cached
+    return cached
 
 
 def accepted_lineage(
@@ -248,19 +274,24 @@ def accepted_lineage(
     *,
     run_id: UUID,
     upstream: Sequence[UpstreamRef],
+    accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> tuple[LineageRef, ...]:
     """The whole accepted chain behind `upstream`, as the store holds it now.
 
     `stored_lineage` over the run's accepted rows: what a record's `lineage`
-    must equal when read (§45.4). One query, none without upstream; caller owns
-    the read. `ARTIFACT_RECORD_MISMATCH` when the chain does not bind.
+    must equal when read (§45.4). `accepted` maps each accepted node to its
+    (artifact, record) pair when the caller's unit already read them, so a
+    reader of every row queries once rather than once per record; otherwise one
+    query, none without upstream. Caller owns the read.
+    `ARTIFACT_RECORD_MISMATCH` when the chain does not bind.
     """
     if not upstream:
         return ()
-    accepted = {
-        node: (artifact, record)
-        for node, _attempt, artifact, record in accepted_rows(conn, run_id)
-    }
+    if accepted is None:
+        accepted = {
+            node: (artifact, record)
+            for node, _attempt, artifact, record in accepted_rows(conn, run_id)
+        }
     return stored_lineage(blobs, upstream, accepted)
 
 

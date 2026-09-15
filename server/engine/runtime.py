@@ -199,7 +199,10 @@ def accepted_artifacts(
         if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
     accepted: dict[str, NodeResult] = {}
-    for node_id, attempt, digest, record in accepted_rows(conn, run_id):
+    rows = accepted_rows(conn, run_id)
+    # The one reading every verified row's lineage is compared with.
+    pairs = {node_id: (digest, record) for node_id, _a, digest, record in rows}
+    for node_id, attempt, digest, record in rows:
         if record is None:
             raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
         if node_id not in readiness_nodes:
@@ -217,6 +220,7 @@ def accepted_artifacts(
                 attempt_id=attempt,
                 artifact_sha256=digest,
                 record_sha256=record,
+                accepted=pairs,
             )
             accepted[node_id] = NodeResult(
                 readiness=tuple(projections.readiness),

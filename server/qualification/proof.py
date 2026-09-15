@@ -146,6 +146,11 @@ def assert_orchestration_proof(
     captured = captured_blocks(conn, run_id)
     delivered = {s: captured.get(s, frozenset()) for s in live.values()}
     reader = _CanonicalReader(conn, blobs, bundle, route, run_id, live, delivered)
+    # One reading of the accepted pairs, which every record's lineage is read against.
+    reader.pairs = {
+        str(row[1]): (str(row[0]), None if row[6] is None else str(row[6]))
+        for row in accepted
+    }
     nodes = {node.route_node_id: node for node in route.nodes}
     citations = 0
     anchored: set[tuple[str, str, str]] = set()
@@ -215,6 +220,7 @@ class _CanonicalReader:
         self.conn, self.blobs, self.bundle = conn, blobs, bundle
         self.route, self.run_id, self.live = route, run_id, live
         self.delivered = delivered
+        self.pairs: dict[str, tuple[str, str | None]] = {}
         # One reading of the token index for the whole proof: records cluster
         # on the same pages of the same sources.
         self.index = TokenIndex()
@@ -279,7 +285,11 @@ class _CanonicalReader:
         upstream = record.identity.upstream
         lineage = _unless_refused(
             lambda: accepted_lineage(
-                self.conn, self.blobs, run_id=self.run_id, upstream=upstream
+                self.conn,
+                self.blobs,
+                run_id=self.run_id,
+                upstream=upstream,
+                accepted=self.pairs,
             )
         )
         if lineage is None or lineage != record.lineage:
