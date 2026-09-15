@@ -361,8 +361,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   soft edge whose unaccepted source CP-0 reported READY is omitted where the
   vendor refuses. The route engine already BLOCKS such a node, so the runtime
   never asks for its identity. `module_name` is read from the verified catalog
-  at call time rather than pinned, and the prompt is bounded on its JSON
-  encoding; the provider still re-checks the whole encoded request. *Upgrade:* readiness joins
+  at call time rather than pinned. *Upgrade:* readiness joins
   the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2).
 
 **Repair Phase 2.**
@@ -770,7 +769,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   root file `SKILL.md` names -- and hands each file whole, UTF-8, in its own
   tagged section named with its digest, beside a host note that the host runs
   invocation preparation, handoff validation and the completeness check
-  itself; no script is delivered. Upstream sections carry their edge's
+  itself, while the module authors scoring by the rules stated for
+  `confidence_score.py`; no script is delivered. Upstream sections carry their edge's
   catalog `allowed_use` (`NOT_DECLARED` when the catalog gives none), read from
   the verified catalog at prompt time because `Edge` and the route pin do not
   carry it, so no route digest moved. Retrieval (Phase 5) remains the way to
@@ -857,16 +857,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`docs/DECISIONS.md` §28), with no per-section cap. Since Task 3.3b the whole
   prompt -- authority, upstream, evidence -- is built by
   `canonical.check_context` under `prospective_identity` before
-  `start_attempt`, and one whose JSON encoding exceeds `MAX_REQUEST_BYTES`
-  refuses `CONTEXT_OVER_CEILING` with no attempt, reservation or call and
-  nothing truncated (§45.3). The executor rebuilds and re-bounds it under the
+  `start_attempt`, and one whose whole encoded request
+  (`CompletionProvider.request_bytes`: model, parameters and prompt, as the
+  provider sends it) exceeds `MAX_REQUEST_BYTES` refuses
+  `CONTEXT_OVER_CEILING` with no attempt, reservation or call and nothing
+  truncated (§45.3). The executor rebuilds and re-bounds it under the
   attempt's own identity, so each call reads its context twice (the pre-call
-  reads, the case lock hold included). The bound is on the prompt's encoding:
-  the provider's request envelope (model, parameters) adds a few hundred bytes,
-  so a prompt within that margin of the ceiling passes here and is refused
-  `PROVIDER_CALL_INVALID` after reservation. *Upgrade:* a declared per-section
-  bound, and the envelope margin folded into the ceiling, the day a wide route
-  or a large pack comes near it.
+  reads, the case lock hold included). That second check runs after the
+  attempt and its reservation exist: in the one sequential loop only a bundle
+  file changed on disk between the two can make it refuse, but with Phase 4's
+  concurrent workers an upstream accepted in between can make the pre-check
+  pass and the re-check refuse with a reservation held (no call is made).
+  *Upgrade:* a declared per-section bound the day a wide route or a large pack
+  comes near the ceiling, and Phase 4's lease fencing the node's inputs
+  between the two checks.
 
 **Phase 4.**
 

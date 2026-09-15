@@ -20,7 +20,7 @@ from uuid import UUID
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.handoff import HostIdentity, UpstreamRef, invocation_fields
 from server.methodology.vendor import authority_bundle_sha256, load_vendor_contract
-from server.provider import Completion
+from server.provider import Completion, encode_request
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 BUNDLE = Bundle(VENDORED)
@@ -252,6 +252,9 @@ class CanonicalCompletions:
     answers: list[bytes] = field(default_factory=list)
     # Every response body exactly as sent: what the attempt's diagnostic holds.
     bodies: list[str] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         assert json_object
