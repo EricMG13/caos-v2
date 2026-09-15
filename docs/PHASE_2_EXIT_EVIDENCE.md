@@ -95,6 +95,15 @@ CP-6.**
 tests above and in checks 1 and 7 keep their names and now run the canonical
 LITE route; the probe blocks CP-L10 through CP-0's T8 register. The CP-5 ->
 CP-6 runtime test stays on FULL under the temporary claims dispatch (§42.1).
+*Phase 3 (slice f-1a):* every named test in `test_loop_charges.py`,
+`test_execution_freshness.py`, `test_execution_billing.py` and
+`test_accepted_owner.py` (checks 1, 3, 4, 5, 6 and 7) keeps its name and now
+runs the LITE route through the canonical executor. The gate blocks both
+other LITE modules through T8, and
+`test_upstream_with_foreign_envelope_identity_is_refused_before_any_call` now
+gives CP-0 a record naming another invocation (module, ordinal, authority
+bundle), refused `ARTIFACT_RECORD_MISMATCH` by the frontier before CP-L10 is
+attempted.
 
 **6. Two workers/retries cannot accept different authoritative results for the
 same node generation; late responses after cancellation are recorded as

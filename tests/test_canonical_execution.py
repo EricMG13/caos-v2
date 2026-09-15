@@ -11,6 +11,8 @@ exact response body is addressed as the call's diagnostic before analysis.
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -29,7 +31,7 @@ from test_execution_freshness import (
     _revoke_during_transport,
     harness,
 )
-from test_loop_charges import ESTIMATE, REPORT, REPORTED, _Completions
+from test_loop_charges import ESTIMATE, REPORT, REPORTED
 
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode, resolve_route
@@ -41,7 +43,7 @@ from server.methodology.executor import Assignment, execute_module
 from server.methodology.handoff import read_record, validate_markdown
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
-from server.provider import CompletionProvider
+from server.provider import Completion, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
@@ -207,14 +209,30 @@ def test_provider_claimed_identity_never_survives(harness: _Harness) -> None:
     assert _diagnostic(harness) == _body(tampered.bodies[0])
 
 
+@dataclass
+class _ClaimsJson:
+    """Answers in the claims-JSON shape the claims adapter accepted."""
+
+    source_id: UUID
+    model: str = "a-model/for-the-test"
+    prompts: list[str] = field(default_factory=list)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        self.prompts.append(prompt)
+        citation = {"source_id": str(self.source_id), "page": 1, "matched_text": QUOTE}
+        claim = {"statement": "Total debt was USD 1,240.0m.", "citations": [citation]}
+        return Completion(json.dumps({"claims": [claim]}), REPORTED, "gen-claims")
+
+
 def test_a_wrong_adapter_cannot_become_authority(harness: _Harness) -> None:
-    claims = _Completions(harness.source_id)
+    claims = _ClaimsJson(harness.source_id)
     assert _refused(harness, "CP-0", claims) is RefusalCode.HANDOFF_MALFORMED
     # Not a canonical transport, but still exactly what was said.
-    said = _Completions(harness.source_id).complete(claims.prompts[0], json_object=True)
+    said = _ClaimsJson(harness.source_id).complete(claims.prompts[0], json_object=True)
     assert isinstance(said.content, str)
     assert _diagnostic(harness) == _body(said.content)
-    # A canonical pin never runs as claims, whoever calls the claims executor.
+    # Claims-only until f-2: a canonical pin never runs as claims, whoever calls
+    # the claims executor.
     attempt = _reserved(harness, "CP-0")
     with pytest.raises(Refusal) as refused:
         execute_module(
@@ -230,7 +248,7 @@ def test_a_wrong_adapter_cannot_become_authority(harness: _Harness) -> None:
     assert _counts(harness) == (1, [REPORTED], 0, 2, 2)
 
 
-@pytest.mark.parametrize("route", [CLAIMS], indirect=True)
+@pytest.mark.parametrize("route", [CLAIMS], indirect=True)  # claims-only: f-2
 def test_canonical_wire_on_a_claims_pin_is_refused(harness: _Harness) -> None:
     node = harness.route.nodes[0]
     canonical = CanonicalCompletions(harness.source_id)

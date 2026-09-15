@@ -1,7 +1,9 @@
-"""Provider facts commit before analytical refusal, acceptance or cleanup."""
+"""Provider facts commit before analytical refusal, acceptance or cleanup.
 
+On the canonical LITE route through the canonical executor (slice f-1a)."""
+
+import hashlib
 import http.client
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from decimal import Decimal
@@ -17,7 +19,7 @@ from test_loop_charges import ESTIMATE, MODEL, REPORTED, _Completions
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, verify_citations
-from server.methodology import executor
+from server.methodology import canonical
 from server.methodology.runner import ModuleProvider
 from server.provider import MAX_RESPONSE_BYTES, Completion, OpenRouter
 from server.refusals import Refusal, RefusalCode
@@ -61,7 +63,7 @@ def _bill(
         ((200, _wire("content_filter")), "PROVIDER_REFUSED", Decimal("0.25")),
         ((402, _wire()), "PROVIDER_CALL_INVALID", Decimal("0.25")),
         ((503, _wire()), "PROVIDER_UNAVAILABLE", Decimal("0.25")),
-        ((200, _wire("stop")), "ENVELOPE_INVALID", Decimal("0.25")),
+        ((200, _wire("stop")), "HANDOFF_MALFORMED", Decimal("0.25")),
         ((200, _wire(cost="0")), "PROVIDER_OUTPUT_TRUNCATED", Decimal("0")),
         ((200, _wire(identity="{}")), "PROVIDER_OUTPUT_TRUNCATED", Decimal("0.25")),
         ((200, _wire(cost="true")), "PROVIDER_OUTPUT_TRUNCATED", None),
@@ -106,37 +108,38 @@ def test_analysis_failure_preserves_bill_and_exact_replay(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
-    original = provider.completions.complete
-
-    def complete(prompt: str, *, json_object: bool = False) -> Completion:
-        result = original(prompt, json_object=json_object)
-        if failure == "envelope":
-            return replace(result, content="private")
-        body = json.loads(result.content or "")
-        if failure == "readiness":
-            body.pop("content_to_module_map")
-        elif failure == "citation":
-            body["claims"][0]["citations"][0]["source_id"] = str(uuid4())
-        return replace(result, content=json.dumps(body))
+    completions = provider.completions
+    assert isinstance(completions, _Completions)
+    if failure == "envelope":
+        completions.content = "private"
+    elif failure == "readiness":
+        completions.readiness = {"CP-5": "NOT-A-STATUS"}
+    elif failure == "citation":
+        completions.source_id = uuid4()
 
     def broken_blob(self: BlobStore, data: bytes) -> str:
         raise OSError("synthetic")
 
-    monkeypatch.setattr(provider.completions, "complete", complete)
     if failure == "blob":
         monkeypatch.setattr(BlobStore, "put", broken_blob)
     codes = {
-        "envelope": "ENVELOPE_INVALID",
-        "readiness": "READINESS_INCOMPLETE",
+        "envelope": "HANDOFF_MALFORMED",
+        "readiness": "HANDOFF_INCOMPLETE",
         "citation": "CITATION_NOT_DELIVERED",
+        # The response body could not be stored as the call's diagnostic.
+        "blob": "STORE_UNAVAILABLE",
     }
-    with pytest.raises(OSError if failure == "blob" else Refusal) as caught:
+    with pytest.raises(Refusal) as caught:
         _invoke(provider, uuid4(), "runtime", provider.route.nodes[0])
-    assert str(caught.value) == codes.get(failure, "synthetic")
+    assert str(caught.value) == codes[failure]
     assert provider.conn.info.transaction_status is TransactionStatus.IDLE
     dsn = _url_for(provider.conn.info.dbname)
     attempt = _bill(dsn, provider.run_id, REPORTED)
-    facts = CallOutcome(REPORTED, MODEL, "gen-loop-test")
+    [body] = completions.bodies
+    diagnostic = (
+        None if failure == "blob" else hashlib.sha256(body.encode()).hexdigest()
+    )
+    facts = CallOutcome(REPORTED, MODEL, "gen-loop-test", diagnostic)
     assert not record_outcome(provider.conn, attempt_id=attempt, outcome=facts)
     with pytest.raises(Refusal, match=r"^CALL_OUTCOME_CONFLICT$"):
         record_outcome(
@@ -183,7 +186,7 @@ def test_postbilling_citation_cleanup_preserves_money_and_original_refusal(
             raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
         return anchored
 
-    monkeypatch.setattr(executor, "verify_citations", fault)
+    monkeypatch.setattr(canonical, "verify_citations", fault)
     with pytest.raises(Refusal, match=f"^{code}$") as caught:
         _invoke(provider, uuid4(), "runtime", provider.route.nodes[0])
     assert caught.value.__cause__ is None
@@ -206,7 +209,10 @@ def test_failed_outcome_persistence_refuses_before_blob_storage(
     dsn = _url_for(provider.conn.info.dbname)
     provider.conn.execute("ALTER TABLE call_outcomes ADD CHECK (false)")
     provider.conn.commit()
-    original = provider.completions.complete
+    completions = provider.completions
+    assert isinstance(completions, _Completions)
+    original = completions.complete
+    bodies = completions.bodies
 
     def broken(conn: StoreConnection) -> None:
         raise psycopg.OperationalError("private")
@@ -217,10 +223,15 @@ def test_failed_outcome_persistence_refuses_before_blob_storage(
             monkeypatch.setattr(psycopg.Connection, "rollback", broken)
         return result
 
+    real_put = BlobStore.put
+
     def forbidden(self: BlobStore, data: bytes) -> str:
+        # Only the response body is addressed before billing, as its diagnostic.
+        if data == bodies[-1].encode():
+            return real_put(self, data)
         pytest.fail("failed billing reached blob storage")
 
-    monkeypatch.setattr(provider.completions, "complete", complete)
+    monkeypatch.setattr(completions, "complete", complete)
     monkeypatch.setattr(BlobStore, "put", forbidden)
     with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$") as caught:
         _invoke(provider, uuid4(), "runtime", provider.route.nodes[0])

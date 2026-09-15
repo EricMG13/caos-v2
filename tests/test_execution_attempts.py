@@ -1,7 +1,9 @@
-"""Explicit attempt identity and bounded, caller-safe execution read units."""
+"""Explicit attempt identity and bounded, caller-safe execution read units.
+
+On the canonical LITE route through the canonical executor (slice f-1a)."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from uuid import UUID, uuid4
 
@@ -21,9 +23,10 @@ from test_loop_charges import (
 
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
-from server.engine.runtime import Execution, run_route
+from server.engine.runtime import Execution, ProviderResult, run_route
 from server.methodology.bundle import Bundle
-from server.methodology.executor import Assignment, execute_module
+from server.methodology.canonical import execute_handoff
+from server.methodology.executor import Assignment
 from server.methodology.runner import ModuleProvider
 from server.provider import OpenRouter
 from server.refusals import Refusal
@@ -76,7 +79,7 @@ def _invoke(
     elif entry == "module":
         provider.execute(node.route_node_id, module, attempt_id=attempt)
     else:
-        execute_module(
+        execute_handoff(
             provider.conn,
             provider.bundle,
             provider.blobs,
@@ -125,7 +128,8 @@ def _fault(
 @dataclass
 class _Transport:
     conn: StoreConnection
-    response: tuple[int, bytes] | Exception
+    # A fixed answer, a transport failure, or an answer to the prompt sent.
+    response: tuple[int, bytes] | Exception | Callable[[str], tuple[int, bytes]]
     calls: int = 0
     prompts: list[str] = field(default_factory=list)
 
@@ -137,6 +141,8 @@ class _Transport:
         self.prompts.append(json.loads(body)["messages"][0]["content"])
         if isinstance(self.response, Exception):
             raise self.response
+        if callable(self.response):
+            return self.response(self.prompts[-1])
         return self.response
 
 
@@ -156,31 +162,34 @@ def _wire(
     ).encode()
 
 
+def _accepted(result: ProviderResult) -> Accepted:
+    return Accepted(
+        result.artifact_sha256,
+        result.charge,
+        result.model,
+        result.generation_id,
+        diagnostic_sha256=result.diagnostic_sha256,
+        record_sha256=result.record_sha256,
+    )
+
+
 def test_two_attempts_are_attributed_explicitly_and_transport_reads_are_idle(
     provider: ModuleProvider,
 ) -> None:
-    first, second = provider.route.nodes
+    first, second = provider.route.nodes[:2]
     a1, a2 = _reserve(provider, first), _reserve(provider, second)
-    body = provider.completions.complete("content_to_module_map").content
-    transport = _Transport(
-        provider.conn, (200, _wire("stop", str(REPORTED), content=body or ""))
-    )
-    second_body = provider.completions.complete("").content
+    answers = provider.completions
+
+    def answer(prompt: str) -> tuple[int, bytes]:
+        content = answers.complete(prompt, json_object=True).content or ""
+        return 200, _wire("stop", str(REPORTED), content=content)
+
+    transport = _Transport(provider.conn, answer)
     provider = replace(
         provider, completions=OpenRouter("offline", MODEL, transport=transport)
     )
     result = provider.execute(first.route_node_id, first.module_id, attempt_id=a1)
-    accept_attempt(
-        provider.conn,
-        attempt_id=a1,
-        accepted=Accepted(
-            result.artifact_sha256,
-            result.charge,
-            result.model,
-            result.generation_id,
-        ),
-    )
-    transport.response = (200, _wire("stop", str(REPORTED), content=second_body or ""))
+    accept_attempt(provider.conn, attempt_id=a1, accepted=_accepted(result))
     result = provider.execute(second.route_node_id, second.module_id, attempt_id=a2)
     with connect(_url_for(provider.conn.info.dbname)) as observer:
         assert observer.execute(
@@ -192,16 +201,7 @@ def test_two_attempts_are_attributed_explicitly_and_transport_reads_are_idle(
         assert observer.execute("SELECT attempt_id FROM artifacts").fetchall() == [
             (a1,)
         ]
-    accept_attempt(
-        provider.conn,
-        attempt_id=a2,
-        accepted=Accepted(
-            result.artifact_sha256,
-            result.charge,
-            result.model,
-            result.generation_id,
-        ),
-    )
+    accept_attempt(provider.conn, attempt_id=a2, accepted=_accepted(result))
     assert provider.conn.info.transaction_status is TransactionStatus.IDLE
     assert provider.conn.execute(
         "SELECT attempt_id,amount FROM budget_ledger ORDER BY charged_at"
@@ -233,13 +233,13 @@ def test_invalid_or_used_attempt_cannot_reach_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """check_call refuses before either evidence or upstream context is read."""
-    from server.methodology import executor
+    from server.methodology import canonical, executor
 
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("invalid attempt reached evidence or upstream reads")
 
     monkeypatch.setattr(executor, "read_run_block", forbidden)
-    monkeypatch.setattr(executor, "_upstream_digests", forbidden)
+    monkeypatch.setattr(canonical, "upstream_markdown", forbidden)
     node = provider.route.nodes[0]
     attempt = _reserve(provider, node)
     actual_run = provider.run_id
@@ -328,7 +328,7 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
 ) -> None:
     """execution_reads releases its unit or closes when its own cleanup fails."""
     from server.engine import runtime
-    from server.methodology import executor
+    from server.methodology import canonical, executor
 
     dsn = _url_for(provider.conn.info.dbname)
 
@@ -343,7 +343,7 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
 
     owner, name = {
         "delivery": (executor, "read_run_block"),
-        "upstream": (executor, "_upstream_digests"),
+        "upstream": (canonical, "upstream_markdown"),
         "frontier": (runtime, "accepted_artifacts"),
     }[stage]
     monkeypatch.setattr(owner, name, fail)

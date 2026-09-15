@@ -41,7 +41,7 @@ CLAIMS = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 
 @pytest.fixture
 def route(request: pytest.FixtureRequest) -> ResolvedRoute:
-    return resolve_route(CATALOG, *getattr(request, "param", CLAIMS))
+    return resolve_route(CATALOG, *getattr(request, "param", CANONICAL))
 
 
 def _accepted(harness: _Harness, attempt: UUID, record: str | None) -> Accepted:
@@ -81,7 +81,6 @@ def test_a_canonical_route_pins_the_canonical_adapter_and_requires_a_subject(
     assert load_run_input(conn, lite) == pin
 
 
-@pytest.mark.parametrize("route", [CANONICAL], indirect=True)
 def test_a_canonical_pin_passes_execution_input(harness: _Harness) -> None:
     pin, route = execution_input(harness.conn, harness.run_id, harness.bundle)
     harness.conn.rollback()
@@ -127,7 +126,6 @@ def test_acceptance_requires_a_record_exactly_for_a_canonical_pin(
     assert _count(harness, "budget_ledger") == 1
 
 
-@pytest.mark.parametrize("route", [CANONICAL], indirect=True)
 def test_a_replay_with_another_record_is_refused(harness: _Harness) -> None:
     attempt = _billed(harness)
     assert _refused(harness, attempt, "e" * 64) is True
@@ -142,6 +140,7 @@ def test_a_replay_with_another_record_is_refused(harness: _Harness) -> None:
     assert _count(harness, "artifacts") == 1
 
 
+@pytest.mark.parametrize("route", [CLAIMS], indirect=True)  # claims-only: f-2
 def test_a_claims_replay_carries_no_record(harness: _Harness) -> None:
     attempt = _billed(harness)
     assert _refused(harness, attempt, "E" * 64) is RefusalCode.BLOB_ADDRESS_INVALID

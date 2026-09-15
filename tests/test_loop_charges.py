@@ -1,9 +1,10 @@
-"""Phase 6 debt: the loop meets `execute_module` and charges what was reported.
+"""Phase 6 debt: the loop meets a real module and charges what was reported.
 
 `docs/REBUILD_PLAN.md` lists `test_the_loop_charges_what_the_provider_reported`
 under Phase 6, owed by Phase 4. Phase 4's loop reserved an estimate and charged
 whatever its stub handed back; Phase 5 built the real module execution and the
-real provider, which reports `usage.cost`. This is the join.
+real provider, which reports `usage.cost`. This is the join, on the canonical
+LITE route (Task 3.1 slice f-1a): CP-0, CP-L10, CP-5.
 
 The distinction the test exists for: an estimate is what the run set aside before
 the call, and a charge is what the call cost. A ledger that recorded the estimate
@@ -12,14 +13,22 @@ would reconcile perfectly against itself and tell nobody what was spent.
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, field
+import hashlib
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
 import pytest
-from conftest import _url_for, approve_run, gate_verdict, priced
+from canonical_fixtures import (
+    CATALOG,
+    LITE_PROFILE,
+    LITE_SELECTION,
+    PINNED,
+    QUOTE,
+    CanonicalCompletions,
+)
+from conftest import _url_for, approve_run, priced
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -27,8 +36,8 @@ from server.engine.route import NodeState, ResolvedRoute, node_states, resolve_r
 from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
+from server.methodology.handoff import _decoded_record
 from server.methodology.runner import ModuleProvider
-from server.provider import Completion
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
 from server.store.events import events_of
@@ -42,9 +51,9 @@ from server.store.runs import (
 )
 
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
-PROFILE = "FULL_CREDIT_32"
-# Two nodes: CP-0 and CP-DR. The smallest real pathway in the catalog.
-SELECTION = "DEEP_RESEARCH"
+PROFILE = LITE_PROFILE
+# Three nodes: CP-0, CP-L10 and CP-5, the canonical route (§42).
+SELECTION = LITE_SELECTION
 
 ESTIMATE = Decimal("0.50")
 # What the host configured and therefore what answered: fallbacks are off.
@@ -59,58 +68,27 @@ Total debt at 31 December 2026 was USD 1,240.0m
 
 
 @dataclass
-class _Completions:
-    """A completion provider that answers with one valid claim, at a known cost."""
+class _Completions(CanonicalCompletions):
+    """Valid LITE handoffs at a known cost, the gate saying `verdict` of the rest.
 
-    source_id: UUID
-    charge: Decimal = REPORTED
-    # The identity a real provider carries: what the host configured, which
-    # with fallbacks off is what answers.
+    Whole prompts are kept: the predecessor-chain test below
+    (`docs/REBUILD_PLAN.md` Phase 11, "The chain") reads the upstream handoff
+    back out of a later node's prompt, and a truncated copy would not carry it.
+    """
+
+    charge: Decimal | None = REPORTED
     model: str = MODEL
-    # What the gate says about the one other module of this pathway.
+    generation_id: str = "gen-loop-test"
     verdict: str = "READY"
-    # Whole prompts, not a prefix: the predecessor-chain test below
-    # (`docs/REBUILD_PLAN.md` Phase 11, "The chain") reads the upstream section
-    # back out of the second node's prompt, and a truncated copy would not
-    # carry it.
-    prompts: list[str] = field(default_factory=list)
 
-    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
-        self.prompts.append(prompt)
-        body = json.dumps(
-            {
-                "claims": [
-                    {
-                        "statement": "Total debt was USD 1,240.0m.",
-                        "citations": [
-                            {
-                                "source_id": str(self.source_id),
-                                "page": 1,
-                                "matched_text": "Total debt at 31 December 2026",
-                            }
-                        ],
-                    }
-                ],
-                # A verdict on the rest of the route, when the prompt is the
-                # gate's. This pathway is CP-0 and CP-DR alone.
-                **gate_verdict(prompt, self.verdict),
-            }
-        )
-        return Completion(
-            content=body, charge=self.charge, generation_id="gen-loop-test"
-        )
+    def __post_init__(self) -> None:
+        if self.verdict != "READY" and not self.readiness:
+            self.readiness = dict.fromkeys(PINNED, self.verdict)
 
 
 @pytest.fixture
 def route() -> ResolvedRoute:
-    catalog = json.loads(
-        (
-            VENDORED
-            / "skills/cp-os-credit-os/references"
-            / "CREDIT_OS_V_MODULE_CATALOG_v2.json"
-        ).read_text(encoding="utf-8")
-    )
-    return resolve_route(catalog, PROFILE, SELECTION)
+    return resolve_route(CATALOG, PROFILE, SELECTION)
 
 
 @pytest.fixture
@@ -152,6 +130,29 @@ def _reserved(conn: StoreConnection, run_id: UUID) -> list[Decimal]:
     return [row[0] for row in rows]
 
 
+def _run(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore],
+    route: ResolvedRoute,
+    completions: _Completions,
+) -> None:
+    conn, run_id, _source_id, blobs = ready
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        route=route,
+        run_id=run_id,
+    )
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
+    )
+
+
 def test_the_loop_charges_what_the_provider_reported(
     ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
 ) -> None:
@@ -161,29 +162,13 @@ def test_the_loop_charges_what_the_provider_reported(
     the point: the reservation is what the ceiling was checked against, and the
     charge is what the run actually cost.
     """
-    conn, run_id, source_id, blobs = ready
-    completions = _Completions(source_id)
-    provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=completions,
-        route=route,
-        run_id=run_id,
-    )
-
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-    )
+    conn, run_id, source_id, _blobs = ready
+    _run(ready, route, _Completions(source_id))
 
     assert run_status(conn, run_id) is RunStatus.COMPLETE
     charges = _charges(conn, run_id)
-    assert charges == [REPORTED, REPORTED], "the ledger holds what the calls cost"
-    assert _reserved(conn, run_id) == [ESTIMATE, ESTIMATE], "and what was set aside"
+    assert charges == [REPORTED] * 3, "the ledger holds what the calls cost"
+    assert _reserved(conn, run_id) == [ESTIMATE] * 3, "and what was set aside"
     assert REPORTED != ESTIMATE, "a test that compared two equal numbers proves nothing"
 
 
@@ -203,69 +188,46 @@ def test_an_accepted_artifact_records_the_model_that_produced_it(
     response body would be taking a claim where the host already holds a fact
     (invariant 3).
     """
-    conn, run_id, source_id, blobs = ready
-    provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=_Completions(source_id),
-        route=route,
-        run_id=run_id,
-    )
-
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-    )
+    conn, run_id, source_id, _blobs = ready
+    _run(ready, route, _Completions(source_id))
 
     recorded = conn.execute(
         "SELECT model, generation_id FROM artifacts WHERE run_id = %s", (run_id,)
     ).fetchall()
     assert [(str(row[0]), str(row[1])) for row in recorded] == [
-        (MODEL, "gen-loop-test"),
-        (MODEL, "gen-loop-test"),
-    ], "one identity per accepted artifact, for both nodes of the pathway"
+        (MODEL, "gen-loop-test")
+    ] * 3, "one identity per accepted artifact, for every node of the pathway"
 
 
-def test_the_artifact_is_the_envelope_the_host_built(
+def test_the_artifact_is_the_handoff_and_the_record_the_host_built(
     ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
 ) -> None:
-    """What the loop stores is the canonical envelope, addressed by its digest --
-    not the provider's body, which is untrusted JSON the host has already
-    replaced."""
+    """What the loop stores is the exact Markdown handoff, addressed by its
+    digest, beside the host's record -- not the provider's body, which is
+    untrusted JSON kept only as the call's diagnostic."""
     conn, run_id, source_id, blobs = ready
-    provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=_Completions(source_id),
-        route=route,
-        run_id=run_id,
-    )
-
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-    )
+    completions = _Completions(source_id)
+    _run(ready, route, completions)
 
     row = conn.execute(
-        "SELECT artifact_sha256 FROM artifacts WHERE run_id = %s"
-        " ORDER BY created_at LIMIT 1",
+        "SELECT a.artifact_sha256, a.record_sha256, o.diagnostic_sha256"
+        " FROM artifacts a JOIN call_outcomes o USING (attempt_id)"
+        " WHERE a.run_id = %s ORDER BY a.created_at LIMIT 1",
         (run_id,),
     ).fetchone()
     assert row is not None
-    stored = json.loads(blobs.get(str(row[0])))
+    artifact, record, diagnostic = (str(value) for value in row)
+    assert blobs.get(artifact) == completions.answers[0], "the Markdown, exactly"
+    body = completions.bodies[0].encode()
+    assert diagnostic == hashlib.sha256(body).hexdigest() != artifact
+    stored = _decoded_record(blobs.get(record))
 
-    assert stored["module_id"] == "CP-0", "the host's module id, not the module's"
-    assert stored["build_id"].startswith("a43cb903")
-    assert len(stored["authority_digest"]) == 64
-    assert stored["claims"][0]["citations"][0]["bboxes"], "anchored by the host"
+    assert stored.identity.module_id == "CP-0", "the host's module id, not the module's"
+    assert stored.artifact_sha256 == artifact
+    assert stored.build_id.startswith("a43cb903")
+    assert len(stored.authority_digest) == 64
+    [citation] = stored.citations
+    assert citation.matched_text == QUOTE and citation.bboxes, "anchored by the host"
 
 
 def test_a_module_that_cannot_be_anchored_stops_the_run(
@@ -273,26 +235,11 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
 ) -> None:
     """A refusal inside a node is not a node that quietly produced nothing. The
     attempt and its reservation stay; the run does not complete."""
-    conn, run_id, source_id, blobs = ready
-    completions = _Completions(source_id)
-    completions.source_id = UUID(int=0)  # cites evidence never delivered
-    provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=completions,
-        route=route,
-        run_id=run_id,
-    )
+    conn, run_id, _source_id, _blobs = ready
+    completions = _Completions(UUID(int=0))  # cites evidence never delivered
 
     with pytest.raises(Refusal, match=r"^CITATION_NOT_DELIVERED$"):
-        run_route(
-            conn,
-            blobs,
-            run_id=run_id,
-            route=route,
-            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-        )
+        _run(ready, route, completions)
 
     with connect(_url_for(conn.info.dbname)) as observer:
         assert run_status(observer, run_id) is RunStatus.RUNNING
@@ -306,81 +253,50 @@ def test_a_module_that_cannot_be_anchored_stops_the_run(
 def test_the_loop_hands_each_node_its_predecessors_results(
     ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
 ) -> None:
-    """DEEP_RESEARCH is CP-0 then CP-DR: the second node's prompt carries the
-    first node's accepted statement, read from the artifact the host stored."""
-    conn, run_id, source_id, blobs = ready
+    """CP-0 runs first with no upstream; CP-L10's prompt carries CP-0's accepted
+    handoff, exactly as the host stored it."""
+    conn, run_id, source_id, _blobs = ready
     completions = _Completions(source_id)
     pin_route(conn, run_id, route)
 
-    module_provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=completions,
-        route=route,
-        run_id=run_id,
-    )
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(
-            module_provider,
-            priced(ESTIMATE),
-            module_provider.bundle,
-        ),
-    )
+    _run(ready, route, completions)
 
-    first, second = completions.prompts
+    first, second, _third = completions.prompts
     assert "--- UPSTREAM" not in first
-    assert "module_id: CP-0" in second
-    assert "Total debt was USD 1,240.0m." in second
+    assert "--- UPSTREAM" in second
+    assert completions.answers[0].decode() in second
 
 
 def test_a_predecessor_artifact_of_another_shape_is_refused_not_raised(
     ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
 ) -> None:
-    """Valid JSON of a shape the host did not write is a typed refusal.
+    """Bytes of a shape the host did not write are a typed refusal.
 
-    `_upstream` indexed the stored artifact directly, so a claim without
-    `citations` raised `KeyError` across the provider seam -- from inside
-    `_run_node`, after the reservation, out of a boundary whose whole contract
-    is that refusals are typed. It reads the way the proof reads the same bytes
-    now, and refuses with the same code.
+    Reading a stored predecessor once raised across the provider seam -- from
+    inside `_run_node`, after the reservation, out of a boundary whose whole
+    contract is that refusals are typed. A canonical row's record that does not
+    decode is refused as a mismatch before any call.
     """
     conn, run_id, source_id, blobs = ready
     cp0 = next(node.route_node_id for node in route.nodes if node.module_id == "CP-0")
-    digest = blobs.put(json.dumps({"claims": [{"statement": 40}]}).encode("utf-8"))
     accept_attempt(
         conn,
         attempt_id=start_attempt(conn, run_id, cp0),
         accepted=Accepted(
-            artifact_sha256=digest,
+            artifact_sha256=blobs.put(b"---\nnot: a handoff\n---\n"),
             charge=REPORTED,
             model=MODEL,
             generation_id="gen-loop-test",
+            record_sha256=blobs.put(b'{"claims": [{"statement": 40}]}'),
         ),
     )
-    provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=_Completions(source_id),
-        route=route,
-        run_id=run_id,
-    )
+    completions = _Completions(source_id)
 
     with pytest.raises(Refusal) as caught:
-        run_route(
-            conn,
-            blobs,
-            run_id=run_id,
-            route=route,
-            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-        )
+        _run(ready, route, completions)
 
-    assert caught.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
+    assert caught.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
+    assert completions.prompts == []
 
 
 def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
@@ -388,31 +304,14 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
 ) -> None:
     """The verdict decides what runs, driven end to end rather than composed.
 
-    Each half held on its own -- the envelope carries the map, `_state_for`
-    reads it, the frontier offers RUNNABLE and RESTRICTED -- and nothing put a
-    real loop behind a real gate answer. CP-0 answers BLOCKED for the one other
-    node here, so it is never offered: one call, one reservation, one charge, no
-    attempt row, and a BLOCKED run (§39) reporting it unrun. A loop that ran it
-    anyway would pay a provider for an answer the gate had already refused.
+    CP-0's T8 register answers BLOCKED for every other node here, so none is
+    offered: one call, one reservation, one charge, one attempt row, and a
+    BLOCKED run (§39) reporting the rest unrun. A loop that ran them anyway
+    would pay a provider for an answer the gate had already refused.
     """
     conn, run_id, source_id, blobs = ready
     completions = _Completions(source_id, verdict="BLOCKED")
-    provider = ModuleProvider(
-        conn=conn,
-        bundle=Bundle(root=VENDORED),
-        blobs=blobs,
-        completions=completions,
-        route=route,
-        run_id=run_id,
-    )
-
-    run_route(
-        conn,
-        blobs,
-        run_id=run_id,
-        route=route,
-        execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-    )
+    _run(ready, route, completions)
 
     nodes = {node.module_id: node.route_node_id for node in route.nodes}
     # §39: an empty frontier with unfinished required work is blocked, not done.
@@ -423,19 +322,17 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     assert _charges(conn, run_id) == [REPORTED], "one charge, for the one call"
     assert _reserved(conn, run_id) == [ESTIMATE], "and one reservation behind it"
     assert _attempted(conn, run_id) == [nodes["CP-0"]], "no attempt row at all"
-    states = node_states(route, accepted_artifacts(conn, blobs, route, run_id))
-    assert states[nodes["CP-DR"]] is NodeState.BLOCKED, "reported unrun, with its cause"
+    bundle = Bundle(root=VENDORED)
+    states = node_states(
+        route, accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
+    )
+    for module in PINNED:
+        assert states[nodes[module]] is NodeState.BLOCKED, "reported unrun, with cause"
 
     # Blocked stays blocked: running the route again spends nothing and moves nothing.
     conn.rollback()
     with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
-        run_route(
-            conn,
-            blobs,
-            run_id=run_id,
-            route=route,
-            execution=Execution(provider, priced(ESTIMATE), provider.bundle),
-        )
+        _run(ready, route, completions)
     assert len(completions.prompts) == 1
     assert run_status(conn, run_id) is RunStatus.BLOCKED
     assert _charges(conn, run_id) == [REPORTED]
