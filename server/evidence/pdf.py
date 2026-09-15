@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from importlib.metadata import version
 from io import BytesIO
 
-from pdfminer.layout import LTChar, LTPage, LTTextBox, LTTextLine
+from pdfminer.layout import LTAnno, LTChar, LTPage, LTTextBox, LTTextLine
 from pdfminer.pdfparser import PDFSyntaxError
 
 from server.evidence.extract import ExtractorIdentity, Token
@@ -114,10 +114,24 @@ def _runs(line: LTTextLine) -> list[list[LTChar]]:
     Split on whitespace as the document draws it, so a word's rectangle covers
     the word and not the space beside it -- a rectangle wider than its quote
     highlights text the citation does not contain.
+
+    A word break is not only a drawn space glyph: pdfminer's own layout
+    analysis (`LTTextLineHorizontal.add`) inserts a virtual `LTAnno(" ")`
+    between two characters whose gap exceeds `laparams.word_margin` times the
+    character's own width or height -- which is how two glyphs positioned by a
+    `TJ` kerning array with no space character between them are recognised as
+    two words rather than one run of letters (§44.5: glyph merging follows
+    pdfminer's `word_margin`, no custom heuristic). `LTAnno` carries no
+    rectangle, so it never becomes part of a run; it only ends one.
     """
     runs: list[list[LTChar]] = []
     current: list[LTChar] = []
     for item in line:
+        if isinstance(item, LTAnno):
+            if item.get_text().isspace() and current:
+                runs.append(current)
+                current = []
+            continue
         if not isinstance(item, LTChar):
             continue
         if item.get_text().isspace():

@@ -25,6 +25,7 @@ from canonical_fixtures import (
     CanonicalCompletions,
     skill,
 )
+from conftest import recorded_statements
 from test_execution_freshness import (
     _counts,
     _Harness,
@@ -36,7 +37,7 @@ from test_loop_charges import ESTIMATE, REPORT, REPORTED
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode, resolve_route
 from server.engine.runtime import ProviderResult
-from server.methodology import runner
+from server.methodology import executor, runner
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import HandoffOutcome, execute_handoff
 from server.methodology.executor import Assignment, captured_blocks
@@ -178,7 +179,11 @@ def test_the_executor_produces_a_validated_handoff_and_its_record(
 
     monkeypatch.setattr(runner, "execute_handoff", kept)
     completions = CanonicalCompletions(harness.source_id)
-    gate_attempt, gate = _run(harness, "CP-0", completions)
+    with recorded_statements(harness.conn) as statements:
+        gate_attempt, gate = _run(harness, "CP-0", completions)
+    # The captured pins are read once, before the call: the anchoring after it
+    # uses the very deliveries the prompt was built from.
+    assert statements.count(executor._CAPTURED) == 1
     # The runner stores exactly the executor's two blobs.
     assert harness.blobs.get(gate.artifact_sha256) == outcomes[0].markdown
     assert gate.record_sha256 == hashlib.sha256(outcomes[0].record).hexdigest()
@@ -328,9 +333,14 @@ def test_billing_survives_every_analytical_refusal(
 def test_a_quote_outside_the_captured_blocks_refuses_the_handoff(
     harness: _Harness,
 ) -> None:
-    """Slice 3.2e at the executor: the quoted line is not among the run's
-    captured blocks, so it was never delivered and cannot be cited, although
-    its source was and its tokens are still indexed."""
+    """Wiring only, not exit evidence: the executor anchors on the blocks it
+    delivered. In production those are every block of every pinned source
+    (`source_blocks` rows are immutable), so no real run narrows delivery below
+    a whole source; this test narrows it by deleting a block with the
+    immutability trigger disabled. The rule itself -- an undelivered page of a
+    delivered source cannot be cited -- is proven at `verify_citations` in
+    `tests/test_awkward_evidence.py`; `CLAUDE.md`'s Repair Phase 3 ledger says
+    why nothing narrows delivery yet."""
     conn, source = harness.conn, harness.source_id
     whole = captured_blocks(conn, harness.run_id)
     assert whole[source] == frozenset({"b000000", "b000001"})

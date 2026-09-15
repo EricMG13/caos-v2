@@ -18,7 +18,7 @@ from uuid import UUID
 
 import pytest
 from canonical_fixtures import QUOTE, UNANCHORED, CanonicalCompletions
-from conftest import priced
+from conftest import priced, recorded_statements
 from test_canonical_execution import (
     _accept,
     _node,
@@ -40,7 +40,7 @@ from test_loop_charges import ESTIMATE, MODEL, REPORTED
 from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
-from server.methodology import canonical
+from server.methodology import canonical, executor
 from server.methodology.canonical import accepted_projections, blocked_verdict
 from server.methodology.handoff import (
     Projections,
@@ -260,14 +260,18 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
     _still_running(harness)
     screen = _node(harness, "CP-5").route_node_id
-    assert blocked_verdict(
-        harness.conn,
-        harness.blobs,
-        harness.bundle,
-        run_id=harness.run_id,
-        route=harness.route,
-        route_node_ids=[screen],
-    )
+    with recorded_statements(harness.conn) as statements:
+        verdict = blocked_verdict(
+            harness.conn,
+            harness.blobs,
+            harness.bundle,
+            run_id=harness.run_id,
+            route=harness.route,
+            route_node_ids=[screen],
+        )
+    assert verdict
+    # The captured pins are read once, by the reader the verdict re-anchors on.
+    assert statements.count(executor._CAPTURED) == 1
     harness.conn.rollback()
     # Resume: no attempt, reservation or call; the run ends BLOCKED once.
     assert _run_route(harness, provider) is None

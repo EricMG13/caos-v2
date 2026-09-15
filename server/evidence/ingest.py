@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import isfinite
@@ -305,15 +305,30 @@ def _blocks(tokens: list[Token]) -> list[_Block]:
     lines: dict[int, list[Token]] = {}
     for token in tokens:
         lines.setdefault(token.line_id, []).append(token)
+    block_ids = block_ids_by_line(lines)
 
     return [
         _Block(
-            block_id=f"{BLOCK_PREFIX}{ordinal:06d}",
+            block_id=block_ids[line_id],
             page=line[0].page,
             text=BoundaryText.of(" ".join(token.text for token in line)),
         )
-        for ordinal, (_line_id, line) in enumerate(sorted(lines.items()))
+        for line_id, line in sorted(lines.items())
     ]
+
+
+def block_ids_by_line(line_ids: Iterable[int]) -> dict[int, str]:
+    """Line id to the block id admission writes for it: the one numbering.
+
+    One block per line, the source's distinct line ids numbered in ascending
+    order and zero-padded to six digits (wider past 999,999 lines). Admission
+    packs with it and citation anchoring reads it back from the token index, so
+    the two cannot disagree about which block a quoted line belongs to.
+    """
+    return {
+        line_id: f"{BLOCK_PREFIX}{ordinal:06d}"
+        for ordinal, line_id in enumerate(sorted(set(line_ids)))
+    }
 
 
 def _store_blocks(conn: StoreConnection, source_id: UUID, blocks: list[_Block]) -> None:

@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
@@ -38,9 +38,9 @@ from server.methodology.bundle import (
 from server.methodology.executor import (
     SKILL,
     Assignment,
+    Delivery,
     _delivered,
     _stored_identity,
-    captured_blocks,
 )
 from server.methodology.handoff import (
     GATE_MODULE,
@@ -224,7 +224,9 @@ def execute_handoff(
         # comparison also catches an upstream rewritten during the call.
         if _identity(conn, bundle, assignment) != identity:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-        blocks = captured_blocks(conn, assignment.run_id)
+        # Exactly what the prompt was built from: pins are immutable, so the
+        # pre-call reading is this unit's too, without a second query.
+        blocks = _by_source(delivered)
         markdown, citations = parse_response(content, delivered=frozenset(blocks))
         projections = _unless_blocked(
             lambda: validate_markdown(
@@ -260,6 +262,14 @@ def execute_handoff(
         generation_id=generation,
         diagnostic_sha256=diagnostic,
     )
+
+
+def _by_source(delivered: Sequence[Delivery]) -> dict[UUID, frozenset[str]]:
+    """Source to the block ids a node was handed, from its deliveries."""
+    blocks: dict[UUID, set[str]] = {}
+    for delivery in delivered:
+        blocks.setdefault(delivery.source_id, set()).add(delivery.block_id)
+    return {source: frozenset(ids) for source, ids in blocks.items()}
 
 
 def _unless_blocked(validate: Callable[[], Projections]) -> Projections | None:
@@ -316,12 +326,11 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
         if blocks is None:
             # Once per call: every captured block, whatever the attempts.
             try:
-                _delivered(conn, run_id)
+                blocks = _by_source(_delivered(conn, run_id))
             except Refusal as refusal:
                 if refusal.code in _STORE_FAULTS:
                     raise
                 return False  # e.g. a withdrawn source: no verdict can be re-derived
-            blocks = captured_blocks(conn, run_id)
         if body is not None and _answered_blocked(
             conn,
             bundle,
