@@ -12,9 +12,9 @@ ignored reports cannot override those contracts.
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 4 accepted at `0deb4a4`** (Phase 3 `3400b6c`, Phase 2 `b4298dc`; records below) |
-| Latest accepted task | **Phase 4 Tasks 4.1–4.5 accepted with the phase at `0deb4a4`** |
-| Next task | Phase 5 Task 5.4b: implement the bounded authenticated live reads, durable receipt linkage, and CP-CF-aware presentation; then clear phase-exit gates. |
+| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`; records below) |
+| Latest accepted task | **Phase 5 Tasks 5.1–5.4b accepted with the phase at `ca65ec7`** |
+| Next task | Phase 6 Tasks 6.1–6.4 offline: validate the set before spend, independent credit answer keys, persisted review verdicts, and restore/release evidence. Do not run 6.5 live validation without explicit provider, model, route, call, token, cost, and time-window authorization. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -23,36 +23,27 @@ Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
 
-## Codex resume checkpoint — Phase 5 in progress
+## Phase 5 acceptance record — 15 September 2026
 
-- **Coordinator branch:** `codex/execute-repair-plan`; no Phase 5 acceptance has
-  been declared. Integrated slices are 5.1 (`c48219d`), 5.2a
-  (`51d3123`, `859f548`), 5.2b (`2e8f1d5`..`3b9430c`), 5.3
-  (`9bf20b2`..`e3899c3`), wire inventory (`e3b7b71`) and 5.4a (`77eda16`).
-  Review remediations are `351dd6e`, `0a7bddd` and `4c28ed0`. The 5.4b live
-  read contract and dependency audit are in `fb4dc0f`; its implementation is
-  still pending.
-- **Execution routing:** Codex `gpt-6-astra` is used at high reasoning for
-  high-risk implementation slices; ordinary bounded work may use the balanced
-  Codex models. At the end of the complete Phase 5 only, run one whole-phase
-  confidence review and one separate adversarial audit at extra-high (`xhigh`)
-  reasoning. Rewrite tournaments are disabled by the project policy.
-- **Interim review evidence:** requested `xhigh` adversarial and confidence
-  reviews are recorded in `reviews/phase-5-interim-adversarial-audit.md` and
-  `reviews/phase-5-interim-confidence-review.md`. Their confirmed package,
-  exception-chain, CP-CF revision-readiness and receipt-identity defects are
-  fixed, but neither report is a phase-exit review.
-- **Gates:** provider variables remain stripped for every command. The combined
-  backend suite passed 2,719 tests with 2 skipped, focused Phase 5 suites and
-  server mypy passed, and the image was built with the CP-CF methodology files
-  present before later revision changes. Rebuild/scan the current image,
-  refresh GitNexus, run all CI gates, and rerun production smoke. Firefox still
-  times out with CP-0 `RUNNABLE`; it blocks phase exit until root-caused.
-- **Next implementation:** Task 5.4b must add the bounded live
-  Model/Report/Committee read boundary, persisted receipt linkage, and
-  CP-CF-accurate display. Then create actual stacked PRs for the 5.3 range
-  (2,011 counted lines vs. the 800-line gate) and only then run the one
-  whole-phase confidence review followed by the separate adversarial audit.
+- **Candidate:** `ca65ec7`; GitNexus index-only refreshed at this commit
+  (8,603 nodes, 22,018 edges, 373 clusters, 300 flows; status up to date).
+- **Delivered:** bounded authenticated Model, Report and Committee reads;
+  exact saved revisions and filing receipts; CP-CF-aware projections;
+  `filing_changed` invalidation; migration `0017` seals legitimate legacy
+  filing classifications and fails closed on receiptless post-migration data;
+  fresh per-browser journey stacks; static, keyboard-scrollable saved artifact
+  text that preserves canonical whitespace and contains wide rows.
+- **Complete gate:** provider variables stripped, `make check` exit 0: 2,817
+  backend tests, 21 races, clean lint/type/Bandit/pip-audit/gitleaks, 225
+  frontend units, zero accessibility violations, 90 workbench tests,
+  production-image checks, and 13 journeys each in Chromium (5.4m), Firefox
+  (5.5m), and WebKit (5.8m).
+- **Whole-phase reviews:** independent xhigh confidence and adversarial reviews
+  both PASS with no P0/P1/P2; see
+  [confidence](reviews/phase-5-confidence-review.md) and
+  [adversarial](reviews/phase-5-adversarial-audit.md).
+- **Next:** implement Phase 6.1–6.4 offline, then stop for the explicitly
+  authorized, capped live 6.5 validation.
 
 Accepted predecessor evidence is retained in Git: Task17d2 application/proofs
 at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
