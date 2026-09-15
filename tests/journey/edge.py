@@ -12,7 +12,7 @@ so the real-stack journey reaches the API the way production would:
   `content-type`, `content-length` and `accept` pass through, with the body;
 - responses stream frame by frame, so SSE is unbuffered, with no read timeout.
 
-`GET /_edge/login?persona=analyst|approver|intruder` stands in for the OIDC
+`GET /_edge/login?persona=analyst|approver|reader|intruder` stands in for the OIDC
 login; any other request without a valid session is answered 401 here and
 never reaches the API. Run with
 `python -m uvicorn --factory journey.edge:from_environment --host 127.0.0.1
@@ -70,6 +70,7 @@ class Persona:
 PERSONAS = {
     "analyst": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a001"), "caos-analysts"),
     "approver": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a002"), "caos-analysts"),
+    "reader": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a004"), "caos-readers"),
     "intruder": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a003"), "caos-analysts"),
 }
 
