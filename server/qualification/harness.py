@@ -82,6 +82,7 @@ from server.qualification.matrix import (
     QualificationSet,
     assert_measurable,
     build_matrix,
+    qualification_set_digest,
 )
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
@@ -210,6 +211,7 @@ class PreparedCase:
 
     case_label: str
     input: RunInput
+    qualification_set_sha256: str
 
 
 def prepare(
@@ -239,6 +241,7 @@ def prepare(
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     _subjects(qualification)
     require_idle(conn)
+    set_digest = qualification_set_digest(qualification)
     prepared = []
     try:
         with execution_reads(conn):
@@ -260,6 +263,7 @@ def prepare(
                         harness.bundle,
                         subject=case.subject,
                     ),
+                    set_digest,
                 )
             )
     except psycopg.Error:
@@ -292,11 +296,14 @@ def perform(
     assert_measurable(qualification)
     _distinct(qualification)
     _answerable(qualification)
+    set_digest = qualification_set_digest(qualification)
     if len(prepared) != len(qualification.cases) or any(
         type(item) is not PreparedCase
         or type(item.input) is not RunInput
         or type(item.case_label) is not str
+        or type(item.qualification_set_sha256) is not str
         or item.case_label != case.label
+        or item.qualification_set_sha256 != set_digest
         or type(item.input.run_id) is not UUID
         or type(item.input.case_id) is not UUID
         for case, item in zip(qualification.cases, prepared, strict=True)
