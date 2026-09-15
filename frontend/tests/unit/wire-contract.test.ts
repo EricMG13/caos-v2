@@ -662,6 +662,7 @@ describe("the v1 wire contract", () => {
       "run_terminal",
       "sources_changed",
       "runs_changed",
+      "filing_changed",
     ]);
   });
 

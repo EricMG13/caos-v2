@@ -117,6 +117,21 @@ def test_model_reads_only_the_accepted_cp_cf_projection(
     assert document["status"] == "complete" and document["chrome"]["actions"] == []
 
 
+def test_analysis_labels_the_accepted_cp_cf_projection_as_host_calculation(
+    client: TestClient, harness: _Harness
+) -> None:
+    _complete(harness)
+    response = client.get(
+        f"/api/v1/cases/{harness.case_id}/analysis", headers=_as(harness.approver)
+    )
+    harness.conn.rollback()
+    assert response.status_code == 200, response.json()
+    handoff = next(
+        h for h in response.json()["body"]["handoffs"] if h["module_id"] == "CP-CF"
+    )
+    assert handoff["host_calculation"] == "CP_CF_FORECAST"
+
+
 @pytest.mark.parametrize("change", ["owner", "record", "pin", "source", "blob"])
 def test_model_refuses_missing_or_changed_projection_authority(
     client: TestClient, harness: _Harness, change: str

@@ -1696,11 +1696,12 @@ refusal never has to be un-remembered.
    `run_events`. `/api/runs/{run_id}/events` is retired. Directory opens no
    stream.
 2. **Closed names, no payloads.** `EventName` is `run_progress`,
-   `handoff_accepted`, `run_terminal`, `sources_changed` and `runs_changed`
-   (`server/api/events.py` `STREAM_NAMES`). Admission and withdrawal are
+   `handoff_accepted`, `run_terminal`, `sources_changed`, `runs_changed` and
+   `filing_changed` (`server/api/events.py` `STREAM_NAMES`). Admission and withdrawal are
    `sources_changed`; create run, pin input, both gate releases, start, retry
-   and cancel are `runs_changed`; `CASE_CREATED`, `OPINION_SIGNED`,
-   `DELIVERABLE_FROZEN` and `DELIVERABLE_FILED` are silent. A test fails a
+   and cancel are `runs_changed`; sign, freeze and file are `filing_changed`,
+   which refetches Report and Committee; `CASE_CREATED` and `REVISION_SAVED`
+   are silent. A test fails a
    `RunEvent` or audit action that is neither named nor declared silent. The
    browser's `REFETCHES` table says which sections each name refetches;
    revocation has no name.

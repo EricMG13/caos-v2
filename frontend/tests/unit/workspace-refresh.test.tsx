@@ -67,6 +67,7 @@ const committee = () => ({
     receipt: null,
   },
 });
+const filedCommittee = () => json("../../fixtures/committee-v1.json");
 
 class FakeSource {
   static CONNECTING = 0;
@@ -203,7 +204,7 @@ describe("the workspace under its event tail", () => {
     expect(sent).toHaveLength(5);
   });
 
-  test("Report requires a direct exact selection and refreshes only for source changes", async () => {
+  test("Report requires a direct exact selection and refreshes for saved-source or filing changes", async () => {
     await mount("report", `/report/?case=${CASE}&run=${RUN}`);
     expect(sent).toHaveLength(0);
     await mount("report", `/report/?case=${CASE}&run=${RUN}&revision=${REVISION}`);
@@ -215,12 +216,18 @@ describe("the workspace under its event tail", () => {
     expect(sent).toHaveLength(1);
     await fire("sources_changed");
     expect(sent).toHaveLength(2);
+    await answer(1, report());
+    await fire("filing_changed");
+    expect(sent).toHaveLength(3);
   });
 
-  test("Committee requires the same exact selection and refreshes when its saved source changes", async () => {
+  test("Committee requires the same exact selection and refreshes from frozen to filed", async () => {
     await mount("committee", `/committee/?case=${CASE}&run=${RUN}`);
     expect(sent).toHaveLength(0);
-    await mount("committee", `/committee/?case=${CASE}&run=${RUN}&revision=${REVISION}`);
+    const { container } = await mount(
+      "committee",
+      `/committee/?case=${CASE}&run=${RUN}&revision=${REVISION}`,
+    );
     expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/committee?run=${RUN}&revision=${REVISION}`);
     await answer(0, committee());
     for (const name of ["run_progress", "handoff_accepted", "run_terminal", "runs_changed"]) {
@@ -229,6 +236,14 @@ describe("the workspace under its event tail", () => {
     expect(sent).toHaveLength(1);
     await fire("sources_changed");
     expect(sent).toHaveLength(2);
+    await answer(1, committee());
+    await fire("filing_changed");
+    expect(sent).toHaveLength(3);
+    await answer(2, filedCommittee());
+    expect(container.querySelector("[data-committee-filing]")).toHaveAttribute(
+      "data-state",
+      "filed",
+    );
   });
 
   test("test_names_arriving_mid_flight_cause_exactly_one_more_fetch", async () => {

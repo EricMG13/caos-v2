@@ -125,10 +125,12 @@ describe("what a name refetches and what a view is", () => {
       run_terminal: ["run", "analysis", "model"],
       sources_changed: ["upload", "run", "analysis", "model", "report", "committee"],
       runs_changed: ["run", "analysis", "model"],
+      filing_changed: ["report", "committee"],
     });
     expect(refetches("run_progress", "analysis")).toBe(false);
     expect(refetches("sources_changed", "upload")).toBe(true);
     expect(refetches("runs_changed", "directory")).toBe(false);
+    expect(refetches("filing_changed", "committee")).toBe(true);
   });
 
   test("analytical identity is the run, or the run and its sorted records", () => {

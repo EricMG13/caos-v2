@@ -474,7 +474,7 @@ class HandoffView(BaseModel):
     screening_only: bool
     source_facts: Annotated[list[CitationView], Field(max_length=CITATIONS_MAX)]
     model_analysis: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
-    host_calculation: Literal["NONE"]
+    host_calculation: Literal["NONE", "CP_CF_FORECAST"]
 
 
 class PendingNode(BaseModel):
@@ -705,6 +705,7 @@ EventName = Literal[
     "run_terminal",
     "sources_changed",
     "runs_changed",
+    "filing_changed",
 ]
 
 

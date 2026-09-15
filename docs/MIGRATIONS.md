@@ -252,3 +252,20 @@ generated canonical text form of the UUID. They are `NOT VALID`: old text-label
 history stays readable without fabricated saved payloads; new writes must name
 a saved revision of the same case. The populated version-14 migration test
 preserves a legacy signature and refuses a new detached signature.
+
+## Versions 16 and 17 — filing receipts and the sealed legacy boundary — 2026-09-15
+
+`0016_filed_receipts` adds immutable exact receipts for every new filed
+deliverable. It deliberately backfills nothing: earlier digest-only filings
+remain historical and cannot be represented as newly created receipt bytes.
+
+`0017_legacy_filing_events` snapshots every receiptless `DELIVERABLE_FILED`
+hash only when it follows `0016` in the same atomic upgrade from a pre-0016
+prefix. It seals that set with foreign-key and no-mutation guards, and makes
+audit events update/delete/truncate immutable. A store already at version 16
+that contains any receiptless filing refuses version 17 as ambiguous: an
+operator must recover or validate it rather than silently blessing a missing
+current receipt. Readers trust the sealed set, never a live event timestamp,
+so a post-cutover receipt cannot be bypassed by backdating. The receipt
+migration regressions prove both legacy preservation and the ambiguous-prefix
+refusal.
