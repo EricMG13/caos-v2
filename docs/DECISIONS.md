@@ -2167,3 +2167,12 @@ also raises each run's conservative reservation. The changed ceiling is bound
 in the fresh execution profile identity
 `openrouter/google-ai-studio/high/65536`; it requires verification before the
 one authorized paid retry.
+
+That retry reached the temporary qualification collector, which returned from
+`perform()` but then failed while JSON-encoding a proof's `frozenset` of anchored
+citations. Cleanup dropped its disposable database before it emitted generation
+or charge data. The account cannot use OpenRouter's aggregate activity endpoint
+for reconciliation without a management key (`403`). Its actual route outcome
+is therefore indeterminate and creates no artifact, evidence or verdict. The
+temporary collector has been corrected to serialize the proof explicitly; do
+not repeat this paid attempt without fresh authorization.

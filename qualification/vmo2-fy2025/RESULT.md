@@ -139,3 +139,21 @@ This profile is not qualified at the shipped 32,768-token ceiling. A same-cap
 retry changes no controlled variable and must not be purchased. A 65,536-token
 experiment would be materially different, but requires an intentional runtime
 change, fresh build identity and fresh authorization before spend.
+
+## 65,536-token attempt — result collection indeterminate
+
+After the authorized ceiling/profile change at `691637b`, the prepared attempt
+used `openrouter/google-ai-studio/high/65536` with the same frozen corpus and
+`$22.00` set/run ceilings. `perform()` returned to its temporary qualification
+collector, but the collector then raised while JSON-encoding the proof's
+`frozenset` of anchored citations. Its `finally` block dropped the disposable
+database before it printed the run ID, generation IDs, charges, node status or
+matrix.
+
+The OpenRouter activity endpoint is aggregate-only and requires a management
+key for this account; reconciliation therefore returned `403`. The number of
+provider calls, their individual charges and the canonical outcome are
+unrecoverable from the surviving record. No artifact, evidence row or verdict
+may be claimed from this attempt. The collector now serializes the proof fields
+explicitly for any future authorized run, but this is not permission to repeat
+the indeterminate paid attempt.

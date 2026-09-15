@@ -97,6 +97,9 @@ live call. **Verdict:** CLEAN after remediation.
    large encoded response. It is a separate transport guard, intentionally not
    relaxed by this narrowly scoped output-token change.
 
-No unresolved code or security blocker remains for the single authorized
-Gemini call. Its result can create execution evidence only; it cannot create a
-qualification verdict without external authenticated review.
+No unresolved repository code or security blocker remained for the single
+authorized Gemini call. Its temporary reporter then failed after `perform()`
+returned and erased the disposable record; therefore it created no usable
+execution evidence, and no retry is authorized. Even a successfully captured
+future result cannot create a qualification verdict without external
+authenticated review.
