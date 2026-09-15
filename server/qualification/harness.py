@@ -122,6 +122,9 @@ class Harness:
     # nothing bounded the set until this, and two hundred cases were two
     # hundred routes' worth of calls, each individually within budget.
     ceiling: Decimal
+    # The ceiling for each run the harness prepares. Defaults to the ordinary
+    # run ceiling; an authorized live qualification can name a larger bound.
+    run_ceiling: Decimal = CEILING
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,7 +264,7 @@ def prepare(
         for case, title, route in zip(qualification.cases, titles, routes, strict=True):
             case_id = create_case(conn, title)
             admit_pack(conn, blobs, case_id=case_id, documents=list(case.documents))
-            run_id = start_run(conn, case_id)
+            run_id = start_run(conn, case_id, budget_ceiling=harness.run_ceiling)
             conn.commit()
             source = snapshot_source_set(conn, case_id)
             pin_route(conn, run_id, route)
@@ -414,7 +417,11 @@ def _eligible(
         (pin.case_id, pin.source_version),
     ).fetchall()
     if (
-        owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
+        owner
+        != (
+            BoundaryText.of(case.label, limit=_LABEL_LIMIT).value,
+            harness.run_ceiling,
+        )
         or (route.profile_id, route.selection_id)
         != (case.profile_id, case.selection_id)
         or (
@@ -440,8 +447,8 @@ def _affordable(
 
     Invariant 8 one level up, and the same shape: a ceiling refuses the
     operation that would breach it *before* it happens. Each run opened here
-    takes `server.store.budget.CEILING`, so what the set may spend is that times
-    the number of cases.
+    takes `Harness.run_ceiling`, so what the set may spend is that times the
+    number of cases.
 
     Compared against the worst case rather than an estimate of the likely one.
     A set admitted because it would *probably* come in under would be a
@@ -450,13 +457,16 @@ def _affordable(
     the guess was good.
     """
     validate_spend(harness.ceiling)
-    if Fraction(CEILING) * len(qualification.cases) > Fraction(harness.ceiling):
+    validate_spend(harness.run_ceiling)
+    if Fraction(harness.run_ceiling) * len(qualification.cases) > Fraction(
+        harness.ceiling
+    ):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
     # Every node of a case's route reserves one worst case against that run's
     # ceiling; a route that cannot fit would pay for calls it cannot finish.
     # A floor, not a bound: a refused analysis reserves again.
     call = Fraction(worst_case(harness.price))
-    if any(call * len(route.nodes) > Fraction(CEILING) for route in routes):
+    if any(call * len(route.nodes) > Fraction(harness.run_ceiling) for route in routes):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 
