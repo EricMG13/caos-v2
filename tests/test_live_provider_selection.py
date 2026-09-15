@@ -12,6 +12,8 @@ STUB = REPO / "tests/live_provider_stub.py"
 LIVE_ENV = {
     "OPENROUTER_API_KEY": "synthetic-not-a-secret",
     "OPENROUTER_MODEL": "synthetic/model",
+    "CAOS_MODEL_PRICE": "synthetic/model,0.000001,0.000004,2026-09-15",
+    "CAOS_LIVE_BUDGET_CEILING": "22.00",
     "CAOS_TEST_POSTGRES_URL": "postgresql://unused/unused",
     "CAOS_REQUIRE_PROVIDER": "1",
 }
@@ -53,4 +55,6 @@ def test_explicit_live_selection_fails_when_configuration_is_missing() -> None:
     assert result.returncode != 0
     assert "OPENROUTER_API_KEY" in result.stderr
     assert "OPENROUTER_MODEL" in result.stderr
+    assert "CAOS_MODEL_PRICE" in result.stderr
+    assert "CAOS_LIVE_BUDGET_CEILING" in result.stderr
     assert "CAOS_TEST_POSTGRES_URL" in result.stderr

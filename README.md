@@ -73,6 +73,12 @@ make dev-worker  # the one polling worker
 make dev-ui      # http://127.0.0.1:5173
 ```
 
+`make test-provider` is a separately authorized paid mode. It additionally
+requires `CAOS_MODEL_PRICE` (`model,input_per_token,output_per_token,YYYY-MM-DD`)
+and `CAOS_LIVE_BUDGET_CEILING` (a positive decimal). The test reserves the
+configured worst-case price before each call and refuses the next call before
+that per-run ceiling would be exceeded; it never prints credential values.
+
 Sample screens are available only in explicit demonstration mode. They carry a
 prominent read-only banner and fixture handlers reject commands:
 
