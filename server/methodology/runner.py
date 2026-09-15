@@ -70,6 +70,7 @@ class ModuleProvider:
             run_id=self.run_id,
             route=self.route,
             node=node,
+            provider=self.completions,
         )
 
     def _node(self, route_node_id: str, module_id: str) -> RouteNode:

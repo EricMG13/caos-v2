@@ -1458,3 +1458,22 @@ keeps every v1 pin byte-identical while fixing the geometry new admissions carry
 **Why.** Item 3 requires complete verified instructions and lineage without
 summarising; the measured references fit the request bound; no speculative tool
 loop or retrieval layer is added.
+
+## 2026-09-14 §46 — The LITE route's named object, completion cap and read model
+
+**Decision.** For Phase 3 Task 3.4:
+
+1. **CP-5 over the named LITE object.** The host reads CP-5's verified LITE
+   compatibility block (`NAMED_LITE_OBJECT_ACCEPTED`, `accepted_lite_object_ids`)
+   and holds CP-5 BLOCKED, with no call, until an accepted upstream owns one of
+   those objects. Driven by vendor fields, not a hardcoded graph.
+2. **Completion cap.** `MAX_COMPLETION_TOKENS` stays 32,768; a length-truncated
+   answer refuses `PROVIDER_OUTPUT_TRUNCATED`, keeps its bill and accepts
+   nothing. Any raise needs authorized live evidence (Phase 6).
+3. **Read model** labels land in the deliverable render only (source fact =
+   host-verified citations; analysis = model Markdown; host calculation = none);
+   API models arrive in Phase 4.
+4. **No CP-5 content checks by the host** (e.g. T5.1 naming CP-L10); the vendor
+   remains the conformance authority (invariant 4).
+5. **LITE `required_payload_fields`** are not validated by the host; recorded in
+   the ledger beside `semantic_rules`.
