@@ -30,6 +30,7 @@ from server.deliverable.filing import freeze
 from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import Bundle, verified_bytes
+from server.methodology.executor import captured_blocks
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
 from server.methodology.invocation import (
     call_time_identity,
@@ -95,7 +96,8 @@ def canonical_payload(
         if route is None or any(n.route_node_id not in rows for n in route.nodes):
             raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
         pinned = pinned_live_sources(conn, run_id)
-        reader = _Reader(conn, blobs, bundle, route, pinned)
+        captured = captured_blocks(conn, run_id)
+        reader = _Reader(conn, blobs, bundle, route, pinned, captured)
         artifacts = []
         for node in route.nodes:
             attempt, artifact, record_sha = rows[node.route_node_id]
@@ -127,18 +129,23 @@ def canonical_payload(
 class _Reader:
     """One payload's shared authority: contract, catalog and pinned evidence."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- one payload's store, bundle, pin and blocks
         self,
         conn: StoreConnection,
         blobs: BlobStore,
         bundle: Bundle,
         route: ResolvedRoute,
         pinned: dict[str, UUID],
+        captured: dict[UUID, frozenset[str]],
     ) -> None:
         self.conn, self.blobs, self.bundle, self.route = conn, blobs, bundle, route
         self.contract = load_vendor_contract(bundle)
         self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
         self.pinned = pinned
+        # The captured blocks of the pinned live sources: what any node was handed.
+        self.delivered = {
+            source: captured.get(source, frozenset()) for source in pinned.values()
+        }
 
     def proven(
         self, run_id: UUID, node: RouteNode, attempt: UUID, artifact: str, sha: str
@@ -179,7 +186,7 @@ class _Reader:
             raise mismatch
         anchored = verify_citations(
             self.conn,
-            delivered=set(pinned.values()),
+            delivered=self.delivered,
             citations=[
                 Citation(pinned[c.document_sha256], c.page, c.matched_text)
                 for c in record.citations

@@ -39,7 +39,6 @@ from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
-from server.evidence.pdf import PdfExtractor
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.provider import OpenRouter
@@ -100,13 +99,10 @@ def test_a_live_run_admits_documents_and_completes_its_route(
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     route = resolve_route(catalog, PROFILE, PATHWAY)
 
-    # One extractor per admission, so the PDF is admitted on its own.
+    # One pack: each document is read by the extractor its bytes call for.
     text = Document(filename=BoundaryText.of("report.txt"), data=REPORT)
     pdf = Document(filename=BoundaryText.of("statement.pdf"), data=STATEMENT)
-    source_ids = admit_pack(conn, blobs, case_id=case_id, documents=[text])
-    source_ids += admit_pack(
-        conn, blobs, case_id=case_id, documents=[pdf], extractor=PdfExtractor()
-    )
+    admit_pack(conn, blobs, case_id=case_id, documents=[text, pdf])
     run_id = start_run(conn, case_id)
     conn.commit()
     approve_run(conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle)

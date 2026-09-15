@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 from canonical_fixtures import CATALOG, CONTRACT, handoff_markdown, skill
+from conftest import every_block
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -94,7 +95,7 @@ def _accept(
     )
     anchored = verify_citations(
         conn,
-        delivered={harness.source_id},
+        delivered=every_block(conn, harness.source_id),
         citations=[Citation(harness.source_id, 1, QUOTE)],
     )
     conn.rollback()

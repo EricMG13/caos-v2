@@ -250,3 +250,22 @@ def priced(estimate: Decimal, model: str = "a-model/for-the-test") -> ModelPrice
         estimate / MAX_COMPLETION_TOKENS,
         date(2026, 9, 13),
     )
+
+
+def every_block(conn: object, *sources: UUID) -> dict[UUID, frozenset[str]]:
+    """Each source mapped to every block it holds: a whole-source delivery,
+    for suites calling `verify_citations` outside a run."""
+    from server.store import StoreConnection
+
+    rows = (
+        cast(StoreConnection, conn)
+        .execute(
+            "SELECT source_id, block_id FROM source_blocks WHERE source_id = ANY(%s)",
+            (list(sources),),
+        )
+        .fetchall()
+    )
+    blocks: dict[UUID, set[str]] = {source: set() for source in sources}
+    for source, block in rows:
+        blocks[UUID(str(source))].add(str(block))
+    return {source: frozenset(found) for source, found in blocks.items()}

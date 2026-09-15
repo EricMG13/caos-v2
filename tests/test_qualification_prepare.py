@@ -13,6 +13,7 @@ import psycopg
 import pytest
 from canonical_fixtures import LITE_PROFILE, LITE_SELECTION
 from conftest import priced
+from test_pdf_extraction import minimal_pdf
 from test_qualification_harness import (
     CATALOG,
     ESTIMATE,
@@ -432,3 +433,19 @@ def test_a_case_on_any_route_without_a_subject_leaves_no_setup(
         )
     assert _count(conn, "SELECT count(*) FROM cases") == 0
     _unapproved_and_unspent(conn, harness)
+
+
+def test_the_harness_admits_pdfs_through_the_pdf_extractor(ready: Fixture) -> None:
+    """The harness passes no extractor; before per-document dispatch a PDF case
+    was read as UTF-8 text and refused, or tokenised as PDF syntax."""
+    conn, blobs, harness, _ = ready
+    pdf = minimal_pdf(["Total debt at 31 December 2026 was USD 1,240.0m"])
+    # `_case` names every document `report.txt`: the name must not decide.
+    case = _case("pdf", pdf)
+    assert [document.filename.value for document in case.documents] == ["report.txt"]
+    subject.prepare(conn, blobs, harness, qualification=QualificationSet((case,)))
+    rows = conn.execute("SELECT extractor_identity FROM source_extractions").fetchall()
+    assert [json.loads(str(row[0]))["name"] for row in rows] == ["caos.pdfminer"]
+    tokens = conn.execute("SELECT text FROM source_tokens ORDER BY token_id").fetchall()
+    assert [row[0] for row in tokens][:2] == ["Total", "debt"]
+    conn.rollback()

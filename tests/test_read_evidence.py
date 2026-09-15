@@ -22,6 +22,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from conftest import every_block
 from psycopg.pq import TransactionStatus
 
 from server.blobs import BlobStore
@@ -265,7 +266,7 @@ def test_verify_citations_refuses_a_delivered_source_with_no_live_row(
     with pytest.raises(Refusal) as caught:
         verify_citations(
             conn,
-            delivered={phantom},
+            delivered={phantom: frozenset()},
             citations=[Citation(source_id=phantom, page=1, matched_text="Total debt")],
         )
 
@@ -295,7 +296,7 @@ def test_uncitable_quote_is_refused_before_artifact(
     with pytest.raises(Refusal) as caught:
         verify_citations(
             conn,
-            delivered={source_id},
+            delivered=every_block(conn, source_id),
             citations=[
                 Citation(source_id=source_id, page=1, matched_text="Total debt"),
                 Citation(
@@ -323,7 +324,7 @@ def test_a_citation_may_only_name_evidence_that_was_delivered(
     with pytest.raises(Refusal) as caught:
         verify_citations(
             conn,
-            delivered={delivered},
+            delivered=every_block(conn, delivered),
             citations=[
                 Citation(source_id=other, page=1, matched_text="Leverage is 3.4x")
             ],
@@ -340,7 +341,7 @@ def test_verified_citations_come_back_with_their_rectangles(
 
     anchored = verify_citations(
         conn,
-        delivered={source_id},
+        delivered=every_block(conn, source_id),
         citations=[Citation(source_id=source_id, page=1, matched_text="Total debt")],
     )
 

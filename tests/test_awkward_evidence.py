@@ -24,6 +24,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from conftest import every_block
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -31,6 +32,7 @@ from server.evidence.citations import Citation, verify_citations
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.read import read_block
+from server.refusals import Refusal
 from server.store import StoreConnection
 
 # Sixty filler lines, a blank one to close the region, then the table. The
@@ -81,7 +83,7 @@ def test_an_awkward_document_can_be_quoted_back_to_the_host(
     # A module quoting the delivered line verbatim is anchored, not refused.
     [anchored] = verify_citations(
         conn,
-        delivered={source_id},
+        delivered=every_block(conn, source_id),
         citations=[
             Citation(
                 source_id=source_id, page=block.page, matched_text=block.text.value
@@ -90,3 +92,78 @@ def test_an_awkward_document_can_be_quoted_back_to_the_host(
     )
     assert anchored.page == 2
     assert anchored.bboxes, "an anchored citation carries its rectangle"
+
+
+# Slice 3.2e: a source being delivered is not every line of it being delivered.
+# A citation anchors only in the exact blocks the node was handed; ambiguity is
+# still counted over the whole page (docs/DECISIONS.md section 44.5).
+
+
+def _blocks_on(conn: StoreConnection, source_id: UUID, page: int) -> frozenset[str]:
+    rows = conn.execute(
+        "SELECT block_id FROM source_blocks WHERE source_id = %s AND page = %s",
+        (source_id, page),
+    ).fetchall()
+    return frozenset(str(row[0]) for row in rows)
+
+
+def test_a_quote_on_an_undelivered_page_of_a_delivered_source_is_refused(
+    admitted: tuple[StoreConnection, UUID],
+) -> None:
+    conn, source_id = admitted
+    block_id = _block(conn, source_id, "Term loan B")
+    block = read_block(conn, source_id=source_id, block_id=block_id)
+    quote = Citation(source_id, block.page, block.text.value)
+    page_one = _blocks_on(conn, source_id, 1)
+    assert page_one and block_id not in page_one
+
+    with pytest.raises(Refusal, match=r"^CITATION_NOT_DELIVERED$") as caught:
+        verify_citations(conn, delivered={source_id: page_one}, citations=[quote])
+    assert caught.value.__cause__ is None and not caught.value.__context__
+    # The same quote anchors the moment its page is delivered.
+    everything = page_one | _blocks_on(conn, source_id, 2)
+    assert verify_citations(conn, delivered={source_id: everything}, citations=[quote])
+
+
+def test_a_quote_straddling_delivered_and_undelivered_lines_is_refused(
+    admitted: tuple[StoreConnection, UUID],
+) -> None:
+    conn, source_id = admitted
+    header = _block(conn, source_id, "Facility")
+    row = _block(conn, source_id, "Term loan B")
+    # One region, two lines: the quote wraps from the header onto the row.
+    quote = Citation(source_id, 2, "Undrawn Term loan")
+    assert verify_citations(
+        conn, delivered={source_id: frozenset({header, row})}, citations=[quote]
+    )
+
+    for only in (header, row):
+        with pytest.raises(Refusal, match=r"^CITATION_NOT_DELIVERED$"):
+            verify_citations(
+                conn, delivered={source_id: frozenset({only})}, citations=[quote]
+            )
+
+
+def test_a_repeated_quote_with_one_undelivered_copy_stays_ambiguous(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    conn, case_id = case
+    [source_id] = admit_pack(
+        conn,
+        BlobStore(tmp_path / "blobs"),
+        case_id=case_id,
+        documents=[
+            Document(
+                filename=BoundaryText.of("twice.txt"),
+                data=b"Leverage is 3.4x\nLeverage is 3.4x\n",
+            )
+        ],
+    )
+    first, second = sorted(_blocks_on(conn, source_id, 1))
+    quote = Citation(source_id, 1, "Leverage is 3.4x")
+
+    for only in (first, second):
+        with pytest.raises(Refusal, match=r"^CITATION_AMBIGUOUS$"):
+            verify_citations(
+                conn, delivered={source_id: frozenset({only})}, citations=[quote]
+            )

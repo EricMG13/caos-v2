@@ -12,6 +12,7 @@ is what makes "whole or not at all" true, and a refusal leaves it to roll back.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -22,13 +23,20 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.extract import (
     Extractor,
+    ExtractorDispatch,
     ExtractorIdentity,
-    PlainTextExtractor,
     Token,
+    dispatch_by_content,
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.cases import lock_case
+
+# pdfminer logs tokens and content-stream operands at DEBUG and WARNING, which is
+# document text. Never let it reach this process's handlers.
+_PDFMINER = logging.getLogger("pdfminer")
+_PDFMINER.addHandler(logging.NullHandler())
+_PDFMINER.propagate = False
 
 # One block per line while small. `SYSTEM_SPEC.md` section 5 bounds line groups
 # once a document is not small; this build packs a line per block and the group
@@ -83,34 +91,26 @@ def admit_pack(
     *,
     case_id: UUID,
     documents: Sequence[Document],
-    extractor: Extractor | None = None,
+    dispatch: ExtractorDispatch = dispatch_by_content,
 ) -> list[UUID]:
     """Admit every document or refuse the pack. Returns the new source ids.
 
-    Bytes go to the blob store under their digest; the row holds the address.
-    Text is extracted to tokens carrying page, region, line and rectangle, and
-    packed into blocks -- one row each, never a JSON column on the source row,
-    which is the ~8x read defect `docs/AI_CODE_QUALITY.md` section 1 measures.
+    Each document is read by the extractor `dispatch` chooses from its own
+    bytes (§44.6), so a mixed pack admits whole and a PDF named `.txt` is still
+    a PDF. Bytes go to the blob store under their digest; the row holds the
+    address. Text is extracted to tokens carrying page, region, line and
+    rectangle, and packed into blocks -- one row each, never a JSON column on
+    the source row, which is the ~8x read defect `docs/AI_CODE_QUALITY.md`
+    section 1 measures.
     """
     if not documents:
         raise Refusal(RefusalCode.SOURCE_PACK_EMPTY)
     _require_case(conn, case_id)
-    reader = extractor if extractor is not None else PlainTextExtractor()
-    try:
-        declared = reader.identity
-    except (Refusal, AttributeError, TypeError, ValueError, OverflowError):
-        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
-    if not isinstance(declared, ExtractorIdentity):
-        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
-    try:
-        identity = declared.canonical()
-    except (Refusal, AttributeError, TypeError, ValueError, OverflowError):
-        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
 
     # Extract everything first. A document that cannot be read must refuse the
     # pack before any of it is written, not after some of it is.
-    extracted = [(document, reader.extract(document.data)) for document in documents]
-    if any(not tokens for _document, tokens in extracted):
+    extracted = [_extract(dispatch, document) for document in documents]
+    if any(not tokens for _identity, tokens in extracted):
         # Readable bytes, no text: a scanned page. Admitting it would put a
         # source in the pinned set that can never support a citation, and
         # invariant 11 would refuse every quote naming it at artifact time --
@@ -121,10 +121,60 @@ def admit_pack(
     # rather than at the write, for the same reason the check above is here:
     # a line the boundary refuses is a line `read_evidence` refuses, so
     # admitting it would pin a source no run can read.
-    packed = [_prepare(document, tokens, identity) for document, tokens in extracted]
+    packed = [
+        _prepare(document, tokens, identity)
+        for document, (identity, tokens) in zip(documents, extracted, strict=True)
+    ]
 
     lock_case(conn, case_id)
     return [_admit_one(conn, blobs, case_id, one) for one in packed]
+
+
+def _extract(
+    dispatch: ExtractorDispatch, document: Document
+) -> tuple[str, list[Token]]:
+    """One document's canonical extractor identity and tokens, or a typed code.
+
+    Whatever the dispatch or the extractor raises is reduced to a code and
+    raised again outside the handler, so no message, cause or context -- all of
+    which can quote the bytes an extractor choked on -- travels with it.
+    """
+    code: RefusalCode | None = None
+    try:
+        reader = dispatch(document.data)
+        identity = _identity(reader)
+        tokens = reader.extract(document.data)
+    except Refusal as refusal:
+        code = refusal.code
+    except MemoryError:
+        raise  # the process, not the document
+    except Exception as failure:  # noqa: BLE001 -- untrusted bytes; any failure is a code
+        code = _code_for(failure)
+    if code is not None:
+        raise Refusal(code) from None
+    return identity, tokens
+
+
+def _code_for(failure: Exception) -> RefusalCode:
+    # Imported here so plain-text admission never loads pdfminer.
+    from pdfminer.pdfdocument import PDFEncryptionError
+
+    if isinstance(failure, PDFEncryptionError):
+        return RefusalCode.SOURCE_ENCRYPTED
+    return RefusalCode.SOURCE_NOT_READABLE
+
+
+def _identity(reader: Extractor) -> str:
+    try:
+        declared = reader.identity
+    except (Refusal, AttributeError, TypeError, ValueError, OverflowError):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
+    if not isinstance(declared, ExtractorIdentity):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
+    try:
+        return declared.canonical()
+    except (Refusal, AttributeError, TypeError, ValueError, OverflowError):
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
 
 
 def _prepare(document: Document, tokens: list[Token], identity: str) -> _Packed:

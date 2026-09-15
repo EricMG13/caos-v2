@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CanonicalCompletions
-from conftest import approve_run, priced, route_fault
+from conftest import approve_run, every_block, priced, route_fault
 from test_canonical_execution import _node, harness, route
 from test_deliverable_canonical import RESTRICTED, _accept
 from test_execution_freshness import _guard_disabled, _Harness
@@ -384,9 +384,9 @@ def test_a_source_admitted_after_the_pin_cannot_support_the_proof(
     [cited] = _decoded_record(ran.blobs.get(record)).citations
     moved = replace(cited, document_sha256=sha256(late).hexdigest())
     request = Citation(late_id, cited.page, cited.matched_text)
-    assert verify_citations(ran.conn, delivered={late_id}, citations=[request]) == [
-        moved
-    ]
+    assert verify_citations(
+        ran.conn, delivered=every_block(ran.conn, late_id), citations=[request]
+    ) == [moved]
     ran.conn.rollback()
 
     _rewrite(ran, "CP-5", lambda r: replace(r, citations=(moved,)))

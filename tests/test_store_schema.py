@@ -811,7 +811,7 @@ def test_exact_historical_unicode_float_output_and_complete_pin_upgrade(
         BlobStore(tmp_path),
         case_id=sources.case_id,
         documents=[Document(BoundaryText.of("custom.txt"), b"custom")],
-        extractor=cast(Extractor, reader),
+        dispatch=lambda data: cast(Extractor, reader),
     )
     conn.commit()
     # Later migrations add columns; the rows that existed must not move.
