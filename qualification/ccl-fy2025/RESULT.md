@@ -69,6 +69,18 @@ then failed citation anchoring because `FORM 10-K` appears more than once on the
 cited page. After the prompt explicitly required a unique page quote, a fresh
 Terra response repeated the same ambiguous citation. This establishes that the
 remaining incompatibility is neither OpenRouter-only nor DeepSeek-only: strict
-citation selection is still unreliable across models. The host continues to
-fail closed, and no Terra response was accepted or treated as qualification
-evidence.
+citation selection was unreliable across models.
+
+The host now pre-validates delivered lines with the same anchoring function used
+at acceptance and marks the three longest valid candidates on each source page.
+The final prompt contained 87 marked candidates across 1,726 delivered blocks,
+without duplicating any source text. A fresh Terra response to that exact prompt
+passed structure, identity, completeness, T8, and citation anchoring; its one
+citation was one of the marked candidates. The handoff's `qa_status: Blocked`
+was therefore accepted as a valid domain verdict for the incomplete
+single-document source set, then terminated as `HANDOFF_BLOCKED` by design.
+
+This resolves the canonical-handoff incompatibility in the direct cross-model
+probe. It is not DeepSeek qualification evidence: OpenRouter returned no body on
+the subsequent live attempts, so `deepseek/deepseek-v4-pro-0813` remains **not
+qualified** until a fresh provider run completes the qualification matrix.

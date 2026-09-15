@@ -30,7 +30,12 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
-from server.evidence.citations import AnchoredCitation, verify_citations
+from server.evidence.citations import (
+    AnchoredCitation,
+    Citation,
+    citation_candidates,
+    verify_citations,
+)
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -349,6 +354,7 @@ class _Context:
     lineage: tuple[LineageRef, ...]
     # Each direct upstream's anchored citations, from its verified record.
     citations: dict[str, tuple[AnchoredCitation, ...]]
+    candidates: tuple[Citation, ...]
 
 
 def _context(
@@ -367,11 +373,19 @@ def _context(
     records, lineage = _upstream_records(
         conn, blobs, bundle, assignment, identity.upstream
     )
+    candidates = citation_candidates(
+        conn,
+        delivered=_by_source(delivered),
+        proposed=tuple(
+            Citation(item.source_id, item.page, item.text.value) for item in delivered
+        ),
+    )
     return _Context(
         delivered=delivered,
         upstream=upstream_markdown(blobs, identity.upstream),
         lineage=lineage,
         citations={node: record.citations for node, record in records.items()},
+        candidates=candidates,
     )
 
 
@@ -407,6 +421,7 @@ def _prompt(
         upstream=context.upstream,
         upstream_citations=context.citations,
         route=assignment.route,
+        citation_candidates=context.candidates,
     )
 
 
