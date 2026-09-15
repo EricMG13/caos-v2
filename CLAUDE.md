@@ -202,6 +202,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the API and harness the bundle with typed node results; d-2 proves
   canonical artifacts; f-1 makes readers refuse a NULL record and removes the
   dispatch.
+- **A frozen canonical deliverable binds its source record and Markdown.**
+  Slice d-4 re-derives the package payload, records, identity, projections,
+  and rectangles from the store before freezing and verifies those hashes and
+  derivations again when the revision is checked. It renders model text as
+  escaped preformatted text. Artifact rows can still change after derivation
+  and before the governed freeze write, so verification catches that movement
+  rather than the freeze itself. *Upgrade:* derive under the freeze lock once
+  artifact rows are immutable; d-2 and d-3b provide proof and matrix readers.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
