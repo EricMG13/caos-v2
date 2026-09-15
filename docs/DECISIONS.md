@@ -1477,3 +1477,12 @@ loop or retrieval layer is added.
    remains the conformance authority (invariant 4).
 5. **LITE `required_payload_fields`** are not validated by the host; recorded in
    the ledger beside `semantic_rules`.
+
+*Refined 2026-09-14 (3.4b review, Phase 3 confidence review):* an input meets
+item 1's boundary when its catalog `owned_object` or the catalog edge's
+`accepted_object_id` is an accepted id; a boundary no input on the pinned route
+offers is not enforced (holding it forever would be a host-invented graph), and
+is only reachable on routes the adapter refuses. Execution is also limited to
+the pathways a contract test proves (`ADAPTER_ROUTES`, LITE earnings only), so
+LITE portfolio decision (CP-0 -> CP-L10) stays disabled (REPAIR_PLAN work
+item 6).

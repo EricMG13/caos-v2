@@ -17,7 +17,7 @@ import psycopg
 from server import methodology
 from server.engine.route import ResolvedRoute
 from server.methodology.bundle import Bundle
-from server.methodology.handoff import ADAPTER_MODULES
+from server.methodology.handoff import ADAPTER_MODULES, ADAPTER_ROUTES
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
@@ -263,11 +263,14 @@ def execution_input(
 
 
 def require_adapter_route(route: ResolvedRoute) -> None:
-    """Refuse a route the canonical adapter does not own every module of (§42.2).
+    """Refuse a route the canonical adapter does not own every module of (§42.2),
+    or a pathway of its modules no contract test proves (work item 6).
 
     Pinning, gates and resolution stay general; execution and acceptance do not.
     """
-    if any(node.module_id not in ADAPTER_MODULES for node in route.nodes):
+    if (route.profile_id, route.selection_id) not in ADAPTER_ROUTES or any(
+        node.module_id not in ADAPTER_MODULES for node in route.nodes
+    ):
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
 
 
