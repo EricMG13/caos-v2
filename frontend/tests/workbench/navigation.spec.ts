@@ -81,3 +81,37 @@ test("demo Model, Report, and Committee routes render parsed v1 content", async 
     0,
   );
 });
+
+test("saved artifacts preserve canonical tables in contained scroll viewers", async ({ page }) => {
+  const routes = [
+    [
+      "/report/?case=00000000-0000-4000-8000-000000000001&run=00000000-0000-4000-8000-0000000000b2&revision=00000000-0000-4000-8000-0000000000c3",
+      ["[data-report-artifact-text]", "[data-report-artifact-record]"],
+    ],
+    [
+      "/committee/?case=00000000-0000-4000-8000-000000000001&run=00000000-0000-4000-8000-0000000000b2&revision=00000000-0000-4000-8000-0000000000c3",
+      ["[data-committee-artifact-text]", "[data-committee-artifact-record]"],
+    ],
+  ] as const;
+  const table = `| Metric | Value |\n| --- | --- |\n| ${"wide-cell ".repeat(80)}| 2.1x |`;
+
+  for (const [route, selectors] of routes) {
+    await page.goto(route);
+    for (const selector of selectors) {
+      const viewer = page.locator(selector).first();
+      await viewer.evaluate((element, text) => {
+        element.textContent = text;
+      }, table);
+      await expect(viewer).toHaveText(table);
+      await expect(viewer).toHaveJSProperty("tagName", "PRE");
+      await expect(viewer).toHaveCSS("overflow-x", "auto");
+      await expect(
+        viewer.evaluate((element) => element.scrollWidth > element.clientWidth),
+      ).resolves.toBe(true);
+      await viewer.focus();
+      await expect(viewer).toBeFocused();
+      await page.keyboard.press("ArrowRight");
+      expect(await viewer.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    }
+  }
+});

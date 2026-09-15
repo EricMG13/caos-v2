@@ -83,11 +83,15 @@ function ModelAnalysis({ text }: { text: string }) {
   );
 }
 
-function HostCalculation() {
+function HostCalculation({ calculation }: { calculation: HandoffView["host_calculation"] }) {
   return (
     <section className="pnl" data-host-calculation>
       <header>
-        <h3>Deterministic calculations: none performed by the host</h3>
+        <h3>
+          {calculation === "CP_CF_FORECAST"
+            ? "Deterministic calculations: CP-CF forecast projection performed by the host"
+            : "Deterministic calculations: none performed by the host"}
+        </h3>
       </header>
     </section>
   );
@@ -136,7 +140,7 @@ function HandoffCard({ handoff }: { handoff: HandoffView }) {
         ) : null}
         <SourceFacts record={handoff.record_sha256} facts={handoff.source_facts} />
         <ModelAnalysis text={handoff.model_analysis} />
-        <HostCalculation />
+        <HostCalculation calculation={handoff.host_calculation} />
       </div>
     </section>
   );

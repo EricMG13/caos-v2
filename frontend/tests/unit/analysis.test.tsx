@@ -107,7 +107,7 @@ describe("Analysis", () => {
     );
   });
 
-  test("host_calculation is always the closed literal NONE, and the section says so", () => {
+  test("host_calculation keeps LITE as NONE and labels a host CP-CF forecast", () => {
     const { container } = mount(complete);
     for (const handoff of complete.body.handoffs) {
       expect(handoff.host_calculation).toBe("NONE");
@@ -116,6 +116,18 @@ describe("Analysis", () => {
         "Deterministic calculations: none performed by the host",
       );
     }
+    const forecast: HandoffView = {
+      ...complete.body.handoffs[0]!,
+      module_id: "CP-CF",
+      host_calculation: "CP_CF_FORECAST",
+    };
+    const { container: forecastPage } = mount({
+      ...complete,
+      body: { ...complete.body, handoffs: [forecast] },
+    });
+    expect(forecastPage.querySelector("[data-host-calculation]")).toHaveTextContent(
+      "Deterministic calculations: CP-CF forecast projection performed by the host",
+    );
   });
 
   test("qa status, committee status, decision scope and confidence are all shown", () => {

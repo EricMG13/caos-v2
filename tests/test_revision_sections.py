@@ -129,6 +129,11 @@ def test_committee_reads_the_exact_frozen_payload_and_receipt(
                 "DELETE FROM deliverable_receipts WHERE revision_id=%s",
                 str(revision),
             )
+            _corrupt(
+                lite,
+                "UPDATE audit_events SET at='2000-01-01' WHERE entry_sha256=%s",
+                receipt.filed_event_sha256,
+            )
     lite.conn.commit()
     response = client.get(
         _path(lite, revision, "committee"), headers=_as(lite.approver)
@@ -155,6 +160,28 @@ def test_committee_distinguishes_frozen_from_filed(
     body = _get(client, lite, revision, "committee")
     assert (body["state"], body["filed_by"], body["receipt"]) == ("frozen", None, None)
     assert counter.executed == IO_BUDGET["frozen"]
+
+
+def test_historical_receiptless_filing_does_not_block_a_newer_frozen_revision(
+    client: TestClient, lite: _Harness
+) -> None:
+    historical = _file(lite)
+    _corrupt(
+        lite,
+        "DELETE FROM deliverable_receipts WHERE revision_id=%s",
+        str(historical.revision_id),
+    )
+    lite.conn.execute("SET LOCAL session_replication_role = replica")
+    lite.conn.execute(
+        "INSERT INTO legacy_filing_events (case_id,filed_event_sha256) VALUES (%s,%s)",
+        (lite.case_id, historical.filed_event_sha256),
+    )
+    lite.conn.execute("SET LOCAL session_replication_role = origin")
+    revision = _save(lite)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    body = _get(client, lite, revision, "committee")
+    assert (body["state"], body["filed_by"], body["receipt"]) == ("frozen", None, None)
 
 
 @pytest.mark.parametrize("section", ["report", "committee"])

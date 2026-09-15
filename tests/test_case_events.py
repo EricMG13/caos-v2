@@ -300,6 +300,7 @@ def test_frames_carry_only_a_cursor_a_name_and_empty_data(
     assert frames == [
         {"id": "0.0"},
         {"id": "1.0", "event": "sources_changed", "data": "{}"},
+        {"id": "2.0", "event": "filing_changed", "data": "{}"},
         {"id": "2.1", "event": "run_progress", "data": "{}"},
     ]
 
