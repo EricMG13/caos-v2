@@ -223,9 +223,12 @@ jobs:
       - run: pytest --live-provider -m live_provider
         env:
           # The key is a repository secret and the model id a repository
-          # variable; neither appears in a file this repository tracks.
+          # variable. The dated rate and explicit live-run ceiling are also
+          # repository variables; none appears in a file this repository tracks.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          CAOS_MODEL_PRICE: ${{ vars.CAOS_MODEL_PRICE }}
+          CAOS_LIVE_BUDGET_CEILING: ${{ vars.CAOS_LIVE_BUDGET_CEILING }}
           CAOS_REQUIRE_PROVIDER: "1"
           CAOS_TEST_POSTGRES_URL: postgresql://postgres:caos@localhost:5432/caos
           CAOS_REQUIRE_POSTGRES: "1"
