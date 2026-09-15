@@ -8,7 +8,7 @@ front-matter lines to copy, the exact upstream Markdown as context, and every
 delivered block as evidence; it refuses an oversized request rather than cut
 anything out of it.
 
-The claims-JSON path in `executor.py` is untouched; slice c-5a wires this in.
+`canonical.py` calls both for every canonical attempt, before and after the call.
 """
 
 from __future__ import annotations

@@ -217,13 +217,7 @@ def _context(
 
     Called only after `_stored_identity`, so `assignment.route` is the pin.
     """
-    delivered = []
-    for source, block in conn.execute(_CAPTURED, (assignment.run_id,)).fetchall():
-        source_id = UUID(str(source))
-        read = read_run_block(
-            conn, run_id=assignment.run_id, source_id=source_id, block_id=str(block)
-        )
-        delivered.append(Delivery(source_id, str(block), read.page, read.text))
+    delivered = _delivered(conn, assignment.run_id)
     module_id = assignment.module_id
     gate_expects = (
         frozenset(node.module_id for node in assignment.route.nodes) - {module_id}
@@ -240,6 +234,18 @@ def _context(
         for edge in assignment.route.edges
     )
     return _Context(delivered, gate_expects, upstream, digests, qa)
+
+
+def _delivered(conn: StoreConnection, run_id: UUID) -> list[Delivery]:
+    """Every captured block of the run, each through the run-bound reader."""
+    delivered = []
+    for source, block in conn.execute(_CAPTURED, (run_id,)).fetchall():
+        source_id = UUID(str(source))
+        read = read_run_block(
+            conn, run_id=run_id, source_id=source_id, block_id=str(block)
+        )
+        delivered.append(Delivery(source_id, str(block), read.page, read.text))
+    return delivered
 
 
 def _upstream_digests(conn: StoreConnection, assignment: Assignment) -> dict[str, str]:
@@ -386,7 +392,7 @@ def execute_module(
             run_id=assignment.run_id,
             route_node_id=assignment.node.route_node_id,
         )
-        _stored_identity(conn, assignment, bundle)
+        _stored_identity(conn, assignment, bundle, adapter=CLAIMS_ADAPTER_VERSION)
         context = _context(conn, blobs, bundle, assignment)
     authority = assemble_authority(bundle, assignment.module_id)
     prompt = build_prompt(
@@ -428,7 +434,7 @@ def execute_module(
             run_id=assignment.run_id,
             route_node_id=assignment.node.route_node_id,
         )
-        _stored_identity(conn, assignment, bundle)
+        _stored_identity(conn, assignment, bundle, adapter=CLAIMS_ADAPTER_VERSION)
         if _upstream_digests(conn, assignment) != context.digests:
             raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         envelope = _envelope(conn, assignment, context, authority, completion.content)
@@ -441,10 +447,14 @@ def execute_module(
 
 
 def _stored_identity(
-    conn: StoreConnection, assignment: Assignment, bundle: Bundle
+    conn: StoreConnection, assignment: Assignment, bundle: Bundle, *, adapter: str
 ) -> None:
-    """Current input with the actual Bundle, and the exact pinned route/node."""
-    _input, stored = execution_input(conn, assignment.run_id, bundle)
+    """Current input with the actual Bundle, the exact pinned route/node, and
+    the pinned adapter this executor implements (§42.1): a pin never runs
+    under the other adapter, whoever calls."""
+    pin, stored = execution_input(conn, assignment.run_id, bundle)
+    if pin.adapter_version != adapter:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     if (
         stored != assignment.route
         or assignment.node not in stored.nodes

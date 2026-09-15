@@ -68,6 +68,9 @@ class ProviderResult:
     charge: Decimal
     model: str
     generation_id: str
+    # A canonical pin's host record and the call's diagnostic Markdown (§42).
+    record_sha256: str | None = None
+    diagnostic_sha256: str | None = None
 
 
 class Provider(Protocol):
