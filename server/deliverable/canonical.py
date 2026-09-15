@@ -33,6 +33,7 @@ from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import captured_blocks
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
 from server.methodology.invocation import (
+    accepted_lineage,
     call_time_identity,
     host_identity,
     record_authority_matches,
@@ -72,12 +73,13 @@ def canonical_payload(
 
     Owns one read unit. Refuses `RUN_NOT_FOUND` for a run of another case;
     `DELIVERABLE_PAYLOAD_INVALID` for an unpinned route or a pinned node with no
-    accepted artifact; `ARTIFACT_RECORD_MISMATCH` when a blob, the binding, a
-    projection or a rectangle disagrees, or a citation names a document that is
-    not among `pinned_live_sources` (withdrawn, re-extracted, admitted after the
-    pin, or captured twice with two extractions); a citation's own code when it
-    no longer anchors; and whatever `host_identity` refuses. No refusal carries
-    text.
+    accepted artifact; `ARTIFACT_RECORD_MISMATCH` when a blob, the binding, the
+    lineage, a projection or a rectangle disagrees, or a citation names a
+    document that is not among `pinned_live_sources` (withdrawn, re-extracted,
+    admitted after the pin, or captured twice with two extractions); a
+    citation's own code when it no longer anchors; and whatever `host_identity`
+    refuses (`ROUTE_IDENTITY_INVALID` for a node without its CP-0 anchor). No
+    refusal carries text.
     """
     run_id = revision.run_id
     with execution_reads(conn):
@@ -168,6 +170,11 @@ class _Reader:
         if not record_authority_matches(
             record, bundle=bundle, module_id=node.module_id
         ) or any(c.document_sha256 not in pinned for c in record.citations):
+            raise mismatch
+        upstream = record.identity.upstream
+        if record.lineage != accepted_lineage(
+            self.conn, self.blobs, run_id=run_id, upstream=upstream
+        ):
             raise mismatch
         markdown = self.blobs.get(artifact)
         gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}

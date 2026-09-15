@@ -34,10 +34,15 @@ from server.deliverable.package import build_package, verify_package
 from server.deliverable.render import canonical_bound, render
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
-from server.methodology.bundle import assemble_authority, authority_digest
+from server.methodology.bundle import (
+    assemble_authority,
+    authority_digest,
+    delivered_authority,
+    delivered_authority_digest,
+)
 from server.methodology.canonical import accepted_projections
 from server.methodology.handoff import CanonicalRecord, record_bytes, validate_markdown
-from server.methodology.invocation import host_identity
+from server.methodology.invocation import accepted_lineage, host_identity
 from server.methodology.vendor import authority_bundle_sha256
 from server.refusals import Refusal, RefusalCode
 from server.store.budget import reserve
@@ -98,6 +103,9 @@ def _accept(
         delivered=every_block(conn, harness.source_id),
         citations=[Citation(harness.source_id, 1, QUOTE)],
     )
+    lineage = accepted_lineage(
+        conn, harness.blobs, run_id=harness.run_id, upstream=identity.upstream
+    )
     conn.rollback()
     record = CanonicalRecord(
         artifact_sha256=harness.blobs.put(markdown),
@@ -106,7 +114,11 @@ def _accept(
         manifest_sha256=bundle.manifest_sha256,
         authority_bundle_sha256=authority_bundle_sha256(bundle),
         authority_digest=authority_digest(assemble_authority(bundle, module_id)),
+        delivered_authority_digest=delivered_authority_digest(
+            delivered_authority(bundle, module_id)
+        ),
         identity=identity,
+        lineage=lineage,
         projections=projections,
         citations=tuple(anchored),
     )
@@ -391,3 +403,23 @@ def test_the_page_keeps_limitations_labels_screens_and_escapes_model_text(
     with pytest.raises(Refusal) as refused:
         render(unbound)
     assert refused.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+
+
+def test_the_deliverable_labels_source_fact_analysis_and_no_host_calculation(
+    lite: _Harness,
+) -> None:
+    """§45.6: host-verified citations are source facts, the model's Markdown is
+    analysis the host has not verified, and the host performed no calculation."""
+    text = render(_payload(lite)).decode()
+    section = text.split("<h2>", 2)[1]
+    facts = section.index("<h3>Source facts (host-verified citations)</h3>")
+    analysis = section.index("<h3>Analysis (model-authored, not host-verified)</h3>")
+    calculation = section.index(
+        "<h3>Deterministic calculations</h3>\n"
+        "<p>None performed by the host on this route.</p>"
+    )
+    assert facts < analysis < calculation
+    assert "<blockquote>" in section[facts:analysis]
+    assert "<blockquote>" not in section[analysis:]
+    assert "<pre>" in section[analysis:calculation]
+    assert "<pre>" not in section[:analysis]
