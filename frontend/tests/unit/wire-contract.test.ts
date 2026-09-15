@@ -22,6 +22,7 @@ import {
   parseGateApproved,
   parseGatePreviewDocument,
   parsePageDocument,
+  parseQualificationRead,
   parseRefusalBody,
   parseRunCreated,
   parseRunInputPinned,
@@ -421,6 +422,28 @@ function refuses(parse: () => unknown, path?: string): void {
 }
 
 describe("the v1 wire contract", () => {
+  test("test_parseQualificationRead_refuses_undeclared_or_unbound_fields", () => {
+    const current = {
+      evidence_sha256: SHA,
+      state: "QUALIFIED",
+      qualification_set_sha256: "b".repeat(64),
+      performed_sha256: "c".repeat(64),
+      build_id: "build",
+      adapter_version: "adapter",
+      provider: "openrouter",
+      model: "model",
+      reviewer: "Reviewer",
+      decided_at: AT,
+      expires_at: "2026-09-16T10:00:00Z",
+    };
+    expect(parseQualificationRead(current).state).toBe("QUALIFIED");
+    refuses(() => parseQualificationRead({ ...current, extra: true }), "$");
+    refuses(
+      () => parseQualificationRead({ ...current, evidence_sha256: "bad" }),
+      "$.evidence_sha256",
+    );
+  });
+
   test("test_v1_shapes_equal_the_committed_backend_schema", () => {
     const defs = committed();
     const all = { ...V1_SHAPES, ...V1_COMMAND_SHAPES };

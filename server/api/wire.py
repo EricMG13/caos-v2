@@ -73,6 +73,33 @@ class RefusalBody(BaseModel):
     clears: Text
 
 
+class QualificationState(StrEnum):
+    """What this caller can truthfully say about one exact evidence identity."""
+
+    QUALIFIED = "QUALIFIED"
+    UNQUALIFIED = "UNQUALIFIED"
+    RESTRICTED = "RESTRICTED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class QualificationRead(BaseModel):
+    """A global qualification result; it is not a case section document."""
+
+    model_config = _CLOSED
+
+    evidence_sha256: Sha256
+    state: QualificationState
+    qualification_set_sha256: Sha256 | None
+    performed_sha256: Sha256 | None
+    build_id: Id | None
+    adapter_version: Id | None
+    provider: Id | None
+    model: Id | None
+    reviewer: Text | None
+    decided_at: AwareDatetime | None
+    expires_at: AwareDatetime | None
+
+
 _C = RefusalCode
 
 # Total over `RefusalCode` (`test_every_refusal_code_has_a_constant_clearance`).
@@ -893,6 +920,7 @@ def wire_schema() -> str:
     models: tuple[type[BaseModel], ...] = (
         *V1_DOCUMENTS,
         PageDocument,
+        QualificationRead,
         *V1_COMMANDS,
         RefusalBody,
     )

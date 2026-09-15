@@ -18,10 +18,12 @@ import {
   parseCommitteeDocument,
   parseReportDocument,
   parseRefusalBody,
+  parseQualificationRead,
   parseRunSectionDocument,
   parseUploadDocument,
   requireIdentity,
   type PageDocument,
+  type QualificationRead,
   type SectionDocument as V1Document,
 } from "@/wire/v1";
 
@@ -181,6 +183,52 @@ export async function fetchSection(
   if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
   const body = await bodyOf(response);
   return classifyV1(section, body, query);
+}
+
+export type QualificationStatus =
+  | { kind: "ready"; document: QualificationRead }
+  | { kind: "error"; refusal: Refusal }
+  | { kind: "unavailable" }
+  | { kind: "offline" };
+
+/** Qualification is global evidence, so its immutable identity travels as a hash. */
+export function qualificationUrl(evidenceSha256: string): string {
+  return `/api/v1/qualification/${encodeURIComponent(evidenceSha256)}`;
+}
+
+/** Read one exact qualification result and reject a substituted response. */
+export async function fetchQualification(
+  evidenceSha256: string,
+  signal?: AbortSignal,
+): Promise<QualificationStatus> {
+  let response: Response;
+  try {
+    response = await fetch(qualificationUrl(evidenceSha256), {
+      signal,
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    return { kind: "offline" };
+  }
+  if (response.status === 404) return { kind: "unavailable" };
+  if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
+  try {
+    const document = parseQualificationRead(await bodyOf(response));
+    if (!same(document.evidence_sha256, evidenceSha256)) throw new WireIdentityError();
+    return { kind: "ready", document };
+  } catch (error) {
+    if (error instanceof WireShapeError || error instanceof WireIdentityError) {
+      return {
+        kind: "error",
+        refusal: {
+          code:
+            error instanceof WireIdentityError ? "WIRE_IDENTITY_MISMATCH" : "WIRE_SHAPE_INVALID",
+          clears: "the qualification result is bound to the requested evidence",
+        },
+      };
+    }
+    throw error;
+  }
 }
 
 // Evidence pages (brief 4.4, decision 7). Not a section document: no chrome,

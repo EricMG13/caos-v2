@@ -65,6 +65,7 @@ from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
 from server.api.reads import model as model_read
+from server.api.reads import qualification as qualification_read
 from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
@@ -205,6 +206,7 @@ for _section in (
     run_read,
     analysis_read,
     model_read,
+    qualification_read,
     reports_read,
     evidence_read,
 ):
