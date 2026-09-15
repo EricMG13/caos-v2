@@ -1486,3 +1486,56 @@ is only reachable on routes the adapter refuses. Execution is also limited to
 the pathways a contract test proves (`ADAPTER_ROUTES`, LITE earnings only), so
 LITE portfolio decision (CP-0 -> CP-L10) stays disabled (REPAIR_PLAN work
 item 6).
+
+## 2026-09-14 §47 — PDF extraction runs in a killed, budgeted child
+
+**Decision.** Supersedes §44.2 (Phase 3 adversarial audit):
+
+1. **Isolation.** `PdfExtractor.extract` runs the page walk in a child
+   interpreter (`python -I -c`, empty environment, stderr discarded); the
+   parent kills it at the admission deadline and refuses
+   `SOURCE_EXTRACTION_TIMEOUT`. Only a JSON token list or an allowlisted code
+   crosses back. Not `multiprocessing`: `spawn` re-runs the caller's
+   `__main__`, and a fork copies credentials and connections.
+2. **Decoded bytes.** `AdmissionLimits.max_decoded_bytes` (256 MiB) bounds what
+   one PDF's Flate streams inflate to, enforced in the child by replacing
+   pdfminer's `zlib` with a budgeted inflater; over budget refuses
+   `SOURCE_TOO_LARGE`.
+3. **Plain text** stays in-process; a line stops building tokens one past
+   `max_tokens`.
+
+**Why.** A 16,926-byte PDF page overran a 2 s deadline to 23.2 s and a
+261,529-byte page held 806 MiB, so a document inside every §44.1 ceiling could
+exhaust the extracting process: REPAIR_PLAN Phase 3 exit check 1's "specific
+safe outcomes" did not hold. A child uses only the standard library and touches
+no transaction, so the failure mode §44.2 feared (a killed worker
+mid-transaction) does not arise; the probes after the change refused at 2.0 s
+and in 0.2 s.
+
+## 2026-09-14 §48 — CI installs with uv, runs once per pull request update and holds a read-only token
+
+**Decision.** Four changes to `.github/workflows/ci.yml`; no required check,
+threshold, scanner rule or job name changes.
+
+1. **`push` runs on `main` only.** A pull request's commits are checked by its
+   `pull_request` run. A branch pushed with no pull request open gets no CI
+   until one is opened.
+2. **The workflow token is `contents: read`** unless a job widens it; only
+   `security` does, to read pull requests for gitleaks.
+3. **One pin per action.** Every job uses `actions/checkout` v7.0.1,
+   `actions/setup-python` v7.0.0 and `actions/upload-artifact` v7.0.1, each
+   commit-pinned.
+4. **`astral-sh/setup-uv` v10.1.0**, commit-pinned, installs uv 0.12.5 (the
+   version `make venv` uses locally) with its download cache keyed on the
+   job's lock. Every Python job runs `uv pip install --system --require-hashes
+   --only-binary :all:` into the interpreter `setup-python` provides, in place
+   of `pip install` and its cache.
+
+**Reason.** A push to a branch with an open pull request started two full
+runs whose refs differ, so `cancel-in-progress` cancelled neither. The
+default token may carry write scopes no job uses. Mixed action versions are
+two things to maintain per action. uv is what the Makefile already installs
+with, and it resolves and installs the same hashed, wheels-only locks faster.
+
+**Rollback.** Revert the workflow commit; nothing outside the workflow
+depends on these changes.

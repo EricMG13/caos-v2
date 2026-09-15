@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
+from itertools import islice
 from typing import Protocol
 
 from server.boundary_text import BoundaryText
@@ -66,6 +68,8 @@ class AdmissionLimits:
     max_pages: int
     max_tokens: int
     max_seconds: float
+    # What one PDF's compressed streams may inflate to, in total (§47).
+    max_decoded_bytes: int
 
 
 DEFAULT_LIMITS = AdmissionLimits(
@@ -75,6 +79,7 @@ DEFAULT_LIMITS = AdmissionLimits(
     max_pages=500,
     max_tokens=500_000,
     max_seconds=60.0,
+    max_decoded_bytes=256 * 1024 * 1024,
 )
 
 
@@ -204,33 +209,32 @@ class PlainTextExtractor:
                 # a new region, so a quote cannot wrap across the gap.
                 region_id += 1
                 continue
-            tokens.extend(_line_tokens(line, line_number, region_id))
+            # One past the ceiling is enough to refuse: a line of a million
+            # words never builds more (Phase 3 adversarial audit).
+            words = _line_tokens(line, line_number, region_id)
+            tokens.extend(islice(words, limits.max_tokens - len(tokens) + 1))
             if len(tokens) > limits.max_tokens:
                 raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
         return tokens
 
 
-def _line_tokens(line: str, line_number: int, region_id: int) -> list[Token]:
+def _line_tokens(line: str, line_number: int, region_id: int) -> Iterator[Token]:
     page, row = divmod(line_number, LINES_PER_PAGE)
     top = MARGIN + row * CELL_HEIGHT
-    tokens = []
     for word, column in _words(line):
-        tokens.append(
-            Token(
-                text=word,
-                page=page + 1,
-                region_id=region_id,
-                line_id=line_number,
-                x0=MARGIN + column * CELL_WIDTH,
-                y0=top,
-                x1=MARGIN + (column + len(word)) * CELL_WIDTH,
-                y1=top + CELL_HEIGHT,
-            )
+        yield Token(
+            text=word,
+            page=page + 1,
+            region_id=region_id,
+            line_id=line_number,
+            x0=MARGIN + column * CELL_WIDTH,
+            y0=top,
+            x1=MARGIN + (column + len(word)) * CELL_WIDTH,
+            y1=top + CELL_HEIGHT,
         )
-    return tokens
 
 
-def _words(line: str) -> list[tuple[str, int]]:
+def _words(line: str) -> Iterator[tuple[str, int]]:
     """Each whitespace-separated run with the column it starts at.
 
     Whitespace as `str.split()` draws it, not the space character alone.
@@ -240,15 +244,13 @@ def _words(line: str) -> list[tuple[str, int]]:
     `CITATION_NOT_LOCATED`. The two have to agree on where a word ends, or the
     evidence a module was handed is evidence it cannot cite.
     """
-    words: list[tuple[str, int]] = []
     start: int | None = None
     for column, character in enumerate(line):
         if not character.isspace():
             if start is None:
                 start = column
         elif start is not None:
-            words.append((line[start:column], start))
+            yield line[start:column], start
             start = None
     if start is not None:
-        words.append((line[start:], start))
-    return words
+        yield line[start:], start
