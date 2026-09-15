@@ -90,7 +90,7 @@ function restartJourneyWorker(): Promise<void> {
   return restartService("journey-worker");
 }
 
-async function loginAs(page: Page, persona: "analyst" | "intruder"): Promise<void> {
+async function loginAs(page: Page, persona: "analyst" | "reader" | "intruder"): Promise<void> {
   const response = await page.request.get(`/_edge/login?persona=${persona}`);
   expect(response.status()).toBe(200);
 }
@@ -402,6 +402,21 @@ test.describe.serial("journey", () => {
         );
       })
       .toBe(true);
+  });
+
+  test("journey: a reader sees qualification as restricted beside the real PDF evidence", async ({
+    browser,
+  }) => {
+    const readerContext = await browser.newContext({ baseURL: EDGE_ORIGIN });
+    const reader = await readerContext.newPage();
+    await loginAs(reader, "reader");
+
+    await reader.goto(`/analysis/?case=${caseId}&run=${runId}&qualification=${"a".repeat(64)}`);
+    await expect(reader.getByLabel("Qualification")).toContainText("RESTRICTED");
+    await expect(reader.getByLabel("Qualification")).toContainText(
+      "Qualification metadata requires an analyst role.",
+    );
+    await readerContext.close();
   });
 
   test("Escape returns focus to the chip that opened the drawer", async () => {
