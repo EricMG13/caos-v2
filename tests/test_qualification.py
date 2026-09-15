@@ -166,6 +166,12 @@ def test_a_verdict_refuses_a_timestamp_with_no_offset() -> None:
         assert refused.value.code is RefusalCode.VERDICT_BINDING_INVALID, binding
 
 
+def test_a_verdict_refuses_a_naive_current_time() -> None:
+    with pytest.raises(Refusal) as refused:
+        read_verdict(document(), now=NOW.replace(tzinfo=None))
+    assert refused.value.code is RefusalCode.VERDICT_BINDING_INVALID
+
+
 def test_a_verdict_refuses_an_expiry_that_does_not_follow_its_date() -> None:
     """A signature that expired before it was signed was never current.
 
