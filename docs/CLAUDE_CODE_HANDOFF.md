@@ -94,6 +94,8 @@ this documentation update has not rerun their gates or accepted new code.
 
 ### Phase 6 qualification checkpoint — 15 September 2026
 
+- **Candidate:** provider-profile and canonical-I/O remediation committed at
+  `f95e8ba`; this handoff update follows as documentation only.
 - **Authorized profile:** DeepSeek V4 Pro 0813 through
   `openrouter/ionstream/xhigh`, the frozen VMO2 FY2025 public corpus,
   `canonical-markdown-v2`, and a `$22.00` ceiling.

@@ -53,7 +53,7 @@ application correctly refuses to mint that release evidence itself.
 Effort: `xhigh`, over the whole Phase 6 completion candidate after the live
 qualification outcome.
 
-Scope: owned changes after `dc25c65`; user-owned `CLAUDE.md`, `.claude/skills/`,
+Scope: owned `dc25c65..f95e8ba`; user-owned `CLAUDE.md`, `.claude/skills/`,
 `AGENTS.md` and `gemini-audit.md` were excluded.
 
 Least confident about (ranked):
