@@ -2178,3 +2178,23 @@ next execution persists its immutable performed snapshot and its bound evidence
 identity in the migrated store before `perform()` returns; the collector only
 confirms and retains that state for external review. Do not repeat this paid
 attempt without fresh authorization.
+
+## 2026-09-15 §60 — Preserve literal quotation at the canonical boundary
+
+The recovery run at profile `openrouter/google-ai-studio/high/65536` completed
+normally and retained its performed snapshot and bound evidence. Its CP-0
+response was valid closed JSON, its four citations were all delivered and
+uniquely anchored, and its canonical Markdown passed the vendor validator. The
+host refused it only because none of those evidence quotations occurred
+character-for-character in the Markdown body. Safe structural comparison found
+case-only variation for three quotations and punctuation-normalized variation
+for all four, including the required Evidence Trace section.
+
+This is a Gemini 3.8 Flash one-shot protocol incompatibility. It is not a
+reason to relax `parse_response`: a citation needs both an exact source anchor
+and an exact occurrence in the model's handoff, so a reviewer can see the same
+words supporting the claim. General punctuation/case normalization would admit
+meaning-changing edits and would weaken the pinned canonical contract. The
+model is therefore unqualified; its performed evidence cannot mint a verdict.
+Any future spend must be a separately authorized, materially different
+candidate or protocol experiment.
