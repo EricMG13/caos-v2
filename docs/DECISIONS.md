@@ -2082,3 +2082,21 @@ would change no controlled variable, so the run was not repeated.
 This change does not qualify DeepSeek or raise the 32,768 completion cap. It
 makes a controlled endpoint/reasoning experiment possible through the existing
 runtime and keeps ordinary/offline gates credential-free.
+
+## 2026-09-15 §59 — Gemini replacement is bounded by the shipped output ceiling
+
+The authorized replacement candidate is `google/gemini-3.8-flash` through the
+pinned OpenRouter `google-ai-studio` endpoint at reasoning effort `high`.
+Google supports structured output and up to 65,536 output tokens for this
+model; the exact shipped CAOS runtime still requests at most 32,768.
+
+The frozen VMO2 CP-0 call was served by Google AI Studio, used 29,454 native
+reasoning tokens, exhausted 32,761 native completion tokens, and finished with
+`length`. The host therefore recorded `PROVIDER_OUTPUT_TRUNCATED` before any
+artifact or qualification evidence existed. The `$0.25356225` charge remains
+inside the authorized `$22.00` ceiling.
+
+Do not repeat that same high-reasoning, 32,768-token request. Raising the
+ceiling to the model's 65,536 maximum changes the executed build contract and
+worst-case reservation; implement and verify it deliberately, bind the fresh
+build identity, and obtain fresh authorization before another paid run.
