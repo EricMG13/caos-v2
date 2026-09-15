@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -28,7 +28,7 @@ from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.deliverable.filing import freeze
-from server.engine.route import BLOCKING, ResolvedRoute, RouteNode
+from server.engine.route import ResolvedRoute, RouteNode
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import (
     Bundle,
@@ -36,27 +36,16 @@ from server.methodology.bundle import (
     authority_digest,
     verified_bytes,
 )
-from server.methodology.handoff import (
-    GATE_MODULE,
-    HostIdentity,
-    read_record,
-    validate_markdown,
-)
-from server.methodology.invocation import host_identity
+from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
+from server.methodology.invocation import call_time_identity, host_identity
 from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import execution_reads
 from server.store.routes import resolved_route
+from server.store.source_sets import pinned_live_sources
 
 _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
-# Every member of the run's pinned source-set version, never the case's live set.
-_PINNED = (
-    "SELECT m.source_id, m.document_sha256 FROM run_inputs i"
-    " JOIN source_set_members m"
-    " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
-    " WHERE i.run_id = %s"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,8 +74,11 @@ def canonical_payload(
     Owns one read unit. Refuses `RUN_NOT_FOUND` for a run of another case;
     `DELIVERABLE_PAYLOAD_INVALID` for an unpinned route or a pinned node with no
     accepted artifact; `ARTIFACT_RECORD_MISMATCH` when a blob, the binding, a
-    projection or a rectangle disagrees; a citation's own code when it no longer
-    anchors; and whatever `host_identity` refuses. No refusal carries text.
+    projection or a rectangle disagrees, or a citation names a document that is
+    not among `pinned_live_sources` (withdrawn, re-extracted, admitted after the
+    pin, or captured twice with two extractions); a citation's own code when it
+    no longer anchors; and whatever `host_identity` refuses. No refusal carries
+    text.
     """
     run_id = revision.run_id
     with execution_reads(conn):
@@ -104,23 +96,23 @@ def canonical_payload(
         }
         if route is None or any(n.route_node_id not in rows for n in route.nodes):
             raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-        pinned: dict[str, list[UUID]] = {}
-        for source, document in conn.execute(_PINNED, (run_id,)).fetchall():
-            pinned.setdefault(str(document), []).append(UUID(str(source)))
+        pinned = pinned_live_sources(conn, run_id)
         reader = _Reader(conn, blobs, bundle, route, pinned)
         artifacts = []
         for node in route.nodes:
             attempt, artifact, record_sha = rows[node.route_node_id]
             if record_sha is None:
                 raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-            markdown = reader.proven(run_id, node, attempt, artifact, str(record_sha))
+            markdown, record = reader.proven(
+                run_id, node, attempt, artifact, str(record_sha)
+            )
             artifacts.append(
                 {
                     "route_node_id": node.route_node_id,
                     "artifact_sha256": artifact,
                     "record_sha256": str(record_sha),
                     "markdown": markdown.decode("utf-8"),
-                    "record": blobs.get(str(record_sha)).decode("utf-8"),
+                    "record": record.decode("utf-8"),
                 }
             )
     payload: dict[str, Any] = {
@@ -143,22 +135,27 @@ class _Reader:
         blobs: BlobStore,
         bundle: Bundle,
         route: ResolvedRoute,
-        pinned: dict[str, list[UUID]],
+        pinned: dict[str, UUID],
     ) -> None:
         self.conn, self.blobs, self.bundle, self.route = conn, blobs, bundle, route
         self.contract = load_vendor_contract(bundle)
         self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
-        # A document pinned twice cannot say which source a citation meant.
-        self.pinned = {doc: ids[0] for doc, ids in pinned.items() if len(ids) == 1}
+        self.pinned = pinned
 
     def proven(
         self, run_id: UUID, node: RouteNode, attempt: UUID, artifact: str, sha: str
-    ) -> bytes:
+    ) -> tuple[bytes, bytes]:
+        """The proven Markdown and record bytes."""
         bundle, route, pinned = self.bundle, self.route, self.pinned
         host = host_identity(
             self.conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt
         )
-        expected = _call_time(self.blobs, route, host, sha)
+        stored = None
+        with suppress(Refusal):  # an unreadable record is `read_record`'s refusal
+            stored = self.blobs.get(sha)
+        expected = call_time_identity(
+            self.conn, route, host, attempt_id=attempt, record=stored
+        )
         record = read_record(
             self.blobs, artifact_sha256=artifact, record_sha256=sha, expected=expected
         )
@@ -194,32 +191,9 @@ class _Reader:
                 for c in record.citations
             ],
         )
-        if tuple(anchored) != record.citations:
+        if tuple(anchored) != record.citations or stored is None:
             raise mismatch
-        return markdown
-
-
-def _call_time(
-    blobs: BlobStore, route: ResolvedRoute, host: HostIdentity, record_sha: str
-) -> HostIdentity:
-    """The host's identity with the upstream the call could have named.
-
-    A soft input accepted after this node was called is named now and was not
-    then, so the host's refs narrow to those the record names -- except a
-    blocking one, which is never optional. The record adds nothing to them.
-    """
-    named: set[str] = set()
-    with suppress(Exception):  # an unreadable record is `read_record`'s refusal
-        document = json.loads(blobs.get(record_sha))
-        named = {ref["route_node_id"] for ref in document["identity"]["upstream"]}
-    by_module = {n.module_id: n.route_node_id for n in route.nodes}
-    named |= {
-        str(by_module.get(edge.source))
-        for edge in route.edges
-        if edge.target == host.module_id and edge.type in BLOCKING
-    }
-    kept = tuple(ref for ref in host.upstream if ref.route_node_id in named)
-    return replace(host, upstream=kept)
+        return markdown, stored
 
 
 def freeze_canonical(

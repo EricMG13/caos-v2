@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -109,6 +110,53 @@ def host_identity(  # noqa: PLR0913 -- the brief's keyword-only identity inputs
             period=subject.reporting_period,
         ),
     )
+
+
+def call_time_identity(
+    conn: StoreConnection,
+    route: ResolvedRoute,
+    host: HostIdentity,
+    *,
+    attempt_id: UUID,
+    record: bytes | None,
+) -> HostIdentity:
+    """`host` with only the upstream refs this attempt's call could have named.
+
+    `host_identity` names every input accepted now. A soft input accepted after
+    the attempt started was not there to name, so the refs narrow to those the
+    stored `record` names -- except a blocking ref, never optional, and a soft
+    ref whose artifact was accepted before the attempt started, which the call
+    had to name. Nothing the record says is added. Keeping a ref the record
+    omits is what makes `read_record` refuse it; an unreadable `record` names
+    nothing, and `read_record` refuses it on its own. Caller owns the read.
+    """
+    named: set[str] = set()
+    try:
+        document = json.loads(record or b"null")
+        named = {ref["route_node_id"] for ref in document["identity"]["upstream"]}
+    except (ValueError, KeyError, TypeError):
+        named = set()
+    by_module = {n.module_id: n.route_node_id for n in route.nodes}
+    named |= {
+        str(by_module.get(edge.source))
+        for edge in route.edges
+        if edge.target == host.module_id and edge.type in BLOCKING
+    }
+    later = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT a.route_node_id FROM artifacts a"
+            " JOIN run_attempts t ON t.run_id = a.run_id"
+            " WHERE t.attempt_id = %s AND a.created_at > t.started_at",
+            (attempt_id,),
+        ).fetchall()
+    }
+    kept = tuple(
+        ref
+        for ref in host.upstream
+        if ref.route_node_id in named or ref.route_node_id not in later
+    )
+    return replace(host, upstream=kept)
 
 
 def _module_name(bundle: Bundle, route: ResolvedRoute, node: RouteNode) -> str:

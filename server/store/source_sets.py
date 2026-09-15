@@ -171,3 +171,38 @@ def _snapshot(conn: StoreConnection, case_id: UUID) -> SourceSet:
             [(case_id, version, *asdict(member).values()) for member in members],
         )
     return SourceSet(case_id, version, fingerprint, members)
+
+
+def pinned_live_sources(conn: StoreConnection, run_id: UUID) -> dict[str, UUID]:
+    """Document digest to source id: the run's captured members still usable now.
+
+    The one reader of a run's evidence for everything proven after the call --
+    the orchestration proof and the canonical deliverable. A captured member
+    counts only while it is live and its document and extraction identity are
+    still the ones the pin captured (invariant 1: withdrawal is checked at every
+    use); a source admitted after the pin is never a member.
+
+    A document captured under several such members resolves to the lowest
+    source id when all of them carry one extraction output -- identical tokens,
+    so identical rectangles, whichever copy a call cited -- and to none when
+    their outputs differ, since a digest cannot say which rectangles it meant.
+    Caller owns the read transaction.
+    """
+    rows = conn.execute(
+        "SELECT m.document_sha256, m.source_id, m.output_sha256 FROM run_inputs i"
+        " JOIN source_set_members m"
+        " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
+        " JOIN live_sources s ON (s.case_id, s.source_id) = (m.case_id, m.source_id)"
+        " JOIN source_extractions e ON e.source_id = s.source_id"
+        " WHERE i.run_id = %s AND (s.document_sha256, e.extractor_identity,"
+        " e.output_sha256, e.extraction_sha256) = (m.document_sha256,"
+        " m.extractor_identity, m.output_sha256, m.extraction_sha256)"
+        " ORDER BY m.source_id",
+        (run_id,),
+    ).fetchall()
+    resolved: dict[str, UUID] = {}
+    outputs: dict[str, set[str]] = {}
+    for document, source, output in rows:
+        resolved.setdefault(str(document), UUID(str(source)))
+        outputs.setdefault(str(document), set()).add(str(output))
+    return {doc: source for doc, source in resolved.items() if len(outputs[doc]) == 1}

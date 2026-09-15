@@ -71,6 +71,7 @@ from server.engine.route import (
 )
 from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
+from server.methodology import CANONICAL_ADAPTER_VERSION, adapter_for
 from server.methodology.bundle import Bundle
 from server.methodology.runner import ModuleProvider
 from server.pricing import ModelPrice, worst_case
@@ -89,7 +90,7 @@ from server.store.budget import CEILING, validate_spend
 from server.store.gates import execution_input
 from server.store.outcomes import execution_reads, require_idle
 from server.store.routes import pin_route, resolved_route
-from server.store.run_inputs import RunInput, pin_run_input
+from server.store.run_inputs import RunInput, pin_run_input, valid_subject
 from server.store.runs import create_case, run_status, start_run
 from server.store.source_sets import snapshot_source_set
 
@@ -236,6 +237,7 @@ def prepare(
     _affordable(qualification, harness, routes)
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    _subjects(qualification, routes)
     require_idle(conn)
     prepared = []
     try:
@@ -251,7 +253,13 @@ def prepare(
             prepared.append(
                 PreparedCase(
                     case.label,
-                    pin_run_input(conn, run_id, source.version, harness.bundle),
+                    pin_run_input(
+                        conn,
+                        run_id,
+                        source.version,
+                        harness.bundle,
+                        subject=case.subject,
+                    ),
                 )
             )
     except psycopg.Error:
@@ -398,6 +406,22 @@ def _affordable(
     call = Fraction(worst_case(harness.price))
     if any(call * len(route.nodes) > Fraction(CEILING) for route in routes):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
+
+
+def _subjects(qualification: QualificationSet, routes: Sequence[ResolvedRoute]) -> None:
+    """Every case's subject is one its pin would accept, checked before any write.
+
+    `pin_run_input` refuses a canonical-adapter route without a subject, and an
+    invalid subject, but only as the last step of each case -- after the cases
+    ahead of it were created, admitted and pinned. Asked here of the whole set,
+    so a set that cannot be pinned writes nothing.
+    """
+    for case, route in zip(qualification.cases, routes, strict=True):
+        if case.subject is None:
+            if adapter_for(route) == CANONICAL_ADAPTER_VERSION:
+                raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+        elif not valid_subject(case.subject):
+            raise Refusal(RefusalCode.RUN_INPUT_INVALID)
 
 
 def _distinct(qualification: QualificationSet) -> None:
