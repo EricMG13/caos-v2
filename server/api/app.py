@@ -49,10 +49,12 @@ from server.api.stream import TERMINAL, StreamEvent, tail
 from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
+    NamedObjects,
     NodeResult,
     NodeState,
     ResolvedRoute,
     RouteNode,
+    lite_object_unmet,
     node_states,
     readiness_from,
     route_digest,
@@ -60,6 +62,7 @@ from server.engine.route import (
 )
 from server.engine.runtime import accepted_artifacts
 from server.methodology.bundle import Bundle
+from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 from server.store.members import Standing, satisfies, standing_of
@@ -336,7 +339,9 @@ def read_run(
 
     # The bundle is what reads a canonical run's gate and QA records (§42.4).
     accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
-    states = node_states(route, accepted)
+    # The runtime's named-object boundary, so the document shows its states.
+    named = named_objects(bundle, route)
+    states = node_states(route, accepted, named)
     # `accepted` already carries CP-0's readiness -- `accepted_artifacts` reads
     # it for exactly this reason -- so reading the verdict out of it here costs
     # no further round trip.
@@ -355,7 +360,7 @@ def read_run(
             if status == "RUNNING"
             else view.model_copy(update={"awaiting_gate": False})
             for view in (
-                _node_view(route, accepted, node, states, readiness)
+                _node_view(route, accepted, node, states, readiness, named)
                 for node in route.nodes
             )
         ],
@@ -444,15 +449,20 @@ def _marker(headers: object) -> int:
     return int(value)
 
 
-def _node_view(
+def _node_view(  # noqa: PLR0913 -- one node of one run document
     route: ResolvedRoute,
     accepted: Mapping[str, NodeResult],
     node: RouteNode,
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
+    named: NamedObjects | None = None,
 ) -> NodeView:
     done = states[node.route_node_id] is NodeState.COMPLETE
     unmet = () if done else waiting_on(route, accepted, node.route_node_id)
+    if not done and named is not None and node.module_id in named.accepted_ids:
+        # A node held for its named object names the edges that could meet it.
+        extra = lite_object_unmet(route, accepted, node.module_id, named)
+        unmet = (*unmet, *(edge for edge in extra if edge not in unmet))
     answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
     return NodeView(
         route_node_id=node.route_node_id,

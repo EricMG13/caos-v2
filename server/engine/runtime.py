@@ -35,6 +35,7 @@ from server.engine.route import (
 )
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_projections, blocked_verdict
+from server.methodology.invocation import named_objects
 from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -134,10 +135,12 @@ def run_route(
     worst_case(execution.price)
     route = _execution_route(conn, run_id, route, execution.bundle)
     bundle = execution.bundle
+    # Read once from verified bundle bytes, handed to the pure engine (§46.1).
+    named = named_objects(bundle, route)
     while True:
         with execution_reads(conn):
             accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
-            ready = frontier(route, accepted)
+            ready = frontier(route, accepted, named)
             # Before any attempt: a Blocked verdict whose bill committed but
             # whose block did not (a crash in that gap) is never paid twice.
             blocked = bool(ready) and blocked_verdict(
@@ -162,7 +165,7 @@ def run_route(
     # with unfinished required work ends the run blocked.
     with execution_reads(conn):
         accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
-        states = node_states(route, accepted)
+        states = node_states(route, accepted, named)
     if all(state is NodeState.COMPLETE for state in states.values()):
         complete_run(conn, run_id)
     else:

@@ -418,6 +418,31 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   re-anchoring in the pre-call unit if a consumer ever relies on the register
   for more than orientation, and a per-section bound with the one "An upstream
   section is unbounded" owes.
+- **The named-LITE-object boundary is read from `SKILL.md` prose headings, and
+  only where a block is keyed to its module.** Slice 3.4b (§46.1): each
+  upstream section names its source's catalog
+  `artifact_contract.owned_object` (`NOT_DECLARED` when absent) beside
+  `allowed_use`, and `invocation.named_objects` reads every pinned node's
+  verified `SKILL.md` block headed `## LITE profile compatibility — <module_id>`
+  -- vendor fields only, no module or object named in host code. A block that
+  names the route's profile and retains `NAMED_LITE_OBJECT_ACCEPTED` holds its
+  node BLOCKED in `route.node_states` (no attempt, reservation or call) until
+  an accepted direct input offers one of its `accepted_lite_object_ids` --
+  owned through its catalog `owned_object` or carried by the edge's declared
+  `accepted_object_id`; a present but malformed block refuses
+  `AUTHORITY_BYTES_MISMATCH`. The runtime, `read_run` and the harness's
+  `_unrun` pass it, and the run document names the edges that could meet it in
+  `waiting_on`. A boundary no input on the pinned route offers is not enforced
+  (holding the node forever would be a host-invented graph): on
+  `LITE_FULL_CREDIT_SCREEN` CP-2A accepts `lite_fundamental_credit_screen`,
+  which no catalog module owns or carries, so the host does not hold it there;
+  those routes are refused `HANDOFF_MODULE_UNSUPPORTED` before any attempt
+  today. CP-3C's unkeyed prose heading is not read, although the vendor's
+  execution-profiles JSON declares its boundary.
+  `named_objects` re-reads the bundle bytes per run and per `read_run`.
+  *Upgrade:* read the structured `CP_DEPLOY_V_EXECUTION_PROFILES_v1.json`
+  declaration beside the block (refusing disagreement), and a vendor owner for
+  every accepted object before those routes are enabled (Phase 5).
 
 **Repair Phase 2.**
 
