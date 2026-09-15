@@ -14,12 +14,17 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 
 import pytest
-from canonical_fixtures import CATALOG, CONTRACT, PINNED, skill, wire
-from canonical_fixtures import handoff_markdown as _markdown
-from canonical_fixtures import identity as _identity
+from test_canonical_handoff import (
+    CATALOG,
+    CONTRACT,
+    PINNED,
+    _identity,
+    _markdown,
+    _skill,
+)
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, Rect
@@ -34,12 +39,18 @@ from server.methodology.handoff import (
 from server.refusals import Refusal, RefusalCode
 
 SECRET = "Confidential covenant headroom 7.3x"
-SOURCE = uuid4()
+SOURCE = UUID("f8e35ea4-c242-4253-b938-96af4cf2688c")
 DELIVERED = frozenset({SOURCE})
 CP0 = _identity("CP-0")
 CP0_MD = _markdown(CP0, body_note="Recorded source p1. " + SECRET)
 QUOTE = "Recorded source p1"
 CITED = json.dumps({"source_id": str(SOURCE), "page": 1, "matched_text": QUOTE})
+
+
+def wire(markdown: bytes, citations: list[dict[str, object]]) -> str:
+    return json.dumps(
+        {"canonical_markdown": markdown.decode("utf-8"), "citations": citations}
+    )
 
 
 def _citation(**changes: object) -> dict[str, object]:
@@ -108,7 +119,7 @@ def test_a_malformed_transport_refuses(body: str) -> None:
 
 
 def test_a_citation_of_undelivered_evidence_refuses() -> None:
-    body = wire(CP0_MD, [_citation(source_id=str(uuid4()))])
+    body = wire(CP0_MD, [_citation(source_id="6bf2b5c6-be1f-4ae9-b3e6-1fee90eaa6a4")])
     assert _parse_refused(body) is RefusalCode.CITATION_NOT_DELIVERED
 
 
@@ -119,7 +130,7 @@ def test_a_quote_absent_from_the_markdown_refuses_the_handoff() -> None:
 
 def _record(**changes: object) -> CanonicalRecord:
     projections = validate_markdown(
-        CONTRACT, CATALOG, skill("CP-0"), CP0_MD, identity=CP0, gate_expects=PINNED
+        CONTRACT, CATALOG, _skill("CP-0"), CP0_MD, identity=CP0, gate_expects=PINNED
     )
     values: dict[str, object] = {
         "artifact_sha256": hashlib.sha256(CP0_MD).hexdigest(),
