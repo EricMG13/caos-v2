@@ -143,6 +143,12 @@ def test_an_uncited_figure_is_refused_at_the_render() -> None:
             lambda p: p["artifacts"].__setitem__(0, _artifact(citations="not-a-list")),
             id="citations not a list",
         ),
+        pytest.param(
+            lambda p: p["artifacts"].__setitem__(
+                0, _artifact(citations=["not-a-mapping"])
+            ),
+            id="citation not a mapping",
+        ),
         pytest.param(lambda p: p.update(case_title=""), id="case_title empty"),
     ],
 )
