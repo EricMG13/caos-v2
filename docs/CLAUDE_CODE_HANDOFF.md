@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Phase 6.5 was authorized and executed for `openrouter/ionstream/xhigh`; it failed CP-0 host validation, so Phase 6 remains release-blocked** |
-| Next task | Select a materially different provider/model or revise the canonical handoff contract, then obtain fresh authorization and run a new qualification. Do not repeat the frozen temperature-zero Ionstream call. |
+| Latest accepted task | **Phase 6.5 replacement `openrouter/google-ai-studio/high` was authorized and executed; it exhausted the shipped output ceiling at CP-0, so Phase 6 remains release-blocked** |
+| Next task | Decide whether to raise the bound completion ceiling from 32,768 to Gemini's 65,536 maximum, verify the changed build, then obtain fresh authorization. Do not repeat either unchanged failed call. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -129,6 +129,14 @@ this documentation update has not rerun their gates or accepted new code.
   session and is reported passed there. This local checkpoint did not push or
   independently re-query hosted status; the historical local size result above
   is not the status of that separately managed delivery work.
+- **Replacement result:** Gemini 3.8 Flash at
+  `openrouter/google-ai-studio/high` was subsequently run against the same
+  frozen corpus. Run `7c9c8d60-7b42-4f38-9b42-bb4e1d1afb47`, generation
+  `gen-1789477949-PdZ0oPgEZZGQjoUQbTE1`, stopped at CP-0 as
+  `PROVIDER_OUTPUT_TRUNCATED`: 29,454 reasoning and 32,761 completion tokens,
+  `finish_reason=length`, cost `$0.25356225`. The shipped 32,768 ceiling—not
+  citation validation—was the controlling failure. No qualification evidence
+  or verdict exists.
 
 ## Phase 4 acceptance record — 14 September 2026
 

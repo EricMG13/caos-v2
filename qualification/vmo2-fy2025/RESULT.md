@@ -116,3 +116,26 @@ the observed contract failure. DeepSeek V4 Pro remains a capable general agent,
 but this deployment is not compatible with the current one-shot canonical
 handoff contract. Repeating the same frozen temperature-zero call would not add
 a new controlled variable and was not purchased.
+
+## Gemini 3.8 Flash follow-up — 2026-09-15
+
+The replacement candidate used model `google/gemini-3.8-flash`, pinned
+OpenRouter endpoint `google-ai-studio`, reasoning effort `high`, the same public
+corpus and qualification-set digest, adapter `canonical-markdown-v2`, and the
+same `$22.00` run ceiling. Current dated pricing was `$0.75` input and `$3.75`
+output per million tokens. Google documents 1,048,576 input and 65,536 output
+tokens for this model, but the unchanged CAOS provider ceiling remained 32,768
+completion tokens.
+
+Fresh run `7c9c8d60-7b42-4f38-9b42-bb4e1d1afb47` stopped at CP-0 as
+`PROVIDER_OUTPUT_TRUNCATED`. Generation
+`gen-1789477949-PdZ0oPgEZZGQjoUQbTE1` reconciled to Google AI Studio, 174,278
+native prompt tokens, 32,761 native completion tokens, 29,454 native reasoning
+tokens, `finish_reason=length`, and `$0.25356225` total cost. CP-L10 and CP-5
+were not called, and no artifact, proof, matrix, evidence row or verdict was
+produced.
+
+This profile is not qualified at the shipped 32,768-token ceiling. A same-cap
+retry changes no controlled variable and must not be purchased. A 65,536-token
+experiment would be materially different, but requires an intentional runtime
+change, fresh build identity and fresh authorization before spend.
