@@ -1,0 +1,307 @@
+"""The closed provider transport and the host record beside the Markdown
+(Phase 3 Task 3.1 c-1; `docs/DECISIONS.md` §41).
+
+The Markdown is the authority; the record is a host-written attachment bound to
+it by digest. Neither the transport nor the record tolerates a key, a type or a
+byte the host did not declare, and every refusal carries only its code.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import hashlib
+import json
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+import pytest
+from test_canonical_handoff import (
+    CATALOG,
+    CONTRACT,
+    PINNED,
+    _identity,
+    _markdown,
+    _skill,
+)
+
+from server.blobs import BlobStore
+from server.evidence.citations import AnchoredCitation, Citation, Rect
+from server.methodology.handoff import (
+    RECORD_FORMAT,
+    CanonicalRecord,
+    parse_response,
+    read_record,
+    record_bytes,
+    validate_markdown,
+)
+from server.refusals import Refusal, RefusalCode
+
+SECRET = "Confidential covenant headroom 7.3x"
+SOURCE = UUID("f8e35ea4-c242-4253-b938-96af4cf2688c")
+DELIVERED = frozenset({SOURCE})
+CP0 = _identity("CP-0")
+CP0_MD = _markdown(CP0, body_note="Recorded source p1. " + SECRET)
+QUOTE = "Recorded source p1"
+CITED = json.dumps({"source_id": str(SOURCE), "page": 1, "matched_text": QUOTE})
+
+
+def wire(markdown: bytes, citations: list[dict[str, object]]) -> str:
+    return json.dumps(
+        {"canonical_markdown": markdown.decode("utf-8"), "citations": citations}
+    )
+
+
+def _citation(**changes: object) -> dict[str, object]:
+    return {"source_id": str(SOURCE), "page": 1, "matched_text": QUOTE, **changes}
+
+
+def _refused(call: Callable[[], object]) -> Refusal:
+    with pytest.raises(Refusal) as refused:
+        call()
+    refusal = refused.value
+    assert refusal.__cause__ is None and refusal.__context__ is None
+    assert SECRET not in repr(refusal) and SECRET not in str(refusal)
+    return refusal
+
+
+def _parse_refused(body: str) -> RefusalCode:
+    return _refused(lambda: parse_response(body, delivered=DELIVERED)).code
+
+
+def test_a_closed_transport_yields_the_exact_markdown_and_its_citations() -> None:
+    markdown, citations = parse_response(
+        wire(CP0_MD, [_citation()]), delivered=DELIVERED
+    )
+    assert markdown == CP0_MD
+    assert citations == (Citation(source_id=SOURCE, page=1, matched_text=QUOTE),)
+
+
+def test_claims_only_json_is_not_a_canonical_handoff() -> None:
+    body = json.dumps({"claims": [{"statement": SECRET, "citations": [_citation()]}]})
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "not json " + SECRET,
+        json.dumps([SECRET]),
+        '{"canonical_markdown": "Recorded source p1", "canonical_markdown": "b",'
+        f' "citations": [{CITED}]}}',
+        json.dumps({"canonical_markdown": 7, "citations": [_citation()]}),
+        json.dumps({"canonical_markdown": SECRET}),
+        json.dumps(
+            {"canonical_markdown": SECRET, "citations": [_citation()], "extra": 1}
+        ),
+        json.dumps({"canonical_markdown": SECRET, "citations": {}}),
+        wire(CP0_MD, []),
+        wire(CP0_MD, [_citation(page=True)]),
+        wire(CP0_MD, [_citation(page=0)]),
+        wire(CP0_MD, [_citation(page=1.0)]),
+        wire(CP0_MD, [_citation(source_id="not-a-uuid")]),
+        wire(CP0_MD, [_citation(source_id=7)]),
+        wire(CP0_MD, [_citation(matched_text="")]),
+        wire(CP0_MD, [_citation(matched_text="   ")]),
+        wire(CP0_MD, [_citation(bbox=[0, 0, 1, 1])]),
+        wire(CP0_MD, ["Recorded source p1"]),  # type: ignore[list-item]
+        '{"canonical_markdown": "Recorded source p1", "citations": [{"source_id":'
+        f' "{SOURCE}", "page": 1, "page": 2, "matched_text": "{QUOTE}"}}]}}',
+        '{"canonical_markdown": "\\ud800 Recorded source p1",'
+        f' "citations": [{CITED}]}}',
+        '{"canonical_markdown": "Recorded source p1", "citations": [{"source_id":'
+        f' "{SOURCE}", "page": NaN, "matched_text": "{QUOTE}"}}]}}',
+    ],
+)
+def test_a_malformed_transport_refuses(body: str) -> None:
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_a_citation_of_undelivered_evidence_refuses() -> None:
+    body = wire(CP0_MD, [_citation(source_id="6bf2b5c6-be1f-4ae9-b3e6-1fee90eaa6a4")])
+    assert _parse_refused(body) is RefusalCode.CITATION_NOT_DELIVERED
+
+
+def test_a_quote_absent_from_the_markdown_refuses_the_handoff() -> None:
+    body = wire(CP0_MD, [_citation(), _citation(matched_text="headroom 9.9x")])
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+def _record(**changes: object) -> CanonicalRecord:
+    projections = validate_markdown(
+        CONTRACT, CATALOG, _skill("CP-0"), CP0_MD, identity=CP0, gate_expects=PINNED
+    )
+    values: dict[str, object] = {
+        "artifact_sha256": hashlib.sha256(CP0_MD).hexdigest(),
+        "adapter_version": "canonical-markdown-v1",
+        "build_id": "build-1",
+        "manifest_sha256": "a" * 64,
+        "authority_bundle_sha256": CP0.authority_bundle_sha256,
+        "authority_digest": "b" * 64,
+        "identity": CP0,
+        "projections": projections,
+        "citations": (
+            AnchoredCitation(
+                document_sha256="c" * 64,
+                page=1,
+                matched_text=QUOTE,
+                bboxes=(Rect(page=1, x0=1.0, y0=2.5, x1=30.0, y1=12.25),),
+            ),
+        ),
+    }
+    values.update(changes)
+    return CanonicalRecord(**values)  # type: ignore[arg-type]
+
+
+def _stored(tmp_path: Path, record: CanonicalRecord) -> tuple[BlobStore, str, str]:
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(CP0_MD)
+    return blobs, artifact, blobs.put(record_bytes(record))
+
+
+def test_a_record_round_trips_exactly(tmp_path: Path) -> None:
+    record = _record()
+    blobs, artifact, sha = _stored(tmp_path, record)
+    read = read_record(blobs, artifact_sha256=artifact, record_sha256=sha, expected=CP0)
+    assert read == record
+    assert record_bytes(read) == record_bytes(record)
+    decoded = json.loads(record_bytes(record))
+    assert decoded["format"] == RECORD_FORMAT
+    assert record_bytes(record) == json.dumps(
+        decoded, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def _mismatch(blobs: BlobStore, artifact: str, sha: str, expected: object) -> None:
+    refusal = _refused(
+        lambda: read_record(
+            blobs,
+            artifact_sha256=artifact,
+            record_sha256=sha,
+            expected=expected,  # type: ignore[arg-type]
+        )
+    )
+    assert refusal.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
+
+
+def test_a_changed_markdown_byte_breaks_the_record(tmp_path: Path) -> None:
+    blobs, artifact, sha = _stored(tmp_path, _record())
+    # A record naming other Markdown is not this artifact's record.
+    other = blobs.put(CP0_MD + b"\n")
+    _mismatch(blobs, other, sha, CP0)
+    # The Markdown blob changed under its digest.
+    blobs.path_of(artifact).write_bytes(CP0_MD.replace(b"p1", b"p2", 1))
+    _mismatch(blobs, artifact, sha, CP0)
+
+
+def test_a_changed_record_byte_breaks_the_record(tmp_path: Path) -> None:
+    blobs, artifact, sha = _stored(tmp_path, _record())
+    blobs.path_of(sha).write_bytes(record_bytes(_record(build_id="build-2")))
+    _mismatch(blobs, artifact, sha, CP0)
+    _mismatch(blobs, artifact, "d" * 64, CP0)
+
+
+def test_a_record_naming_another_identity_refuses(tmp_path: Path) -> None:
+    blobs, artifact, sha = _stored(tmp_path, _record())
+    _mismatch(blobs, artifact, sha, dataclasses.replace(CP0, ordinal=2))
+    _mismatch(blobs, artifact, sha, dataclasses.replace(CP0, issuer_name="Other"))
+
+
+def _rewritten(edit: Callable[[dict[str, Any]], object]) -> bytes:
+    decoded = json.loads(record_bytes(_record()))
+    edit(decoded)
+    # Canonical form, so the strict parser rather than the byte comparison is
+    # what each variant meets.
+    return json.dumps(
+        decoded, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def _set(path: tuple[str | int, ...], value: object) -> Callable[[Any], None]:
+    def edit(decoded: Any) -> None:  # noqa: ANN401 -- a JSON tree
+        target = decoded
+        for step in path[:-1]:
+            target = target[step]
+        target[path[-1]] = value
+
+    return edit
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"not json",
+        _rewritten(_set(("format",), "canonical-record-v0")),
+        _rewritten(_set(("extra",), 1)),
+        _rewritten(lambda d: d.pop("build_id")),
+        _rewritten(_set(("identity", "ordinal"), True)),
+        _rewritten(_set(("identity", "ordinal"), "1")),
+        _rewritten(_set(("identity", "extra"), None)),
+        _rewritten(_set(("projections", "confidence_score"), 90.0)),
+        _rewritten(_set(("projections", "readiness"), [["CP-5"]])),
+        _rewritten(_set(("citations",), [])),
+        _rewritten(_set(("citations", 0, "page"), False)),
+        _rewritten(_set(("citations", 0, "bboxes", 0, "x0"), 1)),
+        _rewritten(_set(("citations", 0, "bboxes", 0, "extra"), 1.0)),
+        record_bytes(_record()).replace(
+            b'{"adapter_version"', b'{"build_id":"x","adapter_version"', 1
+        ),
+    ],
+)
+def test_a_malformed_record_refuses(tmp_path: Path, data: bytes) -> None:
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(CP0_MD)
+    _mismatch(blobs, artifact, blobs.put(data), CP0)
+
+
+def test_the_record_carries_no_model_authored_claims() -> None:
+    decoded = json.loads(record_bytes(_record()))
+    assert set(decoded) == {
+        "format",
+        "artifact_sha256",
+        "adapter_version",
+        "build_id",
+        "manifest_sha256",
+        "authority_bundle_sha256",
+        "authority_digest",
+        "identity",
+        "projections",
+        "citations",
+    }
+
+
+@pytest.mark.parametrize(
+    "quote",
+    ["Example", "credit_os_run_id:", "ecorded sour", "Recorded source p"],
+)
+def test_a_quote_must_be_whole_words_of_the_body(quote: str) -> None:
+    # Front matter is host identity, and a quote matches whole tokens.
+    body = wire(CP0_MD, [_citation(matched_text=quote)])
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+@pytest.mark.parametrize(
+    "citations",
+    [[_citation(page=2**31)], [_citation(), _citation()]],
+)
+def test_an_unbounded_page_or_a_repeated_citation_refuses(
+    citations: list[dict[str, object]],
+) -> None:
+    assert _parse_refused(wire(CP0_MD, citations)) is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_an_oversized_transport_refuses_before_parsing() -> None:
+    body = " " * (2 * 26_214_400 + 1)
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_a_record_contradicting_its_own_identity_refuses(tmp_path: Path) -> None:
+    blobs, artifact, sha = _stored(tmp_path, _record(authority_bundle_sha256="e" * 64))
+    _mismatch(blobs, artifact, sha, CP0)
+
+
+def test_a_record_not_in_canonical_form_refuses(tmp_path: Path) -> None:
+    blobs, artifact, _ = _stored(tmp_path, _record())
+    spaced = record_bytes(_record()).replace(b'":', b'": ', 1)
+    _mismatch(blobs, artifact, blobs.put(spaced), CP0)

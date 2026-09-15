@@ -6,9 +6,12 @@ this module decides whether it is *this* invocation's handoff. Every field the
 host owns is compared type-exactly against what the host would have written,
 because a provider-claimed identity never survives (invariant 3).
 
-Pure: no I/O, no clock. Every refusal is a typed code raised outside the handler
-that caught the vendor's exception, so neither the exception chain nor the
-refusal carries vendor text, which can quote the document (invariant 2).
+Pure: no clock, and no I/O but `read_record`'s two digest-verified blob reads.
+The closed provider transport and the host record beside the Markdown live
+here too, so one module owns the handoff's shape end to end. Every refusal is
+a typed code raised outside the handler that caught the vendor's exception, so
+neither the exception chain nor the refusal carries vendor text, which can
+quote the document (invariant 2).
 """
 
 from __future__ import annotations
@@ -16,10 +19,13 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import asdict, dataclass, fields
+from typing import Any, NoReturn
+from uuid import UUID
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.vendor import VendorContract
 from server.refusals import Refusal, RefusalCode
 
@@ -83,10 +89,11 @@ class Projections:
     decision_scope: str
 
 
-def _vendor[T](code: RefusalCode, call: Callable[[], T]) -> T:
-    with suppress(Exception):  # any vendor failure is this refusal
+def _or_refuse[T](code: RefusalCode, call: Callable[[], T]) -> T:
+    with suppress(Exception):  # any failure inside is this refusal
         return call()
-    # Raised after the handler has closed, so `__context__` holds no vendor text.
+    # Raised after the handler has closed, so `__context__` holds no vendor or
+    # document text.
     raise Refusal(code)
 
 
@@ -101,7 +108,7 @@ def invocation_fields(
     """The host-owned front matter for this invocation, built by the vendor envelope."""
     upstream = sorted(identity.upstream, key=lambda ref: ref.route_node_id)
     gate = [ref.sha256 for ref in upstream if ref.module_id == GATE_MODULE]
-    envelope = _vendor(
+    envelope = _or_refuse(
         RefusalCode.HANDOFF_IDENTITY_MISMATCH,
         lambda: contract.envelope.build(
             run_id=identity.run_id,
@@ -133,7 +140,7 @@ def invocation_fields(
         "credit_os_authority_bundle_sha256": identity.authority_bundle_sha256,
         "credit_os_attempt_id": envelope["attempt_id"],
         "credit_os_route_node_id": identity.route_node_id,
-        "credit_os_invocation_sha256": _vendor(
+        "credit_os_invocation_sha256": _or_refuse(
             RefusalCode.HANDOFF_IDENTITY_MISMATCH,
             lambda: contract.envelope.digest(envelope),
         ),
@@ -203,7 +210,7 @@ def _readiness(
     gate_expects: frozenset[str],
 ) -> tuple[tuple[str, str], ...]:
     nav = contract.navigation
-    rows = _vendor(
+    rows = _or_refuse(
         RefusalCode.HANDOFF_INCOMPLETE,
         lambda: nav.parse_t8(text, nav.validate_catalog(catalog)),
     )
@@ -248,7 +255,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     if identity.module_id not in ADAPTER_MODULES:
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
     text = _text(markdown)
-    result = _vendor(
+    result = _or_refuse(
         RefusalCode.HANDOFF_MALFORMED,
         lambda: contract.validate_handoff.validate_text(text),
     )
@@ -265,7 +272,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     ) or any(fields.get(key) is not None for key in _UPGRADE_KEYS):
         raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
 
-    violations = _vendor(
+    violations = _or_refuse(
         RefusalCode.HANDOFF_INCOMPLETE,
         lambda: contract.completeness_check.check(
             skill.decode("utf-8"), text, identity.module_id
@@ -292,3 +299,245 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
         readiness=readiness,
         decision_scope=_decision_scope(catalog, identity),
     )
+
+
+# The closed provider transport (§41.3) and the host record's own format.
+WIRE_KEYS = frozenset({"canonical_markdown", "citations"})
+WIRE_CITATION_KEYS = frozenset({"source_id", "page", "matched_text"})
+RECORD_FORMAT = "caos-canonical-record-v1"
+# A body may carry the largest Markdown the vendor reads plus its citations.
+MAX_TRANSPORT_CHARS = 2 * MAX_FILE_BYTES
+MAX_PAGE = 2**31 - 1  # the store's integer page
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalRecord:
+    """The host's record beside one accepted Markdown handoff (§41.2).
+
+    Host-written and bound to the Markdown by `artifact_sha256`. It carries no
+    model-authored summary and no claims: the Markdown is the authority, and
+    `projections` is a sidecar a reader re-derives from it and compares.
+    """
+
+    artifact_sha256: str
+    adapter_version: str
+    build_id: str
+    manifest_sha256: str
+    authority_bundle_sha256: str
+    authority_digest: str
+    identity: HostIdentity
+    projections: Projections
+    citations: tuple[AnchoredCitation, ...]
+
+
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    decoded = dict(pairs)
+    if len(decoded) != len(pairs):
+        raise ValueError  # a duplicate key: which value is meant is undecidable
+    return decoded
+
+
+def _no_constant(_: str) -> NoReturn:
+    raise ValueError  # NaN and the infinities are not JSON
+
+
+def _strict_json(text: str) -> object:
+    return json.loads(text, object_pairs_hook=_unique, parse_constant=_no_constant)
+
+
+def _closed(value: object, keys: frozenset[str]) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError
+    return value
+
+
+def _requested(item: object) -> Citation:
+    citation = _closed(item, WIRE_CITATION_KEYS)
+    source_id, page = citation["source_id"], citation["page"]
+    quote = citation["matched_text"]
+    # Only the canonical spelling of the id the prompt handed over: a UUID
+    # accepts braces, a URN prefix and upper case, none of which the host wrote.
+    if not isinstance(source_id, str) or str(UUID(source_id)) != source_id:
+        raise ValueError
+    if type(page) is not int or not 1 <= page <= MAX_PAGE:
+        raise ValueError
+    if not isinstance(quote, str) or not quote.strip():
+        raise ValueError
+    return Citation(source_id=UUID(source_id), page=page, matched_text=quote)
+
+
+def _transport(body: str) -> tuple[bytes, str, tuple[Citation, ...]]:
+    if len(body) > MAX_TRANSPORT_CHARS:
+        raise ValueError
+    wire = _closed(_strict_json(body), WIRE_KEYS)
+    text, citations = wire["canonical_markdown"], wire["citations"]
+    if not isinstance(text, str) or not isinstance(citations, list) or not citations:
+        raise ValueError
+    # A lone surrogate survives `json.loads` and fails here, inside the guard.
+    requested = tuple(_requested(c) for c in citations)
+    if len(frozenset(requested)) != len(requested):
+        raise ValueError  # the same citation twice is not two citations
+    return text.encode("utf-8"), text, requested
+
+
+def _body_words(text: str) -> list[str]:
+    """The Markdown after its front matter, as whitespace tokens.
+
+    The front matter is host identity, not analysis, so no quote may rest on it;
+    and a quote matches whole tokens, as anchoring in the evidence does.
+    """
+    lines = text.split("\n")
+    has_front = lines[:1] == ["---"] and "---" in lines[1:]
+    closing = lines.index("---", 1) if has_front else 0
+    return "\n".join(lines[closing + 1 :]).split()
+
+
+def _quoted(words: list[str], quote: str) -> bool:
+    # ponytail: linear scan per citation; an index when bodies grow large.
+    wanted = quote.split()
+    return any(
+        words[i : i + len(wanted)] == wanted
+        for i in range(len(words) - len(wanted) + 1)
+    )
+
+
+def parse_response(
+    body: str, *, delivered: frozenset[UUID]
+) -> tuple[bytes, tuple[Citation, ...]]:
+    """The exact Markdown bytes and the citation requests beside them, or a refusal.
+
+    The transport is `{"canonical_markdown", "citations"}` and nothing else, at
+    either level, with duplicate keys refused. A citation must name delivered
+    evidence and quote the Markdown verbatim; one that does not refuses the whole
+    handoff, because the Markdown cannot be edited to drop what rests on it.
+    Anchoring in the token index needs the store and is the executor's step.
+    """
+    markdown, text, citations = _or_refuse(
+        RefusalCode.HANDOFF_MALFORMED, lambda: _transport(body)
+    )
+    if any(citation.source_id not in delivered for citation in citations):
+        raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
+    words = _body_words(text)
+    if any(not _quoted(words, citation.matched_text) for citation in citations):
+        raise Refusal(RefusalCode.HANDOFF_MALFORMED)
+    return markdown, citations
+
+
+def record_bytes(record: CanonicalRecord) -> bytes:
+    """The record's one canonical serialisation; its SHA-256 is `record_sha256`."""
+    document: dict[str, Any] = {"format": RECORD_FORMAT, **asdict(record)}
+    for citation in document["citations"]:
+        for box in citation["bboxes"]:
+            box.update({key: float(box[key]) for key in ("x0", "y0", "x1", "y1")})
+    return json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _exact[T](kind: type[T]) -> Callable[[object], T]:
+    def parse(value: object) -> T:
+        if type(value) is not kind:
+            raise TypeError  # `true` is not 1, and 1 is not 1.0
+        return value
+
+    return parse
+
+
+def _each[T](parse: Callable[[object], T]) -> Callable[[object], tuple[T, ...]]:
+    def parse_all(value: object) -> tuple[T, ...]:
+        if not isinstance(value, list):
+            raise TypeError
+        return tuple(parse(item) for item in value)
+
+    return parse_all
+
+
+def _typed[T](kind: type[T], value: object, **special: Callable[[object], Any]) -> T:
+    """`kind` from a closed object whose fields are strings unless named."""
+    document = _closed(value, frozenset(f.name for f in fields(kind)))  # type: ignore[arg-type]
+    parsed = {
+        name: special.get(name, _exact(str))(item) for name, item in document.items()
+    }
+    return kind(**parsed)
+
+
+def _pair(value: object) -> tuple[str, str]:
+    module_id, readiness = _each(_exact(str))(value)
+    return module_id, readiness
+
+
+_int, _strs = _exact(int), _each(_exact(str))
+_rect = _each(
+    lambda box: _typed(
+        Rect, box, page=_int, **dict.fromkeys(("x0", "y0", "x1", "y1"), _exact(float))
+    )
+)
+
+
+def _decoded_record(data: bytes) -> CanonicalRecord:
+    document = _strict_json(data.decode("utf-8"))
+    if not isinstance(document, dict) or document.pop("format", None) != RECORD_FORMAT:
+        raise ValueError
+    citations = _each(
+        lambda item: _typed(AnchoredCitation, item, page=_int, bboxes=_rect)
+    )(document.get("citations"))
+    if not citations:
+        raise ValueError
+    return _typed(
+        CanonicalRecord,
+        document,
+        identity=lambda item: _typed(
+            HostIdentity,
+            item,
+            ordinal=_int,
+            upstream=_each(lambda ref: _typed(UpstreamRef, ref)),
+        ),
+        projections=lambda item: _typed(
+            Projections,
+            item,
+            confidence_score=_int,
+            limitation_flags=_strs,
+            validation_warnings=_strs,
+            downstream_consumers=_strs,
+            readiness=_each(_pair),
+        ),
+        citations=lambda _: citations,
+    )
+
+
+def read_record(
+    blobs: BlobStore,
+    *,
+    artifact_sha256: str,
+    record_sha256: str,
+    expected: HostIdentity,
+) -> CanonicalRecord:
+    """The record bound to this artifact and this invocation, or a refusal.
+
+    Both blobs are read, so both digests are proven; the record must parse
+    strictly, be in its own canonical form, name this Markdown and carry exactly
+    `expected`. Every failure is `ARTIFACT_RECORD_MISMATCH` with no text.
+
+    The record is still not fact (§41.2): re-parsing the projections from the
+    Markdown and re-anchoring the citations are the readers' steps (3.1d), since
+    they need the vendor contract and the store.
+    """
+
+    def read() -> CanonicalRecord:
+        blobs.get(artifact_sha256)
+        data = blobs.get(record_sha256)
+        record = _decoded_record(data)
+        if (
+            record_bytes(record) != data
+            or record.artifact_sha256 != artifact_sha256
+            or record.identity != expected
+            or record.authority_bundle_sha256 != expected.authority_bundle_sha256
+        ):
+            raise ValueError
+        return record
+
+    return _or_refuse(RefusalCode.ARTIFACT_RECORD_MISMATCH, read)
