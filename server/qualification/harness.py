@@ -81,6 +81,7 @@ from server.qualification.matrix import (
     QualificationCase,
     QualificationSet,
     assert_measurable,
+    assert_unambiguous,
     build_matrix,
     qualification_set_digest,
 )
@@ -229,7 +230,7 @@ def prepare(
     Existing helpers commit separately; earlier preparations survive later failure.
     """
     assert_measurable(qualification)
-    _distinct(qualification)
+    assert_unambiguous(qualification)
     _answerable(qualification)
     routes = [
         resolve_route(harness.catalog, case.profile_id, case.selection_id)
@@ -300,7 +301,7 @@ def perform(
     # is empty, and "it has no documents" is the more useful of two true
     # answers about the same defect.
     assert_measurable(qualification)
-    _distinct(qualification)
+    assert_unambiguous(qualification)
     _answerable(qualification)
     set_digest = qualification_set_digest(qualification)
     provider = _provider_identity(harness.completions)
@@ -459,18 +460,6 @@ def _subjects(qualification: QualificationSet) -> None:
     for case in qualification.cases:
         if not valid_subject(case.subject):
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-
-
-def _distinct(qualification: QualificationSet) -> None:
-    """Two cases under one label make "the answer" depend on read order.
-
-    `build_matrix` refuses this too, and only once every case has been paid
-    for — which is what the paragraph above promises does not happen. Checked
-    here so that promise is true.
-    """
-    labels = [case.label for case in qualification.cases]
-    if len(set(labels)) != len(labels):
-        raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
 
 
 def _perform_one(

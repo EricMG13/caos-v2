@@ -196,9 +196,8 @@ def build_matrix(
     purest form — the row that would have failed is simply not there.
     """
     assert_measurable(qualification)
+    assert_unambiguous(qualification)
     labels = [case.label for case in qualification.cases]
-    if len(set(labels)) != len(labels):
-        raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
     for label in labels:
         if label not in runs:
             raise Refusal(RefusalCode.QUALIFICATION_RUN_MISSING)
@@ -315,3 +314,12 @@ def assert_measurable(qualification: QualificationSet) -> None:
         # A case expecting nothing measures nothing; a case with no documents
         # cannot be run and cannot be cited. Both are the same hole.
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
+
+
+def assert_unambiguous(qualification: QualificationSet) -> None:
+    """Refuse duplicate case labels or answer keys before either can be scored."""
+    labels = [case.label for case in qualification.cases]
+    if len(set(labels)) != len(labels) or any(
+        len(set(case.expects)) != len(case.expects) for case in qualification.cases
+    ):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
