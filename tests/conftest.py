@@ -113,18 +113,29 @@ def approve_run(
 ) -> UUID:
     """Pin and govern one real test run, returning its synthetic approver."""
     from server.engine.route import ResolvedRoute
+    from server.methodology import CANONICAL_ADAPTER_VERSION, adapter_for
     from server.methodology.bundle import Bundle
     from server.store import StoreConnection
     from server.store.gates import Gate, GateApproval, approve_gate, gate_preview
     from server.store.members import Standing, grant
     from server.store.routes import pin_route
-    from server.store.run_inputs import pin_run_input
+    from server.store.run_inputs import RunSubject, pin_run_input
     from server.store.source_sets import snapshot_source_set
 
     connection = cast(StoreConnection, conn)
     source = snapshot_source_set(connection, case_id)
-    pin_route(connection, run_id, cast(ResolvedRoute, route))
-    pin_run_input(connection, run_id, source.version, cast(Bundle, bundle))
+    pinned = cast(ResolvedRoute, route)
+    pin_route(connection, run_id, pinned)
+    # A canonical route cannot pin without the subject its handoffs name.
+    canonical = adapter_for(pinned) == CANONICAL_ADAPTER_VERSION
+    subject = RunSubject("EXAMPLE", "Example Holdings plc", "FY2025", "2026-09-08")
+    pin_run_input(
+        connection,
+        run_id,
+        source.version,
+        cast(Bundle, bundle),
+        subject=subject if canonical else None,
+    )
     approver = uuid4()
     grant(
         connection,

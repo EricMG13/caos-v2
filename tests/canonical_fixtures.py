@@ -1,0 +1,187 @@
+"""Deterministic canonical Markdown handoffs for the LITE earnings route.
+
+Built the way `vendor/deploy-v/tests/test_module_workflow.py` builds them:
+structural scenarios over CP-0 -> CP-L10 -> CP-5, not issuer analysis. Shared
+by every suite that needs a handoff the vendor validators accept.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from server.methodology.bundle import Bundle, verified_bytes
+from server.methodology.handoff import HostIdentity, UpstreamRef, invocation_fields
+from server.methodology.vendor import authority_bundle_sha256, load_vendor_contract
+
+VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
+BUNDLE = Bundle(VENDORED)
+CONTRACT = load_vendor_contract(BUNDLE)
+CATALOG = json.loads(
+    (
+        VENDORED
+        / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
+    ).read_text()
+)
+LITE_PROFILE = "LITE_CREDIT_22"
+LITE_SELECTION = "LITE_EARNINGS_UPDATE"
+ROUTE = CONTRACT.routing.Route(CATALOG, LITE_PROFILE, LITE_SELECTION)
+RUN = "COS-20260908T120000Z-" + "1" * 32
+PINNED = frozenset({"CP-L10", "CP-5"})
+
+
+def identity(
+    module_id: str, upstream: tuple[UpstreamRef, ...] = (), **changes: object
+) -> HostIdentity:
+    """The host identity of one LITE node, with any field replaced."""
+    node = ROUTE.by_module[module_id]
+    values: dict[str, Any] = {
+        "run_id": RUN,
+        "profile_id": ROUTE.profile_id,
+        "selection_id": ROUTE.selection_id,
+        "route_node_id": node["route_node_id"],
+        "module_id": module_id,
+        "module_name": node["module_name"],
+        "issuer_id": "EXAMPLE",
+        "issuer_name": "Example",
+        "reporting_period": "FY2025",
+        "analysis_date": "2026-09-08",
+        "ordinal": 1,
+        "authority_bundle_sha256": authority_bundle_sha256(BUNDLE),
+        "upstream": upstream,
+    }
+    values.update(changes)
+    return HostIdentity(**values)
+
+
+def _table(columns: list[str] | tuple[str, ...], rows: list[list[str]]) -> str:
+    head = (
+        "| "
+        + " | ".join(columns)
+        + " |\n| "
+        + " | ".join("---" for _ in columns)
+        + " |\n"
+    )
+    return head + "".join("| " + " | ".join(row) + " |\n" for row in rows) + "\n"
+
+
+def _yaml(fields: dict[str, Any]) -> str:
+    lines = []
+    for key, value in fields.items():
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            lines.append(key + ":")
+            for item in value:
+                for n, (k, v) in enumerate(item.items()):
+                    lines.append(
+                        ("  - " if n == 0 else "    ") + k + ": " + json.dumps(v)
+                    )
+        else:
+            lines.append(key + ": " + json.dumps(value))
+    return "\n".join(lines)
+
+
+def skill(module_id: str) -> bytes:
+    """The module's verified `SKILL.md`."""
+    return verified_bytes(BUNDLE, module_id, "SKILL.md")
+
+
+def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
+    identity: HostIdentity,
+    *,
+    fields: dict[str, Any] | None = None,
+    authored: dict[str, Any] | None = None,
+    override: dict[str, Any] | None = None,
+    omit_register: str | None = None,
+    drop: str | None = None,
+    body_note: str = "Recorded source p1.",
+    readiness: dict[str, str] | None = None,
+) -> bytes:
+    """A handoff the vendor validators accept for `identity`, then varied.
+
+    `fields` replaces the host-owned front matter (a fake provider copies what
+    the prompt handed it); `readiness` sets CP-0's T8 status per pinned module.
+    """
+    front: dict[str, Any] = {
+        **(fields if fields is not None else invocation_fields(CONTRACT, identity)),
+        "confidence_score": 90,
+        "confidence_band": "High",
+        "qa_status": "Passed",
+        "committee_status": "Draft Only",
+        "limitation_flags": [],
+        "validation_warnings": [],
+        "downstream_consumers": [],
+        **(authored or {}),
+        **(override or {}),
+    }
+    front.pop(drop or "", None)
+    rules = CONTRACT.completeness_check.load_contract(
+        skill(identity.module_id).decode(), identity.module_id
+    )
+    appendix = "### Analytical appendix — complete canonical registers\n\n"
+    for register, spec in rules["registers"].items():
+        if register == omit_register:
+            continue
+        appendix += "#### " + register + "\n\n"
+        if identity.module_id == "CP-0" and register == "T8":
+            appendix += _table(CONTRACT.navigation.NEW_HEADERS, _t8(readiness or {}))
+        else:
+            columns = spec["columns"] or ["Evidence"]
+            appendix += _table(
+                columns,
+                [["Recorded source p1"] * len(columns)]
+                * max(1, spec["minimum_body_rows"]),
+            )
+    for table_id in rules["unconditional_stable_tables"]:
+        appendix += (
+            "<!-- table-id: "
+            + table_id
+            + " -->\n"
+            + _table(["source_locator"], [["Source p1"]])
+        )
+    headings = CONTRACT.validate_handoff.CANONICAL_HEADINGS
+    body = "".join(
+        "## " + h + "\n\n" + (appendix if h == "Analysis" else body_note + "\n\n")
+        for h in headings
+    )
+    return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
+
+
+def _t8(readiness: dict[str, str]) -> list[list[str]]:
+    rows = []
+    for n, module in enumerate(sorted(PINNED), 1):
+        status = readiness.get(module, "READY")
+        runnable = status in {"READY", "READY_WITH_LIMITATIONS"}
+        command = "Run " + module
+        rows.append(
+            [
+                str(n),
+                module,
+                command,
+                command if runnable else "DO NOT RUN",
+                "Source p1",
+                "Current handoff",
+                status,
+                "Relevant source p1",
+            ]
+        )
+    return rows
+
+
+def upstream_ref(identity: HostIdentity, markdown: bytes) -> UpstreamRef:
+    """How a downstream node names this accepted handoff."""
+    return UpstreamRef(
+        route_node_id=identity.route_node_id,
+        module_id=identity.module_id,
+        run_id=identity.run_id,
+        period=identity.reporting_period,
+        sha256=hashlib.sha256(markdown).hexdigest(),
+    )
+
+
+def wire(markdown: bytes, citations: list[dict[str, object]]) -> str:
+    """The closed provider transport `{canonical_markdown, citations}` (§41)."""
+    return json.dumps(
+        {"canonical_markdown": markdown.decode("utf-8"), "citations": citations}
+    )

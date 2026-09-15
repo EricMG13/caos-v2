@@ -309,6 +309,10 @@ def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
     route = resolved_route(conn, run_id)
     if source is None or route is None:
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    adapter = methodology.adapter_for(route)
+    if adapter == methodology.CANONICAL_ADAPTER_VERSION and subject is None:
+        # A canonical handoff names its subject; there is none to name.
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     candidate = RunInput(
         run_id,
         owner[0],
@@ -317,7 +321,7 @@ def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
         route_digest(route),
         bundle.build_id,
         bundle.manifest_sha256,
-        methodology.CLAIMS_ADAPTER_VERSION,
+        adapter,
         raw,
         "",
         subject,

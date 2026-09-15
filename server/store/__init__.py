@@ -62,6 +62,12 @@ MIGRATIONS = (
         "0011_run_subject",
         Path(__file__).with_name("0011_run_subject.sql").read_text(encoding="utf-8"),
     ),
+    (
+        "0012_artifact_record",
+        Path(__file__)
+        .with_name("0012_artifact_record.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

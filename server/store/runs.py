@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 
+from server import methodology
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
@@ -141,6 +142,9 @@ class Accepted:
     model: str
     generation_id: str
     diagnostic_sha256: str | None = None
+    # The host record blob; present exactly when the run pins the canonical
+    # adapter (`docs/DECISIONS.md` §42.1).
+    record_sha256: str | None = None
 
 
 def accept_attempt(
@@ -191,9 +195,12 @@ def _accept(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
 
 def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> bool:
     run, case, status = _locked_attempt(conn, attempt)
-    if (
-        not isinstance(accepted.artifact_sha256, str)
-        or re.fullmatch(r"[0-9a-f]{64}", accepted.artifact_sha256) is None
+    digests = [accepted.artifact_sha256]
+    if accepted.record_sha256 is not None:
+        digests.append(accepted.record_sha256)
+    if not all(
+        isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+        for digest in digests
     ):
         raise Refusal(RefusalCode.BLOB_ADDRESS_INVALID)
     values = (
@@ -202,10 +209,11 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
         case,
         accepted.model,
         accepted.generation_id,
+        accepted.record_sha256,
     )
     row = conn.execute(
-        "SELECT artifact_sha256,run_id,case_id,model,generation_id FROM artifacts"
-        " WHERE attempt_id = %s",
+        "SELECT artifact_sha256,run_id,case_id,model,generation_id,record_sha256"
+        " FROM artifacts WHERE attempt_id = %s",
         (attempt,),
     ).fetchone()
     if row is not None:
@@ -216,7 +224,10 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
         return False
     # Fresh authority in this locked unit: governed writes take the case lock
     # first, so nothing can commit between this check and the insert.
-    _pin, route = approved_run_input(conn, run)
+    pin, route = approved_run_input(conn, run)
+    canonical = pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
+    if canonical is (accepted.record_sha256 is None):
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
     node = conn.execute(
         "SELECT route_node_id FROM run_attempts WHERE attempt_id = %s", (attempt,)
     ).fetchone()
@@ -228,8 +239,8 @@ def _accept_artifact(conn: StoreConnection, attempt: UUID, accepted: Accepted) -
     # `route_node_id` is filled from the attempt by the migration 0009 trigger.
     conn.execute(
         "INSERT INTO artifacts (attempt_id, artifact_sha256, run_id, case_id,"
-        " model, generation_id)"
-        " VALUES (%s, %s, %s, %s, %s, %s)",
+        " model, generation_id, record_sha256)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s)",
         (attempt, *values),
     )
     append(conn, run, RunEvent.ATTEMPT_ACCEPTED)
@@ -244,14 +255,19 @@ def _legacy_replay(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> 
         " WHERE a.attempt_id=%s",
         (attempt,),
     ).fetchone()
-    if accepted.diagnostic_sha256 is not None or row != (
-        accepted.artifact_sha256,
-        run,
-        case,
-        accepted.model,
-        accepted.generation_id,
-        run,
-        accepted.charge,
+    if (
+        accepted.diagnostic_sha256 is not None
+        or accepted.record_sha256 is not None
+        or row
+        != (
+            accepted.artifact_sha256,
+            run,
+            case,
+            accepted.model,
+            accepted.generation_id,
+            run,
+            accepted.charge,
+        )
     ):
         raise Refusal(RefusalCode.CALL_OUTCOME_LEGACY)
 

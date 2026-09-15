@@ -17,13 +17,20 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from test_canonical_handoff import (
+from canonical_fixtures import (
     CATALOG,
     CONTRACT,
     PINNED,
-    _identity,
-    _markdown,
-    _skill,
+    wire,
+)
+from canonical_fixtures import (
+    handoff_markdown as _markdown,
+)
+from canonical_fixtures import (
+    identity as _identity,
+)
+from canonical_fixtures import (
+    skill as _skill,
 )
 
 from server.blobs import BlobStore
@@ -45,12 +52,6 @@ CP0 = _identity("CP-0")
 CP0_MD = _markdown(CP0, body_note="Recorded source p1. " + SECRET)
 QUOTE = "Recorded source p1"
 CITED = json.dumps({"source_id": str(SOURCE), "page": 1, "matched_text": QUOTE})
-
-
-def wire(markdown: bytes, citations: list[dict[str, object]]) -> str:
-    return json.dumps(
-        {"canonical_markdown": markdown.decode("utf-8"), "citations": citations}
-    )
 
 
 def _citation(**changes: object) -> dict[str, object]:

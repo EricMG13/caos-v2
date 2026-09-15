@@ -183,6 +183,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
   day the vendor ships it, or by a dated decision that the host owns it; readers
   (3.1d) must label a screening-only record whatever its committee status.
+- **A canonical-adapter run pins but cannot execute yet.** Slice c-2 derives
+  the pinned adapter from the route (§42.1), so a `LITE_CREDIT_22` run pins
+  `canonical-markdown-v1`, and acceptance requires `artifacts.record_sha256`
+  for it. Until the canonical executor exists, `execution_input` refuses such a
+  pin `HANDOFF_MODULE_UNSUPPORTED` before any attempt, reservation or call, and
+  the orchestration proof refuses it rather than parse Markdown as claims. The
+  record's blob is shape-checked at acceptance, not read. *Upgrade:* slices
+  c-5a/c-5b remove the execution refusal, write both blobs and accept with the
+  record; d-2 proves canonical artifacts; f-1 makes readers refuse a NULL
+  record and removes the dispatch.
 
 **Repair Phase 2.**
 
