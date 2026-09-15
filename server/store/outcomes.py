@@ -59,6 +59,36 @@ def accepted_owner(
     return None if row is None else UUID(str(row[0]))
 
 
+def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
+    """Every accepted artifact of the run, keyed by route node id.
+
+    One query, read in one place: the frontier, the claims executor's upstream
+    and the canonical host identity all need exactly this row set. It lives in
+    the store so the runtime can import the canonical reader without a cycle.
+    """
+    # One row per node: `artifacts UNIQUE (run_id, route_node_id)` makes the
+    # accepted owner a database fact, so no ordering picks a winner.
+    return {
+        str(node): str(digest)
+        for node, _attempt, digest, _record in accepted_rows(conn, run_id)
+    }
+
+
+def accepted_rows(
+    conn: StoreConnection, run_id: UUID
+) -> list[tuple[str, UUID, str, str | None]]:
+    """(route node, attempt, artifact, record) for every accepted artifact."""
+    rows = conn.execute(
+        "SELECT route_node_id, attempt_id, artifact_sha256, record_sha256"
+        " FROM artifacts WHERE run_id = %s",
+        (run_id,),
+    ).fetchall()
+    return [
+        (str(node), UUID(str(attempt)), str(digest), None if rec is None else str(rec))
+        for node, attempt, digest, rec in rows
+    ]
+
+
 def check_attempt(
     conn: StoreConnection, *, attempt_id: UUID, run_id: UUID, route_node_id: str
 ) -> None:

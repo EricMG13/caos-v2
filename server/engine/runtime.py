@@ -34,17 +34,22 @@ from server.engine.route import (
     node_states,
 )
 from server.methodology.bundle import Bundle
+from server.methodology.canonical import accepted_projections
 from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
 from server.store.gates import execution_input
+
+# `artifact_digests` is re-exported: it now lives in the store (no import cycle).
 from server.store.outcomes import (
     CallOutcome,
+    accepted_rows,
     execution_reads,
     record_outcome,
     require_idle,
 )
+from server.store.outcomes import artifact_digests as artifact_digests
 from server.store.runs import (
     Accepted,
     accept_attempt,
@@ -124,50 +129,40 @@ def run_route(
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     worst_case(execution.price)
     route = _execution_route(conn, run_id, route, execution.bundle)
+    bundle = execution.bundle
     while True:
         with execution_reads(conn):
-            ready = frontier(route, accepted_artifacts(conn, blobs, route, run_id))
+            accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
+            ready = frontier(route, accepted)
         if not ready:
             break
         for route_node_id in ready:
-            _run_node(
+            if not _run_node(
                 conn,
                 run_id=run_id,
                 route=route,
                 route_node_id=route_node_id,
                 execution=execution,
-            )
+            ):
+                return  # A validated Blocked handoff ended the run BLOCKED.
     # §39: success only when every pinned node was accepted; an empty frontier
     # with unfinished required work ends the run blocked.
     with execution_reads(conn):
-        states = node_states(route, accepted_artifacts(conn, blobs, route, run_id))
+        accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
+        states = node_states(route, accepted)
     if all(state is NodeState.COMPLETE for state in states.values()):
         complete_run(conn, run_id)
     else:
         block_run(conn, run_id)
 
 
-def artifact_digests(conn: StoreConnection, run_id: UUID) -> dict[str, str]:
-    """Every accepted artifact of the run, keyed by route node id.
-
-    One query, read in one place. `accepted_artifacts` below and
-    `server.methodology.executor._upstream_digests` both need exactly this
-    row set -- the first to decide which nodes are COMPLETE and which body
-    to read, the second to read a node's predecessors' bodies -- and a query
-    string kept twice is a join two callers can silently drift out of step on
-    the day the schema moves under one of them and not the other.
-    """
-    # One row per node: `artifacts UNIQUE (run_id, route_node_id)` makes the
-    # accepted owner a database fact, so no ordering picks a winner.
-    rows = conn.execute(
-        "SELECT route_node_id, artifact_sha256 FROM artifacts WHERE run_id = %s",
-        (run_id,),
-    ).fetchall()
-    return {str(route_node_id): str(digest) for route_node_id, digest in rows}
-
-
 def accepted_artifacts(
-    conn: StoreConnection, blobs: BlobStore, route: ResolvedRoute, run_id: UUID
+    conn: StoreConnection,
+    blobs: BlobStore,
+    route: ResolvedRoute,
+    run_id: UUID,
+    *,
+    bundle: Bundle | None = None,
 ) -> dict[str, Any]:
     """The run's accepted attempts, keyed by route node.
 
@@ -176,6 +171,11 @@ def accepted_artifacts(
     others, so fetching every payload
     would be a blob read per node per pass for data nobody looks at -- the ~8x
     shape `docs/AI_CODE_QUALITY.md` section 1 measures.
+
+    One query either way. A claims row (`record_sha256` NULL) is read as its
+    JSON body; a canonical row's readiness and `qa_status` come from its record,
+    verified against its Markdown under `bundle` (§42.4), and without a bundle
+    such a row refuses rather than be read as JSON.
     """
     qa_sources = {e.source for e in route.edges if e.type is EdgeType.QA_GATE}
     readiness_nodes = {
@@ -183,13 +183,39 @@ def accepted_artifacts(
         for node in route.nodes
         if node.module_id == GATE_MODULE or node.module_id in qa_sources
     }
-    try:
-        return {
-            node_id: (
-                json.loads(blobs.get(digest)) if node_id in readiness_nodes else {}
+    accepted: dict[str, Any] = {}
+    for node_id, attempt, digest, record in accepted_rows(conn, run_id):
+        if node_id not in readiness_nodes:
+            accepted[node_id] = {}
+        elif record is None:
+            accepted[node_id] = _claims_body(blobs, digest)
+        elif bundle is None:
+            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+        else:
+            projections = accepted_projections(
+                conn,
+                blobs,
+                bundle,
+                route,
+                run_id=run_id,
+                route_node_id=node_id,
+                attempt_id=attempt,
+                artifact_sha256=digest,
+                record_sha256=record,
             )
-            for node_id, digest in artifact_digests(conn, run_id).items()
-        }
+            accepted[node_id] = {
+                "qa_status": projections.qa_status,
+                "content_to_module_map": [
+                    {"module_id": module, "readiness_status": status}
+                    for module, status in projections.readiness
+                ],
+            }
+    return accepted
+
+
+def _claims_body(blobs: BlobStore, digest: str) -> object:
+    try:
+        return json.loads(blobs.get(digest))
     except ValueError:
         raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE) from None
 
@@ -201,8 +227,12 @@ def _run_node(
     route: ResolvedRoute,
     route_node_id: str,
     execution: Execution,
-) -> None:
-    """One try at one node. One attempt row, one reservation, one acceptance."""
+) -> bool:
+    """One try at one node. One attempt row, one reservation, one acceptance.
+
+    Returns False when a validated Blocked handoff ended the run BLOCKED: the
+    bill and diagnostic are already recorded, nothing is accepted, no retry.
+    """
     module_id = next(
         node.module_id for node in route.nodes if node.route_node_id == route_node_id
     )
@@ -213,13 +243,30 @@ def _run_node(
     reserve(conn, attempt_id, worst_case(execution.price))
 
     _execution_route(conn, run_id, route, execution.bundle)
-    result = execution.provider.execute(route_node_id, module_id, attempt_id=attempt_id)
+    try:
+        result = execution.provider.execute(
+            route_node_id, module_id, attempt_id=attempt_id
+        )
+    except Refusal as refusal:
+        if refusal.code is not RefusalCode.HANDOFF_BLOCKED:
+            raise
+        result = None
+    if result is None:
+        _end_blocked(conn, run_id, attempt_id)
+        return False
 
     require_idle(conn)
+    # The canonical executor recorded its diagnostic with the call: this is
+    # then an exact replay, and acceptance binds the host record (§42).
     record_outcome(
         conn,
         attempt_id=attempt_id,
-        outcome=CallOutcome(result.charge, result.model, result.generation_id),
+        outcome=CallOutcome(
+            result.charge,
+            result.model,
+            result.generation_id,
+            result.diagnostic_sha256,
+        ),
     )
     _execution_route(conn, run_id, route, execution.bundle)
     accept_attempt(
@@ -230,8 +277,26 @@ def _run_node(
             charge=result.charge,
             model=result.model,
             generation_id=result.generation_id,
+            diagnostic_sha256=result.diagnostic_sha256,
+            record_sha256=result.record_sha256,
         ),
     )
+    return True
+
+
+def _end_blocked(conn: StoreConnection, run_id: UUID, attempt_id: UUID) -> None:
+    """End the run BLOCKED on a validated Blocked handoff (brief correction 6).
+
+    Only a call whose outcome is recorded counts: a Blocked claim nothing
+    billed is not a validated handoff, and refuses as an ordinary refusal.
+    """
+    with execution_reads(conn):
+        recorded = conn.execute(
+            "SELECT 1 FROM call_outcomes WHERE attempt_id = %s", (attempt_id,)
+        ).fetchone()
+    if recorded is None:
+        raise Refusal(RefusalCode.HANDOFF_BLOCKED)
+    block_run(conn, run_id)
 
 
 def _execution_route(

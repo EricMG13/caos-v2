@@ -181,23 +181,25 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a
   LITE handoff saying `Committee Ready` validates; the host projects the scope
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
-  day the vendor ships it, or by a dated decision that the host owns it; readers
-  (3.1d) must label a screening-only record whatever its committee status.
-- **A canonical run executes one node at a time but `run_route` cannot yet
-  accept it.** Slice c-5a's `server/methodology/canonical.py` runs a canonical
-  pin end to end -- billing with the diagnostic Markdown first, then vendor
-  validation, host identity, all-or-nothing anchoring and the host record --
-  and `ModuleProvider` stores both blobs, choosing the executor from the
-  pinned adapter (§42.1); each executor refuses the other adapter's pin
-  `RUN_INPUT_INVALID`. `ProviderResult` now carries `record_sha256` and
-  `diagnostic_sha256`, but `run_route` still records and accepts without them,
-  so a LITE route refuses at its first acceptance and a Blocked handoff is an
-  ordinary refusal rather than a BLOCKED run. The orchestration proof still
-  refuses canonical pins, and acceptance shape-checks the record, never reads
-  it. The compiled vendor contract is cached per manifest digest, so a vendor
-  script changed on disk under an unchanged manifest is not re-verified by the
-  cached validator (every other read still is). *Upgrade:* c-5b accepts with
-  the record and diagnostic and ends a Blocked node's run BLOCKED; d-2 proves
+  day the vendor ships it, or by a dated decision that the host owns it.
+- **A LITE route runs through `run_route`, but only the runtime reads its
+  records.** Slice c-5b: `_run_node` replays the executor's outcome with its
+  diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
+  (identity held, every citation anchored -- an unanchorable Blocked handoff is
+  an ordinary refusal) keeps its bill and diagnostic, accepts nothing and ends
+  the run `BLOCKED` with one `RUN_BLOCKED`, no retry. `accepted_artifacts`
+  reads CP-0 readiness and `qa_status` of a canonical row from its record,
+  verified against its Markdown and the identity rebuilt from the store
+  (§42.4, no re-anchoring), and refuses such a row without a bundle -- which
+  the API's `read_run` and the harness's `_unrun` do not yet pass, so they
+  refuse (or fall back to presence) on a canonical run. Every frontier pass
+  re-runs the vendor validators on CP-0's Markdown. Diagnostic blobs are
+  untrusted provider text, never `BoundaryText`: nothing may render them or
+  read them as analysis. The orchestration proof still refuses canonical
+  pins. The compiled vendor contract is cached per manifest digest, so a
+  vendor script changed on disk under an unchanged manifest is not re-verified
+  by the cached validator (every other read still is). *Upgrade:* d-1 hands
+  the API and harness the bundle with typed node results; d-2 proves
   canonical artifacts; f-1 makes readers refuse a NULL record and removes the
   dispatch.
 - **Canonical upstream refs ignore readiness and predicates.**
@@ -208,9 +210,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   soft edge whose unaccepted source CP-0 reported READY is omitted where the
   vendor refuses. The route engine already BLOCKS such a node, so the runtime
   never asks for its identity. `module_name` is read from the verified catalog
-  at call time rather than pinned, and the prompt is bounded on its UTF-8 bytes;
-  the provider still re-checks the encoded request. *Upgrade:* readiness joins
-  the refs when a reader of the canonical CP-0 T8 exists (d-2).
+  at call time rather than pinned, and the prompt is bounded on its JSON
+  encoding; the provider still re-checks the whole encoded request. *Upgrade:* readiness joins
+  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2).
 
 **Repair Phase 2.**
 
