@@ -43,17 +43,15 @@ from server.engine.runtime import (
     run_route,
 )
 from server.methodology.bundle import Bundle
-from server.methodology.executor import Assignment, ModuleOutcome, execute_module
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.budget import reserve
 from server.store.gates import Gate, approve_gate, approved_run_input, execution_input
 from server.store.members import Standing, grant
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route
 from server.store.run_inputs import RunInput, pin_run_input
-from server.store.runs import Accepted, accept_attempt, start_attempt, start_run
+from server.store.runs import Accepted, accept_attempt, start_run
 from server.store.source_sets import snapshot_source_set
 
 __all__ = ["client", "harness"]
@@ -207,49 +205,6 @@ def test_an_existing_claims_pin_refuses_execution(
     assert conn.execute(
         "SELECT count(*) FROM run_attempts WHERE run_id = %s", (run,)
     ).fetchone() == (0,)
-
-
-@dataclass
-class _NeverCompletes:
-    model: str = MODEL
-    prompts: list[str] = field(default_factory=list)
-
-    def complete(self, prompt: str, *, json_object: bool = False) -> object:
-        self.prompts.append(prompt)
-        raise AssertionError(prompt[:0])
-
-
-@pytest.mark.parametrize(
-    ("route", "code"),
-    [
-        (LITE, RefusalCode.RUN_INPUT_INVALID),
-        (DEEP, RefusalCode.HANDOFF_MODULE_UNSUPPORTED),
-    ],
-    indirect=["route"],
-)
-def test_the_retired_claims_executor_is_unreachable_from_any_pin(
-    harness: _Harness, code: RefusalCode
-) -> None:
-    """Every pin is canonical, so `execute_module` refuses under its own read
-    unit before any prompt: no `ModuleOutcome` can be produced (f-2b deletes
-    it)."""
-    node = harness.route.nodes[0]
-    attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
-    reserve(harness.conn, attempt, ESTIMATE)
-    never = _NeverCompletes()
-    outcome: ModuleOutcome | None = None
-    with pytest.raises(Refusal) as refused:
-        outcome = execute_module(
-            harness.conn,
-            harness.bundle,
-            harness.blobs,
-            assignment=Assignment(
-                node.module_id, harness.run_id, node, harness.route, attempt
-            ),
-            provider=never,  # type: ignore[arg-type]
-        )
-    assert refused.value.code is code and outcome is None
-    assert never.prompts == []
 
 
 def _strip_record(harness: _Harness, module_id: str) -> None:

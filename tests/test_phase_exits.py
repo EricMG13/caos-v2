@@ -65,8 +65,6 @@ NOT_YET_REACHED: set[str] = {
     "test_a_gate_answer_missing_a_pinned_module_is_refused",
     "test_only_the_gate_module_may_return_a_readiness_map",
     "test_a_node_receives_its_direct_predecessors_accepted_claims",
-    # Temporary bridge until f-2b removes these public surfaces:
-    # Claim Envelope parse_qa parse_claims parse_readiness UpstreamClaim Upstream.
     # Phase 12, the handoff: no module payload exists yet, so a register, a
     # critical column and a cited figure are all things no artifact carries.
     "test_the_declared_register_schema_matches_the_bundles_own_contract",
