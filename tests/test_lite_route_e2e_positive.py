@@ -162,7 +162,7 @@ def test_realistic_lite_route_completes_proves_and_freezes(harness: _Harness) ->
 
 
 def test_realistic_fixture_handoffs_fit_the_completion_cap(harness: _Harness) -> None:
-    """§46.2: `MAX_COMPLETION_TOKENS` stays 32,768; every realistic wire body
+    """§46.2: every realistic wire body
     this run's provider actually produced fits under it. A fixture that grew
     past the cap would make every route run over it refuse
     `PROVIDER_OUTPUT_TRUNCATED` before ever reaching the assertions below."""

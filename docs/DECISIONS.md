@@ -1117,7 +1117,7 @@ accepted as a complete answer. Injected transports face the same byte checks.
 Incomplete native HTTP framing refuses `PROVIDER_UNAVAILABLE`, including when
 the received prefix happens to be valid JSON; bounded reads retain this check.
 
-Every request sets `max_completion_tokens: 32768`, `allow_fallbacks: false`, and
+Every request sets `max_completion_tokens: 65536`, `allow_fallbacks: false`, and
 `require_parameters: true`. The current [OpenRouter chat contract](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion)
 names `max_completion_tokens` and deprecates `max_tokens`; its [routing contract](https://openrouter.ai/docs/guides/routing/provider-selection)
 documents the required-parameter restriction. HTTPS-only, no redirects or retries,
@@ -1467,9 +1467,10 @@ loop or retrieval layer is added.
    compatibility block (`NAMED_LITE_OBJECT_ACCEPTED`, `accepted_lite_object_ids`)
    and holds CP-5 BLOCKED, with no call, until an accepted upstream owns one of
    those objects. Driven by vendor fields, not a hardcoded graph.
-2. **Completion cap.** `MAX_COMPLETION_TOKENS` stays 32,768; a length-truncated
-   answer refuses `PROVIDER_OUTPUT_TRUNCATED`, keeps its bill and accepts
-   nothing. Any raise needs authorized live evidence (Phase 6).
+2. **Completion cap.** The initial 32,768-token cap refused a length-truncated
+   answer, kept its bill and accepted nothing. §59 raises the current cap to
+   65,536 after authorized live evidence; length truncation still refuses and
+   accepts nothing.
 3. **Read model** labels land in the deliverable render only (source fact =
    host-verified citations; analysis = model Markdown; host calculation = none);
    API models arrive in Phase 4.
@@ -2116,9 +2117,10 @@ not DeepSeek's first-party reasoning profile.
 `OpenRouter` now accepts optional `OPENROUTER_PROVIDER` and
 `OPENROUTER_REASONING_EFFORT`. A provider value is sent as the sole ordered
 endpoint with fallbacks disabled; the reasoning value is sent through
-OpenRouter's reasoning-effort contract. The qualification provider identity
-includes both settings (for example `openrouter/deepseek/max`), while an unset
-legacy profile remains `openrouter`. Invalid values refuse before transport.
+OpenRouter's reasoning-effort contract. A pinned qualification provider
+identity includes both settings and the completion ceiling (for example
+`openrouter/deepseek/max/65536`), while an unset legacy profile remains
+`openrouter`. Invalid values refuse before transport.
 The model id and dated conservative price remain separately bound.
 The qualification harness refuses that unpinned legacy profile; automatic
 routing remains available only to ordinary calls that cannot mint a verdict.
@@ -2142,16 +2144,16 @@ evidence or verdict was created. This rules out automatic routing, absent
 reasoning and truncation for that failure. A same-input temperature-zero repeat
 would change no controlled variable, so the run was not repeated.
 
-This change does not qualify DeepSeek or raise the 32,768 completion cap. It
-makes a controlled endpoint/reasoning experiment possible through the existing
-runtime and keeps ordinary/offline gates credential-free.
+At that checkpoint, this did not qualify DeepSeek or raise the 32,768
+completion cap. It made a controlled endpoint/reasoning experiment possible
+through the existing runtime and kept ordinary/offline gates credential-free.
 
 ## 2026-09-15 §59 — Gemini replacement is bounded by the shipped output ceiling
 
 The authorized replacement candidate is `google/gemini-3.8-flash` through the
 pinned OpenRouter `google-ai-studio` endpoint at reasoning effort `high`.
 Google supports structured output and up to 65,536 output tokens for this
-model; the exact shipped CAOS runtime still requests at most 32,768.
+model; the exact shipped CAOS runtime initially requested at most 32,768.
 
 The frozen VMO2 CP-0 call was served by Google AI Studio, used 29,454 native
 reasoning tokens, exhausted 32,761 native completion tokens, and finished with
@@ -2159,7 +2161,9 @@ reasoning tokens, exhausted 32,761 native completion tokens, and finished with
 artifact or qualification evidence existed. The `$0.25356225` charge remains
 inside the authorized `$22.00` ceiling.
 
-Do not repeat that same high-reasoning, 32,768-token request. Raising the
-ceiling to the model's 65,536 maximum changes the executed build contract and
-worst-case reservation; implement and verify it deliberately, bind the fresh
-build identity, and obtain fresh authorization before another paid run.
+Do not repeat that same high-reasoning, 32,768-token request. The authorized
+remediation raises the shared CAOS ceiling to the model's 65,536 maximum, which
+also raises each run's conservative reservation. The changed ceiling is bound
+in the fresh execution profile identity
+`openrouter/google-ai-studio/high/65536`; it requires verification before the
+one authorized paid retry.
