@@ -159,3 +159,33 @@ or partial immutable snapshot and its bound evidence row before returning; the
 collector serializes its digest and retains the disposable database/blob root
 for external review. This is not permission to repeat the indeterminate paid
 attempt.
+
+## Recovered 65,536-token retry — Gemini protocol incompatibility confirmed
+
+The recovery candidate at `40a13dd` persisted the complete immutable performed
+snapshot and its bound evidence row before its collector returned. The fresh
+run `1590edfc-a747-4c69-ae1a-06455edeb1a7` used the same frozen
+qualification-set digest and profile
+`openrouter/google-ai-studio/high/65536`. CP-0 generation
+`gen-1789486082-I1BG57GiSspM6MntssMu` was served by Google AI Studio, finished
+normally with `stop`, used 177,062 native prompt, 36,606 native completion and
+28,952 native reasoning tokens, and cost `$0.270069`.
+
+The retained diagnostic was a valid closed JSON transport with canonical
+Markdown and four citations. Each citation named delivered evidence and
+uniquely anchored in that evidence. The vendor Markdown validator also passed.
+The host nevertheless correctly refused CP-0 as `HANDOFF_MALFORMED`: none of
+the four evidence quotations occurred character-for-character in the Markdown
+body. Safe replay found case-insensitive matches for three and punctuation-
+normalized matches for all four, including an Evidence Trace section. Gemini
+therefore rewrote the quotations while retaining their meaning, instead of
+copying them verbatim as the pinned canonical protocol requires.
+
+No artifact, orchestration proof, matrix, evidence row for a verdict, or
+qualification verdict exists. The performed snapshot digest is
+`713ba25de76d8edf3dcde577c1ac9cc0d3000fc0079ea009d8d98f04ba26933f` and its
+bound evidence digest is
+`0e5e64d3948bbc149ac313185d1d47343987d10d87e41f11a9c0b33eaedd192c`.
+The retention failure is fixed; Gemini 3.8 Flash is not qualified for this
+one-shot canonical handoff contract. Do not buy another Gemini retry without a
+materially different, explicitly authorized protocol experiment.
