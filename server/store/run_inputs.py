@@ -275,8 +275,10 @@ def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
 ) -> RunInput:
     """Own one case-first/run-locked row/event transaction; setup commits separately.
 
-    A `subject` pins format version 2, whose fingerprint and gate preview bind
-    the subject and the UTC vendor run id; without one, version 1 is unchanged.
+    Every new pin is format version 2 under the one canonical adapter (§42.1):
+    its fingerprint and gate preview bind the `subject` and the UTC vendor run
+    id, and a pin without a subject refuses `RUN_INPUT_INVALID`. Stored version
+    1 pins stay readable and byte-identical; execution refuses them.
     """
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
@@ -302,7 +304,8 @@ def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
 ) -> RunInput:
     if type(source_version) is not int or not 0 < source_version < 2**63:
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-    if subject is not None and not _subject_valid(subject):
+    # Every run pins the canonical adapter, whose handoffs name a subject.
+    if subject is None or not _subject_valid(subject):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     raw = _research(research)
     status = lock_run(conn, run_id)
@@ -315,10 +318,6 @@ def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
     route = resolved_route(conn, run_id)
     if source is None or route is None:
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-    adapter = methodology.adapter_for(route)
-    if adapter == methodology.CANONICAL_ADAPTER_VERSION and subject is None:
-        # A canonical handoff names its subject; there is none to name.
-        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     candidate = RunInput(
         run_id,
         owner[0],
@@ -327,11 +326,11 @@ def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
         route_digest(route),
         bundle.build_id,
         bundle.manifest_sha256,
-        adapter,
+        methodology.CANONICAL_ADAPTER_VERSION,
         raw,
         "",
         subject,
-        None if subject is None else cos_run_id(run_id, owner[1]),
+        cos_run_id(run_id, owner[1]),
     )
     candidate = replace(candidate, input_fingerprint=_fingerprint(candidate))
     _validate(candidate)
@@ -354,16 +353,10 @@ def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
             " format_version) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 *(getattr(candidate, name) for name in _V1_COLUMNS),
-                *(
-                    (None,) * 4
-                    if subject is None
-                    else (
-                        subject.issuer_id,
-                        subject.issuer_name,
-                        subject.reporting_period,
-                        subject.analysis_date,
-                    )
-                ),
+                subject.issuer_id,
+                subject.issuer_name,
+                subject.reporting_period,
+                subject.analysis_date,
                 candidate.cos_run_id,
                 candidate.format_version,
             ),

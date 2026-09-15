@@ -131,7 +131,7 @@ def assert_orchestration_proof(
     if (pin.build_id, pin.manifest_sha256, pin.adapter_version) != (
         bundle.build_id,
         bundle.manifest_sha256,
-        methodology.adapter_for(route),
+        methodology.CANONICAL_ADAPTER_VERSION,
     ):
         raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
 

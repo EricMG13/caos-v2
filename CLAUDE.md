@@ -223,12 +223,28 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   read them as analysis. The orchestration proof still refuses canonical
   pins. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
-  by the cached validator (every other read still is). No HTTP test covers a
-  canonical `read_run` over a QA_GATE verdict other than `Passed`, because the
-  catalog's only QA_GATE (CP-5 -> CP-6) sits on a route the canonical adapter
-  does not execute; the view function that projects a stored `qa_status` is
-  tested directly instead. *Upgrade:* this gap closes when the canonical
-  adapter reaches a route carrying that QA_GATE.
+  by the cached validator (every other read still is). The executor's pre-call
+  unit binds every upstream record it will put in the prompt to that
+  upstream's call-time identity and this build (`record_authority_matches`,
+  shared with the proof and the deliverable), costing the host identity's
+  queries per upstream under the case lock; the record is not re-checked after
+  the call (only the digests are). Since f-1a the shared loop fixtures run
+  LITE, so the claims executor has no freshness tests left while it still
+  ships. No HTTP test covers a canonical `read_run` over a QA_GATE verdict
+  other than `Passed`, because the catalog's only QA_GATE (CP-5 -> CP-6) sits
+  on a route the canonical adapter does not execute (§42.2); the view function
+  that projects a stored `qa_status` is tested directly instead. Since f-1c
+  the adapter is one constant: every reader refuses a row without its record
+  `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
+  `RUN_INPUT_INVALID`, and every route with a module outside CP-0, CP-L10 and
+  CP-5 -- FULL, DEEP and every other catalog pathway -- pins and passes its
+  gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
+  before any attempt, reservation or call) and at acceptance. A harness case
+  on such a route still prepares and is refused only when performed. The
+  claims executor, `envelope.py` and the claims deliverable render remain,
+  unreachable from any pin. *Upgrade:* f-2a/f-2b delete that dead code, and
+  the HTTP gap closes the day Phase 5 extends the canonical adapter (and its
+  contract tests) to a route carrying that QA_GATE.
 - **A frozen canonical deliverable binds its source record and Markdown.**
   Slice d-4 re-derives the package payload, records, identity, projections,
   and rectangles from the store before freezing and verifies those hashes and
@@ -237,13 +253,28 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and before the governed freeze write, so verification catches that movement
   rather than the freeze itself. *Upgrade:* derive under the freeze lock once
   artifact rows are immutable; d-2 and d-3b provide proof and matrix readers.
-- **The canonical orchestration proof binds the accepted record to live proof.**
-  Slice d-2 re-reads both blobs, rebuilds identity, validates projections and
-  citations against pinned live sources, and requires the pin's adapter and
-  bundle authority. It returns the re-anchored citations, so the matrix scores
-  exactly what the proof proved without a second record read. *Upgrade:* read
-  proof and scoring in one repeatable-read transaction when a reviewer needs a
-  single snapshot.
+- **The orchestration proof over a canonical run proves it now, not
+  continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
+  binds the record to the identity rebuilt from the store, requires the pin's
+  adapter and the bundle's build, manifest and authority, re-validates the
+  Markdown against the record's projections and re-anchors every recorded
+  citation in the run's pinned live sources on identical rectangles -- the
+  deliverable's verdicts, under the proof's codes, through the same two readers
+  (`pinned_live_sources`, `call_time_identity`): a withdrawn or re-extracted
+  source, or a doubly captured document, gets one verdict from both. A
+  `host_identity` refusal keeps its own code. It proves a BLOCKED run's
+  accepted artifacts and says nothing of the node that never ran. Beside its
+  counts it returns `anchored`, the `(module_id, document_sha256,
+  matched_text)` it re-anchored under the pinned modules, and the matrix (d-3b)
+  scores exactly that set with no second artifact or record read: an artifact
+  accepted after the proof is not scored, an unproven canonical run cites
+  nothing, and a proven document no longer among `pinned_live_sources` at
+  scoring refuses the row `ORCHESTRATION_SOURCE_NOT_PINNED`. Under READ
+  COMMITTED the proof's own statements can still see different snapshots, and
+  a withdrawal committed after the matrix's live check is not seen by that
+  row. Like every proof it holds only for the bundle and sources present now.
+  *Upgrade:* the proof and scoring in one REPEATABLE READ unit, the day a
+  reviewer relies on the matrix as one consistent snapshot.
 - **Every upstream carried into a canonical prompt is bound to this build.**
   Before the call, each accepted upstream record is validated against its
   call-time identity and current authority; a mismatch refuses the call.
@@ -455,7 +486,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   reader that can be handed one.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
-  re-deriving the proof and re-reading every artifact for its citations. Two of
+  re-deriving the proof (a run is scored from its proof, not by re-reading
+  artifacts). Two of
   those are deliberate: the matrix stands alone, and reading a proof back from
   the harness would make it trust a caller's copy of what the store said
   (invariant 3). Against a provider call per node none of it shows. *Upgrade:*

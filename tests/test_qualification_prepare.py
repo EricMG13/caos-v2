@@ -354,10 +354,9 @@ LITE_SUBJECT = run_inputs.RunSubject(
 )
 
 
-def _claims(case: QualificationCase) -> QualificationCase:
-    return replace(
-        case, profile_id="FULL_CREDIT_32", selection_id="DEEP_RESEARCH", subject=None
-    )
+def _disabled(case: QualificationCase) -> QualificationCase:
+    """The case on a route the adapter does not execute: it still prepares (§42.2)."""
+    return replace(case, profile_id="FULL_CREDIT_32", selection_id="DEEP_RESEARCH")
 
 
 def _lite(case: QualificationCase, subject_: object) -> QualificationCase:
@@ -372,12 +371,13 @@ def _lite(case: QualificationCase, subject_: object) -> QualificationCase:
 def test_a_canonical_case_pins_its_declared_subject(ready: Fixture) -> None:
     conn, blobs, harness, qualification = ready
     first, second = qualification.cases
-    mixed = QualificationSet((_claims(first), _lite(second, LITE_SUBJECT)))
+    mixed = QualificationSet((_disabled(first), _lite(second, LITE_SUBJECT)))
 
-    claims, canonical = subject.prepare(conn, blobs, harness, qualification=mixed)
+    disabled, canonical = subject.prepare(conn, blobs, harness, qualification=mixed)
 
-    assert claims.input.format_version == 1 and claims.input.subject is None
-    assert claims.input.adapter_version == methodology.CLAIMS_ADAPTER_VERSION
+    assert disabled.input.format_version == 2
+    assert disabled.input.subject == first.subject
+    assert disabled.input.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
     assert canonical.input.format_version == 2
     assert canonical.input.subject == LITE_SUBJECT
     assert canonical.input.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
@@ -403,7 +403,7 @@ def test_a_canonical_case_pins_its_declared_subject(ready: Fixture) -> None:
 def test_a_canonical_case_without_a_valid_subject_leaves_no_setup(
     ready: Fixture, declared: object
 ) -> None:
-    """Refused whole-set, before the claims case ahead of it is written."""
+    """Refused whole-set, before the case ahead of it is written."""
     conn, blobs, harness, qualification = ready
     first, second = qualification.cases
     assert not run_inputs.valid_subject(declared)
@@ -420,10 +420,12 @@ def test_a_canonical_case_without_a_valid_subject_leaves_no_setup(
     _unapproved_and_unspent(conn, harness)
 
 
-def test_a_claims_case_declaring_a_subject_leaves_no_setup(ready: Fixture) -> None:
+def test_a_case_on_any_route_without_a_subject_leaves_no_setup(
+    ready: Fixture,
+) -> None:
     conn, blobs, harness, qualification = ready
     first, second = qualification.cases
-    declared = replace(_claims(second), subject=LITE_SUBJECT)
+    declared = replace(_disabled(second), subject=None)
     with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
         subject.prepare(
             conn, blobs, harness, qualification=QualificationSet((first, declared))

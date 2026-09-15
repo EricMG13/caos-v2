@@ -13,8 +13,7 @@ import pytest
 from test_accepted_owner import _billed, _count
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import MODEL, REPORTED, VENDORED
-from test_run_inputs import _prepare
-from test_run_subject import SUBJECT
+from test_run_inputs import SUBJECT, _prepare
 
 import server.store as store
 from server import methodology

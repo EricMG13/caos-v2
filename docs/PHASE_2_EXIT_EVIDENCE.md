@@ -61,9 +61,10 @@ in-flight call prevents fresh acceptance from treating it as live evidence.**
 `test_run_evidence.py`: `test_equal_bytes_do_not_admit_a_post_pin_source`,
 `test_run_read_keeps_captured_membership_after_later_admission`,
 `test_run_read_compares_each_captured_current_identity`.
-`test_orchestration_proof.py`: `test_a_source_admitted_after_the_pin_cannot_support_the_proof`,
-`test_a_readmitted_copy_of_a_withdrawn_pinned_source_does_not_revive_the_proof`,
-`test_a_withdrawn_source_takes_the_proof_with_it`.
+`test_canonical_proof.py` (slice f-1c; the claims-run
+`test_orchestration_proof.py` is gone): `test_a_source_admitted_after_the_pin_cannot_support_the_proof`,
+`test_a_readmitted_copy_of_a_withdrawn_source_does_not_revive_the_proof`,
+`test_a_withdrawn_source_refuses_the_proof_and_the_deliverable`.
 `test_execution_freshness.py`: `test_a_change_waits_for_the_context_unit_and_is_caught_after_the_call[withdraw]`,
 `test_accept_refuses_what_changed_after_the_bill_committed[withdraw_cited|withdraw_uncited]`.
 
@@ -84,8 +85,9 @@ escapes.**
 
 **5. A blocked valid route remains blocked, and blocked CP-5 does not release
 CP-6.**
-`test_runtime.py`: `test_a_blocked_cp5_does_not_release_cp6[Blocked|Passed]`.
 `test_route_resolution.py`: `test_qa_gate_blocks_cp6_until_cp5_accepted` (5 QA values).
+`test_runtime.py`: `test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt`
+(slice f-1c; replaces `test_a_blocked_cp5_does_not_release_cp6`).
 `test_loop_charges.py`: `test_a_node_the_gate_blocked_costs_no_call_and_no_charge`
 (ends BLOCKED; a second `run_route` refuses `RUN_NOT_RUNNING` with no call or charge).
 `test_run_stream.py`: `test_a_blocked_run_refuses_new_attempts`,
@@ -95,6 +97,12 @@ CP-6.**
 tests above and in checks 1 and 7 keep their names and now run the canonical
 LITE route; the probe blocks CP-L10 through CP-0's T8 register. The CP-5 ->
 CP-6 runtime test stays on FULL under the temporary claims dispatch (§42.1).
+*Phase 3 (slice f-1c):* the dispatch is retired and the FULL route, the only
+one carrying the CP-5 -> CP-6 QA_GATE, is disabled at execution (§42.2). The
+rule is proven by the pure route test above; at runtime the approved FULL run
+refuses `HANDOFF_MODULE_UNSUPPORTED` with no attempt, reservation or call
+(`test_disabled_routes.py` covers FULL and DEEP at `execution_input`,
+`run_route` and acceptance).
 *Phase 3 (slice f-1a):* every named test in `test_loop_charges.py`,
 `test_execution_freshness.py`, `test_execution_billing.py` and
 `test_accepted_owner.py` (checks 1, 3, 4, 5, 6 and 7) keeps its name and now
@@ -108,8 +116,8 @@ directly (pre-call unit, reservation kept).
 `test_upstream_record_from_another_build_is_refused_before_any_call` gives
 CP-0's record another build, manifest, authority digest or adapter, refused
 `ORCHESTRATION_BUILD_MOVED` on both entries through the one
-`record_authority_matches` check the proof and the deliverable share. The
-claims executor has no freshness tests left until f-1c removes it.
+`record_authority_matches` check the proof and the deliverable share. Since
+f-1c no pin reaches the claims executor.
 
 **6. Two workers/retries cannot accept different authoritative results for the
 same node generation; late responses after cancellation are recorded as

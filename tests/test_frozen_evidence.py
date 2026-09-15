@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from test_case_ordering import _blocked
-from test_run_inputs import Prepared, prepared
+from test_run_inputs import SUBJECT, Prepared, prepared
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
@@ -26,7 +26,7 @@ def test_ordinary_mutation_cannot_change_pinned_evidence(
     prepared: Prepared, table: str
 ) -> None:
     conn, run, sources, bundle, _ = prepared
-    pin = pin_run_input(conn, run, sources.version, bundle)
+    pin = pin_run_input(conn, run, sources.version, bundle, subject=SUBJECT)
     source = sources.members[0].source_id
     with pytest.raises(psycopg.Error):
         conn.execute(f"UPDATE {table} SET text = 'two' WHERE source_id = %s", (source,))

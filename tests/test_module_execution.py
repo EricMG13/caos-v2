@@ -135,7 +135,7 @@ def _attempt(
 
 
 def test_the_retired_envelope_still_serialises_canonically() -> None:
-    """Pure: a `ModuleOutcome`'s claims `Envelope` (retired by f-1c, gone in f-2b)
+    """Pure: the claims `Envelope` (unreachable since f-1c, deleted in f-2b)
     serialises to one byte string whatever order it was built in."""
     from server.methodology.runner import canonical
 
