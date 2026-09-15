@@ -410,11 +410,24 @@ def test_the_prompt_carries_exact_upstream_bytes_and_every_block(
 def test_the_prompt_repeats_the_closed_contract_after_evidence(
     module_id: str,
 ) -> None:
-    prompt = _prompt(identity(module_id))
+    gate = handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), gate)
+    upstream = () if module_id == "CP-0" else ((ref, gate),)
+    of = identity(module_id, tuple(r for r, _ in upstream))
+    prompt = _prompt(of, upstream=upstream)
     tag = _tag(prompt)
     reminder = prompt.split(f"--- END EVIDENCE {tag} ---\n", 1)[1]
+    compact = " ".join(reminder.split())
 
     assert "Return exactly one JSON object" in reminder
+    assert "add only the model-authored fields named in the final check" in prompt
+    authored = (
+        "confidence_score, confidence_band, qa_status, committee_status, "
+        "limitation_flags, validation_warnings, downstream_consumers"
+    )
+    assert f"Add only these model-authored front-matter fields: {authored}." in compact
+    assert "Do not add any other front-matter fields" in compact
+    assert "appears exactly once on its cited evidence page" in compact
     assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
     assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
     t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"

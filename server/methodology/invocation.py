@@ -407,10 +407,11 @@ Rules that will cause your answer to be refused if broken:
   {filename}.
 - The front matter carries the host-owned lines below exactly as given,
   character for character and quotes included: change, reorder or drop none of
-  them. Add the fields the authority asks you to author after them.
+  them. After them, add only the model-authored fields named in the final check.
 - Every citation's `matched_text` is whole words copied character for character
-  from one line of the evidence below, and the same words appear verbatim in the
-  Markdown body after the front matter.
+  from one line of the evidence below, appears exactly once on its cited
+  evidence page, and appears verbatim in the Markdown body after the front
+  matter.
 - Give at least one citation. `source_id` is one of the ids given below, and
   `page` is the page given with it.
 - Use no keys other than those shown.
@@ -427,9 +428,13 @@ _FINAL_CHECK = """\
 Return exactly one JSON object with only `canonical_markdown` and `citations`.
 Inside `canonical_markdown`, copy the host-owned front matter exactly and use
 exactly these {heading_count} H2 headings once, in this order: {headings}.
+Add only these model-authored front-matter fields: {authored_fields}. Do not add
+any other front-matter fields; `owned_object`, `schema_family`, `runtime_output`
+and `canonical_filename` belong outside canonical front matter.
 Include every register required by the authority. For every citation, copy
-`matched_text` from one evidence line and include the same whole words verbatim
-in the Markdown body after the front matter. Include at least one citation.
+`matched_text` from one evidence line that appears exactly once on its cited
+evidence page, and include the same whole words verbatim in the Markdown body
+after the front matter. Include at least one citation.
 """
 
 _CP0_FINAL_CHECK = """\
@@ -860,7 +865,8 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + evidence
     )
     # Host-owned values join the derivation: none of them can pre-compute a tag.
-    front_matter = _yaml(invocation_fields(contract, identity))
+    host_fields = invocation_fields(contract, identity)
+    front_matter = _yaml(host_fields)
     untagged = front_matter + sections
     tag = hashlib.sha256(untagged.encode("utf-8")).hexdigest()[:16]
     prompt = (
@@ -898,8 +904,16 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         )
     canonical_headings = contract.validate_handoff.CANONICAL_HEADINGS
     headings = " -> ".join(canonical_headings)
+    authored_fields = ", ".join(
+        name
+        for name in contract.validate_handoff.REQUIRED_FIELDS
+        if name not in host_fields
+    )
     prompt += _FINAL_CHECK.format(
-        tag=tag, heading_count=len(canonical_headings), headings=headings
+        tag=tag,
+        heading_count=len(canonical_headings),
+        headings=headings,
+        authored_fields=authored_fields,
     )
     if identity.module_id == GATE_MODULE:
         t8_header = "| " + " | ".join(contract.navigation.NEW_HEADERS) + " |"
