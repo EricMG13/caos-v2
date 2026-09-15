@@ -206,7 +206,10 @@ def test_postbilling_citation_cleanup_preserves_money_and_original_refusal(
         raise psycopg.OperationalError("private")
 
     def fault(
-        conn: StoreConnection, *, delivered: set[UUID], citations: Sequence[Citation]
+        conn: StoreConnection,
+        *,
+        delivered: Mapping[UUID, frozenset[str]],
+        citations: Sequence[Citation],
     ) -> list[AnchoredCitation]:
         anchored = verify_citations(conn, delivered=delivered, citations=citations)
         if broken_cleanup:

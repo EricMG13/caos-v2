@@ -39,7 +39,7 @@ from server.engine.runtime import ProviderResult
 from server.methodology import runner
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import HandoffOutcome, execute_handoff
-from server.methodology.executor import Assignment
+from server.methodology.executor import Assignment, captured_blocks
 from server.methodology.handoff import read_record, validate_markdown
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
@@ -323,3 +323,32 @@ def test_billing_survives_every_analytical_refusal(
     assert _refused(harness, "CP-0", completions) is RefusalCode(code)
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert _diagnostic(harness) == _body(completions.bodies[0])
+
+
+def test_a_quote_outside_the_captured_blocks_refuses_the_handoff(
+    harness: _Harness,
+) -> None:
+    """Slice 3.2e at the executor: the quoted line is not among the run's
+    captured blocks, so it was never delivered and cannot be cited, although
+    its source was and its tokens are still indexed."""
+    conn, source = harness.conn, harness.source_id
+    whole = captured_blocks(conn, harness.run_id)
+    assert whole[source] == frozenset({"b000000", "b000001"})
+    row = conn.execute("SELECT current_database()").fetchone()
+    assert row is not None and str(row[0]).startswith("caos_test_")
+    conn.rollback()
+    with conn.transaction():  # test-only narrowing; no production knob exists
+        conn.execute("ALTER TABLE source_blocks DISABLE TRIGGER evidence_immutable")
+        conn.execute(
+            "DELETE FROM source_blocks WHERE source_id = %s AND block_id = 'b000001'",
+            (source,),
+        )
+        conn.execute("ALTER TABLE source_blocks ENABLE TRIGGER evidence_immutable")
+    narrowed = captured_blocks(conn, harness.run_id)
+    assert narrowed == {**whole, source: frozenset({"b000000"})}
+    conn.rollback()
+
+    quoting = CanonicalCompletions(source)
+    assert _refused(harness, "CP-0", quoting) is RefusalCode.CITATION_NOT_DELIVERED
+    [prompt] = quoting.prompts
+    assert QUOTE not in prompt

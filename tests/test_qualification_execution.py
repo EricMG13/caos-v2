@@ -530,20 +530,23 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
         patch.setattr(psycopg.Connection, "execute", sql)
         result = _run(ready, prepared)
     # Per node: evidence is read in the pre-call authority unit, then the
-    # post-call unit rechecks input.
-    node = ["node", "blocks", "node"]
-    case = ["input", "members", *node * 3, "record"]
+    # post-call unit rechecks input and anchors in the captured blocks, which
+    # the proof reads again inside the record and the matrix units (3.2e).
+    unit = ["node", "blocks"]
+    case = ["input", "members", *unit * 6, "record", "blocks"]
     assert [name for name, _ in observed] == [
         *["input", "members"] * 2,
         *case,
         *case,
         "matrix",
+        "blocks",
+        "blocks",
     ]
-    shared = (0, 2, 4, 6, 9, 12, 16, 18, 21, 24)
-    for start in shared:
+    starts = range(0, len(observed) - 2, 2)
+    for start in starts:
         assert observed[start][1] == observed[start + 1][1]
-    units = (*shared, 8, 11, 14, 15, 20, 23, 26, 27, 28)
-    assert len({observed[i][1] for i in units}) == len(units)
+    assert observed[-1][1] == observed[-3][1]
+    assert len({observed[i][1] for i in starts}) == len(starts)
     assert conn.info.transaction_status.name == "IDLE"
     assert result.matrix is not None and len(result.matrix.rows) == 2
     assert len(cast(_Completions, harness.completions).prompts) == 6

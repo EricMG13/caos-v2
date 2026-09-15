@@ -24,10 +24,11 @@ single enclosing rectangle would cover text the quote does not contain.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
+from server.evidence.ingest import BLOCK_PREFIX
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -86,6 +87,10 @@ def anchor_citation(
 
 
 def _locate(tokens: list[_Token], page: int, matched_text: str) -> list[Rect]:
+    return _rectangles(_unique_run(tokens, matched_text), page)
+
+
+def _unique_run(tokens: list[_Token], matched_text: str) -> list[_Token]:
     """The one search rule both entry points use: exactly once, never across a
     region."""
     words = matched_text.split()
@@ -98,13 +103,13 @@ def _locate(tokens: list[_Token], page: int, matched_text: str) -> list[Rect]:
         raise Refusal(RefusalCode.CITATION_NOT_LOCATED)
     if len(matches) > 1:
         raise Refusal(RefusalCode.CITATION_AMBIGUOUS)
-    return _rectangles(matches[0], page)
+    return matches[0]
 
 
 def verify_citations(
     conn: StoreConnection,
     *,
-    delivered: set[UUID],
+    delivered: Mapping[UUID, frozenset[str]],
     citations: Sequence[Citation],
 ) -> list[AnchoredCitation]:
     """Re-derive every citation, or refuse the set.
@@ -115,7 +120,12 @@ def verify_citations(
 
     A citation may only name evidence actually delivered to that node
     (`SYSTEM_SPEC.md` section 5) -- a real source in the same case is still
-    something this node was not given.
+    something this node was not given. `delivered` maps each source to the
+    exact blocks the node was handed, and the one match must lie wholly within
+    their lines: a quote on an undelivered page, or wrapping onto an undelivered
+    line, refuses `CITATION_NOT_DELIVERED`. Ambiguity is still counted over the
+    whole page (`docs/DECISIONS.md` section 44.5), so a quote repeated on a line
+    the node never saw is ambiguous rather than resolved to the copy it did.
 
     An artifact carries many citations and they cluster: several quotes from one
     page of one source is the normal shape. Both lookups are therefore fetched
@@ -125,17 +135,25 @@ def verify_citations(
     """
     pages: dict[tuple[UUID, int], list[_Token]] = {}
     digests: dict[UUID, str] = {}
+    ordinals: dict[UUID, dict[int, str]] = {}
 
     anchored = []
     for citation in citations:
-        if citation.source_id not in delivered:
+        blocks = delivered.get(citation.source_id)
+        if blocks is None:
             raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
         key = (citation.source_id, citation.page)
         if key not in pages:
             pages[key] = _page_tokens(conn, citation.source_id, citation.page)
         if citation.source_id not in digests:
             digests[citation.source_id] = _document_sha256(conn, citation.source_id)
-        boxes = _locate(pages[key], citation.page, citation.matched_text)
+        run = _unique_run(pages[key], citation.matched_text)
+        if citation.source_id not in ordinals:
+            ordinals[citation.source_id] = _line_blocks(conn, citation.source_id)
+        lines = ordinals[citation.source_id]
+        if any(lines.get(token.line_id) not in blocks for token in run):
+            raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
+        boxes = _rectangles(run, citation.page)
         anchored.append(
             AnchoredCitation(
                 document_sha256=digests[citation.source_id],
@@ -159,6 +177,23 @@ def _page_tokens(conn: StoreConnection, source_id: UUID, page: int) -> list[_Tok
         (source_id, page),
     ).fetchall()
     return [_Token(*row) for row in rows]
+
+
+def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, str]:
+    """Line id to the block admission wrote for it.
+
+    Admission packs one block per line, numbering the source's distinct line
+    ids in ascending order (`server/evidence/ingest.py` `_blocks`); this is
+    that numbering read back from the token index, once per source.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s"
+        " ORDER BY line_id",
+        (source_id,),
+    ).fetchall()
+    return {
+        int(row[0]): f"{BLOCK_PREFIX}{ordinal:06d}" for ordinal, row in enumerate(rows)
+    }
 
 
 def _match_at(tokens: list[_Token], start: int, words: Sequence[str]) -> list[_Token]:
