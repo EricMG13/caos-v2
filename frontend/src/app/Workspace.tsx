@@ -25,6 +25,7 @@ import { Rail } from "@/chrome/Rail";
 import { Ribbon } from "@/chrome/Ribbon";
 import { SectionTabs } from "@/chrome/SectionTabs";
 import { VerdictStrip } from "@/chrome/VerdictStrip";
+import { QualificationStrip } from "@/chrome/QualificationStrip";
 import { composeChrome, markDisabled } from "@/chrome/compose";
 import { fallbackChrome } from "@/chrome/fallback";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
@@ -85,10 +86,12 @@ export function Workspace({ section }: { section: Section }) {
   const caseId = params.get("case");
   const runId = params.get("run");
   const revisionId = params.get("revision");
+  const qualificationEvidence = params.get("qualification");
   const carried = new URLSearchParams();
   if (caseId) carried.set("case", caseId);
   if (runId) carried.set("run", runId);
   if (revisionId) carried.set("revision", revisionId);
+  if (qualificationEvidence) carried.set("qualification", qualificationEvidence);
   const caseSearch = carried.toString();
   const fixture = import.meta.env.MODE === "demo" ? params.get("fixture") : null;
   // A disabled section, or a case section with no case, sends no request and
@@ -97,7 +100,7 @@ export function Workspace({ section }: { section: Section }) {
     sectionUrl(section, { case: caseId, run: runId, revision: revisionId, fixture }) !== null;
   // Everything the reader sees is keyed on the request that produced it, so a
   // navigation shows `loading` without a render-time state write.
-  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${fixture ?? ""}`;
+  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${qualificationEvidence ?? ""}|${fixture ?? ""}`;
   const [held, setHeld] = useState<Keyed<Held> | null>(null);
   const [tabChoice, setTabChoice] = useState<Keyed<string> | null>(null);
   const authority = useRef<Authority>(INITIAL);
@@ -218,6 +221,7 @@ export function Workspace({ section }: { section: Section }) {
         onSelect={(id) => setTabChoice({ key, value: id })}
       />
       <VerdictStrip verdict={(chrome ?? fallback).verdict} />
+      <QualificationStrip evidenceSha256={qualificationEvidence} />
       <div className="frame">
         <Rail
           section={section}
