@@ -529,11 +529,12 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
         patch.setattr(executor, "execution_input", boundary("node", execution_input))
         patch.setattr(psycopg.Connection, "execute", sql)
         result = _run(ready, prepared)
-    # Per node: evidence is read in the pre-call authority unit, and the
+    # Per node: the whole context is read and bounded before any attempt exists
+    # (3.3b), evidence is read again in the pre-call authority unit, and the
     # post-call unit rechecks input and anchors in those same deliveries without
     # reading the blocks again; the proof reads them inside the record and the
     # matrix units (3.2e).
-    unit = ["node", "blocks", "node"]
+    unit = ["node", "blocks", "node", "blocks", "node"]
     case = ["input", "members", *unit * 3, "record", "blocks"]
     assert [name for name, _ in observed] == [
         *["input", "members"] * 2,
@@ -643,13 +644,9 @@ def test_native_execution_read_failures_clean_owned_work_and_retain_purchases(
             "budget_ledger",
             "artifacts",
         ):
-            # A blocks read now fails inside the node's unit, after its
-            # reservation and before any call.
-            held = int(
-                fault in {"blocks", "rollback"}
-                and table in {"run_attempts", "budget_reservations"}
-            )
-            assert _count(observer, "SELECT count(*) FROM " + table) == paid + held
+            # A blocks read now fails in the node's context check (3.3b),
+            # before any attempt, reservation or call.
+            assert _count(observer, "SELECT count(*) FROM " + table) == paid
         for [digest] in observer.execute("SELECT artifact_sha256 FROM artifacts"):
             assert blobs.get(digest)
         if paid == 3:

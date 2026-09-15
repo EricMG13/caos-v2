@@ -243,6 +243,9 @@ class _ArbitraryProvider:
     calls: int = 0
     model: str = MODEL
 
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        pass
+
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
@@ -952,6 +955,9 @@ class _Charged:
     harness: _Harness
     charge: Decimal | None
     mutate: Callable[[], None] = lambda: None
+
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        pass
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID

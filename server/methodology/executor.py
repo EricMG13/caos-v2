@@ -21,9 +21,8 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.gates import execution_input
 
-# The skill is the authority; the reference files are what it may consult. Only
-# the skill goes into the prompt, because the reference set of one module runs to
-# tens of thousands of tokens and the budget is invariant 8's, not a suggestion.
+# The skill is the authority and the first delivered file; the vendor validators
+# read it. Every delivered file reaches the prompt (§45.1, `invocation.py`).
 SKILL = "SKILL.md"
 
 

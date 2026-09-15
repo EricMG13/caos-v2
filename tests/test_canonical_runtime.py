@@ -40,7 +40,7 @@ from test_loop_charges import ESTIMATE, MODEL, REPORTED
 from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
-from server.methodology import canonical, executor
+from server.methodology import canonical, executor, invocation
 from server.methodology.canonical import accepted_projections, blocked_verdict
 from server.methodology.handoff import (
     Projections,
@@ -231,6 +231,9 @@ class _UnbilledBlocked:
 
     model: str = MODEL
 
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        pass
+
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
     ) -> ProviderResult:
@@ -327,6 +330,9 @@ class _ClaimsBlocked:
     inner: ModuleProvider
     module: str = "CP-0"
     model: str = MODEL
+
+    def check_context(self, route_node_id: str, module_id: str) -> None:
+        self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -523,4 +529,35 @@ def test_a_failure_while_deriving_context_makes_no_call(
             "SELECT count(*) FROM call_outcomes WHERE attempt_id=%s", (attempt,)
         ).fetchone()
     assert row == (0,)
+    _still_running(harness)
+
+
+def test_a_changed_root_reference_refuses_before_the_call(harness: _Harness) -> None:
+    """§45.1 through the runtime: a root file SKILL.md names, changed on disk
+    under an unchanged manifest, refuses before any attempt, reservation or call."""
+    canon = harness.bundle.root / "CANON_SHARED.md"
+    canon.write_bytes(canon.read_bytes().replace(b"CP", b"CQ", 1))
+    answers = _answers(harness)
+    assert _run_route(harness, _module_provider(harness, answers)) is (
+        RefusalCode.AUTHORITY_BYTES_MISMATCH
+    )
+    assert answers.calls == 0
+    assert _counts(harness) == (0, [], 0, 0, 0)
+    _still_running(harness)
+
+
+def test_an_over_ceiling_context_refuses_without_truncation_or_call(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§45.3 through the runtime: the ceiling is met before `start_attempt`, so
+    an over-ceiling context leaves no attempt, reservation, call or charge.
+    (Exactness at the ceiling, and no truncation, is proven on the prompt in
+    `test_handoff_invocation.py`.)"""
+    monkeypatch.setattr(invocation, "MAX_REQUEST_BYTES", 4096)
+    answers = _answers(harness)
+    assert _run_route(harness, _module_provider(harness, answers)) is (
+        RefusalCode.CONTEXT_OVER_CEILING
+    )
+    assert answers.calls == 0
+    assert _counts(harness) == (0, [], 0, 0, 0)
     _still_running(harness)
