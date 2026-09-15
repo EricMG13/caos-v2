@@ -32,7 +32,7 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import BLOCKING, NamedObjects, ResolvedRoute, RouteNode
-from server.evidence.citations import AnchoredCitation
+from server.evidence.citations import AnchoredCitation, Citation
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -434,7 +434,9 @@ and `canonical_filename` belong outside canonical front matter.
 Include every register required by the authority. For every citation, copy
 `matched_text` from one evidence line that appears exactly once on its cited
 evidence page, and include the same whole words verbatim in the Markdown body
-after the front matter. Include at least one citation.
+after the front matter. Use only evidence whose host header says
+`citation_candidate: true`; copy that block's complete text without shortening
+or combining it. Include at least one citation.
 """
 
 _CP0_FINAL_CHECK = """\
@@ -796,6 +798,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     upstream: Sequence[tuple[UpstreamRef, bytes]],
     upstream_citations: Mapping[str, tuple[AnchoredCitation, ...]],
     route: ResolvedRoute,
+    citation_candidates: Sequence[Citation] = (),
 ) -> str:
     """The task, the host-owned front matter, the host's own steps, every
     delivered authority file, upstream, its citation register, evidence.
@@ -813,6 +816,8 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     section's own bytes, the host-owned front matter included, so neither a
     section's text nor a host-owned field value can reproduce one. Nothing is
     cut or summarised; the caller bounds it with `within_request_ceiling`.
+    `citation_candidates` are exact delivered lines the host has already
+    anchored uniquely; the final verifier remains authoritative.
     """
     if identity.module_id not in ADAPTER_MODULES:
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
@@ -841,8 +846,16 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         if gate_expects
         else ""
     )
+    candidates = set(citation_candidates)
     evidence = "\n\n".join(
-        f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}"
+        "citation_candidate: {}\nsource_id: {}\npage: {}\n{}".format(
+            str(
+                Citation(item.source_id, item.page, item.text.value) in candidates
+            ).lower(),
+            item.source_id,
+            item.page,
+            item.text.value,
+        )
         for item in delivered
     )
     sections = (

@@ -36,7 +36,7 @@ from server.engine.route import (
     node_states,
     resolve_route,
 )
-from server.evidence.citations import AnchoredCitation, Rect
+from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.bundle import (
     delivered_authority,
     verified_bytes,
@@ -92,6 +92,7 @@ def _prompt(
     of: HostIdentity,
     delivered: list[Delivery] | None = None,
     upstream: tuple[tuple[UpstreamRef, bytes], ...] = (),
+    citation_candidates: tuple[Citation, ...] = (),
 ) -> str:
     return build_handoff_prompt(
         CONTRACT,
@@ -102,6 +103,7 @@ def _prompt(
         upstream=upstream,
         upstream_citations={ref.route_node_id: ANCHORED for ref in of.upstream},
         route=LITE_ROUTE,
+        citation_candidates=citation_candidates,
     )
 
 
@@ -413,7 +415,13 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     ref = upstream_ref(identity("CP-0"), gate)
     upstream = () if module_id == "CP-0" else ((ref, gate),)
     of = identity(module_id, tuple(r for r, _ in upstream))
-    prompt = _prompt(of, upstream=upstream)
+    delivered = _delivered()
+    candidate = Citation(
+        delivered[0].source_id, delivered[0].page, delivered[0].text.value
+    )
+    prompt = _prompt(
+        of, delivered=delivered, upstream=upstream, citation_candidates=(candidate,)
+    )
     tag = _tag(prompt)
     reminder = prompt.split(f"--- END EVIDENCE {tag} ---\n", 1)[1]
     compact = " ".join(reminder.split())
@@ -427,6 +435,13 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     assert f"Add only these model-authored front-matter fields: {authored}." in compact
     assert "Do not add any other front-matter fields" in compact
     assert "appears exactly once on its cited evidence page" in compact
+    assert (
+        f"citation_candidate: true\nsource_id: {candidate.source_id}\n"
+        f"page: {candidate.page}\n{candidate.matched_text}" in prompt
+    )
+    assert "Use only evidence whose host header says `citation_candidate: true`" in (
+        compact
+    )
     assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
     assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
     t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"
