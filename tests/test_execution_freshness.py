@@ -1342,6 +1342,7 @@ def test_direct_executor_derives_its_context_from_the_pins(harness: _Harness) ->
 def _accepted_gate(
     harness: _Harness,
     record_fields: dict[str, str] | None = None,
+    projected: dict[str, object] | None = None,
     /,
     **identity: object,
 ) -> str:
@@ -1354,10 +1355,12 @@ def _accepted_gate(
     )
     assert result.record_sha256 is not None
     record = result.record_sha256
-    if identity or record_fields:
+    if identity or record_fields or projected:
         stored = _decoded_record(harness.blobs.get(record))
         moved = replace(stored.identity, **identity)  # type: ignore[arg-type]
         foreign = replace(stored, identity=moved, **(record_fields or {}))  # type: ignore[arg-type]
+        shown = replace(stored.projections, **(projected or {}))  # type: ignore[arg-type]
+        foreign = replace(foreign, projections=shown)
         record = harness.blobs.put(record_bytes(foreign))
     accepted = Accepted(
         result.artifact_sha256,
@@ -1435,6 +1438,17 @@ def test_upstream_record_from_another_build_is_refused_before_any_call(
     _accepted_gate(harness, {field: "0" * 64})
     code = _refused_before_cp_l10_call(harness, entry)
     assert code is RefusalCode.ORCHESTRATION_BUILD_MOVED
+
+
+@pytest.mark.parametrize("entry", ["frontier", "module"])
+def test_upstream_record_disagreeing_with_its_markdown_is_refused_before_any_call(
+    harness: _Harness, entry: str
+) -> None:
+    """CP-0's record binds its invocation and build but projects what its
+    Markdown does not say: it never feeds CP-L10's prompt."""
+    _accepted_gate(harness, None, {"qa_status": "Restricted"})
+    code = _refused_before_cp_l10_call(harness, entry)
+    assert code is RefusalCode.ARTIFACT_RECORD_MISMATCH
 
 
 def test_upstream_rewritten_during_the_call_is_refused_keeping_the_bill(
@@ -1637,8 +1651,10 @@ def test_an_unreadable_upstream_blob_is_refused_before_any_call(
         _provider(harness, completion).execute(
             node.route_node_id, node.module_id, attempt_id=attempt
         )
+    # The record check reads the Markdown first, so an unreadable upstream is a
+    # record that no longer binds its bytes.
     assert (refused.value.code, refused.value.__cause__, completion.calls) == (
-        RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE,
+        RefusalCode.ARTIFACT_RECORD_MISMATCH,
         None,
         0,
     )

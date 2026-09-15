@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
 from conftest import approve_run
-from test_module_execution import VENDORED
+from test_loop_charges import VENDORED
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
