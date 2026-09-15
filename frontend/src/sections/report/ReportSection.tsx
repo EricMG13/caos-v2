@@ -1,7 +1,17 @@
 // The saved Report payload, read only. Text stays text: this surface never
 // interprets markdown, follows evidence, or offers a legacy draft action.
 import type { ReportDocument } from "@/wire/v1";
+import type { KeyboardEvent } from "react";
 
+function scrollArtifact(event: KeyboardEvent<HTMLPreElement>) {
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    event.preventDefault();
+    event.currentTarget.scrollBy({ left: event.key === "ArrowRight" ? 40 : -40 });
+  }
+}
+
+/* Keyboard scroll makes static, wide canonical text reachable in every browser. */
+/* eslint-disable jsx-a11y/no-noninteractive-element-interactions */
 function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][number] }) {
   return (
     <section className="pnl" data-report-artifact={artifact.route_node_id}>
@@ -20,8 +30,26 @@ function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][
           <dt>Scope</dt>
           <dd>{artifact.decision_scope}</dd>
         </dl>
-        <pre>{artifact.markdown}</pre>
-        <pre>{artifact.record}</pre>
+        <pre
+          className="tscroll artifact-scroll"
+          data-report-artifact-text
+          aria-label="Saved artifact markdown"
+          role="region"
+          tabIndex={0}
+          onKeyDown={scrollArtifact}
+        >
+          {artifact.markdown}
+        </pre>
+        <pre
+          className="tscroll artifact-scroll"
+          data-report-artifact-record
+          aria-label="Saved artifact record"
+          role="region"
+          tabIndex={0}
+          onKeyDown={scrollArtifact}
+        >
+          {artifact.record}
+        </pre>
         <div className="note" data-report-limitations>
           <b>Limitations.</b> {artifact.limitation_flags.join(", ") || "none"}
         </div>
@@ -32,6 +60,7 @@ function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][
     </section>
   );
 }
+/* eslint-enable jsx-a11y/no-noninteractive-element-interactions */
 
 export function ReportSection({ document }: { document: ReportDocument; tab: string | null }) {
   const { body } = document;

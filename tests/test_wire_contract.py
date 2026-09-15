@@ -470,6 +470,7 @@ def test_event_names_and_the_page_document_are_in_the_committed_schema() -> None
         "run_terminal",
         "sources_changed",
         "runs_changed",
+        "filing_changed",
     ]
     assert defs["EventName"] == {"enum": names, "type": "string"}
     assert list(get_args(wire.EventName)) == names

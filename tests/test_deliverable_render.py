@@ -109,6 +109,24 @@ def test_the_deliverable_renders_from_the_frozen_payload_alone(
     assert b"Module provenance" in first
 
 
+def test_cp_cf_render_discloses_its_host_performed_projection() -> None:
+    payload = {
+        **PAYLOAD_DATA,
+        "artifacts": [
+            _artifact(
+                projections={
+                    "module_id": "CP-CF",
+                    "qa_status": "Passed",
+                    "committee_status": "Committee Ready",
+                    "decision_scope": "COMMITTEE",
+                    "limitation_flags": [],
+                }
+            )
+        ],
+    }
+    assert b"CP-CF forecast projection performed by the host" in render(payload)
+
+
 def test_the_render_reaches_no_network_and_no_clock() -> None:
     """It prints to paper and has to render the same in ten years. A page that
     fetched a stylesheet would render differently the day the stylesheet moved."""

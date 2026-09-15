@@ -46,11 +46,11 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         "CASE_CREATED": None,
         "GATE_RELEASED:SOURCE_SET": "runs_changed",
         "GATE_RELEASED:RESEARCH_PLAN": "runs_changed",
-        # Report and Committee are not enabled: nothing on screen reads these.
+        # Saving creates a new exact selection; filing changes the selection on screen.
         "REVISION_SAVED": None,
-        "OPINION_SIGNED": None,
-        "DELIVERABLE_FROZEN": None,
-        "DELIVERABLE_FILED": None,
+        "OPINION_SIGNED": "filing_changed",
+        "DELIVERABLE_FROZEN": "filing_changed",
+        "DELIVERABLE_FILED": "filing_changed",
     }
 )
 
