@@ -100,6 +100,11 @@ def canonical_payload(
         pinned = pinned_live_sources(conn, run_id)
         captured = captured_blocks(conn, run_id)
         reader = _Reader(conn, blobs, bundle, route, pinned, captured)
+        # One reading of the accepted pairs for every record's lineage.
+        reader.pairs = {
+            node: (artifact, None if record is None else str(record))
+            for node, (_attempt, artifact, record) in rows.items()
+        }
         artifacts = []
         for node in route.nodes:
             attempt, artifact, record_sha = rows[node.route_node_id]
@@ -144,6 +149,7 @@ class _Reader:
         self.contract = load_vendor_contract(bundle)
         self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
         self.pinned = pinned
+        self.pairs: dict[str, tuple[str, str | None]] = {}
         # The captured blocks of the pinned live sources: what any node was handed.
         self.delivered = {
             source: captured.get(source, frozenset()) for source in pinned.values()
@@ -173,7 +179,7 @@ class _Reader:
             raise mismatch
         upstream = record.identity.upstream
         if record.lineage != accepted_lineage(
-            self.conn, self.blobs, run_id=run_id, upstream=upstream
+            self.conn, self.blobs, run_id=run_id, upstream=upstream, accepted=self.pairs
         ):
             raise mismatch
         markdown = self.blobs.get(artifact)

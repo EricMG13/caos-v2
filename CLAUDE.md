@@ -376,18 +376,31 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   transitive accepted chain behind the direct upstream, each (artifact, record)
   pair read by `stored_lineage` from the direct upstream records and required
   to be each node's accepted pair now. v1 records refuse; there is no backfill.
-  A reader compares a record's lineage with `accepted_lineage` (one
-  `accepted_rows` query and one record blob read per direct upstream), so an
+  A reader compares a record's lineage with `accepted_lineage` over the
+  accepted pairs its read unit already holds (one `accepted_rows` query per
+  unit, not per record; one record blob read per direct upstream, none in the
+  executor's pre-call unit, which reads the lineage from the records it has
+  just verified), so an
   ancestor record rewritten after its consumer was accepted refuses at the
   runtime's pre-call unit, at the proof and at the deliverable -- but whether
   that ancestor's own record is sound is the ancestor's own verification, which
   the proof and deliverable run for every row and the pre-call unit runs for
-  direct inputs only. The executor's post-call unit compares only the lineage's
-  pairs with the accepted rows (one query), not the records again, and the
-  lineage names `call_time_identity`'s narrowed upstream, so a soft input
-  accepted during a call appears in no lineage. `blocked_verdict` builds no
-  record and checks no lineage. *Upgrade:* Phase 4's lease fencing ancestors
-  for the node's whole attempt, and immutable `artifacts` rows.
+  direct inputs only. The pairs are read once per unit, so under READ COMMITTED
+  a row moved between that read and a later record's comparison is seen by the
+  next unit, not this one. The executor's post-call unit compares only the
+  lineage's pairs with the accepted rows (one query), not the records again.
+  The executor writes the lineage from the pre-call host identity's upstream
+  -- every direct input accepted when the prompt was built -- and the post-call
+  identity comparison refuses an attempt during whose call another input was
+  accepted, so no lineage names one; `call_time_identity`'s narrowing applies
+  only when a record is read back. `blocked_verdict` builds no record and
+  checks no lineage. `record_authority_matches` hashes a module's authority
+  files once per process for each (bundle root, manifest digest, build,
+  module): the manifest pins every hash, so the digests cannot differ for one
+  manifest, but a file changed on disk under an unchanged manifest is refused
+  by the executor's prompt (which reads every delivered byte) and no longer by
+  a reader's comparison. *Upgrade:* Phase 4's lease fencing ancestors for the
+  node's whole attempt, and immutable `artifacts` rows.
 
 **Repair Phase 2.**
 

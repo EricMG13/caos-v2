@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import shutil
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -23,21 +24,20 @@ from canonical_fixtures import (
     CATALOG,
     CONTRACT,
     PINNED,
+    VENDORED,
     wire,
 )
-from canonical_fixtures import (
-    handoff_markdown as _markdown,
-)
-from canonical_fixtures import (
-    identity as _identity,
-)
-from canonical_fixtures import (
-    skill as _skill,
-)
+from canonical_fixtures import handoff_markdown as _markdown
+from canonical_fixtures import identity as _identity
+from canonical_fixtures import skill as _skill
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, Rect
+from server.methodology import bundle as bundle_module
 from server.methodology.bundle import (
+    MANIFEST_NAME,
+    SKILLS_DIR,
+    Bundle,
     assemble_authority,
     authority_digest,
     delivered_authority,
@@ -399,3 +399,115 @@ def test_stored_lineage_reads_the_chain_from_the_stored_records(
     for rows in moved:
         refusal = _refused(partial(stored_lineage, blobs, (ref,), rows))
         assert refusal.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
+
+
+def test_stored_lineage_follows_a_three_deep_chain_past_non_direct_ancestors(
+    tmp_path: Path,
+) -> None:
+    """§45.4 over stored rows built directly: the consumer's one direct input
+    names two ancestors that are not its inputs, and the grand-ancestor's pair
+    still binds -- moved or missing, it refuses through a record the consumer
+    never reads as an input."""
+    blobs = BlobStore(tmp_path / "blobs")
+
+    def stored(route_node_id: str, module_id: str, *lineage: LineageRef) -> LineageRef:
+        artifact = blobs.put(CP0_MD + route_node_id.encode())
+        record = _record(artifact_sha256=artifact, lineage=lineage)
+        return LineageRef(
+            route_node_id, module_id, artifact, blobs.put(record_bytes(record))
+        )
+
+    gate = stored("RN-01-CP-0", "CP-0")
+    screen = stored("RN-02-CP-L10", "CP-L10", gate)
+    trace = stored("RN-03-CP-5", "CP-5", gate, screen)
+    ref = UpstreamRef(
+        trace.route_node_id, "CP-5", "COS-1", "FY2025", trace.artifact_sha256
+    )
+    accepted: dict[str, tuple[str, str | None]] = {
+        link.route_node_id: (link.artifact_sha256, link.record_sha256)
+        for link in (gate, screen, trace)
+    }
+    assert stored_lineage(blobs, (ref,), accepted) == (gate, screen, trace)
+    grand = {**accepted, gate.route_node_id: (gate.artifact_sha256, "0" * 64)}
+    missing = {k: v for k, v in accepted.items() if k != screen.route_node_id}
+    for rows in (grand, missing):
+        refusal = _refused(partial(stored_lineage, blobs, (ref,), rows))
+        assert refusal.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
+
+
+def test_a_verified_record_is_not_read_again_for_its_lineage(tmp_path: Path) -> None:
+    """The executor hands `stored_lineage` the records its pre-call unit already
+    verified; that copy answers, and must still bind the accepted artifact."""
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(CP0_MD)
+    record = _record(artifact_sha256=artifact)
+    sha = blobs.put(record_bytes(record))
+    ref = UpstreamRef("RN-01-CP-0", "CP-0", "COS-1", "FY2025", artifact)
+    accepted: dict[str, tuple[str, str | None]] = {ref.route_node_id: (artifact, sha)}
+    blobs.path_of(sha).unlink()  # only the verified copy can answer now
+    link = LineageRef(ref.route_node_id, "CP-0", artifact, sha)
+    assert stored_lineage(blobs, (ref,), accepted, verified={sha: record}) == (link,)
+    other = dataclasses.replace(record, artifact_sha256="0" * 64)
+    for verified in ({}, {sha: other}):
+        refusal = _refused(
+            partial(stored_lineage, blobs, (ref,), accepted, verified=verified)
+        )
+        assert refusal.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
+
+
+def _resign(root: Path, module_id: str, name: str, data: bytes) -> None:
+    """Rewrite one module file and its manifest hash, keeping the build id."""
+    manifest = root / MANIFEST_NAME
+    document = json.loads(manifest.read_bytes())
+    [entry] = [e for e in document["skills"] if e["module_id"] == module_id]
+    (root / SKILLS_DIR / entry["folder_slug"] / name).write_bytes(data)
+    entry["relative_file_hashes"][name] = {
+        **entry["relative_file_hashes"][name],
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    manifest.write_text(json.dumps(document))
+
+
+def test_authority_digests_are_hashed_once_per_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every reader compares a record's authority with the bundle's; the files
+    are hashed once per (root, manifest, build, module), and a manifest that
+    moved -- same build, one reference re-signed -- is never answered from the
+    earlier reading."""
+    root = tmp_path / "deploy-v"
+    shutil.copytree(VENDORED, root)
+    bundle = Bundle(root)
+    record = _record(
+        build_id=bundle.build_id,
+        manifest_sha256=bundle.manifest_sha256,
+        authority_digest=authority_digest(assemble_authority(bundle, "CP-0")),
+        delivered_authority_digest=delivered_authority_digest(
+            delivered_authority(bundle, "CP-0")
+        ),
+    )
+    reads: list[Path] = []
+    real = bundle_module._read_verified
+
+    def counted(on: Bundle, path: Path, expected: dict[str, Any]) -> bytes:
+        reads.append(path)
+        return real(on, path, expected)
+
+    monkeypatch.setattr(bundle_module, "_read_verified", counted)
+    assert record_authority_matches(record, bundle=bundle, module_id="CP-0")
+    first = len(reads)
+    assert record_authority_matches(record, bundle=bundle, module_id="CP-0")
+    assert len(reads) == first
+    entry = bundle.skill_of("CP-0")
+    name = min(n for n in entry["relative_file_hashes"] if n.startswith("references/"))
+    path = root / SKILLS_DIR / entry["folder_slug"] / name
+    _resign(root, "CP-0", name, path.read_bytes() + b"\n")
+    moved = Bundle(root)
+    assert moved.build_id == record.build_id
+    assert not record_authority_matches(
+        dataclasses.replace(record, manifest_sha256=moved.manifest_sha256),
+        bundle=moved,
+        module_id="CP-0",
+    )
+    assert len(reads) > first

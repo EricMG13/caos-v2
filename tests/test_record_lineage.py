@@ -23,9 +23,11 @@ from test_canonical_runtime import _answers, _module_provider, _run_route
 from test_execution_freshness import _counts, _Harness, harness
 from test_loop_charges import REPORTED
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.deliverable.canonical import Revision, canonical_payload
 from server.engine.route import ResolvedRoute, resolve_route
+from server.methodology import canonical, invocation
 from server.methodology.bundle import DeliveredAuthority, delivered_authority_digest
 from server.methodology.handoff import (
     CanonicalRecord,
@@ -35,7 +37,7 @@ from server.methodology.handoff import (
 )
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
-from server.store import connect
+from server.store import StoreConnection, connect, outcomes
 from server.store.events import lock_run
 
 __all__ = ["harness"]
@@ -134,6 +136,51 @@ def test_full_lineage_survives_direct_only_context(harness: _Harness) -> None:
     # Context stays direct: each upstream section is a direct input's handoff.
     final = answers.prompts[-1]
     assert final.count("\nsha256: ") == len(_record(harness, "CP-5").identity.upstream)
+
+
+def test_the_pre_call_unit_reads_accepted_rows_once_and_records_once_each(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lineage costs no query per record: CP-5's whole context reads the
+    accepted rows once, and each upstream record only for its own verification
+    (the call-time narrowing, then `read_record`) -- never again for the
+    lineage, which is read from the verified copy."""
+    for module_id in ("CP-0", "CP-L10"):
+        attempt, result = _run(harness, module_id, _answers(harness))
+        _accept(harness, attempt, result)
+    queries: list[UUID] = []
+    real_rows = outcomes.accepted_rows
+
+    def rows(
+        conn: StoreConnection, run_id: UUID
+    ) -> list[tuple[str, UUID, str, str | None]]:
+        queries.append(run_id)
+        return real_rows(conn, run_id)
+
+    for module in (canonical, invocation):
+        monkeypatch.setattr(module, "accepted_rows", rows)
+    reads: list[str] = []
+    real_get = BlobStore.get
+
+    def get(blobs: BlobStore, sha: str) -> bytes:
+        reads.append(sha)
+        return real_get(blobs, sha)
+
+    monkeypatch.setattr(BlobStore, "get", get)
+    node = _node(harness, "CP-5")
+    canonical.check_context(
+        harness.conn,
+        harness.bundle,
+        harness.blobs,
+        run_id=harness.run_id,
+        route=harness.route,
+        node=node,
+        provider=_answers(harness),
+    )
+    harness.conn.rollback()
+    assert queries == [harness.run_id]
+    screen = _row(harness, "CP-L10")[2]
+    assert reads.count(screen) == 2
 
 
 def _moved_gate(harness: _Harness) -> CanonicalRecord:
