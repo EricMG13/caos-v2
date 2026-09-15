@@ -2174,5 +2174,7 @@ citations. Cleanup dropped its disposable database before it emitted generation
 or charge data. The account cannot use OpenRouter's aggregate activity endpoint
 for reconciliation without a management key (`403`). Its actual route outcome
 is therefore indeterminate and creates no artifact, evidence or verdict. The
-temporary collector has been corrected to serialize the proof explicitly; do
-not repeat this paid attempt without fresh authorization.
+next execution persists its immutable performed snapshot and its bound evidence
+identity in the migrated store before `perform()` returns; the collector only
+confirms and retains that state for external review. Do not repeat this paid
+attempt without fresh authorization.

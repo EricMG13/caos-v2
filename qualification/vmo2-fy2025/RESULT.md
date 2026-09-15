@@ -154,6 +154,8 @@ The OpenRouter activity endpoint is aggregate-only and requires a management
 key for this account; reconciliation therefore returned `403`. The number of
 provider calls, their individual charges and the canonical outcome are
 unrecoverable from the surviving record. No artifact, evidence row or verdict
-may be claimed from this attempt. The collector now serializes the proof fields
-explicitly for any future authorized run, but this is not permission to repeat
-the indeterminate paid attempt.
+may be claimed from this attempt. Future `perform()` calls persist the complete
+or partial immutable snapshot and its bound evidence row before returning; the
+collector serializes its digest and retains the disposable database/blob root
+for external review. This is not permission to repeat the indeterminate paid
+attempt.
