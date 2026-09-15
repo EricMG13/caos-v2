@@ -12,9 +12,9 @@ ignored reports cannot override those contracts.
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`; records below) |
-| Latest accepted task | **Phase 5 Tasks 5.1–5.4b accepted with the phase at `ca65ec7`** |
-| Next task | Phase 6 Tasks 6.1–6.4 offline: validate the set before spend, independent credit answer keys, persisted review verdicts, and restore/release evidence. Do not run 6.5 live validation without explicit provider, model, route, call, token, cost, and time-window authorization. |
+| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering checkpoint below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
+| Latest accepted task | **Phase 6 offline Tasks 6.1–6.4 checkpointed at `d4bdde5`; live 6.5 remains unapproved** |
+| Next task | Obtain explicit provider, model, route, call, token, cost, and time-window authorization before attempting Phase 6.5 live qualification; then verify hosted required checks. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -80,6 +80,14 @@ this documentation update has not rerun their gates or accepted new code.
   name that host-only extension; CP-CF's accepted artifact remains independently
   proved.  Restricted/refusal examples and the real PDF production journey
   remain required before Task 6.2 can be accepted.
+
+### Phase 6 engineering checkpoint — 15 September 2026
+
+- **Candidate:** `d4bdde5`; GitNexus refreshed at the prior source checkpoint with 8,761 nodes, 22,354 edges, 378 clusters and 300 flows.
+- **Completed offline work:** whole-set and provider/model/route binding; independent CP-CF conclusion qualification; immutable evidence and verdict migrations; current authenticated exact-evidence read; restricted Reader/PDF UI; restore probe; and cross-browser production journey coverage.
+- **Gate evidence:** `make check` passed all code, test, scan, frontend, accessibility and workbench gates before its pinned Trivy prerequisite; the verified temporary Trivy 0.70.0 completed `make image smoke-production`. Backend: 2,833 passed; races: 21 passed; frontend unit: 230 passed; workbench: 90 passed; production image: 8 passed. Firefox and WebKit subsequently passed the 14-test production journey after `d4bdde5`; Chromium had passed in the preceding smoke run.
+- **Phase-end reviews:** [confidence](reviews/phase-6-confidence-review.md) and [adversarial](reviews/phase-6-adversarial-audit.md). The browser journey's transient-success assertion was the sole confirmed defect and is repaired in `d4bdde5`.
+- **Not accepted as release qualification:** no explicit live-provider authorization was supplied, so 6.5 was not run; GitHub-hosted required checks have not been confirmed for this candidate. Keep release status blocked until both are satisfied.
 
 ## Phase 4 acceptance record — 14 September 2026
 
