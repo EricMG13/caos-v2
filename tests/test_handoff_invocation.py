@@ -430,3 +430,11 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     assert tag is not None
     assert prompt.count(tag.group(1)) == 5 and tag.group(1) not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
+
+
+def test_a_node_receives_its_direct_predecessors_accepted_claims(
+    harness: _Harness,
+) -> None:
+    """Phase 11 exit, on the canonical adapter: a node's prompt carries each
+    direct predecessor's accepted handoff, byte for byte."""
+    test_the_prompt_carries_exact_upstream_bytes_and_every_block(harness)

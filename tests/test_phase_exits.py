@@ -58,13 +58,6 @@ NOT_YET_REACHED: set[str] = {
     # deletes it itself. It is owed again when Phase 5 extends the canonical
     # adapter to CP-1.
     "test_cp1_produces_canonical_envelope_with_anchored_citations",
-    # Phase 11's readiness-map and upstream-chain exits named the retired
-    # claims executor. Their canonical successors are
-    # `test_readiness_must_cover_exactly_the_pin` and
-    # `test_the_prompt_carries_exact_upstream_bytes_and_every_block`.
-    "test_a_gate_answer_missing_a_pinned_module_is_refused",
-    "test_only_the_gate_module_may_return_a_readiness_map",
-    "test_a_node_receives_its_direct_predecessors_accepted_claims",
     # Phase 12, the handoff: no module payload exists yet, so a register, a
     # critical column and a cited figure are all things no artifact carries.
     "test_the_declared_register_schema_matches_the_bundles_own_contract",
