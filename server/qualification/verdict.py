@@ -87,6 +87,12 @@ def read_verdict(document: object, *, now: datetime) -> Verdict:
     to tell a malformed document from a stale signature, which are the two cases
     with entirely different remedies.
     """
+    if (
+        type(now) is not datetime
+        or now.tzinfo is None
+        or now.tzinfo.utcoffset(now) is None
+    ):
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
     fields = _closed(document)
 
     provider = _boundary_text(fields, "provider")
