@@ -93,6 +93,32 @@ def test_changed_answer_key_refuses_before_any_provider_call(ready: Fixture) -> 
     _unspent(conn)
 
 
+@pytest.mark.parametrize(
+    ("field", "changed"), [("provider", "other-provider"), ("model", "other/model")]
+)
+def test_changed_execution_target_refuses_before_any_provider_call(
+    ready: Fixture, field: str, changed: str
+) -> None:
+    conn, blobs, harness, qualification = ready
+    prepared = _prepared(ready)
+    completions = cast(_Completions, harness.completions)
+    changed_harness = replace(
+        harness, completions=replace(completions, **{field: changed})
+    )
+
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        subject.perform(
+            conn,
+            blobs,
+            changed_harness,
+            qualification=qualification,
+            prepared=prepared,
+        )
+
+    assert completions.prompts == []
+    _unspent(conn)
+
+
 def _run(ready: Fixture, prepared: object) -> subject.PerformedSet:
     conn, blobs, harness, qualification = ready
     return subject.perform(
@@ -252,7 +278,11 @@ def test_untrusted_carrier_shape_refuses_before_paid_work(
         ),
         "item-subclass": (
             type("CarrierItem", (subject.PreparedCase,), {})(
-                a.case_label, a.input, a.qualification_set_sha256
+                a.case_label,
+                a.input,
+                a.qualification_set_sha256,
+                a.provider,
+                a.model,
             ),
             b,
         ),
