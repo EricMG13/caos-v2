@@ -33,6 +33,7 @@ from test_run_events import approved_nodes
 from server.api import app as app_module
 from server.api.app import (
     IO_BUDGET,
+    RUN_READ_IO,
     TAIL_DEADLINE,
     EdgeView,
     NodeView,
@@ -40,12 +41,14 @@ from server.api.app import (
     RunDocument,
     app,
     blob_store,
+    methodology_bundle,
     read_run,
     read_run_events,
     store_connection,
 )
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, resolve_route
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke, standing_of
@@ -233,10 +236,16 @@ def test_an_anonymous_request_opens_no_store_connection(
         opened.append(store_connection.__name__)
         return conn
 
+    def counted_bundle() -> Bundle:
+        opened.append(methodology_bundle.__name__)
+        raise AssertionError  # never reached before identity
+
     app.dependency_overrides[store_connection] = counted
+    app.dependency_overrides[methodology_bundle] = counted_bundle
 
     for path in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/events"):
         assert client.get(path).status_code == 401, path
+    del app.dependency_overrides[methodology_bundle]
     assert opened == [], (
         "an anonymous request resolved the store dependency; identity is "
         "declared before it so that it does not"
@@ -777,7 +786,7 @@ def test_each_request_path_declares_what_it_costs_the_store(
 
     assert client.get(f"/api/runs/{run_id}", headers=_as(viewer)).status_code == 200
 
-    assert counter.executed == IO_BUDGET, (
+    assert counter.executed == RUN_READ_IO <= IO_BUDGET, (
         "the run document costs what it says it costs; a read that grew with "
         "the size of the route would show up here first"
     )

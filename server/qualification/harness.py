@@ -62,7 +62,13 @@ import psycopg
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import NodeState, ResolvedRoute, node_states, resolve_route
+from server.engine.route import (
+    NodeResult,
+    NodeState,
+    ResolvedRoute,
+    node_states,
+    resolve_route,
+)
 from server.engine.runtime import Execution, accepted_artifacts, run_route
 from server.evidence.ingest import admit_pack
 from server.methodology.bundle import Bundle
@@ -467,7 +473,7 @@ def _record(
         refusal = unprovable.code
 
     try:
-        unrun = _unrun(conn, blobs, run_id)
+        unrun = _unrun(conn, blobs, harness.bundle, run_id)
     except Refusal as unattributed:
         if unattributed.code is not RefusalCode.ROUTE_IDENTITY_INVALID:
             raise
@@ -484,7 +490,9 @@ def _record(
     )
 
 
-def _unrun(conn: StoreConnection, blobs: BlobStore, run_id: UUID) -> tuple[Unrun, ...]:
+def _unrun(
+    conn: StoreConnection, blobs: BlobStore, bundle: Bundle, run_id: UUID
+) -> tuple[Unrun, ...]:
     """The pinned nodes that produced no accepted artifact, in route order.
 
     The route comes from the pin rather than from the object this module just
@@ -505,7 +513,7 @@ def _unrun(conn: StoreConnection, blobs: BlobStore, run_id: UUID) -> tuple[Unrun
     route = resolved_route(conn, run_id)
     if route is None:
         return ()
-    states = node_states(route, _accepted(conn, blobs, route, run_id))
+    states = node_states(route, _accepted(conn, blobs, bundle, route, run_id))
     tried: dict[str, list[Attempted]] = {}
     for node_id, *fact in conn.execute(
         "SELECT t.route_node_id, t.attempt_id, r.attempt_id IS NOT NULL,"
@@ -530,11 +538,16 @@ def _unrun(conn: StoreConnection, blobs: BlobStore, run_id: UUID) -> tuple[Unrun
 
 
 def _accepted(
-    conn: StoreConnection, blobs: BlobStore, route: ResolvedRoute, run_id: UUID
-) -> dict[str, Any]:
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    run_id: UUID,
+) -> dict[str, NodeResult]:
     """What the run accepted, and never a reason to end the set.
 
-    `accepted_artifacts` reads CP-0's body out of the blob store to recover the
+    `accepted_artifacts` reads CP-0's readiness -- a claims body, or a canonical
+    record verified under the harness's bundle -- to recover the
     readiness a soft edge turns on, and bytes that will not load raise — which,
     left unguarded here, would take down the whole set from inside the function
     added to keep one bad case from doing that. A run whose artifacts cannot be
@@ -543,7 +556,7 @@ def _accepted(
     node from a RESTRICTED one.
     """
     try:
-        return accepted_artifacts(conn, blobs, route, run_id)
+        return accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
     except (Refusal, ValueError):
         rows = conn.execute(
             "SELECT t.route_node_id FROM artifacts a"
@@ -551,7 +564,7 @@ def _accepted(
             " WHERE a.run_id = %s",
             (run_id,),
         ).fetchall()
-        return {str(row[0]): {} for row in rows}
+        return {str(row[0]): NodeResult() for row in rows}
 
 
 def _answerable(qualification: QualificationSet) -> None:
