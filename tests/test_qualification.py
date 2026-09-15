@@ -107,6 +107,14 @@ def test_a_verdict_expires_at_its_expiry_not_after_it() -> None:
     assert at_expiry.value.code is RefusalCode.VERDICT_EXPIRED
 
 
+def test_a_verdict_is_not_current_before_its_decision_time() -> None:
+    with pytest.raises(Refusal) as future:
+        read_verdict(
+            document(decided_at=(NOW + timedelta(seconds=1)).isoformat()), now=NOW
+        )
+    assert future.value.code is RefusalCode.VERDICT_BINDING_INVALID
+
+
 def test_a_verdict_is_what_it_was_read_as_and_stays_that() -> None:
     """A signature that can be edited after it is read is not a signature.
 
