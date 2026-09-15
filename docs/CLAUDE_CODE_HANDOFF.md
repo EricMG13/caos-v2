@@ -53,9 +53,10 @@ this documentation update has not rerun their gates or accepted new code.
 
 ## Phase 6 offline implementation checkpoint — 15 September 2026
 
-- **State:** Tasks 6.1 and the verdict-clock guard are partly implemented and
-  verified locally; Phase 6 is **not accepted**.  The next accepted checkpoint
-  still requires Tasks 6.2–6.4 and all end-of-phase gates and reviews.
+- **State:** Task 6.1, the verdict-clock guard, and the deterministic portion
+  of Task 6.2 are implemented and verified locally; Phase 6 is **not
+  accepted**.  The next accepted checkpoint still requires the restricted/PDF
+  production journey, Tasks 6.3–6.4, and all end-of-phase gates and reviews.
 - **Committed guards:** `5524f2c` binds preparation to the exact qualification
   set; `e55ab19` additionally binds provider and model; `5cedb95` rejects
   duplicate case labels and duplicate citation answer keys; `373ee07` and
@@ -68,15 +69,17 @@ this documentation update has not rerun their gates or accepted new code.
   confirms that existing governed writes and commands are case-scoped, while
   a qualification verdict covers a complete, potentially multi-case set;
   do not bind one to an arbitrary application case merely to reuse that API.
-- **Remaining design constraint:** the enabled canonical routes currently
-  expose citation keys but no typed, independently determinable credit
-  conclusion (value, unit, period, perimeter, scenario and limitation).  The
-  only existing deterministic forecast projection is CP-CF, which is not an
-  enabled route.  Do not falsely qualify prose or model-authored balancing
-  figures.  Before Task 6.2, select and implement an explicit, validated
-  canonical conclusion contract (or explicitly keep the affected routes
-  unqualified); that choice must then drive persisted evidence, the UI, and
-  restore/release checks in Tasks 6.3–6.4.
+- **Deterministic conclusion key:** `994b004` adds a closed CP-CF forecast key
+  (independent value, period/scenario, currency/scale, perimeter, QA,
+  limitations and gate-readiness checks), its on-disk form, exact host-route
+  extension binding, and regressions for wrong amount, unit and perimeter.
+  It reads the accepted artifact through the existing host recomputation seam,
+  never model prose.  CP-CF is a declared host extension of the enabled
+  FULL_CREDIT_32/RELATIVE_VALUE route, so a qualification case now binds the
+  extension explicitly.  The proof no longer asks vendor navigation T8 to
+  name that host-only extension; CP-CF's accepted artifact remains independently
+  proved.  Restricted/refusal examples and the real PDF production journey
+  remain required before Task 6.2 can be accepted.
 
 ## Phase 4 acceptance record — 14 September 2026
 
