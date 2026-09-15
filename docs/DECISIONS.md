@@ -2040,3 +2040,45 @@ for old payloads, never accepted by the new save boundary.
 Codex execution uses Astra high for this high-risk revision boundary. Ordinary
 task review and scoped gates precede integration; phase confidence/adversarial
 reviews remain coordinator-owned at actual xhigh after the whole phase.
+
+## 2026-09-15 §58 — Qualification binds OpenRouter endpoint and reasoning profile
+
+The September 15 DeepSeek qualification calls exposed a false premise in §16
+and §25: `allow_fallbacks: false` prevents a second endpoint after the selected
+one fails, but OpenRouter still chooses that first endpoint by price and
+availability. Reconciliation showed that all three calls ran on Ionstream and
+used zero reasoning tokens. They therefore test `openrouter/ionstream/default`,
+not DeepSeek's first-party reasoning profile.
+
+`OpenRouter` now accepts optional `OPENROUTER_PROVIDER` and
+`OPENROUTER_REASONING_EFFORT`. A provider value is sent as the sole ordered
+endpoint with fallbacks disabled; the reasoning value is sent through
+OpenRouter's reasoning-effort contract. The qualification provider identity
+includes both settings (for example `openrouter/deepseek/max`), while an unset
+legacy profile remains `openrouter`. Invalid values refuse before transport.
+The model id and dated conservative price remain separately bound.
+The qualification harness refuses that unpinned legacy profile; automatic
+routing remains available only to ordinary calls that cannot mint a verdict.
+
+The canonical prompt changed during citation remediation, so the adapter is
+advanced from `canonical-markdown-v1` to `canonical-markdown-v2`. Old v1 pins
+remain historical and cannot execute as v2. A new positive qualification must
+prepare a fresh v2 run; it cannot reuse the three cross-revision failures.
+
+OpenRouter provider routing takes the endpoint catalog's lowercase `tag`, not
+its display name, so mixed-case values refuse before transport. The configured
+account returned `404 No endpoints found` for the live first-party `deepseek`
+tag even without reasoning or JSON constraints. An `ionstream`/`xhigh` JSON
+probe did succeed and reconciliation recorded 15 native reasoning tokens, but a
+probe is not a qualification run.
+
+The authorized frozen-v2 `ionstream`/`xhigh` qualification then used 6,286
+native reasoning tokens and finished with `stop`; the host still refused CP-0
+as `CITATION_NOT_DELIVERED`. No downstream module ran and no qualification
+evidence or verdict was created. This rules out automatic routing, absent
+reasoning and truncation for that failure. A same-input temperature-zero repeat
+would change no controlled variable, so the run was not repeated.
+
+This change does not qualify DeepSeek or raise the 32,768 completion cap. It
+makes a controlled endpoint/reasoning experiment possible through the existing
+runtime and keeps ordinary/offline gates credential-free.

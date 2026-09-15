@@ -43,6 +43,7 @@ On 2026-09-12, run from the repository:
 
 ```sh
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+  -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
   -u CAOS_REQUIRE_PROVIDER \
   DOCKER_HOST=unix:///Users/ericguei/.colima/default/docker.sock \
   .venv/bin/python tests/probes/migration_restore.py
