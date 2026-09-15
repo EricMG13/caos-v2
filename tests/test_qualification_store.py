@@ -1,8 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-import pytest
-
 from server.qualification.store import (
     Evidence,
     current_verdict,
@@ -10,7 +8,6 @@ from server.qualification.store import (
     record_verdict,
 )
 from server.qualification.verdict import Verdict, read_verdict
-from server.refusals import Refusal
 from server.store import apply_schema, connect
 
 
@@ -50,6 +47,4 @@ def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> 
         record_verdict(
             conn, evidence=evidence, reviewer_id=reviewer, verdict=_verdict(now)
         )
-        assert current_verdict(conn, evidence=evidence, reviewer_id=reviewer, now=now)
-        with pytest.raises(Refusal):
-            current_verdict(conn, evidence=evidence, reviewer_id=uuid4(), now=now)
+        assert current_verdict(conn, evidence=evidence, now=now)

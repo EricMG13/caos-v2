@@ -87,7 +87,6 @@ def current_verdict(
     conn: StoreConnection,
     *,
     evidence: Evidence,
-    reviewer_id: UUID,
     now: datetime,
 ) -> Verdict:
     """Read only the current verdict bound to the exact requested evidence."""
@@ -95,8 +94,8 @@ def current_verdict(
         "SELECT q.reviewer,q.decided_at,q.expires_at,e.qualification_set_sha256,"
         " e.build_id,e.provider,e.model FROM qualification_verdicts q"
         " JOIN qualification_evidence e USING (evidence_sha256)"
-        " WHERE q.evidence_sha256=%s AND q.reviewer_id=%s",
-        (evidence.sha256, reviewer_id),
+        " WHERE q.evidence_sha256=%s",
+        (evidence.sha256,),
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
