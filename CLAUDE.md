@@ -228,6 +228,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and before the governed freeze write, so verification catches that movement
   rather than the freeze itself. *Upgrade:* derive under the freeze lock once
   artifact rows are immutable; d-2 and d-3b provide proof and matrix readers.
+- **The canonical orchestration proof binds the accepted record to live proof.**
+  Slice d-2 re-reads both blobs, rebuilds identity, validates projections and
+  citations against pinned live sources, and requires the pin's adapter and
+  bundle authority. It returns counts only, so the matrix cannot yet surface
+  canonical quotes. *Upgrade:* d-3b reads proven canonical citations.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
