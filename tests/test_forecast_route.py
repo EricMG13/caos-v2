@@ -1,6 +1,7 @@
 """The actual extended route accepts CP-CF only from anchored owner inputs."""
 
 import json
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -14,10 +15,21 @@ from test_canonical_runtime import _module_provider, _run_route, _status
 from test_execution_freshness import _Harness
 from test_relative_value_route import harness as _harness
 
+from server.boundary_text import BoundaryText
 from server.calculators.cash_flow import cash_flow_forecast
 from server.engine.route import ResolvedRoute, RouteExtensions, resolve_route
+from server.evidence.ingest import Document
 from server.methodology.forecast import forecast_projection
 from server.provider import Completion
+from server.qualification.matrix import (
+    ExpectedCitation,
+    ExpectedForecast,
+    ForecastValue,
+    QualificationCase,
+    QualificationSet,
+    build_matrix,
+)
+from server.qualification.proof import assert_orchestration_proof
 from server.refusals import RefusalCode
 
 harness = _harness
@@ -228,3 +240,97 @@ def test_forecast_retains_an_accepted_owner_restriction(harness: _Harness) -> No
     answers.qa_by_module = {"CP-1": "Restricted"}
     assert _run_route(harness, _module_provider(harness, answers)) is None
     assert _status(harness) == "COMPLETE"
+
+
+def test_qualification_checks_host_recomputed_forecast_not_its_citation(
+    harness: _Harness,
+) -> None:
+    """A matching CP-1 quote cannot hide a wrong CP-CF conclusion."""
+    from conftest import priced
+    from test_loop_charges import ESTIMATE
+
+    from server.engine.runtime import Execution, run_route
+
+    answers = ForecastCompletions(harness.source_id)
+    run_route(
+        harness.conn,
+        harness.blobs,
+        run_id=harness.run_id,
+        route=harness.route,
+        execution=Execution(
+            _module_provider(harness, answers), priced(ESTIMATE), harness.bundle
+        ),
+    )
+    row = harness.conn.execute(
+        "SELECT document_sha256 FROM live_sources WHERE source_id = %s",
+        (harness.source_id,),
+    ).fetchone()
+    assert row is not None
+    document_sha256 = str(row[0])
+    citation = next(
+        quote
+        for module, _document, quote in assert_orchestration_proof(
+            harness.conn, harness.blobs, harness.bundle, run_id=harness.run_id
+        ).anchored
+        if module == "CP-1"
+    )
+    case = QualificationCase(
+        label="acme-cf",
+        documents=(
+            Document(
+                filename=BoundaryText.of("issuer-pack.txt"),
+                data=harness.blobs.get(document_sha256),
+            ),
+        ),
+        profile_id="FULL_CREDIT_32",
+        selection_id="RELATIVE_VALUE",
+        model_extension=True,
+        expects=(ExpectedCitation("CP-1", document_sha256, citation),),
+        forecast=ExpectedForecast(
+            scenario="BASE",
+            period_id="FY2026",
+            values=(ForecastValue("cash.closing", "145.000000"),),
+            currency="USD",
+            scale="millions",
+            perimeter="Consolidated",
+            qa_status="Passed",
+            limitation_flags=(),
+            readiness=tuple(
+                sorted(
+                    (node.module_id, "READY")
+                    for node in harness.route.nodes
+                    if node.module_id not in {"CP-0", "CP-CF"}
+                )
+            ),
+        ),
+    )
+    matrix = build_matrix(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        qualification=QualificationSet((case,)),
+        runs={case.label: harness.run_id},
+    )
+    [qualified] = matrix.rows
+    assert qualified.met == case.expects
+    assert qualified.forecast_met is True
+
+    assert case.forecast is not None
+    for forecast in (
+        replace(case.forecast, perimeter="Parent"),
+        replace(case.forecast, scale="units"),
+        replace(
+            case.forecast,
+            values=(ForecastValue("cash.closing", "999.000000"),),
+        ),
+    ):
+        wrong = QualificationSet((replace(case, forecast=forecast),))
+        [mismatch] = build_matrix(
+            harness.conn,
+            harness.blobs,
+            harness.bundle,
+            qualification=wrong,
+            runs={case.label: harness.run_id},
+        ).rows
+        assert mismatch.met == case.expects
+        assert mismatch.forecast_met is False

@@ -295,7 +295,9 @@ class _CanonicalReader:
         if lineage is None or lineage != record.lineage:
             raise mismatch
         skill = verified_bytes(bundle, node.module_id, "SKILL.md")
-        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+        # CP-CF is a host extension, not a vendor navigation row. Its accepted
+        # artifact is proven independently, so T8 must not be asked to name it.
+        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
         projections = _unless_refused(
             lambda: validate_markdown(
                 self.contract,
