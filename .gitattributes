@@ -1,0 +1,2 @@
+# Qualification inputs are frozen evidence; formatters must not change their bytes.
+qualification/*/documents/* -text whitespace=-trailing-space

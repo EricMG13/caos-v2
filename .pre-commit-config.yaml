@@ -19,9 +19,9 @@ repos:
       - id: check-merge-conflict
         exclude: ^vendor/
       - id: end-of-file-fixer
-        exclude: ^vendor/
+        exclude: ^(vendor/|qualification/.*/documents/)
       - id: trailing-whitespace
-        exclude: ^vendor/
+        exclude: ^(vendor/|qualification/.*/documents/)
   - repo: local
     hooks:
       - id: vocabulary
