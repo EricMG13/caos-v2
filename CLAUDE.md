@@ -173,19 +173,29 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Repair Phase 3.**
 
-- **The PDF extractor's identity no longer predicts its output for positioned
-  text, and a letter-spaced heading cannot be quoted as a word.** (a) Slice
-  3.2c changed `_runs` to follow pdfminer's own `word_margin` word-break rule
-  (§44.5) instead of a custom heuristic, so `caos.pdfminer` v1 -- the identity
-  `PdfExtractor.identity` still reports -- no longer predicts the tokens a
-  positioned-text page produces from its `laparams`; stored rows are
-  unaffected, since nothing re-extracts an already-admitted document.
-  *Upgrade:* slice 3.2d bumps the identity to v2 the day a caller needs the
-  old and new behavior distinguishable. (b) The same rule means glyphs spread
+- **A letter-spaced heading cannot be quoted as a word.** (a) ~~The PDF
+  extractor's identity no longer predicts its output for positioned text.~~
+  Closed by slice 3.2d: `caos.pdfminer` v2 declares every effective `LAParams`
+  scalar, `coordinates: "crop-top-left-rotated-pt"` and `crop_policy:
+  "drop-outside"`, so new admissions record an identity that predicts their
+  tokens; v1 rows keep their stored identity and bottom-left rectangles, and
+  verify and re-anchor as recorded
+  (`test_v1_pdf_extractions_still_verify_and_reanchor_as_recorded`) --
+  readmission is how a source gains v2 geometry (§44.4). (b) Slice 3.2c's
+  `word_margin` rule (§44.5) means glyphs spread
   by `Tc` character tracking beyond `word_margin` -- a heading tracked for
   display rather than readability -- split into single-letter tokens, so the
   word cannot be quoted as itself; `test_tracked_glyphs_beyond_word_margin_split_into_letters`
   pins it. *Upgrade:* quote normalisation, Phase 5.
+- **A word just inside a crop edge can be dropped.** `PdfExtractor`'s
+  `drop-outside` crop policy (slice 3.2d) tests membership on pdfminer's full
+  glyph box -- the font size, descent included -- not the baseline, so a word
+  whose baseline sits just inside the visible crop but whose box crosses its
+  edge is dropped and cannot be cited. That is the fail-closed direction: a
+  clipped rectangle would anchor text a reader may not fully see. A crop that
+  clips to nothing against the MediaBox drops every token on its page.
+  *Upgrade:* a declared tolerance, recorded in the extractor identity, if real
+  documents need it.
 - **"Undelivered pages of a delivered source cannot be cited" is enforced by
   the rule, not yet by any narrower delivery.** `verify_citations` (slice
   3.2e) anchors a quote only wholly within the block ids a node was handed,
@@ -881,7 +891,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **The plain-text extractor's rectangles are a fixed-pitch rendering.** A `.txt`
   document has no typography, so `PlainTextExtractor` states its cell size and
   derives rectangles from character positions. It is a real, reproducible
-  mapping, not a measurement of a page. *Upgrade:* Phase 6 owes
+  mapping, not a measurement of a page. Since slice 3.2d its identity (v2)
+  declares that convention, `coordinates: "cell-top-left-pt"` -- top-left,
+  y down, the same orientation as a v2 PDF's crop-relative rectangles -- so
+  the two extractors no longer disagree silently about which way y grows.
+  *Upgrade:* Phase 6 owes
   `test_citations_anchor_in_an_extracted_pdf` with a real extractor, which
   implements the same protocol and changes nothing above it.
 

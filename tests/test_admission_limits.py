@@ -11,15 +11,13 @@ without finishing the rest of the walk that would have proven it.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from io import BytesIO
 from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-import pdfminer.high_level
 import pytest
-from pdfminer.layout import LTPage
+from pdfminer.pdfinterp import PDFPageInterpreter
+from pdfminer.pdfpage import PDFPage
 from test_pdf_extraction import LEFT_MARGIN, raw_pdf
 
 from server.blobs import BlobStore
@@ -197,17 +195,16 @@ def test_pages_over_the_ceiling_refuse_without_parsing_the_rest(
 ) -> None:
     """A page ceiling of one still has to learn a second page exists -- pulling
     it from pdfminer's own generator is unavoidable -- but must never pull a
-    third. `extract_pages` is spied on to count exactly how many pages the
+    third. `process_page` is spied on to count exactly how many pages the
     walk actually asked pdfminer to lay out."""
-    real = pdfminer.high_level.extract_pages
-    seen: list[LTPage] = []
+    real = PDFPageInterpreter.process_page
+    seen: list[PDFPage] = []
 
-    def spy(pdf_file: BytesIO) -> Iterator[LTPage]:
-        for page in real(pdf_file):
-            seen.append(page)
-            yield page
+    def spy(self: PDFPageInterpreter, page: PDFPage) -> None:
+        seen.append(page)
+        real(self, page)
 
-    monkeypatch.setattr(pdfminer.high_level, "extract_pages", spy)
+    monkeypatch.setattr(PDFPageInterpreter, "process_page", spy)
     data = multi_page_pdf([_page("Page one"), _page("Page two"), _page("Page three")])
     limits = _limits(max_pages=1)
 
