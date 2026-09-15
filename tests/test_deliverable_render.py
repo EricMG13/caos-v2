@@ -48,10 +48,14 @@ def _artifact(
             "committee_status": "Committee Ready",
             "decision_scope": "COMMITTEE",
             "limitation_flags": [],
-        } if projections is None else projections,
+        }
+        if projections is None
+        else projections,
         "citations": [
             {"document_sha256": DOCUMENT_SHA256, "page": 1, "matched_text": QUOTE}
-        ] if citations is None else citations,
+        ]
+        if citations is None
+        else citations,
     }
     record_json = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return {
@@ -60,6 +64,7 @@ def _artifact(
         "artifact_sha256": digest,
         "record_sha256": hashlib.sha256(record_json.encode()).hexdigest(),
     }
+
 
 PAYLOAD_DATA: dict[str, Any] = {
     "case_title": "Acme Holdings plc",
