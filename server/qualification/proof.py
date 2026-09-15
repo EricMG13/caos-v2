@@ -279,7 +279,7 @@ class _CanonicalReader:
         if record is None:
             raise mismatch
         if not record_authority_matches(
-            record, bundle=bundle, module_id=node.module_id
+            record, bundle=bundle, module_id=node.module_id, verify=True
         ):
             raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
         upstream = record.identity.upstream
