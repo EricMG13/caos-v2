@@ -232,7 +232,33 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a
   LITE handoff saying `Committee Ready` validates; the host projects the scope
   beside the status and invents no refusal. *Upgrade:* enforce each rule the
-  day the vendor ships it, or by a dated decision that the host owns it.
+  day the vendor ships it, or by a dated decision that the host owns it. The
+  deliverable (d-4) labels a screening-only record a screen whatever its
+  committee status; the proof (d-2) and the matrix (d-3b) report no status a
+  record projects, so neither has anything to label.
+- **The canonical deliverable proves the store at freeze and verification, not
+  continuously.** `server/deliverable/canonical.py` re-derives the payload --
+  both blobs, identity, projections, rectangles -- when it is built, frozen and
+  verified. It is derived in its own read unit before `freeze`'s governed write,
+  and `artifacts` rows are mutable (the Phase 2 entry below), so a pair moved in
+  that gap freezes and is caught by `verify_frozen`, not by the freeze. Proof is
+  re-derived under the bundle and live sources present now: a bundle upgrade
+  (as for the proof, Phase 10) or a withdrawn source makes a filed revision
+  refuse verification. The payload needs every pinned node accepted, and the
+  Markdown renders as escaped preformatted text, not formatted Markdown. A soft
+  upstream ref may be absent from a record only if that input's artifact was
+  accepted after the attempt started (`call_time_identity`); the comparison is
+  `artifacts.created_at > run_attempts.started_at`, both transaction-start
+  times, so an acceptance whose transaction began before the attempt's and
+  committed after it is refused -- impossible in the one sequential loop,
+  fail-closed under Phase 4's concurrent workers, which should order by event
+  or lease instead. Sources are `pinned_live_sources`, which the proof reads
+  too: a document captured under several live members resolves to the lowest
+  source id when they share one extraction output and to none when they do
+  not.
+  *Upgrade:* derive inside the freeze's lock once artifact rows are immutable,
+  and a Markdown renderer with a closed element set when committee layout needs
+  one.
 - **A LITE route runs through `run_route`, but only the runtime reads its
   records.** Slice c-5b: `_run_node` replays the executor's outcome with its
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
@@ -271,8 +297,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   document pinned twice under different extractions resolves to no source, so
   its citations can never be proven. Diagnostic blobs are
   untrusted provider text, never `BoundaryText`: nothing may render them or
-  read them as analysis. The orchestration proof still refuses canonical
-  pins. The compiled vendor contract is cached per manifest digest, so a
+  read them as analysis. The compiled vendor contract is cached per manifest digest, so a
   vendor script changed on disk under an unchanged manifest is not re-verified
   by the cached validator (every other read still is). The executor's pre-call
   unit binds every upstream record it will put in the prompt to that
@@ -291,19 +316,21 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   CP-5 -- FULL, DEEP and every other catalog pathway -- pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
-  on such a route still prepares and is refused only when performed. The
-  claims executor, `envelope.py` and the claims deliverable render remain,
-  unreachable from any pin. *Upgrade:* f-2a/f-2b delete that dead code, and
-  the HTTP gap closes the day Phase 5 extends the canonical adapter (and its
-  contract tests) to a route carrying that QA_GATE.
-- **A frozen canonical deliverable binds its source record and Markdown.**
-  Slice d-4 re-derives the package payload, records, identity, projections,
-  and rectangles from the store before freezing and verifies those hashes and
-  derivations again when the revision is checked. It renders model text as
-  escaped preformatted text. Artifact rows can still change after derivation
-  and before the governed freeze write, so verification catches that movement
-  rather than the freeze itself. *Upgrade:* derive under the freeze lock once
-  artifact rows are immutable; d-2 and d-3b provide proof and matrix readers.
+  on such a route still prepares and is refused only when performed. Closed in
+  f-2a/f-2b: the claims executor (`execute_module` and its helpers in
+  `server/methodology/executor.py`), `envelope.py` and the claims deliverable
+  render (`server/deliverable/render.py`'s `_artifact`) are deleted rather than
+  left unreachable; `render()` now renders every artifact from its canonical
+  record. The live Phase 5 exit
+  `test_cp1_produces_canonical_envelope_with_anchored_citations` ran the
+  deleted executor's citation pipeline against CP-1 of the FULL route, a
+  live-model contract the canonical adapter does not cover; it is deleted
+  rather than ported, and `tests/test_phase_exits.py`'s `NOT_YET_REACHED`
+  names it so the phase-exit gate stays honest instead of failing red for a
+  test that structurally cannot pass. *Upgrade:* the HTTP gap above closes,
+  and that Phase 5 exit test is owed again, the day Phase 5 extends the
+  canonical adapter (and its contract tests) to CP-1 and a route carrying
+  that QA_GATE.
 - **The orchestration proof over a canonical run proves it now, not
   continuously.** `server/qualification/proof.py` (slice d-2) reads both blobs,
   binds the record to the identity rebuilt from the store, requires the pin's
@@ -316,19 +343,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `host_identity` refusal keeps its own code. It proves a BLOCKED run's
   accepted artifacts and says nothing of the node that never ran. Beside its
   counts it returns `anchored`, the `(module_id, document_sha256,
-  matched_text)` it re-anchored under the pinned modules, and the matrix (d-3b)
-  scores exactly that set with no second artifact or record read: an artifact
-  accepted after the proof is not scored, an unproven canonical run cites
-  nothing, and a proven document no longer among `pinned_live_sources` at
-  scoring refuses the row `ORCHESTRATION_SOURCE_NOT_PINNED`. Under READ
-  COMMITTED the proof's own statements can still see different snapshots, and
-  a withdrawal committed after the matrix's live check is not seen by that
-  row. Like every proof it holds only for the bundle and sources present now.
-  *Upgrade:* the proof and scoring in one REPEATABLE READ unit, the day a
-  reviewer relies on the matrix as one consistent snapshot.
-- **Every upstream carried into a canonical prompt is bound to this build.**
-  Before the call, each accepted upstream record is validated against its
-  call-time identity and current authority; a mismatch refuses the call.
+  matched_text)` it re-anchored under the pinned modules, and the matrix (d-3b) scores exactly that set with no second artifact or
+  record read: an artifact accepted after the proof is not scored, an unproven
+  canonical run cites nothing, and a proven document no longer among
+  `pinned_live_sources` at scoring refuses the row
+  `ORCHESTRATION_SOURCE_NOT_PINNED`. Under READ COMMITTED the proof's own
+  statements can still see different snapshots, and a withdrawal committed
+  after the matrix's live check is not seen by that row. Like every proof it
+  holds only for the bundle and sources present now. *Upgrade:* the proof and
+  scoring in one REPEATABLE READ unit, the day a reviewer relies on the matrix
+  as one consistent snapshot.
 - **Canonical upstream refs ignore readiness and predicates.**
   `server/methodology/invocation.py` names every accepted direct input and
   refuses a blocking one that is missing, as the vendor's
@@ -652,12 +676,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `_citation` reads `str(citation.get("page", ""))`, while `matched_text` and
   `document_sha256` beside it are refused when absent — so a payload with no
   `page` prints "page " rather than refusing. Unreachable from any real run:
-  `server/methodology/envelope.py` lists `page` in `CITATION_KEYS` and parses it
-  with `int(citation["page"])`, and `server/methodology/runner.py` writes it into
-  every stored artifact, so only a payload hand-built for `freeze` can carry a
-  citation without one. The cost is a cosmetic line on the page rather than a
-  false assurance, which is why it is recorded and not fixed. *Upgrade:* refuse
-  it here too, for consistency with the two fields beside it, the day a payload
+  `AnchoredCitation` (`server/evidence/citations.py`) declares `page` a
+  required `int` with no default, and `record_bytes`
+  (`server/methodology/handoff.py`) serialises it into every stored record, so
+  only a payload hand-built for `freeze` can carry a citation without one. The
+  cost is a cosmetic line on the page rather than a false assurance, which is
+  why it is recorded and not fixed. *Upgrade:* refuse it here too, for
+  consistency with the two fields beside it, the day a payload
   has any author but this repository.
 
 **Phase 7.**
@@ -725,26 +750,31 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 5.**
 
-- **The envelope is the host's minimal shape, not CP-1's payload schema.** The
-  bundle ships `CP-1__CanonicalDataFoundation__payload.schema.txt`, and nothing
-  validates a module's output against it yet: `server/methodology/envelope.py`
-  enforces the host's own closed shape — claims, statements, citations — which
-  is what invariant 9's "bounded schema, undeclared fields refused" needs to
-  mean before a schema validator exists. *Upgrade:* the registry that derives
-  each module's payload schema from the manifest (`docs/DECISIONS.md` §24) is
-  where the bundle's own schema starts being enforced; it needs a JSON-schema
-  dependency and therefore a decision entry.
-- **A refused claim is counted, not shown.** `claims_refused` travels in the
-  stored envelope (`docs/DECISIONS.md` §26) and nothing renders it: the
-  deliverable prints the claims that survived and says nothing of the ones that
-  did not, so a page can read as complete over a module that asserted twice
-  what it kept. *Upgrade:* the deliverable's provenance line carries the count,
-  the day a reader relies on the page without the store beside it.
-- **Only `SKILL.md` reaches the prompt.** A module's `reference_files` are
-  verified and assembled but not sent: one module's reference set runs to tens
-  of thousands of tokens, and the budget is invariant 8's. *Upgrade:* the
-  retrieval index the bundle ships (`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`) is
-  what selects the references a question actually needs.
+- ~~**The envelope is the host's minimal shape, not CP-1's payload schema.**~~
+  Closed by retirement: `server/methodology/envelope.py` enforced the host's
+  own closed claims/statements/citations shape, and was deleted with the
+  claims executor (Task 3.1 slice f-2a; `docs/DECISIONS.md` §42.1). What
+  invariant 9's "bounded schema, undeclared fields refused" means on the
+  canonical path is the vendor's own conforming-Markdown validators
+  (`server/methodology/handoff.py`), not a host-invented shape — the gap this
+  entry named does not carry over.
+- ~~**A refused claim is counted, not shown.**~~ Closed by retirement:
+  `claims_refused` lived on the now-deleted claims `Envelope`
+  (`docs/DECISIONS.md` §26). The canonical adapter's citations bind to the
+  whole handoff rather than per claim (§41.3), so there is no partial-refusal
+  count to show; a record's `citations` and its projections are what the
+  deliverable renders in full.
+- ~~**Only `SKILL.md` reaches the prompt.**~~ Closed by repair Task 3.3b
+  (`docs/DECISIONS.md` §45.1): `build_handoff_prompt` takes the module's
+  `DeliveredAuthority` -- `SKILL.md`, every non-script manifest file and each
+  root file `SKILL.md` names -- and hands each file whole, UTF-8, in its own
+  tagged section named with its digest, beside a host note that the host runs
+  invocation preparation, handoff validation and the completeness check
+  itself; no script is delivered. Upstream sections carry their edge's
+  catalog `allowed_use` (`NOT_DECLARED` when the catalog gives none), read from
+  the verified catalog at prompt time because `Edge` and the route pin do not
+  carry it, so no route digest moved. Retrieval (Phase 5) remains the way to
+  send less than the whole set.
 - **A run's price is supplied by its caller, not read from a table.**
   `docs/DECISIONS.md` §40: every call reserves `pricing.worst_case(price)` --
   every byte of the largest request (§38) as an input token plus the output cap
@@ -802,16 +832,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   sends the reason and the UI has nowhere to put it. *Upgrade:* the
   workspace's wire type and the section that draws a node —
   `frontend/src/sections/run/RouteGraph.tsx` and `NodeDetail.tsx`.
-- **The host asks the gate for claims and a map in one answer, and refuses an
-  answer carrying only the map.** `execute_module` calls `parse_claims`, which
-  refuses `ENVELOPE_INVALID` when `claims` is absent or empty — while CP-0's own
-  payload schema declares no claims at all, its output being a register. So a
-  gate answering in its own register terms loses the verdict, and costs the
-  attempt and the reservation that paid for the call. Accepting it is not a
-  guard away: `server/qualification/proof.py` refuses an artifact whose claim
-  list is empty, so what a *gate* artifact is would have to change in the proof
-  and the matrix as well as here — a phase-sized decision about that shape, not
-  a fix. *Upgrade:* a declared gate-artifact shape the proof and the matrix both
+- ~~**The host asks the gate for claims and a map in one answer, and refuses an
+  answer carrying only the map.**~~ Closed by retirement: `execute_module` and
+  `parse_claims` were the claims adapter's mechanism, deleted with it (Task 3.1
+  slice f-2b). CP-0 runs on the canonical adapter now, answering in its own
+  register (T8), not a JSON claims map, so the shape mismatch this entry named
+  does not arise. `server/qualification/proof.py` no longer refuses on an empty
+  claim list either; it reads the canonical record. *Upgrade:* a declared
+  gate-artifact shape the proof and the matrix both
   understand.
 - **A node RESTRICTED by the verdict alone has its cause everywhere but in the
   engine's answer.** `_state_for` returns RESTRICTED for a
@@ -824,13 +852,21 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from
   the engine rather than from the run document.
-- **An upstream section is unbounded.** A node's prompt carries every claim of
-  every direct predecessor (`docs/DECISIONS.md` §28), and nothing caps the
-  total: a node with five predecessors of fifty claims each carries two hundred
-  and fifty statements and their quotes on top of the authority and every block
-  of evidence. On the routes run so far it is a few thousand tokens. *Upgrade:*
-  a declared bound with a typed refusal, the day a wide route meets a model's
-  context rather than a budget.
+- **An upstream section is unbounded, but the whole context is refused.** A
+  node's prompt carries every direct predecessor's accepted Markdown whole
+  (`docs/DECISIONS.md` §28), with no per-section cap. Since Task 3.3b the whole
+  prompt -- authority, upstream, evidence -- is built by
+  `canonical.check_context` under `prospective_identity` before
+  `start_attempt`, and one whose JSON encoding exceeds `MAX_REQUEST_BYTES`
+  refuses `CONTEXT_OVER_CEILING` with no attempt, reservation or call and
+  nothing truncated (§45.3). The executor rebuilds and re-bounds it under the
+  attempt's own identity, so each call reads its context twice (the pre-call
+  reads, the case lock hold included). The bound is on the prompt's encoding:
+  the provider's request envelope (model, parameters) adds a few hundred bytes,
+  so a prompt within that margin of the ceiling passes here and is refused
+  `PROVIDER_CALL_INVALID` after reservation. *Upgrade:* a declared per-section
+  bound, and the envelope margin folded into the ceiling, the day a wide route
+  or a large pack comes near it.
 
 **Phase 4.**
 
@@ -870,8 +906,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   whitespace and each word must equal a token, punctuation included. A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
   `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
-  costs its claim (§26), an over-eager match costs a rectangle over text the quote does
-  not contain — but it will refuse quotes a reader would call correct.
+  costs its claim under the retired claims adapter's per-claim refusal (§26,
+  closed with the claims executor in f-2b); on the canonical adapter one
+  unanchored quote refuses the whole handoff (§41.3) — an over-eager match
+  costs a rectangle over text the quote does not contain either way — but it
+  will refuse quotes a reader would call correct.
   *Upgrade:* Phase 5, when a real module's real quotes say which normalisations
   are needed; anything decided before then is guesswork about a caller that does
   not exist.
