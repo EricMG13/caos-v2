@@ -140,7 +140,9 @@ def test_a_gate_blocked_module_reads_as_blocked_by_its_verdict(
 
 def test_the_harness_keeps_gate_readiness_on_a_canonical_run(harness: _Harness) -> None:
     """Presence alone would leave CP-L10 RUNNABLE: its only blocking edge is
-    from the accepted gate. BLOCKED is the gate's verdict, read from its record."""
+    from the accepted gate. BLOCKED is the gate's verdict, read from its record.
+    CP-5 is BLOCKED beside it, unattempted: no accepted input owns a named LITE
+    object (§46.1)."""
     _run(
         harness,
         CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"}),
@@ -148,9 +150,13 @@ def test_the_harness_keeps_gate_readiness_on_a_canonical_run(harness: _Harness) 
     with execution_reads(harness.conn):
         unrun = _unrun(harness.conn, harness.blobs, harness.bundle, harness.run_id)
 
-    screen = next(n for n in harness.route.nodes if n.module_id == "CP-L10")
+    screen, qa = (
+        next(n for n in harness.route.nodes if n.module_id == module_id)
+        for module_id in ("CP-L10", "CP-5")
+    )
     assert [(u.route_node_id, u.state, u.attempts) for u in unrun] == [
-        (screen.route_node_id, NodeState.BLOCKED, ())
+        (screen.route_node_id, NodeState.BLOCKED, ()),
+        (qa.route_node_id, NodeState.BLOCKED, ()),
     ]
 
 

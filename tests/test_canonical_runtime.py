@@ -180,15 +180,25 @@ def test_a_lite_route_completes_through_the_real_runtime(
     )
 
 
-def test_the_gate_blocking_a_module_ends_the_run_without_calling_it(
+def test_cp5_is_not_invoked_without_an_accepted_named_lite_object(
     harness: _Harness,
 ) -> None:
+    """§46.1: CP-L10's edge into CP-5 is soft, but CP-5's verified LITE block
+    retains `NAMED_LITE_OBJECT_ACCEPTED`. With CP-L10 gate-blocked no upstream
+    owns an accepted object, so the run ends BLOCKED and CP-5 costs nothing."""
     answers = CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"})
     assert _run_route(harness, _module_provider(harness, answers)) is None
-    # CP-5's edge from CP-L10 is soft, so CP-5 runs without it; CP-L10 never.
     called = [prompt.split(maxsplit=6)[5] for prompt in answers.prompts]
-    assert called == ["CP-0", "CP-5"]
-    assert _counts(harness) == (2, [REPORTED] * 2, 2, 2, 2)
+    assert called == ["CP-0"]
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    with connect(harness.url) as observer:
+        cp5 = observer.execute(
+            "SELECT count(*), count(r.attempt_id) FROM run_attempts t"
+            " LEFT JOIN budget_reservations r USING (attempt_id)"
+            " WHERE t.route_node_id=%s",
+            (_node(harness, "CP-5").route_node_id,),
+        ).fetchone()
+    assert cp5 == (0, 0)
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
 
 
