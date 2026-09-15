@@ -7,21 +7,11 @@ import type { Severity } from "@/wire";
 
 const HASH = /^[0-9a-f]{64}$/;
 
-function display(
-  status: QualificationStatus | null,
-  bound: boolean,
-): {
+function display(status: QualificationStatus | null): {
   label: string;
   sentence: string;
   severity: Severity;
 } {
-  if (!bound) {
-    return {
-      label: "UNAVAILABLE",
-      sentence: "No exact qualification evidence is bound to this view.",
-      severity: "IDLE",
-    };
-  }
   if (status === null)
     return { label: "LOADING", sentence: "Reading qualification.", severity: "RUNNING" };
   if (status.kind === "offline") {
@@ -86,7 +76,8 @@ export function QualificationStrip({ evidenceSha256 }: { evidenceSha256: string 
   }, [bound, evidenceSha256]);
 
   const status = held?.evidenceSha256 === evidenceSha256 ? held.status : null;
-  const view = display(status, bound);
+  if (!bound) return null;
+  const view = display(status);
   return (
     <section className={`verdict ${toneOf(view.severity)}`} aria-label="Qualification">
       <span className="sig">

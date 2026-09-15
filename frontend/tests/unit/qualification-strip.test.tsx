@@ -33,12 +33,12 @@ test("qualification states are never composed from a section verdict", async () 
   );
 });
 
-test("an unbound workspace labels qualification unavailable without a request", () => {
+test("an unbound workspace has no qualification claim or request", () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
   render(<QualificationStrip evidenceSha256={null} />);
 
-  expect(screen.getByLabelText("Qualification")).toHaveTextContent("UNAVAILABLE");
+  expect(screen.queryByLabelText("Qualification")).not.toBeInTheDocument();
   expect(fetch).not.toHaveBeenCalled();
 });
 
