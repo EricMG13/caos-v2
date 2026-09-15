@@ -417,13 +417,10 @@ def _eligible(
         owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
         or (route.profile_id, route.selection_id)
         != (case.profile_id, case.selection_id)
-        # Whether the case still wants the model extension, read off the
-        # pinned route's own nodes -- not re-derived by calling resolve_route
-        # against harness.catalog again, which a catalog changed or emptied
-        # since the gate (execution reads only the pin) would refuse
-        # ROUTE_PROFILE_UNKNOWN on, defeating the pin this check exists beside.
-        or (MODEL_MODULE in {node.module_id for node in route.nodes})
-        != case.model_extension
+        or (
+            any(node.module_id == MODEL_MODULE for node in route.nodes)
+            != case.model_extension
+        )
         or pin.research_json is not None
         or sorted(members)
         != sorted(

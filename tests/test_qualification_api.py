@@ -65,9 +65,10 @@ def _record(conn: StoreConnection, *, expires_at: datetime) -> Evidence:
 def _read(
     client: TestClient, evidence: Evidence, user: UUID, role: str = "ANALYST"
 ) -> Response:
-    return client.get(
+    answer: Response = client.get(
         f"/api/v1/qualification/{evidence.sha256}", headers=_headers(user, role)
     )
+    return answer
 
 
 def test_read_qualification(
