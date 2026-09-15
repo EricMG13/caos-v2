@@ -100,7 +100,7 @@ class _OneTokenExtractor:
 
     identity = ExtractorIdentity("test.one-token", "1", {})
 
-    def extract(self, data: bytes) -> list[Token]:
+    def extract(self, data: bytes, **_kwargs: object) -> list[Token]:
         return [
             Token(
                 text="Leverage",
