@@ -40,6 +40,7 @@ def manifest(tmp_path: Path) -> Path:
         "authority": "DEPLOY_V_INTEGRITY_v1",
         "schema_version": "1.0",
         "build_id": BUILD,
+        "root_file_hashes": {},
         "skills": [
             {"module_id": "CP-1", "folder_slug": "cp-1", "relative_file_hashes": hashes}
         ],
@@ -340,13 +341,14 @@ def test_mutation_during_the_last_file_read_refuses_assembly(
     manifest: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bundle = Bundle(manifest.parent)
-    original = Path.read_bytes
+    original = Path.open
+    raw = Path.read_bytes
 
-    def mutate(self: Path) -> bytes:
-        data = original(self)
+    def mutate(self: Path, *args: object, **kwargs: object) -> object:
+        stream = original(self, *args, **kwargs)  # type: ignore[call-overload]
         if self.name == "required.md":
-            manifest.write_bytes(original(manifest) + b" ")
-        return data
+            manifest.write_bytes(raw(manifest) + b" ")
+        return stream
 
-    monkeypatch.setattr(Path, "read_bytes", mutate)
+    monkeypatch.setattr(Path, "open", mutate)
     _refuses(lambda: assemble_authority(bundle, "CP-1"))

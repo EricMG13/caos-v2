@@ -1434,3 +1434,27 @@ of unenforced exclusion.
 **Why.** The repair plan requires limits before expensive work and specific safe
 outcomes, without new dependencies or speculative infrastructure; option 3
 keeps every v1 pin byte-identical while fixing the geometry new admissions carry.
+
+## 2026-09-14 §45 — Delivered authority, lineage and context ceilings
+
+**Decision.** For Phase 3 Task 3.3:
+
+1. **Delivered authority** is every non-script file of the module's manifest
+   entry plus every root file its verified `SKILL.md` names, each verified and
+   delivered whole; the record binds exactly that set.
+2. **No calculator is exposed.** No required computation on the LITE route has
+   host-owned inputs; the vendor validators run host-side after the answer.
+3. **Over-ceiling context refuses** `CONTEXT_OVER_CEILING` before any reservation
+   or call; nothing is truncated or summarised. Retrieval arrives with Phase 5
+   evidence selection.
+4. **Record format v2** adds the delivered-authority digest and upstream lineage;
+   pre-release v1 records refuse `ARTIFACT_RECORD_MISMATCH`, no backfill.
+5. **CP-0 anchor.** A node whose route gives it no direct CP-0 ref refuses
+   (fail-closed; LITE unaffected); a stored anchor field arrives with Phase 5.
+6. **Read model.** Task 3.4 labels verified citations as source fact, model
+   Markdown as analysis, host calculations as none; the host does not parse
+   vendor lineage columns.
+
+**Why.** Item 3 requires complete verified instructions and lineage without
+summarising; the measured references fit the request bound; no speculative tool
+loop or retrieval layer is added.
