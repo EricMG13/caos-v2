@@ -54,3 +54,21 @@ A fresh validation run, `90dc1bb3-6301-4af7-955e-717824672a90`, reached the
 provider twice but stopped both times with `PROVIDER_UNAVAILABLE`. Neither
 attempt returned a body, generation ID, or charge, so live confirmation remains
 pending and the model remains **not qualified**.
+
+## Direct Terra comparison
+
+An isolated `gpt-5.6-terra` probe answered the same generated CP-0 prompt without
+OpenRouter. Its first response passed the closed JSON and base Markdown checks
+but added `owned_object` and `canonical_filename` to front matter; the authority
+mentions payload metadata that the canonical Markdown validator correctly
+forbids there. The prompt now derives and names the exact model-authored
+front-matter fields from that validator.
+
+With that correction, Terra passed structure, identity, completeness, and T8,
+then failed citation anchoring because `FORM 10-K` appears more than once on the
+cited page. After the prompt explicitly required a unique page quote, a fresh
+Terra response repeated the same ambiguous citation. This establishes that the
+remaining incompatibility is neither OpenRouter-only nor DeepSeek-only: strict
+citation selection is still unreliable across models. The host continues to
+fail closed, and no Terra response was accepted or treated as qualification
+evidence.
