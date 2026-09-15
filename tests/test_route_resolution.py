@@ -34,7 +34,6 @@ from server.engine.route import (
     ResolvedRoute,
     RouteExtensions,
     RouteNode,
-    claims_result,
     dependency_order,
     frontier,
     limitations_of,
@@ -552,42 +551,6 @@ def test_readiness_applies_only_once_the_gate_is_accepted(
 
     assert states[_node_id(route, "CP-0")] is NodeState.RUNNABLE
     assert states[_node_id(route, "CP-1")] is NodeState.BLOCKED
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"content_to_module_map": [{"module_id": "CP-1"}]},
-        {"content_to_module_map": [{"readiness_status": "READY"}]},
-        {"content_to_module_map": ["CP-1"]},
-        {"content_to_module_map": "READY"},
-    ],
-)
-def test_a_malformed_readiness_map_refuses_rather_than_raising(body: object) -> None:
-    """A row the store could not have written is still a row this pure function
-    must not raise `KeyError` over."""
-    with pytest.raises(Refusal) as caught:
-        claims_result(body, gate=True)
-
-    assert caught.value.code is RefusalCode.READINESS_INVALID
-
-
-def test_a_claims_body_reduces_to_the_typed_result() -> None:
-    """The gate's map becomes readiness rows; any other body's map is not
-    readiness, and is neither read nor refused; a body that is not an object,
-    or a verdict that is not a string, carries nothing."""
-    body = {
-        "content_to_module_map": [{"module_id": "CP-1", "readiness_status": "READY"}],
-        "qa_status": "Passed",
-    }
-
-    assert claims_result(body, gate=True) == NodeResult(
-        readiness=(("CP-1", "READY"),), qa_status="Passed"
-    )
-    assert claims_result(body, gate=False) == NodeResult(qa_status="Passed")
-    assert claims_result({"content_to_module_map": "READY"}, gate=False) == NodeResult()
-    assert claims_result(["not", "an", "object"], gate=True) == NodeResult()
-    assert claims_result({"qa_status": 1}, gate=True) == NodeResult()
 
 
 def test_a_nodes_predecessors_are_its_edge_sources_in_route_order(

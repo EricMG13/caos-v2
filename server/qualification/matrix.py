@@ -43,7 +43,6 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
-from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document
@@ -237,7 +236,7 @@ def _row(
         refusal = failed.code
 
     try:
-        cited = _cited(conn, blobs, run_id, proof=proof)
+        cited = _cited(conn, run_id, proof=proof)
     except Refusal as unattributed:
         if unattributed.code not in _ROW_REFUSALS:
             raise
@@ -268,43 +267,19 @@ _ROW_REFUSALS = frozenset(
 
 
 def _cited(
-    conn: StoreConnection,
-    blobs: BlobStore,
-    run_id: UUID,
-    *,
-    proof: OrchestrationProof | None,
+    conn: StoreConnection, run_id: UUID, *, proof: OrchestrationProof | None
 ) -> set[tuple[str, str, str]]:
-    """Every (module, document, quote) this run's accepted artifacts carry.
+    """Every (module, document, quote) this run's proof re-anchored.
 
-    The module is taken from the route pin, not from the envelope that claims it
-    — the same reason `proof.py` does (invariant 3: the host owns identity). A
-    run with no pin cites nothing this function can attribute, which is a row
+    The module is taken from the route pin, as `proof.py` takes it (invariant
+    3: the host owns identity). A run with no pin cites nothing, which is a row
     that misses every key; an invalid pin refuses so `_row` records uncertainty.
-    A canonical run cites exactly what its `proof` re-anchored, and nothing
-    without one: no second read of artifacts the proof never saw.
+    A run cites exactly what its `proof` re-anchored, and nothing without one:
+    no artifact is read as a claims envelope (§42.1).
     """
-    route = resolved_route(conn, run_id)
-    if (
-        route is not None
-        and methodology.adapter_for(route) == methodology.CANONICAL_ADAPTER_VERSION
-    ):
-        return _proven(conn, run_id, proof)
-    module_of = (
-        {} if route is None else {n.route_node_id: n.module_id for n in route.nodes}
-    )
-    rows = conn.execute(
-        "SELECT a.artifact_sha256, t.route_node_id"
-        " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
-        " WHERE a.run_id = %s",
-        (run_id,),
-    ).fetchall()
-
-    cited: set[tuple[str, str, str]] = set()
-    for artifact_sha256, route_node_id in rows:
-        module_id = module_of.get(str(route_node_id))
-        if module_id is not None:
-            cited |= _quotes(blobs, str(artifact_sha256), module_id)
-    return cited
+    if resolved_route(conn, run_id) is None:
+        return set()
+    return _proven(conn, run_id, proof)
 
 
 def _proven(
@@ -321,33 +296,6 @@ def _proven(
     if any(document not in live for _module, document, _quote in proof.anchored):
         raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
     return set(proof.anchored)
-
-
-def _quotes(
-    blobs: BlobStore, artifact_sha256: str, module_id: str
-) -> set[tuple[str, str, str]]:
-    """One artifact's citations. Unreadable bytes cite nothing rather than
-    raising: `assert_orchestration_proof` is what judges an artifact, and it has
-    already run for this row."""
-    try:
-        envelope = json.loads(blobs.get(artifact_sha256))
-    except (ValueError, Refusal):
-        return set()
-    if not isinstance(envelope, dict) or not isinstance(envelope.get("claims"), list):
-        return set()
-
-    found: set[tuple[str, str, str]] = set()
-    for claim in envelope["claims"]:
-        if not isinstance(claim, dict) or not isinstance(claim.get("citations"), list):
-            continue
-        for citation in claim["citations"]:
-            if not isinstance(citation, dict):
-                continue
-            document = citation.get("document_sha256")
-            quote = citation.get("matched_text")
-            if isinstance(document, str) and isinstance(quote, str):
-                found.add((module_id, document, quote))
-    return found
 
 
 def assert_measurable(qualification: QualificationSet) -> None:
