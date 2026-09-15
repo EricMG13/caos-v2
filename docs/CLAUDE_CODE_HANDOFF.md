@@ -90,6 +90,7 @@ this documentation update has not rerun their gates or accepted new code.
 - **Not accepted as release qualification:** no explicit live-provider authorization was supplied, so 6.5 was not run; GitHub-hosted required checks have not been confirmed for this candidate. Keep release status blocked until both are satisfied.
 - **CI size gate:** `PR_BASE=eebb1327a5b77ea75775e793b420251595336f29 make check-size` currently fails at 75,566 counted changed lines against `main` (ceiling: 800). This accumulated repair branch must be split into reviewable PRs before it can satisfy the repository CI policy.
 - **Application-wide adversarial audit:** [audit](reviews/application-adversarial-audit.md) refreshed GitNexus at `5054d7c` and reviewed every deployable trust boundary. It found no new confirmed in-repository exploit, but independently confirms the live-qualification, hosted-check, trusted-edge and PR-size blockers above.
+- **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
 
 ## Phase 4 acceptance record — 14 September 2026
 
