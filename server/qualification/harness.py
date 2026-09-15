@@ -75,7 +75,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.invocation import named_objects
 from server.methodology.runner import ModuleProvider
 from server.pricing import ModelPrice, worst_case
-from server.provider import CompletionProvider
+from server.provider import CompletionProvider, OpenRouter
 from server.qualification.matrix import (
     Matrix,
     QualificationCase,
@@ -89,7 +89,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.gates import execution_input
-from server.store.outcomes import execution_reads, require_idle
+from server.store.outcomes import execution_reads, producer_identifier, require_idle
 from server.store.routes import pin_route, resolved_route
 from server.store.run_inputs import RunInput, pin_run_input, valid_subject
 from server.store.runs import create_case, run_status, start_run
@@ -212,6 +212,8 @@ class PreparedCase:
     case_label: str
     input: RunInput
     qualification_set_sha256: str
+    provider: str
+    model: str
 
 
 def prepare(
@@ -240,6 +242,8 @@ def prepare(
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     _subjects(qualification)
+    provider = _provider_identity(harness.completions)
+    model = _model_identity(harness.completions)
     require_idle(conn)
     set_digest = qualification_set_digest(qualification)
     prepared = []
@@ -264,6 +268,8 @@ def prepare(
                         subject=case.subject,
                     ),
                     set_digest,
+                    provider,
+                    model,
                 )
             )
     except psycopg.Error:
@@ -297,13 +303,19 @@ def perform(
     _distinct(qualification)
     _answerable(qualification)
     set_digest = qualification_set_digest(qualification)
+    provider = _provider_identity(harness.completions)
+    model = _model_identity(harness.completions)
     if len(prepared) != len(qualification.cases) or any(
         type(item) is not PreparedCase
         or type(item.input) is not RunInput
         or type(item.case_label) is not str
         or type(item.qualification_set_sha256) is not str
+        or type(item.provider) is not str
+        or type(item.model) is not str
         or item.case_label != case.label
         or item.qualification_set_sha256 != set_digest
+        or item.provider != provider
+        or item.model != model
         or type(item.input.run_id) is not UUID
         or type(item.input.case_id) is not UUID
         for case, item in zip(qualification.cases, prepared, strict=True)
@@ -344,6 +356,27 @@ def perform(
             runs={record.case_label: record.run_id for record in performed},
         )
     return PerformedSet(tuple(performed), matrix)
+
+
+def _provider_identity(provider: object) -> str:
+    """The configured provider, never a response-body claim."""
+    value = (
+        "openrouter"
+        if type(provider) is OpenRouter
+        else getattr(provider, "provider", None)
+    )
+    identity = producer_identifier(value, limit=256)
+    if identity is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return identity
+
+
+def _model_identity(provider: CompletionProvider) -> str:
+    """The configured model a prepared qualification set is allowed to call."""
+    model = producer_identifier(provider.model, limit=256)
+    if model is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return model
 
 
 def _eligible(
