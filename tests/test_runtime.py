@@ -642,3 +642,29 @@ def test_artifact_digests_maps_accepted_attempts_to_their_digest(
 
 def _node_id(route: ResolvedRoute, module_id: str) -> str:
     return next(n.route_node_id for n in route.nodes if n.module_id == module_id)
+
+
+def test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt(
+    case: tuple[StoreConnection, UUID],
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    """REPAIR_PLAN Phase 2 exit, check 5, after Task 3.1 slice f-1c.
+
+    The catalog's one QA_GATE (CP-5 -> CP-6) is on the FULL route, which the
+    canonical adapter does not execute (§42.2). The rule itself -- a CP-5 that
+    is not `Passed` never releases CP-6 -- is the pure
+    `test_qa_gate_blocks_cp6_until_cp5_accepted`; at runtime the route is
+    refused, approved end to end, before any attempt, reservation or call.
+    """
+    conn, case_id = case
+    full = resolve_route(CATALOG, "FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
+    run = _approved_run(conn, case_id, full, bundle, blobs)
+    provider = run.provider()
+
+    with pytest.raises(Refusal) as caught:
+        run.run(provider)
+
+    assert caught.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
+    _assert_no_work(run, provider)
+    assert run_status(conn, run.run_id) is RunStatus.RUNNING

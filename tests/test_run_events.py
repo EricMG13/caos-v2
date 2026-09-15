@@ -19,12 +19,13 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
 from conftest import approve_run
-from test_module_execution import VENDORED, _catalog_route
+from test_module_execution import VENDORED
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute
+from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
@@ -48,6 +49,8 @@ MODEL = "a-model/for-the-test"
 GENERATION = "gen-for-the-test"
 
 ARTIFACT = "b" * 64
+# Every accepted artifact carries its host record (§42.1).
+RECORD = "c" * 64
 CHARGE = Decimal("0.0142")
 
 
@@ -69,8 +72,9 @@ def approved_nodes(
     bundle: Bundle | None = None,
     route: ResolvedRoute | None = None,
 ) -> dict[str, str]:
-    """Admit evidence, then pin and govern this run on the real catalog route;
-    acceptance checks that authority at the store boundary."""
+    """Admit evidence, then pin and govern this run on the canonical LITE route
+    (acceptance refuses any other, §42.2); acceptance checks that authority at
+    the store boundary."""
     row = conn.execute(
         "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
     ).fetchone()
@@ -82,7 +86,7 @@ def approved_nodes(
         case_id=case_id,
         documents=[Document(filename=BoundaryText.of("pack.txt"), data=b"Pack.\n")],
     )
-    route = route or _catalog_route()
+    route = route or resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
     approve_run(
         conn,
         case_id=case_id,
@@ -118,7 +122,7 @@ def test_terminal_event_is_exactly_once(
     """
     conn, _case_id, run_id = run
     nodes = approved_nodes(conn, run_id, tmp_path)
-    attempt_id = start_attempt(conn, run_id, nodes["CP-1"])
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     conn.commit()
 
     completed = complete_attempt(
@@ -129,6 +133,7 @@ def test_terminal_event_is_exactly_once(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
     assert completed is True
@@ -142,6 +147,7 @@ def test_terminal_event_is_exactly_once(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -176,7 +182,7 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
     """
     conn, case_id, run_id = run
     nodes = approved_nodes(conn, run_id, tmp_path)
-    attempt_id = start_attempt(conn, run_id, nodes["CP-1"])
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     conn.commit()
 
     with connect(empty_database) as dying:
@@ -205,6 +211,7 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
         is True
@@ -261,7 +268,7 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
     conn, _case_id, run_id = run
     nodes = approved_nodes(conn, run_id, tmp_path)
     start_attempt(conn, run_id, nodes["CP-0"])
-    attempt_id = start_attempt(conn, run_id, nodes["CP-1"])
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     complete_attempt(
         conn,
         attempt_id=attempt_id,
@@ -270,6 +277,7 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -285,7 +293,7 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
     therefore its own operation, and a replay of it appends no second event."""
     conn, _case_id, run_id = run
     attempt_id = start_attempt(
-        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-1"]
+        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-L10"]
     )
 
     assert (
@@ -297,6 +305,7 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
         is True
@@ -312,6 +321,7 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
         is False
@@ -354,6 +364,7 @@ def test_a_transition_that_changed_nothing_appends_no_event(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -426,6 +437,7 @@ def test_a_float_charge_is_refused_before_it_reaches_the_ledger(
                 charge=0.0142,  # type: ignore[arg-type]
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
 
@@ -438,7 +450,7 @@ def test_the_charge_survives_as_the_decimal_it_was_given(
 ) -> None:
     conn, _case_id, run_id = run
     attempt_id = start_attempt(
-        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-1"]
+        conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-L10"]
     )
     complete_attempt(
         conn,
@@ -448,6 +460,7 @@ def test_the_charge_survives_as_the_decimal_it_was_given(
             charge=CHARGE,
             model=MODEL,
             generation_id=GENERATION,
+            record_sha256=RECORD,
         ),
     )
 
@@ -490,6 +503,7 @@ def test_an_unknown_attempt_cannot_complete_a_run(
                 charge=CHARGE,
                 model=MODEL,
                 generation_id=GENERATION,
+                record_sha256=RECORD,
             ),
         )
 

@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_frozen_evidence import _insert
 from test_run_inputs import _prepare, pin_version_one
+from test_run_subject import SUBJECT
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
 
 import server.store as store
@@ -69,11 +70,14 @@ def _check_frozen(conn: StoreConnection, source: UUID | None) -> None:
     assert _records(conn) == before
 
 
+_LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
+
+
 def _approve(
     conn: StoreConnection, case_id: UUID, run: UUID, route: ResolvedRoute
 ) -> str:
     """Acceptance requires every gate's current approval (Task17d3a); returns
-    the real CP-DR node."""
+    the route's first node."""
     approver = uuid4()
     grant(conn, case_id=case_id, user_id=approver, standing=Standing.APPROVER)
     conn.commit()
@@ -89,7 +93,7 @@ def _approve(
                 input_fingerprint=preview.input_fingerprint,
             ),
         )
-    return next(n.route_node_id for n in route.nodes if n.module_id == "CP-DR")
+    return route.nodes[0].route_node_id
 
 
 def _check_early_attempt(
@@ -148,7 +152,14 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
                     case_id = create_case(
                         conn, BoundaryText.of("complete input restore")
                     )
-                    run, sources, bundle, route = _prepare(conn, case_id, blobs.root)
+                    # Acceptance needs a route the adapter executes (§42.2);
+                    # a prefix-7 pin is data only, on the default route.
+                    run, sources, bundle, route = _prepare(
+                        conn,
+                        case_id,
+                        blobs.root,
+                        *([] if prefix_seven else [_LITE]),
+                    )
                     if prefix_seven:
                         # Today's pin and attempt writers need columns a prefix-7
                         # schema lacks: both are written as that code wrote them.
@@ -163,7 +174,12 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
                         reserve(conn, attempt, Decimal("0.25"))
                     else:
                         pin = pin_run_input(
-                            conn, run, sources.version, bundle, {"q": "Café?"}
+                            conn,
+                            run,
+                            sources.version,
+                            bundle,
+                            {"q": "Café?"},
+                            subject=SUBJECT,
                         )
                         attempt = start_attempt(
                             conn, run, _approve(conn, case_id, run, route)
@@ -173,7 +189,11 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
                             conn,
                             attempt_id=attempt,
                             accepted=Accepted(
-                                digest, Decimal("0.75"), "synthetic", "restore"
+                                digest,
+                                Decimal("0.75"),
+                                "synthetic",
+                                "restore",
+                                record_sha256=blobs.put(b"restore record"),
                             ),
                         )
                 columns = _columns(conn)
