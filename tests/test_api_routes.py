@@ -781,6 +781,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/model": "read_model",
         "/api/v1/cases/{case_id}/report": "read_report",
         "/api/v1/cases/{case_id}/committee": "read_committee",
+        "/api/v1/qualification/{evidence_sha256}": "read_qualification",
         "/api/v1/cases/{case_id}/runs/{run_id}/sources/{source_id}/pages/{page}": (
             "read_evidence_page"
         ),
