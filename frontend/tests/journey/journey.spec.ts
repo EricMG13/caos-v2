@@ -247,20 +247,15 @@ test.describe.serial("journey", () => {
     await page.locator("[data-route-select]").selectOption({
       label: "LITE_CREDIT_22 · LITE_EARNINGS_UPDATE",
     });
-    // Retried as a whole, not just awaited longer: under load the command's
-    // own response can be lost to the same transient 503 the connection-storm
-    // comment on `waitForNode` describes, while the run it created still
-    // lands and reaches this view through the SSE tail's own refetch --
-    // observable as the stale-run banner instead of the success toast. A
-    // second click in that case creates one more run, which costs nothing
-    // here: the next step reads whichever run is now displayed, not a count.
-    await expect(async () => {
-      await page.locator("[data-create-run] [data-action='CREATE_RUN']").click();
-      await expect(page.locator("[data-create-run] [data-command-success]")).toContainText(
-        "Run created.",
-        { timeout: 15_000 },
-      );
-    }).toPass({ timeout: 60_000 });
+    // Creation is not idempotent: retrying the click can create a second run
+    // while the worker claims the first, splitting this shared journey's
+    // observed run from its executed run. A transient command failure must
+    // fail this fresh-stack journey rather than silently changing its subject.
+    await page.locator("[data-create-run] [data-action='CREATE_RUN']").click();
+    await expect(page.locator("[data-create-run] [data-command-success]")).toContainText(
+      "Run created.",
+      { timeout: 15_000 },
+    );
     await expect(page.locator("[data-run]")).toBeVisible({ timeout: 15_000 });
     runId = (await page.locator("[data-run]").getAttribute("data-run")) ?? "";
     expect(runId).not.toBe("");

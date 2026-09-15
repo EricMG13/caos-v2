@@ -46,11 +46,11 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         "RUN_CANCEL_REQUESTED": "runs_changed",
         # Written before any case stream can exist: the Directory is not a stream.
         "CASE_CREATED": None,
-        # Report and Committee are not enabled: nothing on screen reads these.
+        # Saving creates a new exact selection; filing changes the selection on screen.
         "REVISION_SAVED": None,
-        "OPINION_SIGNED": None,
-        "DELIVERABLE_FROZEN": None,
-        "DELIVERABLE_FILED": None,
+        "OPINION_SIGNED": "filing_changed",
+        "DELIVERABLE_FROZEN": "filing_changed",
+        "DELIVERABLE_FILED": "filing_changed",
     }
 )
 

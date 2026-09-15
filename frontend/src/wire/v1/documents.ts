@@ -193,7 +193,7 @@ const HandoffView = object({
   screening_only: bool,
   source_facts: array(CitationView, 1024),
   model_analysis: string({ max: 26214400 }),
-  host_calculation: literal("NONE"),
+  host_calculation: enumOf(["NONE", "CP_CF_FORECAST"]),
 });
 const PendingNode = object({ route_node_id: short, module_id: short, state: NodeState });
 const AnalysisBody = object({
@@ -305,6 +305,7 @@ export const EVENT_NAMES = [
   "run_terminal",
   "sources_changed",
   "runs_changed",
+  "filing_changed",
 ] as const;
 const EventName = enumOf(EVENT_NAMES);
 const FrameView = object({
