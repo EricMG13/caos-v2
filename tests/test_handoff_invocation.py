@@ -443,6 +443,14 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     assert "Use only evidence whose host header says `citation_candidate: true`" in (
         compact
     )
+    assert "eligible, not required" in compact
+    assert "Do not enumerate all eligible candidates" in compact
+    assert "omit every candidate not quoted in the Markdown body" in compact
+    assert "copy its complete `matched_text` under `## Evidence Trace`" in compact
+    source_ids = json.dumps(
+        sorted({str(item.source_id) for item in delivered}), separators=(",", ":")
+    )
+    assert f"Valid `source_id` values are exactly: {source_ids}." in reminder
     assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
     assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
     t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"

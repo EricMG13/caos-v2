@@ -436,7 +436,14 @@ Include every register required by the authority. For every citation, copy
 evidence page, and include the same whole words verbatim in the Markdown body
 after the front matter. Use only evidence whose host header says
 `citation_candidate: true`; copy that block's complete text without shortening
-or combining it. Include at least one citation.
+or combining it. `citation_candidate: true` means eligible, not required.
+Select only evidence lines that directly support claims you wrote. Do not
+enumerate all eligible candidates; omit every candidate not quoted in the
+Markdown body. For each array item, copy its complete `matched_text` under
+`## Evidence Trace` before using it as support.
+Valid `source_id` values are exactly: {source_ids}. Copy one of these values
+character for character from the selected evidence block. Include at least one
+citation.
 """
 
 _CP0_FINAL_CHECK = """\
@@ -927,6 +934,9 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         heading_count=len(canonical_headings),
         headings=headings,
         authored_fields=authored_fields,
+        source_ids=json.dumps(
+            sorted({str(item.source_id) for item in delivered}), separators=(",", ":")
+        ),
     )
     if identity.module_id == GATE_MODULE:
         t8_header = "| " + " | ".join(contract.navigation.NEW_HEADERS) + " |"
