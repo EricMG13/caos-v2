@@ -102,9 +102,12 @@ def test_changed_execution_target_refuses_before_any_provider_call(
     conn, blobs, harness, qualification = ready
     prepared = _prepared(ready)
     completions = cast(_Completions, harness.completions)
-    changed_harness = replace(
-        harness, completions=replace(completions, **{field: changed})
+    changed_completions = (
+        replace(completions, provider=changed)
+        if field == "provider"
+        else replace(completions, model=changed)
     )
+    changed_harness = replace(harness, completions=changed_completions)
 
     with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
         subject.perform(

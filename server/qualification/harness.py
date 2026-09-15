@@ -66,6 +66,7 @@ from server.engine.route import (
     NodeResult,
     NodeState,
     ResolvedRoute,
+    RouteExtensions,
     node_states,
     resolve_route,
 )
@@ -233,7 +234,12 @@ def prepare(
     assert_unambiguous(qualification)
     _answerable(qualification)
     routes = [
-        resolve_route(harness.catalog, case.profile_id, case.selection_id)
+        resolve_route(
+            harness.catalog,
+            case.profile_id,
+            case.selection_id,
+            extensions=RouteExtensions(model_extension=case.model_extension),
+        )
         for case in qualification.cases
     ]
     titles = [
@@ -410,6 +416,13 @@ def _eligible(
         owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
         or (route.profile_id, route.selection_id)
         != (case.profile_id, case.selection_id)
+        or route
+        != resolve_route(
+            harness.catalog,
+            case.profile_id,
+            case.selection_id,
+            extensions=RouteExtensions(model_extension=case.model_extension),
+        )
         or pin.research_json is not None
         or sorted(members)
         != sorted(
@@ -632,5 +645,7 @@ def _answerable(qualification: QualificationSet) -> None:
     """
     for case in qualification.cases:
         carried = {sha256(document.data).hexdigest() for document in case.documents}
-        if any(expect.document_sha256 not in carried for expect in case.expects):
+        if any(expect.document_sha256 not in carried for expect in case.expects) or (
+            case.forecast is not None and not case.model_extension
+        ):
             raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)

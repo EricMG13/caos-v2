@@ -44,8 +44,11 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
+from server.methodology.canonical import accepted_handoff
+from server.methodology.forecast import forecast_projection
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -72,6 +75,33 @@ class ExpectedCitation:
 
 
 @dataclass(frozen=True, slots=True)
+class ForecastValue:
+    """One host-recomputed CP-CF value an independent key expects."""
+
+    name: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedForecast:
+    """A closed, mechanical credit-conclusion key for an accepted CP-CF run.
+
+    The result is read through ``accepted_handoff`` and recomputed by the host;
+    it is never extracted from model-authored narrative text.
+    """
+
+    scenario: str
+    period_id: str
+    values: tuple[ForecastValue, ...]
+    currency: str
+    scale: str
+    perimeter: str
+    qa_status: str
+    limitation_flags: tuple[str, ...]
+    readiness: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class QualificationCase:
     """One case of the set: its inputs, its route, and its answer key.
 
@@ -93,6 +123,13 @@ class QualificationCase:
     # Who and when the run is about. A canonical-adapter route requires one
     # (`pin_run_input`); a claims route leaves it None, as every case did before.
     subject: RunSubject | None = None
+    # Optional while historical citation-only sets remain reviewable.  New
+    # credit-conclusion sets use this deterministic CP-CF answer key.
+    forecast: ExpectedForecast | None = None
+    expected_refusal: RefusalCode | None = None
+    # CP-CF is a host extension, so a forecast key must bind whether it was
+    # present rather than silently qualifying the base route.
+    model_extension: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +153,8 @@ class MatrixRow:
     refusal: RefusalCode | None
     met: tuple[ExpectedCitation, ...]
     missed: tuple[ExpectedCitation, ...]
+    forecast_met: bool | None
+    expected_refusal_met: bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +215,24 @@ def _digested(case: QualificationCase) -> list[object]:
                 subject.analysis_date,
             ]
         )
+    if case.model_extension:
+        entry.append("model_extension")
+    if case.forecast is not None:
+        entry.append(
+            [
+                case.forecast.scenario,
+                case.forecast.period_id,
+                sorted([value.name, value.value] for value in case.forecast.values),
+                case.forecast.currency,
+                case.forecast.scale,
+                case.forecast.perimeter,
+                case.forecast.qa_status,
+                sorted(case.forecast.limitation_flags),
+                sorted(case.forecast.readiness),
+            ]
+        )
+    if case.expected_refusal is not None:
+        entry.append(case.expected_refusal.value)
     return entry
 
 
@@ -247,7 +304,143 @@ def _row(
         refusal=refusal,
         met=met,
         missed=tuple(expect for expect in case.expects if expect not in met),
+        forecast_met=_forecast_met(
+            conn, blobs, bundle, case=case, run_id=run_id, proof=proof
+        ),
+        expected_refusal_met=(
+            None if case.expected_refusal is None else refusal is case.expected_refusal
+        ),
     )
+
+
+def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+    proof: OrchestrationProof | None,
+) -> bool | None:
+    """Compare a CP-CF answer key only after the complete run proof exists."""
+    expected = case.forecast
+    if expected is None:
+        return None
+    if proof is None:
+        return False
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return False
+    node = next((item for item in route.nodes if item.module_id == "CP-CF"), None)
+    if node is None:
+        return False
+    rows = conn.execute(
+        "SELECT a.artifact_sha256, a.record_sha256, a.attempt_id"
+        " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+        " WHERE a.run_id = %s AND t.route_node_id = %s",
+        (run_id, node.route_node_id),
+    ).fetchall()
+    if len(rows) != 1 or rows[0][1] is None:
+        return False
+    accepted = {
+        str(row[0]): (str(row[1]), None if row[2] is None else str(row[2]))
+        for row in conn.execute(
+            "SELECT t.route_node_id, a.artifact_sha256, a.record_sha256"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s",
+            (run_id,),
+        ).fetchall()
+    }
+    artifact_sha256, record_sha256, attempt_id = rows[0]
+    try:
+        markdown, record = accepted_handoff(
+            conn,
+            blobs,
+            bundle,
+            route,
+            run_id=run_id,
+            route_node_id=node.route_node_id,
+            attempt_id=UUID(str(attempt_id)),
+            artifact_sha256=str(artifact_sha256),
+            record_sha256=str(record_sha256),
+            accepted=accepted,
+        )
+        result = forecast_projection(markdown)
+    except (Refusal, ValueError, TypeError):
+        return False
+    row = next(
+        (
+            item
+            for item in result["rows"]
+            if item["case"] == expected.scenario
+            and item["period_id"] == expected.period_id
+        ),
+        None,
+    )
+    return (
+        row is not None
+        and all(
+            _forecast_values(row).get(value.name) == value.value
+            for value in expected.values
+        )
+        and result["units"] == {"currency": expected.currency, "scale": expected.scale}
+        and result["perimeter"] == expected.perimeter
+        and record.projections.qa_status == expected.qa_status
+        and record.projections.limitation_flags == expected.limitation_flags
+        and _readiness(conn, blobs, bundle, route, run_id) == expected.readiness
+    )
+
+
+def _forecast_values(row: Mapping[str, object]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for group, item in row.items():
+        if group in {"case", "period_id", "fiscal_year", "days", "unavailable_reason"}:
+            continue
+        if isinstance(item, dict):
+            for name, value in item.items():
+                if isinstance(value, dict) and isinstance(value.get("value"), str):
+                    values[f"{group}.{name}"] = value["value"]
+                elif isinstance(value, str):
+                    values[f"{group}.{name}"] = value
+        elif isinstance(item, str):
+            values[group] = item
+    return values
+
+
+def _readiness(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    route: ResolvedRoute,
+    run_id: UUID,
+) -> tuple[tuple[str, str], ...]:
+    """The gate's revalidated readiness projection, or an empty non-match."""
+    gate = next((item for item in route.nodes if item.module_id == "CP-0"), None)
+    if gate is None:
+        return ()
+    row = conn.execute(
+        "SELECT a.artifact_sha256, a.record_sha256, a.attempt_id"
+        " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+        " WHERE a.run_id = %s AND t.route_node_id = %s",
+        (run_id, gate.route_node_id),
+    ).fetchone()
+    if row is None or row[1] is None:
+        return ()
+    try:
+        _markdown, record = accepted_handoff(
+            conn,
+            blobs,
+            bundle,
+            route,
+            run_id=run_id,
+            route_node_id=gate.route_node_id,
+            attempt_id=UUID(str(row[2])),
+            artifact_sha256=str(row[0]),
+            record_sha256=str(row[1]),
+        )
+    except (Refusal, ValueError, TypeError):
+        return ()
+    return record.projections.readiness
 
 
 def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool:
@@ -309,9 +502,17 @@ def assert_measurable(qualification: QualificationSet) -> None:
     """
     if not qualification.cases:
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
-    if any(not case.expects or not case.documents for case in qualification.cases):
-        # A case expecting nothing measures nothing; a case with no documents
-        # cannot be run and cannot be cited. Both are the same hole.
+    if any(
+        not case.documents
+        or (
+            not case.expects and case.forecast is None and case.expected_refusal is None
+        )
+        or (case.forecast is not None and not case.forecast.values)
+        for case in qualification.cases
+    ):
+        # A case with no declared comparison, or an empty forecast key, measures
+        # nothing; a case with no documents cannot be run.  All are the same
+        # pre-spend hole.
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
 
 
@@ -319,6 +520,12 @@ def assert_unambiguous(qualification: QualificationSet) -> None:
     """Refuse duplicate case labels or answer keys before either can be scored."""
     labels = [case.label for case in qualification.cases]
     if len(set(labels)) != len(labels) or any(
-        len(set(case.expects)) != len(case.expects) for case in qualification.cases
+        len(set(case.expects)) != len(case.expects)
+        or (
+            case.forecast is not None
+            and len({value.name for value in case.forecast.values})
+            != len(case.forecast.values)
+        )
+        for case in qualification.cases
     ):
         raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)

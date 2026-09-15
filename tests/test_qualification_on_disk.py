@@ -32,6 +32,8 @@ from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
+    ExpectedForecast,
+    ForecastValue,
     QualificationCase,
     QualificationSet,
     qualification_set_digest,
@@ -162,6 +164,42 @@ def test_the_bytes_on_disk_are_what_the_case_carries(on_disk: Path) -> None:
     (on_disk / "documents" / "acme-2026" / "report.txt").write_bytes(b"something else")
 
     assert qualification_set_digest(load_qualification_set(on_disk)) != before
+
+
+def test_a_disk_set_binds_a_forecast_key_and_host_extension(tmp_path: Path) -> None:
+    manifest = _manifest()
+    first = manifest["cases"][0]  # type: ignore[index]
+    first.update(
+        {
+            "forecast": {
+                "scenario": "BASE",
+                "period_id": "FY2026",
+                "values": [{"name": "cash.closing", "value": "145.000000"}],
+                "currency": "USD",
+                "scale": "millions",
+                "perimeter": "Consolidated",
+                "qa_status": "Passed",
+                "limitation_flags": [],
+                "readiness": [["CP-1", "READY"]],
+            },
+            "expected_refusal": "HANDOFF_BLOCKED",
+            "model_extension": True,
+        }
+    )
+    [case] = load_qualification_set(_write(tmp_path, manifest)).cases[:1]
+    assert case.model_extension is True
+    assert case.expected_refusal is RefusalCode.HANDOFF_BLOCKED
+    assert case.forecast == ExpectedForecast(
+        scenario="BASE",
+        period_id="FY2026",
+        values=(ForecastValue(name="cash.closing", value="145.000000"),),
+        currency="USD",
+        scale="millions",
+        perimeter="Consolidated",
+        qa_status="Passed",
+        limitation_flags=(),
+        readiness=(("CP-1", "READY"),),
+    )
 
 
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
