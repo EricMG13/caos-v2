@@ -45,6 +45,10 @@ TRUSTED = "1"
 SUBJECT_HEADER = "x-caos-user"
 GROUPS_HEADER = "x-forwarded-groups"
 ROLE_HEADER = "x-caos-role"
+# Edge mode (`server/api/edge.py`): while this is set, the switch above is never
+# believed, whatever it says -- boot refuses the pair, and this is the rule a
+# request meeting the pair anyway still obeys.
+EDGE_TOKEN_ENV = "CAOS_EDGE_TOKEN"  # nosec B105 -- a variable name, not a secret
 
 
 class GlobalRole(StrEnum):
@@ -97,7 +101,7 @@ def actor_from_headers(headers: object) -> Actor:
         # `from None`: the ValueError's message is the header the client sent.
         raise Refusal(RefusalCode.NOT_AUTHENTICATED) from None
 
-    if os.environ.get(TRUST_SWITCH) == TRUSTED:
+    if os.environ.get(TRUST_SWITCH) == TRUSTED and EDGE_TOKEN_ENV not in os.environ:
         return Actor(user_id=user_id, role=_claimed(get(ROLE_HEADER)))
     return Actor(user_id=user_id, role=_from_groups(get(GROUPS_HEADER)))
 

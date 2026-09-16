@@ -56,6 +56,60 @@ def route_fault(conn: object) -> Iterator[None]:
         connection.execute("ALTER TABLE run_routes ENABLE TRIGGER route_immutable")
 
 
+# Where a suite's `TestClient` stands (slice 4.5a1). The edge guard serves a
+# tokenless process only to a loopback peer on a loopback host, and an unsafe
+# `/api` call only as a same-origin fetch, so every client defaults to what the
+# development browser presents. A suite proving a refusal names its own peer,
+# base URL or headers, or deletes the default (`tests/test_edge.py`).
+LOOPBACK_BASE_URL = "http://127.0.0.1:8000"
+LOOPBACK_PEER = ("127.0.0.1", 50000)
+LOOPBACK_HEADERS = {"sec-fetch-site": "same-origin"}
+# The development shell exports the trust switch; a suite that needs it sets it.
+_AMBIENT_IDENTITY = ("CAOS_EDGE_TOKEN", "CAOS_PUBLIC_ORIGIN", "CAOS_TRUST_ROLE_HEADER")
+
+
+def _loopback_test_client() -> None:
+    from starlette.testclient import TestClient
+
+    original = TestClient.__init__
+    if getattr(original, "loopback_default", False):
+        return
+
+    def init(
+        self: TestClient,
+        app: object,
+        base_url: str = LOOPBACK_BASE_URL,
+        *args: object,
+        headers: dict[str, str] | None = None,
+        client: tuple[str, int] = LOOPBACK_PEER,
+        **kwargs: object,
+    ) -> None:
+        merged = {**LOOPBACK_HEADERS, **(headers or {})}
+        original(self, app, base_url, *args, headers=merged, client=client, **kwargs)  # type: ignore[arg-type, misc]
+
+    init.loopback_default = True  # type: ignore[attr-defined]
+    TestClient.__init__ = init  # type: ignore[method-assign]
+
+
+_loopback_test_client()
+
+
+@pytest.fixture(autouse=True)
+def _development_edge() -> Iterator[None]:
+    """No suite inherits an edge token, public origin or trust switch.
+
+    Not through `monkeypatch`: an autouse request would set that fixture up
+    first and so tear it down last, leaving a suite's own patches in place
+    while its database fixtures clean up.
+    """
+    saved = {name: os.environ.pop(name, None) for name in _AMBIENT_IDENTITY}
+    yield
+    for name, value in saved.items():
+        os.environ.pop(name, None)
+        if value is not None:
+            os.environ[name] = value
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--live-provider", action="store_true", help="run live provider tests"
