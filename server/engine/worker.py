@@ -180,7 +180,8 @@ def pause_seconds(config: WorkerConfig, failures: int) -> float:
     """The next wait: the poll interval, doubled per consecutive store fault up
     to the cap, with +-20% jitter so workers do not poll in step."""
     base = config.poll_seconds * float(2 ** max(failures - 1, 0))
-    jitter = 0.8 + secrets.randbelow(401) / 1000
+    # Integer thousandths first: `0.8 + 400 / 1000` is 1.2000000000000002.
+    jitter = (800 + secrets.randbelow(401)) / 1000
     return min(base, config.backoff_cap_seconds) * jitter
 
 
