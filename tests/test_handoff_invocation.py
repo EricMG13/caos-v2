@@ -44,6 +44,7 @@ from server.methodology.bundle import (
 )
 from server.methodology.executor import Delivery
 from server.methodology.handoff import (
+    INVISIBLE,
     HostIdentity,
     UpstreamRef,
     expected_filename,
@@ -390,6 +391,35 @@ def test_cp0_source_preparation_is_tagged_context_not_evidence() -> None:
     )
     assert expected_root in prompt
     assert prompt.index(section) < prompt.index(f"--- EVIDENCE {tag} ---")
+
+
+def test_a_filename_the_host_renders_can_always_be_quoted_back() -> None:
+    """The host must not name a document in a way its own reader refuses.
+
+    `BoundaryText` admits U+2028, U+2029 and U+FEFF, so a document can be
+    admitted under a filename carrying one. `handoff.INVISIBLE` refuses those
+    same characters in a module's answer, and the preparation section is
+    labelled host-owned -- so CP-0 copying the name into its P2 inventory,
+    exactly as instructed, would be refused HANDOFF_MALFORMED for a string the
+    host chose to show it.
+    """
+    delivered = _delivered()
+    hostile = "\ufeffReport\u2028Q4.pdf"
+    source_set = _source_set(*(item.source_id for item in delivered), filename=hostile)
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=source_set,
+    )
+
+    assert not INVISIBLE.intersection(prompt), "nothing invisible reaches the model"
+    assert '"filename": "ReportQ4.pdf"' in prompt
 
 
 def test_only_cp0_can_receive_source_preparation() -> None:

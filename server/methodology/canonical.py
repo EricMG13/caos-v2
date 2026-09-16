@@ -534,6 +534,40 @@ class Replayed:
     code: RefusalCode | None = None
 
 
+def unexplained_charge(
+    conn: StoreConnection,
+    *,
+    run_id: UUID,
+    route_node_ids: Sequence[str],
+) -> str | None:
+    """A ready node already paid for whose answer was never stored.
+
+    `_diagnostic` can fail to write its body after `record_outcome` has already
+    committed the charge: the bytes are gone, and `replay_billed` cannot settle
+    the attempt because it requires a diagnostic to read. Left alone the next
+    pass starts a fresh attempt, reserves again and calls the provider again,
+    so one node is billed twice with nobody deciding that it should be. The
+    run ceiling bounds it; nothing else does.
+
+    Returns the first such node, for a caller that refuses rather than spends.
+    Paying again may well be the right answer -- but it is an operator's to
+    give, which is what parking the run with a code asks for.
+    """
+    row = conn.execute(
+        "SELECT t.route_node_id FROM call_outcomes o JOIN run_attempts t"
+        " USING (attempt_id) JOIN budget_ledger l"
+        " ON (l.run_id, l.attempt_id) = (o.run_id, o.charged_attempt_id)"
+        " WHERE t.run_id = %s AND t.route_node_id = ANY(%s)"
+        " AND o.diagnostic_sha256 IS NULL"
+        " AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.attempt_id = o.attempt_id)"
+        " AND NOT EXISTS"
+        " (SELECT 1 FROM attempt_refusals r WHERE r.attempt_id = o.attempt_id)"
+        " ORDER BY t.ordinal, t.route_node_id LIMIT 1",
+        (run_id, list(route_node_ids)),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
 def replay_billed(  # noqa: PLR0913 -- one run's nodes, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,

@@ -46,6 +46,7 @@ from server.methodology.executor import SKILL, Delivery
 from server.methodology.handoff import (
     ADAPTER_MODULES,
     GATE_MODULE,
+    INVISIBLE,
     CanonicalRecord,
     HostIdentity,
     LineageRef,
@@ -797,6 +798,21 @@ def _authority_sections(authority: DeliveredAuthority, tag: str) -> str:
     )
 
 
+def _printable(value: str) -> str:
+    """A string the host attributes to itself, with nothing invisible in it.
+
+    `BoundaryText` keeps U+2028, U+2029 and U+FEFF -- one text that reads as
+    two -- while `handoff.INVISIBLE` refuses them in a module's answer. A
+    filename is chosen by whoever admitted the document, and it is rendered
+    here under a marker the prompt calls host-owned. Copied into CP-0's
+    inventory exactly as the instruction demands, such a filename would be
+    refused `HANDOFF_MALFORMED`: a host defect recorded as the model's answer.
+    Dropping the characters is the narrow fix; the document keeps its name
+    everywhere the host owns the comparison.
+    """
+    return "".join(character for character in value if character not in INVISIBLE)
+
+
 def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
     """CP-0's verified source provenance, deliberately outside evidence."""
     if source_set is None:
@@ -815,7 +831,7 @@ def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
         "sources": [
             {
                 "source_id": str(member.source_id),
-                "filename": member.filename,
+                "filename": _printable(member.filename),
                 "admitted_at": member.admitted_at,
                 "original_root": f"blob://sha256/{member.document_sha256}",
                 "original_sha256": member.document_sha256,
