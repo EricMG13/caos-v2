@@ -13,7 +13,7 @@ import psycopg
 from server.qualification.harness import Performed, PerformedSet, PreparedCase
 from server.qualification.verdict import Verdict, read_verdict
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +55,31 @@ class PerformedEvidence:
 
     @property
     def complete(self) -> bool:
-        return self.performed.matrix is not None
+        """A matrix over runs that finished and answered their keys.
+
+        A matrix alone is not enough. `Assurance` has one reviewer-written
+        member, `QUALIFIED`, so a snapshot worth signing is one that could
+        carry that word: every run reached `COMPLETE`, and every row either
+        met the refusal its case declared or proved every expected citation.
+        A run that validly returns a blocked readiness handoff stops with
+        nothing in `stopped` and still builds a matrix — rows unproven, every
+        key missed — which is the shape both live runs so far have taken, and
+        exactly what must not be signable.
+        """
+        matrix = self.performed.matrix
+        if matrix is None:
+            return False
+        if any(
+            record.status is not RunStatus.COMPLETE
+            for record in self.performed.performed
+        ):
+            return False
+        return all(
+            row.expected_refusal_met
+            if row.expected_refusal_met is not None
+            else (row.proven and not row.missed)
+            for row in matrix.rows
+        )
 
     @property
     def evidence(self) -> Evidence:
