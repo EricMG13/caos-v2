@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **`canonical-markdown-v3` (`1b7e455`) and its review remediation (`b456966`) are accepted on a complete green `make check`. The authorized Terra v3 qualification ran and, for the first time, finished its route: three artifacts, fourteen citations, all anchored, one call per module, `$0.82248325`. It met two of three answer keys and missed CP-0's, so `complete` is false and no verdict exists. Phase 6 remains release-blocked.** |
-| Next task | Decide what answers CP-0's missed key: a further separately authorized run, a change to the instruction that selects evidence, or an answer key that the module's own reading can meet. Then the three ledgered Phase 6 gaps (double-billed diagnostic, the post-bill original recheck, the admitter-chosen filename) before any second paid run. No result may be represented as qualified without an external authenticated verdict over a `complete` snapshot. |
+| Latest accepted task | **Two Terra v3 qualification runs, a complete green `make check`, and three defects they found. The first finished its route (3 artifacts, 14 citations all anchored, `$0.82248325`); the second was refused by our own reader and exposed it. Phase 6 remains release-blocked.** |
+| Next task | Author CP-0's replacement expectation from its own contract — not from what a previous run cited — and re-freeze the set. Then one authorized run against digest `ae70850d…`, then the verdict decision. No result may be represented as qualified without an external authenticated verdict over a `complete` snapshot. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -93,6 +93,36 @@ this documentation update has not rerun their gates or accepted new code.
 - **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
 
 ### Phase 6 qualification checkpoint — 15 September 2026
+
+### Phase 6 second run, three fixes, and a re-cast key — 16 September 2026
+
+- **The second run failed on us, not on the model.** CP-L10 answered in full —
+  33 KB, every section, five citations all present in its own Markdown — and
+  `parse_response` refused `HANDOFF_MALFORMED` because the Evidence Trace wrote
+  them as prose does, in quotation marks: the whole-token rule compared `“The`
+  against `The`. DeepSeek's three attempts are recorded in the same words
+  ("quoted none of them in the body"), so four paid attempts across two models
+  have been blamed on the corpus for a defect in our reader. Fixed at
+  `7a12c6d` and verified against the stored answer that died, which now parses
+  with its five citations. `verify_citations` is untouched.
+- **Two Phase 6 gaps closed** (`cf6905d`): a billed call whose diagnostic body
+  could not be stored is no longer silently billed again — `unexplained_charge`
+  parks the run `CALL_OUTCOME_UNEXPLAINED` for an operator, with `holds_lease`
+  keeping the lease answer first; and an admitter-chosen filename no longer
+  reaches the prompt carrying characters the host's own reader refuses. The
+  third, the post-bill original recheck, is kept rather than removed, and the
+  ledger says why instead of promising a deletion.
+- **The driver is in the tree.** `scripts/qualify.py` replaces the script that
+  lived in `/private/tmp` and nearly took two runs' evidence with it. It
+  refuses before spending when the environment resolves to an unexpected
+  profile, and prints its database and blob root before the first call.
+- **The answer key was re-cast.** CP-0's borrowing-capacity expectation moved
+  to CP-5: it is a credit fact, not a readiness fact, and CP-0 is
+  `SourceReadiness`. The set digest moved `ec84bf8b…` → `ae70850d…`, so the two
+  runs performed are not comparable to anything after it. CP-0 now carries no
+  expectation and one is owed, authored from its contract rather than from what
+  a run cited.
+- **Nothing has been run against the new set.** Spend so far: `$1.33`.
 
 ### Phase 6 v3 qualification result — 16 September 2026
 
