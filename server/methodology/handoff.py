@@ -61,8 +61,10 @@ ZERO_SHA256 = "0" * 64
 MAX_FILE_BYTES = 26_214_400
 MAX_FRONTMATTER_BYTES = 262_144
 MAX_LINE_BYTES = 65_536
-# Characters BoundaryText keeps that still make one text read as two.
-_INVISIBLE = frozenset("\u2028\u2029\ufeff")
+# Characters BoundaryText keeps that still make one text read as two. Public
+# because the prompt builder must drop what this refuses, so that a filename
+# the host renders can always be quoted back (invocation._printable).
+INVISIBLE = frozenset("\u2028\u2029\ufeff")
 _UPGRADE_KEYS = ("credit_os_parent_run_id", "credit_os_upgrade_source_sha256")
 
 
@@ -218,7 +220,7 @@ def _text(markdown: bytes) -> str:
         text = None
     # Canonical Markdown is LF-only; a CR would let the host and the vendor
     # disagree about where lines, and so the front matter, end.
-    if text is None or "\r" in text or _INVISIBLE.intersection(text):
+    if text is None or "\r" in text or INVISIBLE.intersection(text):
         raise malformed
     try:
         clean = BoundaryText.of(text, limit=len(text)).value == text

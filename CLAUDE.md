@@ -905,8 +905,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **A billed call whose diagnostic body cannot be stored is billed again.**
-  `_diagnostic` returning no body still commits the charge with
+- ~~**A billed call whose diagnostic body cannot be stored is billed again.**~~
+  Closed the same day it was raised. `_diagnostic` returning no body still commits the charge with
   `diagnostic_sha256` NULL, and `replay_billed` excludes exactly those rows, so
   the next pass over the node starts a fresh attempt, reserves again and calls
   the provider again. Nothing between `replay_billed` and `start_attempt` asks
@@ -918,8 +918,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   query beside `replay_billed` in `_drive` for a ready node with a ledger charge,
   no artifact, no refusal row and a NULL diagnostic, raising a code that is not
   in `_NOT_AN_EXPLANATION` so the second charge is an explained, requeued
-  decision. Owed before a second paid run.
-- **The post-bill original recheck protects nothing a reader relies on.**
+  decision. That is what `canonical.unexplained_charge` now is: `_drive` asks it
+  for a ready node with a ledger charge, no artifact, no refusal row and a NULL
+  diagnostic, and refuses `CALL_OUTCOME_UNEXPLAINED` before reserving anything.
+  The run parks with the code, which is the operator's decision this entry said
+  nobody was making. Paying again is still allowed -- it is just chosen now.
+- **The post-bill original recheck is a fault point, and it stays.** Recorded
+  because the Phase 6 adversarial audit asked for its removal and that
+  recommendation was not taken; a contested finding is worth a ledger entry
+  either way.
   `_answer` re-reads every original PDF after the money is spent, but the
   answer's validity does not depend on those bytes: evidence comes from
   `source_blocks` and `source_tokens`, the record embeds no original, and
@@ -927,10 +934,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   fault point between the charge and acceptance, where a transient `OSError` on
   a multi-megabyte read leaves a billed, unexplained node. The pre-call check in
   `_source_preparation` is the one with a consumer, and replay runs it again
-  before any new spend. *Upgrade:* delete the post-bill read and the two tests
-  that exist only to exercise it, and drop the "recur at acceptance" sentence
-  from the three documents that make it.
-- **A filename an admitter chose is rendered under a host-attributed marker.**
+  before any new spend. The audit is right that the recheck guards no reader.
+  It is wrong about the price: v3 also made `BLOB_*` faults re-raise out of
+  `replay_billed` rather than become a verdict, so the billed node this recheck
+  can strand is replayed from its stored body once the original is restored --
+  `test_a_lost_original_after_billing_replays_after_it_is_restored` is that
+  path. A recoverable fault point that re-verifies a pinned digest against the
+  store is the direction invariant 3 asks for, so it is kept.
+  *Upgrade:* none planned. Revisit if a real run is ever stranded here, which
+  would mean the recovery does not work as that test claims.
+- ~~**A filename an admitter chose is rendered under a host-attributed marker.**~~
+  Closed the same day it was raised.
   `invocation.py` writes `member.filename` inside `HOST SOURCE PREPARATION`,
   which the prompt labels host-owned, and `_TAGGED` warns the model only about
   untagged *markers*. `BoundaryText` accepts U+FEFF, U+2028 and U+2029 that
@@ -938,9 +952,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   copied into CP-0's inventory exactly as the instruction demands, is refused
   `HANDOFF_MALFORMED` — a host defect recorded as the model's answer. Cannot
   fire on a frozen ASCII corpus, which is why it is recorded rather than fixed
-  under an authorized run. *Upgrade:* render `filename` through the same
-  invisible-character filter, or refuse it at `_valid_member`, and label the
-  section as host-derived metadata whose string values are not instructions.
+  under an authorized run. `invocation._printable` now drops those characters
+  from the rendered filename, and `handoff.INVISIBLE` is public so the prompt
+  builder and the reader that refuses them cannot drift apart. The document
+  keeps its real name everywhere the host owns the comparison. *Upgrade:* the
+  section's own label still says "host-owned preparation metadata" without
+  saying that its string values are not instructions; worth adding the day a
+  document is admitted by anyone but this repository's operator.
 
 - **Identity before the store rests on parameter order.** Every section read
   (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
