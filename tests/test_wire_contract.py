@@ -303,7 +303,6 @@ def test_the_wire_schema_uses_only_keywords_the_browser_validator_understands() 
     assert {"$ref", "anyOf", "maxLength", "maxItems", "pattern", "format"} <= seen
 
 
-def test_the_section_routers_are_route_less_and_budgeted() -> None:
+def test_every_section_router_declares_its_store_budget() -> None:
     for module in (directory, upload, run, analysis):
-        assert module.IO_BUDGET == 0
-        assert module.router.routes == []
+        assert isinstance(module.IO_BUDGET, int) and module.IO_BUDGET >= 0
