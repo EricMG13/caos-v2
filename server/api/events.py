@@ -36,6 +36,7 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         RunEvent.RUN_BLOCKED.value: "run_terminal",
         RunEvent.RUN_CANCELLED.value: "run_terminal",
         "SOURCE_WITHDRAWN": "sources_changed",
+        "SOURCES_ADMITTED": "sources_changed",
         "GATE_RELEASED:SOURCE_SET": "runs_changed",
         "GATE_RELEASED:RESEARCH_PLAN": "runs_changed",
         "RUN_ENQUEUED": "runs_changed",

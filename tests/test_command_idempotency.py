@@ -33,7 +33,7 @@ from server.api.commands._request import (
     require_case_writer,
 )
 from server.api.deps import Caller, Store, store_connection
-from server.api.identity import Actor, GlobalRole
+from server.api.identity import TRUST_SWITCH, Actor, GlobalRole
 from server.api.wire import CaseCreated, CreateCase
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
@@ -187,6 +187,12 @@ probe = FastAPI()
 for _error, _handler in app.exception_handlers.items():
     probe.add_exception_handler(_error, _handler)
 probe.include_router(router)
+
+
+@pytest.fixture(autouse=True)
+def _groups_not_role_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Identity comes from groups; a developer's trusted role header stays out."""
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
 
 
 @pytest.fixture
@@ -447,12 +453,7 @@ def test_case_standing_is_visibility_then_global_role_then_floor(
 
 def test_the_real_app_includes_the_command_routers_and_statuses() -> None:
     from server.api import app as app_module
-    from server.api.commands import runs
 
-    # `execution` and `cases` have their routes (slices 4.2f and 4.2d).
-    for module in (runs,):
-        assert module.IO_BUDGET == 0
-        assert module.router.routes == []
     status = app_module._STATUS
     assert status[RefusalCode.NOT_AUTHORISED] == 403
     assert status[RefusalCode.SOURCE_TOO_LARGE] == 413

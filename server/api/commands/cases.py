@@ -26,26 +26,36 @@ single-actor release under invariant 5.
 from __future__ import annotations
 
 from collections.abc import Callable
+from hashlib import sha256
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Response
+import psycopg
+from fastapi import APIRouter, Depends, Request, Response
+from starlette.datastructures import UploadFile
+from starlette.exceptions import HTTPException
+from starlette.types import Message, Receive
 
 from server.api.commands._request import (
     Key,
     command_response,
     json_body,
+    require_case_writer,
 )
-from server.api.deps import Caller, Store
+from server.api.deps import Blobs, Caller, Store
 from server.api.identity import Actor, GlobalRole
-from server.api.wire import TITLE_CHARS, CaseCreated, CreateCase
+from server.api.wire import TITLE_CHARS, CaseCreated, CreateCase, SourcesAdmitted
 from server.boundary_text import BoundaryText
 from server.evidence.extract import DEFAULT_LIMITS
+from server.evidence.ingest import Document, admit_prepared, prepare_pack
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction
 from server.store.commands import (
     NIL_SCOPE,
+    CommandResult,
+    StoredReceipt,
+    find_receipt,
     request_digest,
     run_command,
 )
@@ -126,3 +136,135 @@ def _open_case(
         grant(conn, case_id=case_id, user_id=creator, standing=Standing.ADMIN)
 
     return prepare
+
+
+def _upload_envelope(request: Request) -> int:
+    """The declared body length, checked before a byte of the body is read."""
+    media = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    declared = request.headers.get("content-length")
+    if (
+        media != "multipart/form-data"
+        or "transfer-encoding" in request.headers
+        or declared is None
+        or not (declared.isascii() and declared.isdigit())
+    ):
+        raise Refusal(RefusalCode.REQUEST_INVALID)
+    if int(declared) > MAX_UPLOAD_BYTES:
+        raise Refusal(RefusalCode.SOURCE_TOO_LARGE)
+    return int(declared)
+
+
+def _release_read(
+    _standing: Annotated[Standing, Depends(require_case_writer)], conn: Store
+) -> None:
+    """End the standing read's transaction: parsing and extraction hold none."""
+    rollback_or_close(conn)
+
+
+async def _admission_documents(
+    request: Request,
+    declared: Annotated[int, Depends(_upload_envelope)],
+    _released: Annotated[None, Depends(_release_read)],
+) -> list[Document]:
+    """The pack's documents, in part order, from a stream held to its length."""
+    bounded = Request(request.scope, _bounded(request.receive, declared))
+    try:
+        form = await bounded.form(max_files=DEFAULT_LIMITS.max_documents, max_fields=0)
+    except (HTTPException, ValueError):
+        raise Refusal(RefusalCode.REQUEST_INVALID) from None
+    try:
+        documents = []
+        for name, part in form.multi_items():
+            if name != DOCUMENT_PART or not isinstance(part, UploadFile):
+                raise Refusal(RefusalCode.REQUEST_INVALID)
+            filename = BoundaryText.of(part.filename or "", limit=FILENAME_CHARS)
+            if not filename.value.strip():
+                raise Refusal(RefusalCode.BOUNDARY_TEXT_INVALID)
+            documents.append(Document(filename, await part.read()))
+    finally:
+        await form.close()
+    if not documents:
+        raise Refusal(RefusalCode.SOURCE_PACK_EMPTY)
+    return documents
+
+
+def _bounded(receive: Receive, declared: int) -> Receive:
+    """`receive`, refusing a body that streams past its declared length."""
+    received = 0
+
+    async def bounded() -> Message:
+        nonlocal received
+        message = await receive()
+        received += len(message.get("body", b""))
+        if received > declared:
+            raise Refusal(RefusalCode.REQUEST_INVALID)
+        return message
+
+    return bounded
+
+
+@router.post("/api/v1/cases/{case_id}/sources", status_code=201)
+def admit_sources(  # noqa: PLR0913 -- decision 2's dependency order, one per step
+    actor: Caller,
+    _declared: Annotated[int, Depends(_upload_envelope)],
+    key: Key,
+    documents: Annotated[list[Document], Depends(_admission_documents)],
+    case_id: UUID,
+    conn: Store,
+    blobs: Blobs,
+) -> Response:
+    listing = [
+        {
+            "filename": document.filename.value,
+            "sha256": sha256(document.data).hexdigest(),
+        }
+        for document in documents
+    ]
+    digest = request_digest(
+        ADMIT_SOURCES, case_id=case_id, run_id=None, gate=None, body=listing
+    )
+    stored = _peek(conn, actor.user_id, case_id, key)
+    if stored is not None:
+        if stored.request_sha256 != digest:
+            raise Refusal(RefusalCode.IDEMPOTENCY_KEY_REUSED)
+        replay = CommandResult(stored.status, stored.receipt, replayed=True)
+        return command_response(replay, SourcesAdmitted)
+
+    pack = prepare_pack(documents)  # no unit open, no case lock held
+    result = run_command(
+        conn,
+        scope=case_id,
+        key=key,
+        command=ADMIT_SOURCES,
+        request_sha256=digest,
+        action=GovernedAction(
+            case_id=case_id,
+            actor_id=actor.user_id,
+            action="SOURCES_ADMITTED",
+            requires=Standing.WRITER,
+            payload={
+                "case_id": str(case_id),
+                "document_sha256": [row["sha256"] for row in listing],
+            },
+        ),
+        write=lambda unit: (
+            201,
+            SourcesAdmitted(
+                case_id=case_id, source_ids=admit_prepared(unit, blobs, case_id, pack)
+            ),
+        ),
+    )
+    return command_response(result, SourcesAdmitted)
+
+
+def _peek(
+    conn: StoreConnection, actor_id: UUID, scope: UUID, key: UUID
+) -> StoredReceipt | None:
+    """The key's committed receipt, read in a unit closed before extraction."""
+    try:
+        stored = find_receipt(conn, actor_id=actor_id, scope=scope, key=key)
+        conn.rollback()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    return stored
