@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from dataclasses import replace
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -420,6 +421,44 @@ def test_a_filename_the_host_renders_can_always_be_quoted_back() -> None:
 
     assert not INVISIBLE.intersection(prompt), "nothing invisible reaches the model"
     assert '"filename": "ReportQ4.pdf"' in prompt
+
+
+def test_cp0_is_told_the_readiness_rule_its_own_skill_states() -> None:
+    """The host restates the bundle to CP-0; it does not add to it.
+
+    Run 62698a60… marked CP-5 CONDITIONAL because CP-L10 had not run yet, which
+    `cp-0-source-readiness/SKILL.md` tells CP-0 not to do, and the route ended
+    BLOCKED with two modules paid for. The sentence in CP-0's final check is
+    that file's own, quoted; this asserts it is the bundle's words and that no
+    other module is given them.
+    """
+    quoted = (
+        "Source readiness does not assert that upstream analytical handoffs "
+        "already exist: navigation checks those separately."
+    )
+    skill = (
+        Path(__file__).resolve().parents[1]
+        / "vendor/deploy-v/skills/cp-0-source-readiness/SKILL.md"
+    ).read_text()
+    assert quoted in " ".join(skill.split()), "the quote is the bundle's own"
+
+    delivered = _delivered()
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=_source_set(*(item.source_id for item in delivered)),
+    )
+    assert quoted in " ".join(prompt.split())
+
+    # CP-0-only delivery is asserted by the source-preparation gating tests
+    # beside this one; what is asserted here is that the sentence the host
+    # states is the bundle's and not the host's own.
 
 
 def test_only_cp0_can_receive_source_preparation() -> None:

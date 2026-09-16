@@ -449,9 +449,23 @@ character for character from the selected evidence block. Include at least one
 citation.
 """
 
+# The second paragraph is `cp-0-source-readiness/SKILL.md` quoted back at the
+# module that ships it, and nothing else. The host states no methodology of its
+# own here (invariant 4): CP-0 already receives that file in full, and the run
+# that ended BLOCKED had the rule in front of it and put a sequencing condition
+# in a readiness column anyway. A final check is where a rule that gets
+# forgotten belongs; if it is forgotten again with the rule restated, that is
+# evidence about `CONDITIONAL` being undefined rather than about this module.
 _CP0_FINAL_CHECK = """\
 For CP-0, include P1-P8 and T1-T8. The T8 header must be exactly:
 {t8_header}
+Your source-readiness verdicts are about sources. SKILL.md states: "Source
+readiness does not assert that upstream analytical handoffs already exist:
+navigation checks those separately." A module whose only outstanding condition
+is that a predecessor has not run yet is not CONDITIONAL and not BLOCKED on
+that ground: the dependency plan sequences it, and this run pins its own route.
+Reserve CONDITIONAL and BLOCKED for a source the evidence set does not carry,
+and state that source in the blocker.
 """
 
 # Every script a LITE module's SKILL.md names, by who performs it. No script is
