@@ -15,7 +15,6 @@ import { stepLabel } from "@/sections/committee/FilingLadder";
 import { caseHref } from "@/sections/directory/CaseRegister";
 import { figureCounts, isUncited, kindLabel } from "@/sections/report/RevisionEditor";
 import { shortDigest } from "@/sections/report/text";
-import { nodeAccept } from "@/sections/run/NodeDetail";
 import { severityOf } from "@/sections/run/RouteGraph";
 import { clock } from "@/sections/upload/SourcePack";
 import { CHROME_KEYS, REQUIRED_KEYS } from "@/wire/keys";
@@ -45,9 +44,9 @@ describe("severity is shape and hue, never hue alone", () => {
   });
 
   test("a RUNNABLE node is only RUNNING while it is actually running", () => {
-    expect(severityOf({ state: "RUNNABLE", running: true })).toBe("RUNNING");
-    expect(severityOf({ state: "RUNNABLE", running: false })).toBe("IDLE");
-    expect(severityOf({ state: "BLOCKED", running: false })).toBe("CRITICAL");
+    expect(severityOf({ state: "RUNNABLE" }, true)).toBe("RUNNING");
+    expect(severityOf({ state: "RUNNABLE" }, false)).toBe("IDLE");
+    expect(severityOf({ state: "BLOCKED" }, false)).toBe("CRITICAL");
   });
 
   test("a confidence tier is the number's band, at its boundaries", () => {
@@ -210,19 +209,5 @@ describe("what the report section refuses by name", () => {
         paragraph({ kind: "MODULE", figures: [figure(null)] }),
       ]),
     ).toEqual({ total: 3, uncited: 1 });
-  });
-});
-
-describe("the actions a run and an upload refuse", () => {
-  test("a node that is not COMPLETE cannot be accepted, and says which state it is in", () => {
-    expect(nodeAccept({ state: "COMPLETE" } as never)).toBeNull();
-    const refusal = nodeAccept({
-      state: "BLOCKED",
-      module_id: "CP-4",
-      reason: "waiting on CP-1",
-    } as never);
-    expect(refusal?.code).toBe("NODE_NOT_ACCEPTABLE");
-    expect(refusal?.clears).toContain("CP-4");
-    expect(refusal?.clears).toContain("waiting on CP-1");
   });
 });

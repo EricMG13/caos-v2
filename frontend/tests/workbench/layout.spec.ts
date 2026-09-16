@@ -19,7 +19,7 @@ function lines(locator: Locator) {
 test("route stage headers stay in their columns and node reasons are never cut mid-line", async ({
   page,
 }) => {
-  await page.goto("/run/?case=CASE-2026-CVNA01&fixture=gate");
+  await page.goto("/run/?case=00000000-0000-4000-8000-000000000001");
   await expect(page.locator(".dag[data-route]")).toBeVisible();
   const layout = await page.evaluate(() => {
     const headers = [...document.querySelectorAll(".stagehdr")].map((header) =>

@@ -22,9 +22,12 @@ export const DISABLED_SECTIONS = SECTIONS.filter((section) => !ENABLED_SECTIONS.
     section with no case sends no request. */
 export const DEMO_CASE = "CASE-2026-CVNA01";
 
-/** Upload's v1 fixture (slice 4.1h) carries the case as a UUID; Run and
-    Analysis stay on the legacy string until their own slices cut over. */
-export const DEMO_CASE_BY_SECTION = { upload: "ff1fbf5a-e56f-4f84-a983-2f5a507675f0" };
+/** Upload (4.1h) and Run (4.1i) v1 fixtures carry the case as a UUID;
+    Analysis stays on the legacy string until its slice cuts over. */
+export const DEMO_CASE_BY_SECTION = {
+  upload: "ff1fbf5a-e56f-4f84-a983-2f5a507675f0",
+  run: "00000000-0000-4000-8000-000000000001",
+};
 
 /** A section's page, with the demo case where the section is case-scoped.
     @param {string} section
