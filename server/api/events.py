@@ -38,6 +38,9 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         "SOURCE_WITHDRAWN": "sources_changed",
         "GATE_RELEASED:SOURCE_SET": "runs_changed",
         "GATE_RELEASED:RESEARCH_PLAN": "runs_changed",
+        "RUN_ENQUEUED": "runs_changed",
+        "RUN_REQUEUED": "runs_changed",
+        "RUN_CANCEL_REQUESTED": "runs_changed",
         # Report and Committee are not enabled: nothing on screen reads these.
         "OPINION_SIGNED": None,
         "DELIVERABLE_FROZEN": None,
