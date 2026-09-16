@@ -425,3 +425,15 @@ that contradicts the contract's own status rule — is the model's.
 Retained: database `caos_qualify_cf7b0d99f8474825b7ce7264bb385e43` (the 429),
 the second run's database and blob root are named in its capture beside this
 file.
+
+### Operator decision — 2026-09-16
+
+`deepseek/deepseek-v4-pro-0813` is **unapproved for use**. That is the
+operator's decision and it agrees with the evidence above: its only run against
+this set stopped mid-route on a contract violation the model owns.
+
+It is recorded here as a decision, not as a verdict. No `qualification_verdicts`
+row exists for this model or any other, and the host has no representation of
+"unapproved" — a model is simply not configured. The distinction matters: a
+verdict is digest-bound to performed evidence and re-checkable; this is a
+person's choice about what to configure.
