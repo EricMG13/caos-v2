@@ -286,6 +286,7 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     anchored = verify_citations(conn, delivered=blocks, citations=citations)
     if projections is None:
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
+    _forecast_inputs(bundle, assignment.module_id, markdown, context)
     record = CanonicalRecord(
         artifact_sha256=hashlib.sha256(markdown).hexdigest(),
         adapter_version=methodology.CANONICAL_ADAPTER_VERSION,
@@ -709,7 +710,46 @@ def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
     )
     if projections != record.projections:
         raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    if node.module_id == "CP-CF":
+        assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
+        _forecast_inputs(
+            bundle,
+            node.module_id,
+            markdown,
+            _context(conn, blobs, bundle, assignment, identity),
+        )
     return record, projections
+
+
+def _forecast_inputs(
+    bundle: Bundle, module: str, markdown: bytes, context: _Context
+) -> None:
+    """The same owner-binding check at acceptance, replay and every accepted read."""
+    if module != "CP-CF":
+        return
+    from server.methodology.forecast import (
+        validate_driver_mapping,
+        validate_forecast_bindings,
+    )
+
+    upstream = {ref.module_id: data for ref, data in context.upstream}
+    citations = {
+        ref.module_id: context.citations[ref.route_node_id]
+        for ref, _data in context.upstream
+    }
+    validate_forecast_bindings(markdown, upstream, citations)
+    validate_driver_mapping(_contract(bundle), markdown, upstream["CP-2G"])
+    parse = _contract(bundle).validate_handoff.validate_text
+    fields = parse(markdown.decode()).fields
+    for data in upstream.values():
+        owner = parse(data.decode()).fields
+        if (
+            owner["qa_status"] == "Restricted" and fields["qa_status"] != "Restricted"
+        ) or any(
+            not set(owner[key]) <= set(fields[key])
+            for key in ("limitation_flags", "validation_warnings")
+        ):
+            raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
 
 
 def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
@@ -815,7 +855,9 @@ def _upstream_records(
 def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
     if module_id != GATE_MODULE:
         return frozenset()
-    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+    # The vendor T8 cannot name host modules; CP-CF is released by its four
+    # REQUIRED owner/gate edges, after these exact vendor readiness rows.
+    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
 
 
 def _identity(

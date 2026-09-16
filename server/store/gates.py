@@ -284,6 +284,9 @@ def require_adapter_route(route: ResolvedRoute) -> None:
 
     Pinning, gates and resolution stay general; execution and acceptance do not.
     """
+    from server.methodology.host import verify_extension
+
+    verify_extension(route)
     if (route.profile_id, route.selection_id) not in ADAPTER_ROUTES or any(
         node.module_id not in ADAPTER_MODULES for node in route.nodes
     ):
