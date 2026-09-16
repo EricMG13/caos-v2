@@ -18,6 +18,11 @@ sequences.
 is exactly the thing that stays open across a revocation, and losing standing
 closes the stream rather than idling it.
 
+*An idle stream still hands back control.* With `heartbeat`, each poll ends
+in `None`, which the route writes as an SSE comment: the thread driving this
+generator returns to the server every poll, so a browser that went away is
+noticed within one poll rather than at the deadline.
+
 *A delivered terminal ends the run half.* Once the run's terminal event has
 been delivered, or the marker is already past it, `run_events` is never read
 again for this stream -- late billing after a terminal stays durable and is not
@@ -32,6 +37,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from time import monotonic, sleep
+from typing import Literal, overload
 from uuid import UUID
 
 from server.api.events import STREAM_NAMES, Marker, parse_marker
@@ -76,6 +82,34 @@ class StreamEvent:
     name: EventName | None
 
 
+@overload
+def case_tail(
+    conn: StoreConnection,
+    *,
+    case_id: UUID,
+    run_id: UUID | None,
+    actor_id: UUID,
+    after: str | None,
+    deadline: float = ...,
+    poll: float = ...,
+    heartbeat: Literal[False] = ...,
+) -> Iterator[StreamEvent]: ...
+
+
+@overload
+def case_tail(
+    conn: StoreConnection,
+    *,
+    case_id: UUID,
+    run_id: UUID | None,
+    actor_id: UUID,
+    after: str | None,
+    deadline: float = ...,
+    poll: float = ...,
+    heartbeat: Literal[True],
+) -> Iterator[StreamEvent | None]: ...
+
+
 def case_tail(  # noqa: PLR0913 -- the stream's identity, then its lifetime
     conn: StoreConnection,
     *,
@@ -85,7 +119,8 @@ def case_tail(  # noqa: PLR0913 -- the stream's identity, then its lifetime
     after: str | None,
     deadline: float = 0.0,
     poll: float = 0.0,
-) -> Iterator[StreamEvent]:
+    heartbeat: bool = False,
+) -> Iterator[StreamEvent | None]:
     """The cursor frame, then named frames after `after`, polling every `poll`
     seconds until `deadline` seconds have passed or standing is lost.
 
@@ -116,6 +151,8 @@ def case_tail(  # noqa: PLR0913 -- the stream's identity, then its lifetime
         if monotonic() - started >= deadline:
             return
         sleep(poll)
+        if heartbeat:
+            yield None
 
 
 def _pending(

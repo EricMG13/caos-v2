@@ -105,6 +105,8 @@ def _frames(response: httpx.Response) -> Iterator[Frame]:
                 yield fields
             fields = {}
             continue
+        if line.startswith(":"):  # an SSE comment: the keepalive, not a field
+            continue
         key, _, value = line.partition(": ")
         fields[key] = value
     if fields:
@@ -450,6 +452,51 @@ def test_an_idle_stream_closes_when_standing_is_revoked(
     finally:
         response.close()
         http.close()
+
+
+def test_an_idle_stream_hands_back_control_every_poll(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """An idle tail yields a keepalive after each poll, so the server notices a
+    disconnected browser within one poll instead of holding a worker thread,
+    a connection and a concurrency slot until the deadline."""
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    conn.commit()
+    stream = case_tail(
+        conn,
+        case_id=case_id,
+        run_id=None,
+        actor_id=reader,
+        after=None,
+        deadline=60.0,
+        poll=0.01,
+        heartbeat=True,
+    )
+    started = time.monotonic()
+    first = next(stream)
+    assert first is not None and first.name is None
+    assert next(stream) is None
+    assert next(stream) is None
+    del stream
+    assert time.monotonic() - started < 2
+
+
+def test_the_http_stream_writes_the_keepalive_as_a_comment(
+    served: str, case: tuple[StoreConnection, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    conn.commit()
+    _held(monkeypatch)
+    with (
+        httpx.Client(base_url=served, timeout=10) as http,
+        http.stream("GET", _path(case_id), headers=_as(reader)) as response,
+    ):
+        lines = response.iter_lines()
+        assert next(lines) == "id: 0.0"
+        assert next(lines) == ""
+        assert next(lines) == ":"
 
 
 class _Recording:
