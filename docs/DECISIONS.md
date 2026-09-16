@@ -1833,7 +1833,14 @@ coordinate space citations were anchored in (invariant 11).
     digest-pinned PostgreSQL on tmpfs with no host port, the API on
     `127.0.0.1:18000` in edge mode with its own blob volume, a credential-less
     `worker` (profile `smoke`) and the deterministic `journey-worker` (profile
-    `journey`, `./tests` mounted read-only; `tests/` is never in the image).
+    `journey`, `./tests` mounted read-only at `/app/tests` -- not
+    `/opt/caos-tests` as the brief wrote, because `tests/canonical_fixtures.py`
+    finds `vendor/deploy-v` as its parent's sibling -- with its exit-once marker
+    in the blob volume the image's uid owns; `tests/` is never in the image).
+    The test edge retries a refused upstream connect for a GET for up to 30 s
+    and answers 502 after, so a browser's stream reconnect meets a restarted
+    API rather than an error Firefox and WebKit treat as final; an unsafe
+    method is never retried.
     `make smoke-production` builds the image, runs `pytest -m production_image`
     with `CAOS_REQUIRE_IMAGE=1`, then `tests/journey/run.py`, which starts the
     stack, the host test edge on 127.0.0.1:18080 and Playwright, and always
@@ -1848,3 +1855,16 @@ Mounting static files inside FastAPI shadowed API refusals and served a CDN
 script the policy refuses; a dispatcher keeps the two surfaces apart. A
 proxy inside the image would be packages to scan and a supervisor to run for
 what is operator infrastructure anyway.
+
+## 2026-09-14 §51 refinement — one extraction deadline for the whole pack
+
+**Decision.** `AdmissionLimits.max_pack_seconds` (300 s) bounds a pack's
+extraction as a whole: each document's deadline is the earlier of its own
+`max_seconds` (60 s, §44.1) and the pack's, and a pack past it refuses
+`SOURCE_EXTRACTION_TIMEOUT` with nothing written.
+
+**Why.** The Phase 4 adversarial audit found that only the per-document
+deadline existed, so one authenticated writer's fifty-document pack could hold
+an admission request, its thread and one of the image's 32 concurrency slots
+for fifty minutes. 300 s matches the edge's idle timeout (§53.1), past which
+the request would be cut anyway.

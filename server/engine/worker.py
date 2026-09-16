@@ -144,6 +144,12 @@ def work_once(
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     except Refusal as refused:
         _refused(conn, lease, refused)
+    except Exception as fault:  # noqa: BLE001 -- neither a refusal nor a store error
+        # Parked, not raised: a worker that died holding the claim would find the
+        # same run first after every lease expiry and never reach the rest of the
+        # queue. The class alone is written; a message may quote a document.
+        print(type(fault).__name__, file=sys.stderr)
+        _settle(conn, lambda: stop(conn, lease, RefusalCode.INTERNAL_FAULT))
     return lease.run_id
 
 
