@@ -905,20 +905,34 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **The VMO2 set asks for a module its own readiness gate may refuse.** CP-0 is
-  the readiness gate, `LITE_EARNINGS_UPDATE` puts CP-5 behind it, and two
-  earnings releases without audited statements or executed debt documents are
-  marginal evidence for CP-5. Run `e0e101b5…` had a CP-0 that permitted CP-5 and
-  completed; run `62698a60…` had a CP-0 whose T8 sheet said `DO NOT RUN` for
-  CP-5, and the route ended BLOCKED with the two earlier modules paid for and
-  accepted. Both are defensible readings of the same corpus, so whether this set
-  can reach `complete` turns on a judgement that varies between runs of one
-  model — which no answer key fixes and no retry should paper over, since
-  retrying a validated Blocked handoff is paying for a second opinion.
-  *Upgrade:* one of three, and it is a decision rather than a defect — run a
-  route CP-0 will not gate, supply the evidence CP-5 needs, or make the block
-  itself the declared result, which needs the `expected_refusal` entry above
-  closed first.
+- **`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**
+  `cp-0-source-readiness/SKILL.md` defines it only as "emit `DO NOT RUN`", and
+  nothing there says the condition must be a *source* condition — while line
+  359 of the same file says source readiness must not assert whether upstream
+  analytical handoffs exist. Run `62698a60…`'s CP-0 marked CP-5 `CONDITIONAL`
+  on "CP-L10 must first produce the selected-route analytical handoff", which
+  is the sequencing claim that line forbids, and the route ended BLOCKED with
+  two modules paid for. Nothing discharges the status inside a run: the
+  vendor's own `prepare_invocation.py` and `handoffs.py` refuse a conditional
+  module exactly as `server/engine/route.py` does, so the host is faithful and
+  the misuse is terminal either way. *Upgrade:* the bundle's, in a new build —
+  define the condition as source-only, name its discharge, and say that an
+  upstream-handoff dependency is never a readiness ground. What the host may do
+  without editing upstream is quote line 359 verbatim in `_GATE_INSTRUCTION`,
+  which restates the bundle rather than adding to it. The set now measures the
+  failure directly through `expects_ready`.
+- **The bundle gates per consumer; the owner's statement of intent does not.**
+  Told on 16 September 2026 that CP-0 "only classifies the documents to assess
+  which pathways are available", the audit found the vendored methodology says
+  otherwise: `SKILL.md` §331 requires readiness "against the evidence demand of
+  each proposed downstream module", §349 a verdict per consumer, §357 `DO NOT
+  RUN` for CONDITIONAL and BLOCKED, and `CANON_SHARED.md` §632 "CP-0 determines
+  readiness". The vendor's own scripts refuse a non-ready module. So the host
+  enforcing it is invariant 4 working, and a host that stopped would be
+  dropping a constraint the bundle states. *Upgrade:* a dated decision entry
+  saying which governs. If the intent is policy, it is a bundle change and a
+  new build, not a host change — this entry exists so nobody closes the gap by
+  quietly weakening `route.py`.
 
 - **The borrowing-capacity key names a subordinate clause, not the fact.** One
   block per line (§5's group is unbuilt), so the sentence on Q4 page 4 is three
