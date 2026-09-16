@@ -13,7 +13,6 @@ import os
 import secrets
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -32,7 +31,7 @@ def _compose(*args: str) -> list[str]:
     return ["docker", "compose", "-p", PROJECT, "-f", str(REPO / COMPOSE_FILE), *args]
 
 
-def _environment(state_dir: str) -> dict[str, str]:
+def _environment() -> dict[str, str]:
     """A per-run edge token and the journey's switches; no provider credential."""
     env = {
         key: value
@@ -44,7 +43,6 @@ def _environment(state_dir: str) -> dict[str, str]:
         CAOS_PUBLIC_ORIGIN=f"http://{EDGE_HOST}:{EDGE_PORT}",
         JOURNEY_UPSTREAM=API_ORIGIN,
         JOURNEY_EXIT_AFTER_FIRST_ACCEPT="1",
-        JOURNEY_STATE_DIR=state_dir,
     )
     return env
 
@@ -96,8 +94,12 @@ def start_edge(env: dict[str, str]) -> subprocess.Popen[bytes]:
 
 
 def run_playwright(env: dict[str, str]) -> int:
+    cmd = ["npx", "playwright", "test", "-c", PLAYWRIGHT_CONFIG]
+    project = os.environ.get("JOURNEY_PLAYWRIGHT_PROJECT")
+    if project:
+        cmd += ["--project", project]
     return subprocess.run(
-        ["npx", "playwright", "test", "-c", PLAYWRIGHT_CONFIG],
+        cmd,
         cwd=REPO / "frontend",
         env=env,
         check=False,
@@ -114,18 +116,17 @@ def main() -> int:
         names = ", ".join(str(path.relative_to(REPO)) for path in missing)
         print(f"journey refused: missing stack files: {names}", file=sys.stderr)
         return REFUSED
-    with tempfile.TemporaryDirectory(prefix="caos-journey-") as state_dir:
-        env = _environment(state_dir)
-        edge: subprocess.Popen[bytes] | None = None
-        try:
-            compose_up(env)
-            edge = start_edge(env)
-            return run_playwright(env)
-        finally:
-            if edge is not None:
-                edge.terminate()
-                edge.wait(timeout=10)
-            compose_down(env)
+    env = _environment()
+    edge: subprocess.Popen[bytes] | None = None
+    try:
+        compose_up(env)
+        edge = start_edge(env)
+        return run_playwright(env)
+    finally:
+        if edge is not None:
+            edge.terminate()
+            edge.wait(timeout=10)
+        compose_down(env)
 
 
 if __name__ == "__main__":

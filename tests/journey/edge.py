@@ -21,8 +21,10 @@ never reaches the API. Run with
 
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -37,6 +39,9 @@ LOGIN_PATH = "/_edge/login"
 EDGE_TOKEN_HEADER = "x-caos-edge-token"
 UPSTREAM_ENV = "JOURNEY_UPSTREAM"
 TOKEN_ENV = "CAOS_EDGE_TOKEN"
+# How long a GET waits for an unreachable upstream (a restarting API) before
+# the edge answers 502, as an operator's proxy retries a refused connect.
+UPSTREAM_WAIT_SECONDS = 30.0
 
 PASSED = frozenset(
     {
@@ -86,6 +91,44 @@ def forwarded_headers(
     ]
 
 
+def raw_target(request: Request) -> str:
+    """The raw target, so a percent-escape reaches the API as the client sent it."""
+    target = (request.scope.get("raw_path") or request.url.path.encode()).decode(
+        "latin-1"
+    )
+    if request.scope["query_string"]:
+        target += "?" + request.scope["query_string"].decode("latin-1")
+    return target
+
+
+def response_headers(answer: httpx.Response) -> dict[str, str]:
+    """The upstream's headers without the hop-by-hop ones."""
+    return {
+        name: value
+        for name, value in answer.headers.multi_items()
+        if name.lower() not in HOP_BY_HOP
+    }
+
+
+async def send_upstream(
+    client: httpx.AsyncClient, build: Callable[[], httpx.Request], *, retry: bool
+) -> httpx.Response:
+    """Send upstream; a GET waits out a refused connect (a restarting API).
+
+    Only a connect that never reached the API is retried, so nothing is sent
+    twice, and an unsafe method is never retried.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + (UPSTREAM_WAIT_SECONDS if retry else 0.0)
+    while True:
+        try:
+            return await client.send(build(), stream=True)
+        except httpx.ConnectError:
+            if loop.time() >= deadline:
+                raise
+            await asyncio.sleep(0.25)
+
+
 def make_edge(
     upstream: str, token: str, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> ASGIApp:
@@ -115,24 +158,23 @@ def make_edge(
 
     async def proxy(request: Request, persona: Persona) -> Response:
         body = await request.body()
-        # The raw target, so a percent-escape reaches the API as the client sent it.
-        target = (request.scope.get("raw_path") or request.url.path.encode()).decode(
-            "latin-1"
-        )
-        if request.scope["query_string"]:
-            target += "?" + request.scope["query_string"].decode("latin-1")
-        outbound = client.build_request(
-            request.method,
-            target,
-            headers=forwarded_headers(request, persona, token),
-            content=body or None,
-        )
-        answer = await client.send(outbound, stream=True)
-        headers = {
-            name: value
-            for name, value in answer.headers.multi_items()
-            if name.lower() not in HOP_BY_HOP
-        }
+        target = raw_target(request)
+
+        def outbound() -> httpx.Request:
+            return client.build_request(
+                request.method,
+                target,
+                headers=forwarded_headers(request, persona, token),
+                content=body or None,
+            )
+
+        try:
+            answer = await send_upstream(
+                client, outbound, retry=request.method == "GET"
+            )
+        except httpx.ConnectError:
+            return PlainTextResponse("upstream unreachable", status_code=502)
+        headers = response_headers(answer)
         return StreamingResponse(
             answer.aiter_raw(),
             status_code=answer.status_code,
