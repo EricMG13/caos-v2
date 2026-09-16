@@ -466,3 +466,52 @@ row exists for this model or any other, and the host has no representation of
 "unapproved" — a model is simply not configured. The distinction matters: a
 verdict is digest-bound to performed evidence and re-checkable; this is a
 person's choice about what to configure.
+
+## Terra against the corrected key — 2026-09-16, and what it exposed
+
+Run `62698a60-c777-4153-9d21-d2dae189cf6c`, set
+`746ee12d82703d9c04399708be8f1ef4996023cd9cb4dfa844a7687ed3428cc6` (the
+borrowing key re-authored to the line that carries the fact). `$0.5161795`.
+
+CP-0 accepted (`$0.2511`, `Restricted`, 59, `READY_WITH_LIMITATIONS`). CP-L10
+accepted (`$0.2650795`, `Restricted`, 59, `Requires More Work`). Two artifacts,
+four citations, all anchored. The run then ended **BLOCKED** and CP-5 was never
+called, so all three keys are missed and `complete` is false.
+
+### Why it blocked
+
+CP-0's T8 Recommended Run Command Sheet says, for the second row:
+
+    | 2 | CP-5 | Run CP-5 | DO NOT RUN | … |
+
+CP-0 judged CP-5 not ready on this evidence — no audited FY2025 statements, no
+executed debt documents — and the host honoured that judgement and blocked the
+route. Nothing malfunctioned. CP-0 is the readiness gate and it gated.
+
+### The structural problem this exposes
+
+The set pairs a corpus that only marginally supports CP-5 with a route that
+requires CP-5 and a gate that lets CP-0 refuse it. Run `e0e101b5…` had a CP-0
+that permitted CP-5 and the route completed; this one had a CP-0 that refused
+it and the route could not. Both are defensible readings of the same two
+earnings releases, so whether this set can complete at all turns on a judgement
+call that varies between runs of the same model.
+
+That is not something a better answer key fixes, and it is not model
+non-compliance. Three consequences:
+
+- `--attempts` did not fire and should not have. A validated Blocked handoff is
+  an answer, not a refusal: `Performed.stopped` is `None`, so the driver
+  correctly did not retry. Retrying would have been paying for a different
+  opinion.
+- `complete` cannot be reached reliably on this set while CP-5 is in the route,
+  however the keys are authored.
+- The honest readings are: run the set on a route CP-0 will not gate
+  (`LITE_EARNINGS_UPDATE` without CP-5, which the two CP-5 keys then have to
+  leave), or supply the evidence CP-5 needs (a different corpus, a different
+  set), or declare the block as the expected result — which `complete` cannot
+  represent today, because it requires every run `COMPLETE` and a validated
+  Blocked gate ends its run `BLOCKED` (ledgered).
+
+No further run was made. Spend on this set to date: `$2.18` across four Terra
+runs and one DeepSeek run.

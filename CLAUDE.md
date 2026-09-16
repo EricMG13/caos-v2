@@ -905,6 +905,21 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
+- **The VMO2 set asks for a module its own readiness gate may refuse.** CP-0 is
+  the readiness gate, `LITE_EARNINGS_UPDATE` puts CP-5 behind it, and two
+  earnings releases without audited statements or executed debt documents are
+  marginal evidence for CP-5. Run `e0e101b5…` had a CP-0 that permitted CP-5 and
+  completed; run `62698a60…` had a CP-0 whose T8 sheet said `DO NOT RUN` for
+  CP-5, and the route ended BLOCKED with the two earlier modules paid for and
+  accepted. Both are defensible readings of the same corpus, so whether this set
+  can reach `complete` turns on a judgement that varies between runs of one
+  model — which no answer key fixes and no retry should paper over, since
+  retrying a validated Blocked handoff is paying for a second opinion.
+  *Upgrade:* one of three, and it is a decision rather than a defect — run a
+  route CP-0 will not gate, supply the evidence CP-5 needs, or make the block
+  itself the declared result, which needs the `expected_refusal` entry above
+  closed first.
+
 - **The borrowing-capacity key names a subordinate clause, not the fact.** One
   block per line (§5's group is unbuilt), so the sentence on Q4 page 4 is three
   blocks, and the key is the first: "When compliance reporting requirements
