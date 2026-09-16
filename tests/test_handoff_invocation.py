@@ -71,6 +71,7 @@ from server.store.outcomes import CallOutcome, record_outcome
 from server.store.routes import pin_route
 from server.store.run_inputs import RunSubject, load_run_input, pin_run_input
 from server.store.runs import Accepted, accept_attempt, start_attempt, start_run
+from server.store.source_sets import SourceSet, SourceSetMember
 
 __all__ = ["harness"]
 
@@ -94,16 +95,22 @@ def _prompt(
     upstream: tuple[tuple[UpstreamRef, bytes], ...] = (),
     citation_candidates: tuple[Citation, ...] = (),
 ) -> str:
+    items = _delivered() if delivered is None else delivered
     return build_handoff_prompt(
         CONTRACT,
         identity=of,
         authority=delivered_authority(BUNDLE, of.module_id),
         catalog=CATALOG,
-        delivered=_delivered() if delivered is None else delivered,
+        delivered=items,
         upstream=upstream,
         upstream_citations={ref.route_node_id: ANCHORED for ref in of.upstream},
         route=LITE_ROUTE,
         citation_candidates=citation_candidates,
+        source_set=(
+            _source_set(*(item.source_id for item in items))
+            if of.module_id == "CP-0"
+            else None
+        ),
     )
 
 
@@ -338,6 +345,114 @@ def _delivered() -> list[Delivery]:
         Delivery(uuid4(), "000001", 1, BoundaryText.of("Revenue rose 4% to 1,240.")),
         Delivery(uuid4(), "000002", 3, BoundaryText.of("Net leverage was 4.2x.")),
     ]
+
+
+def _source_set(*source_ids: UUID, filename: str = "issuer-report.pdf") -> SourceSet:
+    sources = source_ids or (uuid4(),)
+    return SourceSet(
+        uuid4(),
+        1,
+        "b" * 64,
+        tuple(
+            SourceSetMember(
+                source,
+                f"{number:x}" * 64,
+                filename,
+                "2026-09-15T00:00:00+00:00",
+                '{"config":{},"name":"caos.test","version":"1"}',
+                f"{number + 1:x}" * 64,
+                f"{number + 2:x}" * 64,
+            )
+            for number, source in enumerate(sources, start=1)
+        ),
+    )
+
+
+def test_cp0_source_preparation_is_tagged_context_not_evidence() -> None:
+    delivered = _delivered()
+    source_set = _source_set(*(item.source_id for item in delivered))
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=source_set,
+    )
+    tag = _tag(prompt)
+    section = f"--- HOST SOURCE PREPARATION {tag}"
+    assert section in prompt and "not citable evidence" in prompt
+    expected_root = (
+        f'"original_root": "blob://sha256/{source_set.members[0].document_sha256}'
+    )
+    assert expected_root in prompt
+    assert prompt.index(section) < prompt.index(f"--- EVIDENCE {tag} ---")
+
+
+def test_only_cp0_can_receive_source_preparation() -> None:
+    with pytest.raises(Refusal) as refused:
+        build_handoff_prompt(
+            CONTRACT,
+            identity=identity("CP-L10"),
+            authority=delivered_authority(BUNDLE, "CP-L10"),
+            catalog=CATALOG,
+            delivered=_delivered(),
+            upstream=(),
+            upstream_citations={},
+            route=LITE_ROUTE,
+            source_set=_source_set(),
+        )
+    assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+
+
+def test_cp0_requires_exact_source_preparation_membership() -> None:
+    delivered = _delivered()
+    for source_set in (None, _source_set(delivered[0].source_id)):
+        with pytest.raises(Refusal) as refused:
+            build_handoff_prompt(
+                CONTRACT,
+                identity=identity("CP-0"),
+                authority=delivered_authority(BUNDLE, "CP-0"),
+                catalog=CATALOG,
+                delivered=delivered,
+                upstream=(),
+                upstream_citations={},
+                route=LITE_ROUTE,
+                source_set=source_set,
+            )
+        assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+
+
+def test_source_preparation_values_cannot_pre_compute_the_section_tag() -> None:
+    delivered = _delivered()
+    source_ids = tuple(item.source_id for item in delivered)
+    base = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=_source_set(*source_ids),
+    )
+    old_tag = _tag(base)
+    changed = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=_source_set(*source_ids, filename=f"issuer-{old_tag}.pdf"),
+    )
+    assert _tag(changed) != old_tag
 
 
 def test_provider_claimed_identity_never_survives(harness: _Harness) -> None:
@@ -798,8 +913,9 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     prompt = _prompt(gate, delivered)
     tag = _tag(prompt)
     files = len(delivered_authority(BUNDLE, "CP-0").files)
-    # Instructions, front matter (2), host steps, each file (2), evidence (2), check.
-    assert prompt.count(tag) == 7 + 2 * files and tag not in forged
+    # Instructions, front matter (2), host steps, each file (2), source prep
+    # (2), evidence (2), check.
+    assert prompt.count(tag) == 9 + 2 * files and tag not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
 
 

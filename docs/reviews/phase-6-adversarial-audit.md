@@ -143,3 +143,45 @@ three-scenario migration restore proof and full CI-equivalent gate passed:
 2,849 backend tests, 21 race tests, security, frontend, accessibility,
 workbench, image, and all three 14-step production journeys. Authorized live
 execution and external review remain release prerequisites.
+
+## Adversarial review addendum — v3 CP-0 provenance
+
+Effort: `xhigh`; scope is the uncommitted canonical adapter v3 candidate,
+including its shared prompt builder, execution/replay, worker classification,
+tests and supporting records. User-owned working-tree files are excluded.
+**Verdict:** CLEAN after remediation; this is not a release qualification
+verdict.
+
+### Remediated findings
+
+1. **Saboteur — remove the immutable original after billing (critical).** The
+   response could have been written as a terminal refusal even though its
+   diagnostic was retained and a restored original would make replay safe.
+   Canonical acceptance now revalidates originals, and the shared recovery
+   classifications requeue all typed blob faults. The regression deletes an
+   original after transport, restores it, and proves exactly one billed replay.
+2. **New Hire — call the generic prompt builder directly (warning).** The
+   important CP-0 provenance fact lived in one caller convention, not a shared
+   contract. The builder now expresses the small truth table itself: exact
+   source set for CP-0, none for P1–P8. Focused tests cover both invalid sides
+   and exact membership.
+3. **Security Auditor — smuggle source metadata into a downstream prompt
+   (warning).** A caller could have used source preparation as ungoverned
+   pseudo-evidence. The builder forbids the context outside CP-0, labels it
+   non-citable, and source membership is bound to delivered evidence. Prompt
+   tag and citation-register regressions prove it is not an evidence channel.
+
+### Notes
+
+1. Extraction metadata is trusted only after the runtime loads the pinned,
+   validated source set; the builder guard is a second shared-boundary check,
+   not a replacement for source-set validation.
+2. The two-document frozen set may still be insufficient for a successful
+   Terra artifact. That is a qualification result to observe, not a reason to
+   broaden the corpus or silently relax the canonical contract.
+
+The three personas' confirmed defects were repaired at the shared boundaries
+and covered by 62 focused CP-0/canonical/upstream tests. The complete local
+gate is rerun after this v3 change; a fresh authorized Terra run and external
+authenticated verdict remain the only phase-release evidence not local to the
+repository.

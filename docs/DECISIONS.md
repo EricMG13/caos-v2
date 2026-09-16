@@ -797,6 +797,18 @@ archived compatibility; it is not inserted into the catalog route, so extraction
 and preparation do not run twice. The no-Excel/no-Word decision and archived
 workbook/publication contracts remain unchanged.
 
+`canonical-markdown-v3` makes that delivery concrete. Before CP-0 is called,
+the canonical adapter verifies every pinned member remains delivered and each
+original BlobStore object still hashes to its pinned digest. It gives CP-0 a
+tagged, non-citable `HOST SOURCE PREPARATION` context with source-set identity,
+the content-addressed original root and provenance fields. The same original
+checks recur before accepting or replaying the response. This is enough to
+establish host-held preparation facts, but it does not certify the model-owned
+P1–P8 workflow; CP-0 still authors and validates those registers. The context
+does not reach downstream modules. An original blob lost after billing is a
+store fault, not an answer verdict: the worker releases the run and replay uses
+the already billed diagnostic once the operator restores the blob.
+
 **Reason.** The current claims JSON discards the bundle's complete registers and
 cannot become canonical merely because the host stores it. Adding a second model
 summary would create competing authority; preserving the exact validated

@@ -61,7 +61,9 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.events import lock_run
 from server.store.outcomes import accepted_rows
+from server.store.run_inputs import load_run_input
 from server.store.runs import block_run
+from server.store.source_sets import load_source_set
 from server.store.work import Lease
 
 __all__ = ["harness", "route"]
@@ -342,6 +344,38 @@ def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
     assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
     assert len(answers.prompts) == 3
     _still_running(harness)
+
+
+def test_a_lost_original_after_billing_replays_after_it_is_restored(
+    harness: _Harness,
+) -> None:
+    pin = load_run_input(harness.conn, harness.run_id)
+    assert pin is not None
+    source_set = load_source_set(harness.conn, pin.case_id, pin.source_version)
+    assert source_set is not None
+    original = harness.blobs.get(source_set.members[0].document_sha256)
+    harness.conn.rollback()
+    lost = False
+
+    def remove_once() -> None:
+        nonlocal lost
+        if not lost:
+            harness.blobs.path_of(source_set.members[0].document_sha256).unlink()
+            lost = True
+
+    answers = _answers(harness, during=remove_once)
+    provider = _module_provider(harness, answers)
+    assert _run_route(harness, provider) is RefusalCode.BLOB_NOT_FOUND
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    row = harness.conn.execute("SELECT count(*) FROM attempt_refusals").fetchone()
+    assert row == (0,)
+    harness.conn.rollback()
+    _still_running(harness)
+
+    assert harness.blobs.put(original) == source_set.members[0].document_sha256
+    assert _run_route(harness, provider) is None
+    assert len(answers.delegate.prompts) == 3
+    assert _counts(harness) == (3, [REPORTED] * 3, 3, 3, 3)
 
 
 def test_a_body_that_cannot_be_stored_refuses_after_its_bill(

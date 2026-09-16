@@ -149,7 +149,7 @@ def _record(**changes: object) -> CanonicalRecord:
     )
     values: dict[str, object] = {
         "artifact_sha256": hashlib.sha256(CP0_MD).hexdigest(),
-        "adapter_version": "canonical-markdown-v2",
+        "adapter_version": "canonical-markdown-v3",
         "build_id": "build-1",
         "manifest_sha256": "a" * 64,
         "authority_bundle_sha256": CP0.authority_bundle_sha256,

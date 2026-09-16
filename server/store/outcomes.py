@@ -244,6 +244,9 @@ def _record(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
 # holder may still accept or explain that answer, so none is written down.
 _NOT_AN_EXPLANATION = frozenset(
     {
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
         RefusalCode.STORE_UNAVAILABLE,
         RefusalCode.STORE_NOT_TRANSACTIONAL,
         RefusalCode.LEASE_NOT_HELD,
