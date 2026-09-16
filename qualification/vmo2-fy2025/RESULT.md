@@ -375,8 +375,19 @@ No run has been performed against this set.
 
 The v2 conclusion that DeepSeek V4 Pro is not qualified rested on three billed
 CP-0 attempts recorded as "returned N citations; none of their exact quotes
-appeared in the Markdown body" — the exact shape of the reader defect fixed at
-`7a12c6d`. That evidence was contaminated, so the model was re-tried.
+appeared in the Markdown body", which reads like the reader defect fixed at
+`7a12c6d`. The model was re-tried on that suspicion.
+
+**That attribution was too broad, and is corrected below.** The surviving
+record does not support it for at least two of the three: attempt 2 refused
+`CITATION_NOT_DELIVERED` over a mutated source UUID, which `parse_response`
+raises *before* the quote check, and attempt 3 emitted `## Analysis` twice,
+which the vendor headings rule refuses whatever the quoting. Only attempt 1 is
+consistent with the reader defect, and its generation id places it inside the
+window between the candidate rule landing and the "do not enumerate candidates"
+hardening — consistent with a model listing every eligible block. The runs are
+gone, so this cannot be settled; what can be said is that the reader defect
+explains at most one of the three, not all three.
 
 - Set: `ae70850d27d1860155ec772ac27e95d7747dd2e9ab944f87034e0215dde407d8`
   (the re-cast key; CP-0 carries no expectation)
@@ -417,10 +428,28 @@ paraphrased rather than reproduced — `TL20.1 — Source and Scope Guard` for
 `Source and Scope Gate`, `TL40.3 —  decision screen`, `TL23.4 — Gaps` — where
 the Terra runs reproduced them exactly.
 
-**The verdict does not change: DeepSeek V4 Pro is not qualified.** What changes
-is the reason and the evidence behind it. The earlier "quoted none of its
-citations" finding should be read as the host's defect; this one — a module
-that contradicts the contract's own status rule — is the model's.
+**The verdict does not change: DeepSeek V4 Pro is not qualified.** The reason
+does. This refusal is the model's, and precisely so: the cap lives in the same
+vendor script that computes the score
+(`cp-l10-financial-change-screen/scripts/confidence_score.py`), which applies
+`min(score, 59)` whenever a MATERIAL finding exists. The module listed three
+MATERIAL rows and scored itself 69. Terra satisfied the same rule four times
+out of four, so the corpus does not force the contradiction — it forces
+`Restricted`, which is a different thing.
+
+Two corrections to what was said above about this run:
+
+- The paraphrased register headings are **not** why it was refused. The
+  vendor's `completeness_check` finds registers by ID and returns zero
+  violations on this handoff; `validate_text` returns the cap error alone.
+- DeepSeek's **accepted** CP-0 broke the same kind of rule in the other
+  direction — `qa_status: Passed`, `committee_status: Committee Ready`,
+  `confidence_score: 93`, over a self-declared `SOURCE_GAP | MATERIAL` row.
+  The vendor validator checks only `Restricted → ≤59` and `Blocked → ≤39`, not
+  "MATERIAL implies Restricted", and `completeness_check.load_contract` reads
+  only cell disqualifiers, never the frontmatter ones. So the host accepted a
+  CP-0 that contradicts the rule that later refused the same model's CP-L10.
+  Ledgered in `CLAUDE.md`.
 
 Retained: database `caos_qualify_cf7b0d99f8474825b7ce7264bb385e43` (the 429),
 the second run's database and blob root are named in its capture beside this
