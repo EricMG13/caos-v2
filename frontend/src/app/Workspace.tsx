@@ -5,13 +5,7 @@ import { INITIAL, accepts, issue, navigate, ticket, type Authority } from "./aut
 import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { eventsUrl, openTail } from "./sse";
 import { LedgerProvider } from "./ledger";
-import {
-  OFFLINE_WORDING,
-  fetchSection,
-  sectionUrl,
-  type RegionStatus,
-  type WorkspaceDocument,
-} from "./transport";
+import { OFFLINE_WORDING, fetchSection, sectionUrl, type RegionStatus } from "./transport";
 import { SECTION_VIEWS } from "./views";
 import { DecisionBrief } from "@/chrome/DecisionBrief";
 import { Rail } from "@/chrome/Rail";
@@ -23,21 +17,15 @@ import { fallbackChrome } from "@/chrome/fallback";
 import { PageAlert } from "@/states/PageAlert";
 import { RegionState } from "@/states/RegionState";
 import type { Chrome, Section } from "@/wire";
-import type { SectionDocument as V1Document } from "@/wire/v1";
 
 const LOADING: RegionStatus = { kind: "loading" };
 const UNAVAILABLE: RegionStatus = { kind: "unavailable" };
 
-/** The legacy chrome a document carries, or the one composed for a v1 document. */
+/** The chrome composed for a v1 document. A disabled section never fetches,
+    so it never reaches here with a document to compose from. */
 function chromeOf(section: Section, status: RegionStatus): Chrome | null {
   if (!("document" in status)) return null;
-  const { document } = status;
-  if (!isV1(document)) return document.chrome;
-  return isEnabledSection(section) ? composeChrome(section, document) : null;
-}
-
-function isV1(document: WorkspaceDocument): document is V1Document {
-  return !("ribbon" in document.chrome);
+  return isEnabledSection(section) ? composeChrome(section, status.document) : null;
 }
 
 interface Keyed<T> {

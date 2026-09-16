@@ -5,7 +5,7 @@
 // that quietly returned the wrong thing would still leave the section green.
 import { sectionPath } from "@/app/sections";
 import { EVENT_NAMES, eventsUrl } from "@/app/sse";
-import { OFFLINE_WORDING, UNAVAILABLE_WORDING, classify } from "@/app/transport";
+import { OFFLINE_WORDING, UNAVAILABLE_WORDING } from "@/app/transport";
 import { toneOf } from "@/chrome/SeverityMark";
 import { fallbackChrome } from "@/chrome/fallback";
 import { ACTION_UNPLACED, READ_ONLY_API, refusalText } from "@/controls/RefusedControl";
@@ -17,7 +17,6 @@ import { figureCounts, isUncited, kindLabel } from "@/sections/report/RevisionEd
 import { shortDigest } from "@/sections/report/text";
 import { severityOf } from "@/sections/run/RouteGraph";
 import { clock } from "@/sections/upload/SourcePack";
-import { CHROME_KEYS, REQUIRED_KEYS } from "@/wire/keys";
 import type { LadderStep } from "@/wire/committee";
 import type { Figure, Paragraph } from "@/wire/report";
 
@@ -58,13 +57,6 @@ describe("severity is shape and hue, never hue alone", () => {
 });
 
 describe("the wire contract and the states around it", () => {
-  test("the pinned key sets are what classify() measures a document against", () => {
-    expect(REQUIRED_KEYS).toEqual(["chrome", "body", "observed_at"]);
-    expect(CHROME_KEYS).toContain("served_role");
-    // Every required key is also pinned; the reverse is not true.
-    expect(CHROME_KEYS.length).toBeGreaterThan(REQUIRED_KEYS.length);
-  });
-
   test("offline and unavailable are one sentence each, and never the same one", () => {
     expect(OFFLINE_WORDING).not.toBe(UNAVAILABLE_WORDING);
     expect(OFFLINE_WORDING).not.toMatch(/error|exception|stack/i);
@@ -86,10 +78,10 @@ describe("the wire contract and the states around it", () => {
 
     const refused = fallbackChrome({
       kind: "error",
-      refusal: { code: "WIRE_KEYS_MISMATCH", clears: "the document carries the pinned keys" },
+      refusal: { code: "WIRE_SHAPE_INVALID", clears: "the document is the declared v1 shape" },
     });
-    expect(refused.ribbon.chips[0]?.label).toBe("WIRE_KEYS_MISMATCH");
-    expect(refused.brief.action).toContain("the document carries the pinned keys");
+    expect(refused.ribbon.chips[0]?.label).toBe("WIRE_SHAPE_INVALID");
+    expect(refused.brief.action).toContain("the document is the declared v1 shape");
   });
 
   test("the fallback brief ends its clause once, however the refusal punctuates it", () => {
@@ -103,20 +95,21 @@ describe("the wire contract and the states around it", () => {
   });
 
   test("the client's own refusals read as a clause after 'clears when'", () => {
-    const chrome = Object.fromEntries(CHROME_KEYS.map((key) => [key, {}]));
+    // `classify`'s legacy key check was retired with the dual wire path
+    // (slice 4.1j); every enabled section's document is validated by
+    // `classifyV1`, exercised end to end in transport.test.ts. What is
+    // pinned here is only the shape every such refusal's own clause takes.
     const refusals = [
-      classify(null),
-      classify({ chrome, body: {}, observed_at: "", unexpected: true }),
-      classify({ chrome, body: {}, observed_at: "", observed_empty: true }),
-    ].map((status) => (status.kind === "error" ? status.refusal : null));
-    expect(refusals.map((refusal) => refusal?.code)).toEqual([
-      "RESPONSE_INVALID",
-      "WIRE_KEYS_MISMATCH",
-      "OBSERVED_EMPTY_UNTIMED",
-    ]);
+      { code: "RESPONSE_INVALID", clears: "the server answers with a typed refusal" },
+      { code: "WIRE_SHAPE_INVALID", clears: "the document is the declared v1 shape" },
+      {
+        code: "OBSERVED_EMPTY_UNTIMED",
+        clears: "an observed-empty response carries the time it was observed",
+      },
+    ];
     for (const refusal of refusals) {
-      expect(refusal?.clears).toMatch(/^[a-z]/);
-      expect(refusal?.clears).not.toMatch(/\.$/);
+      expect(refusal.clears).toMatch(/^[a-z]/);
+      expect(refusal.clears).not.toMatch(/\.$/);
     }
   });
 
