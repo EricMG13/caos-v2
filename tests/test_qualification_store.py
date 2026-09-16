@@ -273,6 +273,37 @@ def test_a_case_whose_forecast_was_not_met_cannot_receive_a_verdict() -> None:
     assert met.complete is True
 
 
+def test_a_case_whose_gate_refused_a_module_cannot_receive_a_verdict() -> None:
+    """A gate that wrongly refuses a module is invisible to a citation key.
+
+    The module never runs, so it cites nothing, and every key aimed at it reads
+    as the model failing to find evidence when the truth is the model was never
+    asked. `ready_met` is the host's own readiness projection, and a snapshot
+    where CP-0 gated a module the set said must run is not signable.
+    """
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    gated = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, ready_met=False),)),
+        ),
+    )
+
+    assert gated.complete is False
+    allowed = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, ready_met=True),)),
+        ),
+    )
+    assert allowed.complete is True
+
+
 def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
     """A set may declare a refusal as its answer; meeting it is a result.
 

@@ -43,7 +43,7 @@ def _answered(row: MatrixRow) -> bool:
     forecast (which `assert_measurable` allows) was otherwise signable with
     that forecast unmet, because nothing here read the field.
     """
-    if row.forecast_met is False:
+    if row.forecast_met is False or row.ready_met is False:
         return False
     if row.expected_refusal_met is not None:
         return row.expected_refusal_met

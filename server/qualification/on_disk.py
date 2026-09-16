@@ -79,6 +79,7 @@ _OPTIONAL_CASE_KEYS = frozenset(
     {
         "forecast",
         "expected_refusal",
+        "expects_ready",
         "model_extension",
     }
 )
@@ -155,6 +156,7 @@ def _case(root: Path, entry: object) -> QualificationCase:
         subject=_subject(fields[_SUBJECT_KEY]) if declared else None,
         forecast=_forecast(fields.get("forecast")),
         expected_refusal=_refusal(fields.get("expected_refusal")),
+        expects_ready=_ready(fields.get("expects_ready")),
         model_extension=_extension(fields.get("model_extension")),
     )
 
@@ -230,6 +232,27 @@ def _forecast(item: object) -> ExpectedForecast | None:
         limitation_flags=_strings(fields, "limitation_flags"),
         readiness=tuple(_pair(value) for value in readiness),
     )
+
+
+def _ready(item: object) -> tuple[str, ...]:
+    """The module ids CP-0 must find ready, or a refusal.
+
+    Declared as a list of module ids; absent means the case asks nothing of
+    readiness. Bounded and de-duplicated here, because this crosses into the
+    set's digest and a key that differs only by repetition would digest twice.
+    """
+    if item is None:
+        return ()
+    if not isinstance(item, list) or not item:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    modules = []
+    for value in item:
+        if not isinstance(value, str) or not value.strip():
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        modules.append(BoundaryText.of(value.strip(), limit=_LABEL_LIMIT).value)
+    if len(set(modules)) != len(modules):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(modules)
 
 
 def _refusal(item: object) -> RefusalCode | None:
