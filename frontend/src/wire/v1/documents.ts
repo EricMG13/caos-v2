@@ -325,6 +325,7 @@ export type RunView = Infer<typeof RunView>;
 export type NodeView = Infer<typeof NodeView>;
 export type HandoffView = Infer<typeof HandoffView>;
 export type CitationView = Infer<typeof CitationView>;
+export type PendingNode = Infer<typeof PendingNode>;
 export type SectionDocument =
   DirectoryDocument | UploadDocument | RunSectionDocument | AnalysisDocument;
 

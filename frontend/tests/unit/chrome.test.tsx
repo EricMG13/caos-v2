@@ -6,21 +6,21 @@ import { Rail } from "@/chrome/Rail";
 import { Ribbon } from "@/chrome/Ribbon";
 import { SeverityMark } from "@/chrome/SeverityMark";
 import { VerdictStrip } from "@/chrome/VerdictStrip";
+import { isEnabledSection } from "@/app/sections";
 import { SECTIONS, type AnyDocument, type Severity } from "@/wire";
 
 const FIXTURES = `${resolve(process.cwd(), "fixtures")}/`;
-// Directory and Upload read the v1 wire since slice 4.1h: their document's
-// `chrome` carries only `{subject, served_role}` (composed into the legacy
-// `Chrome` shape by `@/chrome/compose`, not stored on the fixture itself), so
-// the generic legacy-chrome fixtures this file scans exclude them.
-const V1_CUTOVER = ["directory", "upload", "run"];
+// Every enabled section reads the v1 wire (brief 4.1, decision 9; slices
+// 4.1h-j): its document's `chrome` carries only `{subject, served_role}`
+// (composed into the legacy `Chrome` shape by `@/chrome/compose`, not stored
+// on the fixture itself), so the generic legacy-chrome fixtures this file
+// scans are exactly the five disabled sections' own.
+const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
 const documents = (): [string, AnyDocument][] =>
   [
-    ...SECTIONS.filter((section) => !V1_CUTOVER.includes(section)).map(
-      (section) => `${section}.json`,
-    ),
+    ...DISABLED.map((section) => `${section}.json`),
     ...readdirSync(`${FIXTURES}states`)
-      .filter((name) => !V1_CUTOVER.some((section) => name.startsWith(`${section}.`)))
+      .filter((name) => DISABLED.some((section) => name.startsWith(`${section}.`)))
       .map((name) => `states/${name}`),
   ].map((name) => [name, JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8"))]);
 
