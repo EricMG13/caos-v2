@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Two Terra v3 qualification runs, a complete green `make check`, and three defects they found. The first finished its route (3 artifacts, 14 citations all anchored, `$0.82248325`); the second was refused by our own reader and exposed it. Phase 6 remains release-blocked.** |
-| Next task | Author CP-0's replacement expectation from its own contract — not from what a previous run cited — and re-freeze the set. Then one authorized run against digest `ae70850d…`, then the verdict decision. No result may be represented as qualified without an external authenticated verdict over a `complete` snapshot. |
+| Latest accepted task | **Phase 6 accepted by the owner on 16 September 2026 with its gaps stated (`docs/DECISIONS.md` §62). Seven live runs, a complete green `make check`, two authorised bundle edits (§61), and one `complete` snapshot — pinned to the build §61 retired. No verdict exists and nothing is qualified.** |
+| Next task | Deploy the remaining modules. CP-5 is deferred until then (§62): it refuses on this corpus for writing the honest answer in a column its contract calls critical, and the fix is a bundle change under §61's precedent. Then a run on `cdea0c9f`, then the verdict. No result may be represented as qualified without an authenticated verdict over a `complete` snapshot, and none exists. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -93,6 +93,31 @@ this documentation update has not rerun their gates or accepted new code.
 - **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
 
 ### Phase 6 qualification checkpoint — 15 September 2026
+
+### Phase 6 acceptance — 16 September 2026
+
+Accepted by the owner with the gaps stated; the binding record is
+`docs/DECISIONS.md` §62, and it is an acceptance of a phase, not a
+qualification of a build.
+
+- **Engineering:** complete green `make check` — lint, mypy 227 files, 2899
+  tests, 21 race tests, security, frontend, image under pinned Trivy 0.70.0,
+  production smoke on three engines.
+- **Qualification:** seven authorised live runs, all recorded with charges and
+  generation ids in [result](../qualification/vmo2-fy2025/RESULT.md). One
+  `complete` snapshot, run `42e17048…` — pinned to build `a43cb903`, which §61
+  retired, so it no longer re-proves against this tree.
+- **Not met, accepted anyway:** no verdict exists anywhere; no complete snapshot
+  on `cdea0c9f`; CP-5 does not complete on this corpus; one of eighteen
+  pathways has been run.
+- **Deferred:** CP-5 until the other modules are deployed. Its refusal is the
+  completeness contract treating "insufficient information" and "not calculable
+  from provided materials" as disqualifying placeholders in a critical column —
+  the honest answer, refused. `disqualifier_exempt_columns` is the mechanism and
+  T5B.6 already uses it; which of CP-5's status columns should carry it is a
+  bundle change needing its own authorisation.
+
+Nothing in this tree may describe a build, model or pathway as QUALIFIED.
 
 ### Phase 6 second run, three fixes, and a re-cast key — 16 September 2026
 

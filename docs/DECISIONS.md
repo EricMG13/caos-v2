@@ -2236,3 +2236,50 @@ own `tests/` were not extended, being upstream files outside the
 authorisation; the named tests live in the host suite
 (`tests/test_canonical_handoff.py`, `tests/test_bundle_pin.py`).
 `CANON_SHARED.md` is untouched: the rule was already there, unenforced.
+
+## 2026-09-16 §62 — Phase 6 accepted by the owner, with the gap stated
+
+The owner accepted Phase 6 on 16 September 2026 and deferred CP-5 until the
+other modules are deployed. This entry records that decision and exactly what it
+does and does not assert, because `docs/REPAIR_PLAN.md` Phase 6's exit checks
+are not all met and a later reader must not mistake acceptance for satisfaction.
+
+**What is true.** A complete `make check` is green: lint, mypy over 227 files,
+2899 tests, 21 race tests, bandit, pip-audit, gitleaks, the frontend half, the
+image half under pinned Trivy 0.70.0, and the production smoke stack on three
+engines. Seven authorised live runs were performed against a real provider and
+every one of them is recorded in `qualification/vmo2-fy2025/RESULT.md` with its
+charges, generation ids and outcome. Run `42e17048-8b50-48cc-94ff-833d894a68cb`
+produced the first `qualification_performed.complete` snapshot: route COMPLETE,
+three artifacts, eight citations all re-located, the citation key met, the
+readiness key met, every declared conclusion met.
+
+**What is not true, and is being accepted anyway.**
+
+1. **No verdict exists.** `qualification_verdicts` is empty in every run
+   database. Phase 6 item 3 wants an authenticated review verdict over exact
+   performed evidence; nobody has signed one. Nothing in this repository may
+   describe any build, model or pathway as QUALIFIED.
+2. **The one complete snapshot is pinned to a retired build.** It was performed
+   under `a43cb903`; §61 moved the bundle to `cdea0c9f`, so that run refuses
+   `ORCHESTRATION_BUILD_MOVED` on re-proof. There is no complete snapshot on the
+   build the tree now carries.
+3. **CP-5 does not currently complete on this corpus.** Run `36d87283…` refused
+   it three times for writing "insufficient information" and "not calculable
+   from provided materials" in a column its own contract calls critical — the
+   honest answer, refused. Deferred by this decision, not solved.
+4. **Phase 6 item 4 wants qualification on every route intended to be
+   advertised.** One pathway, `LITE_CREDIT_22 / LITE_EARNINGS_UPDATE`, has been
+   run. The other seventeen have not.
+
+**What the deferral commits to.** CP-5 is revisited once the other modules are
+deployed. The mechanism is known and recorded in `CLAUDE.md`:
+`disqualifier_exempt_columns` already exists and T5B.6 uses it, so the question
+is which of CP-5's status columns should carry it. That is a bundle change and
+needs its own authorisation under §61's precedent.
+
+**Standing constraint.** This entry is an acceptance of a phase, not a
+qualification of a build. The guardrail in `docs/REPAIR_PLAN.md` — no shipping
+unqualified pathways behind a generic success label — is unaffected by it, and
+any surface that reports qualification status must continue to report that
+there is none.

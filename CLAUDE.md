@@ -922,6 +922,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `Evidence Status` — so the question is which of CP-5's status columns should
   carry it. A bundle change, needing its own authorisation, and it belongs with
   the `completeness_check.load_contract` half §61 left open.
+  **Deferred by the owner on 16 September 2026 (`docs/DECISIONS.md` §62)
+  until the other modules are deployed** — an accepted limitation with a
+  named revisit, not an open defect nobody owns.
 
 - ~~**`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**~~
   Closed by `docs/DECISIONS.md` §61, the owner's authorised override of
