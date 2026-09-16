@@ -27,6 +27,7 @@ from server.blobs import BlobStore
 from server.engine.route import (
     GATE_MODULE,
     EdgeType,
+    NamedObjects,
     NodeResult,
     NodeState,
     ResolvedRoute,
@@ -138,9 +139,34 @@ def run_route(
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     worst_case(execution.price)
     route = _execution_route(conn, run_id, route, execution.bundle)
-    bundle = execution.bundle
     # Read once from verified bundle bytes, handed to the pure engine (§46.1).
-    named = named_objects(bundle, route)
+    named = named_objects(execution.bundle, route)
+    try:
+        _drive(
+            conn, blobs, run_id=run_id, route=route, execution=execution, named=named
+        )
+    except Refusal as refusal:
+        # D8: the accepted set moved between the decision and the lock. One
+        # more pass decides again from the store; a second move raises.
+        if refusal.code is not RefusalCode.RUN_TERMINAL_STALE:
+            raise
+        _drive(
+            conn, blobs, run_id=run_id, route=route, execution=execution, named=named
+        )
+
+
+def _drive(  # noqa: PLR0913 -- one run, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    execution: Execution,
+    named: NamedObjects,
+) -> None:
+    """The frontier passes and the terminal decision, whose terminal call
+    carries the accepted set it was decided from (brief 4.3 D8)."""
+    bundle = execution.bundle
     while True:
         with execution_reads(conn):
             accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
@@ -151,6 +177,8 @@ def run_route(
                 conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=ready
             )
         if blocked:
+            # A node's own stored verdict, not a whole-route decision: no
+            # snapshot (the lease fences the writer).
             block_run(conn, run_id, lease=execution.lease)
             return
         if not ready:
@@ -170,10 +198,12 @@ def run_route(
     with execution_reads(conn):
         accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
         states = node_states(route, accepted, named)
+    # Re-derived under `lock_run` by the store, which refuses a moved snapshot.
+    decided = frozenset(accepted)
     if all(state is NodeState.COMPLETE for state in states.values()):
-        complete_run(conn, run_id, lease=execution.lease)
+        complete_run(conn, run_id, lease=execution.lease, accepted=decided)
     else:
-        block_run(conn, run_id, lease=execution.lease)
+        block_run(conn, run_id, lease=execution.lease, accepted=decided)
 
 
 def accepted_artifacts(

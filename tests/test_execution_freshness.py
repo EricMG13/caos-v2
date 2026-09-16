@@ -70,7 +70,7 @@ from server.store.outcomes import (
 from server.store.runs import (
     Accepted,
     accept_attempt,
-    complete_run,
+    block_run,
     create_case,
     fail_run,
     start_attempt,
@@ -475,8 +475,8 @@ def _mutation(  # noqa: C901
             elif name == "failed":
                 assert fail_run(other, harness.run_id)
             else:
-                assert name == "complete"
-                assert complete_run(other, harness.run_id)
+                assert name == "blocked"
+                assert block_run(other, harness.run_id)
 
     return change
 
@@ -533,7 +533,7 @@ _CHANGES = [
     ("input_corrupt", RefusalCode.RUN_INPUT_INVALID),
     ("route_corrupt", RefusalCode.ROUTE_IDENTITY_INVALID),
     ("failed", RefusalCode.RUN_NOT_RUNNING),
-    ("complete", RefusalCode.RUN_NOT_RUNNING),
+    ("blocked", RefusalCode.RUN_NOT_RUNNING),
     ("bundle_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
     ("adapter_mismatch", RefusalCode.RUN_INPUT_INVALID),
 ]
@@ -568,12 +568,10 @@ def test_check_attempt_and_runtime_recheck_transport_authority_before_use(
             "SELECT status FROM runs WHERE run_id=%s", (harness.run_id,)
         ).fetchone()
     assert accepted == (0,)
-    expected_status = {"failed": "FAILED", "complete": "COMPLETE"}.get(
-        change, "RUNNING"
-    )
+    expected_status = {"failed": "FAILED", "blocked": "BLOCKED"}.get(change, "RUNNING")
     assert status == (expected_status,)
     # F02: a post-call refusal never manufactures a completion of its own.
-    assert _events(harness, "RUN_COMPLETE") == (1 if change == "complete" else 0)
+    assert _events(harness, "RUN_COMPLETE") == 0
 
 
 def _events(harness: _Harness, name: str) -> int:
@@ -1132,7 +1130,7 @@ _AT_ACCEPT = [
     ("input_corrupt", RefusalCode.RUN_INPUT_INVALID),
     ("route_corrupt", RefusalCode.ROUTE_IDENTITY_INVALID),
     ("failed", False),
-    ("complete", False),
+    ("blocked", False),
 ]
 
 
@@ -1154,7 +1152,7 @@ def test_accept_refuses_what_changed_after_the_bill_committed(
         (True, True),
     )
     assert _events(harness, "ATTEMPT_ACCEPTED") == 0
-    if change in {"failed", "complete"}:
+    if change in {"failed", "blocked"}:
         with connect(harness.url) as observer:
             status = observer.execute(
                 "SELECT status FROM runs WHERE run_id=%s", (harness.run_id,)
@@ -1165,7 +1163,7 @@ def test_accept_refuses_what_changed_after_the_bill_committed(
         _still_running(harness)
 
 
-@pytest.mark.parametrize("terminal", [None, complete_run])
+@pytest.mark.parametrize("terminal", [None, block_run])
 def test_exact_replay_never_rechecks_authority_or_duplicates(
     harness: _Harness, terminal: Callable[[StoreConnection, UUID], bool] | None
 ) -> None:

@@ -34,6 +34,7 @@ from server.store.outcomes import (
     _attempt_owner,
     _locked_attempt,
     accepted_owner,
+    artifact_digests,
     record_outcome,
 )
 from server.store.work import Lease, mark_work_done, require_lease
@@ -319,10 +320,23 @@ def _legacy_replay(conn: StoreConnection, attempt: UUID, accepted: Accepted) -> 
 
 
 def complete_run(
-    conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+    conn: StoreConnection,
+    run_id: UUID,
+    *,
+    lease: Lease | None = None,
+    accepted: frozenset[str] | None = None,
 ) -> bool:
-    """End a run that finished its route. Returns whether this call ended it."""
-    return _transition(conn, run_id, RunStatus.COMPLETE, RunEvent.RUN_COMPLETE, lease)
+    """End a run that finished its route. Returns whether this call ended it.
+
+    Decided under `lock_run`, not trusted from the caller: every node of the
+    run's approved pinned route must own an accepted artifact, else
+    `RUN_NODES_UNACCEPTED`; an unpinned or unapproved run refuses as
+    `approved_run_input` does, so COMPLETE always requires the pin. A caller
+    that decided from a snapshot passes `accepted`, and a different set under
+    the lock refuses `RUN_TERMINAL_STALE` (brief 4.3 D3, D8)."""
+    return _transition(
+        conn, run_id, RunStatus.COMPLETE, RunEvent.RUN_COMPLETE, lease, accepted
+    )
 
 
 def complete_attempt(
@@ -337,21 +351,31 @@ def complete_attempt(
     The single-node shape Phase 1 exits on, kept as one call because
     `test_terminal_event_is_exactly_once` is about the two committing as one
     story: a crash in the gap yields one artifact, one charge, one terminal
-    event, however many times it is replayed.
+    event, however many times it is replayed. The acceptance commits on its
+    own; completion then refuses `RUN_NODES_UNACCEPTED` while any other pinned
+    node is unaccepted (brief 4.3 D8).
     """
     accept_attempt(conn, attempt_id=attempt_id, accepted=accepted, lease=lease)
     return complete_run(conn, _attempt_owner(conn, attempt_id)[0], lease=lease)
 
 
 def block_run(
-    conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+    conn: StoreConnection,
+    run_id: UUID,
+    *,
+    lease: Lease | None = None,
+    accepted: frozenset[str] | None = None,
 ) -> bool:
     """End a run whose route has required work nothing can release (§39).
 
     Returns whether this call ended it. No further attempt or reservation is
     possible; the reason is re-derived from the pins and accepted artifacts.
+    With `accepted`, the accepted set re-read under the lock must equal it,
+    else `RUN_TERMINAL_STALE`.
     """
-    return _transition(conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease)
+    return _transition(
+        conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease, accepted
+    )
 
 
 def fail_run(
@@ -361,12 +385,13 @@ def fail_run(
     return _transition(conn, run_id, RunStatus.FAILED, RunEvent.RUN_FAILED, lease)
 
 
-def _transition(
+def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decision
     conn: StoreConnection,
     run_id: UUID,
     into: RunStatus,
     event: RunEvent,
     lease: Lease | None,
+    accepted: frozenset[str] | None = None,
 ) -> bool:
     """Move a RUNNING run into a terminal status, appending `event` only if the
     move actually happened. Zero rows updated, no event -- the rule that makes a
@@ -379,6 +404,7 @@ def _transition(
         changed = 0
         if lock_run(conn, run_id) is RunStatus.RUNNING:
             require_lease(conn, run_id, lease)
+            _require_terminal_decision(conn, run_id, into, accepted)
             changed = conn.execute(
                 "UPDATE runs SET status = %s WHERE run_id = %s AND status = %s",
                 (into.value, run_id, RunStatus.RUNNING.value),
@@ -394,3 +420,23 @@ def _transition(
         rollback_or_close(conn)
         raise
     return bool(changed)
+
+
+def _require_terminal_decision(
+    conn: StoreConnection,
+    run_id: UUID,
+    into: RunStatus,
+    accepted: frozenset[str] | None,
+) -> None:
+    """Re-derive the terminal decision under the caller's `lock_run` (D8).
+
+    FAILED (and BLOCKED without a snapshot) needs no decision to re-derive."""
+    if accepted is None and into is not RunStatus.COMPLETE:
+        return
+    held = frozenset(artifact_digests(conn, run_id))
+    if accepted is not None and held != accepted:
+        raise Refusal(RefusalCode.RUN_TERMINAL_STALE)
+    if into is RunStatus.COMPLETE:
+        _pin, route = approved_run_input(conn, run_id)
+        if not {node.route_node_id for node in route.nodes} <= held:
+            raise Refusal(RefusalCode.RUN_NODES_UNACCEPTED)

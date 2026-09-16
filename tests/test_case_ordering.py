@@ -23,7 +23,7 @@ from server.store.audit import GovernedAction, audit_trail, governed_write, veri
 from server.store.cases import lock_case
 from server.store.gates import Gate, GateApproval, approve_gate, withdraw_source
 from server.store.members import Standing, grant, revoke
-from server.store.runs import complete_run, create_case, start_attempt, start_run
+from server.store.runs import create_case, fail_run, start_attempt, start_run
 
 
 @contextmanager
@@ -377,7 +377,7 @@ def test_lock_run_reads_status_after_waiting(
             assert other.info.transaction_status is TransactionStatus.IDLE
 
         with _blocked(conn, other, attempt):
-            complete_run(conn, run)
+            fail_run(conn, run)
     assert conn.execute("SELECT count(*) FROM run_attempts").fetchone() == (0,)
 
 

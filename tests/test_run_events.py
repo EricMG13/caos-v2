@@ -34,6 +34,7 @@ from server.store.events import Event, RunEvent, events_of, lock_run
 from server.store.runs import (
     Accepted,
     accept_attempt,
+    block_run,
     complete_attempt,
     complete_run,
     create_case,
@@ -97,6 +98,24 @@ def approved_nodes(
     return {node.module_id: node.route_node_id for node in route.nodes}
 
 
+def _accepted() -> Accepted:
+    return Accepted(
+        artifact_sha256=ARTIFACT,
+        charge=CHARGE,
+        model=MODEL,
+        generation_id=GENERATION,
+        record_sha256=RECORD,
+    )
+
+
+def accept_nodes(conn: StoreConnection, run_id: UUID, *node_ids: str) -> None:
+    """Start and accept one attempt per named node: what completion now needs
+    of every other pinned node (brief 4.3 D8)."""
+    for node_id in node_ids:
+        attempt_id = start_attempt(conn, run_id, node_id)
+        assert accept_attempt(conn, attempt_id=attempt_id, accepted=_accepted())
+
+
 def _names(conn: StoreConnection, run_id: UUID) -> list[str]:
     return [event.name for event in events_of(conn, run_id)]
 
@@ -122,6 +141,8 @@ def test_terminal_event_is_exactly_once(
     """
     conn, _case_id, run_id = run
     nodes = approved_nodes(conn, run_id, tmp_path)
+    # Completion needs every other pinned node accepted (brief 4.3 D8).
+    accept_nodes(conn, run_id, nodes["CP-0"], nodes["CP-5"])
     attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
     conn.commit()
 
@@ -152,21 +173,24 @@ def test_terminal_event_is_exactly_once(
     )
 
     assert replayed is False, "the replay must not claim to have completed the run"
-    assert _count(conn, "artifacts", run_id) == 1
-    assert _count(conn, "budget_ledger", run_id) == 1
-    # One of each is the whole test. Stated as a count rather than only as a
-    # list, so a later phase adding an event cannot weaken it by editing the
-    # list -- which is exactly what Phase 4 did when ATTEMPT_ACCEPTED arrived.
+    # One of each per node is the whole test. Stated as a count rather than only
+    # as a list, so a later phase adding an event cannot weaken it by editing
+    # the list -- which is exactly what Phase 4 did when ATTEMPT_ACCEPTED arrived.
+    assert _count(conn, "artifacts", run_id) == len(nodes)
+    assert _count(conn, "budget_ledger", run_id) == len(nodes)
     names = _names(conn, run_id)
     assert names.count(RunEvent.RUN_COMPLETE.value) == 1
-    assert names.count(RunEvent.CALL_OUTCOME_RECORDED.value) == 1
-    assert names.count(RunEvent.ATTEMPT_ACCEPTED.value) == 1
+    assert names.count(RunEvent.CALL_OUTCOME_RECORDED.value) == len(nodes)
+    assert names.count(RunEvent.ATTEMPT_ACCEPTED.value) == len(nodes)
     assert names == [
         RunEvent.ROUTE_PINNED.value,
         RunEvent.INPUT_PINNED.value,
-        RunEvent.ATTEMPT_STARTED.value,
-        RunEvent.CALL_OUTCOME_RECORDED.value,
-        RunEvent.ATTEMPT_ACCEPTED.value,
+        *[
+            RunEvent.ATTEMPT_STARTED.value,
+            RunEvent.CALL_OUTCOME_RECORDED.value,
+            RunEvent.ATTEMPT_ACCEPTED.value,
+        ]
+        * len(nodes),
         RunEvent.RUN_COMPLETE.value,
     ]
     assert run_status(conn, run_id) is RunStatus.COMPLETE
@@ -202,20 +226,8 @@ def test_a_crash_before_the_commit_leaves_no_event_and_no_charge(
         RunEvent.ATTEMPT_STARTED.value,
     ]
 
-    assert (
-        complete_attempt(
-            conn,
-            attempt_id=attempt_id,
-            accepted=Accepted(
-                artifact_sha256=ARTIFACT,
-                charge=CHARGE,
-                model=MODEL,
-                generation_id=GENERATION,
-                record_sha256=RECORD,
-            ),
-        )
-        is True
-    )
+    # Accepting, not completing: the other pinned nodes are unaccepted (D8).
+    assert accept_attempt(conn, attempt_id=attempt_id, accepted=_accepted()) is True
     assert _count(conn, "artifacts", run_id) == 1
     assert _count(conn, "budget_ledger", run_id) == 1
 
@@ -269,20 +281,11 @@ def test_events_of_a_run_are_numbered_from_one_without_gaps(
     nodes = approved_nodes(conn, run_id, tmp_path)
     start_attempt(conn, run_id, nodes["CP-0"])
     attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
-    complete_attempt(
-        conn,
-        attempt_id=attempt_id,
-        accepted=Accepted(
-            artifact_sha256=ARTIFACT,
-            charge=CHARGE,
-            model=MODEL,
-            generation_id=GENERATION,
-            record_sha256=RECORD,
-        ),
-    )
+    accept_attempt(conn, attempt_id=attempt_id, accepted=_accepted())
+    fail_run(conn, run_id)
 
-    # Route and input pinned, CP-0 started, CP-1 started, outcome recorded, CP-1
-    # accepted, run complete.
+    # Route and input pinned, CP-0 started, CP-L10 started, outcome recorded,
+    # CP-L10 accepted, run failed.
     assert [event.seq for event in events_of(conn, run_id)] == [1, 2, 3, 4, 5, 6, 7]
 
 
@@ -332,15 +335,80 @@ def test_accept_attempt_records_the_artifact_without_ending_the_run(
 
 
 def test_complete_run_ends_a_run_once(
-    run: tuple[StoreConnection, UUID, UUID],
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
 ) -> None:
     conn, _case_id, run_id = run
+    accept_nodes(conn, run_id, *approved_nodes(conn, run_id, tmp_path).values())
+    before = _names(conn, run_id)
 
     assert complete_run(conn, run_id) is True
     assert complete_run(conn, run_id) is False
 
-    assert _names(conn, run_id) == [RunEvent.RUN_COMPLETE.value]
+    assert _names(conn, run_id) == [*before, RunEvent.RUN_COMPLETE.value]
     assert run_status(conn, run_id) is RunStatus.COMPLETE
+
+
+def test_store_refuses_complete_with_an_unaccepted_pinned_node(
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
+) -> None:
+    """D8: COMPLETE is decided under the run lock, from the pinned route, not
+    trusted from a caller's snapshot. No status, no event, until every pinned
+    node owns an accepted artifact."""
+    conn, _case_id, run_id = run
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    accept_nodes(conn, run_id, nodes["CP-0"])
+    before = _names(conn, run_id)
+
+    with pytest.raises(Refusal) as caught:
+        complete_run(conn, run_id)
+    assert caught.value.code is RefusalCode.RUN_NODES_UNACCEPTED
+
+    attempt_id = start_attempt(conn, run_id, nodes["CP-L10"])
+    with pytest.raises(Refusal) as caught:
+        complete_attempt(conn, attempt_id=attempt_id, accepted=_accepted())
+    assert caught.value.code is RefusalCode.RUN_NODES_UNACCEPTED
+    assert _count(conn, "artifacts", run_id) == 2, "the acceptance still stands"
+    assert run_status(conn, run_id) is RunStatus.RUNNING
+    assert RunEvent.RUN_COMPLETE.value not in _names(conn, run_id)
+    assert len(_names(conn, run_id)) == len(before) + 3
+
+    accept_nodes(conn, run_id, nodes["CP-5"])
+    assert complete_run(conn, run_id) is True
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+
+
+def test_a_terminal_snapshot_moved_under_the_lock_refuses_stale(
+    run: tuple[StoreConnection, UUID, UUID], tmp_path: Path
+) -> None:
+    """D8: a decision taken from a snapshot is refused when the accepted set
+    re-read under `lock_run` differs from it, for BLOCKED and COMPLETE alike."""
+    conn, _case_id, run_id = run
+    nodes = approved_nodes(conn, run_id, tmp_path)
+    accept_nodes(conn, run_id, nodes["CP-0"])
+    decided = frozenset({nodes["CP-0"]})
+    accept_nodes(conn, run_id, nodes["CP-L10"])  # moves after the decision
+    before = _names(conn, run_id)
+
+    for end in (block_run, complete_run):
+        with pytest.raises(Refusal) as caught:
+            end(conn, run_id, accepted=decided)
+        assert caught.value.code is RefusalCode.RUN_TERMINAL_STALE
+        assert run_status(conn, run_id) is RunStatus.RUNNING
+        assert _names(conn, run_id) == before
+
+    accept_nodes(conn, run_id, nodes["CP-5"])
+    everything = frozenset(nodes.values())
+    with pytest.raises(Refusal) as caught:
+        block_run(conn, run_id, accepted=decided | {nodes["CP-L10"]})
+    assert caught.value.code is RefusalCode.RUN_TERMINAL_STALE
+    assert complete_run(conn, run_id, accepted=everything) is True
+    assert _names(conn, run_id) == [
+        *before,
+        RunEvent.ATTEMPT_STARTED.value,
+        RunEvent.CALL_OUTCOME_RECORDED.value,
+        RunEvent.ATTEMPT_ACCEPTED.value,
+        RunEvent.RUN_COMPLETE.value,
+    ]
 
 
 def test_a_transition_that_changed_nothing_appends_no_event(
@@ -452,17 +520,7 @@ def test_the_charge_survives_as_the_decimal_it_was_given(
     attempt_id = start_attempt(
         conn, run_id, approved_nodes(conn, run_id, tmp_path)["CP-L10"]
     )
-    complete_attempt(
-        conn,
-        attempt_id=attempt_id,
-        accepted=Accepted(
-            artifact_sha256=ARTIFACT,
-            charge=CHARGE,
-            model=MODEL,
-            generation_id=GENERATION,
-            record_sha256=RECORD,
-        ),
-    )
+    accept_attempt(conn, attempt_id=attempt_id, accepted=_accepted())
 
     row = conn.execute(
         "SELECT amount FROM budget_ledger WHERE run_id = %s", (run_id,)
