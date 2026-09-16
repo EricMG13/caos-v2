@@ -735,3 +735,39 @@ CP-L10 cites the impairment; on the evidence so far that is roughly one run in
 three, at about `$0.90` each.
 
 Spend on this set to date: `$6.95`.
+
+## A signable snapshot on the current build — 2026-09-16
+
+Run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, build `30222a49`, set
+`0863964b…`, `$0.79558075`. **`qualification_performed.complete` is true, and
+this one is bound to the build the tree carries.**
+
+| | |
+|---|---|
+| Route | COMPLETE, three modules |
+| Proof | 3 artifacts, 11 citations, every one re-located |
+| Citation key | `met=1, missed=0` — CP-L10 quoted the £1,021.7m impairment |
+| `ready_met` | true |
+| `projections_met` | true |
+
+Re-derived from the store against the set on disk rather than read from the
+capture: `proven=True, missed=0, ready_met=True, projections_met=True`. The
+stored row binds set `0863964b…`, build `30222a49…`, provider
+`openrouter/openai/flex/high/65536`, model `openai/gpt-5.6-terra`.
+
+- Database `caos_qualify_5a47243d96774e088f1bfebb6271f2d1`
+- Evidence digest `bb09d8d0bcec1524eabdc426142ef9eae60890be52a58bbf973f321644cd4621`
+- Performed digest `d758a253dba3aed1f88cd325a46c8984d2e0da9189a3027e8f8b4734eb78a7bd`
+
+It took three runs on this build for CP-L10 to surface the material figure,
+which is the finding recorded above and is not changed by this one succeeding.
+A model that quotes the period's largest single item one time in three is what
+the record says; the bar was not moved to meet it.
+
+`qualification_verdicts` is still empty. Nothing in `server/` or `scripts/`
+calls `record_verdict`, so no reviewer can sign — the open half of F17 in
+`docs/DECISIONS.md` §64. The snapshot is signable in the sense that `complete`
+is true and every binding a verdict must match is recorded; what is missing is
+the route by which a person asserts one.
+
+Spend on this set to date: `$7.75` across eleven runs.
