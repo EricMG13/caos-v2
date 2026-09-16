@@ -240,6 +240,66 @@ def _record(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
     return True
 
 
+# What the store, the run or its fence said, never what the answer was: a later
+# holder may still accept or explain that answer, so none is written down.
+_NOT_AN_EXPLANATION = frozenset(
+    {
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+        RefusalCode.LEASE_NOT_HELD,
+        RefusalCode.RUN_NOT_RUNNING,
+        RefusalCode.RUN_CANCEL_REQUESTED,
+        RefusalCode.RUN_INPUT_INVALID,
+        RefusalCode.ATTEMPT_NOT_FOUND,
+        RefusalCode.NODE_ALREADY_ACCEPTED,
+        RefusalCode.CALL_OUTCOME_CONFLICT,
+        RefusalCode.CALL_OUTCOME_LEGACY,
+        RefusalCode.HANDOFF_BLOCKED,
+    }
+)
+
+
+def record_refusal(
+    conn: StoreConnection,
+    *,
+    attempt_id: UUID,
+    code: RefusalCode,
+    lease: Lease | None = None,
+) -> bool:
+    """Write once why an attempt's recorded call was not accepted (brief 4.3 D7).
+
+    Owns the caller transaction. Returns whether a row was written: nothing is
+    for an attempt with no recorded call outcome, for a code that describes the
+    store, the run or its fence rather than the answer, or for an attempt that
+    already has one. Fenced under `lock_run`, as every holder write is.
+    """
+    if not isinstance(code, RefusalCode):
+        raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
+    if code in _NOT_AN_EXPLANATION:
+        return False
+    require_idle(conn)
+    try:
+        run, _case, _status = _locked_attempt(conn, attempt_id)
+        # Imported here: `work` imports this module at its top.
+        from server.store.work import require_lease
+
+        require_lease(conn, run, lease)
+        inserted = conn.execute(
+            "INSERT INTO attempt_refusals (attempt_id, code)"
+            " SELECT attempt_id, %s FROM call_outcomes WHERE attempt_id = %s"
+            " ON CONFLICT (attempt_id) DO NOTHING",
+            (code.value, attempt_id),
+        ).rowcount
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+    return bool(inserted)
+
+
 def producer_identifier(value: object, *, limit: int) -> str | None:
     """An exact producer identifier, or unknown; never coerce response fields."""
     if (
