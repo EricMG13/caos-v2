@@ -2,7 +2,9 @@
 // a back navigation and a cross-case race are all resolved here against stale
 // responses: a late response for a case the user has left is discarded, and
 // the Book binds one accepted snapshot per compared case. Pure; no I/O.
-import type { Refusal } from "@/wire";
+import type { EnabledSection } from "./sections";
+import type { Refusal, Section } from "@/wire";
+import type { EventName } from "@/wire/v1";
 
 export interface Authority {
   /** The case on screen, or null when the section is not about one case. */
@@ -68,4 +70,17 @@ export function release(authority: Authority, caseId: string): Authority {
   const bound = { ...authority.bound };
   delete bound[caseId];
   return { ...authority, bound };
+}
+
+/** Which sections each event name refetches (brief 4.4, decision 2). */
+export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> = {
+  run_progress: ["run"],
+  handoff_accepted: ["run", "analysis"],
+  run_terminal: ["run", "analysis"],
+  sources_changed: ["upload", "run", "analysis"],
+  runs_changed: ["run", "analysis"],
+};
+
+export function refetches(name: EventName, section: Section): boolean {
+  return (REFETCHES[name] as readonly string[]).includes(section);
 }

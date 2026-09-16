@@ -1,4 +1,14 @@
-import { INITIAL, accepts, bind, issue, navigate, release, ticket } from "@/app/authority";
+import {
+  INITIAL,
+  REFETCHES,
+  accepts,
+  bind,
+  issue,
+  navigate,
+  refetches,
+  release,
+  ticket,
+} from "@/app/authority";
 
 describe("the authority machine", () => {
   test("test_route_replay_discards_late_response_for_left_case", () => {
@@ -48,5 +58,20 @@ describe("the authority machine", () => {
     const moved = bind(release(held, "CASE-2026-CVNA01"), "CASE-2026-CVNA01", "snp_cvna_q3_2026");
     expect(moved.refusal).toBeNull();
     expect(moved.authority.bound["CASE-2026-CVNA01"]).toBe("snp_cvna_q3_2026");
+  });
+});
+
+describe("what a name refetches", () => {
+  test("each event name refetches exactly the sections decision 2 names", () => {
+    expect(REFETCHES).toEqual({
+      run_progress: ["run"],
+      handoff_accepted: ["run", "analysis"],
+      run_terminal: ["run", "analysis"],
+      sources_changed: ["upload", "run", "analysis"],
+      runs_changed: ["run", "analysis"],
+    });
+    expect(refetches("run_progress", "analysis")).toBe(false);
+    expect(refetches("sources_changed", "upload")).toBe(true);
+    expect(refetches("runs_changed", "directory")).toBe(false);
   });
 });

@@ -4,7 +4,6 @@
 // rendering a section exercises a helper without ever naming it, so a helper
 // that quietly returned the wrong thing would still leave the section green.
 import { sectionPath } from "@/app/sections";
-import { EVENT_NAMES, eventsUrl } from "@/app/sse";
 import { OFFLINE_WORDING, UNAVAILABLE_WORDING } from "@/app/transport";
 import { toneOf } from "@/chrome/SeverityMark";
 import { fallbackChrome } from "@/chrome/fallback";
@@ -121,28 +120,10 @@ describe("the wire contract and the states around it", () => {
   });
 });
 
-describe("navigation and the event tail", () => {
+describe("navigation", () => {
   test("a section path is the slug with its trailing slash", () => {
     expect(sectionPath("directory")).toBe("/directory/");
     expect(sectionPath("committee")).toBe("/committee/");
-  });
-
-  test("the tail url carries the case and the fixture, and neither when absent", () => {
-    expect(eventsUrl(null, null)).toBe("/api/events");
-    expect(eventsUrl("CASE-2026-CVNA01", null)).toBe("/api/events?case=CASE-2026-CVNA01");
-    expect(eventsUrl(null, "gate")).toBe("/api/events?fixture=gate");
-  });
-
-  test("the six event names are the whole set the client listens for", () => {
-    // Name-only: the client reads the name and refetches, never a payload.
-    expect(EVENT_NAMES).toEqual([
-      "node_state_changed",
-      "attempt_recorded",
-      "gate_opened",
-      "run_terminal",
-      "source_withdrawn",
-      "authority_changed",
-    ]);
   });
 });
 

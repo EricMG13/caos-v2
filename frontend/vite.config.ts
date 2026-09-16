@@ -20,6 +20,19 @@ function sectionOf(pathname: string): string | null {
 
 // The frame a run's stream has advanced to; the next fetch of /run reads it.
 let runFrame = 0;
+// Whether the `stale` stream has announced a newer analytical identity; the
+// next fetch of /analysis answers for a different run.
+let staleAdvanced = false;
+
+/** The `stale` fixture's newer answer: another displayed run, other figures. */
+function advancedAnalysis(raw: string): string {
+  const doc = JSON.parse(raw);
+  const next = "00000000-0000-4000-8000-0000000000b2";
+  doc.body.displayed_run_id = next;
+  doc.body.latest_run_id = next;
+  if (doc.body.handoffs[0]) doc.body.handoffs[0].confidence_score = 12;
+  return JSON.stringify(doc);
+}
 
 async function readJson(path: string): Promise<string | null> {
   try {
@@ -50,46 +63,75 @@ async function serveSection(section: string, fixture: string | null, res: Server
     );
   }
   let path = `${section}.json`;
-  if (fixture && fixture !== "stale") path = `states/${section}.${fixture}.json`;
+  if (fixture && !STREAM_FIXTURES.has(fixture)) path = `states/${section}.${fixture}.json`;
   else if (section === "run" && runFrame > 0) path = `run/frames/${runFrame}.json`;
   const body = await readJson(path);
   if (body === null) return send(res, 404, "{}");
-  send(res, 200, body);
+  send(res, 200, section === "analysis" && staleAdvanced ? advancedAnalysis(body) : body);
 }
 
+/** Fixtures that drive the event stream, not a document state of their own. */
+const STREAM_FIXTURES = new Set(["stale", "drop"]);
+
+type Marker = [number, number];
+const MARKER = /^(0|[1-9][0-9]{0,15})\.(0|[1-9][0-9]{0,15})$/;
+
+/** A resume marker, or null when it is missing or malformed (brief 4.4, decision 3). */
+function markerOf(value: string | string[] | undefined): Marker | null {
+  const match = typeof value === "string" ? MARKER.exec(value) : null;
+  return match ? [Number(match[1]), Number(match[2])] : null;
+}
+
+// The v1 case stream (brief 4.4, decisions 1-3): a cursor frame, then
+// name-only frames `id: {audit_seq}.{run_seq}`, delivered strictly after a
+// Last-Event-ID. `drop` ends the first connection after its second frame, so
+// the browser resumes with its marker.
 async function serveEvents(fixture: string | null, req: IncomingMessage, res: ServerResponse) {
   const named = fixture === "stale" ? "stale" : "events";
   const raw = await readJson(`run/${named}.json`);
-  let events: { id: number; type: string }[] = [];
+  let events: { id: string; event: string }[] = [];
   try {
     events = raw ? JSON.parse(raw) : [];
   } catch {
     events = [];
   }
-  const after = Number(req.headers["last-event-id"] ?? 0);
+  const resumed = markerOf(req.headers["last-event-id"]);
+  const [audit, run] = resumed ?? [0, 0];
   res.statusCode = 200;
   res.setHeader("content-type", "text/event-stream");
   res.setHeader("cache-control", "no-store");
   res.flushHeaders();
-  runFrame = 0;
+  // A fresh stream starts the fixture over; a resumed one keeps its place.
+  if (resumed === null) {
+    runFrame = 0;
+    staleAdvanced = false;
+  } else if (named === "events") {
+    runFrame = run;
+  }
+  res.write(`retry: 300\nid: ${audit}.${run}\n\n`);
+  const pending = events.filter((event) => {
+    const marker = markerOf(event.id);
+    return marker !== null && (marker[0] > audit || marker[1] > run);
+  });
+  const dropAfter = fixture === "drop" && resumed === null ? 2 : Infinity;
   let index = 0;
-  const pending = events.filter((event) => event.id > after);
   const tick = () => {
     const event = pending[index];
-    if (res.writableEnded) return;
-    if (!event) {
-      res.write("event: stream_end\ndata: {}\n\n");
+    // With nothing left the stream stays open and idle, as a real tail does.
+    if (res.writableEnded || !event) return;
+    if (named === "events") runFrame = markerOf(event.id)?.[1] ?? runFrame;
+    else staleAdvanced = true;
+    res.write(`id: ${event.id}\nevent: ${event.event}\ndata: {}\n\n`);
+    index += 1;
+    if (index >= dropAfter) {
       res.end();
       return;
     }
-    if (named === "events") runFrame = event.id;
-    res.write(`id: ${event.id}\nevent: ${event.type}\ndata: {}\n\n`);
-    index += 1;
     setTimeout(tick, 250);
   };
   setTimeout(tick, 250);
-  // The frame is reset when a stream opens, never when it closes: the refetch
-  // that run_terminal triggers races the close, and must still see the last
+  // The frame is reset when a fresh stream opens, never when it closes: the
+  // refetch an event triggers races the close, and must still see the last
   // frame. The client opens its tail before its first fetch for the same reason.
   // ponytail: one process-wide frame; per-stream frames if two runs ever tail at once.
   req.on("close", () => res.end());
@@ -124,7 +166,7 @@ const fixtureMiddleware: Connect.NextHandleFunction = (req, res, next) => {
     void serveSection(section, fixture, res);
     return;
   }
-  if (pathname === "/api/events") {
+  if (/^\/api\/v1\/cases\/[^/]+\/events$/.test(pathname)) {
     void serveEvents(fixture, req, res);
     return;
   }
