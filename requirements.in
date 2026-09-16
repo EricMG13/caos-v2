@@ -6,3 +6,5 @@ pdfminer.six==20260107
 # The HTTP surface and its named wire models (docs/DECISIONS.md 22).
 fastapi==0.141.1
 uvicorn==0.52.4
+# Starlette's form parser for the admission upload (Task 4.2 decision 4; user-authorized 2026-09-14).
+python-multipart==0.0.32

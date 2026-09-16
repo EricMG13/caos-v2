@@ -15,10 +15,12 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from command_fixtures import command_client, command_headers
+from command_fixtures import command_client, command_headers, member
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from httpx import Response
+from journey.pack import PDF_NAME, TEXT_NAME, journey_pack
+from psycopg.pq import TransactionStatus
 from starlette.datastructures import FormData
 from starlette.requests import Request
 
@@ -26,10 +28,11 @@ from server.api.app import app
 from server.api.commands import cases
 from server.api.deps import store_connection
 from server.evidence import ingest
-from server.store import StoreConnection
+from server.evidence.extract import DEFAULT_LIMITS
+from server.store import StoreConnection, connect
 from server.store import commands as store_commands
 from server.store.audit import audit_trail, verify_chain
-from server.store.members import Standing, standing_of
+from server.store.members import Standing, revoke, standing_of
 
 __all__ = ["command_client"]
 
@@ -191,6 +194,266 @@ def test_create_case_actor_matrix(
     )
 
 
+def test_admission_is_whole_or_nothing_for_a_mixed_text_and_pdf_pack(
+    case: tuple[StoreConnection, UUID], command_client: TestClient
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+
+    admitted = _admit(command_client, case_id, writer, journey_pack())
+
+    assert admitted.status_code == 201, admitted.json()
+    body = admitted.json()
+    assert body["case_id"] == str(case_id) and len(body["source_ids"]) == 2
+    rows = conn.execute(
+        "SELECT s.source_id, s.filename, count(b.block_id) FROM sources s"
+        " JOIN source_blocks b USING (source_id) WHERE s.case_id = %s"
+        " GROUP BY s.source_id, s.filename",
+        (case_id,),
+    ).fetchall()
+    conn.rollback()
+    assert {str(r[0]) for r in rows} == set(body["source_ids"])
+    assert {r[1] for r in rows} == {TEXT_NAME, PDF_NAME}
+    assert all(r[2] > 0 for r in rows)
+    [event] = audit_trail(conn, case_id)
+    conn.rollback()
+    assert event.action == "SOURCES_ADMITTED"
+
+    # A readable text beside a PDF that will not read: nothing of either lands.
+    refused = _admit(
+        command_client,
+        case_id,
+        writer,
+        [("fine.txt", TEXT), ("broken.pdf", b"%PDF-1.4\nnot a document")],
+    )
+    assert refused.status_code == 400
+    assert refused.json()["code"] == "SOURCE_NOT_READABLE"
+    assert _sources(conn, case_id) == 2
+    assert _count(conn, "SELECT count(*) FROM audit_events") == 1
+    assert _receipts(conn) == 1
+
+
+def test_a_replayed_admission_returns_the_original_receipt_and_no_second_rows(
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    seen: dict[str, int],
+) -> None:
+    conn, case_id = case
+    writer, key = member(conn, case_id), uuid4()
+
+    first = _admit(command_client, case_id, writer, [("a.txt", TEXT)], key=key)
+    again = _admit(command_client, case_id, writer, [("a.txt", TEXT)], key=key)
+    renamed = _admit(command_client, case_id, writer, [("b.txt", TEXT)], key=key)
+
+    assert (first.status_code, again.status_code) == (201, 201)
+    assert again.json() == first.json()
+    assert again.headers["idempotency-replayed"] == "true"
+    assert (renamed.status_code, renamed.json()["code"]) == (
+        409,
+        "IDEMPOTENCY_KEY_REUSED",
+    )
+    assert seen["prepare"] == 1, "a replay or a reused key extracts nothing"
+    assert _sources(conn, case_id) == 1
+    assert _receipts(conn) == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [
+        ("evil\u202etxt.pdf", "BOUNDARY_TEXT_INVALID"),
+        ("   ", "BOUNDARY_TEXT_INVALID"),
+        ("n" * 256, "BOUNDARY_TEXT_TOO_LONG"),
+    ],
+)
+def test_filenames_cross_boundary_text(
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    seen: dict[str, int],
+    name: str,
+    code: str,
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+
+    refused = _admit(command_client, case_id, writer, [("ok.txt", TEXT), (name, TEXT)])
+
+    assert (refused.status_code, refused.json()["code"]) == (400, code)
+    assert seen["prepare"] == 0, "refused before extraction"
+    assert _sources(conn, case_id) == 0
+
+    admitted = _admit(command_client, case_id, writer, [("../Résumé.txt", TEXT)])
+    assert admitted.status_code == 201
+    stored = conn.execute("SELECT filename FROM sources WHERE case_id = %s", (case_id,))
+    assert stored.fetchone() == ("../Résumé.txt",), "NFC, display only"
+    conn.rollback()
+
+
+def test_parts_other_than_named_documents_are_request_invalid(
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    seen: dict[str, int],
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    path = f"/api/v1/cases/{case_id}/sources"
+
+    answers = [
+        command_client.post(
+            path,
+            headers=command_headers(writer),
+            files=[("attachment", ("a.txt", TEXT, "text/plain"))],
+        ),
+        command_client.post(
+            path,
+            headers=command_headers(writer),
+            files=[("document", ("a.txt", TEXT, "text/plain"))],
+            data={"note": "a field"},
+        ),
+        command_client.post(
+            path,
+            headers=command_headers(writer),
+            files=[("document", ("a.txt", TEXT))] * 51,
+        ),
+        command_client.post(
+            path,
+            headers={**command_headers(writer), "content-type": "multipart/form-data"},
+            content=b"no boundary",
+        ),
+    ]
+
+    assert [(a.status_code, a.json()["code"]) for a in answers] == [
+        (400, "REQUEST_INVALID")
+    ] * 4
+    assert seen["prepare"] == 0
+    assert _sources(conn, case_id) == 0
+
+
+def test_an_oversized_or_chunked_pack_is_refused_before_parsing(
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    seen: dict[str, int],
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    path = f"/api/v1/cases/{case_id}/sources"
+    multipart = "multipart/form-data; boundary=x"
+
+    def post(headers: dict[str, str], content: object) -> tuple[int, str]:
+        answer = command_client.post(
+            path,
+            headers={**command_headers(writer), **headers},
+            content=content,
+        )
+        return answer.status_code, answer.json()["code"]
+
+    ceiling = DEFAULT_LIMITS.max_pack_bytes + 1024 * 1024
+    assert post(
+        {"content-type": multipart, "content-length": str(ceiling + 1)}, b"--x--"
+    ) == (413, "SOURCE_TOO_LARGE")
+    assert post({"content-type": multipart}, iter([b"--x", b"--\r\n"])) == (
+        400,
+        "REQUEST_INVALID",
+    ), "chunked: no declared length"
+    assert post({"content-type": "application/json"}, b"{}") == (400, "REQUEST_INVALID")
+    assert post({"content-type": multipart, "content-length": "1e3"}, b"--x--") == (
+        400,
+        "REQUEST_INVALID",
+    )
+    assert seen["form"] == 0, "no envelope refusal parsed a byte"
+
+    # A body longer than its declared length is refused as it streams.
+    lying = post({"content-type": multipart, "content-length": "10"}, b"-" * 5000)
+    assert lying == (400, "REQUEST_INVALID")
+    assert seen["prepare"] == 0
+    assert _sources(conn, case_id) == 0
+
+
+def test_a_nonmember_upload_is_404_without_extraction(
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    seen: dict[str, int],
+) -> None:
+    conn, case_id = case
+    revoked = member(conn, case_id)
+    revoke(conn, case_id=case_id, user_id=revoked)
+    conn.commit()
+
+    for user, role in ((uuid4(), "ANALYST"), (uuid4(), "ADMIN"), (revoked, "ANALYST")):
+        answer = _admit(command_client, case_id, user, journey_pack(), role=role)
+        assert (answer.status_code, answer.json()["code"]) == (404, "CASE_NOT_FOUND")
+    unknown = _admit(command_client, uuid4(), uuid4(), [("a.txt", TEXT)])
+    assert unknown.status_code == 404
+
+    assert seen == {"form": 0, "prepare": 0}, (
+        "no stranger's pack is parsed or extracted"
+    )
+    assert _sources(conn, case_id) == 0
+
+
+@pytest.mark.parametrize(
+    ("standing", "role", "status"),
+    [
+        (Standing.READER, "ANALYST", 403),
+        (Standing.WRITER, "READER", 403),
+        (Standing.WRITER, "ANALYST", 201),
+        (Standing.APPROVER, "ANALYST", 201),
+        (Standing.ADMIN, "ADMIN", 201),
+    ],
+)
+def test_admission_actor_matrix(  # noqa: PLR0913 -- one matrix row
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    seen: dict[str, int],
+    standing: Standing,
+    role: str,
+    status: int,
+) -> None:
+    conn, case_id = case
+    user = member(conn, case_id, standing)
+
+    answer = _admit(command_client, case_id, user, [("a.txt", TEXT)], role=role)
+
+    assert answer.status_code == status
+    if status == 403:
+        assert answer.json()["code"] == "NOT_AUTHORISED"
+        assert seen == {"form": 0, "prepare": 0}
+    anonymous = command_client.post(
+        f"/api/v1/cases/{case_id}/sources",
+        files=[("document", ("a.txt", TEXT, "text/plain"))],
+    )
+    assert (anonymous.status_code, anonymous.json()["code"]) == (
+        401,
+        "NOT_AUTHENTICATED",
+    )
+
+
+def test_extraction_holds_no_case_lock(
+    case: tuple[StoreConnection, UUID],
+    command_client: TestClient,
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    observed: list[tuple[bool, bool]] = []
+
+    def prepare(documents: list[ingest.Document]) -> ingest.PreparedPack:
+        idle = conn.info.transaction_status is TransactionStatus.IDLE
+        with connect(empty_database) as other:
+            locked = other.execute(
+                "SELECT case_id FROM cases WHERE case_id = %s FOR UPDATE NOWAIT",
+                (case_id,),
+            ).fetchone()
+            other.rollback()
+        observed.append((idle, locked is not None))
+        return ingest.prepare_pack(documents)
+
+    monkeypatch.setattr(cases, "prepare_pack", prepare)
+
+    assert _admit(command_client, case_id, writer, journey_pack()).status_code == 201
+    assert observed == [(True, True)], "no open unit and the case lock is free"
+
+
 class _Counting:
     """Counts store round trips (statements and cursors) on the request's
     connection, so each declared budget is measured rather than asserted."""
@@ -214,7 +477,8 @@ class _Counting:
 def test_each_case_command_declares_and_meets_its_store_budget(
     case: tuple[StoreConnection, UUID], command_client: TestClient
 ) -> None:
-    conn, _case_id = case
+    conn, case_id = case
+    writer = member(conn, case_id)
 
     def measured(send: Callable[[], Response]) -> tuple[int, int]:
         counter = _Counting(conn)
@@ -230,12 +494,29 @@ def test_each_case_command_declares_and_meets_its_store_budget(
     assert measured(create) == (201, cases.CREATE_CASE_IO)
     assert measured(create)[1] <= cases.REPLAY_IO
 
+    one = measured(lambda: _admit(command_client, case_id, writer, [("a.txt", TEXT)]))
+    two = measured(lambda: _admit(command_client, case_id, writer, journey_pack()))
+    per_document = cases.ADMISSION_PER_DOCUMENT_IO
+    assert one == (201, cases.ADMISSION_FIXED_IO + per_document)
+    assert two == (201, cases.ADMISSION_FIXED_IO + 2 * per_document)
+    key = uuid4()
+    measured(
+        lambda: _admit(command_client, case_id, writer, [("r.txt", TEXT)], key=key)
+    )
+    replay = measured(
+        lambda: _admit(command_client, case_id, writer, [("r.txt", TEXT)], key=key)
+    )
+    assert replay[0] == 201 and replay[1] <= cases.REPLAY_IO
+    assert cases.IO_BUDGET >= cases.ADMISSION_FIXED_IO + 50 * per_document
 
-def test_create_case_is_the_one_route_of_its_router_so_far() -> None:
+
+def test_the_case_commands_are_the_two_routes_of_their_router() -> None:
     served = {
         (route.path, route.endpoint)
         for route in cases.router.routes
         if isinstance(route, APIRoute)
     }
-    # `admit_sources` joins it with the admission half of this slice.
-    assert served == {("/api/v1/cases", cases.create_case_command)}
+    assert served == {
+        ("/api/v1/cases", cases.create_case_command),
+        ("/api/v1/cases/{case_id}/sources", cases.admit_sources),
+    }
