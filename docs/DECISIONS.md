@@ -2563,6 +2563,22 @@ that answered did answer. Under `make smoke-production` it runs against the
 production image through the real edge on all three engines — 15 journey tests
 each, where there were 14.
 
-No model is called: `tests/journey/worker.py::RealisticLiteCompletions` is
-deterministic, so this proves the workspace's handling of the state and not a
-provider's behaviour.
+The case is a one-note pack with no covenant certificate
+(`tests/journey/pack.py::insufficient_pack`), and the journey worker keys its
+answer on the evidence the run pinned rather than on a flag: that document's
+digest gets the Blocked verdict, the certificate's gets `Passed`. So the case is
+about the evidence, one worker serves both journeys on one stack, and no model
+is called.
+
+**Driving it found what reading had not.** The exit check is met — the status
+cell, the case register's tag and the handoff count are honest, and those are
+what the test asserts. But `node_states` is recomputed from accepted artifacts
+alone, and a validated Blocked accepts nothing, so CP-5 comes back `RUNNABLE`
+and the workspace draws it pulsing "in the frontier" beside a `Status` of
+BLOCKED; and the analysis document carries no run status at all, so that page is
+indistinguishable from a run still in flight. Nothing on either page names the
+verdict. Those two are recorded in `CLAUDE.md`'s Phase 9 ledger with their
+upgrade — the run document carrying the blocking node, the analysis document the
+run status — and are deliberately left unasserted rather than asserted as though
+they were correct. A test that asserted them would pin the misleading behaviour
+in place.

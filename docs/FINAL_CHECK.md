@@ -67,6 +67,14 @@ Seven items were listed. Four are closed, two were miscategorised, one is open.
    A journey test admits a thin pack, runs it, and asserts the run page reads
    BLOCKED and not COMPLETE while the modules that did answer read COMPLETE —
    on the production image, through the real edge, on all three engines.
+   *With a caveat a signer should know:* driving it showed the workspace draws
+   the blocking node as **running** beside a BLOCKED status, and the analysis
+   page carries no run status, so it looks like a run still in flight. The
+   status cell, the register tag and the handoff count are honest and are what
+   the test asserts; the misleading parts are recorded in the ledger and
+   deliberately left unasserted, because a test asserting them would pin them in
+   place. The exit check is met; the workspace is not yet fully honest about a
+   blocked run.
 3. **The frontmatter disqualifiers are deliberately not enforced** (§66). The
    change was written, measured and rejected: it refuses seven of the 25
    retained real handoffs, two of them the accepted artifacts of the only
