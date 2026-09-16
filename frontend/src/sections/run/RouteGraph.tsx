@@ -7,7 +7,7 @@ import { reasonOf, runningOf } from "./reason";
 import { SeverityMark } from "@/chrome/SeverityMark";
 import type { AttemptView } from "./types";
 import type { EdgeType, NodeState, Severity } from "@/wire";
-import type { NodeView } from "@/wire/v1";
+import type { NodeView, RunView } from "@/wire/v1";
 
 export const NODE_W = 128;
 // Tall enough for the id, the state and two whole lines of reason; at 62 the
@@ -127,11 +127,13 @@ export function edgesOf(
 export function RouteGraph({
   nodes,
   attempts,
+  status,
   selected,
   onSelect,
 }: {
   nodes: NodeView[];
   attempts: AttemptView[];
+  status: RunView["status"];
   selected: string | null;
   onSelect: (routeNodeId: string) => void;
 }) {
@@ -185,7 +187,7 @@ export function RouteGraph({
           {nodes.map((node) => {
             const placed = at.get(node.route_node_id);
             if (!placed) return null;
-            const running = runningOf(node, attempts);
+            const running = runningOf(node, attempts, status);
             const on = node.route_node_id === selected;
             const cls = `node ${node.state.toLowerCase()}${running ? " running" : ""}${node.awaiting_gate ? " gate" : ""}${on ? " sel" : ""}`;
             return (
@@ -205,7 +207,7 @@ export function RouteGraph({
                   <SeverityMark severity={severityOf(node, running)} pulse={running} />
                   {stateWord(node, running)}
                 </span>
-                <span className="why">{reasonOf(node)}</span>
+                <span className="why">{reasonOf(node, status)}</span>
               </button>
             );
           })}

@@ -5,10 +5,18 @@ import { severityOf } from "./RouteGraph";
 import { reasonOf, runningOf } from "./reason";
 import { SeverityMark, toneOf } from "@/chrome/SeverityMark";
 import type { AttemptView } from "./types";
-import type { NodeView } from "@/wire/v1";
+import type { NodeView, RunView } from "@/wire/v1";
 
-export function NodeDetail({ node, attempts }: { node: NodeView; attempts: AttemptView[] }) {
-  const running = runningOf(node, attempts);
+export function NodeDetail({
+  node,
+  attempts,
+  status,
+}: {
+  node: NodeView;
+  attempts: AttemptView[];
+  status: RunView["status"];
+}) {
+  const running = runningOf(node, attempts, status);
   const severity = severityOf(node, running);
   const mine = attempts.filter((attempt) => attempt.route_node_id === node.route_node_id);
   return (
@@ -27,7 +35,7 @@ export function NodeDetail({ node, attempts }: { node: NodeView; attempts: Attem
         <div className="pb">
           <dl className="kv">
             <dt>Reason</dt>
-            <dd className="wrap">{reasonOf(node)}</dd>
+            <dd className="wrap">{reasonOf(node, status)}</dd>
             <dt>Stage</dt>
             <dd>{node.stage}</dd>
             <dt>Edges in</dt>

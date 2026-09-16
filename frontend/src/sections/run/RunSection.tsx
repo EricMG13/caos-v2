@@ -157,6 +157,7 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
             <RouteGraph
               nodes={run.nodes}
               attempts={run.attempts}
+              status={run.status}
               selected={selectedId}
               onSelect={(routeNodeId) => setChoice({ run: run.run_id, node: routeNodeId })}
             />
@@ -164,13 +165,16 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
         </section>
         <div className="note">
           <b>States are the bundle&apos;s, recomputed from accepted attempts — never stored.</b>{" "}
-          COMPLETE has an accepted artifact. RUNNABLE is in the frontier. RESTRICTED runs and
-          carries its limitation forward. BLOCKED names the edge and the upstream it waits on.
+          COMPLETE has an accepted artifact. RUNNABLE is in the frontier while the run is running,
+          and did not run once it has ended. RESTRICTED runs and carries its limitation forward.
+          BLOCKED names the edge and the upstream it waits on.
         </div>
       </div>
       <div className="col right">
         {refetchNote}
-        {selected ? <NodeDetail node={selected} attempts={run.attempts} /> : null}
+        {selected ? (
+          <NodeDetail node={selected} attempts={run.attempts} status={run.status} />
+        ) : null}
         <section className="pnl">
           <header>
             <h2>Run</h2>

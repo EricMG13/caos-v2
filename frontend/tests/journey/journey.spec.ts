@@ -626,8 +626,16 @@ test.describe.serial("journey", () => {
     await expect(status).not.toContainText("COMPLETE");
     await expect(nodeLocator(page, "CP-0")).toHaveAttribute("data-state", "COMPLETE");
     await expect(nodeLocator(page, "CP-L10")).toHaveAttribute("data-state", "COMPLETE");
+    // CP-5 keeps an unaccepted attempt and, recomputed from accepted artifacts
+    // alone, a RUNNABLE state -- both true. What must not follow is the page
+    // drawing it as running, or saying it is in the frontier, beside a Status
+    // of BLOCKED. Nothing on an ended run is in flight.
+    await expect(nodeLocator(page, "CP-5")).not.toHaveClass(/\brunning\b/);
     await nodeLocator(page, "CP-5").click();
     await expect(page.locator("[data-node-detail='CP-5']")).toBeVisible();
+    const detail = page.locator("[data-node-detail='CP-5']");
+    await expect(detail).toContainText("did not run");
+    await expect(detail).not.toContainText("in the frontier");
     const attempts = page.locator("section.pnl", { hasText: "Attempts — CP-5" });
     await expect(attempts.locator("[data-attempt]")).toHaveCount(1);
     await expect(attempts.locator("[data-attempt]")).toContainText("NOT ACCEPTED");

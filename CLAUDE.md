@@ -865,6 +865,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   by, and an authorized evidence page. Withdraw, sign, freeze, file and
   membership grants still have no route, and Book, Model, Report, Committee
   and Admin stay unavailable.
+- **~~A BLOCKED run draws the node that blocked it as running.~~** Half
+  closed. The run page no longer does: `reasonOf` and `runningOf` read the
+  run's own status, which the run document already carried, so on an ended
+  run nothing is drawn running and a ready-but-unrun node reads "did not
+  run" instead of "in the frontier". No wire change was needed for that
+  half — the status was there, and reading the node state without it was
+  the defect. The journey now asserts it through the production stack.
+  **What remains is the analysis page**, which still carries no run status
+  and so still shows a blocked run as though it were in flight; that half
+  does need the wire change below. The original entry:
 - **A BLOCKED run draws the node that blocked it as running.** `node_states`
   is recomputed from accepted artifacts alone (invariant 10), and a validated
   CP-5 `Blocked` accepts nothing: on a run `_end_blocked` has ended, CP-5 has
@@ -879,12 +889,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   BLOCKED and is shown as such, not as success` asserts through the production
   stack; the graph's state for CP-5 and the pending list are left unasserted
   rather than asserted as expected. Found by driving the case, not by reading.
-  *Upgrade:* a terminal run's unrun node needs a state the bundle's four do not
-  express. The read model already holds the run status and `blocked_verdict`
-  can name the node, so the run document carries which node blocked it, the
-  analysis document carries the run status, and `reasonOf` stops saying "in
-  the frontier" on a run that has ended — a wire change on both documents, so
-  a model change and an updated pinned key set each.
+  *Upgrade:* `reasonOf` no longer says "in the frontier" on an ended run, which
+  needed no wire change. What is still owed is the analysis document carrying
+  the run status, and — for naming *why* it ended rather than only that it did —
+  the run document carrying which node blocked it, which `blocked_verdict` can
+  supply. Both are wire changes, so a model change and an updated pinned key set
+  each.
 
 **Phase 8.**
 
