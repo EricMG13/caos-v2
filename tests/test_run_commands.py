@@ -6,24 +6,37 @@ through the real app against PostgreSQL. A refusal commits nothing.
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from command_fixtures import command_client, command_headers, member
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from server.api import app as app_module
 from server.api.commands import runs as runs_command
+from server.api.deps import store_connection
+from server.api.reads import run as run_read
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document, admit_pack
 from server.store import StoreConnection
 from server.store.audit import audit_trail
 from server.store.events import events_of
+from server.store.gates import (
+    Gate,
+    GateState,
+    gate_preview,
+    gate_state,
+    withdraw_source,
+)
+from server.store.members import Standing, grant, revoke
 from server.store.routes import pinned_route
 from server.store.run_inputs import load_run_input
 from server.store.runs import create_case, fail_run, start_run
+from server.store.source_sets import snapshot_source_set
 
 __all__ = ["command_client"]
 
@@ -209,3 +222,257 @@ def test_the_subject_pin_snapshots_live_sources_once(
     again = _send(client, _path(case_id, run_id, "input"), writer, PIN)
     assert _outcome(again) == "409 RUN_INPUT_ALREADY_PINNED"
     assert _effects(conn) == before
+
+
+def test_approval_of_a_stale_or_transplanted_preview_is_a_conflict(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    sourced: UUID,
+    tmp_path: Path,
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    approver = member(conn, case_id, Standing.APPROVER)
+    first = _run(client, case_id, writer, pin=True)
+    second = _run(client, case_id, writer, pin=True)
+    unpinned = _run(client, case_id, writer, pin=False)
+    other = create_case(conn, BoundaryText.of("Other 2026"))
+    grant(conn, case_id=other, user_id=writer, standing=Standing.WRITER)
+    grant(conn, case_id=other, user_id=approver, standing=Standing.APPROVER)
+    conn.commit()
+    _admit(conn, other, tmp_path, "other.txt")
+    foreign = _run(client, other, writer, pin=True)
+    of_first = _digests(client, case_id, first, approver)
+    of_plan = _digests(client, case_id, first, approver, RESEARCH_PLAN)
+    of_foreign = _digests(client, other, foreign, approver)
+    approval = SOURCE_SET + "approval"
+    before = _effects(conn)
+
+    for run, digests, outcome in [
+        (second, of_first, "409 GATE_APPROVAL_MISMATCH"),  # another run's preview
+        (first, of_plan, "409 GATE_APPROVAL_MISMATCH"),  # another gate's preview
+        (first, {**of_first, "preview_sha256": "0" * 64}, "409 GATE_APPROVAL_MISMATCH"),
+        # Another case's run under this case's path, with its own exact preview.
+        (foreign, of_foreign, "404 RUN_NOT_FOUND"),
+        (unpinned, of_first, "409 RUN_INPUT_NOT_PINNED"),
+    ]:
+        answer = _send(client, _path(case_id, run, approval), approver, digests)
+        assert _outcome(answer) == outcome
+    assert _effects(conn) == before
+
+    # A pinned member withdrawn after the preview was read.
+    withdraw_source(conn, case_id=case_id, source_id=sourced, actor_id=writer)
+    before = _effects(conn)
+    withdrawn = _send(client, _path(case_id, first, approval), approver, of_first)
+    assert _outcome(withdrawn) == "409 EVIDENCE_NOT_AVAILABLE"
+    assert _effects(conn) == before
+    assert gate_state(conn, first, Gate.SOURCE_SET) is GateState.OPEN
+
+    # The exact preview of a live run of the path's case releases its gate.
+    approved = _send(client, _path(other, foreign, approval), approver, of_foreign)
+    assert approved.status_code == 200, approved.text
+    assert (
+        approved.json() == {"run_id": str(foreign), "gate": "SOURCE_SET"} | of_foreign
+    )
+    assert gate_state(conn, foreign, Gate.SOURCE_SET) is GateState.RELEASED
+    entry = audit_trail(conn, other)[-1]
+    conn.rollback()
+    assert (entry.action, entry.actor_id) == ("GATE_RELEASED:SOURCE_SET", approver)
+
+
+def test_approval_on_a_terminal_run_is_refused(
+    client: TestClient, case: tuple[StoreConnection, UUID], sourced: UUID
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    approver = member(conn, case_id, Standing.APPROVER)
+    run_id = _run(client, case_id, writer, pin=True)
+    digests = _digests(client, case_id, run_id, approver)
+    assert fail_run(conn, run_id)
+    before = _effects(conn)
+
+    path = _path(case_id, run_id, SOURCE_SET + "approval")
+    refused = _send(client, path, approver, digests)
+
+    assert _outcome(refused) == "409 RUN_NOT_RUNNING"
+    assert _effects(conn) == before
+    assert _digests(client, case_id, run_id, approver) == digests, (
+        "the historical preview stays readable; it releases nothing"
+    )
+
+
+def test_a_preview_is_exact_content_and_grants_nothing(
+    client: TestClient, case: tuple[StoreConnection, UUID], sourced: UUID
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    reader = member(conn, case_id, Standing.READER)
+    run_id = _run(client, case_id, writer, pin=True)
+    unpinned = _run(client, case_id, writer, pin=False)
+    foreign = start_run(conn, create_case(conn, BoundaryText.of("Other 2026")))
+    conn.commit()
+    before = _effects(conn)
+
+    for slug, gate in zip((SOURCE_SET, RESEARCH_PLAN), Gate, strict=True):
+        answer = _send(client, _path(case_id, run_id, slug + "preview"), reader)
+        assert answer.status_code == 200, answer.text
+        body = answer.json()
+        expected = gate_preview(conn, run_id, gate)
+        conn.rollback()
+        assert body.pop("observed_at").endswith(("Z", "+00:00"))
+        assert body == {
+            "run_id": str(run_id),
+            "gate": gate.value,
+            "content": expected.content,
+            "preview_sha256": sha256(expected.content.encode()).hexdigest(),
+            "input_fingerprint": expected.input_fingerprint,
+        }
+
+    assert _effects(conn) == before, "reading a preview writes nothing"
+    assert {gate_state(conn, run_id, gate) for gate in Gate} == {GateState.OPEN}
+    conn.rollback()
+    for run, tail, outcome in [
+        (run_id, "gates/SOURCE_SET/preview", "404 ENDPOINT_NOT_FOUND"),
+        (unpinned, SOURCE_SET + "preview", "409 RUN_INPUT_NOT_PINNED"),
+        (foreign, SOURCE_SET + "preview", "404 RUN_NOT_FOUND"),
+        ("nope", SOURCE_SET + "preview", "404 RUN_NOT_FOUND"),
+    ]:
+        assert _outcome(_send(client, _path(case_id, run, tail), reader)) == outcome
+
+
+def test_a_command_replays_its_receipt_and_refuses_a_reused_key(
+    client: TestClient, case: tuple[StoreConnection, UUID], sourced: UUID
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    approver = member(conn, case_id, Standing.APPROVER)
+    key = uuid4()
+    first = _send(client, _path(case_id), writer, ROUTE, key=key)
+    again = _send(client, _path(case_id), writer, ROUTE, key=key)
+    assert (first.status_code, again.json()) == (201, first.json())
+    assert again.headers["idempotency-replayed"] == "true"
+    assert _effects(conn)[0] == 1, "one run"
+
+    run_id = UUID(first.json()["run_id"])
+    assert _send(client, _path(case_id, run_id, "input"), writer, PIN).is_success
+    digests = _digests(client, case_id, run_id, approver)
+    path = _path(case_id, run_id, SOURCE_SET + "approval")
+    approved = _send(client, path, approver, digests, key=key)
+    before = _effects(conn)
+    replayed = _send(client, path, approver, digests, key=key)
+    assert (approved.status_code, replayed.json()) == (200, approved.json())
+    assert replayed.headers["idempotency-replayed"] == "true"
+    other_gate = _path(case_id, run_id, RESEARCH_PLAN + "approval")
+    reused = _send(client, other_gate, approver, digests, key=key)
+    assert _outcome(reused) == "409 IDEMPOTENCY_KEY_REUSED"
+    assert _effects(conn) == before
+
+
+# Writer and approver hold that standing with G = ANALYST; "G reader writer"
+# holds WRITER standing with G = READER.
+ACTORS = "anon nonmember reader writer approver revoked G_admin G_reader_writer"
+MATRIX = {
+    "runs": (401, 404, 403, 201, 201, 404, 404, 403),
+    "input": (401, 404, 403, 200, 200, 404, 404, 403),
+    "preview": (401, 404, 200, 200, 200, 404, 404, 200),
+    "approval": (401, 404, 403, 403, 200, 404, 404, 403),
+}
+
+
+@pytest.mark.parametrize("endpoint", sorted(MATRIX))
+def test_the_run_commands_across_the_actor_matrix(
+    client: TestClient, case: tuple[StoreConnection, UUID], sourced: UUID, endpoint: str
+) -> None:
+    conn, case_id = case
+    writer = member(conn, case_id)
+    reader = member(conn, case_id, Standing.READER)
+    approver = member(conn, case_id, Standing.APPROVER)
+    revoked = member(conn, case_id, Standing.ADMIN)
+    revoke(conn, case_id=case_id, user_id=revoked)
+    conn.commit()
+    users: list[tuple[UUID | None, str]] = [(None, "ANALYST"), (uuid4(), "ANALYST")]
+    users += [(reader, "READER"), (writer, "ANALYST"), (approver, "ANALYST")]
+    users += [(revoked, "ADMIN"), (uuid4(), "ADMIN"), (writer, "READER")]
+    pinned = _run(client, case_id, writer, pin=True)
+    digests = _digests(client, case_id, pinned, approver)
+
+    def ask(user: UUID | None, role: str) -> int:
+        body: object
+        if endpoint == "runs":
+            path, body = _path(case_id), ROUTE
+        elif endpoint == "input":
+            fresh = _run(client, case_id, writer, pin=False)
+            path, body = _path(case_id, fresh, "input"), PIN
+        elif endpoint == "preview":
+            path, body = _path(case_id, pinned, SOURCE_SET + "preview"), None
+        else:
+            path, body = _path(case_id, pinned, SOURCE_SET + "approval"), digests
+        return _send(client, path, user, body, role=role).status_code
+
+    names = ACTORS.split()
+    observed = {name: ask(*user) for name, user in zip(names, users, strict=True)}
+
+    assert observed == dict(zip(names, MATRIX[endpoint], strict=True))
+
+
+class _Counting:
+    """The request's connection, counting statements sent to the store."""
+
+    def __init__(self, conn: StoreConnection) -> None:
+        self._conn = conn
+        self.executed = 0
+
+    def execute(self, *args: object, **kwargs: object) -> object:
+        self.executed += 1
+        return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    def cursor(self, *args: object, **kwargs: object) -> object:
+        self.executed += 1
+        return self._conn.cursor(*args, **kwargs)  # type: ignore[call-overload]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+def test_each_run_command_meets_its_declared_store_budget(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    sourced: UUID,
+    tmp_path: Path,
+) -> None:
+    conn, case_id = case
+    counted = _Counting(conn)
+    writer = member(conn, case_id)
+    approver = member(conn, case_id, Standing.APPROVER)
+    # An earlier snapshot the pin's live set differs from: the costliest path.
+    snapshot_source_set(conn, case_id)
+    _admit(conn, case_id, tmp_path, "later.txt")
+    overrides = app_module.app.dependency_overrides
+
+    def measured(path: str, user: UUID, body: object, key: UUID) -> tuple[int, int]:
+        overrides[store_connection] = lambda: counted
+        counted.executed = 0
+        try:
+            status = _send(client, path, user, body, key=key).status_code
+        finally:
+            overrides[store_connection] = lambda: conn
+        return status, counted.executed
+
+    key = uuid4()
+    created = measured(_path(case_id), writer, ROUTE, key)
+    assert created == (201, runs_command.CREATE_RUN_IO)
+    assert measured(_path(case_id), writer, ROUTE, key) == (201, runs_command.REPLAY_IO)
+    assert runs_command.REPLAY_IO <= 3
+    [run_id] = [UUID(str(r[0])) for r in conn.execute("SELECT run_id FROM runs")]
+    conn.rollback()
+    pin = measured(_path(case_id, run_id, "input"), writer, PIN, uuid4())
+    assert pin == (200, runs_command.PIN_INPUT_IO)
+    path = _path(case_id, run_id, SOURCE_SET + "preview")
+    assert measured(path, approver, None, key) == (200, runs_command.PREVIEW_IO)
+    assert runs_command.PINNED_INPUT_IO == run_read.PINNED_INPUT_IO
+    digests = _digests(client, case_id, run_id, approver)
+    path = _path(case_id, run_id, SOURCE_SET + "approval")
+    assert measured(path, approver, digests, uuid4()) == (200, runs_command.APPROVE_IO)
+    budgets = [runs_command.CREATE_RUN_IO, runs_command.PIN_INPUT_IO]
+    budgets += [runs_command.PREVIEW_IO, runs_command.APPROVE_IO]
+    assert runs_command.IO_BUDGET == max(budgets)
