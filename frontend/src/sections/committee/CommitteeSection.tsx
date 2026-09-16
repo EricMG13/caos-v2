@@ -1,39 +1,5 @@
 import type { CommitteeDocument } from "@/wire/v1";
-
-function Values({ label, values }: { label: string; values: readonly string[] }) {
-  return (
-    <div className="note">
-      <b>{label}</b> {values.length ? values.join(", ") : "none"}
-    </div>
-  );
-}
-
-function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts"][number] }) {
-  return (
-    <section className="pnl" data-committee-artifact={artifact.route_node_id}>
-      <header>
-        <h2>{artifact.route_node_id}</h2>
-        <span className="cp">
-          {artifact.qa_status} · {artifact.committee_status}
-        </span>
-      </header>
-      <div className="pb">
-        <dl className="kv">
-          <dt>Artifact</dt>
-          <dd>sha256:{artifact.artifact_sha256}</dd>
-          <dt>Record</dt>
-          <dd>sha256:{artifact.record_sha256}</dd>
-          <dt>Scope</dt>
-          <dd>{artifact.decision_scope}</dd>
-        </dl>
-        <div data-committee-artifact-text>{artifact.markdown}</div>
-        <div data-committee-artifact-record>{artifact.record}</div>
-        <Values label="Limitations." values={artifact.limitation_flags} />
-        <Values label="Validation warnings." values={artifact.validation_warnings} />
-      </div>
-    </section>
-  );
-}
+import { SavedArtifact } from "@/sections/saved/SavedArtifact";
 
 function Filing({ document }: { document: CommitteeDocument }) {
   const { body } = document;
@@ -115,7 +81,7 @@ export function CommitteeSection({
         </div>
       </section>
       {body.artifacts.map((artifact) => (
-        <Artifact key={artifact.route_node_id} artifact={artifact} />
+        <SavedArtifact section="committee" key={artifact.route_node_id} artifact={artifact} />
       ))}
       <section className="pnl" data-committee-narrative>
         <header>

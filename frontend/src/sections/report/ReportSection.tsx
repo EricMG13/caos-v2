@@ -1,37 +1,7 @@
 // The saved Report payload, read only. Text stays text: this surface never
 // interprets markdown, follows evidence, or offers a legacy draft action.
 import type { ReportDocument } from "@/wire/v1";
-
-function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][number] }) {
-  return (
-    <section className="pnl" data-report-artifact={artifact.route_node_id}>
-      <header>
-        <h2>{artifact.route_node_id}</h2>
-        <span className="cp">
-          {artifact.qa_status} · {artifact.committee_status}
-        </span>
-      </header>
-      <div className="pb">
-        <dl className="kv">
-          <dt>Artifact</dt>
-          <dd>sha256:{artifact.artifact_sha256}</dd>
-          <dt>Record</dt>
-          <dd>sha256:{artifact.record_sha256}</dd>
-          <dt>Scope</dt>
-          <dd>{artifact.decision_scope}</dd>
-        </dl>
-        <pre>{artifact.markdown}</pre>
-        <pre>{artifact.record}</pre>
-        <div className="note" data-report-limitations>
-          <b>Limitations.</b> {artifact.limitation_flags.join(", ") || "none"}
-        </div>
-        <div className="note" data-report-warnings>
-          <b>Validation warnings.</b> {artifact.validation_warnings.join(", ") || "none"}
-        </div>
-      </div>
-    </section>
-  );
-}
+import { SavedArtifact } from "@/sections/saved/SavedArtifact";
 
 export function ReportSection({ document }: { document: ReportDocument; tab: string | null }) {
   const { body } = document;
@@ -61,7 +31,7 @@ export function ReportSection({ document }: { document: ReportDocument; tab: str
         </div>
       </section>
       {body.artifacts.map((artifact) => (
-        <Artifact key={artifact.route_node_id} artifact={artifact} />
+        <SavedArtifact section="report" key={artifact.route_node_id} artifact={artifact} />
       ))}
       <section className="pnl" data-report-narrative>
         <header>
