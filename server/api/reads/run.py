@@ -13,7 +13,7 @@ and the accepted artifacts, never stored; each carries the reason for it.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -39,6 +39,7 @@ from server.api.wire import (
 )
 from server.blobs import BlobStore
 from server.engine.route import (
+    Edge,
     EdgeType,
     NamedObjects,
     NodeResult,
@@ -331,6 +332,39 @@ def _node_views(
     ]
 
 
+def node_readiness(  # noqa: PLR0913 -- one node of one run document
+    route: ResolvedRoute,
+    accepted: Mapping[str, NodeResult],
+    node: RouteNode,
+    states: Mapping[str, NodeState],
+    readiness: Mapping[str, str],
+    named: NamedObjects | None = None,
+) -> tuple[Sequence[Edge], bool, str | None]:
+    """The unmet edges, `awaiting_gate` and `gate_verdict`: shared by the v1
+    wire (`_node_view` below) and the legacy run document (`server/api/app.py`)
+    until that document is retired. Each wire builds its own `EdgeView` from
+    the raw edges, since the two documents do not share that model.
+
+    The one QA_GATE in the catalog is `CP-5 -> CP-6`. `awaiting_gate` is true
+    while the node waits for the QA source's verdict. Once CP-5 answered
+    anything but `Passed`, nothing is awaited: the node is BLOCKED by that
+    verdict and the unmet edges still name it (F03).
+    """
+    done = states[node.route_node_id] is NodeState.COMPLETE
+    unmet = () if done else waiting_on(route, accepted, node.route_node_id)
+    if not done and named is not None and node.module_id in named.accepted_ids:
+        # A node held for its named object names the edges that could meet it.
+        extra = lite_object_unmet(route, accepted, node.module_id, named)
+        unmet = (*unmet, *(edge for edge in extra if edge not in unmet))
+    answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
+    awaiting_gate = any(
+        edge.type is EdgeType.QA_GATE and edge.source not in answered for edge in unmet
+    )
+    # `.get`, not `[]`: a module the gate has not ruled on has no verdict
+    # rather than a false one, and None is that absence on the wire.
+    return unmet, awaiting_gate, readiness.get(node.module_id)
+
+
 def _node_view(  # noqa: PLR0913 -- one node of one run document
     route: ResolvedRoute,
     accepted: Mapping[str, NodeResult],
@@ -339,28 +373,15 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
     readiness: Mapping[str, str],
     named: NamedObjects | None = None,
 ) -> NodeView:
-    done = states[node.route_node_id] is NodeState.COMPLETE
-    unmet = () if done else waiting_on(route, accepted, node.route_node_id)
-    if not done and named is not None and node.module_id in named.accepted_ids:
-        # A node held for its named object names the edges that could meet it.
-        extra = lite_object_unmet(route, accepted, node.module_id, named)
-        unmet = (*unmet, *(edge for edge in extra if edge not in unmet))
-    answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
+    unmet, awaiting_gate, gate_verdict = node_readiness(
+        route, accepted, node, states, readiness, named
+    )
     return NodeView(
         route_node_id=node.route_node_id,
         module_id=node.module_id,
         stage=node.stage,
         state=states[node.route_node_id],
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
-        # The one QA_GATE in the catalog is `CP-5 -> CP-6`. True while the node
-        # waits for the QA source's verdict. Once CP-5 answered anything but
-        # `Passed`, nothing is awaited: the node is BLOCKED by that verdict and
-        # `waiting_on` still names the edge (F03).
-        awaiting_gate=any(
-            edge.type is EdgeType.QA_GATE and edge.source not in answered
-            for edge in unmet
-        ),
-        # `.get`, not `[]`: a module the gate has not ruled on has no verdict
-        # rather than a false one, and None is that absence on the wire.
-        gate_verdict=readiness.get(node.module_id),
+        awaiting_gate=awaiting_gate,
+        gate_verdict=gate_verdict,
     )

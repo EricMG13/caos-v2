@@ -43,7 +43,7 @@ from server.api.app import (
     store_connection,
 )
 from server.api.reads import run as run_read
-from server.api.reads.run import _node_view, read_run_section
+from server.api.reads.run import _node_view, node_readiness, read_run_section
 from server.api.wire import CLEARS, EdgeView, NodeView, RefusalBody, RunSectionDocument
 from server.blobs import BlobStore
 from server.engine.route import (
@@ -626,6 +626,28 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     gate = EdgeView(source="CP-5", type=EdgeType.QA_GATE)
     assert (gate in cp6.waiting_on) is held
     assert by_module["CP-5"].waiting_on == []
+
+
+def test_node_readiness_is_the_shared_computation_node_view_builds_on(
+    catalog: dict[str, Any],
+) -> None:
+    """`node_readiness` is what `_node_view` (this module) and the legacy run
+    document's own `_node_view` (`server/api/app.py`) both call, so the two
+    wires cannot compute a node's unmet edges differently by drifting apart."""
+    full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    accepted: dict[str, NodeResult] = {}
+    states = node_states(full, accepted)
+    readiness = readiness_from(full, accepted)
+    cp0 = next(n for n in full.nodes if n.module_id == "CP-0")
+
+    unmet, awaiting_gate, gate_verdict = node_readiness(
+        full, accepted, cp0, states, readiness
+    )
+
+    view = _node_view(full, accepted, cp0, states, readiness)
+    assert [e.source for e in unmet] == [e.source for e in view.waiting_on]
+    assert awaiting_gate == view.awaiting_gate
+    assert gate_verdict == view.gate_verdict
 
 
 def test_nothing_is_awaited_on_a_run_that_is_no_longer_running(

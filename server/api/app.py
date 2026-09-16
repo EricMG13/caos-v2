@@ -63,11 +63,9 @@ from server.engine.route import (
     NodeState,
     ResolvedRoute,
     RouteNode,
-    lite_object_unmet,
     node_states,
     readiness_from,
     route_digest,
-    waiting_on,
 )
 from server.engine.runtime import accepted_artifacts
 from server.methodology.bundle import Bundle
@@ -481,26 +479,18 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
     readiness: Mapping[str, str],
     named: NamedObjects | None = None,
 ) -> NodeView:
-    done = states[node.route_node_id] is NodeState.COMPLETE
-    unmet = () if done else waiting_on(route, accepted, node.route_node_id)
-    if not done and named is not None and node.module_id in named.accepted_ids:
-        # A node held for its named object names the edges that could meet it.
-        extra = lite_object_unmet(route, accepted, node.module_id, named)
-        unmet = (*unmet, *(edge for edge in extra if edge not in unmet))
-    answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
+    """The legacy run document's node view, retired alongside this route --
+    `node_readiness` is the shared computation (`server/api/reads/run.py`)."""
+    unmet, awaiting_gate, gate_verdict = run_read.node_readiness(
+        route, accepted, node, states, readiness, named
+    )
     return NodeView(
         route_node_id=node.route_node_id,
         module_id=node.module_id,
         state=states[node.route_node_id].value,
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
-        awaiting_gate=any(
-            edge.type is EdgeType.QA_GATE and edge.source not in answered
-            for edge in unmet
-        ),
-        # `.get`, not `[]`: a module the gate has not ruled on -- every module,
-        # until CP-0's own artifact is accepted -- has no verdict rather than a
-        # false one, and None is that absence on the wire.
-        gate_verdict=readiness.get(node.module_id),
+        awaiting_gate=awaiting_gate,
+        gate_verdict=gate_verdict,
     )
 
 
