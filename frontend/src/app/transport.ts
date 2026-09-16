@@ -1,17 +1,13 @@
 // One transport for every section document. A response becomes a RegionStatus,
 // never an exception: the seven states of IA_SPEC.md 6 plus `ready`.
 //
-// URLs are versioned and case-scoped (brief 4.1, decision 1). A section reads
-// the v1 wire only when its `sections/<s>/wire.ts` marker says so; until then
-// its document keeps the legacy key check. Nothing parsed here is cast: every
-// body is narrowed by a validator or a type predicate.
+// URLs are versioned and case-scoped (brief 4.1, decision 1). Every enabled
+// section reads the v1 wire (Directory and Upload since slice 4.1h, Run since
+// 4.1i, Analysis since 4.1j); a disabled section sends no request at all, so
+// no document it could carry is ever read here. Nothing parsed here is cast:
+// every body is narrowed by a validator or a type predicate.
 import { isEnabledSection, type EnabledSection } from "./sections";
-import { WIRE as ANALYSIS_WIRE } from "@/sections/analysis/wire";
-import { WIRE as DIRECTORY_WIRE } from "@/sections/directory/wire";
-import { WIRE as RUN_WIRE } from "@/sections/run/wire";
-import { WIRE as UPLOAD_WIRE } from "@/sections/upload/wire";
-import { keysMatch } from "@/wire/keys";
-import type { AnyDocument, Refusal, Section } from "@/wire";
+import type { Refusal, Section } from "@/wire";
 import {
   WireIdentityError,
   WireShapeError,
@@ -24,8 +20,9 @@ import {
   type SectionDocument as V1Document,
 } from "@/wire/v1";
 
-/** What a section region can hold while the legacy and v1 wires coexist. */
-export type WorkspaceDocument = AnyDocument | V1Document;
+/** What a section region can hold. Every enabled section reads the v1 wire;
+    a disabled section never fetches, so no other document shape reaches here. */
+export type WorkspaceDocument = V1Document;
 
 export type RegionStatus<D = WorkspaceDocument> =
   | { kind: "loading" }
@@ -49,13 +46,6 @@ export interface SectionQuery {
   run?: string | null;
   fixture?: string | null;
 }
-
-const WIRES: Record<EnabledSection, "legacy" | "v1"> = {
-  directory: DIRECTORY_WIRE,
-  upload: UPLOAD_WIRE,
-  run: RUN_WIRE,
-  analysis: ANALYSIS_WIRE,
-};
 
 const V1_PARSERS: Record<EnabledSection, (value: unknown) => V1Document> = {
   directory: parseDirectoryDocument,
@@ -102,44 +92,7 @@ async function bodyOf(response: Response): Promise<unknown> {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isLegacyDocument(
-  value: Record<string, unknown>,
-): value is Record<string, unknown> & AnyDocument {
-  return keysMatch(value);
-}
-
-/** The legacy wire: the pinned top-level and chrome keys, nothing deeper. */
-export function classify(document: unknown): RegionStatus<AnyDocument> {
-  if (!isRecord(document)) return { kind: "error", refusal: RESPONSE_INVALID };
-  if (!isLegacyDocument(document)) {
-    return {
-      kind: "error",
-      refusal: { code: "WIRE_KEYS_MISMATCH", clears: "the document carries the pinned keys" },
-    };
-  }
-  if (document.observed_empty === true) {
-    if (typeof document.observed_at !== "string" || document.observed_at === "") {
-      return {
-        kind: "error",
-        refusal: {
-          code: "OBSERVED_EMPTY_UNTIMED",
-          clears: "an observed-empty response carries the time it was observed",
-        },
-      };
-    }
-    return { kind: "observed-empty", observed_at: document.observed_at, document };
-  }
-  if (document.status === "partial") {
-    return { kind: "partial", document, notes: document.notes ?? [] };
-  }
-  return { kind: "ready", document };
-}
-
-/** The v1 wire: the whole document validated, then bound to the request. */
+/** The whole document validated, then bound to the request. */
 function classifyV1(section: EnabledSection, body: unknown, query: SectionQuery): RegionStatus {
   let document: V1Document;
   try {
@@ -193,5 +146,5 @@ export async function fetchSection(
   if (response.status === 404) return { kind: "unavailable" };
   if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
   const body = await bodyOf(response);
-  return WIRES[section] === "v1" ? classifyV1(section, body, query) : classify(body);
+  return classifyV1(section, body, query);
 }
