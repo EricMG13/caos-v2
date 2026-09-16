@@ -218,3 +218,15 @@ from the run's pinned adapter (§42.1), and the accept replay compares it with
 the other stored facts. Readers that refuse a NULL record arrive with slice
 f-1. The restore probe carries only claims-route artifacts, whose record stays
 NULL across restore and upgrade.
+
+## Version 14 — command receipts — 2026-09-14
+
+Version 14 (`0014_command_requests`) is additive. It creates one empty table,
+`command_requests`, keyed by `(actor_id, scope, idempotency_key)`, with CHECKs
+on the command name, the lowercase SHA-256 `request_sha256`, a success status
+(200, 201 or 202) and a receipt of at most 65,536 bytes, and two triggers that
+refuse UPDATE, DELETE and TRUNCATE (`docs/DECISIONS.md` §51.3). No existing
+table is altered and nothing is backfilled, so the upgrade cannot refuse a
+populated store; `test_version_fourteen_adds_empty_command_requests_to_a_populated_store`
+advances a version-13 store and finds the table empty. Rows are written only
+by a committed command and no code path removes one.

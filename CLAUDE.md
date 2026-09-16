@@ -141,11 +141,13 @@ Standing rules that back them:
   `make doctor`, and `make dev-up`. This creates the locked Python 3.14/3.12
   and Node 24 environments, starts the persistent dev database on 55436 and
   the ephemeral test-admin database on 55437, and preserves local blobs.
-- `make dev-api` (`make dev` is an alias) — the API alone on port 8000. It
-  needs `CAOS_DATABASE_URL` and `CAOS_BLOB_ROOT`, both read per request, and
-  advances the verified migration prefix at startup. No worker, nothing seeded.
-- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000. It
-  fails visibly for routes not built yet. `make dev-ui-demo` is the separately
+- `make dev-api` (`make dev` is an alias) — the guarded site application on
+  127.0.0.1:8000, loopback only (§53). It needs `CAOS_DATABASE_URL` and
+  `CAOS_BLOB_ROOT`, both read per request, and advances the verified migration
+  prefix at startup. `make dev-worker` is the worker; nothing is seeded.
+- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000 as
+  the local actor `CAOS_DEV_USER` (role `CAOS_DEV_ROLE`, default ANALYST);
+  without it the API answers 401. `make dev-ui-demo` is the separately
   labelled, read-only fixture workbench; it is never integration evidence.
 - `make test` — the offline suite with PostgreSQL required; paid provider tests
   remain deselected.
@@ -154,7 +156,9 @@ Standing rules that back them:
   fails rather than skips without them.
 - `make check` — the complete offline engineering gate: required PostgreSQL,
   backend lint/types/tests/coverage/I/O/races/security, frontend lint/types/unit/
-  production and demo builds/a11y/workbench, then the image gate, sequentially.
+  production and demo builds/a11y/workbench, the image gate, then
+  `make smoke-production` (the production image and real-stack journey),
+  sequentially.
   `make check-fast` is explicitly partial; `make check-size PR_BASE=<commit>` is
   the separate PR-only size gate.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
@@ -170,6 +174,87 @@ phase numbers. Entries are not evidence of completion; the handoff and repair
 plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
+
+**Repair Phase 4.**
+
+- **An audit event cannot be read back to the ids its command made.**
+  `governed_write` stores only `payload_sha256`, never the payload, so a
+  `RUN_CREATED` or `SOURCES_ADMITTED` row says a command happened without
+  naming the run or sources. The payload binds the command's
+  `request_sha256`, and the ids are in the `command_requests` receipt under
+  that digest, but no column joins the two rows: an auditor needs the
+  request itself to recompute the payload digest. *Upgrade:* a
+  `request_sha256` column on `audit_events` (a migration), the day an audit
+  reader needs the join.
+- **Receipts are kept forever, including a revoked member's.**
+  `command_requests` is UPDATE/DELETE/TRUNCATE-immutable and nothing collects
+  it, so it grows by one row per committed command. A revoked member's
+  receipts stay; their replay is answered 404 by the visibility check before
+  the lookup. *Upgrade:* a dated retention decision and a governed sweep, the
+  day the table's size is measured.
+- **The demonstration workbench shows no available command.** The v1
+  fixtures carry `"actions": []`, so every command control in `make
+  dev-ui-demo` renders refused `ACTION_UNPLACED`, and the fixture middleware
+  answers any non-GET under `/api/` 405 `READ_ONLY_DEMO`. `ACTION_UNPLACED`'s
+  clearance (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still
+  says the API serves only the run document and its event stream, which has
+  not been true since §50. Availability is proven against the real API
+  (`test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code`)
+  and in unit tests, not in the workbench. *Upgrade:* correct the clearance
+  text, and fixture actions when a workbench spec needs an available control.
+
+- **An evidence page holds a read transaction while its frame is extracted.**
+  `read_evidence_page` reads standing and the page's lines, then
+  `server/evidence/page.py` reads the whole document blob and, for a PDF, runs
+  the §47 child for its frame, under the admission deadline (60 s) and decoded
+  budget -- all with the request's read transaction open and its unpooled
+  connection held. Each request pays an interpreter start and a full blob read,
+  and nothing caches a frame, so a reader paging a large PDF repeats both.
+  *Upgrade:* a frame stored at admission beside the extraction, or a cache
+  keyed by `(document_sha256, extractor identity, page)`, and the transaction
+  closed before the child, the day page latency is measured.
+- **The demonstration event stream keeps one process-wide frame counter.**
+  `frontend/vite.config.ts`'s fixture stream advances a single `runFrame`
+  (and `staleAdvanced`) for the whole dev server, reset when a fresh stream
+  opens, so two tabs or two concurrent workbench specs tailing it move each
+  other's Run document. The evidence workbench specs refuse the demo stream
+  for that reason. Demo mode only; the real stream has no shared state.
+  *Upgrade:* per-stream frames the day a spec needs two tails at once.
+
+- **The edge proves itself with one static shared secret.** Edge mode trusts
+  any request carrying `CAOS_EDGE_TOKEN` (§53.2): anything on the private
+  network that learns it can assert any subject and groups, the process holds
+  one token at a time so rotating it means restarting the API, and nothing
+  binds a request to the edge's authentication of it. *Upgrade:* verifying the
+  identity provider's signed assertion (a dependency and a dated decision), or
+  mutual TLS between edge and API.
+- **The API cannot tell whether the edge stripped a client's identity.** The
+  guard refuses a repeated or lookalike identity header, which catches an edge
+  that appends; an edge that forwards a client's `x-forwarded-groups` and sets
+  none of its own is indistinguishable from a correct one, and that client
+  chooses its global role. The contract lives in `server/api/edge.py`, §53.1
+  and the test edge (`tests/journey/edge.py`), not in anything the API can
+  check. *Upgrade:* the signed assertion above, which makes the groups the
+  identity provider's rather than a header's.
+- **The worker has no readiness.** The API's `/api/health` probes the store,
+  bundle and blob root it uses; `server/engine/worker.py` serves no listener,
+  and `compose.smoke.yaml` gives the worker no healthcheck. A worker that
+  exited 2 (`PROVIDER_NOT_CONFIGURED`) or is backing off on store faults is
+  visible only in its exit code and logs, and a queued run simply waits.
+  *Upgrade:* a heartbeat the worker writes and health reads, the day an
+  operator has to alert on a stalled queue.
+- **The test edge's session cookie is weaker than the contract's.** Over
+  `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
+  drops `Secure` and the `__Host-` prefix the contract names and keeps
+  `HttpOnly` and `SameSite=Lax`. The journey therefore proves SameSite and the
+  Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
+  TLS material, which this task was not authorized to create.
+- **The production image and journey are proven locally, not in CI.**
+  `make smoke-production` is the last step of `make check`, and no CI
+  job runs it. At `943f57f` its journey step refuses with exit 2 because
+  `frontend/playwright.journey.config.ts` (slice 4.5e2) does not exist yet, so
+  a complete `make check` fails there until that slice lands. *Upgrade:* the
+  journey slice, then a CI job over the smoke stack (Phase 6).
 
 **Repair Phase 3.**
 
@@ -225,11 +310,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   inflater; each PDF pays an interpreter's start-up (0.124 s measured on the
   development machine); and plain text stays in-process and cooperative per
   line, which the 20 MiB document ceiling bounds (a line now stops building
-  tokens one past `max_tokens`). Extraction also runs while the caller's
-  transaction is open, before `lock_case`: a pack of fifty documents can hold
-  it idle for their extraction time. *Upgrade:* an address-space limit in the
-  child where the platform enforces one, a worker pool if start-up cost shows,
-  and extraction outside the store transaction with Phase 4's upload worker.
+  tokens one past `max_tokens`). The admission command (§51) extracts through
+  `prepare_pack` with no transaction open and no case lock held, but
+  `admit_pack`, which the qualification harness still calls, extracts while
+  the caller's transaction is open, before `lock_case`: a pack of fifty
+  documents can hold it idle for their extraction time. *Upgrade:* an
+  address-space limit in the child where the platform enforces one, a worker
+  pool if start-up cost shows, and the harness admitting through
+  `prepare_pack`.
 
 - **Three vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
@@ -490,8 +578,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   acceptance (interleaving I6: no lock is held across transport). A response
   that trickles past the 300 s lease (the provider timeout bounds each socket
   operation, not the call) costs at most one extra paid call. `run_work` is
-  enqueued only by the store function today; the governed start command is
-  Task 4.2. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
+  written only by the start, retry and cancel commands (§51), each in its own
+  audited unit that rechecks authority but never calls a provider. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
   a borrowed code. `artifacts` rows are also not UPDATE/DELETE-immutable, so a
   privileged edit could move ownership; a refusal trigger like 0007's is the
   upgrade. *Upgrade:* none planned for I6 while one worker runs; per-node
@@ -731,37 +819,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
-- **The real workspace reads the v1 section routes, but events, evidence pages
-  and commands are not wired yet.** Phase 4 Task 4.1 (§50) closed the reads:
-  Directory, Upload, Run and Analysis are served at `/api/v1/…`, validated whole
-  in the browser and bound to their case and run, with one `{code, clears}`
-  refusal body; the other five sections are unavailable. What follows is the
-  entry as it stood, kept for the parts still open — the event vocabulary
-  (Task 4.4), evidence pages (4.4) and governed writes (4.2):
-  **The real workspace is not yet wired to backend section routes.**
-  `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
-  section document and `sse.ts` tails `/api/events` for six lower-case event
-  names, while `server/api/app.py` serves `/api/runs/{id}` and its
-  `/events`, whose stream carries `RunEvent` names (`ROUTE_PINNED` …
-  `RUN_FAILED`). The refusal bodies differ as well: the client reads
-  `{code, clears}` and the server sends `{refusal}`, so a real server refusal
-  is classed `RESPONSE_INVALID`. Ordinary development and production preview
-  now use the real API path and fail visibly; only the explicitly labelled
-  read-only demo serves fixtures. No governed write — commit,
-  withdraw, pin, approve, accept, sign, freeze, file — has a route. A control
-  refused for want of one now says so (`READ_ONLY_API`) instead of naming a
-  build phase that had already exited; a control refused for a domain reason —
-  `APPROVER_NOT_INDEPENDENT`, `RUN_NOT_TERMINAL` — still gives that reason,
-  which is the one its route will owe, although meeting it opens no route
-  today. The fixtures are the contract those routes owe, including two fields
-  the workspace now reads: `withdrawn_at` on a citation of a withdrawn source,
-  and `tab` on a ribbon action that opens one of the section's own tabs. This
-  entry was missing — the gap was found by driving every user story
-  (`docs/feature-status.csv`), not by the ledger.
-  *Upgrade:* a named model per section document behind `/api/sections/<s>`,
-  one event vocabulary chosen for both halves, and a refusal body that carries
-  what clears it; then a write route per governed action over the store call
-  that already exists.
+- ~~**The real workspace reads the v1 section routes, but events, evidence
+  pages and commands are not wired yet.**~~ Closed by Phase 4: Task 4.1 (§50)
+  served Directory, Upload, Run and Analysis at `/api/v1/…` with one `{code,
+  clears}` refusal body; Task 4.2 (§51) the governed writes the journey needs;
+  Task 4.4 (§52) one name-only case stream whose names the browser refetches
+  by, and an authorized evidence page. Withdraw, sign, freeze, file and
+  membership grants still have no route, and Book, Model, Report, Committee
+  and Admin stay unavailable.
 
 **Phase 8.**
 
@@ -811,7 +876,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 - **Identity before the store rests on parameter order.** Every section read
   (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
-  `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
+  `read_case_events` declare `actor: Caller` ahead of `conn: Store`, and that is
   the whole of what refuses an anonymous request before a connection is opened:
   FastAPI builds a route's dependency list in signature order (`get_dependant`)
   and solves it sequentially (`solve_dependencies`), so the ordering is a
@@ -822,34 +887,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
   inserts at the front of the list whatever the parameters say; worth taking the
   day a third route arrives and the order has to be remembered three times.
-- **A run tail polls.** `server/api/app.py` re-reads `run_events` every
-  `POLL_INTERVAL` until the run is terminal, standing is lost, or
-  `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
-  watcher still costs `EVENTS_IO_BUDGET` queries every half second — six a
-  second, per open connection. *Upgrade:* `LISTEN`/`NOTIFY` on the event append,
-  making the poll a fallback rather than the mechanism; worth doing when there
-  are enough concurrent watchers to measure it, not before.
-- **The role an actor carries is global, and nothing reads it.**
-  `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
-  asserts, which is what the actor matrix is about; but every authority decision
-  that matters is per case and is taken at commit time against `case_members`
-  (`SYSTEM_SPEC.md` §8), so no code path consults the global role today. It is
-  derived rather than deferred because deriving it later, once routes exist that
-  assume a role is present, is how a role header gets trusted "just for now".
-  *Upgrade:* the first authority that is genuinely account-wide rather than
-  case-scoped. This entry used to name administration in Phase 10; Phase 10 came
-  and went without it, and `docs/REBUILD_PLAN.md` lists an admin UI under what is
-  deliberately not in the plan — so there is no scheduled upgrade, and saying so
-  is better than pointing at a phase that has closed.
-- **`GET /api/health` is specified and not served.** `SYSTEM_SPEC.md` §11 wants
-  liveness and readiness on one strict model — store, bundle, blob store, 200
-  when all hold and 503 otherwise, probed on a shared background task — and the
-  route answers FastAPI's own 404. The Admin section's document said
-  `HEALTH · 200` and listed a worker the one-process deployment does not have;
-  it now names the route as not served. Until the route exists a drifted schema
-  stops the process at boot, and every other store fault surfaces only on the
-  request that meets it. *Upgrade:* the route and its three probes, the day a
-  proxy or an operator has to ask whether the process can serve.
+- **A case stream polls.** `server/api/stream.py`'s `case_tail` re-reads the
+  case's audit actions, the run's events and the caller's standing every
+  `POLL_INTERVAL` (0.5 s) until `TAIL_DEADLINE` (300 s) or standing is lost,
+  on one store connection held for the stream's life. Every §9 rule holds and
+  events are timely, but an idle watcher costs three queries a poll -- six a
+  second -- while its run is open, and two a poll once the run's terminal is
+  delivered, per open connection, with one more standing check per named
+  frame. *Upgrade:* `LISTEN`/`NOTIFY` on the event and audit appends, making
+  the poll a fallback rather than the mechanism; worth doing when there are
+  enough concurrent watchers to measure it, not before.
+- ~~**The role an actor carries is global, and nothing reads it.**~~ Closed
+  by Phase 4 Task 4.2 (§51.2): every command reads the global role -- create
+  case and every case-scoped write refuse a global READER `NOT_AUTHORISED`
+  whatever its case standing -- and the section reads' availability does the
+  same. Case standing is still the authority checked at commit.
+
+- ~~**`GET /api/health` is specified and not served.**~~ Closed by Phase 4
+  Task 4.5b (§53.8): `server/api/health.py` serves a closed `HealthDocument`
+  from probes of store, bundle and blob root run every 10 s on one lifespan
+  task, 503 unless all three are `OK` and fresh, with no identity, token or
+  I/O on the request. The worker still serves none (Repair Phase 4 above).
 
 **Phase 5.**
 
@@ -1022,7 +1080,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   not exist.
 - **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
   blob store inside the caller's transaction, and the blob store is a filesystem
-  that transaction cannot roll back. The orphans are harmless — content-
+  that transaction cannot roll back. The admission command (§51) extracts
+  before any transaction but still puts each document's bytes inside its
+  governed unit (`admit_prepared`), so a unit that fails after a put -- a
+  store fault on a later insert, the audit link or the commit -- leaves them
+  too.
+  The orphans are harmless — content-
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.

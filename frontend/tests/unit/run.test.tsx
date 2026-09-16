@@ -468,6 +468,205 @@ describe("Run", () => {
     expect(actionOf(actions, "CANCEL_RUN")).toBeUndefined();
   });
 
+  test("test_start_and_retry_are_refused_until_a_fingerprint_is_known", () => {
+    const doc = withActions(running, [
+      { action: "START_RUN", refusal: null },
+      { action: "RETRY_RUN", refusal: null },
+      { action: "CANCEL_RUN", refusal: null },
+    ]);
+    const { container } = mount(doc);
+    const start = container.querySelector('[data-action="START_RUN"]')!;
+    expect(start).toHaveAttribute("aria-disabled", "true");
+    expect(start).toHaveAttribute("data-refusal", "COMMAND_EXPECTATION_STALE");
+    const retry = container.querySelector('[data-action="RETRY_RUN"]')!;
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+    const cancel = container.querySelector('[data-action="CANCEL_RUN"]')!;
+    expect(cancel).not.toHaveAttribute("aria-disabled");
+  });
+
+  test("test_the_preview_text_is_shown_exactly_before_approval", async () => {
+    const run = routeNotPinned.body.run!;
+    const CONTENT = "RESEARCH PLAN PREVIEW\n\n  - line with leading spaces\n  - and a second\n";
+    const receipt = {
+      run_id: run.run_id,
+      gate: "RESEARCH_PLAN",
+      content: CONTENT,
+      preview_sha256: "a".repeat(64),
+      input_fingerprint: "b".repeat(64),
+      observed_at: "2026-09-14T10:00:00Z",
+    };
+    const fetchSpy = vi.fn().mockResolvedValue(jsonResponse(receipt));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const doc = withActions(routeNotPinned, [{ action: "APPROVE_RESEARCH_PLAN", refusal: null }]);
+      const { container } = mount(doc);
+      const previewButton = container.querySelector(
+        '[data-gate-panel="RESEARCH_PLAN"] [data-action="PREVIEW"]',
+      )!;
+      fireEvent.click(previewButton);
+
+      const pre = await waitFor(() => {
+        const found = container.querySelector(
+          '[data-gate-panel="RESEARCH_PLAN"] [data-gate-preview-content]',
+        );
+        if (!found) throw new Error("preview not yet rendered");
+        return found;
+      });
+      // Exact content, not trimmed or reformatted: invariant 5 binds approval
+      // to precisely what was read.
+      expect(pre.textContent).toBe(CONTENT);
+
+      const approve = container.querySelector(
+        '[data-gate-panel="RESEARCH_PLAN"] [data-action="APPROVE_RESEARCH_PLAN"]',
+      )!;
+      await waitFor(() => expect(approve).not.toHaveAttribute("aria-disabled"));
+
+      fireEvent.click(approve);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      const [, init] = fetchSpy.mock.calls[1]!;
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+        preview_sha256: receipt.preview_sha256,
+        input_fingerprint: receipt.input_fingerprint,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_a_stale_preview_is_cleared_when_the_pinned_input_changes", async () => {
+    const run = routeNotPinned.body.run!;
+    const previewReceipt = {
+      run_id: run.run_id,
+      gate: "RESEARCH_PLAN",
+      content: "FIRST PREVIEW\n",
+      preview_sha256: "1".repeat(64),
+      input_fingerprint: "2".repeat(64),
+      observed_at: "2026-09-14T10:00:00Z",
+    };
+    const pinReceipt = {
+      run_id: run.run_id,
+      source_set_version: run.source_set_version,
+      input_fingerprint: "3".repeat(64),
+    };
+    const doc = withActions(routeNotPinned, [
+      { action: "APPROVE_RESEARCH_PLAN", refusal: null },
+      { action: "PIN_RUN_INPUT", refusal: null },
+    ]);
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(previewReceipt))
+      .mockResolvedValueOnce(jsonResponse(pinReceipt))
+      // The refetch after the pin still serves the same actions: only the
+      // fingerprint moved, not what this actor may do.
+      .mockResolvedValueOnce(jsonResponse(doc));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container } = mount(doc);
+      fireEvent.click(
+        container.querySelector('[data-gate-panel="RESEARCH_PLAN"] [data-action="PREVIEW"]')!,
+      );
+      await waitFor(() =>
+        expect(
+          container.querySelector('[data-gate-panel="RESEARCH_PLAN"] [data-gate-preview-content]'),
+        ).not.toBeNull(),
+      );
+      const approveBefore = container.querySelector(
+        '[data-gate-panel="RESEARCH_PLAN"] [data-action="APPROVE_RESEARCH_PLAN"]',
+      )!;
+      expect(approveBefore).not.toHaveAttribute("aria-disabled");
+
+      fireEvent.click(container.querySelector('[data-action="PIN_RUN_INPUT"]')!);
+      await waitFor(() =>
+        expect(
+          container.querySelector('[data-gate-panel="RESEARCH_PLAN"] [data-gate-preview-content]'),
+        ).toBeNull(),
+      );
+      const approveAfter = container.querySelector(
+        '[data-gate-panel="RESEARCH_PLAN"] [data-action="APPROVE_RESEARCH_PLAN"]',
+      )!;
+      expect(approveAfter).toHaveAttribute("aria-disabled", "true");
+      expect(approveAfter).toHaveAttribute("data-refusal", "GATE_PREVIEW_NOT_READ");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_start_retry_and_cancel_post_the_expected_url_body_and_idempotency_key", async () => {
+    const run = running.body.run!;
+    const caseId = running.body.case_id;
+    const fingerprint = "4".repeat(64);
+    const workReceipt = (state: "QUEUED" | "STOPPED") => ({
+      run_id: run.run_id,
+      run_status: "RUNNING",
+      work: { state, stop_code: null, cancel_requested: false },
+    });
+    const doc = withActions(running, [
+      { action: "PIN_RUN_INPUT", refusal: null },
+      { action: "START_RUN", refusal: null },
+      { action: "RETRY_RUN", refusal: null },
+      { action: "CANCEL_RUN", refusal: null },
+    ]);
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          run_id: run.run_id,
+          source_set_version: run.source_set_version,
+          input_fingerprint: fingerprint,
+        }),
+      )
+      // Every refetch still serves the same actions: only the run's own
+      // state moved, not what this actor may do.
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse(workReceipt("QUEUED")))
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse(workReceipt("QUEUED")))
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse(workReceipt("STOPPED")))
+      .mockResolvedValueOnce(jsonResponse(doc));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container } = mount(doc);
+      fireEvent.click(container.querySelector('[data-action="PIN_RUN_INPUT"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+
+      fireEvent.click(container.querySelector('[data-action="START_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(4));
+      fireEvent.click(container.querySelector('[data-action="RETRY_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(6));
+      fireEvent.click(container.querySelector('[data-action="CANCEL_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(8));
+
+      const [startUrl, startInit] = fetchSpy.mock.calls[2]!;
+      expect(startUrl).toBe(`/api/v1/cases/${caseId}/runs/${run.run_id}/start`);
+      expect(JSON.parse((startInit as RequestInit).body as string)).toEqual({
+        input_fingerprint: fingerprint,
+      });
+
+      const [retryUrl, retryInit] = fetchSpy.mock.calls[4]!;
+      expect(retryUrl).toBe(`/api/v1/cases/${caseId}/runs/${run.run_id}/retry`);
+      expect(JSON.parse((retryInit as RequestInit).body as string)).toEqual({
+        input_fingerprint: fingerprint,
+      });
+
+      const [cancelUrl, cancelInit] = fetchSpy.mock.calls[6]!;
+      expect(cancelUrl).toBe(`/api/v1/cases/${caseId}/runs/${run.run_id}/cancel`);
+      expect(JSON.parse((cancelInit as RequestInit).body as string)).toEqual({});
+
+      const keyOf = (init: unknown): string =>
+        ((init as RequestInit).headers as Record<string, string>)["Idempotency-Key"] ?? "";
+      const [startKey, retryKey, cancelKey] = [
+        keyOf(startInit),
+        keyOf(retryInit),
+        keyOf(cancelInit),
+      ];
+      for (const key of [startKey, retryKey, cancelKey]) expect(UUID.test(key)).toBe(true);
+      expect(new Set([startKey, retryKey, cancelKey]).size).toBe(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   test("test_every_enabled_demo_fixture_is_a_valid_v1_document", () => {
     const fixtures = [
       "../../fixtures/run.json",

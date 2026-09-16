@@ -1599,3 +1599,252 @@ every stale write, and no lock is held across transport.
 **Why.** The repair plan requires versioned models, settled identity and refusal
 semantics, whole-document validation and no pretence that `/api/runs` was a
 section document.
+
+## 2026-09-14 §51 — Governed commands: one audited unit and one receipt per intent
+
+**Decision.** Phase 4 Task 4.2 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.2-brief.md`):
+
+1. **Nine endpoints under `/api/v1/cases`.** Create case (`POST`), admit
+   sources (`/{case}/sources`), create run (`/{case}/runs`, the route resolved
+   and pinned in the same unit), pin input (`/runs/{run}/input`, snapshotting
+   the case's live sources in the same unit), a gate preview (`GET
+   /runs/{run}/gates/{gate}/preview`) and approval (`POST …/approval`) for
+   `source-set` and `research-plan`, and start, retry and cancel. Start, retry
+   and cancel are the only writers of `run_work`; none calls a provider, and
+   `test_command_modules_import_no_runtime_provider_or_transport` holds that.
+2. **Authority is derived, in order.** Identity (401), path ids, the
+   `Idempotency-Key` header (400 `IDEMPOTENCY_KEY_REQUIRED`, before a body is
+   read), visibility (no live standing is the private 404), the global role (a
+   write needs ANALYST or ADMIN), the command's case floor (403
+   `NOT_AUTHORISED`), the bounded body, then the governed write, which
+   rechecks standing under the case lock; a `NOT_AUTHORISED` there answers
+   `CASE_NOT_FOUND`. No request carries an actor, case, run or approver. Create
+   case inserts the case, grants its creator ADMIN and writes `CASE_CREATED` in
+   one transaction.
+3. **Idempotency (migration 0014).** `command_requests` holds one immutable
+   receipt per `(actor_id, scope, idempotency_key)`, scope the case or the nil
+   UUID for create case, beside `request_sha256` -- canonical JSON of
+   `{command, case_id, run_id, gate, body}`, an admission's body being
+   `[{filename, sha256}]` in part order. Only committed successes are recorded,
+   as the governed unit's last domain statement, so state, run events, the
+   work row, the audit event and the receipt commit together or not at all. A
+   key already committed replays its status and receipt with
+   `Idempotency-Replayed: true` and writes nothing; under another digest it is
+   409 `IDEMPOTENCY_KEY_REUSED`. A concurrent twin finds the first receipt
+   under the case lock, or waits on the primary key's `ON CONFLICT DO NOTHING`
+   under the nil scope, rolls back its whole unit and replays. A refusal burns
+   no key.
+4. **In-transaction store entry points.** `pin_route_in`, `pin_run_input_in`,
+   `snapshot_in` and `release_gate_in` write in the caller's transaction (the
+   committing wrappers call them); `release_gate_in` takes the run lock and
+   refuses `RUN_NOT_RUNNING`. Lock order stays case, run, `run_work`.
+5. **Conflicts, not faults.** Approval re-derives the preview under the case
+   and run locks (`GATE_APPROVAL_MISMATCH`, `EVIDENCE_NOT_AVAILABLE`,
+   `RUN_NOT_RUNNING`). Start and retry classify inside the unit: no pin
+   `RUN_INPUT_NOT_PINNED`; another build, manifest or adapter
+   `ORCHESTRATION_BUILD_MOVED`; then `execution_input`; a fingerprint other
+   than the body's `COMMAND_EXPECTATION_STALE`; then `RUN_ALREADY_STARTED` or
+   `RUN_NOT_STOPPED`. Cancel of an unqueued run enqueues and requests cancel in
+   one unit. A route pair outside `ADAPTER_ROUTES` is `ROUTE_NOT_ENABLED`
+   before resolution. Each is 409; oversize is 413 `SOURCE_TOO_LARGE`.
+6. **Bodies.** JSON commands need `application/json` of at most 16 KiB; any
+   failure is 400 `REQUEST_INVALID`, never FastAPI's 422 quoting the input.
+   Admission needs `multipart/form-data` with a declared `Content-Length` no
+   larger than `max_pack_bytes` plus 1 MiB and no `Transfer-Encoding`, checked
+   from headers; after the floor the standing read's transaction is closed, the
+   form is parsed (`max_files=50`, `max_fields=0`, the stream held to its
+   declared length), only file parts named `document` are taken, each filename
+   `BoundaryText` of at most 255 characters and not blank. The receipt is
+   looked up before extraction; `prepare_pack` then extracts (the §47 child for
+   a PDF) with no transaction open and no case lock held, and one unit runs
+   `admit_prepared`, `SOURCES_ADMITTED` and the receipt. The pack is admitted
+   whole or not at all.
+7. **Dependency.** `python-multipart==0.0.32`, pinned and hashed in
+   `requirements.txt` and `requirements-dev.txt`, authorized by the user on
+   2026-09-14. Starlette's `Request.form` requires it; nothing else imports it.
+8. **Availability is advisory.** `Chrome.actions` is computed by the pure
+   functions of `server/api/commands/availability.py` from facts each read
+   already holds, in the order the command checks them, so a refused action
+   names the code its command would answer now. It grants nothing; the command
+   rechecks at commit. The Run document adds `RunView.work` and
+   `RunBody.route_choices` (at most 16, from `ADAPTER_ROUTES`).
+9. **The browser.** `frontend/src/app/commands.ts` validates every receipt and
+   preview whole. A control holds one `crypto.randomUUID()` key per intent,
+   reused only when the previous call carried the identical body and never
+   reached the server, and replaced after any answer. Controls render from
+   `chrome.actions`, present and refused rather than hidden (an absent entry is
+   `ACTION_UNPLACED`); a success refetches its section once.
+10. **CSRF, first half.** No CORS middleware, exact content types and a
+    mandatory custom header, so a cross-site simple form POST is refused before
+    any effect. Origin and `Sec-Fetch-Site` are §53's.
+
+**Why.** REPAIR_PLAN Phase 4 work item 3 asks for idempotent, server-authorized
+commands with stale-preview and changed-authority conflicts. The committing
+store pins could not share a transaction with an audit event or a receipt, and
+`admit_pack` extracted before it locked, so neither could be governed as it
+stood. A key per intent is what makes a retried request after a lost
+acknowledgement safe to send, and recording only committed successes means a
+refusal never has to be un-remembered.
+
+## 2026-09-14 §52 — One name-only case stream, and evidence pages from the token index
+
+**Decision.** Phase 4 Task 4.4 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.4-brief.md`):
+
+1. **One stream per case.** `GET /api/v1/cases/{case_id}/events?run=` needs
+   READER standing (else the private 404; a run of another case is
+   `RUN_NOT_FOUND`) and carries the case's audit actions plus the named run's
+   `run_events`. `/api/runs/{run_id}/events` is retired. Directory opens no
+   stream.
+2. **Closed names, no payloads.** `EventName` is `run_progress`,
+   `handoff_accepted`, `run_terminal`, `sources_changed` and `runs_changed`
+   (`server/api/events.py` `STREAM_NAMES`). Admission and withdrawal are
+   `sources_changed`; create run, pin input, both gate releases, start, retry
+   and cancel are `runs_changed`; `CASE_CREATED`, `OPINION_SIGNED`,
+   `DELIVERABLE_FROZEN` and `DELIVERABLE_FILED` are silent. A test fails a
+   `RunEvent` or audit action that is neither named nor declared silent. The
+   browser's `REFETCHES` table says which sections each name refetches;
+   revocation has no name.
+3. **Composite cursor.** Each frame is `id: {audit_seq}.{run_seq}`, `event:
+   {name}`, `data: {}`; the first frame is the cursor alone, at the heads. A
+   `Last-Event-ID` that is missing, not ASCII digits in that shape, longer than
+   sixteen digits a half, or ahead of the heads resumes from the heads, and
+   delivery is strictly after the marker. Silent rows advance the cursor.
+4. **Lifetime.** Standing is rechecked before each named frame and on each
+   poll; losing it closes the stream, and the reconnect's 404 closes the
+   browser's `EventSource`. Once the run's terminal event is delivered, or the
+   marker is past it, `run_events` is not read again (F16). The stream closes
+   at `TAIL_DEADLINE` (300 s) and the browser reconnects with its marker.
+5. **Refetch.** One fetch per section in flight; a name arriving mid-flight
+   causes exactly one more. A case or run change closes the tail, aborts the
+   fetch and discards any late answer. A refetch under the same analytical
+   identity (Run: the shown run; Analysis: the displayed run and its sorted
+   `record_sha256`s) replaces the view; another identity is held as pending
+   until Reload, while withdrawals from the latest document still mark the
+   shown one. The view mounts under `case|displayedRun`, so a refresh keeps
+   selection, and a section that throws renders `RENDER_FAILED`.
+6. **A closed stream refetches.** `EventSource` cannot tell a refusal from a
+   connection that never opened (Firefox closes both), so a closed tail
+   triggers a document read, and that answer decides: 404 is unavailable, no
+   connection is offline. Every reopen refetches the visible documents.
+7. **Evidence pages.**
+   `GET /api/v1/cases/{case}/runs/{run}/sources/{source}/pages/{page}` checks
+   identity, READER standing, then the run's case, and serves a source only
+   while it is live and a member of the run's pinned source-set version with
+   matching document, extractor identity and output digests. Anything else --
+   a page outside 1..500, a malformed source id, a withdrawn or re-extracted
+   source, bytes that no longer hash to the pin, a child that refuses -- is one
+   404 `PAGE_NOT_AVAILABLE` with no text. It is a new code because
+   `EVIDENCE_NOT_AVAILABLE` is a command's 409 (§51.5). Responses are
+   `no-store`.
+8. **A text layer, not a rendering.** The page is its `source_tokens` grouped
+   by `(region_id, line_id)` into joined text and union rectangles in stored
+   coordinates, at most 2,000 lines (else `partial`, `LIST_TRUNCATED`). The
+   frame follows the stored identity: `caos.pdfminer` v2 is the crop with y
+   down, v1 the layout crop with y up (§44.4), `caos.plain-text` its recorded
+   cells; PDF frames come from the §47 child under the admission deadline and
+   decoded-byte budget. The browser places lines and citation rectangles with
+   one `toFraction`, draws no rectangle outside the frame and says how many it
+   did not draw. The drawer is labelled "Text layer from the token index".
+9. **The drawer is bound to the visible snapshot.** It holds a citation's
+   identity `(record_sha256, source_id, page, index)` and the snapshot key it
+   was opened on, and re-resolves both each render: another key or a citation
+   no longer present closes it; a withdrawal shows in it; a pending document
+   the user has not reloaded never reaches it.
+
+**Why.** REPAIR_PLAN Phase 4 work items 1, 5 and 6. Withdrawal is an audit
+action, which a run tail never read, so a stream per case is the one that can
+say it. A payload would be a second copy of state the client is about to fetch
+under its own authority check. A page renderer would put an untrusted-PDF
+parser with its own CVE stream on a request path; the token index is the
+coordinate space citations were anchored in (invariant 11).
+
+## 2026-09-14 §53 — The edge guard, one site application, readiness and the smoke stack
+
+**Decision.** Phase 4 Task 4.5 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.5-brief.md`):
+
+1. **The edge contract** (`server/api/edge.py`'s docstring). The operator's
+   edge authenticates with OIDC and forwards only to a private listener. It
+   strips inbound `x-caos-user`, `x-forwarded-groups`, `x-caos-role`,
+   `x-caos-edge-token`, every header whose name contains `_`, and its own
+   session cookie; it sets exactly one `x-caos-user`, `x-forwarded-groups` and
+   `x-caos-edge-token`; it passes `origin`, `sec-fetch-*`, `idempotency-key`,
+   `last-event-id`, `content-type` and `content-length`. Its cookie is
+   `__Host-`, `Secure; HttpOnly; SameSite=Lax` (Strict breaks the OIDC
+   return); SSE is unbuffered with an idle timeout above 300 s.
+2. **Two modes, from the environment on every use.** *Edge mode*
+   (`CAOS_EDGE_TOKEN` set): the token is at least 32 bytes,
+   `CAOS_PUBLIC_ORIGIN` a bare `scheme://host[:port]`, and
+   `CAOS_TRUST_ROLE_HEADER` absent, or the lifespan fails
+   `EDGE_CONFIG_INVALID`; every request but `GET|HEAD /api/health` carries
+   exactly one token equal under `hmac.compare_digest`, or is 403
+   `EDGE_NOT_TRUSTED` before routing, identity or body. *Dev mode* (no token):
+   both socket ends are loopback and `Host` is `localhost`, `127.0.0.1` or
+   `[::1]`, or 403. A tokenless image on a published port answers health and
+   nothing else. The token header is removed from the scope before anything
+   downstream runs.
+3. **Identity switch rule.** `actor_from_headers` believes `x-caos-role` only
+   when the switch is `1` and no edge token is set; otherwise the role comes
+   from groups.
+4. **Header hygiene, both modes.** A repeated identity header, or a name that
+   differs from one only by case or `_` for `-`, is 401 `NOT_AUTHENTICATED`.
+5. **Origin, the second half of §51.10.** Under `/api`: an `Origin` outside
+   the allowed set (`CAOS_PUBLIC_ORIGIN`, or `http://{localhost,127.0.0.1,[::1]}:{5173,8000}`
+   in dev mode) is refused; a safe method needs `Sec-Fetch-Site` absent,
+   `none` or `same-origin`; an unsafe one `same-origin`, or no
+   `Sec-Fetch-Site` with an allowed `Origin`. Otherwise 403 `ORIGIN_REFUSED`.
+   No CORS middleware.
+6. **Every response** carries the CSP `default-src 'none'; script-src 'self';
+   style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self';
+   base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src
+   'none'; require-trusted-types-for 'script'; trusted-types 'none'`,
+   `nosniff`, `no-referrer`, COOP and CORP `same-origin`, and a cache policy
+   (`/api` `no-store`, `/assets/` immutable for a year, else `no-cache`); any
+   `set-cookie` or `access-control-*` header is dropped. FastAPI's docs,
+   ReDoc and OpenAPI routes are not served. A directive is widened only for a
+   named violation recorded here; none has been.
+7. **One site application.** `server.api.site:application` is `EdgeGuard`
+   over a dispatcher: `/api` and `/api/*` (and the lifespan) go to
+   `server.api.app:app`, so routing's 404 and 405 there stay
+   `ENDPOINT_NOT_FOUND`; everything else is a GET/HEAD read of
+   `CAOS_SITE_ROOT` without symlinks, where `/` and each section path serve
+   `index.html` and any other method is a bodiless 405. With the root unset
+   non-API paths are 404; set without `index.html`, the lifespan fails.
+8. **`GET /api/health`.** A closed `HealthDocument{status, store, bundle,
+   blobs, checked_at}`, 200 only when all three probes are `OK` and the round
+   is under 30 s old (`PROBE_STALE` after, `PROBE_NOT_RUN` before the first).
+   One lifespan task probes every 10 s, each probe in a thread under 2 s
+   (`PROBE_TIMEOUT`), never two rounds at once: store connects with a 2 s
+   timeout and runs a read-only `verify_schema`; bundle compares a fresh
+   manifest with the process's; blobs checks the root is a usable directory,
+   writing nothing. The route needs no token or identity and does no I/O.
+9. **One image, two commands, no proxy inside.** A digest-pinned
+   `node:24-slim` build stage runs `npm ci --ignore-scripts && npm run build`
+   and only `dist` reaches the runtime (`/app/site`, `CAOS_SITE_ROOT`). The
+   API runs `uvicorn server.api.site:application --workers 1
+   --no-proxy-headers --no-server-header --limit-concurrency 32`; the worker
+   is `python -m server.engine.worker`. `make dev-api` serves the same
+   application on 127.0.0.1 with `--no-proxy-headers`.
+10. **Dev identity lives in the Vite proxy.** It removes every client
+    `x-caos-*`, `x-forwarded-*`, `forwarded` and `_` header, then sets
+    `x-caos-user` from `CAOS_DEV_USER` and `x-caos-role` from `CAOS_DEV_ROLE`
+    (default ANALYST); without `CAOS_DEV_USER` it sets nothing and the API
+    answers 401.
+11. **Smoke stack.** `compose.smoke.yaml`, project `caos-workbench-smoke`: a
+    digest-pinned PostgreSQL on tmpfs with no host port, the API on
+    `127.0.0.1:18000` in edge mode with its own blob volume, a credential-less
+    `worker` (profile `smoke`) and the deterministic `journey-worker` (profile
+    `journey`, `./tests` mounted read-only; `tests/` is never in the image).
+    `make smoke-production` builds the image, runs `pytest -m production_image`
+    with `CAOS_REQUIRE_IMAGE=1`, then `tests/journey/run.py`, which starts the
+    stack, the host test edge on 127.0.0.1:18080 and Playwright, and always
+    takes the stack down with its volumes. It is the last step of `make
+    check`; `make test` deselects `production_image`.
+
+**Why.** REPAIR_PLAN Phase 4 work item 7. The image listened on `0.0.0.0` and
+believed any well-formed identity header, and nothing proved a request had
+passed the edge; a shared token is the proof available with the standard
+library alone (JWT verification needs a dependency, mTLS certificates).
+Mounting static files inside FastAPI shadowed API refusals and served a CDN
+script the policy refuses; a dispatcher keeps the two surfaces apart. A
+proxy inside the image would be packages to scan and a supervisor to run for
+what is operator infrastructure anyway.
