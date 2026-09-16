@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess  # nosec B404
 import sys
 
@@ -26,6 +27,26 @@ OPTIONAL_CONFIGURATION = frozenset(
         "CAOS_REQUIRE_PROVIDER",
     }
 )
+DEV_ROLES = frozenset({"READER", "ANALYST", "ADMIN"})
+# The same canonical form the dev proxy in frontend/vite.config.ts accepts.
+DEV_USER = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+
+
+def _dev_actor() -> bool:
+    """Check the dev UI proxy's local actor; never print either value."""
+    user = os.environ.get("CAOS_DEV_USER")
+    role = os.environ.get("CAOS_DEV_ROLE") or "ANALYST"
+    print(f"CAOS_DEV_USER: {'present' if user else 'absent (dev UI answers 401)'}")
+    healthy = True
+    if user and DEV_USER.fullmatch(user) is None:
+        print("CAOS_DEV_USER must be a UUID", file=sys.stderr)
+        healthy = False
+    if role not in DEV_ROLES:
+        print("CAOS_DEV_ROLE must be READER, ANALYST or ADMIN", file=sys.stderr)
+        healthy = False
+    return healthy
 
 
 def _version(command: list[str]) -> str:
@@ -104,6 +125,7 @@ def main() -> int:
         present = bool(os.environ.get(name))
         print(f"{name}: {'present' if present else 'missing'}")
         healthy &= present
+    healthy &= _dev_actor()
     for name in sorted(OPTIONAL_CONFIGURATION):
         state = "present" if os.environ.get(name) else "absent"
         print(f"{name}: {state} (optional live mode)")
