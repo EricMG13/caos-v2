@@ -38,6 +38,8 @@ from server.store.members import Standing, satisfies, standing_of
 # The first entry's predecessor. A fixed, obviously-not-a-hash value, so the
 # start of a chain cannot be confused with a link into one.
 GENESIS = "0" * 64
+# How many actions one `actions_after` read returns.
+ACTIONS_PAGE = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +144,19 @@ def audit_trail(conn: StoreConnection, case_id: UUID) -> list[AuditEntry]:
         )
         for row in rows
     ]
+
+
+def actions_after(
+    conn: StoreConnection, *, case_id: UUID, seq: int
+) -> list[tuple[int, str]]:
+    """The case's `(seq, action)` pairs after `seq`, in order, at most
+    `ACTIONS_PAGE` of them: a caller that polls continues from the last one."""
+    rows = conn.execute(
+        "SELECT seq, action FROM audit_events WHERE case_id = %s AND seq > %s"
+        " ORDER BY seq LIMIT %s",
+        (case_id, seq, ACTIONS_PAGE),
+    ).fetchall()
+    return [(int(row[0]), str(row[1])) for row in rows]
 
 
 def audit_head(conn: StoreConnection, case_id: UUID) -> str:
