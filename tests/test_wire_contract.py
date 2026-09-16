@@ -11,7 +11,8 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
+from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -37,11 +38,15 @@ from server.api.wire import (
     DirectoryBody,
     DirectoryDocument,
     EdgeView,
+    FrameView,
     GateApproved,
     GatePreviewDocument,
     GateView,
     HandoffView,
     NodeView,
+    PageBody,
+    PageDocument,
+    PageLine,
     PendingNode,
     PinRunInput,
     RectView,
@@ -162,6 +167,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "page",
             "matched_text",
             "rects",
+            "source_id",
             "withdrawn_at",
         }
     ),
@@ -196,6 +202,13 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "pending",
         }
     ),
+    # Evidence pages (Task 4.4, decision 7).
+    FrameView: frozenset({"x0", "y0", "x1", "y1", "y_axis"}),
+    PageLine: frozenset({"text", "x0", "y0", "x1", "y1"}),
+    PageBody: frozenset(
+        {"case_id", "run_id", "source_id", "document_sha256", "page", "frame", "lines"}
+    ),
+    PageDocument: frozenset({"body", "observed_at", "status", "notes"}),
     # Commands (Task 4.2, decisions 1 and 11): requests, then receipts.
     CreateCase: frozenset({"title"}),
     CaseCreated: frozenset({"case_id"}),
@@ -244,6 +257,8 @@ DSL_KEYWORDS = frozenset(
         "anyOf",
         "maxLength",
         "maxItems",
+        "minimum",
+        "maximum",
         "pattern",
         "format",
         "$ref",
@@ -380,6 +395,82 @@ def test_the_wire_schema_uses_only_keywords_the_browser_validator_understands() 
             assert len(node["anyOf"]) == 2
             assert {"type": "null"} in node["anyOf"]
     assert {"$ref", "anyOf", "maxLength", "maxItems", "pattern", "format"} <= seen
+
+
+def test_event_names_and_the_page_document_are_in_the_committed_schema() -> None:
+    """Brief 4.4, decisions 2 and 7: the closed event names and the evidence page
+    document are part of the one committed contract both halves read."""
+    defs = json.loads(COMMITTED.read_text(encoding="utf-8"))["$defs"]
+    names = [
+        "run_progress",
+        "handoff_accepted",
+        "run_terminal",
+        "sources_changed",
+        "runs_changed",
+    ]
+    assert defs["EventName"] == {"enum": names, "type": "string"}
+    assert list(get_args(wire.EventName)) == names
+
+    for model in (PageDocument, PageBody, PageLine, FrameView):
+        assert model.__name__ in defs, model.__name__
+    page = defs["PageBody"]["properties"]
+    assert page["lines"]["maxItems"] == wire.PAGE_LINES_MAX == 2000
+    assert (page["page"]["minimum"], page["page"]["maximum"]) == (1, 500)
+    assert page["source_id"]["format"] == "uuid"
+    frame = defs["FrameView"]["properties"]["y_axis"]
+    assert frame == {"enum": ["down", "up"], "title": "Y Axis", "type": "string"}
+    line = defs["PageLine"]["properties"]["text"]
+    assert line["maxLength"] == wire.QUOTE_CHARS
+
+    body: dict[str, Any] = {
+        "case_id": str(uuid4()),
+        "run_id": str(uuid4()),
+        "source_id": str(uuid4()),
+        "document_sha256": "a" * 64,
+        "page": 1,
+        "frame": {"x0": 0, "y0": 0, "x1": 612, "y1": 792, "y_axis": "down"},
+        "lines": [{"text": "net leverage", "x0": 1, "y0": 2, "x1": 3, "y1": 4}],
+    }
+    document = {
+        "body": body,
+        "observed_at": "2026-09-14T10:00:00Z",
+        "status": "complete",
+        "notes": [],
+    }
+    assert PageDocument.model_validate(document).body.page == 1
+    for bad in (
+        {**document, "chrome": None},
+        {**document, "body": {**body, "page": 0}},
+        {**document, "body": {**body, "page": 501}},
+        {**document, "body": {**body, "lines": [body["lines"][0]] * 2001}},
+        {**document, "body": {**body, "frame": {**body["frame"], "y_axis": "left"}}},
+        {**document, "body": {**body, "lines": None}},
+    ):
+        with pytest.raises(ValidationError):
+            PageDocument.model_validate(bad)
+
+
+def test_citation_view_names_its_source_for_the_page_endpoint() -> None:
+    """Decision 7's page endpoint is addressed by source, so a citation carries
+    the pinned source its document resolves to, not only the document digest."""
+    defs = json.loads(COMMITTED.read_text(encoding="utf-8"))["$defs"]
+    field = defs["CitationView"]["properties"]["source_id"]
+    assert field == {"format": "uuid", "title": "Source Id", "type": "string"}
+    assert "source_id" in defs["CitationView"]["required"]
+    citation = {
+        "document_sha256": "a" * 64,
+        "filename": "report.txt",
+        "page": 1,
+        "matched_text": "net leverage",
+        "rects": [],
+        "withdrawn_at": None,
+    }
+    with pytest.raises(ValidationError):
+        CitationView.model_validate(citation)
+    source = uuid4()
+    assert CitationView.model_validate({**citation, "source_id": source}).source_id == (
+        source
+    )
 
 
 def test_every_section_router_declares_its_store_budget() -> None:

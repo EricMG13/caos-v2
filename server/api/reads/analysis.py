@@ -226,8 +226,10 @@ def _handoffs(
 
 def _cited_documents(
     conn: StoreConnection, run_id: UUID, records: list[CanonicalRecord]
-) -> dict[str, tuple[str, object]]:
-    """Filename and live withdrawal for every cited document, in one query.
+) -> dict[str, tuple[UUID, str, object]]:
+    """Source, filename and live withdrawal for every cited document, in one
+    query. The source is the one those facts are read from, so a citation's
+    page is addressed by the same pinned member its label names.
 
     Among the run's pinned members, a live source is preferred, so a document
     withdrawn under one copy and still live under another reads live. A cited
@@ -237,10 +239,10 @@ def _cited_documents(
     if not cited:
         return {}
     found = {
-        str(document): (str(filename), withdrawn_at)
-        for document, filename, withdrawn_at in conn.execute(
-            "SELECT DISTINCT ON (s.document_sha256) s.document_sha256, s.filename,"
-            " s.withdrawn_at FROM run_inputs i JOIN source_set_members m"
+        str(document): (UUID(str(source_id)), str(filename), withdrawn_at)
+        for document, source_id, filename, withdrawn_at in conn.execute(
+            "SELECT DISTINCT ON (s.document_sha256) s.document_sha256, s.source_id,"
+            " s.filename, s.withdrawn_at FROM run_inputs i JOIN source_set_members m"
             " ON (m.case_id, m.version) = (i.case_id, i.source_version)"
             " JOIN sources s ON (s.case_id, s.source_id) = (m.case_id, m.source_id)"
             " WHERE i.run_id = %s AND s.document_sha256 = ANY(%s)"
@@ -259,7 +261,7 @@ def _handoff_view(  # noqa: PLR0913 -- one accepted handoff and its lookups
     record: CanonicalRecord,
     markdown: bytes,
     accepted_at: object,
-    documents: dict[str, tuple[str, object]],
+    documents: dict[str, tuple[UUID, str, object]],
 ) -> HandoffView:
     projections = record.projections
     return HandoffView(
@@ -284,11 +286,12 @@ def _handoff_view(  # noqa: PLR0913 -- one accepted handoff and its lookups
 
 
 def _citation(
-    citation: AnchoredCitation, documents: dict[str, tuple[str, object]]
+    citation: AnchoredCitation, documents: dict[str, tuple[UUID, str, object]]
 ) -> CitationView:
-    filename, withdrawn_at = documents[citation.document_sha256]
+    source_id, filename, withdrawn_at = documents[citation.document_sha256]
     return CitationView(
         document_sha256=citation.document_sha256,
+        source_id=source_id,
         filename=filename,
         page=citation.page,
         matched_text=citation.matched_text,
