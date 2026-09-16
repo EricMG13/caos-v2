@@ -821,6 +821,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/run": read_run_section.__name__,
         "/api/v1/cases/{case_id}/analysis": "read_analysis",
         "/api/runs/{run_id}/events": read_run_events.__name__,
+        "/api/health": "read_health",
     }
 
 
