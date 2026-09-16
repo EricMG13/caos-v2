@@ -1152,8 +1152,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 2.**
 
-- **A quote matches whole tokens exactly.** `matched_text` is split on
-  whitespace and each word must equal a token, punctuation included. A module
+- **A quote matches whole tokens exactly, typography at its edges aside.**
+  `matched_text` is split on whitespace and each word must equal a token,
+  punctuation included -- except that the first and last tokens of the body's
+  window may carry quotation marks (`_QUOTATION`). That exception was paid for:
+  a module writes its Evidence Trace as prose, prose puts quotation marks
+  around a quotation, and the CP-L10 attempt of the second paid Terra run was
+  refused `HANDOFF_MALFORMED` for `“The preliminary` where the quote said
+  `The preliminary`. It is the body check only -- `verify_citations` still
+  anchors against the document's own tokens exactly, so nothing about what may
+  be cited moved. A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
   `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
   costs its claim under the retired claims adapter's per-claim refusal (§26,
