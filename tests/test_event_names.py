@@ -88,6 +88,7 @@ def test_every_run_event_and_audit_action_maps_to_one_stream_name_or_is_declared
     assert STREAM_NAMES["RUN_CANCEL_REQUESTED"] == "runs_changed"
     for silent in (
         "CASE_CREATED",
+        "REVISION_SAVED",
         "OPINION_SIGNED",
         "DELIVERABLE_FROZEN",
         "DELIVERABLE_FILED",

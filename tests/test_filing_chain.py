@@ -1,0 +1,272 @@
+"""Sign, freeze and file the exact saved revision with independent actors."""
+
+import hashlib
+import inspect
+import json
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import pytest
+from test_deliverable_canonical import harness, lite, route
+from test_execution_freshness import _Harness
+from test_revisions import _read, _save
+
+from server.boundary_text import BoundaryText
+from server.deliverable.canonical import payload_bytes
+from server.deliverable.filing import (
+    Receipt,
+    file_deliverable,
+    freeze,
+    receipt_bytes,
+    sign_opinion,
+)
+from server.refusals import Refusal
+from server.store.audit import audit_trail
+from server.store.gates import withdraw_source
+from server.store.members import Standing, grant
+from server.store.runs import create_case
+
+__all__ = ["harness", "lite", "route"]
+
+
+def _actor(lite: _Harness) -> UUID:
+    actor = uuid4()
+    grant(lite.conn, case_id=lite.case_id, user_id=actor, standing=Standing.APPROVER)
+    lite.conn.commit()
+    return actor
+
+
+def _sign(lite: _Harness, revision: UUID, actor: UUID | None = None) -> None:
+    sign_opinion(
+        lite.conn,
+        case_id=lite.case_id,
+        actor_id=actor or lite.approver,
+        revision_id=revision,
+    )
+
+
+def _freeze(lite: _Harness, revision: UUID, actor: UUID | None = None) -> str:
+    return freeze(
+        lite.conn,
+        lite.blobs,
+        lite.bundle,
+        case_id=lite.case_id,
+        actor_id=actor or _actor(lite),
+        revision_id=revision,
+    )
+
+
+def test_signing_binds_the_stored_digest_with_no_caller_digest(lite: _Harness) -> None:
+    assert "payload_sha256" not in inspect.signature(sign_opinion).parameters
+    revision = _save(lite)
+    _sign(lite, revision)
+    row = lite.conn.execute(
+        "SELECT payload_sha256 FROM deliverable_opinions"
+    ).fetchone()
+    lite.conn.rollback()
+    assert row is not None
+    assert row[0] == hashlib.sha256(payload_bytes(_read(lite, revision))).hexdigest()
+
+
+def test_freeze_persists_exactly_the_signed_bytes(lite: _Harness) -> None:
+    from server.deliverable.revisions import prove_revision
+
+    assert "payload" not in inspect.signature(freeze).parameters
+    revision = _save(lite)
+    data = payload_bytes(_read(lite, revision))
+    assert (
+        prove_revision(
+            lite.conn,
+            lite.blobs,
+            lite.bundle,
+            case_id=lite.case_id,
+            revision_id=revision,
+        )
+        == data
+    )
+    lite.conn.rollback()
+    _sign(lite, revision)
+    digest = _freeze(lite, revision)
+    assert lite.blobs.get(digest) == data
+    assert lite.conn.execute(
+        "SELECT payload_sha256 FROM deliverable_publications"
+    ).fetchone() == (digest,)
+
+
+def test_a_revision_of_another_case_cannot_be_signed_frozen_or_filed(
+    lite: _Harness,
+) -> None:
+    revision = _save(lite)
+    other = create_case(lite.conn, BoundaryText.of("Other issuer"))
+    actor = uuid4()
+    grant(lite.conn, case_id=other, user_id=actor, standing=Standing.APPROVER)
+    lite.conn.commit()
+    for function, args in (
+        (sign_opinion, ()),
+        (freeze, (lite.blobs, lite.bundle)),
+        (file_deliverable, ()),
+    ):
+        with pytest.raises(Refusal) as caught:
+            function(
+                lite.conn, *args, case_id=other, actor_id=actor, revision_id=revision
+            )
+        assert caught.value.code.value == "DELIVERABLE_NOT_FOUND"
+
+
+@pytest.mark.parametrize("change", ["source", "authority"])
+def test_freeze_refuses_after_a_source_withdrawal_or_bundle_authority_change(
+    lite: _Harness, change: str
+) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    actor = _actor(lite)
+    if change == "source":
+        withdraw_source(
+            lite.conn,
+            case_id=lite.case_id,
+            actor_id=lite.approver,
+            source_id=lite.source_id,
+        )
+    else:
+        from server.methodology.bundle import MANIFEST_NAME
+
+        path = lite.bundle.root / MANIFEST_NAME
+        path.write_bytes(path.read_bytes() + b"\nchanged\n")
+    with pytest.raises(Refusal):
+        _freeze(lite, revision, actor)
+    assert lite.conn.execute(
+        "SELECT count(*) FROM deliverable_publications"
+    ).fetchone() == (0,)
+
+
+def test_filing_refuses_the_signer_and_the_freezer(lite: _Harness) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    freezer = _actor(lite)
+    _freeze(lite, revision, freezer)
+    for actor in (lite.approver, freezer):
+        with pytest.raises(Refusal) as caught:
+            file_deliverable(
+                lite.conn, case_id=lite.case_id, actor_id=actor, revision_id=revision
+            )
+        assert caught.value.code.value == "APPROVER_NOT_INDEPENDENT"
+
+
+def test_the_receipt_names_its_case_run_and_filing_event(
+    lite: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    freezer, filer = _actor(lite), _actor(lite)
+    _freeze(lite, revision, freezer)
+    receipt = file_deliverable(
+        lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
+    )
+    assert receipt.case_id == lite.case_id and receipt.run_id == lite.run_id
+    assert isinstance(receipt, Receipt)
+    assert receipt.revision_id == revision
+    event = next(
+        e
+        for e in audit_trail(lite.conn, lite.case_id)
+        if e.action == "DELIVERABLE_FILED"
+    )
+    assert receipt.filed_event_sha256 == event.entry_sha256
+    assert "audit_head" not in json.loads(receipt_bytes(receipt))
+    path = Path(__file__).parents[1] / "server/deliverable/render.py"
+    assert receipt.renderer_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_sign_freeze_file_refusals_preserve_one_chain(lite: _Harness) -> None:
+    revision = _save(lite)
+    with pytest.raises(Refusal, match="DELIVERABLE_NOT_SIGNED"):
+        _freeze(lite, revision)
+    with pytest.raises(Refusal, match="DELIVERABLE_NOT_FROZEN"):
+        file_deliverable(
+            lite.conn,
+            case_id=lite.case_id,
+            actor_id=lite.approver,
+            revision_id=revision,
+        )
+    _sign(lite, revision)
+    cosigner = _actor(lite)
+    _sign(lite, revision, cosigner)
+    for signer in (lite.approver, cosigner):
+        with pytest.raises(Refusal, match="APPROVER_NOT_INDEPENDENT"):
+            _freeze(lite, revision, signer)
+    freezer, filer = _actor(lite), _actor(lite)
+    _freeze(lite, revision, freezer)
+    with pytest.raises(Refusal, match="DELIVERABLE_ALREADY_FROZEN"):
+        _sign(lite, revision, filer)
+    with pytest.raises(Refusal, match="DELIVERABLE_ALREADY_FROZEN"):
+        _freeze(lite, revision, freezer)
+    for signer in (lite.approver, cosigner):
+        with pytest.raises(Refusal, match="APPROVER_NOT_INDEPENDENT"):
+            file_deliverable(
+                lite.conn, case_id=lite.case_id, actor_id=signer, revision_id=revision
+            )
+    receipt = file_deliverable(
+        lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
+    )
+    assert receipt.signed_by == cosigner
+    with pytest.raises(Refusal, match="DELIVERABLE_ALREADY_FILED"):
+        file_deliverable(
+            lite.conn, case_id=lite.case_id, actor_id=filer, revision_id=revision
+        )
+    actions = [e.action for e in audit_trail(lite.conn, lite.case_id)]
+    assert (
+        actions.count("DELIVERABLE_FROZEN") == actions.count("DELIVERABLE_FILED") == 1
+    )
+
+
+def test_filing_refuses_the_opinion_signer(lite: _Harness) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    with pytest.raises(Refusal, match="APPROVER_NOT_INDEPENDENT"):
+        file_deliverable(
+            lite.conn,
+            case_id=lite.case_id,
+            actor_id=lite.approver,
+            revision_id=revision,
+        )
+    assert not any(
+        e.action == "DELIVERABLE_FILED" for e in audit_trail(lite.conn, lite.case_id)
+    )
+
+
+def test_audit_package_verifies_with_stdlib_alone(
+    lite: _Harness, tmp_path: Path
+) -> None:
+    import subprocess
+    import sys
+    import zipfile
+    from io import BytesIO
+
+    from server.deliverable.package import build_package
+    from server.deliverable.render import render
+
+    revision = _save(lite)
+    payload = _read(lite, revision)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    receipt = file_deliverable(
+        lite.conn, case_id=lite.case_id, actor_id=_actor(lite), revision_id=revision
+    )
+    archive = build_package(
+        payload_bytes(payload), receipt_bytes(receipt), render(payload)
+    )
+    lite.conn.close()
+    package = tmp_path / "filed.zip"
+    package.write_bytes(archive)
+    verifier = tmp_path / "verify_package.py"
+    with zipfile.ZipFile(BytesIO(archive)) as opened:
+        verifier.write_bytes(opened.read("verify_package.py"))
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", str(verifier), str(package)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    assert json.loads(result.stdout) == {"verified": True, "reason": None}
