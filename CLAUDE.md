@@ -905,6 +905,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
+- **CP-5 cannot say a claim is unverifiable in a column its contract calls
+  critical.** `cp-5-evidence-trace-validator/SKILL.md` lists `insufficient
+  information`, `not calculable from provided materials`, `not assessable` and
+  `unavailable` among `critical_cell_values_casefold`, and T5B.5's Claim Status
+  column exempts none of them. Run `36d87283…` refused CP-5 three times,
+  `$0.856` of billed attempts, each for writing one of those phrases about a
+  claim two earnings releases genuinely do not support — which is the answer
+  CP-5's own runbook asks it for. A module that traces claims to sources can
+  then pass only by overstating what the evidence carries. Run `42e17048…`'s
+  CP-5 was accepted over the same corpus because it phrased the same restraint
+  differently, so what the rule selects for is wording. The projection keys
+  cannot see it either: a refused CP-5 leaves no artifact, so its conclusion is
+  unreadable and the row reads as a run that stopped. *Upgrade:* the mechanism
+  exists — `disqualifier_exempt_columns`, which T5B.6 already uses for
+  `Evidence Status` — so the question is which of CP-5's status columns should
+  carry it. A bundle change, needing its own authorisation, and it belongs with
+  the `completeness_check.load_contract` half §61 left open.
+
 - ~~**`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**~~
   Closed by `docs/DECISIONS.md` §61, the owner's authorised override of
   invariant 4: the verdict now names a source the effective-source set does not

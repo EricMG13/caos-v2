@@ -633,3 +633,59 @@ citation-only instrument is what hid them: every one of them presented as a
 model failing to find evidence.
 
 Spend on this set to date: `$3.73` across six Terra runs and one DeepSeek run.
+
+## Re-run against build `cdea0c9f` — 2026-09-16
+
+Run `36d87283-ef92-49a2-a2b1-ef5928aaa5d2`, the first against the bundle build
+produced by `docs/DECISIONS.md` §61. `$1.37845425`, the most any single run of
+this set has cost, because `--attempts 3` bought CP-5 two more tries.
+
+CP-0 accepted (`$0.24881325`), CP-L10 accepted (`$0.27359275`). **CP-5 refused
+three times** — `$0.288437`, `$0.29529725`, `$0.272314` — and the run is
+`RUNNING`, stopped `HANDOFF_INCOMPLETE`. `complete` is false.
+
+### Not the bundle edit
+
+`validate_handoff.validate_text` returns no errors on any of the three CP-5
+bodies, so the severity rule added in §61 is not what refused them. The refusal
+is `completeness_check`, which §61 deliberately did not touch. CP-0 and CP-L10
+both passed the new rule, and CP-0 did not gate anything.
+
+### What refused them
+
+CP-5's own completeness contract (`cp-5-evidence-trace-validator/SKILL.md:101`)
+lists `critical_cell_values_casefold` — cell values that disqualify a full run.
+Among them: `insufficient information`, `not calculable from provided
+materials`, `not assessable`, `unavailable`. T5B.5's Claim Status column is
+critical and exempts none of them.
+
+All three attempts wrote exactly those words:
+
+    T5B.5 row 3: critical column 'Claim Status' holds a disqualifying
+    placeholder 'Insufficient Information'
+    T5B.5 row 2: critical column 'Status' holds a disqualifying placeholder
+    'Not Calculable from Provided Materials'
+
+CP-5 traces claims to sources. Handed two earnings releases, it reported that
+some claims could not be calculated from what it was given — which is true, and
+is the answer its own runbook asks for — and the completeness rule refused the
+handoff for saying so. Three times, each one billed.
+
+This is the same shape as everything else found today: the apparatus punishing
+honest restraint. A validator that cannot say "this cannot be verified from the
+provided materials" in a status column can only pass by overstating what the
+evidence supports.
+
+It is also not new. Run `42e17048…`'s CP-5 was accepted because it happened not
+to use those words; the difference between that run and this one is phrasing,
+not rigour. The set's `expects_projection` keys cannot see it either: a refused
+CP-5 produces no artifact, so its conclusion is unreadable and the row reads as
+a run that stopped.
+
+*Upgrade:* `disqualifier_exempt_columns` already exists — T5B.6 exempts
+`Evidence Status` — so the mechanism is there and the question is which of
+CP-5's status columns should carry it. That is a bundle change and needs its own
+authorisation, and it belongs with the `completeness_check.load_contract` half
+that §61 left open.
+
+Spend on this set to date: `$5.11`.
