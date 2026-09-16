@@ -283,3 +283,56 @@ signable as QUALIFIED. Nothing here may be represented as a qualified build.
 
 An upgrade attempt must be a new, separately authorized run; the corpus and key
 are unchanged, so it would not be a new qualification identity.
+
+## OpenAI Terra v3 second run — 2026-09-16
+
+Run `33ca320e-ef8e-4ca8-bdba-1e4d31355d1d`, same profile, corpus, key and
+price, driven by `scripts/qualify.py` (the driver now lives in the tree). It
+went **worse**, and what it failed on was the host's, not the model's.
+
+- CP-0 accepted on its first attempt, `$0.23739675`, two citations — and again
+  not the answer key's borrowing-capacity sentence. It cited the consolidated
+  third-party debt nominal amounts and the preliminary results heading.
+- CP-L10 answered in full, `$0.27101725`: 33 KB of Markdown, every required
+  section, five citations whose quotes were all present in its own body. The
+  host refused `HANDOFF_MALFORMED` and the run stopped `RUNNING` with no
+  matrix. Total `$0.50841400`.
+
+### What the refusal actually was
+
+CP-L10 wrote its Evidence Trace the way prose writes a quotation:
+
+    - **E-01 — Q4/FY2025 issuer release, p.6:** “The preliminary unaudited
+      selected financial results are set forth below:”
+
+`_quoted` compares whole whitespace tokens, so it read `“The` against `The`
+and `below:”` against `below:` and concluded the module had not quoted what it
+cited. Every one of the five citations failed the same way.
+
+This is almost certainly what the three DeepSeek attempts were too — all three
+were recorded as "returned N citations, quoted none of them in the body" —
+which means the corpus has been blamed on three model attempts for a defect in
+the host's reader. Fixed at `7a12c6d`: the two outer tokens of the window may
+carry quotation marks, the quote's own words and internal punctuation still
+must match exactly, and `verify_citations` is untouched, so nothing about what
+may be *cited* moved. Verified against this stored answer, which now parses
+with its five citations.
+
+### What two runs say about the CP-0 key
+
+Both runs completed CP-0 on the first attempt and neither cited the key's
+sentence, though it was offered: it is rank 2 by length on its page and one of
+the 93 blocks flagged `citation_candidate: true`. CP-0 cited scope and
+boundary blocks both times — what the release covers, the entity perimeter, the
+preliminary results, the debt nominal amounts.
+
+That is what a module called `SourceReadiness` should cite. The key asks CP-0
+for a current borrowing-capacity statement, which is a credit fact belonging to
+CP-5's or CP-L10's reading. On this evidence the expectation is miscast rather
+than unmet, and re-running the same key against the same module is not likely
+to change it. Moving it is a change to a frozen answer key and therefore to the
+set digest, so it is not made here.
+
+Retained: database `caos_qualify_73f0718037d34d95a19417be505b77d2`, blob root
+`/var/folders/81/bwblpst93lb6wb3lwrk8k6800000gn/T/caos-qualify-guifvx4y`,
+capture beside this file.
