@@ -905,6 +905,50 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
+- **The borrowing-capacity key names a subordinate clause, not the fact.** One
+  block per line (§5's group is unbuilt), so the sentence on Q4 page 4 is three
+  blocks, and the key is the first: "When compliance reporting requirements
+  have been completed and assuming no change from 31". The credit content is
+  the *next* line. Seven v3 handoffs have cited 13 distinct lines between them
+  and none has cited this one, while Terra's CP-L10 twice paraphrased the whole
+  sentence correctly in prose. The key is satisfiable -- all three lines are
+  candidates -- but it asks a module to quote the clause that carries no fact.
+  Moving it from CP-0 to CP-5 earlier today moved the wrong thing. *Upgrade:*
+  name the fact-carrying line, or the sentence as a block range once §5's
+  bounded line group exists, and note that the AFCF key's text appears in both
+  releases, so a module citing the Q3 copy misses a key aimed at Q4.
+- **A citation key measures neither the conclusion nor its soundness.** Terra
+  stated the borrowing condition correctly and scored a miss; DeepSeek's CP-0
+  claimed `Committee Ready` at 93 over a self-declared MATERIAL source gap and
+  was accepted. The Phase 10 entry conceded the first half of this; the second
+  is worse, because the apparatus is silent where the answer is wrong rather
+  than merely differently evidenced. The host already projects the fields that
+  would say so -- `qa_status`, `committee_status`, `confidence_score`,
+  `limitation_flags`, CP-0's T8 readiness rows -- and the bundle ships a
+  register parser. *Upgrade:* keys of the form
+  `(module, register_id, row, column, expected)` over those projections, the
+  pattern `ExpectedForecast` already uses.
+- **The host accepts a handoff the vendor's own rule contradicts.**
+  `validate_text` checks `Restricted -> <=59` and `Blocked -> <=39` and nothing
+  the other way, and `completeness_check.load_contract` reads only cell
+  disqualifiers, never the `frontmatter_*` ones. So a module may declare a
+  MATERIAL source gap and still call itself `Passed` / `Committee Ready` at 93,
+  which DeepSeek's accepted CP-0 did minutes before the same model's CP-L10 was
+  refused for breaking the same rule in the direction the validator does check.
+  Invariant 4 says the bundle is the authority and the host adds nothing, so
+  this is the bundle's gap to close -- but a reviewer reading an accepted
+  artifact should know the host asserted nothing about it. *Upgrade:* none the
+  host may take alone; record it against the bundle.
+- **`expected_refusal` cannot be met by any run this system can produce.**
+  `complete` requires every run `COMPLETE`, and a validated Blocked gate ends a
+  run BLOCKED, so a case declaring the refusal it expects -- the "deliberately
+  restricted case" `docs/REPAIR_PLAN.md` Phase 6 names -- is unsignable however
+  it turns out. `test_a_case_that_met_the_refusal_it_declared_is_complete`
+  passes on a hand-built state, which is exactly the vacuous kind of pass the
+  gate scripts exist to catch. *Upgrade:* decide whether `expected_refusal_met`
+  is fed from `Performed.stopped` and the run's own status rather than from the
+  proof, and give it a test built from a run rather than from a dataclass.
+
 - **The VMO2 set measures two of its three modules by key.** CP-0's expectation
   asked `SourceReadiness` for the issuer's current borrowing-capacity
   statement, which is a credit fact and belongs to CP-5's reading; it was moved

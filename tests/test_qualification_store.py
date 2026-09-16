@@ -241,8 +241,49 @@ def test_a_completed_run_that_missed_a_key_cannot_receive_a_verdict(
     assert missed.complete is False
 
 
+def test_a_case_whose_forecast_was_not_met_cannot_receive_a_verdict() -> None:
+    """A forecast is a key too, and nothing was reading it.
+
+    `assert_measurable` admits a case keyed only by a forecast, and such a case
+    has no expected citations to miss — so with `complete` consulting only
+    `proven`, `missed` and `expected_refusal_met`, its row was signable with
+    the forecast unmet. `forecast_met` is `None` when none was declared, so the
+    test is `is not False` rather than truthiness.
+    """
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    unmet = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, forecast_met=False),)),
+        ),
+    )
+
+    assert unmet.complete is False
+    met = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, forecast_met=True),)),
+        ),
+    )
+    assert met.complete is True
+
+
 def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
-    """A set may declare a refusal as its answer; meeting it is a result."""
+    """A set may declare a refusal as its answer; meeting it is a result.
+
+    Built from a dataclass, and no run this system produces reaches this state:
+    `complete` also requires every run `COMPLETE`, while the validated Blocked
+    gate that would meet an expected refusal ends its run BLOCKED. So this
+    asserts the rule and not the path, which is the vacuous shape the gate
+    scripts exist to catch. Ledgered in `CLAUDE.md`; the fix is to decide where
+    `expected_refusal_met` is fed from, and this test is then rebuilt from a
+    run.
+    """
     original = _performed()
     matrix = original.performed.matrix
     assert matrix is not None
