@@ -18,17 +18,31 @@ import hashlib
 import subprocess
 from collections.abc import AsyncIterator
 from pathlib import Path
+from threading import Event
 from uuid import UUID
 
 import httpx
 import pytest
+from conftest import approve_run
 from journey import edge, pack, run, worker
 from lite_route_fixtures import RealisticLiteCompletions
 from starlette.types import ASGIApp, Message
+from test_runtime import blobs, bundle, route
 
+from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute
+from server.engine.worker import WorkerConfig, work_once
 from server.evidence.extract import dispatch_by_content
+from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import Bundle
 from server.pricing import worst_case
 from server.refusals import Refusal, RefusalCode
+from server.store import RunStatus, StoreConnection
+from server.store.runs import run_status, start_run
+from server.store.work import enqueue_run
+
+__all__ = ["blobs", "bundle", "route"]
 
 TOKEN = "t" * 40
 UPSTREAM = "http://upstream.invalid"
@@ -250,6 +264,93 @@ def test_the_journey_worker_uses_only_the_deterministic_provider(
         quote = worker.QUOTE.split()
         spans = [i for i in range(len(words)) if words[i : i + len(quote)] == quote]
         assert len(spans) == 1, f"{name} must carry the cited quote exactly once"
+
+
+def test_the_journey_worker_blocks_on_the_insufficient_pack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deliberately insufficient-evidence case (`docs/REPAIR_PLAN.md` Phase 6
+    exit): a pack that is one earnings note and no covenant certificate is
+    answered with CP-5 `Blocked`, keyed on the evidence the run pinned rather
+    than on a switch. The Passed answer and the refusal are unchanged, and
+    the note anchors the cited quote exactly once, so CP-0 and CP-L10 still
+    locate what they cite before CP-5 blocks."""
+    monkeypatch.setattr(
+        "server.provider.OpenRouter.from_environment",
+        lambda *a, **k: pytest.fail("the journey worker asked for a live provider"),
+    )
+    [(name, note)] = pack.insufficient_pack()
+    assert name == pack.INSUFFICIENT_NAME
+    assert note != dict(pack.journey_pack())[pack.TEXT_NAME]
+    thin, other = UUID(int=3), UUID(int=4)
+
+    completions = worker.completions_for({hashlib.sha256(note).hexdigest(): thin})
+
+    assert isinstance(completions, RealisticLiteCompletions)
+    assert (completions.source_id, completions.qa_by_module) == (
+        thin,
+        {"CP-5": "Blocked"},
+    )
+    assert completions.model == worker.JOURNEY_PRICE.model
+    # The certificate wins when both are pinned: the full pack is never blocked.
+    pdf = dict(pack.journey_pack())[pack.PDF_NAME]
+    both = worker.completions_for(
+        {hashlib.sha256(note).hexdigest(): thin, hashlib.sha256(pdf).hexdigest(): other}
+    )
+    assert (both.source_id, both.qa_by_module) == (other, {})
+    words = [token.text for token in dispatch_by_content(note).extract(note)]
+    quote = worker.QUOTE.split()
+    spans = [i for i in range(len(words)) if words[i : i + len(quote)] == quote]
+    assert len(spans) == 1, "the note must carry the cited quote exactly once"
+
+
+def test_the_insufficient_pack_ends_a_journey_run_blocked(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+) -> None:
+    """The worker's own execution path, not just its provider selection: the
+    thin pack admitted, the LITE route approved and enqueued, one `work_once`
+    through `journey_execution` -- and the run ends BLOCKED on CP-5's
+    validated verdict with CP-0 and CP-L10 accepted and no CP-5 artifact.
+    This is the run the journey then shows through the built UI."""
+    conn, case_id = case
+    admit_pack(
+        conn,
+        blobs,
+        case_id=case_id,
+        documents=[
+            Document(filename=BoundaryText.of(name), data=data)
+            for name, data in pack.insufficient_pack()
+        ],
+    )
+    run_id = start_run(conn, case_id)
+    conn.commit()
+    approve_run(conn, case_id=case_id, run_id=run_id, route=route, bundle=bundle)
+    enqueue_run(conn, run_id)
+    conn.commit()
+
+    claimed = work_once(
+        conn,
+        blobs,
+        execution_for=worker.journey_execution(bundle, blobs, exit_marker=None),
+        config=WorkerConfig(BoundaryText.of("journey-test"), poll_seconds=0.5),
+        stopping=Event(),
+    )
+
+    assert claimed == run_id
+    assert run_status(conn, run_id) is RunStatus.BLOCKED
+    produced = [
+        str(node)
+        for (node,) in conn.execute(
+            "SELECT route_node_id FROM artifacts WHERE run_id = %s ORDER BY 1",
+            (run_id,),
+        ).fetchall()
+    ]
+    conn.rollback()
+    assert [n.rsplit("-", 1)[-1] for n in produced] == ["0", "L10"]
+    assert not [n for n in produced if n.endswith("CP-5")]
 
 
 def test_the_orchestrator_refuses_without_its_stack_files(

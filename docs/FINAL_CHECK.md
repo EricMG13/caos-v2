@@ -50,35 +50,59 @@ The current snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`:
 Re-derived from the store against the set on disk, not read back from the run's
 own capture.
 
-## What is not true, and is accepted
+## What was owed when this was first written, and what became of it
 
-1. **No verdict exists — but one can now be made.** Closed after this document
-   was first written: `POST /api/v1/qualification/{evidence_sha256}/verdict`
-   (§65) takes the reviewer's six-binding document and records it with
-   `reviewer_id` derived from the authenticated actor, from OIDC groups in
-   production. `ADMIN` signs; below that, and for evidence the store does not
-   hold, the answer is one private 404. `qualification_verdicts` is still empty
-   in every database, including the retained evidence behind this check —
-   because signing it is the reviewer's act, and no one has signed.
-2. **One pathway of eighteen has been qualified.** `LITE_CREDIT_22 /
-   LITE_EARNINGS_UPDATE`. The plan wants every route intended to be advertised.
-3. **The model surfaces the material figure inconsistently.** It took three runs
-   on this build for CP-L10 to quote the £1,021.7m Q4 goodwill impairment. The
-   key was not lowered to meet it; the finding stands in the record.
-4. **The restricted case is not demonstrated through the built UI.** It is
-   expressible and proven in the harness, but no journey test drives a blocked
-   or declared-refusal run through the production stack.
-5. **Every run before this build refuses `ORCHESTRATION_BUILD_MOVED`.** Two
-   authorised bundle edits moved the build twice. Earlier runs' artifacts,
-   charges and citations stand as recorded; their proofs no longer re-derive.
-6. **`completeness_check.load_contract` reads only the cell disqualifiers**, not
-   the frontmatter ones every SKILL.md declares. A separate authorisation.
-7. **Two register columns may need the same exemption CP-5's got** — T5B.3
-   `Traceability Status` and T5B.7 `Assessment`. Neither has been observed
-   failing; left until one does.
+Seven items were listed. Four are closed, two were miscategorised, one is open.
 
-`CLAUDE.md`'s known-gap ledger carries these and the smaller ones, each with
-its reason and its upgrade path.
+**Closed.**
+
+1. **A reviewer can now sign.** `POST /api/v1/qualification/{evidence_sha256}/verdict`
+   (§65) records the reviewer's document with `reviewer_id` derived from the
+   authenticated actor — OIDC groups in production — and from nowhere else.
+   `ADMIN` signs; below that, and for evidence the store does not hold, one
+   private 404. `qualification_verdicts` is still empty everywhere **because
+   nobody has signed**, which is now a fact about people rather than about the
+   software.
+2. **The insufficient-evidence case is demonstrated through the built UI** (§67).
+   A journey test admits a thin pack, runs it, and asserts the run page reads
+   BLOCKED and not COMPLETE while the modules that did answer read COMPLETE —
+   on the production image, through the real edge, on all three engines.
+3. **The frontmatter disqualifiers are deliberately not enforced** (§66). The
+   change was written, measured and rejected: it refuses seven of the 25
+   retained real handoffs, two of them the accepted artifacts of the only
+   complete snapshot, each for declaring `SOURCE_LIMITED_NOT_COMMITTEE_READY` —
+   which is true of this corpus. The bundle's list conflates a fixture marker
+   with a thin-evidence one; the flag is already projected and already keyable.
+   The split is owed upstream, and the ledger says so.
+4. **The two further CP-5 columns do not need an exemption.** Every CP-5 body
+   this repository retains — nine, across every run — was parsed: no cell in
+   `T5B.3 Traceability Status` or `T5B.7 Assessment` holds any disqualifying
+   phrase. Measured, not assumed.
+
+**Miscategorised — real, but not work anyone can close.**
+
+5. **The model surfaces the material figure about one run in three.** It took
+   three runs on this build for CP-L10 to quote the £1,021.7m impairment. That
+   is the qualification *result* — a measured finding about `openai/gpt-5.6-terra`
+   on this corpus — not a defect in the system. The bar was not moved to meet it.
+6. **Runs pinned to earlier builds no longer re-prove.** Three authorised bundle
+   edits moved the build. Their artifacts, charges and citations stand as
+   recorded; their proofs refuse `ORCHESTRATION_BUILD_MOVED`. That is invariant 4
+   working, the fail-closed direction, and nothing to repair.
+
+**Open, and quantified.**
+
+7. **One pathway of eighteen is qualified.** The catalog carries ten FULL and
+   eight LITE pathways, 101 module calls in total; at the observed per-call cost
+   that is upwards of $26 of provider spend. Cost is not the obstacle. Each
+   pathway needs its own answer key authored from its documents *before* its
+   run, and several need evidence this corpus does not contain — `CP-4` wants
+   executed debt documents, `CP-2D` a cash-flow pack. Two earnings releases
+   cannot qualify `LITE_COVENANT_REFINANCING` or `DISTRESSED_RESTRUCTURING` at
+   any price. This is a corpus-and-answer-key programme, not a run.
+
+`CLAUDE.md`'s known-gap ledger carries item 7, the two miscategorised ones and
+the smaller gaps besides, each with its reason and its upgrade path.
 
 ## What the day changed
 

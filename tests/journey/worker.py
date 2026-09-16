@@ -5,7 +5,10 @@ read-only, in the Compose `journey` profile only; `server/` has no provider
 selector, so this module is the only way a fake provider reaches a worker. No
 network, no credentials: each claimed run is answered by
 `RealisticLiteCompletions`, citing the pack's PDF among the run's pinned live
-sources, at a fixed dated price.
+sources, at a fixed dated price. A run pinned to the insufficient pack instead
+(`journey.pack.insufficient_pack`, the Phase 6 restricted case) is answered
+with a validated CP-5 `Blocked`, so the route's own rule ends it BLOCKED: the
+verdict is keyed on the evidence the run pinned, never on a switch.
 
 `JOURNEY_EXIT_AFTER_FIRST_ACCEPT=1` (decision 12) makes the process
 `os._exit(137)` once, after its first acceptance: at the next node's context
@@ -30,7 +33,7 @@ import psycopg
 from canonical_fixtures import QUOTE
 from lite_route_fixtures import RealisticLiteCompletions
 
-from journey.pack import PDF_NAME, journey_pack
+from journey.pack import INSUFFICIENT_NAME, PDF_NAME, insufficient_pack, journey_pack
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.runtime import Execution, Provider, ProviderResult
@@ -69,13 +72,19 @@ __all__ = ["JOURNEY_PRICE", "QUOTE", "completions_for", "journey_execution"]
 
 
 def completions_for(sources: dict[str, UUID]) -> RealisticLiteCompletions:
-    """The deterministic provider citing the pack's PDF among `sources`
-    (document digest to source id), or `ORCHESTRATION_SOURCE_NOT_PINNED`."""
+    """The deterministic provider for the evidence in `sources` (document
+    digest to source id): citing the pack's PDF with every module `Passed`
+    when the certificate is pinned, citing the insufficient note with CP-5
+    `Blocked` when only that is, or `ORCHESTRATION_SOURCE_NOT_PINNED`."""
     pdf = dict(journey_pack())[PDF_NAME]
     source_id = sources.get(hashlib.sha256(pdf).hexdigest())
+    if source_id is not None:
+        return RealisticLiteCompletions(source_id)
+    note = dict(insufficient_pack())[INSUFFICIENT_NAME]
+    source_id = sources.get(hashlib.sha256(note).hexdigest())
     if source_id is None:
         raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
-    return RealisticLiteCompletions(source_id)
+    return RealisticLiteCompletions(source_id, qa_by_module={"CP-5": "Blocked"})
 
 
 @dataclass(slots=True)

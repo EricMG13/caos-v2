@@ -865,6 +865,26 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   by, and an authorized evidence page. Withdraw, sign, freeze, file and
   membership grants still have no route, and Book, Model, Report, Committee
   and Admin stay unavailable.
+- **A BLOCKED run draws the node that blocked it as running.** `node_states`
+  is recomputed from accepted artifacts alone (invariant 10), and a validated
+  CP-5 `Blocked` accepts nothing: on a run `_end_blocked` has ended, CP-5 has
+  every input met, no artifact and one unaccepted attempt, so the run document
+  carries `state: RUNNABLE` with `gate_verdict: READY`, and the workspace's
+  `runningOf` draws it pulsing "in the frontier" with a tally of `1 RUNNABLE ·
+  0 BLOCKED` beside a `Status` of BLOCKED. The analysis document carries no run
+  status at all, so that page shows `2 ACCEPTED` and CP-5 pending — the same
+  page a run still in flight would show — and nothing on either page names the
+  verdict. The status cell, the case register's tag and the handoff count are
+  honest, and those are what `journey: an insufficient-evidence run ends
+  BLOCKED and is shown as such, not as success` asserts through the production
+  stack; the graph's state for CP-5 and the pending list are left unasserted
+  rather than asserted as expected. Found by driving the case, not by reading.
+  *Upgrade:* a terminal run's unrun node needs a state the bundle's four do not
+  express. The read model already holds the run status and `blocked_verdict`
+  can name the node, so the run document carries which node blocked it, the
+  analysis document carries the run status, and `reasonOf` stops saying "in
+  the frontier" on a run that has ended — a wire change on both documents, so
+  a model change and an updated pinned key set each.
 
 **Phase 8.**
 
@@ -904,6 +924,36 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   cash and liquidity runway require a later declared contract (§54).
 
 **Phase 6.**
+
+- **The bundle's disqualifier list conflates a fixture with thin evidence.**
+  `full_run_disqualifiers` puts `SOURCE_LIMITED_NOT_COMMITTEE_READY` beside
+  `INTEGRATION_FIXTURE_ONLY` and `SYNTHETIC_FORWARD_ASSUMPTIONS`. The first says
+  the evidence is thin, which is true of every honest handoff over this corpus;
+  the others say the document is not real work. `completeness_check` reads
+  neither list, and §66 records why enforcing them as written was implemented,
+  measured and rejected: it refuses seven of the 25 retained real bodies, two of
+  them the accepted artifacts of the only complete snapshot, each for declaring
+  the thin-evidence flag truthfully. Honouring the list whole refuses honest
+  work; honouring part of it would be the host choosing which of the bundle's
+  rules count, which invariant 4 forbids. Meanwhile `limitation_flags` is
+  already projected and already one of `matrix.PROJECTION_FIELDS`, so a
+  qualification key asserts on it today. *Upgrade:* the bundle's, not this
+  host's — split the fixture markers from the evidence-status markers, and the
+  first group can then be enforced as completeness while the second stays a
+  projection. Until that split exists the host enforces neither, deliberately.
+
+- ~~**Two more CP-5 columns may need T5B.5's exemption.**~~ Measured, and they
+  do not. §63 exempted T5B.5's `Status` and `Claim Status`; the review that
+  proposed it flagged `T5B.3 Traceability Status` and `T5B.7 Assessment` as
+  possibly the same shape, on reading rather than on evidence. Every CP-5 body
+  this repository has retained — nine, across every live run including the three
+  that were refused — was parsed for those two columns: **no cell in either
+  holds any of the seven disqualifying phrases.** Where CP-5 records restraint
+  it records it in the two columns already exempt. So the exemption is not owed,
+  and widening it would weaken the disqualifiers for a case nothing has produced.
+  *Upgrade:* none. If a future run is refused on one of those columns the
+  evidence will say so, and the change is then one line with a run behind it
+  rather than a guess.
 
 - ~~**Nothing can sign a verdict.**~~ Closed by
   `server/api/commands/qualification.py` (`docs/DECISIONS.md` §65):

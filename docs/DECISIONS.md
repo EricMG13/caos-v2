@@ -2486,3 +2486,83 @@ command receipt because there is no case scope to key one by. Verified against a
 throwaway clone of the retained `caos_qualify_5a47243d…`; that database still
 holds no verdict, because signing the evidence behind a final check is the
 reviewer's act and not this change's.
+
+## 2026-09-16 §66 — The frontmatter disqualifiers stay unenforced, and why
+
+§61 fixed one half of the completeness contract and left the other open:
+`completeness_check.load_contract` reads only the `critical_cell_*`
+disqualifiers, never `frontmatter_limitation_flags`,
+`frontmatter_validation_warnings` or `document_substrings_casefold`, which every
+`SKILL.md` declares. It was listed in `docs/FINAL_CHECK.md` as owed. It was
+implemented, measured, and **rejected**; this entry is the rejection, because a
+declared rule nobody enforces needs a reason recorded as much as a rule that
+changes.
+
+**What the change did.** It read all three lists, from `full_run_disqualifiers`
+and CP-L10's `screening_run_disqualifiers`, and reported a handoff declaring one
+of those flags — or carrying one of those substrings in its unfenced text — as a
+completeness violation, which the host maps to `HANDOFF_INCOMPLETE`.
+
+**Why it was rejected.** Replayed against all 25 real handoff bodies this
+repository has retained, it newly refuses **seven**: CP-0 and CP-L10 from runs
+`33ca320e`, `729b0682`, `42e17048` and `54ec3752`. Every one of them for the
+same reason — `limitation_flags` declaring `SOURCE_LIMITED_NOT_COMMITTEE_READY`.
+Two of the seven are the accepted artifacts of `42e17048`, the first complete
+qualification snapshot this project produced.
+
+That flag is *true* of this corpus. Two earnings releases are source-limited and
+are not committee ready, and a module saying so is doing its job. Refusing a
+handoff for an honest declaration about its own evidence is exactly the defect
+§63 had just repaired in CP-5, where "not calculable from provided materials"
+was refused in the same spirit. The bundle's list conflates a **fixture** marker
+(`INTEGRATION_FIXTURE_ONLY`, `PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN`,
+`SYNTHETIC_FORWARD_ASSUMPTIONS`) with a **thin-evidence** marker
+(`SOURCE_LIMITED_NOT_COMMITTEE_READY`); only the first is a completeness
+question. Honouring the list whole refuses honest work, and honouring it in part
+would be the host choosing which of the bundle's declared rules count, which
+invariant 4 forbids.
+
+**And the rule is already enforced, in the right place.** `limitation_flags` is
+projected by `server/methodology/handoff.py::Projections` and is one of
+`matrix.PROJECTION_FIELDS`, so a qualification key can assert on it directly —
+visible to a reader, checkable by a set, and no refusal. A flag that says "not
+committee ready" belongs in what a reader is told, not in whether the document
+parses.
+
+**What stays open.** The conflation is the bundle's, and the honest fix is
+upstream: split the fixture markers from the evidence-status markers so the
+first can be enforced and the second projected. Recorded in `CLAUDE.md` as a
+gap against the bundle rather than against this host.
+
+**Corroboration.** The one `document_substrings_casefold` hit across every
+retained body was a CP-5 describing an upstream as "LITE, preliminary and
+source-limited" — an accurate description of another module's output, which is
+the same conflation seen from the other side.
+
+## 2026-09-16 §67 — The insufficient-evidence case is demonstrated through the built UI
+
+`docs/REPAIR_PLAN.md` Phase 6 asks that "a real PDF case and a deliberately
+restricted/insufficient-evidence case are demonstrated through the
+production-built UI". The PDF half was met by the journey's mixed text-and-PDF
+pack and its citation-highlight check. The second half was not, and a test named
+for the reader-role RESTRICTED state of the qualification strip was easy to
+mistake for it — that is a permission state, not a run whose evidence was thin.
+
+`frontend/tests/journey/journey.spec.ts` now carries *"journey: an
+insufficient-evidence run ends BLOCKED and is shown as such, not as success"*.
+It admits a deliberately thin pack, pins the input, takes both gates, starts the
+run, and waits for the route's own rule to end it: the fake provider returns a
+validated `Blocked` QA verdict, so the run ends BLOCKED by
+`runtime._end_blocked` rather than by an error. It then asserts what a person
+sees — the run page reads BLOCKED and **not** COMPLETE, while the two upstream
+nodes that did produce artifacts read COMPLETE.
+
+That last pair of assertions is the point. A blocked run must not be presented
+as a finished one, and must not be presented as a failure either: the modules
+that answered did answer. Under `make smoke-production` it runs against the
+production image through the real edge on all three engines — 15 journey tests
+each, where there were 14.
+
+No model is called: `tests/journey/worker.py::RealisticLiteCompletions` is
+deterministic, so this proves the workspace's handling of the state and not a
+provider's behaviour.
