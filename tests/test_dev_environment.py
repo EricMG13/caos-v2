@@ -154,3 +154,32 @@ def test_compose_keeps_dev_and_test_storage_isolated() -> None:
     assert "caos-workbench-dev-postgres" in compose
     assert "tmpfs:" in compose
     assert "caos_app" in (REPO / "scripts" / "dev-init.sql").read_text(encoding="utf-8")
+
+
+def test_make_dev_worker_runs_the_worker_entry_point(tmp_path: Path) -> None:
+    (tmp_path / "Makefile").write_text(
+        (REPO / "Makefile").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    project_bin = tmp_path / ".venv" / "bin"
+    project_bin.mkdir(parents=True)
+    (project_bin / "python").symlink_to(sys.executable)
+    engine = tmp_path / "server" / "engine"
+    engine.mkdir(parents=True)
+    (tmp_path / "server" / "__init__.py").write_text("", encoding="utf-8")
+    (engine / "__init__.py").write_text("", encoding="utf-8")
+    (engine / "worker.py").write_text(
+        'print("worker entry point selected")\n', encoding="utf-8"
+    )
+    environment = {"PATH": os.environ["PATH"], "PYTHONDONTWRITEBYTECODE": "1"}
+
+    result = subprocess.run(
+        ["make", "--no-print-directory", "dev-worker"],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "worker entry point selected"

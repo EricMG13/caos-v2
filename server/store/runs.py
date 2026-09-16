@@ -385,6 +385,14 @@ def fail_run(
     return _transition(conn, run_id, RunStatus.FAILED, RunEvent.RUN_FAILED, lease)
 
 
+def cancel_run(
+    conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+) -> bool:
+    """End a run its lease holder was refused `RUN_CANCEL_REQUESTED` on
+    (brief 4.3 D4, I10). Returns whether this call ended it."""
+    return _transition(conn, run_id, RunStatus.CANCELLED, RunEvent.RUN_CANCELLED, lease)
+
+
 def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decision
     conn: StoreConnection,
     run_id: UUID,

@@ -39,6 +39,7 @@ from server.store.outcomes import CallOutcome, record_outcome
 from server.store.runs import (
     Accepted,
     accept_attempt,
+    cancel_run,
     create_case,
     fail_run,
     run_status,
@@ -613,3 +614,27 @@ def test_version_thirteen_adds_empty_work_and_keeps_attempts_unleased(
         assert conn.execute("SELECT count(*) FROM run_work").fetchone() == (0,)
         assert run_status(conn, run_id) is RunStatus.FAILED
         conn.rollback()
+
+
+def test_the_holder_ends_a_cancel_requested_run_with_cancel_run_once(
+    work_run: tuple[StoreConnection, UUID, UUID],
+) -> None:
+    """`cancel_run` is the holder's fenced transition after a requested cancel:
+    one RUN_CANCELLED, the work row DONE, and a stale lease ends nothing."""
+    conn, run_id, _case_id = work_run
+    enqueue_run(conn, run_id)
+    conn.commit()
+    lease = claim_run(conn, worker=WORKER, lease_seconds=60)
+    assert lease is not None
+    assert request_cancel(conn, run_id) is True
+    conn.commit()
+    with pytest.raises(Refusal) as stale:
+        cancel_run(conn, run_id, lease=Lease(run_id, lease.token + 1))
+    assert stale.value.code is RefusalCode.LEASE_NOT_HELD
+
+    assert cancel_run(conn, run_id, lease=lease) is True
+    assert cancel_run(conn, run_id, lease=lease) is False
+    assert run_status(conn, run_id) is RunStatus.CANCELLED
+    assert [e.name for e in events_of(conn, run_id)] == [RunEvent.RUN_CANCELLED.value]
+    work = _work(conn, run_id)
+    assert work is not None and work[0] == "DONE"
