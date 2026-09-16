@@ -44,6 +44,7 @@ from server.api.app import (
 from server.api.deps import actor_from_request
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
+from server.api.reads import model as model_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
 from server.api.reads.run import _node_view, node_readiness, read_run_section
@@ -801,6 +802,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/upload": "read_upload",
         "/api/v1/cases/{case_id}/run": read_run_section.__name__,
         "/api/v1/cases/{case_id}/analysis": "read_analysis",
+        "/api/v1/cases/{case_id}/model": "read_model",
         "/api/v1/cases/{case_id}/runs/{run_id}/sources/{source_id}/pages/{page}": (
             "read_evidence_page"
         ),
@@ -831,7 +833,7 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
     """
     routes = {
         route.path: route
-        for router in (directory_read, upload_read, run_read, analysis_read)
+        for router in (directory_read, upload_read, run_read, analysis_read, model_read)
         for route in router.router.routes
         if isinstance(route, APIRoute)
     }
@@ -871,6 +873,10 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         blob_store,
         methodology_bundle,
     ]
+    assert (
+        calls["/api/v1/cases/{case_id}/model"]
+        == calls["/api/v1/cases/{case_id}/analysis"]
+    )
 
 
 def test_the_reported_digest_is_the_one_that_was_pinned(
