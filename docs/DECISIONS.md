@@ -2582,3 +2582,92 @@ upgrade — the run document carrying the blocking node, the analysis document t
 run status — and are deliberately left unasserted rather than asserted as though
 they were correct. A test that asserted them would pin the misleading behaviour
 in place.
+
+## 2026-09-16 §68 — Why a run ended BLOCKED is recorded by the transition, not re-derived
+
+**Context.** Two commits made a BLOCKED run *look* blocked: nothing is drawn
+running on an ended run (`093828f`), and the analysis page says the run ended
+rather than "pending" (`78b1e61`). Neither page said *why*. On the
+insufficient-evidence journey a reader saw BLOCKED, saw CP-5 "did not run", and
+was left to infer that CP-5 was the cause — which is backwards. CP-5 ran, and
+its answer was a validated `Blocked`. `node_states` is recomputed from accepted
+artifacts (invariant 10) and a Blocked verdict accepts nothing, so the node's
+state is RUNNABLE and always will be. The state is right; it cannot carry the
+cause, and nothing else on the wire did.
+
+**The obvious shape, and why it does not work.** The fact exists at the moment
+the run ends: `runtime._end_blocked` asks `blocked_verdict`, which re-derives
+the verdict from the stored bill and response body through `replay_billed`,
+the same reader crash recovery uses. The first design was for the run document
+to do the same. It cannot. `replay_billed` judges an answer through
+`check_attempt`, which refuses `RUN_NOT_RUNNING` once the run has ended — and
+takes the run's row lock to say so. That is not an accident to be worked
+around: the replay is an execution-path check whose identity comparisons
+(`call_time_identity`, `_assert_originals`, the lineage check) hold the world
+still while the run is live. After the run, a source may be withdrawn
+(invariant 1) or the bundle moved (invariant 4), and a reader that re-derived
+the verdict would refuse the whole document over a fact that had not changed.
+Why a run ended is a fact about the moment it ended, of the same kind as
+`runs.status`, and it belongs beside it.
+
+**Decision.** `block_run` takes `verdict`, the attempt whose validated Blocked
+answer ended the run, and `_transition` writes it to `run_blocking_verdicts`
+(migration `0021_blocking_verdicts.sql`) in the transaction that moves the
+status and appends `RUN_BLOCKED`, riding the same conditional update — zero
+rows moved, nothing recorded. The row is immutable (triggers, as the store's
+other records), at most one per run (the primary key), and only an attempt of
+that run: the insert selects the attempt through its own `run_id`, and
+anything else refuses `ATTEMPT_NOT_FOUND` with the whole transaction rolled
+back, so a run is never ended with a reason that names somebody else's answer.
+Both paths that act on a Blocked verdict record it — the live one
+(`_end_blocked`) and the replayed one (`_settle`, a crash in the commit gap) —
+and `blocked_verdict` returns the attempt rather than a bool, since the caller
+now records which answer it was. The end-of-loop path, §39's empty frontier
+with required work unfinished, records nothing: no node's verdict ended it.
+
+**The wire.** `RunView.blocked_by: BlockedByView | null`, where the view is
+`{route_node_id, module_id, attempt_id}`. Nullable, and the docstring says why:
+a run ends BLOCKED two ways, and the wire must not claim a blocking node when
+the frontier emptied and none exists — the two are different things to a
+reader. `reads/run.py` reads the row only on a BLOCKED run with a pinned route
+(`BLOCKED_BY_IO = 1`, measured in `test_run_section.py`; `IO_BUDGET` moved by
+one), resolves the module through the immutable pinned route, and refuses
+`ORCHESTRATION_NODE_NOT_IN_ROUTE` (503) for a recorded attempt at a node the
+route does not carry — rows this server wrote disagreeing with pins it wrote,
+served as a fault rather than under a guessed module. The verdict's *text* is
+not on the wire. It lives in an unaccepted attempt's body that passed
+validation and not acceptance, and nothing serves un-accepted provider text.
+The pinned key sets, the TypeScript mirror, the committed `schema.json` and
+every fixture carrying a run body moved with it; the seven fixtures carry
+`null`, since none is a BLOCKED run.
+
+**The page.** The graph draws the blocking node `RUNNABLE · BLOCKED THE RUN`
+in the run's own tone (CRITICAL), with the reason `answered Blocked · ended the
+run`; its detail says the same and marks the attempt `BLOCKED · NOT ACCEPTED`
+beside the verdict rather than instead of it; the run panel gains `Blocked by:
+CP-5 answered Blocked on attempt 1 · <node>`, or, on a run the frontier
+emptied, `no node's verdict — the frontier emptied with required work
+unfinished`. Every one of those reads the wire's `blocked_by`; none is inferred
+from an unaccepted attempt, which a node the run never reached holds too. In
+passing, the graph's state word no longer says FRONTIER on an ended run — the
+defect `093828f` fixed in the detail had been left in the state word.
+
+**What this does not do.** The analysis page still lists CP-5 under "Nodes that
+did not run": `AnalysisBody` carries no `blocked_by`, and the Model section
+derives its body from it. Recorded in `CLAUDE.md`'s Phase 9 ledger with the
+upgrade, which is the same field on that body. The stored verdict is served,
+not re-verified, by the reader: what makes it trustworthy is that it was
+written by the transition that had just re-derived it, under the row lock, in
+the same transaction as the status — the same trust `runs.status` itself rests
+on, and no less.
+
+**Tests.** `test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry`
+and the crash-recovery test assert the row names CP-5's attempt on both paths;
+`test_a_blocking_verdict_names_only_an_attempt_of_the_run_it_ends` is the store
+guard; `test_a_node_the_gate_blocked_costs_no_call_and_no_charge` asserts no
+row on the empty frontier;
+`test_the_run_document_names_the_node_whose_blocked_verdict_ended_it` and
+`test_a_run_the_frontier_emptied_names_no_blocking_node` are the document, with
+the IO pinned; the two workspace unit tests cover the helpers and the section;
+and the insufficient-evidence journey asserts the node, the detail, the attempt
+row and the run panel through the production image on three engines.

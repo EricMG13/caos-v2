@@ -631,14 +631,28 @@ test.describe.serial("journey", () => {
     // drawing it as running, or saying it is in the frontier, beside a Status
     // of BLOCKED. Nothing on an ended run is in flight.
     await expect(nodeLocator(page, "CP-5")).not.toHaveClass(/\brunning\b/);
+    // And why it ended: CP-5 did run, and its validated Blocked verdict is
+    // what ended the run. The document names it (`blocked_by`, §68), and the
+    // page says so in three places -- on the node, in its detail, and in the
+    // run panel -- instead of listing CP-5 among the nodes that did not run,
+    // which read as the opposite of what happened.
+    await expect(nodeLocator(page, "CP-5")).toHaveAttribute("data-blocking", "yes");
+    await expect(nodeLocator(page, "CP-5")).toContainText("BLOCKED THE RUN");
+    await expect(nodeLocator(page, "CP-0")).toHaveAttribute("data-blocking", "no");
+    await expect(nodeLocator(page, "CP-L10")).toHaveAttribute("data-blocking", "no");
     await nodeLocator(page, "CP-5").click();
     await expect(page.locator("[data-node-detail='CP-5']")).toBeVisible();
     const detail = page.locator("[data-node-detail='CP-5']");
-    await expect(detail).toContainText("did not run");
+    await expect(detail).toContainText("answered Blocked · ended the run");
+    await expect(detail).not.toContainText("did not run");
     await expect(detail).not.toContainText("in the frontier");
     const attempts = page.locator("section.pnl", { hasText: "Attempts — CP-5" });
     await expect(attempts.locator("[data-attempt]")).toHaveCount(1);
-    await expect(attempts.locator("[data-attempt]")).toContainText("NOT ACCEPTED");
+    await expect(attempts.locator("[data-attempt]")).toContainText("BLOCKED · NOT ACCEPTED");
+    await expect(attempts.locator("[data-blocking-attempt]")).toHaveCount(1);
+    const blockedBy = page.locator("dt:text-is('Blocked by') + dd");
+    await expect(blockedBy).toHaveAttribute("data-blocked-by", "CP-5");
+    await expect(blockedBy).toContainText("CP-5 answered Blocked on attempt 1");
 
     // The analysis page: exactly the two accepted handoffs, both citing the
     // thin note; CP-5 has no handoff and is listed as not accepted.

@@ -8,3 +8,4 @@ import type { V1_SHAPES } from "@/wire/v1/documents";
 export type EdgeView = Infer<typeof V1_SHAPES.EdgeView>;
 export type AttemptView = Infer<typeof V1_SHAPES.AttemptView>;
 export type GateView = Infer<typeof V1_SHAPES.GateView>;
+export type BlockedByView = Infer<typeof V1_SHAPES.BlockedByView>;

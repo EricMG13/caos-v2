@@ -647,12 +647,17 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
     run_id: UUID,
     route: ResolvedRoute,
     route_node_ids: Collection[str],
-) -> bool:
-    """Whether the answer `replay_billed` owes first re-derives to Blocked."""
+) -> UUID | None:
+    """The attempt whose answer, the first `replay_billed` owes a verdict on,
+    re-derives to Blocked; None when that answer is anything else, or there is
+    none. The attempt rather than a bool, because the transition that acts on
+    the verdict records which answer it was (`block_run`, §68)."""
     replayed = replay_billed(
         conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=route_node_ids
     )
-    return replayed is not None and replayed.verdict is Verdict.BLOCKED
+    if replayed is None or replayed.verdict is not Verdict.BLOCKED:
+        return None
+    return replayed.attempt_id
 
 
 def _stored_body(blobs: BlobStore, diagnostic_sha256: str) -> str | None:

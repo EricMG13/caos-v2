@@ -14,6 +14,7 @@ import {
   useRunRefetch,
 } from "./controls";
 import { NodeDetail } from "./NodeDetail";
+import { blockedByOf } from "./reason";
 import { RouteGraph } from "./RouteGraph";
 import type { GateView } from "./types";
 import type { NodeState } from "@/wire";
@@ -94,6 +95,7 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
   const tally = STATES.map(
     (state) => `${run.nodes.filter((node) => node.state === state).length} ${state}`,
   ).join(" · ");
+  const blockedBy = blockedByOf(run);
 
   return (
     <div className="cols two" data-run={run.run_id}>
@@ -158,6 +160,7 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
               nodes={run.nodes}
               attempts={run.attempts}
               status={run.status}
+              blockedBy={run.blocked_by}
               selected={selectedId}
               onSelect={(routeNodeId) => setChoice({ run: run.run_id, node: routeNodeId })}
             />
@@ -166,14 +169,20 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
         <div className="note">
           <b>States are the bundle&apos;s, recomputed from accepted attempts — never stored.</b>{" "}
           COMPLETE has an accepted artifact. RUNNABLE is in the frontier while the run is running,
-          and did not run once it has ended. RESTRICTED runs and carries its limitation forward.
-          BLOCKED names the edge and the upstream it waits on.
+          and did not run once it has ended — unless it is the node whose Blocked verdict ended the
+          run, which is named as such. RESTRICTED runs and carries its limitation forward. BLOCKED
+          names the edge and the upstream it waits on.
         </div>
       </div>
       <div className="col right">
         {refetchNote}
         {selected ? (
-          <NodeDetail node={selected} attempts={run.attempts} status={run.status} />
+          <NodeDetail
+            node={selected}
+            attempts={run.attempts}
+            status={run.status}
+            blockedBy={run.blocked_by}
+          />
         ) : null}
         <section className="pnl">
           <header>
@@ -184,6 +193,14 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
             <dl className="kv">
               <dt>Status</dt>
               <dd>{run.status}</dd>
+              {blockedBy !== null ? (
+                <>
+                  <dt>Blocked by</dt>
+                  <dd className="wrap" data-blocked-by={run.blocked_by?.module_id ?? "none"}>
+                    {blockedBy}
+                  </dd>
+                </>
+              ) : null}
               <dt>Created</dt>
               <dd>{run.created_at}</dd>
               <dt>Route digest</dt>

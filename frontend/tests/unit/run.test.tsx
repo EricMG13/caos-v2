@@ -667,6 +667,76 @@ describe("Run", () => {
     }
   });
 
+  // Through the section, not the helpers: the graph, the detail and the run
+  // panel all read `blocked_by`, and a reader should find the same answer in
+  // each. `rn-cp-6` is the fixture's one RUNNABLE node and holds an unaccepted
+  // attempt, which is exactly the shape a validated Blocked verdict leaves.
+  test("test_a_blocked_run_names_the_node_whose_verdict_ended_it_or_says_no_node_did", () => {
+    const base = running.body.run!;
+    const attempt = base.attempts.find((a) => a.route_node_id === "rn-cp-6" && a.ordinal === 1)!;
+    const byVerdict: RunSectionDocument = {
+      ...running,
+      body: {
+        ...running.body,
+        run: {
+          ...base,
+          status: "BLOCKED",
+          blocked_by: {
+            route_node_id: "rn-cp-6",
+            module_id: "CP-6",
+            attempt_id: attempt.attempt_id,
+          },
+        },
+      },
+    };
+    const { container, unmount } = mount(byVerdict);
+    const node = container.querySelector<HTMLButtonElement>(
+      "button.node[data-route-node='rn-cp-6']",
+    )!;
+    expect(node.getAttribute("data-blocking")).toBe("yes");
+    expect(node.textContent).toContain("BLOCKED THE RUN");
+    expect(node.textContent).toContain("answered Blocked");
+    expect(node.textContent).not.toContain("FRONTIER");
+    expect(node.classList.contains("running")).toBe(false);
+    for (const other of container.querySelectorAll(
+      "button.node:not([data-route-node='rn-cp-6'])",
+    )) {
+      expect(other.getAttribute("data-blocking")).toBe("no");
+    }
+    const panel = container.querySelector("[data-blocked-by]")!;
+    expect(panel.getAttribute("data-blocked-by")).toBe("CP-6");
+    expect(panel.textContent).toBe("CP-6 answered Blocked on attempt 1 · rn-cp-6");
+    fireEvent.click(node);
+    const detail = container.querySelector("[data-node-detail='CP-6']")!;
+    expect(detail.textContent).toContain("answered Blocked · ended the run");
+    expect(detail.textContent).not.toContain("did not run");
+    const rows = container.querySelectorAll("[data-blocking-attempt]");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("BLOCKED · NOT ACCEPTED");
+    unmount();
+
+    // The other way a run ends BLOCKED (§39): no verdict, so no node is named
+    // and the RUNNABLE node simply did not run.
+    const emptied: RunSectionDocument = {
+      ...running,
+      body: { ...running.body, run: { ...base, status: "BLOCKED", blocked_by: null } },
+    };
+    const second = mount(emptied);
+    const idle = second.container.querySelector("button.node[data-route-node='rn-cp-6']")!;
+    expect(idle.getAttribute("data-blocking")).toBe("no");
+    expect(idle.textContent).toContain("DID NOT RUN");
+    expect(second.container.querySelector("[data-blocked-by]")!.textContent).toBe(
+      "no node's verdict — the frontier emptied with required work unfinished",
+    );
+    expect(second.container.querySelectorAll("[data-blocking-attempt]")).toHaveLength(0);
+    second.unmount();
+
+    // A running run has no such line at all.
+    const third = mount(running);
+    expect(third.container.querySelector("[data-blocked-by]")).toBeNull();
+    third.unmount();
+  });
+
   test("test_every_enabled_demo_fixture_is_a_valid_v1_document", () => {
     const fixtures = [
       "../../fixtures/run.json",

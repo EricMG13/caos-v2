@@ -428,6 +428,27 @@ class RouteChoice(BaseModel):
     selection_id: Id
 
 
+class BlockedByView(BaseModel):
+    """The node whose validated Blocked verdict ended the run, and the attempt
+    that answered it.
+
+    Recorded by the transition that ended the run, from the verdict the runtime
+    had just re-derived (`block_run`, §68) -- never re-derived here. The answer
+    is an unaccepted attempt's stored body, and the store refuses to judge it
+    again once the run is no longer RUNNING (`check_attempt`), so a reader that
+    tried would be refused; and a replay later would rest on evidence and a
+    bundle that may since have moved. The node's own `state` stays RUNNABLE,
+    because a Blocked verdict accepts nothing: without this a document could
+    only say the node did not run, which is the opposite of what happened.
+    """
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    attempt_id: UUID
+
+
 class RunView(BaseModel):
     """The displayed run. Node states are recomputed, never stored."""
 
@@ -444,6 +465,12 @@ class RunView(BaseModel):
     nodes: Annotated[list[NodeView], Field(max_length=ROUTE_NODES_MAX)]
     attempts: Annotated[list[AttemptView], Field(max_length=ATTEMPTS_MAX)]
     work: WorkView | None
+    # Why the run ended, when a node's verdict is why. `None` on every run that
+    # is not BLOCKED, and on a BLOCKED run no verdict ended: an empty frontier
+    # with required work unfinished (§39) is the route's own rule and names no
+    # node. Nullable so the wire never claims a blocking node that does not
+    # exist -- the two ways a run ends BLOCKED are different things to a reader.
+    blocked_by: BlockedByView | None
 
 
 class RunBody(BaseModel):

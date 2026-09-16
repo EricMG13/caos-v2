@@ -125,6 +125,9 @@ _STATUS = {
     RefusalCode.READINESS_INVALID: 503,
     RefusalCode.ROUTE_IDENTITY_INVALID: 503,
     RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
+    # A recorded blocking verdict at a node the pinned route does not carry:
+    # rows this server wrote disagreeing with pins it wrote (§68).
+    RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE: 503,
     # A canonical record that no longer binds its Markdown, pin or bundle is
     # likewise the server's own bytes failing verification.
     RefusalCode.ARTIFACT_RECORD_MISMATCH: 503,

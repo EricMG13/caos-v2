@@ -27,6 +27,7 @@ from server.api.wire import (
     ATTEMPTS_MAX,
     RUNS_MAX,
     AttemptView,
+    BlockedByView,
     Chrome,
     EdgeView,
     GateView,
@@ -61,7 +62,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection
 from server.store.gates import (
     Gate,
     GateState,
@@ -105,7 +106,15 @@ CANONICAL_READINESS_IO = 10
 # one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a
 # constant, not a function of route length.
 READINESS_ROWS = 2
-IO_BUDGET = SECTION_READ_IO + BEYOND_LIST_IO + READINESS_ROWS * CANONICAL_READINESS_IO
+# The attempt whose validated Blocked verdict ended the run, as the transition
+# recorded it (§68): one row, read only on a BLOCKED run with a pinned route.
+BLOCKED_BY_IO = 1
+IO_BUDGET = (
+    SECTION_READ_IO
+    + BEYOND_LIST_IO
+    + READINESS_ROWS * CANONICAL_READINESS_IO
+    + BLOCKED_BY_IO
+)
 
 # Reading the Run section is reading its case; holding it grants nothing more.
 READ_REQUIRES = Standing.READER
@@ -267,10 +276,13 @@ def _run_view(
     notes = [SectionNote.LIST_TRUNCATED] if len(attempts) > ATTEMPTS_MAX else []
     route = resolved_route(conn, run_id)
     nodes: list[NodeView] = []
+    blocked_by = None
     if route is None:
         notes.append(SectionNote.ROUTE_NOT_PINNED)
     else:
         nodes = _node_views(conn, blobs, bundle, route, summary)
+        if summary.status == RunStatus.BLOCKED:
+            blocked_by = _blocked_by(conn, route, run_id)
     view = RunView(
         run_id=run_id,
         status=summary.status,
@@ -302,6 +314,7 @@ def _run_view(
             for row in attempts[:ATTEMPTS_MAX]
         ],
         work=work,
+        blocked_by=blocked_by,
     )
     facts = RunFacts(
         running=summary.status == "RUNNING",
@@ -323,6 +336,36 @@ def _run_view(
         cancel_requested=work is not None and work.cancel_requested,
     )
     return view, facts, list(dict.fromkeys(notes))
+
+
+def _blocked_by(
+    conn: StoreConnection, route: ResolvedRoute, run_id: UUID
+) -> BlockedByView | None:
+    """The node whose validated Blocked verdict ended this run, as the
+    transition recorded it (§68), or None: a run the frontier emptied (§39) has
+    no row, and the document says so by carrying nothing.
+
+    Read, not re-derived -- the store refuses to judge an ended run's answer
+    again (`check_attempt`). The module is resolved through the pinned route,
+    which is immutable; an attempt at a node the route does not carry is a
+    store the pins do not describe, refused as a server fault rather than
+    served under a guessed module.
+    """
+    row = conn.execute(
+        "SELECT v.attempt_id, a.route_node_id FROM run_blocking_verdicts v"
+        " JOIN run_attempts a USING (attempt_id) WHERE v.run_id = %s",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    node = next((n for n in route.nodes if n.route_node_id == str(row[1])), None)
+    if node is None:
+        raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
+    return BlockedByView(
+        route_node_id=node.route_node_id,
+        module_id=node.module_id,
+        attempt_id=UUID(str(row[0])),
+    )
 
 
 def _adapter_route(route: ResolvedRoute) -> bool:

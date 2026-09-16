@@ -266,7 +266,7 @@ def _settle(
     caller stops and a retry makes one new attempt instead of replaying it.
     """
     if replayed.verdict is Verdict.BLOCKED:
-        block_run(conn, run_id, lease=lease)
+        block_run(conn, run_id, lease=lease, verdict=replayed.attempt_id)
         return False
     outcome = replayed.outcome
     if replayed.verdict is Verdict.REFUSED or outcome is None:
@@ -475,7 +475,10 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
 
     The raised code is not trusted: the verdict is re-derived from the stored
     bill and response body by the same `replay_billed` crash recovery uses,
-    and a Blocked claim it does not confirm is an ordinary refusal.
+    and a Blocked claim it does not confirm is an ordinary refusal. The attempt
+    it confirms is what the transition records as the reason (§68): this is
+    the last moment the answer can be judged, since `check_attempt` refuses a
+    replay once the run is no longer RUNNING.
     """
     with execution_reads(conn):
         blocked = blocked_verdict(
@@ -486,9 +489,9 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
             route=route,
             route_node_ids=(node,),
         )
-    if not blocked:
+    if blocked is None:
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
-    block_run(conn, run_id, lease=execution.lease)
+    block_run(conn, run_id, lease=execution.lease, verdict=blocked)
 
 
 def _execution_route(

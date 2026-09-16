@@ -144,6 +144,10 @@ const WorkView = object({
   cancel_requested: bool,
 });
 const RouteChoice = object({ profile_id: short, selection_id: short });
+// The node whose validated Blocked verdict ended the run, as the transition
+// recorded it (§68). Nullable on `RunView`: a run the frontier emptied is
+// BLOCKED with no node to name, and the wire never claims one.
+const BlockedByView = object({ route_node_id: short, module_id: short, attempt_id: uuid });
 const RunView = object({
   run_id: uuid,
   status: enumOf(RUN_STATUSES),
@@ -156,6 +160,7 @@ const RunView = object({
   nodes: array(NodeView, 256),
   attempts: array(AttemptView, 4096),
   work: nullable(WorkView),
+  blocked_by: nullable(BlockedByView),
 });
 const RunBody = object({
   case_id: uuid,
@@ -500,6 +505,7 @@ export const V1_SHAPES = {
   AnalysisBody,
   AnalysisDocument,
   AttemptView,
+  BlockedByView,
   CaseRow,
   Chrome,
   CitationView,

@@ -28,6 +28,7 @@ from server.api.wire import (
     AnalysisDocument,
     ApproveGate,
     AttemptView,
+    BlockedByView,
     CancelRun,
     CaseCreated,
     CaseRow,
@@ -202,6 +203,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "gate_verdict",
         }
     ),
+    BlockedByView: frozenset({"route_node_id", "module_id", "attempt_id"}),
     RunView: frozenset(
         {
             "run_id",
@@ -215,6 +217,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "nodes",
             "attempts",
             "work",
+            "blocked_by",
         }
     ),
     RunBody: frozenset(

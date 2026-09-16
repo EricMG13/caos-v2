@@ -3,7 +3,7 @@
 // renders the wire's own words: `gate_verdict` when the gate named one
 // (CLAUDE.md Phase 5 ledger, "the workspace cannot show the cause" — now it
 // can), else the typed edges this node is waiting on.
-import type { AttemptView } from "./types";
+import type { AttemptView, BlockedByView } from "./types";
 import type { NodeView, RunView } from "@/wire/v1";
 
 /** Every direct edge this node names, as `TYPE source`. */
@@ -29,8 +29,16 @@ function ended(status: RunView["status"]): boolean {
 export function reasonOf(
   node: Pick<NodeView, "state" | "waiting_on" | "gate_verdict" | "awaiting_gate">,
   status: RunView["status"],
+  blocking = false,
 ): string {
   const edges = edgesOf(node);
+  // First, because it is the one fact about this node the wire states
+  // outright (`blocked_by`, §68): its validated Blocked verdict ended the run.
+  // Its state is still RUNNABLE -- a Blocked verdict accepts nothing -- and
+  // read without this it said "did not run", the opposite of what happened.
+  // The gate's READY is not repeated here: it is why the node ran, and the
+  // detail lists it on its own row.
+  if (blocking) return "answered Blocked · ended the run";
   // Before the gate's verdict, because the verdict is about whether this node
   // *could* run and the run has stopped either way. CP-5 on a blocked run reads
   // `gate_verdict: READY` with every input met, and "READY" alone beside a
@@ -70,4 +78,53 @@ export function runningOf(
     node.state === "RUNNABLE" &&
     attempts.some((attempt) => attempt.route_node_id === node.route_node_id && !attempt.accepted)
   );
+}
+
+/** Whether this node is the one whose validated Blocked verdict ended the
+    run. Read from the wire's `blocked_by`, never inferred from an unaccepted
+    attempt: a node the run never reached holds one of those too, and the two
+    are opposite facts. */
+export function blockingOf(
+  node: Pick<NodeView, "route_node_id">,
+  blockedBy: BlockedByView | null,
+): boolean {
+  return blockedBy !== null && blockedBy.route_node_id === node.route_node_id;
+}
+
+/** The state word the graph draws under a node's id: the bundle's state, and
+    for RUNNABLE what that means on this run -- running, ended it, did not run,
+    or in the frontier. FRONTIER is never said of a run that has ended. */
+export function stateWordOf(
+  node: Pick<NodeView, "state">,
+  status: RunView["status"],
+  running: boolean,
+  blocking: boolean,
+): string {
+  if (node.state !== "RUNNABLE") return node.state;
+  if (blocking) return "RUNNABLE · BLOCKED THE RUN";
+  if (running) return "RUNNABLE · RUNNING";
+  if (ended(status)) return "RUNNABLE · DID NOT RUN";
+  return "RUNNABLE · FRONTIER";
+}
+
+/** The run panel's line on why a BLOCKED run ended, or null on any other run.
+    Two different things (§39, §68): a node's validated Blocked verdict, named
+    with its attempt; or the route's own rule, when the frontier emptied with
+    required work unfinished and no node was asked. The wire carries `null` for
+    the second and this says so, rather than naming a node that does not
+    exist. */
+export function blockedByOf(
+  run: Pick<RunView, "status" | "blocked_by"> & { attempts: readonly AttemptView[] },
+): string | null {
+  if (run.status !== "BLOCKED") return null;
+  const by = run.blocked_by;
+  if (by === null) return "no node's verdict — the frontier emptied with required work unfinished";
+  const attempt = run.attempts.find((a) => a.attempt_id === by.attempt_id);
+  const which =
+    attempt === undefined
+      ? "an unlisted attempt"
+      : attempt.ordinal === null
+        ? "an unassigned attempt"
+        : `attempt ${attempt.ordinal}`;
+  return `${by.module_id} answered Blocked on ${which} · ${by.route_node_id}`;
 }

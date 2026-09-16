@@ -14,7 +14,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import QUOTE, UNANCHORED, CanonicalCompletions
@@ -232,6 +232,51 @@ def test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry(
             (blocked, _node(harness, "CP-5").route_node_id),
         ).fetchone()
     assert row == (1,)
+    # The transition recorded which answer ended the run, in the transaction
+    # that ended it. Nothing can re-derive this later: `replay_billed` goes
+    # through `check_attempt`, which refuses once the run is no longer RUNNING,
+    # so the row is the only durable form of the cause (§68).
+    assert _blocking_verdict(harness) == _attempt_of(harness, "CP-5")
+
+
+def test_a_blocking_verdict_names_only_an_attempt_of_the_run_it_ends(
+    harness: _Harness,
+) -> None:
+    """`block_run(verdict=)` is the store recording the runtime's decision, and
+    it records only an attempt this run made: another run's, or one that does
+    not exist, refuses `ATTEMPT_NOT_FOUND` and ends nothing -- the status, the
+    event and the verdict are one transaction. Without a verdict the run still
+    ends BLOCKED (§39's empty frontier) and names no node."""
+    with pytest.raises(Refusal, match=r"^ATTEMPT_NOT_FOUND$"):
+        block_run(harness.conn, harness.run_id, verdict=uuid4())
+    _still_running(harness)
+    assert _events(harness, "RUN_BLOCKED") == 0
+    assert _blocking_verdict(harness) is None
+
+    assert block_run(harness.conn, harness.run_id) is True
+    assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+    assert _blocking_verdict(harness) is None
+
+
+def _blocking_verdict(harness: _Harness) -> UUID | None:
+    """The attempt the store says ended this run with a Blocked verdict."""
+    with connect(harness.url) as observer:
+        row = observer.execute(
+            "SELECT attempt_id FROM run_blocking_verdicts WHERE run_id=%s",
+            (harness.run_id,),
+        ).fetchone()
+    return None if row is None else UUID(str(row[0]))
+
+
+def _attempt_of(harness: _Harness, module_id: str) -> UUID:
+    """The one attempt this run made at `module_id`."""
+    with connect(harness.url) as observer:
+        rows = observer.execute(
+            "SELECT attempt_id FROM run_attempts WHERE run_id=%s AND route_node_id=%s",
+            (harness.run_id, _node(harness, module_id).route_node_id),
+        ).fetchall()
+    assert len(rows) == 1
+    return UUID(str(rows[0][0]))
 
 
 def test_an_unanchorable_blocked_handoff_is_an_ordinary_refusal(
@@ -276,11 +321,15 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     crashes = [RefusalCode.STORE_UNAVAILABLE]
 
     def crashing(
-        conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+        conn: StoreConnection,
+        run_id: UUID,
+        *,
+        lease: Lease | None = None,
+        verdict: UUID | None = None,
     ) -> bool:
         if crashes:
             raise Refusal(crashes.pop())
-        return block_run(conn, run_id, lease=lease)
+        return block_run(conn, run_id, lease=lease, verdict=verdict)
 
     monkeypatch.setattr(runtime, "block_run", crashing)
     answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
@@ -297,7 +346,7 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
             route=harness.route,
             route_node_ids=[screen],
         )
-    assert verdict
+    assert verdict == _attempt_of(harness, "CP-5")
     # The captured pins are read once, by the reader the verdict re-anchors on.
     assert statements.count(executor._CAPTURED) == 1
     harness.conn.rollback()
@@ -321,6 +370,8 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     assert len(answers.prompts) == 3
     assert _counts(harness) == (3, [REPORTED] * 3, 2, 3, 3)
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+    # The replayed path records the same reason the live path would have.
+    assert _blocking_verdict(harness) == _attempt_of(harness, "CP-5")
 
 
 def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
@@ -330,11 +381,15 @@ def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
     crashes = [RefusalCode.STORE_UNAVAILABLE]
 
     def crashing(
-        conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+        conn: StoreConnection,
+        run_id: UUID,
+        *,
+        lease: Lease | None = None,
+        verdict: UUID | None = None,
     ) -> bool:
         if crashes:
             raise Refusal(crashes.pop())
-        return block_run(conn, run_id, lease=lease)
+        return block_run(conn, run_id, lease=lease, verdict=verdict)
 
     monkeypatch.setattr(runtime, "block_run", crashing)
     answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})

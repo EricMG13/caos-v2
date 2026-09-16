@@ -322,6 +322,11 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     assert _charges(conn, run_id) == [REPORTED], "one charge, for the one call"
     assert _reserved(conn, run_id) == [ESTIMATE], "and one reservation behind it"
     assert _attempted(conn, run_id) == [nodes["CP-0"]], "no attempt row at all"
+    # No node's verdict ended this run: the frontier emptied. The store names
+    # nothing, so the wire cannot claim a blocking node that does not exist.
+    assert conn.execute(
+        "SELECT count(*) FROM run_blocking_verdicts WHERE run_id = %s", (run_id,)
+    ).fetchone() == (0,)
     bundle = Bundle(root=VENDORED)
     states = node_states(
         route, accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)

@@ -365,16 +365,23 @@ def block_run(
     *,
     lease: Lease | None = None,
     accepted: frozenset[str] | None = None,
+    verdict: UUID | None = None,
 ) -> bool:
     """End a run whose route has required work nothing can release (§39).
 
     Returns whether this call ended it. No further attempt or reservation is
-    possible; the reason is re-derived from the pins and accepted artifacts.
+    possible. Which nodes are unfinished is re-derived from the pins and the
+    accepted artifacts; *why* the run ended is not re-derivable and is recorded
+    here. `verdict` is the attempt whose validated Blocked answer ended the run,
+    written to `run_blocking_verdicts` in the transaction that ends it (§68) --
+    it must be an attempt of this run, else `ATTEMPT_NOT_FOUND` and nothing
+    moves. None when no node's verdict ended it: an empty frontier with
+    required work unfinished is the route's own rule and names no node.
     With `accepted`, the accepted set re-read under the lock must equal it,
     else `RUN_TERMINAL_STALE`.
     """
     return _transition(
-        conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease, accepted
+        conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease, accepted, verdict
     )
 
 
@@ -400,6 +407,7 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
     event: RunEvent,
     lease: Lease | None,
     accepted: frozenset[str] | None = None,
+    verdict: UUID | None = None,
 ) -> bool:
     """Move a RUNNING run into a terminal status, appending `event` only if the
     move actually happened. Zero rows updated, no event -- the rule that makes a
@@ -407,7 +415,8 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
 
     Under `lock_run`, a run already ended is answered False before the fence; a
     RUNNING run is ended only by its lease holder, and its work row closes in
-    the same transaction (brief 4.3 D3, I8)."""
+    the same transaction (brief 4.3 D3, I8). A BLOCKED move with a `verdict`
+    records it in that transaction too, riding the same conditional update."""
     try:
         changed = 0
         if lock_run(conn, run_id) is RunStatus.RUNNING:
@@ -420,6 +429,8 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
         if changed:
             append(conn, run_id, event)
             mark_work_done(conn, run_id)
+            if verdict is not None:
+                _record_blocking_verdict(conn, run_id, into, verdict)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -428,6 +439,28 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
         rollback_or_close(conn)
         raise
     return bool(changed)
+
+
+def _record_blocking_verdict(
+    conn: StoreConnection, run_id: UUID, into: RunStatus, verdict: UUID
+) -> None:
+    """Name the attempt whose Blocked answer ended this run, once.
+
+    Only a BLOCKED move carries one, and only an attempt of this run is
+    accepted: the insert selects the attempt through its own run, so a foreign
+    or unknown id writes nothing and refuses `ATTEMPT_NOT_FOUND` -- raised
+    inside the transaction, which the caller then rolls back whole.
+    """
+    if into is not RunStatus.BLOCKED:
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    written = conn.execute(
+        "INSERT INTO run_blocking_verdicts (run_id, attempt_id)"
+        " SELECT run_id, attempt_id FROM run_attempts"
+        " WHERE attempt_id = %s AND run_id = %s",
+        (verdict, run_id),
+    ).rowcount
+    if written != 1:
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
 
 
 def _require_terminal_decision(

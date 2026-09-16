@@ -877,11 +877,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `displayed_run_status`, so "Pending nodes / not yet accepted" — a claim about
   what happens next — becomes "Nodes that did not run / the run ended BLOCKED"
   once there is no next. Both are asserted through the production stack by the
-  insufficient-evidence journey. What is still owed is naming *why* a run ended:
-  `blocked_verdict` can say which node did it, and the run document does not
-  carry it. The Model section derives its body from Analysis' and has the same
-  blindness; `reads/model.py` excludes the new field rather than guessing at a
-  presentation for it. The original entry:
+  insufficient-evidence journey. *Why* the run ended is carried too:
+  `RunView.blocked_by` names the node whose validated Blocked verdict ended it,
+  with its attempt, and is `null` on a run the frontier emptied (§39) — the
+  wire never claims a blocking node that does not exist. It is recorded by
+  `block_run` in the transaction that ends the run, not re-derived by the
+  reader, because the store refuses to judge an ended run's answer again
+  (`docs/DECISIONS.md` §68). The run page says it on the node, in its detail
+  and in the run panel, and the journey asserts all three. What remains is the
+  analysis page: `AnalysisBody` carries no `blocked_by`, so its "Nodes that did
+  not run" list still holds CP-5 — the one node of the three that did run — and
+  the Model section, which derives its body from Analysis', has the same
+  blindness; `reads/model.py` excludes the status field rather than guessing at
+  a presentation. *Upgrade:* the same field on `AnalysisBody` (a model change,
+  a pinned key set, the analysis fixtures and `reads/model.py`'s exclusion),
+  after which the pending list names the node as what ended the run rather
+  than as unrun. The original entry:
 - **A BLOCKED run draws the node that blocked it as running.** `node_states`
   is recomputed from accepted artifacts alone (invariant 10), and a validated
   CP-5 `Blocked` accepts nothing: on a run `_end_blocked` has ended, CP-5 has

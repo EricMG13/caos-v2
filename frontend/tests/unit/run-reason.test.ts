@@ -1,5 +1,6 @@
 // The Run section's node reasons, recomputed from v1 wire fields (slice 4.1i).
-import { reasonOf, runningOf } from "@/sections/run/reason";
+import { blockedByOf, blockingOf, reasonOf, runningOf, stateWordOf } from "@/sections/run/reason";
+import { severityOf } from "@/sections/run/RouteGraph";
 describe("the reasons a node draws", () => {
   test("reasonOf names the gate's verdict first, then the typed edges; runningOf needs an unaccepted attempt", () => {
     const waiting = [{ source: "CP-L10", type: "ADVISORY" as const }];
@@ -68,5 +69,61 @@ describe("the reasons a node draws", () => {
     expect(reasonOf({ ...runnable, state: "COMPLETE" }, "BLOCKED")).toBe(
       "accepted · REQUIRED CP-0",
     );
+  });
+
+  // The wire names the node whose validated Blocked verdict ended the run
+  // (`blocked_by`, §68). Its state is still RUNNABLE -- a Blocked verdict
+  // accepts nothing -- so read without that field the node said "did not run",
+  // the opposite of what happened. Nothing is inferred from an unaccepted
+  // attempt: a node the run never reached holds one too.
+  test("the node that answered Blocked is named as what ended the run, and no other node is", () => {
+    const cp5 = {
+      route_node_id: "N5",
+      state: "RUNNABLE" as const,
+      waiting_on: [],
+      gate_verdict: "READY",
+      awaiting_gate: false,
+    };
+    const blockedBy = { route_node_id: "N5", module_id: "CP-5", attempt_id: "a" };
+    expect(blockingOf(cp5, blockedBy)).toBe(true);
+    expect(blockingOf({ route_node_id: "N4" }, blockedBy)).toBe(false);
+    expect(blockingOf(cp5, null)).toBe(false);
+
+    expect(reasonOf(cp5, "BLOCKED", true)).toBe("answered Blocked · ended the run");
+    expect(reasonOf(cp5, "BLOCKED", false)).toBe("did not run · READY");
+    expect(severityOf(cp5, false, true)).toBe("CRITICAL");
+    expect(severityOf(cp5, false, false)).toBe("IDLE");
+
+    // The graph's state word says the same thing the detail does, and no
+    // longer reads FRONTIER on a run that has ended.
+    expect(stateWordOf(cp5, "BLOCKED", false, true)).toBe("RUNNABLE · BLOCKED THE RUN");
+    expect(stateWordOf(cp5, "BLOCKED", false, false)).toBe("RUNNABLE · DID NOT RUN");
+    expect(stateWordOf(cp5, "RUNNING", true, false)).toBe("RUNNABLE · RUNNING");
+    expect(stateWordOf(cp5, "RUNNING", false, false)).toBe("RUNNABLE · FRONTIER");
+    expect(stateWordOf({ state: "COMPLETE" }, "BLOCKED", false, false)).toBe("COMPLETE");
+
+    // The run panel's line: the node, its verdict and the attempt on a run a
+    // verdict ended; the route's own rule (§39) on one the frontier emptied;
+    // nothing on a run that is not BLOCKED.
+    const attempts = [
+      {
+        attempt_id: "a",
+        route_node_id: "N5",
+        ordinal: 1,
+        started_at: "2026-09-14T10:00:00Z",
+        accepted: false,
+      },
+    ];
+    expect(blockedByOf({ status: "BLOCKED", blocked_by: blockedBy, attempts })).toBe(
+      "CP-5 answered Blocked on attempt 1 · N5",
+    );
+    expect(blockedByOf({ status: "BLOCKED", blocked_by: blockedBy, attempts: [] })).toBe(
+      "CP-5 answered Blocked on an unlisted attempt · N5",
+    );
+    expect(blockedByOf({ status: "BLOCKED", blocked_by: null, attempts: [] })).toBe(
+      "no node's verdict — the frontier emptied with required work unfinished",
+    );
+    expect(blockedByOf({ status: "RUNNING", blocked_by: null, attempts })).toBeNull();
+    expect(blockedByOf({ status: "COMPLETE", blocked_by: null, attempts })).toBeNull();
   });
 });
