@@ -166,6 +166,9 @@ def _capture(
                 "refusal": None if row.refusal is None else row.refusal.value,
                 "met": len(row.met),
                 "missed": len(row.missed),
+                "ready_met": row.ready_met,
+                "forecast_met": row.forecast_met,
+                "expected_refusal_met": row.expected_refusal_met,
                 "missed_keys": [
                     {
                         "module_id": item.module_id,

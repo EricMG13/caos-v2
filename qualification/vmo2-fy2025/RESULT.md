@@ -480,38 +480,66 @@ called, so all three keys are missed and `complete` is false.
 
 ### Why it blocked
 
-CP-0's T8 Recommended Run Command Sheet says, for the second row:
+**This section was wrong when first written, and is corrected here.** It said
+CP-0 judged CP-5 unready for want of audited statements and executed debt
+documents. That is not what CP-0 said. Its T8 row reads:
 
-    | 2 | CP-5 | Run CP-5 | DO NOT RUN | … |
+    | 2 | CP-5 | Run CP-5 | DO NOT RUN
+    | …releases… | VMO2_CP-0_20260915.md plus completed CP-L10 handoff
+    | CONDITIONAL
+    | CP-L10 must first produce the selected-route analytical handoff for
+      traceability review. |
 
-CP-0 judged CP-5 not ready on this evidence — no audited FY2025 statements, no
-executed debt documents — and the host honoured that judgement and blocked the
-route. Nothing malfunctioned. CP-0 is the readiness gate and it gated.
+The blocker is **sequencing**, not evidence. The gaps naming audited statements
+and executed debt documents list CP-5 among the modules they affect, and the
+first reading mistook that for the verdict's ground.
 
-### The structural problem this exposes
+That distinction is the whole finding, because CP-0's own contract forbids the
+verdict it gave. `cp-0-source-readiness/SKILL.md` line 359:
 
-The set pairs a corpus that only marginally supports CP-5 with a route that
-requires CP-5 and a gate that lets CP-0 refuse it. Run `e0e101b5…` had a CP-0
-that permitted CP-5 and the route completed; this one had a CP-0 that refused
-it and the route could not. Both are defensible readings of the same two
-earnings releases, so whether this set can complete at all turns on a judgement
-call that varies between runs of the same model.
+> Source readiness does not assert that upstream analytical handoffs already
+> exist: navigation checks those separately.
 
-That is not something a better answer key fixes, and it is not model
-non-compliance. Three consequences:
+Sequencing is the dependency plan's job — the catalog's edges, plus the rule
+that a soft edge blocks while CP-0 has marked its source ready. CP-0 encoded
+"CP-L10 has not run yet" as a source-readiness verdict, which is exactly what
+that line tells it not to do. The host then honoured a structurally conformant
+artifact, as invariant 4 requires of it.
+
+So: not the corpus, not the host's reading, and not the `CP-L10 → CP-5`
+ADVISORY edge, which behaved as designed — once CP-0 marked CP-L10 ready that
+edge is blocking, which is how CP-5 is sequenced after the module it traces.
+
+### What it actually exposes
+
+Not a corpus that fails to support CP-5 — CP-5 needs no credit evidence; it
+traces the analysts' findings. What varies between runs is whether CP-0 keeps
+sequencing out of its readiness column. Run `e0e101b5…` did and the route
+completed; run `62698a60…` did not and the route could not.
+
+Behind the model's mistake is a gap in the bundle: `CONDITIONAL` is defined
+only as "emit `DO NOT RUN`". Nothing says the condition must be a *source*
+condition, and nothing discharges it within a run — the vendor's own
+`prepare_invocation.py` and `handoffs.py` refuse a conditional module exactly
+as the host does. A status that invites "conditional on an upstream handoff" is
+therefore fatal to the route in vendor and host alike.
+
+Three consequences:
 
 - `--attempts` did not fire and should not have. A validated Blocked handoff is
   an answer, not a refusal: `Performed.stopped` is `None`, so the driver
   correctly did not retry. Retrying would have been paying for a different
   opinion.
-- `complete` cannot be reached reliably on this set while CP-5 is in the route,
-  however the keys are authored.
-- The honest readings are: run the set on a route CP-0 will not gate
-  (`LITE_EARNINGS_UPDATE` without CP-5, which the two CP-5 keys then have to
-  leave), or supply the evidence CP-5 needs (a different corpus, a different
-  set), or declare the block as the expected result — which `complete` cannot
-  represent today, because it requires every run `COMPLETE` and a validated
-  Blocked gate ends its run `BLOCKED` (ledgered).
+- `complete` is reachable, and the earlier claim that it was not rested on the
+  misreading above. What it needs is a CP-0 that does not put a sequencing
+  condition in a readiness column.
+- The remedies this section first proposed — drop CP-5 from the route, or
+  change the corpus — were aimed at the wrong cause and are withdrawn. Neither
+  would have helped: the same misuse recurs on any corpus.
+- The set now measures this directly. `expects_ready: ["CP-L10", "CP-5"]` reads
+  the host's own readiness projection, so a run where CP-0 gates CP-5 scores
+  `ready_met=false` and says so, instead of reporting three missed citations by
+  a module that was never asked to cite anything.
 
 No further run was made. Spend on this set to date: `$2.18` across four Terra
 runs and one DeepSeek run.

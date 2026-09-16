@@ -355,6 +355,11 @@ def _matrix_document(performed: PerformedSet) -> dict[str, object] | None:
                 ],
                 "forecast_met": row.forecast_met,
                 "expected_refusal_met": row.expected_refusal_met,
+                # The reading that decided answerability travels with it: a
+                # reviewer re-deriving `complete` from this document has to be
+                # able to see a readiness miss, or a snapshot refused because
+                # CP-0 gated a module reads as the model citing nothing.
+                "ready_met": row.ready_met,
             }
             for row in matrix.rows
         ],
