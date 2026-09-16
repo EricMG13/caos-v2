@@ -2671,3 +2671,33 @@ row on the empty frontier;
 the IO pinned; the two workspace unit tests cover the helpers and the section;
 and the insufficient-evidence journey asserts the node, the detail, the attempt
 row and the run panel through the production image on three engines.
+
+## 2026-09-17 §69 — Phase 6 signed off, and what that signature is not
+
+The owner signed `docs/FINAL_CHECK.md` on 17 September 2026. §62 had accepted
+the phase with its gaps stated; this is the sign-off over the account of it,
+after the work of 16 September closed four of the seven items, restated two that
+were never work, and left one.
+
+**What it asserts.** That the final check is an accurate account and that its
+items are accepted as stated: a complete green `make check`; eleven authorised
+live runs at `$7.75`, each recorded with its charges and generation ids,
+including the failures; and one `complete` snapshot, run
+`62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`.
+
+**What it does not.** It is not a qualification verdict. A verdict is a signed
+document over exact evidence, bound to provider, set and build, recorded through
+the route §65 built by an authenticated `ADMIN` whose identity the host derives.
+`qualification_verdicts` is empty in every database, including the one holding
+the complete snapshot. No build, model or pathway is QUALIFIED, and signing this
+page did not make one so.
+
+**One item stays open.** One pathway of eighteen is qualified. The other
+seventeen each need an answer key authored from their own documents before their
+run, and several need evidence this corpus does not hold — `CP-4` wants executed
+debt documents, `CP-2D` a cash-flow pack. That is a corpus-and-answer-key
+programme, not a run, and no amount of spending shortens it.
+
+**The signature block is recorded, not derived.** The host vouches for nothing
+in it: the identity is the owner's configured git identity, written down on
+their instruction, and theirs to correct.

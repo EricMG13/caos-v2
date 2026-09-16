@@ -129,10 +129,24 @@ evidence.
 
 ## Signature
 
-    Reviewer:
-    Date:
-    Signed:
+    Reviewer:  Eric Guei <ericsea1990@googlemail.com>
+    Date:      2026-09-17
+    Signed:    Phase 6, on the owner's instruction of 17 September 2026
 
 Signing asserts that the above is an accurate account and that items 1-7 are
 accepted as stated. It asserts nothing about the fitness of any model or
 pathway for use.
+
+**Recorded, not asserted by the host.** These three lines are the owner's
+sign-off written down on their instruction; the identity is their configured git
+identity and they are the one who can correct it. Nothing about this block is
+derived, verified or vouched for by the software.
+
+**This is not a qualification verdict, and none was created.** A verdict is a
+separate act: a signed document over exact evidence, bound to a provider, a
+qualification set and a build, and recorded through
+`POST /api/v1/qualification/{evidence_sha256}/verdict` by an authenticated
+`ADMIN` whose identity the host derives (§65). `qualification_verdicts` is empty
+in every database, including `caos_qualify_5a47243d96774e088f1bfebb6271f2d1`,
+which holds the one `complete` snapshot. Signing this page does not make any
+build, model or pathway QUALIFIED, and nothing in this tree says otherwise.
