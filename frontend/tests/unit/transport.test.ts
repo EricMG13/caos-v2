@@ -1,13 +1,38 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createElement } from "react";
+import { render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { UNAVAILABLE_WORDING, classify, fetchSection, sectionUrl } from "@/app/transport";
+import { ENABLED_SECTIONS, isEnabledSection } from "@/app/sections";
+import { Workspace } from "@/app/Workspace";
+import { Rail } from "@/chrome/Rail";
+import { composeChrome, markDisabled } from "@/chrome/compose";
 import { PINNED_KEYS, keysMatch } from "@/wire/keys";
 import { SECTIONS } from "@/wire";
+import { parseUploadDocument } from "@/wire/v1";
 
 const FIXTURES = `${resolve(process.cwd(), "fixtures")}/`;
+const CASE = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
+const OTHER_CASE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+const RUN = "7e6d5c4b-3a29-4817-a6f5-e4d3c2b1a098";
+const AT = "2026-09-14T10:00:00.123456Z";
+const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
 
 function fixture(name: string): Record<string, unknown> {
   return JSON.parse(readFileSync(`${FIXTURES}${name}`, "utf8"));
+}
+
+/** A v1 Upload document for `CASE`, served under `role`. */
+function v1Upload(role: { global_role: string; standing: string | null }, caseId = CASE) {
+  return {
+    chrome: { subject: { case_id: caseId, title: "Acme" }, served_role: role },
+    body: { case_id: caseId, sources: [], set_versions: [] },
+    observed_at: AT,
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  };
 }
 
 describe("the wire", () => {
@@ -63,16 +88,19 @@ describe("the wire", () => {
 });
 
 describe("the transport", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 
   test("a request that never reached the server is offline, with no engine text", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
-    expect(await fetchSection("analysis", {})).toEqual({ kind: "offline" });
+    expect(await fetchSection("analysis", { case: CASE })).toEqual({ kind: "offline" });
   });
 
   test("an observed 404 is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })));
-    expect(await fetchSection("analysis", { case: "private" })).toEqual({ kind: "unavailable" });
+    expect(await fetchSection("analysis", { case: CASE })).toEqual({ kind: "unavailable" });
     expect(UNAVAILABLE_WORDING).toBe("Unavailable or not permitted.");
   });
 
@@ -85,28 +113,201 @@ describe("the transport", () => {
         .mockResolvedValueOnce(
           new Response(
             JSON.stringify({ code: "STORE_UNAVAILABLE", clears: "The store answers." }),
-            {
-              status: 503,
-            },
+            { status: 503 },
           ),
         ),
     );
-    const opaque = await fetchSection("run", {});
+    const opaque = await fetchSection("run", { case: CASE });
     expect(opaque).toEqual({
       kind: "error",
       refusal: { code: "RESPONSE_INVALID", clears: expect.any(String) },
     });
     expect(JSON.stringify(opaque)).not.toContain("Traceback");
-    expect(await fetchSection("run", {})).toEqual({
+    expect(await fetchSection("run", { case: CASE })).toEqual({
       kind: "error",
       refusal: { code: "STORE_UNAVAILABLE", clears: "The store answers." },
     });
   });
 
-  test("the fixture parameter travels with the request", () => {
-    expect(sectionUrl("committee", { case: "C-1", fixture: "reader" })).toBe(
-      "/api/sections/committee?case=C-1&fixture=reader",
+  test("test_a_legacy_refusal_body_is_response_invalid", async () => {
+    const bodies = [{ refusal: "STORE_UNAVAILABLE" }, { refusal: { code: "STORE_UNAVAILABLE" } }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(bodies.shift()), { status: 503 })),
     );
-    expect(sectionUrl("committee", {})).toBe("/api/sections/committee");
+    for (let i = 0; i < 2; i += 1) {
+      expect(await fetchSection("directory", {})).toEqual({
+        kind: "error",
+        refusal: { code: "RESPONSE_INVALID", clears: expect.any(String) },
+      });
+    }
+  });
+
+  test("test_section_urls_are_versioned_case_scoped_and_carry_no_fixture_outside_demo", () => {
+    vi.stubEnv("MODE", "production");
+    expect(sectionUrl("directory", { fixture: "reader" })).toBe("/api/v1/directory");
+    expect(sectionUrl("upload", { case: CASE, run: RUN, fixture: "partial" })).toBe(
+      `/api/v1/cases/${CASE}/upload`,
+    );
+    expect(sectionUrl("run", { case: CASE, run: RUN })).toBe(
+      `/api/v1/cases/${CASE}/run?run=${RUN}`,
+    );
+    expect(sectionUrl("analysis", { case: CASE })).toBe(`/api/v1/cases/${CASE}/analysis`);
+    expect(sectionUrl("run", { case: "a/b?c" })).toBe("/api/v1/cases/a%2Fb%3Fc/run");
+    // A caseless case section, or a disabled section, has no URL at all.
+    for (const section of ["upload", "run", "analysis"] as const) {
+      expect(sectionUrl(section, { run: RUN })).toBeNull();
+    }
+    for (const section of DISABLED) expect(sectionUrl(section, { case: CASE })).toBeNull();
+
+    vi.stubEnv("MODE", "demo");
+    expect(sectionUrl("run", { case: CASE, run: RUN, fixture: "gate" })).toBe(
+      `/api/v1/cases/${CASE}/run?run=${RUN}&fixture=gate`,
+    );
+    expect(sectionUrl("directory", { fixture: "observed-empty" })).toBe(
+      "/api/v1/directory?fixture=observed-empty",
+    );
+    // A disabled section stays null across modes; covered above.
+  });
+
+  test("a caseless case section is unavailable and sends no request", async () => {
+    const spy = vi.fn();
+    vi.stubGlobal("fetch", spy);
+    for (const section of ["upload", "run", "analysis"] as const) {
+      expect(await fetchSection(section, {})).toEqual({ kind: "unavailable" });
+    }
+    for (const section of DISABLED) {
+      expect(await fetchSection(section, { case: CASE })).toEqual({ kind: "unavailable" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test("test_disabled_sections_render_unavailable_without_a_request", async () => {
+    expect([...ENABLED_SECTIONS]).toEqual(["directory", "upload", "run", "analysis"]);
+    expect(DISABLED).toEqual(["book", "model", "report", "committee", "admin"]);
+    const spy = vi.fn();
+    const tail = vi.fn();
+    vi.stubGlobal("fetch", spy);
+    vi.stubGlobal("EventSource", tail);
+    vi.stubEnv("MODE", "demo");
+    for (const section of DISABLED) {
+      const { container, unmount } = render(
+        createElement(
+          MemoryRouter,
+          { initialEntries: [`/${section}/?case=${CASE}&fixture=reader`] },
+          createElement(Workspace, { section }),
+        ),
+      );
+      expect(
+        await within(container).findByText(UNAVAILABLE_WORDING, {
+          selector: "[data-surface-state='unavailable'] *",
+        }),
+      ).toBeInTheDocument();
+      const nav = within(container).getByRole("navigation", { name: "Workspace" });
+      for (const off of DISABLED) {
+        const link = within(nav).getByRole("link", { name: new RegExp(off, "i") });
+        expect(link, off).toHaveTextContent(/unavailable/i);
+      }
+      unmount();
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(tail).not.toHaveBeenCalled();
+  });
+
+  test("test_served_role_is_displayed_and_enables_nothing", () => {
+    const reader = parseUploadDocument(v1Upload({ global_role: "READER", standing: "READER" }));
+    const admin = parseUploadDocument(v1Upload({ global_role: "ADMIN", standing: "APPROVER" }));
+    const asReader = composeChrome("upload", reader);
+    const asAdmin = composeChrome("upload", admin);
+    // The served role is the only thing that differs, and no action is offered.
+    expect({ ...asAdmin, served_role: null }).toEqual({ ...asReader, served_role: null });
+    expect(asAdmin.ribbon.actions).toEqual([]);
+    expect(asAdmin.served_role).toEqual({ role: "ADMIN", standing: "APPROVER" });
+    expect(asAdmin.subject).toEqual({ case_id: CASE, issuer: "Acme" });
+
+    render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(Rail, {
+          section: "upload",
+          entries: asAdmin.rail,
+          local: null,
+          servedRole: asAdmin.served_role,
+          search: "",
+        }),
+      ),
+    );
+    const role = screen.getByText(/ADMIN · APPROVER/).closest("[data-served-role]");
+    expect(role).not.toBeNull();
+    expect(role!.querySelector("button, a, select, input")).toBeNull();
+
+    // A directory served with no case standing still shows its role, and nothing more.
+    const none = composeChrome(
+      "upload",
+      parseUploadDocument(v1Upload({ global_role: "ANALYST", standing: null })),
+    );
+    expect(none.served_role).toEqual({ role: "ANALYST", standing: null });
+    expect(none.ribbon.actions).toEqual([]);
+  });
+
+  test("the rail marks every disabled section unavailable", () => {
+    const entries = markDisabled([{ section: "run", count: 2, state: "RUNNING" }]);
+    expect(entries.find((entry) => entry.section === "run")).toEqual({
+      section: "run",
+      count: 2,
+      state: "RUNNING",
+    });
+    for (const section of DISABLED) {
+      expect(entries.find((entry) => entry.section === section)).toEqual({
+        section,
+        count: null,
+        state: "Unavailable",
+      });
+    }
+  });
+});
+
+describe("a section whose marker is v1", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock("@/sections/upload/wire");
+    vi.resetModules();
+  });
+
+  async function v1Transport() {
+    vi.resetModules();
+    vi.doMock("@/sections/upload/wire", () => ({ WIRE: "v1" }));
+    return import("@/app/transport");
+  }
+
+  test("is validated whole and bound to the requested case", async () => {
+    const transport = await v1Transport();
+    const served = [
+      v1Upload({ global_role: "ANALYST", standing: "WRITER" }),
+      { ...v1Upload({ global_role: "ANALYST", standing: "WRITER" }), widget: 1 },
+      v1Upload({ global_role: "ANALYST", standing: "WRITER" }, OTHER_CASE),
+      { ...v1Upload({ global_role: "ANALYST", standing: "WRITER" }), observed_empty: true },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(served.shift()))),
+    );
+    expect(await transport.fetchSection("upload", { case: CASE })).toMatchObject({
+      kind: "ready",
+      document: { body: { case_id: CASE } },
+    });
+    expect(await transport.fetchSection("upload", { case: CASE })).toEqual({
+      kind: "error",
+      refusal: { code: "WIRE_SHAPE_INVALID", clears: expect.any(String) },
+    });
+    expect(await transport.fetchSection("upload", { case: CASE })).toEqual({
+      kind: "error",
+      refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+    });
+    expect(await transport.fetchSection("upload", { case: CASE })).toMatchObject({
+      kind: "observed-empty",
+      observed_at: AT,
+    });
   });
 });

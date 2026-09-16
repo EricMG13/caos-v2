@@ -1,5 +1,6 @@
 """The UI fixture server is explicit, and local gates say what they prove."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,76 @@ def test_vite_defaults_to_the_real_loopback_api() -> None:
     assert '["GET", "HEAD"].includes(req.method' in config
     assert "405," in config
     assert 'code: "READ_ONLY_DEMO"' in config
+
+
+DEMO_MARKERS = (
+    "fixture=",
+    "/api/sections/",
+    "READ_ONLY_DEMO",
+    "READ-ONLY DEMONSTRATION",
+    "caos-fixtures",
+)
+
+
+def _demo_leaks(dist: Path) -> list[str]:
+    """Every fixture file or demo marker a built export carries."""
+    fixtures = {
+        path.name for path in (REPO / "frontend/fixtures").rglob("*") if path.is_file()
+    }
+    leaks: list[str] = []
+    files = [path for path in dist.rglob("*") if path.is_file()]
+    if not files:
+        return ["<nothing scanned>"]
+    for path in files:
+        if path.name in fixtures:
+            leaks.append(f"{path.name}: fixture file")
+        text = path.read_bytes().decode("utf-8", errors="replace")
+        leaks.extend(
+            f"{path.name}: {marker}" for marker in DEMO_MARKERS if marker in text
+        )
+    return leaks
+
+
+def test_the_demo_scan_finds_fixtures_markers_and_an_empty_export(
+    tmp_path: Path,
+) -> None:
+    assert _demo_leaks(tmp_path) == ["<nothing scanned>"]
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets/index.js").write_text(
+        'fetch("/x?fixture=gate")', encoding="utf-8"
+    )
+    (tmp_path / "directory.json").write_text("{}", encoding="utf-8")
+    assert sorted(_demo_leaks(tmp_path)) == [
+        "directory.json: fixture file",
+        "index.js: fixture=",
+    ]
+
+
+def test_production_build_contains_no_fixture_or_demo_route(tmp_path: Path) -> None:
+    node = shutil.which("node")
+    vite = REPO / "frontend/node_modules/vite/bin/vite.js"
+    if node is None or not vite.is_file():
+        # The backend CI job installs no Node; the frontend job builds `dist` itself.
+        pytest.skip("node and frontend/node_modules are required to build the export")
+    out = tmp_path / "dist"
+    subprocess.run(
+        [
+            node,
+            str(vite),
+            "build",
+            "--outDir",
+            str(out),
+            "--emptyOutDir",
+            "--logLevel",
+            "error",
+        ],
+        cwd=REPO / "frontend",
+        check=True,
+        capture_output=True,
+        env={"PATH": os.environ.get("PATH", ""), "NODE_ENV": "production"},
+    )
+    assert (out / "index.html").is_file()
+    assert _demo_leaks(out) == []
 
 
 def test_fixture_browser_launchers_never_reuse_an_unrelated_server() -> None:
