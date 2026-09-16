@@ -7,6 +7,7 @@ import pytest
 from qualification_fixtures import qualification_performed
 
 import server.store as store
+from server.qualification.matrix import ExpectedCitation
 from server.qualification.store import (
     Evidence,
     PerformedEvidence,
@@ -163,6 +164,101 @@ def test_an_incomplete_snapshot_cannot_receive_a_verdict(empty_database: str) ->
                 reviewer_id=uuid4(),
                 verdict=_verdict(now, incomplete.evidence),
             )
+
+
+def test_a_blocked_unproven_matrix_cannot_receive_a_verdict(
+    empty_database: str,
+) -> None:
+    """A run that validly refused to start is not a run a reviewer may sign.
+
+    A blocked readiness handoff is accepted, so the set stops with nothing
+    recorded in `stopped` and a matrix is still built — every row unproven,
+    every expected citation missed. `Assurance` has one reviewer-written
+    member, so signing that snapshot would say QUALIFIED over a run that
+    produced no artifact at all.
+    """
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    original = _performed()
+    [record] = original.performed.performed
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    blocked = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            performed=(replace(record, status=RunStatus.BLOCKED),),
+            matrix=replace(
+                matrix,
+                rows=(
+                    replace(
+                        row,
+                        proven=False,
+                        missed=(ExpectedCitation("CP-0", "c" * 64, "quoted text"),),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert blocked.complete is False
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        record_performed(conn, blocked)
+        with pytest.raises(Refusal, match=r"^VERDICT_BINDING_INVALID$"):
+            record_verdict(
+                conn,
+                evidence=blocked.evidence,
+                reviewer_id=uuid4(),
+                verdict=_verdict(now, blocked.evidence),
+            )
+
+
+def test_a_completed_run_that_missed_a_key_cannot_receive_a_verdict(
+    empty_database: str,
+) -> None:
+    """Finishing the route is not the same as answering the key."""
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    missed = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(
+                matrix,
+                rows=(
+                    replace(
+                        row,
+                        missed=(ExpectedCitation("CP-0", "c" * 64, "quoted text"),),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert missed.complete is False
+
+
+def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
+    """A set may declare a refusal as its answer; meeting it is a result."""
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    refused = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(
+                matrix,
+                rows=(replace(row, proven=False, expected_refusal_met=True),),
+            ),
+        ),
+    )
+
+    assert refused.complete is True
 
 
 def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> None:

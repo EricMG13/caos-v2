@@ -265,3 +265,50 @@ never invoke a provider.
 
 Still open: a fresh, user-authorized Terra v3 live run and external verdict.
 They are release evidence, not local code questions.
+
+## Confidence review — Phase 6 v3 candidate (`1b7e455`), 16 September 2026
+
+Run on Fable 5.1 at high effort against the committed v3 tree, independently of
+the section above, and paired with the adversarial audit recorded beside it.
+
+Measured rather than argued:
+
+- **Request size.** The frozen VMO2 two-document CP-0 request, reconstructed
+  through the real extractor, `prepare_pack` and `build_handoff_prompt` and
+  encoded exactly as `OpenRouter.request_bytes` does for the Terra profile:
+  **452,905 bytes against `MAX_REQUEST_BYTES` of 1,048,576**. v3's
+  `HOST SOURCE PREPARATION` section is 3,134 bytes of that. `CONTEXT_OVER_CEILING`
+  fires in `check_context` before any attempt or reservation, so a ceiling
+  refusal could not burn the authorization.
+- **Answer-key satisfiability.** Emulating the candidate rule over the real
+  token index flags 93 of 1,751 anchorable blocks across 31 pages. Each of the
+  three key quotes is exactly one whole block, uniquely anchorable on its page,
+  and flagged `citation_candidate: true`. A compliant model can meet all three.
+
+Verified fine: the preparation section cannot be cited (`source_id` must be a
+delivered canonical UUID and the section's text is not in the token index); CP-0
+gating is enforced twice, in `_source_preparation` and in the builder's truth
+table; the rechecks read the store rather than a caller's copy; exactly-once
+holds on the original-loss path, where the bill and diagnostic commit before
+`_answer`, `BLOB_*` writes no refusal, and the budget counts
+`greatest(reservation, ledger)`.
+
+Two findings, both remediated before the live run:
+
+1. **A blocked run was signable** — `PerformedEvidence.complete` was literally
+   `matrix is not None`. A validated blocked readiness handoff (the shape the
+   Terra v2 run took) stops with nothing in `stopped`, still builds a matrix of
+   unproven rows, and could carry a reviewer's `QUALIFIED`. `complete` now also
+   requires every run `COMPLETE` and every row either proving its expected
+   citations or meeting the refusal its case declared.
+2. **A run-local blob fault was treated as a global store fault**, so a single
+   worker released and re-claimed the same run every poll — `release` leaves
+   `requested_at` alone and `claim_run` orders by it — with no stop code and
+   nothing on stderr. `worker.STORE_FAULTS` is back to the two store-wide codes;
+   a blob fault parks the run STOPPED with its code.
+
+Still open, and live-only: `max_completion_tokens` is shared between reasoning
+and visible output, reasoning is pinned `high`, and a v3 CP-0 answer is
+materially longer than the v2 readiness block. `finish_reason=length` fails
+closed as `PROVIDER_OUTPUT_TRUNCATED` after one bill; nothing in the tree is
+wrong, but it is the most likely way the single shot ends without an artifact.

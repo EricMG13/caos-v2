@@ -185,3 +185,69 @@ and covered by 62 focused CP-0/canonical/upstream tests. The complete local
 gate is rerun after this v3 change; a fresh authorized Terra run and external
 authenticated verdict remain the only phase-release evidence not local to the
 repository.
+
+## Adversarial audit — Phase 6 v3 candidate (`1b7e455`), 16 September 2026
+
+Run on Fable 5.1 at maximum effort against the committed v3 tree, adversarially
+and independently of the confidence review beside it. Verdict: CONCERNS, no P0,
+two P1s — both around the run rather than in it, both fixed before the spend.
+
+**F1 (P1, fixed).** A BLOCKED run that never completed its route was `complete`
+for verdict purposes. `PerformedEvidence.complete` was `matrix is not None`;
+`build_matrix` runs whenever no case *stopped*, and a validated blocked
+readiness handoff returns normally with `stopped is None`. `record_verdict`'s
+only host-side check is that `complete` column, so a reviewer could sign
+`QUALIFIED` over a matrix whose only row was `proven=False` with every key
+missed — precisely the shape of the Terra v2 run.
+`tests/test_qualification_store.py`'s incomplete-snapshot test covered only
+`matrix=None`, and the harness test proving a BLOCKED run builds a matrix never
+asked whether that matrix could be signed. Fixed: `complete` now requires every
+run `COMPLETE` and every row either proven with nothing missed or meeting its
+declared refusal, with three named tests.
+
+**F2 (P1, fixed).** v3 reclassified `BLOB_*` as transient worker faults, so
+`_refused` released the lease instead of parking the run. `release` writes no
+code and leaves `requested_at` alone while `claim_run` orders by it, so a
+tampered or lost original put the run into a silent unbounded requeue loop —
+2,366 block reads per pass, no stop code, no event, nothing on stderr. The test
+that covered it asserted `("QUEUED", None, None, True)`, enshrining the absence
+of any durable record. v3 is what created the dependency: before it, nothing in
+execution read an original. Fixed by reverting the `worker.STORE_FAULTS`
+widening; the `canonical._STORE_FAULTS` widening is kept, because that one
+correctly re-raises instead of writing a verdict. Replay is unaffected —
+`outcomes._NOT_AN_EXPLANATION` is what keeps a billed answer out of
+`attempt_refusals`, and `_drive` consults `replay_billed` before any new attempt.
+
+Recorded and not fixed, each owed before a *second* paid run:
+
+- **F3 (P2).** A diagnostic body that cannot be stored commits the charge with
+  `diagnostic_sha256` NULL, which `replay_billed` excludes, and nothing between
+  `replay_billed` and `start_attempt` asks whether the node already has a
+  charged, unexplained, body-less outcome — so the next pass bills again.
+  Bounded by the run ceiling, but two charges for one node with no operator
+  decision in between. The DECISIONS/HANDOFF text asserts the opposite.
+- **F4 (P2).** The post-bill original recheck in `_answer` adds a fault point
+  between the charge and acceptance that protects nothing a downstream reader
+  relies on: evidence comes from `source_blocks`/`source_tokens`, the record
+  embeds no original bytes, and the proof never reads an original.
+- **F5 (P3).** `runtime._STORE_FAULTS`'s widened members are unreachable, and
+  the set is hand-synchronised in four places.
+- **F6 (P3).** Claims the code does not support: "extraction manifest" overstates
+  three digests of a JSON document nobody retains; "the context does not reach
+  downstream modules" is true of the *section* but CP-0 authors P1–P8 from it and
+  its Markdown is delivered as UPSTREAM; and the "worker releases the run"
+  sentence describes a worker the authorized run does not use.
+- **F7 (P3).** `member.filename` is admitter-controlled and rendered under a
+  host-attributed marker; `BoundaryText` keeps U+FEFF/U+2028/U+2029 that
+  `handoff._INVISIBLE` refuses, so such a filename copied into CP-0's inventory
+  as instructed would be refused `HANDOFF_MALFORMED` and blamed on the model.
+  Cannot fire on the frozen VMO2 filenames, which are plain ASCII.
+
+Verified with code, no finding: the release path cannot double-bill, lose a
+charge, or replay against a different pin for the v3 originals faults
+(`run_inputs` and `source_set_members` have no UPDATE or DELETE path under
+`server/`); the preparation section cannot be anchored as a citation; the
+ceiling measures the same bytes `_post` sends — **452,993 bytes against
+1,048,576** on the frozen set; no v3 path turns a host fault into
+`HANDOFF_MALFORMED` or `CITATION_NOT_DELIVERED` except F7; no refusal carries
+document- or provider-derived text.
