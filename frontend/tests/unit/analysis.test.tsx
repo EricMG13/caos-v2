@@ -175,16 +175,12 @@ describe("analysis", () => {
     }
   });
 
-  test("the source register agrees with Upload on each source's grade and disposition", () => {
-    const upload = JSON.parse(
-      readFileSync(join(__dirname, "../../fixtures/upload.json"), "utf8"),
-    ) as DocumentOf<"upload">;
-    for (const row of fixture.body.register) {
-      const source = upload.body.sources.find((entry) => entry.source_id === row.label);
-      expect(source, row.label).toBeDefined();
-      expect([row.grade, row.disposition], row.label).toEqual([source!.grade, source!.disposition]);
-    }
-  });
+  // "the source register agrees with Upload on each source's grade and
+  // disposition" is retired: Upload's v1 wire (brief 4.1, slice 4.1h) drops
+  // grade and disposition from SourceRow, and its source_id is now a UUID
+  // rather than the `D-0N` label Analysis's still-legacy register keys on --
+  // the two fixtures no longer share a comparable shape. Analysis's own
+  // cutover (slice 4.1j) is what gives this invariant a v1 home again.
 
   test("an empty conflict register raises no warning", () => {
     const { container } = render(
