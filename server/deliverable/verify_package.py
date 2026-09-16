@@ -18,7 +18,7 @@ from typing import Any
 
 VERIFIER_VERSION = "1"
 # Updated with render.py; the archived verifier retains its historical pin.
-RENDERER_SHA256 = "3417b65ec59fe417033ea4f4f60f2441432668731626002c7371b587b91fba86"
+RENDERER_SHA256 = "e31b2f583c97d7bac5c23aa79eec90e3f0a64b746b1d294e9ec7a32f465f0e3c"
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 LIMITS = {
     "payload.json": 32 * 1024 * 1024,
@@ -94,6 +94,28 @@ def _member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, data: bytes) -> byt
         return body
 
 
+def _receipt_identity_matches(receipt: dict[str, Any], payload: object) -> bool:
+    """Current receipts bind their three identifiers; historical ones omit all."""
+    identity = ("case_id", "run_id", "revision_id")
+    if not any(key in receipt for key in identity):
+        return True
+    return isinstance(payload, dict) and all(
+        isinstance(receipt.get(key), str)
+        and receipt[key].strip()
+        and receipt[key] == payload.get(key)
+        for key in identity
+    )
+
+
+def _receipt_role_error(receipt: dict[str, Any]) -> str | None:
+    named = [receipt.get(role) for role in ("signed_by", "frozen_by", "filed_by")]
+    if any(not isinstance(actor, str) or not actor.strip() for actor in named):
+        return "the receipt does not name all three roles"
+    if len({str(actor).strip() for actor in named}) != 3:
+        return "the receipt names fewer than three people"
+    return None
+
+
 def _contents(members: dict[str, bytes]) -> tuple[bool, str | None]:
     payload = members["payload.json"]
     receipt = json.loads(members["receipt.json"])
@@ -101,11 +123,8 @@ def _contents(members: dict[str, bytes]) -> tuple[bool, str | None]:
         return False, "the receipt is not a JSON object"
     if hashlib.sha256(payload).hexdigest() != receipt.get("payload_sha256"):
         return False, "the payload does not hash to what the receipt says"
-    named = [receipt.get(role) for role in ("signed_by", "frozen_by", "filed_by")]
-    if any(not isinstance(actor, str) or not actor.strip() for actor in named):
-        return False, "the receipt does not name all three roles"
-    if len({str(actor).strip() for actor in named}) != 3:
-        return False, "the receipt names fewer than three people"
+    if role_error := _receipt_role_error(receipt):
+        return False, role_error
     renderer = members["render.py"]
     digest = hashlib.sha256(renderer).hexdigest()
     if digest != RENDERER_SHA256:
@@ -116,6 +135,8 @@ def _contents(members: dict[str, bytes]) -> tuple[bool, str | None]:
     # §55: only exact, pinned build bytes execute, never arbitrary archive code.
     exec(compile(renderer, "<archived render.py>", "exec"), namespace)  # nosec B102
     decoded = json.loads(payload)
+    if not _receipt_identity_matches(receipt, decoded):
+        return False, "the receipt does not identify this payload"
     held = decoded.get("artifacts") if isinstance(decoded, dict) else None
     if not isinstance(held, list) or not held:
         return False, "the payload has no canonical handoffs"
