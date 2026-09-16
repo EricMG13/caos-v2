@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { DirectorySection } from "@/sections/directory/DirectorySection";
-import { parseDirectoryDocument, type DirectoryDocument } from "@/wire/v1";
+import { parseDirectoryDocument, parseUploadDocument, type DirectoryDocument } from "@/wire/v1";
 
 const load = (path: string): unknown =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -106,6 +106,12 @@ describe("Directory", () => {
     for (const path of directoryFixtures) {
       expect(() => parseDirectoryDocument(load(path))).not.toThrow();
     }
-    // The Upload fixtures are asserted with Upload's own cutover to v1.
+    const uploadFixtures = [
+      "../../fixtures/upload.json",
+      "../../fixtures/states/upload.partial.json",
+    ];
+    for (const path of uploadFixtures) {
+      expect(() => parseUploadDocument(load(path))).not.toThrow();
+    }
   });
 });
