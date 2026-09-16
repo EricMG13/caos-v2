@@ -207,6 +207,7 @@ describe("Analysis", () => {
         latest_run_id: null,
         displayed_run_id: null,
         subject: null,
+        displayed_run_status: null,
         handoffs: [],
         pending: [],
       },

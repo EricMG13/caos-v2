@@ -523,6 +523,11 @@ class AnalysisBody(BaseModel):
     latest_run_id: UUID | None
     displayed_run_id: UUID | None
     subject: RunSubjectView | None
+    # The displayed run's own status. Without it this page cannot tell a run
+    # that stopped from one still working: `pending` is recomputed from accepted
+    # artifacts, so a node the run never reached looks exactly like a node whose
+    # turn has not come. `None` when no run is displayed.
+    displayed_run_status: RunStatus | None
     handoffs: Annotated[list[HandoffView], Field(max_length=ROUTE_NODES_MAX)]
     pending: Annotated[list[PendingNode], Field(max_length=ROUTE_NODES_MAX)]
 

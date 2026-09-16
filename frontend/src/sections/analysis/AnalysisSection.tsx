@@ -146,12 +146,23 @@ function HandoffCard({ handoff }: { handoff: HandoffView }) {
   );
 }
 
-function PendingList({ pending }: { pending: readonly PendingNode[] }) {
+function PendingList({
+  pending,
+  runStatus,
+}: {
+  pending: readonly PendingNode[];
+  runStatus: AnalysisDocument["body"]["displayed_run_status"];
+}) {
+  // "Pending" is a claim about the future, and an ended run has none. The list
+  // is recomputed from accepted artifacts, so a node the run never reached
+  // looks exactly like one whose turn has not come; only the run's own status
+  // tells them apart.
+  const ended = runStatus !== null && runStatus !== "RUNNING";
   return (
-    <section className="pnl" data-pending>
+    <section className="pnl" data-pending data-run-ended={ended ? "yes" : "no"}>
       <header>
-        <h2>Pending nodes</h2>
-        <span className="cp">not yet accepted</span>
+        <h2>{ended ? "Nodes that did not run" : "Pending nodes"}</h2>
+        <span className="cp">{ended ? `the run ended ${runStatus}` : "not yet accepted"}</span>
         <span className="right">
           <span className="tag">{pending.length}</span>
         </span>
@@ -213,7 +224,7 @@ export function AnalysisSection({ document }: { document: AnalysisDocument; tab:
       {body.handoffs.map((handoff) => (
         <HandoffCard key={handoff.route_node_id} handoff={handoff} />
       ))}
-      <PendingList pending={body.pending} />
+      <PendingList pending={body.pending} runStatus={body.displayed_run_status} />
     </div>
   );
 }

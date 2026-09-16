@@ -266,6 +266,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "latest_run_id",
             "displayed_run_id",
             "subject",
+            "displayed_run_status",
             "handoffs",
             "pending",
         }

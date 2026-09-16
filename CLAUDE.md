@@ -865,16 +865,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   by, and an authorized evidence page. Withdraw, sign, freeze, file and
   membership grants still have no route, and Book, Model, Report, Committee
   and Admin stay unavailable.
-- **~~A BLOCKED run draws the node that blocked it as running.~~** Half
-  closed. The run page no longer does: `reasonOf` and `runningOf` read the
+- ~~**A BLOCKED run draws the node that blocked it as running, and the analysis
+  page cannot tell it from a run in flight.**~~ Closed. The run page no longer
+  does: `reasonOf` and `runningOf` read the
   run's own status, which the run document already carried, so on an ended
   run nothing is drawn running and a ready-but-unrun node reads "did not
   run" instead of "in the frontier". No wire change was needed for that
   half — the status was there, and reading the node state without it was
   the defect. The journey now asserts it through the production stack.
-  **What remains is the analysis page**, which still carries no run status
-  and so still shows a blocked run as though it were in flight; that half
-  does need the wire change below. The original entry:
+  The analysis page needed the wire change, and has it: `AnalysisBody` carries
+  `displayed_run_status`, so "Pending nodes / not yet accepted" — a claim about
+  what happens next — becomes "Nodes that did not run / the run ended BLOCKED"
+  once there is no next. Both are asserted through the production stack by the
+  insufficient-evidence journey. What is still owed is naming *why* a run ended:
+  `blocked_verdict` can say which node did it, and the run document does not
+  carry it. The Model section derives its body from Analysis' and has the same
+  blindness; `reads/model.py` excludes the new field rather than guessing at a
+  presentation for it. The original entry:
 - **A BLOCKED run draws the node that blocked it as running.** `node_states`
   is recomputed from accepted artifacts alone (invariant 10), and a validated
   CP-5 `Blocked` accepts nothing: on a run `_end_blocked` has ended, CP-5 has

@@ -20,6 +20,7 @@
       "reporting_period": "Q1 2026",
       "analysis_date": "2026-09-08"
     },
+    "displayed_run_status": "COMPLETE",
     "handoffs": [
       {
         "route_node_id": "rn-cp-0",
@@ -42,7 +43,14 @@
             "filename": "CVNA_10K_Annual_Report_FY2025.htm",
             "page": 1,
             "matched_text": "Carvana Co. is an e-commerce platform for buying and selling used cars.",
-            "rects": [{ "x0": 72.0, "y0": 120.5, "x1": 460.2, "y1": 134.0 }],
+            "rects": [
+              {
+                "x0": 72.0,
+                "y0": 120.5,
+                "x1": 460.2,
+                "y1": 134.0
+              }
+            ],
             "withdrawn_at": null
           }
         ],
@@ -70,7 +78,14 @@
             "filename": "CVNA_10Q_Quarterly_Report_Q2_2026.htm",
             "page": 4,
             "matched_text": "Adjusted EBITDA was $769 million for the three months ended June 30, 2026.",
-            "rects": [{ "x0": 72.0, "y0": 300.0, "x1": 480.4, "y1": 313.5 }],
+            "rects": [
+              {
+                "x0": 72.0,
+                "y0": 300.0,
+                "x1": 480.4,
+                "y1": 313.5
+              }
+            ],
             "withdrawn_at": null
           },
           {
@@ -79,7 +94,14 @@
             "filename": "CVNA_Q2_2026_Shareholder_Letter_NonGAAP_EBITDA.htm",
             "page": 1,
             "matched_text": "Retail units sold of 197,325 and GPU of $7,125.",
-            "rects": [{ "x0": 72.0, "y0": 210.0, "x1": 410.0, "y1": 224.0 }],
+            "rects": [
+              {
+                "x0": 72.0,
+                "y0": 210.0,
+                "x1": 410.0,
+                "y1": 224.0
+              }
+            ],
             "withdrawn_at": null
           }
         ],
@@ -125,7 +147,14 @@
             "filename": "CVNA_8K_Ally_FloorPlan_Credit_Agreement_Amendment.htm",
             "page": 12,
             "matched_text": "the Issuer shall not permit the Consolidated Net Leverage Ratio to exceed 3.50 to 1.00",
-            "rects": [{ "x0": 60.0, "y0": 410.0, "x1": 520.0, "y1": 424.0 }],
+            "rects": [
+              {
+                "x0": 60.0,
+                "y0": 410.0,
+                "x1": 520.0,
+                "y1": 424.0
+              }
+            ],
             "withdrawn_at": "2026-09-09T09:41:00Z"
           }
         ],

@@ -643,6 +643,11 @@ test.describe.serial("journey", () => {
     // The analysis page: exactly the two accepted handoffs, both citing the
     // thin note; CP-5 has no handoff and is listed as not accepted.
     await page.goto(`/analysis/?case=${thinCase}&run=${thinRun}`);
+    // The page carries the run's own status now, so "pending" — a claim about
+    // what happens next — is not what it says about a run that has stopped.
+    await expect(page.locator("[data-pending]")).toHaveAttribute("data-run-ended", "yes");
+    await expect(page.locator("[data-pending]")).toContainText("did not run");
+    await expect(page.locator("[data-pending]")).toContainText("the run ended BLOCKED");
     await expect(page.locator("[data-handoff]")).toHaveCount(2);
     await expect(page.locator("[data-handoff='CP-5']")).toHaveCount(0);
     for (const moduleId of ["CP-0", "CP-L10"]) {

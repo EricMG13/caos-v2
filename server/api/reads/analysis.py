@@ -47,11 +47,13 @@ from server.store.routes import resolved_route
 
 # Fixed: standing; the case title, `now()`, latest run and the displayed run's
 # ownership in one row; the subject; the pinned route (`resolved_route`); the
-# accepted artifacts; the cited sources. Then, per accepted handoff, the host
+# accepted artifacts; the cited sources; the displayed run's own status, which
+# is what tells a run that stopped from one still working. Then, per accepted
+# handoff, the host
 # identity `accepted_handoff` rebuilds (as app's `CANONICAL_READINESS_IO`).
 # Linear in handoffs, so declared for a LITE run of three; measured on one and
 # on three in `tests/test_analysis_section.py`.
-FIXED_IO = 6
+FIXED_IO = 7
 PER_HANDOFF_IO = 10
 LITE_NODES = 3
 IO_BUDGET = FIXED_IO + LITE_NODES * PER_HANDOFF_IO
@@ -107,6 +109,14 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
     subject: RunSubjectView | None = None
     notes: list[SectionNote] = []
     route = None if displayed is None else resolved_route(conn, displayed)
+    # Read as the stored string, the way `reads/run.py` reads it: the column
+    # holds exactly the five the wire declares.
+    displayed_status = None
+    if displayed is not None:
+        found = conn.execute(
+            "SELECT status FROM runs WHERE run_id = %s", (displayed,)
+        ).fetchone()
+        displayed_status = None if found is None else found[0]
     if displayed is not None and route is None:
         notes.append(SectionNote.ROUTE_NOT_PINNED)
     elif displayed is not None and route is not None:
@@ -125,6 +135,7 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
             latest_run_id=latest,
             displayed_run_id=displayed,
             subject=subject,
+            displayed_run_status=displayed_status,
             handoffs=handoffs,
             pending=pending,
         ),

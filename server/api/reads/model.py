@@ -19,8 +19,10 @@ from server.refusals import Refusal, RefusalCode
 from server.store.source_sets import pinned_live_sources
 
 # Analysis' ten-node forecast route, including CP-CF's four owner proofs,
-# plus the live source pin. Measured by test_model_http_actor_matrix_and_declared_io.
-IO_BUDGET = 193
+# plus the live source pin. Moves with Analysis' own budget, which this route
+# pays in full before adding to it. Measured by
+# test_model_http_actor_matrix_and_declared_io.
+IO_BUDGET = 194
 router = APIRouter()
 
 
@@ -63,7 +65,10 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
     return ModelDocument(
         **analysis.model_dump(exclude={"body", "status", "observed_empty"}),
         body=ModelBody(
-            **body.model_dump(exclude={"handoffs", "pending"}),
+            #  is the Analysis section's; the Model
+            # section has the same blindness to an ended run and will want
+            # its own field when that is addressed (ledgered).
+            **body.model_dump(exclude={"handoffs", "pending", "displayed_run_status"}),
             forecast=forecast,
             unavailable_reason="NO_ACCEPTED_FORECAST" if forecast is None else None,
         ),

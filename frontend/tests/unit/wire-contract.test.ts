@@ -354,6 +354,7 @@ function analysis(): { [key: string]: Json } {
         reporting_period: "FY2025",
         analysis_date: "2026-09-14",
       },
+      displayed_run_status: "COMPLETE",
       handoffs: [
         {
           route_node_id: "CP-0",

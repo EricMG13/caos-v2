@@ -201,6 +201,7 @@ const AnalysisBody = object({
   latest_run_id: nullable(uuid),
   displayed_run_id: nullable(uuid),
   subject: nullable(RunSubjectView),
+  displayed_run_status: nullable(enumOf(RUN_STATUSES)),
   handoffs: array(HandoffView, 256),
   pending: array(PendingNode, 256),
 });
