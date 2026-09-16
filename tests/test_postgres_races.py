@@ -13,18 +13,24 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 from uuid import UUID
 
 import pytest
-from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION, VENDORED
+from canonical_fixtures import (
+    CATALOG,
+    LITE_PROFILE,
+    LITE_SELECTION,
+    VENDORED,
+    CanonicalCompletions,
+)
 from conftest import priced
 from test_run_events import RECORD, accept_nodes, approved_nodes
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine import runtime
-from server.engine.route import NodeState, resolve_route
+from server.engine.route import NodeState, ResolvedRoute, resolve_route
 from server.engine.runtime import Execution, ProviderResult, run_route
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
@@ -44,7 +50,7 @@ from server.store.runs import (
     start_attempt,
     start_run,
 )
-from server.store.work import Lease, claim_run, enqueue_run, request_cancel
+from server.store.work import Lease, claim_run, enqueue_run, request_cancel, stop
 
 # The producer the store records beside every accepted artifact: what the
 # host configured, and the provider's own handle for the call.
@@ -547,3 +553,284 @@ def test_a_stale_terminal_decision_runs_one_more_pass_then_raises(
         assert decided == [frozenset(), frozenset({nodes["CP-L10"]})], "no third"
         names = [e.name for e in events_of(conn, run_id)]
         assert names.count(RunEvent.RUN_BLOCKED.value) == (2 - moves)
+
+
+# -- The worker loop (brief 4.3 D9; interleavings I1, I5, I9-I11) -------------
+
+
+def _work(url: str, run: object, completions: object, blobs: BlobStore) -> UUID | None:
+    from test_worker import CONFIG
+
+    from server.engine.worker import module_execution, work_once
+
+    with connect(url) as conn:
+        return work_once(
+            conn,
+            blobs,
+            execution_for=module_execution(
+                completions,  # type: ignore[arg-type]
+                priced(Decimal("0.10")),
+                Bundle(VENDORED),
+                blobs,
+            ),
+            config=CONFIG,
+            stopping=Event(),
+        )
+
+
+def _events(conn: StoreConnection, run_id: UUID, name: RunEvent) -> int:
+    found = [e.name for e in events_of(conn, run_id)].count(name.value)
+    conn.rollback()
+    return found
+
+
+def test_two_workers_polling_one_queued_run_claim_it_once(
+    case: tuple[StoreConnection, UUID], empty_database: str, tmp_path: Path
+) -> None:
+    """I1 through `work_once`: the loser builds no execution and calls nothing."""
+    from test_worker import queued_run
+
+    run = queued_run(case, _lite(), Bundle(VENDORED), BlobStore(tmp_path / "blobs"))
+    completions = CanonicalCompletions(run.source_id)
+    start = Barrier(2)
+
+    def poll(_worker: int) -> UUID | None:
+        start.wait(5)
+        return _work(empty_database, run, completions, run.blobs)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claimed = sorted(pool.map(poll, range(2)), key=lambda found: found is None)
+
+    assert claimed == [run.run_id, None]
+    assert run_status(run.conn, run.run_id) is RunStatus.COMPLETE
+    assert len(completions.prompts) == len(_lite().nodes)
+    assert _events(run.conn, run.run_id, RunEvent.RUN_COMPLETE) == 1
+
+
+def test_cancel_during_a_call_keeps_the_bill_accepts_once_and_starts_nothing(
+    case: tuple[StoreConnection, UUID], empty_database: str, tmp_path: Path
+) -> None:
+    """I9: the cancel never interrupts the call in flight; the next start
+    refuses and the worker ends the run CANCELLED."""
+    from test_worker import queued_run
+
+    run = queued_run(case, _lite(), Bundle(VENDORED), BlobStore(tmp_path / "blobs"))
+
+    def cancel() -> None:
+        with connect(empty_database) as other:
+            assert request_cancel(other, run.run_id)
+            other.commit()
+
+    completions = CanonicalCompletions(run.source_id, during=cancel)
+
+    assert _work(empty_database, run, completions, run.blobs) == run.run_id
+
+    assert len(completions.prompts) == 1
+    for table in ("run_attempts", "budget_reservations", "budget_ledger", "artifacts"):
+        assert _count(run.conn, table, run.run_id) == 1, table
+    assert run_status(run.conn, run.run_id) is RunStatus.CANCELLED
+    assert _events(run.conn, run.run_id, RunEvent.RUN_CANCELLED) == 1
+    assert run.conn.execute(
+        "SELECT state FROM run_work WHERE run_id = %s", (run.run_id,)
+    ).fetchone() == ("DONE",)
+
+
+def test_cancel_with_reclaim_ends_the_run_cancelled_exactly_once(
+    case: tuple[StoreConnection, UUID], empty_database: str, tmp_path: Path
+) -> None:
+    """I10: A reserved, a cancel landed, A's lease expired; B's claim ends the
+    run CANCELLED once and A's late acceptance and cancel change nothing."""
+    from test_worker import queued_run
+
+    run = queued_run(case, _lite(), Bundle(VENDORED), BlobStore(tmp_path / "blobs"))
+    stale = _claimed(empty_database, run.run_id, enqueue=False)
+    node = _lite().nodes[0].route_node_id
+    with connect(empty_database) as a:
+        attempt = start_attempt(a, run.run_id, node, lease=stale)
+        reserve(a, attempt, RESERVED, lease=stale)
+        assert request_cancel(a, run.run_id)
+        a.commit()
+        a.execute(
+            "UPDATE run_work SET lease_expires_at = now() - interval '1 second'"
+            " WHERE run_id = %s",
+            (run.run_id,),
+        )
+        a.commit()
+        completions = CanonicalCompletions(run.source_id)
+
+        assert _work(empty_database, run, completions, run.blobs) == run.run_id
+
+        assert completions.prompts == []
+        assert run_status(a, run.run_id) is RunStatus.CANCELLED
+        # A terminal run answers False before the fence; nothing is accepted.
+        assert not accept_attempt(
+            a, attempt_id=attempt, accepted=_accepted(), lease=stale
+        )
+        assert not runs.cancel_run(a, run.run_id, lease=stale)
+        assert _count(a, "artifacts", run.run_id) == 0
+        assert _events(a, run.run_id, RunEvent.RUN_CANCELLED) == 1
+
+
+@pytest.mark.parametrize("state", ["QUEUED", "STOPPED"])
+def test_a_cancel_racing_a_claim_either_claims_or_cancels(
+    empty_database: str, prepared_run: tuple[UUID, UUID], state: str
+) -> None:
+    """I11: both need the work row; the run is claimed or cancelled, never
+    cancelled with a live claim."""
+    _case_id, run_id = prepared_run
+    with connect(empty_database) as conn:
+        enqueue_run(conn, run_id)
+        conn.commit()
+    if state == "STOPPED":
+        stopped = _claimed(empty_database, run_id, enqueue=False)
+        with connect(empty_database) as conn:
+            assert stop(conn, stopped, RefusalCode.CITATION_NOT_LOCATED)
+            conn.commit()
+    start = Barrier(2)
+
+    def cancel() -> bool:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            ended = request_cancel(conn, run_id)
+            conn.commit()
+            return ended
+
+    def claim() -> Lease | None:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            return claim_run(conn, worker=WORKER, lease_seconds=60)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        cancelled, claimed = pool.submit(cancel), pool.submit(claim)
+        lease = claimed.result()
+        assert cancelled.result()
+    with connect(empty_database) as conn:
+        status = run_status(conn, run_id)
+        [(work,)] = conn.execute(
+            "SELECT state FROM run_work WHERE run_id = %s", (run_id,)
+        ).fetchall()
+        if lease is None:
+            assert (status, work) == (RunStatus.CANCELLED, "DONE")
+            assert _events(conn, run_id, RunEvent.RUN_CANCELLED) == 1
+        else:
+            assert state == "QUEUED"
+            assert (status, work) == (RunStatus.RUNNING, "CLAIMED")
+            assert _refused_start(conn, run_id, lease)
+
+
+def _refused_start(conn: StoreConnection, run_id: UUID, lease: Lease) -> bool:
+    _refused(
+        RefusalCode.RUN_CANCEL_REQUESTED,
+        lambda: start_attempt(conn, run_id, "CP-0", lease=lease),
+    )
+    return True
+
+
+def _lite() -> ResolvedRoute:
+    return resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
+
+
+WORKER_SCRIPT = """
+import os, signal, sys
+from pathlib import Path
+from threading import Event
+from uuid import UUID
+sys.dont_write_bytecode = True
+sys.path[:0] = [os.environ["REPO"], os.environ["REPO"] + "/tests"]
+from canonical_fixtures import VENDORED, CanonicalCompletions
+from conftest import priced
+from decimal import Decimal
+from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
+from server.engine import runtime
+from server.engine.worker import WorkerConfig, module_execution, run_worker
+from server.methodology.bundle import Bundle
+from server.store import connect
+
+calls = Path(os.environ["CALLS"])
+
+class Recording(CanonicalCompletions):
+    def complete(self, prompt, *, json_object=False):
+        with calls.open("a") as out:
+            out.write("call\\n")
+        return super().complete(prompt, json_object=json_object)
+
+class Once(Event):
+    def wait(self, timeout=None):
+        self.set()
+        return True
+
+if os.environ.get("KILL") == "1":
+    real = runtime.record_outcome
+    def killed(*args, **kwargs):
+        os.kill(os.getpid(), signal.SIGKILL)
+    runtime.record_outcome = killed
+
+blobs = BlobStore(Path(os.environ["BLOBS"]))
+bundle = Bundle(VENDORED)
+completions = Recording(UUID(os.environ["SOURCE"]))
+sys.exit(run_worker(
+    WorkerConfig(BoundaryText.of("worker-subprocess")),
+    execution_for=module_execution(completions, priced(Decimal("0.10")), bundle, blobs),
+    stopping=Once(),
+    conn_factory=lambda: connect(os.environ["URL"]),
+    blobs=blobs,
+))
+"""
+
+
+def test_worker_sigkilled_after_provider_return_restarts_without_a_second_call(
+    case: tuple[StoreConnection, UUID], empty_database: str, tmp_path: Path
+) -> None:
+    """I5 across processes: the first worker dies after its provider returned
+    and billed, before its acceptance; the restarted worker accepts the stored
+    answer and never calls for that node again."""
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    from test_worker import queued_run
+
+    run = queued_run(case, _lite(), Bundle(VENDORED), BlobStore(tmp_path / "blobs"))
+    script = tmp_path / "worker_script.py"
+    script.write_text(WORKER_SCRIPT, encoding="utf-8")
+    calls = tmp_path / "calls.txt"
+    repo = Path(__file__).resolve().parents[1]
+    environment = {
+        "PATH": os.environ["PATH"],
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "REPO": str(repo),
+        "URL": empty_database,
+        "BLOBS": str(tmp_path / "blobs"),
+        "SOURCE": str(run.source_id),
+        "CALLS": str(calls),
+    }
+
+    def worker_process(kill: str) -> int:
+        return subprocess.run(
+            [sys.executable, "-B", str(script)],
+            cwd=repo,
+            env={**environment, "KILL": kill},
+            check=False,
+            timeout=120,
+        ).returncode
+
+    assert worker_process("1") == -signal.SIGKILL
+    assert calls.read_text().splitlines() == ["call"]
+    assert _count(run.conn, "budget_ledger", run.run_id) == 1
+    assert _count(run.conn, "artifacts", run.run_id) == 0
+    run.conn.execute(
+        "UPDATE run_work SET lease_expires_at = now() - interval '1 second'"
+        " WHERE run_id = %s",
+        (run.run_id,),
+    )
+    run.conn.commit()
+
+    assert worker_process("0") == 0
+
+    assert calls.read_text().splitlines() == ["call"] * len(_lite().nodes)
+    assert run_status(run.conn, run.run_id) is RunStatus.COMPLETE
+    assert _count(run.conn, "run_attempts", run.run_id) == len(_lite().nodes)
+    assert _count(run.conn, "budget_ledger", run.run_id) == len(_lite().nodes)
+    assert _events(run.conn, run.run_id, RunEvent.RUN_COMPLETE) == 1
