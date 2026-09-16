@@ -336,3 +336,37 @@ set digest, so it is not made here.
 Retained: database `caos_qualify_73f0718037d34d95a19417be505b77d2`, blob root
 `/var/folders/81/bwblpst93lb6wb3lwrk8k6800000gn/T/caos-qualify-guifvx4y`,
 capture beside this file.
+
+## The answer key re-cast — 2026-09-16
+
+The CP-0 expectation has been moved to CP-5. The set is now a different set:
+
+| | |
+|---|---|
+| Digest before | `ec84bf8bbb1b45fd715d52466b9142778b4346ab13b252951db0b589209d07d1` |
+| Digest after | `ae70850d27d1860155ec772ac27e95d7747dd2e9ab944f87034e0215dde407d8` |
+
+**Why.** CP-0 is `SourceReadiness`: what the supplied sources are, what they
+cover, and what they can support. The expectation asked it for the issuer's
+current borrowing-capacity statement, which is a credit fact — CP-5's reading,
+from the same document and the same kind of material as CP-5's existing
+liquidity key. The expectation was miscast when it was fixed, and that is the
+reason it moved; the two runs that missed it are corroboration, not the
+argument. Both completed CP-0 on the first attempt and both cited scope and
+perimeter blocks, which is what the module is for.
+
+**What this costs.** Runs `e0e101b5…` and `33ca320e…` were measured against the
+set that digests `ec84bf8b…`. They are not comparable to anything performed
+after this change, and their records above say which set they were measured
+against. That is what the digest is for.
+
+**What is still owed.** CP-0 now carries no expectation, so the set measures
+two modules by key and CP-0 only by proof — artifact accepted, host record
+valid, every citation anchored. A replacement must be authored the way the
+original was: read the Q4 release, decide from CP-0's own contract what a
+readiness module must surface, and fix it before the next run. It must not be
+chosen from what a previous run happened to cite — two runs' output is now on
+the record, and a key picked from it would be measuring the model against
+itself.
+
+No run has been performed against this set.
