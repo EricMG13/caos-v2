@@ -1,6 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { DISABLED_SECTIONS, SECTIONS, sectionRoute } from "../../scripts/fixture-routes.mjs";
 
+// Directory reads the v1 wire as of slice 4.1h; `composeChrome`
+// (brief 4.1, decision 5) composes an empty `ribbon.actions` for every v1
+// section, because 4.1 offers no action. Run and Analysis still read the
+// legacy wire, with their fixtures' own primary action, until slices 4.1i-j.
+const V1_SECTIONS = ["directory"];
+
 /** The API paths a page asked for while it loaded. */
 function apiRequests(page: Page): string[] {
   const seen: string[] = [];
@@ -54,8 +60,10 @@ for (const section of SECTIONS) {
     const role = page.locator("[data-served-role]");
     await expect(role).toHaveCount(1);
     await expect(role.locator("button, a, select, input")).toHaveCount(0);
-    // Exactly one primary action in the ribbon.
-    await expect(page.locator("header.ribbon [data-primary]")).toHaveCount(1);
+    // A v1 section's composed ribbon offers no action (brief 4.1, decision
+    // 5); a still-legacy section keeps its fixture's one primary action.
+    const primaryCount = V1_SECTIONS.includes(section) ? 0 : 1;
+    await expect(page.locator("header.ribbon [data-primary]")).toHaveCount(primaryCount);
   });
 }
 

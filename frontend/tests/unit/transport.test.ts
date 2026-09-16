@@ -37,9 +37,18 @@ function v1Upload(role: { global_role: string; standing: string | null }, caseId
 
 describe("the wire", () => {
   test("test_wire_pinned_keys_match_fixtures", () => {
+    // Directory and Upload read the v1 wire since slice 4.1h (their `wire.ts`
+    // marker), so their fixtures no longer carry the legacy pinned keys this
+    // test checks; `test_every_enabled_demo_fixture_is_a_valid_v1_document`
+    // (tests/unit/directory.test.tsx) is their equivalent gate.
+    const V1_CUTOVER = ["directory", "upload"];
     const documents = [
-      ...SECTIONS.map((section) => `${section}.json`),
-      ...readdirSync(`${FIXTURES}states`).map((name) => `states/${name}`),
+      ...SECTIONS.filter((section) => !V1_CUTOVER.includes(section)).map(
+        (section) => `${section}.json`,
+      ),
+      ...readdirSync(`${FIXTURES}states`)
+        .filter((name) => !V1_CUTOVER.some((section) => name.startsWith(`${section}.`)))
+        .map((name) => `states/${name}`),
       ...readdirSync(`${FIXTURES}run/frames`).map((name) => `run/frames/${name}`),
     ];
     expect(documents.length).toBeGreaterThanOrEqual(9);
