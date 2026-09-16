@@ -337,13 +337,10 @@ def test_a_case_whose_modules_concluded_otherwise_cannot_receive_a_verdict() -> 
 def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
     """A set may declare a refusal as its answer; meeting it is a result.
 
-    Built from a dataclass, and no run this system produces reaches this state:
-    `complete` also requires every run `COMPLETE`, while the validated Blocked
-    gate that would meet an expected refusal ends its run BLOCKED. So this
-    asserts the rule and not the path, which is the vacuous shape the gate
-    scripts exist to catch. Ledgered in `CLAUDE.md`; the fix is to decide where
-    `expected_refusal_met` is fed from, and this test is then rebuilt from a
-    run.
+    This asserts the rule over a hand-built row.
+    `test_a_case_that_declared_the_block_it_expected_is_signable` asserts the
+    path, over a real blocked run, which is what closed the gap this docstring
+    used to describe.
     """
     original = _performed()
     matrix = original.performed.matrix

@@ -91,11 +91,20 @@ class PerformedEvidence:
         matrix = self.performed.matrix
         if matrix is None:
             return False
-        if any(
-            record.status is not RunStatus.COMPLETE
-            for record in self.performed.performed
-        ):
-            return False
+        rows = {row.case_label: row for row in matrix.rows}
+        for record in self.performed.performed:
+            row = rows.get(record.case_label)
+            if row is None:
+                return False
+            # A case that declared its refusal declared that the run would not
+            # finish. Demanding COMPLETE of it as well made the key
+            # unanswerable by any run this system produces, which is what
+            # `docs/REPAIR_PLAN.md` Phase 6 asks for in a deliberately
+            # restricted case.
+            if row.expected_refusal_met:
+                continue
+            if record.status is not RunStatus.COMPLETE:
+                return False
         return all(_answered(row) for row in matrix.rows)
 
     @property

@@ -968,15 +968,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   this is the bundle's gap to close -- but a reviewer reading an accepted
   artifact should know the host asserted nothing about it. *Upgrade:* none the
   host may take alone; record it against the bundle.
-- **`expected_refusal` cannot be met by any run this system can produce.**
-  `complete` requires every run `COMPLETE`, and a validated Blocked gate ends a
-  run BLOCKED, so a case declaring the refusal it expects -- the "deliberately
-  restricted case" `docs/REPAIR_PLAN.md` Phase 6 names -- is unsignable however
-  it turns out. `test_a_case_that_met_the_refusal_it_declared_is_complete`
-  passes on a hand-built state, which is exactly the vacuous kind of pass the
-  gate scripts exist to catch. *Upgrade:* decide whether `expected_refusal_met`
-  is fed from `Performed.stopped` and the run's own status rather than from the
-  proof, and give it a test built from a run rather than from a dataclass.
+- ~~**`expected_refusal` cannot be met by any run this system can produce.**~~
+  Closed. It read only the proof's refusal, and a validated Blocked handoff
+  leaves a sound proof and writes no `attempt_refusals` row -- while `complete`
+  demanded every run reach `COMPLETE`, which a blocked run never does. Both
+  halves now read the run: `_refusal_met` takes the proof's refusal, a recorded
+  attempt refusal, or `HANDOFF_BLOCKED` against a run whose own status is
+  BLOCKED; and `complete` exempts a case from the `COMPLETE` requirement when
+  the refusal it declared was met, because declaring a refusal is declaring
+  that the run will not finish. The "deliberately restricted case"
+  `docs/REPAIR_PLAN.md` Phase 6 names is now expressible, and
+  `test_a_case_that_declared_the_block_it_expected_is_signable` proves it over
+  a real blocked run rather than a hand-built dataclass.
 
 - **The VMO2 set measures two of its three modules by key.** CP-0's expectation
   asked `SourceReadiness` for the issuer's current borrowing-capacity

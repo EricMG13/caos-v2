@@ -53,9 +53,10 @@ from server.methodology.forecast import forecast_projection
 from server.methodology.handoff import Projections
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection
 from server.store.routes import resolved_route
 from server.store.run_inputs import RunSubject
+from server.store.runs import run_status
 from server.store.source_sets import pinned_live_sources
 
 # A case label is authored and reaches a digest; it is a name, not prose.
@@ -366,10 +367,47 @@ def _row(
             conn, blobs, bundle, case=case, run_id=run_id, proof=proof
         ),
         expected_refusal_met=(
-            None if case.expected_refusal is None else refusal is case.expected_refusal
+            None
+            if case.expected_refusal is None
+            else _refusal_met(conn, run_id, case.expected_refusal, refusal)
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
         projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
+    )
+
+
+def _refusal_met(
+    conn: StoreConnection,
+    run_id: UUID,
+    expected: RefusalCode,
+    proof_refusal: RefusalCode | None,
+) -> bool:
+    """Whether the run refused the way its case said it would.
+
+    A case that declares a refusal is declaring how the run ends, and a run
+    ends in one of two places: the proof cannot be taken, or execution stopped
+    and wrote the reason against an attempt. Reading only the first made this
+    key unanswerable by any run the system produces — a deliberately restricted
+    case (`docs/REPAIR_PLAN.md` Phase 6) stops with a refusal recorded and a
+    sound proof over what it did accept, so the proof says nothing and the
+    stored refusal says everything.
+    """
+    if proof_refusal is expected:
+        return True
+    # A validated Blocked handoff is the route's own rule applied, so `_settle`
+    # writes no `attempt_refusals` row for it -- the run's own status is where
+    # that outcome is recorded.
+    if (
+        expected is RefusalCode.HANDOFF_BLOCKED
+        and run_status(conn, run_id) is RunStatus.BLOCKED
+    ):
+        return True
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM attempt_refusals r JOIN run_attempts t"
+            " USING (attempt_id) WHERE t.run_id = %s AND r.code = %s",
+            (run_id, expected.value),
+        ).fetchone()
     )
 
 
