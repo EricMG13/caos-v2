@@ -543,3 +543,45 @@ Three consequences:
 
 No further run was made. Spend on this set to date: `$2.18` across four Terra
 runs and one DeepSeek run.
+
+## Terra with CP-0's own rule restated — 2026-09-16
+
+Run `729b0682-1076-4f7d-8371-2793bf43f3cd`, set
+`a1a70f04ab0aa1b4f46940d6b17131a50909a14521b9a773210bd839695d2bbf`,
+`$0.77497100`. The best run this set has had, and it isolates what is left.
+
+- **Run status `COMPLETE`.** CP-0 did not gate CP-5. All three modules answered
+  on the first attempt: CP-0 `$0.24055425`, CP-L10 `$0.26801425`, CP-5
+  `$0.2664025`. Three artifacts, ten citations, every one re-located.
+- **`ready_met: true`.** The readiness key passed — the first direct evidence
+  that restating `SKILL.md` line 359 in CP-0's final check changes the verdict
+  it writes. Run `62698a60…` put a sequencing condition in a readiness column
+  and ended BLOCKED; this one did not.
+- **`complete` is still false**: `met=1, missed=2`. CP-L10 cited the Adjusted
+  Free Cash Flow limitation — an answer key — and not the goodwill impairment
+  or the borrowing-capacity line.
+
+### What is left is the citation key, and only that
+
+CP-L10 returned five citations from the 93 the host offered: the guidance
+metrics, the entity perimeter, the preliminary-results heading, the AFCF
+limitation, and the £1,645.5 million Cellnex bridge. Sound, relevant evidence
+for a financial-change screen — and a set of five drawn from ninety-three, which
+has to contain three named lines for this set to pass.
+
+Every other failure mode this set has produced is now closed: the reader defect
+(`7a12c6d`), the diagnostic double-bill (`cf6905d`), the gate misuse
+(`a40b2b4`), and the key that named a subordinate clause (`e258422`). What
+remains is the instrument. A citation key measures whether a module's handful of
+length-selected quotes happens to include particular lines; it does not measure
+whether the screen was right, and this run's CP-L10 produced a defensible screen
+while scoring `missed=2`.
+
+The `expects_ready` key added in `1b9c060` is the shape that works, because it
+reads a host projection rather than hoping for a quotation. The same is
+available for `qa_status`, `committee_status`, `confidence_score`,
+`limitation_flags` and CP-0's T8 readiness rows, and the bundle ships a register
+parser for the rest. Until the citation keys are replaced with keys of that
+kind, this set measures the draw rather than the analysis.
+
+Spend on this set to date: `$2.96` across five Terra runs and one DeepSeek run.
