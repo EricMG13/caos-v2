@@ -585,3 +585,51 @@ parser for the rest. Until the citation keys are replaced with keys of that
 kind, this set measures the draw rather than the analysis.
 
 Spend on this set to date: `$2.96` across five Terra runs and one DeepSeek run.
+
+## The first signable snapshot — 2026-09-16
+
+Run `42e17048-8b50-48cc-94ff-833d894a68cb`, set
+`0863964bb4dbad8dc8772654311d7b59dfc2810cd08cf6cfdeda6a940ed0db74`,
+`$0.76978275`. **`qualification_performed.complete` is true.**
+
+| | |
+|---|---|
+| Run status | `COMPLETE`, three modules, one attempt each |
+| Proof | 3 artifacts, 8 citations, every one re-located |
+| Citation key | `met=1, missed=0` — the goodwill impairment |
+| `ready_met` | true — CP-0 gated nothing it should not have |
+| `projections_met` | true — every module concluded what the set required |
+
+Charges: CP-0 `$0.231761`, CP-L10 `$0.265523`, CP-5 `$0.27249875`. Database
+`caos_qualify_eaa6ad1a8dc44ecb9171afec00325bc9`; one `qualification_evidence`
+row, and **zero `qualification_verdicts`** — the host has produced a snapshot a
+reviewer may sign, and nobody has signed it. That distinction is the point: a
+verdict is a person's, and `complete` only says the question was answered.
+
+### Verified rather than assumed
+
+The capture written beside this file reports `projections_met: null`, which is
+the capture under-reporting and not the key going unevaluated — `scripts/qualify.py`
+was serialising `ready_met` and not the field added after it, now fixed.
+`complete` treats an undeclared key as passed (`is not False`), so a key that
+silently did nothing would have produced this same `true`. Re-deriving the
+matrix from the store against the set on disk gives `projections_met: True`,
+`ready_met: True`, `proven: True`, `missed: 0`. The signable document stored in
+the database carried the field correctly throughout.
+
+### What made the difference, in order
+
+1. `7a12c6d` — the reader refused typographic quotation marks and was blaming
+   models for it.
+2. `cf6905d` — a billed call whose body could not be stored was billed again.
+3. `a40b2b4` — CP-0's own readiness rule restated in its final check; the gate
+   stopped refusing CP-5 for a sequencing reason its contract forbids.
+4. `e258422` — the borrowing key named a subordinate clause, not the fact.
+5. `1b9c060`, `32bb47f` — keys that read the host's own projections instead of
+   hoping a module's handful of quotes happened to include particular lines.
+
+Four of those five were the host's or the record's, not the models'. The
+citation-only instrument is what hid them: every one of them presented as a
+model failing to find evidence.
+
+Spend on this set to date: `$3.73` across six Terra runs and one DeepSeek run.
