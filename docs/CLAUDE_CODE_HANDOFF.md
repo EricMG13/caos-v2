@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Durable-handoff recovery `40a13dd` persists the performed snapshot and bound evidence before return; its full local gate is green. The authorized Gemini retry failed CP-0's literal-quotation contract. The later Terra diagnostic exposed the missing CP-0 provenance context; the v3 repair is pending end-of-phase gates. Phase 6 remains release-blocked.** |
-| Next task | The user authorized one fresh v3 Terra qualification. Finish the v3 local gates and phase reviews, then retain its disposable database/blob root, reconcile every generation, and obtain an external authenticated verdict. No result may be represented as qualified before that verdict. |
+| Latest accepted task | **`canonical-markdown-v3` (`1b7e455`) and its review remediation (`b456966`) are accepted on a complete green `make check`. The authorized Terra v3 qualification ran and, for the first time, finished its route: three artifacts, fourteen citations, all anchored, one call per module, `$0.82248325`. It met two of three answer keys and missed CP-0's, so `complete` is false and no verdict exists. Phase 6 remains release-blocked.** |
+| Next task | Decide what answers CP-0's missed key: a further separately authorized run, a change to the instruction that selects evidence, or an answer key that the module's own reading can meet. Then the three ledgered Phase 6 gaps (double-billed diagnostic, the post-bill original recheck, the admitter-chosen filename) before any second paid run. No result may be represented as qualified without an external authenticated verdict over a `complete` snapshot. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -93,6 +93,30 @@ this documentation update has not rerun their gates or accepted new code.
 - **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
 
 ### Phase 6 qualification checkpoint — 15 September 2026
+
+### Phase 6 v3 qualification result — 16 September 2026
+
+- **Gates:** a complete `make check` is green on `b456966` — lint, mypy over 225
+  files, 2865 tests, 21 race tests, bandit/pip-audit/gitleaks, the frontend half
+  (230 unit, a11y, 90 workbench, both builds), the image half with the pinned
+  Trivy 0.70.0, and the production smoke stack (8 image tests, 14 journey tests
+  on all three engines).
+- **Reviews:** the Phase 6 confidence review and adversarial audit were rerun
+  against the v3 tree on Fable 5.1. Both cleared it to spend, each with a
+  condition, and both conditions were met before the call: `complete` now means
+  proven, and the worker's blob-fault reclassification was reverted. Findings and
+  remediation are in `docs/reviews/phase-6-*.md`; three accepted gaps are
+  ledgered in `CLAUDE.md`.
+- **Run:** `e0e101b5-a908-4b9b-913d-45184a6f3a54` completed its route. CP-0,
+  CP-L10 and CP-5 each answered on the first attempt; fourteen citations, all
+  re-located by the host; no refusal row; `$0.82248325` of a `$22.00` ceiling.
+  The confidence review's predicted truncation risk did not materialise.
+- **Verdict:** not qualified. Two of three answer keys met; CP-0 missed the
+  borrowing-capacity statement its key names, having cited four other blocks from
+  the correct documents. A selection miss, not a protocol failure.
+  `qualification_performed.complete` is false, `qualification_verdicts` is empty,
+  and nothing may be represented as qualified. Full record in
+  [result](../qualification/vmo2-fy2025/RESULT.md).
 
 ### Phase 6 v3 CP-0 provenance checkpoint — 15 September 2026
 
