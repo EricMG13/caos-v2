@@ -42,3 +42,17 @@ test("partial renders through warning status with its notes and the body", async
   await expect(page.locator("[data-handoff]").first()).toBeVisible();
   await expect(page.locator("[data-pending-node]").first()).toBeVisible();
 });
+
+test("a stale view holds its figures until Reload", async ({ page }) => {
+  // The fixture stream announces an accepted handoff; the refetch answers for
+  // another displayed run with other figures (brief 4.4, decision 6).
+  await page.goto(`/analysis/?case=${CASE}&fixture=stale`);
+  const figure = page.locator("main#body [data-confidence]").first();
+  await expect(figure).toHaveText(/^96 /);
+  const stale = page.locator("main#body [data-surface-state='stale']");
+  await expect(stale).toBeVisible({ timeout: 10_000 });
+  await expect(figure).toHaveText(/^96 /);
+  await stale.getByRole("button", { name: "RELOAD" }).click();
+  await expect(stale).toHaveCount(0);
+  await expect(figure).toHaveText(/^12 /);
+});
