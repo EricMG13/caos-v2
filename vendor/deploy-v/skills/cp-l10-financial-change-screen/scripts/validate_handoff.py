@@ -88,6 +88,10 @@ H3_RE = re.compile(r"^ {0,3}###(?!#)[ \t]+(.+?)[ \t]*$")
 H4_RE = re.compile(r"^ {0,3}####(?!#)[ \t]+(.+?)[ \t]*$")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
+# CANON_SHARED.md § CP_CONFIDENCE_SCORE.md hard caps, read from the rows a
+# handoff tables under a Severity column rather than from the counts it declared.
+SEVERITY_HEADER_RE = re.compile(r"^severity\b")
+FINDING_SEVERITY_RE = re.compile(r"^(critical|material|minor)\b")
 CONCLUSION_TITLE_RE = re.compile(
     r"\b(?:view|read-through|recommendation|decision|answer|conclusion|implication|thesis|summary|outlook)\b",
     re.IGNORECASE,
@@ -634,6 +638,41 @@ def _presentation_warnings(body: str, fields: dict[str, Any]) -> tuple[str, ...]
     return tuple(warnings)
 
 
+def _plain_cell(cell: str) -> str:
+    """A table cell with its Markdown emphasis removed, case-folded."""
+
+    return cell.strip().strip("`*_").strip().casefold()
+
+
+def _finding_severities(body: str) -> dict[str, int]:
+    """Return {CRITICAL | MATERIAL | MINOR: first body line} over every finding row.
+
+    A finding is a row of any unfenced table whose column is headed Severity
+    and whose cell is one of the canon's three words.  The rows are the
+    authority: the counts a module passes to confidence_score.py are its own.
+    """
+
+    lines = _unfenced_lines(body)
+    found: dict[str, int] = {}
+    for table in _markdown_tables(lines):
+        columns = [
+            index
+            for index, header in enumerate(table.headers)
+            if SEVERITY_HEADER_RE.match(_plain_cell(header))
+        ]
+        if not columns:
+            continue
+        first_row = table.start_index + 2
+        for line_number, line in lines[first_row : first_row + table.body_rows]:
+            cells = _table_cells(line)
+            for index in columns:
+                if index < len(cells):
+                    match = FINDING_SEVERITY_RE.match(_plain_cell(cells[index]))
+                    if match:
+                        found.setdefault(match.group(1).upper(), line_number)
+    return found
+
+
 def _expected_band(score: int) -> str:
     if score >= 80:
         return "High"
@@ -800,6 +839,18 @@ def _validate_fields(fields: dict[str, Any], body: str) -> list[str]:
             errors.append("qa_status Blocked caps confidence_score at 39")
         elif qa_status == "Restricted" and score > 59:
             errors.append("qa_status Restricted caps confidence_score at 59")
+    findings = _finding_severities(body)
+    if qa_status in QA_STATUSES and findings:
+        if "CRITICAL" in findings and qa_status != "Blocked":
+            errors.append(
+                "a CRITICAL finding requires qa_status Blocked; "
+                f"body line {findings['CRITICAL']}"
+            )
+        elif "MATERIAL" in findings and qa_status == "Passed":
+            errors.append(
+                "a MATERIAL finding requires qa_status Restricted; "
+                f"body line {findings['MATERIAL']}"
+            )
 
     committee_status = fields.get("committee_status")
     if committee_status is not None and committee_status not in COMMITTEE_STATUSES:

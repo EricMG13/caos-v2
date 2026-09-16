@@ -53,9 +53,9 @@ def tampered(tmp_path: Path) -> Bundle:
 
 
 def test_the_build_id_is_the_one_the_repository_pinned(bundle: Bundle) -> None:
-    """`docs/DECISIONS.md` §13 pins the build. A run pinned to one build never
-    executes under another (invariant 4)."""
-    assert bundle.build_id.startswith("a43cb903")
+    """`docs/DECISIONS.md` §61 pins the build, having moved the §13 pin. A run
+    pinned to one build never executes under another (invariant 4)."""
+    assert bundle.build_id.startswith("cdea0c9f")
 
 
 def test_authority_is_the_whole_skill_and_its_references(bundle: Bundle) -> None:
@@ -191,10 +191,10 @@ def test_cp_parse_receives_the_whole_cp0_skill(bundle: Bundle) -> None:
 
 def test_the_manifest_itself_is_pinned(bundle: Bundle) -> None:
     """The one vendored file the manifest cannot cover is its own bytes, so
-    `docs/DECISIONS.md` §13 records that digest separately."""
+    `docs/DECISIONS.md` §61 records that digest separately."""
     recorded = json.loads(
         (VENDORED / "DEPLOY_V_INTEGRITY_v1.json").read_text(encoding="utf-8")
     )
 
     assert recorded["build_id"] == bundle.build_id
-    assert bundle.manifest_sha256.startswith("2fc17570")
+    assert bundle.manifest_sha256.startswith("087bbdf8")

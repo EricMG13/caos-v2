@@ -24,8 +24,9 @@ CATALOG = (
     BUNDLE / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
 
-# docs/DECISIONS.md §13. A run pinned to one build never executes under another.
-BUILD_ID = "a43cb903ca2751f79e77b6da71f6ea131b8462a32e1b549d65fd0f67389d185f"
+# docs/DECISIONS.md §61, which moved the §13 pin. A run pinned to one build
+# never executes under another.
+BUILD_ID = "cdea0c9fbb046321fdd6d0fb526b6bc74cf4c9e9e2ea4b381f1c4a61081e9d22"
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -147,3 +148,22 @@ def test_the_bundle_verifies_with_its_own_tool() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+
+
+# `docs/DECISIONS.md` §61: the three places CP-0 reads `CONDITIONAL` from must
+# say the same thing -- a source condition, discharged by supplying the source
+# and re-running CP-0, never an upstream handoff that has not run yet.
+CP0_CONDITIONAL_TEXTS = (
+    "skills/cp-0-source-readiness/SKILL.md",
+    "skills/cp-0-source-readiness/references/REF_CP-0_STEPS.md",
+    "skills/cp-0-source-readiness/references/CP-0__SourceReadiness__payload.schema.txt",
+)
+
+
+@pytest.mark.parametrize("relative", CP0_CONDITIONAL_TEXTS)
+def test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read(
+    relative: str,
+) -> None:
+    text = (BUNDLE / relative).read_text(encoding="utf-8")
+    assert "never a readiness ground" in text, relative
+    assert "CP-0 is re-run" in text, relative

@@ -33,9 +33,11 @@ from server.refusals import Refusal, RefusalCode
 VENDORED = Path(__file__).resolve().parents[1] / "vendor/deploy-v"
 CANON = "../../CANON_SHARED.md"
 LITE_BASE = "../../CP_DEPLOY_V_LITE_MODULE_PAYLOAD_BASE_v1.schema.txt"
-# Measured at build a43cb903 (brief, "Current state"); the ceiling below keeps
-# authority a minor share of one request, leaving room for evidence.
-MEASURED = {"CP-0": 144_867, "CP-L10": 198_465, "CP-5": 165_532}
+# Measured at build a43cb903 (brief, "Current state"); CP-0 re-measured at
+# cdea0c9f, whose three CP-0 texts grew by 1,061 bytes (docs/DECISIONS.md §61).
+# The ceiling below keeps authority a minor share of one request, leaving room
+# for evidence.
+MEASURED = {"CP-0": 145_928, "CP-L10": 198_465, "CP-5": 165_532}
 AUTHORITY_SHARE_OF_REQUEST = 0.25
 FOLDERS = {
     "CP-0": "cp-0-source-readiness",

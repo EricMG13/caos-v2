@@ -212,7 +212,7 @@ Run representation QA after coverage QA: one active content representation per r
 ## REF_CP-0_I_DownstreamReadiness.md
 <!-- REF_CP-0_I_DownstreamReadiness (Tier 2) | 2026-08-02 -->
 <step_reference module="CP-0" step="I" name="DownstreamReadiness">
-Per-module source-readiness verdict: `READY` | `READY_WITH_LIMITATIONS` | `CONDITIONAL` | `BLOCKED`. Justify each verdict from the frozen Representation Catalog, content map, gaps, conflicts and risk log.
+Per-module source-readiness verdict: `READY` | `READY_WITH_LIMITATIONS` | `CONDITIONAL` | `BLOCKED`. Justify each verdict from the frozen Representation Catalog, content map, gaps, conflicts and risk log. `CONDITIONAL` names a source, or the prepared representation of one, that the effective-source set does not carry; an upstream analytical handoff that has not yet been produced is never a readiness ground, because navigation sequences modules and readiness does not.
 
 After the readiness table, produce the **Recommended Run Command Sheet**. One
 row per recommended or blocked next live host module:
@@ -224,7 +224,7 @@ Rules:
 1. Module IDs are canonical live, navigable hosts only: CP-1, CP-1A, CP-1B, CP-1C, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-2H, CP-3, CP-3C, CP-3D, CP-4, CP-4C, CP-5, CP-6, CP-8, CP-L10. Never recommend CP-X, CP-PARSE, a retired alias, CP-MODEL, CP-MEMO or CP-DR.
 2. `candidate_command` is `Run <module_id>` plus only objective, issuer/entity and period qualifiers supported by this run. Its command module must match the row module exactly.
 3. READY and READY_WITH_LIMITATIONS rows set `exact_command` equal to `candidate_command` and carry every limitation into the row.
-4. CONDITIONAL and BLOCKED rows set `exact_command` to exactly `DO NOT RUN`; retain the candidate only as a non-executable preview and state the missing or unusable evidence briefly.
+4. CONDITIONAL and BLOCKED rows set `exact_command` to exactly `DO NOT RUN`; retain the candidate only as a non-executable preview and state the missing or unusable evidence briefly. A CONDITIONAL row is discharged only when the named source is supplied and CP-0 is re-run; it never waits on an upstream analytical handoff.
 5. Source filenames come only from the frozen Representation Catalog/effective-source set. `PASS_THROUGH` attaches its original; `COMPLETE` or `DEGRADED` attaches its managed prepared artifact; `BLOCKED` and skipped rows attach nothing. Never attach both original and parsed content for one logical source.
 6. Every receiving module retains this CP-0 handoff's `run_id` in canonical `upstream_artifacts_used`, even when another handoff is its immediate analytical dependency.
 7. CP-0 passes managed artifacts directly to downstream modules. The user does not copy derivatives back into the source folder or reattach them between parsing and readiness.

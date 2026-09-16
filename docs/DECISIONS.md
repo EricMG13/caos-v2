@@ -2147,3 +2147,92 @@ meaning-changing edits and would weaken the pinned canonical contract. The
 model is therefore unqualified; its performed evidence cannot mint a verdict.
 Any future spend must be a separately authorized, materially different
 candidate or protocol experiment.
+
+## 2026-09-16 §61 — Two authorised edits inside the vendored bundle, and the build they produce
+
+Invariant 4 says never edit a file that exists upstream. On 16 September 2026
+the repository's owner authorised two edits to `vendor/deploy-v/`, these and no
+others, after the VMO2 qualification runs (`qualification/vmo2-fy2025/RESULT.md`)
+showed both to be defects in the methodology itself rather than in the host's
+reading of it. This entry is the override, scoped to the two changes below, and
+§13's pin moves to the build they produce. Upstream
+`github.com/EricMG13/Deploy-V@c4d2e356` does not carry either change: the
+vendored tree is now that build plus these two, and the next upstream pull
+either carries them forward or supersedes them with an entry here.
+
+**Change 1 — `CONDITIONAL` is a source condition.** CP-0 defined the verdict
+only by its effect (`exact_command = DO NOT RUN`), and a live run marked CP-5
+`CONDITIONAL` on "CP-L10 must first produce the selected-route analytical
+handoff", ending the route BLOCKED after two modules had been paid for. The rule
+is now stated in each of the three places CP-0 reads it —
+`skills/cp-0-source-readiness/SKILL.md` (the T8 contract),
+`references/REF_CP-0_STEPS.md` (step I, the verdict and rule 4 of the command
+sheet) and `references/CP-0__SourceReadiness__payload.schema.txt` (the
+`recommended_run_commands` rules) — in the same words: `CONDITIONAL` names a
+source, or the prepared representation of one, that the effective-source set
+does not carry; it is discharged only when that named source is supplied and
+CP-0 is re-run; an upstream analytical handoff that has not yet been produced is
+never a readiness ground, because navigation and the catalog's edges sequence
+modules and `readiness` does not. "Or the prepared representation of one" is
+what keeps `CP0_CAPACITY_RESUME_CONTRACT_v1.md` consistent, where readiness
+stays `CONDITIONAL` while a required parse is still running.
+`tests/test_bundle_pin.py::test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read`
+fails the day any of the three copies stops saying so.
+
+**Change 2 — the validator derives the status floor from the findings.**
+`CANON_SHARED.md § CP_CONFIDENCE_SCORE.md` and CP-5A step 11 say any MATERIAL
+finding is at least `Restricted` and any CRITICAL one is `Blocked`, and
+`confidence_score.py` applies exactly that — to counts the module passes it.
+`validate_handoff.py` checked only the score caps given the declared status, so
+a CP-0 declaring `Passed`, `Committee Ready`, 93 over its own
+`SOURCE_GAP | MATERIAL` row was conformant, and a second live CP-0 declared
+`Passed`, 78 over two CRITICAL rows. The validator now reads every unfenced
+pipe table whose column is headed `Severity` (emphasis and backticks stripped,
+case-folded, the header may carry a qualifier), takes a cell that begins with
+one of the canon's three words as a finding, and refuses a CRITICAL finding
+under any status but `Blocked` and a MATERIAL finding under `Passed`. It is a
+floor, never a ceiling: `Restricted` or `Blocked` with no finding row stays the
+module's own stricter call, a fenced table is not a finding, and a column
+headed anything else is not read. Vendor errors go to the host as
+`HANDOFF_MALFORMED`, which is what a `confidence_band` inconsistent with its
+score already is.
+
+**How the edit was made.** The validator was changed once, at the `SHARED`
+owner the bundle declares (`cp-0-source-readiness/scripts/validate_handoff.py`),
+and `verify_package.py --refresh` — the bundle's own procedure for an
+intentional edit — synchronised the 24 byte-identical copies, ran its 52 unit
+tests and 10 helper self-checks, and regenerated `DEPLOY_V_INTEGRITY_v1.json`,
+`DEPLOY_V_MANIFEST.json`, `DEPLOY_V_BASELINE.json`,
+`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json` and the two Copilot memory prompts. The
+host loads only the `cp-os-credit-os` copy (`server/methodology/vendor.py`),
+but the refresh refuses "shared implementation drift", so editing one copy was
+never an option. Build id
+`cdea0c9fbb046321fdd6d0fb526b6bc74cf4c9e9e2ea4b381f1c4a61081e9d22`; the
+manifest's own SHA-256 is
+`087bbdf8421aca31cac4e04adf3c85d779cc4822cff748e0715d24a82157b1da`, still
+68,657 bytes, so §35's ceiling reasoning is unchanged. The five host pins that
+compare against the bundle moved with it (`tests/test_bundle_pin.py`,
+`tests/test_methodology_bundle.py`, `tests/test_qualification_matrix.py`,
+`tests/test_loop_charges.py`, `tests/test_canonical_proof.py`), and
+`tests/test_delivered_authority.py` re-measures CP-0's delivered authority at
+145,928 bytes, 1,061 more than at `a43cb903` — exactly the three prose additions.
+
+**What it costs.** Every run pinned to `a43cb903` — including the VMO2 runs
+`RESULT.md` rests on — now refuses `ORCHESTRATION_BUILD_MOVED` on re-proof.
+That is the Phase 10 gap read strictly and the fail-closed direction: their
+artifacts, charges and citations stand as recorded, and their proofs are no
+longer re-derivable against this tree. A qualification set's digest covers
+documents, keys and route selection, not the build, so sets are unaffected.
+
+**Decided against, here.** `completeness_check.load_contract` reads only the
+`critical_cell_*` disqualifiers and never `frontmatter_limitation_flags`,
+`frontmatter_validation_warnings` or `document_substrings_casefold`. That is a
+second rule with its own semantics — envelope flags that name a fixture as not
+a current golden, and whole-document substrings — which
+`server/methodology/handoff.py` already records as a host gap; it is not the
+canon's severity rule, and folding it in would make one authorised edit into
+two. It stays open, with its own entry the day it is authorised. The bundle's
+own `tests/` were not extended, being upstream files outside the
+authorisation; the named tests live in the host suite
+(`tests/test_canonical_handoff.py`, `tests/test_bundle_pin.py`).
+`CANON_SHARED.md` is untouched: the rule was already there, unenforced.

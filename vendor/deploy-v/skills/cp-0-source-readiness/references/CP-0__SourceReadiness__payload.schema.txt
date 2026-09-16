@@ -101,6 +101,8 @@ properties
         rules
           READY READY_WITH_LIMITATIONS require exact_command equals candidate_command
           CONDITIONAL BLOCKED require exact_command const DO NOT RUN
+          CONDITIONAL names a source the effective-source set does not carry and an upstream analytical handoff not yet produced is never a readiness ground
+          CONDITIONAL discharged only when the named source is supplied and CP-0 is re-run
           candidate_command module identifier equals module_id
       model_route_source_assessment type object
         required status assertion_scope required_downstream_handoffs optional_downstream_handoffs cp_model_input_contract next_action

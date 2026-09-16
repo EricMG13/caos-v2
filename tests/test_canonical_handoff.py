@@ -118,6 +118,98 @@ def test_restricted_is_accepted_with_limitations() -> None:
     assert projections.limitation_flags == ("Interim period only",)
 
 
+# The T5 register as live CP-0 runs wrote it (`docs/DECISIONS.md` §61): a
+# header named Severity, and CRITICAL | MATERIAL | MINOR in its cells.
+def _with_findings(
+    markdown: bytes, *severities: str, header: str = "Severity"
+) -> bytes:
+    table = (
+        f"| ID | Type | {header} | Affected modules | Remediation |\n"
+        "|---|---|---|---|---|\n"
+        + "".join(
+            f"| G-{n} | SOURCE_GAP | {s} | CP-5 | Obtain it |\n"
+            for n, s in enumerate(severities, 1)
+        )
+    )
+    return markdown.replace(
+        b"## Gaps & Conflicts\n\n",
+        b"## Gaps & Conflicts\n\n" + table.encode() + b"\n",
+        1,
+    )
+
+
+RESTRICTED = {
+    "qa_status": "Restricted",
+    "confidence_score": 50,
+    "confidence_band": "Low",
+    "committee_status": "Restricted",
+}
+BLOCKED = {
+    "qa_status": "Blocked",
+    "confidence_score": 30,
+    "confidence_band": "Insufficient Information",
+    "committee_status": "Blocked",
+}
+
+
+def test_a_material_finding_over_passed_is_refused_as_the_canon_says() -> None:
+    """CANON_SHARED § CP_CONFIDENCE_SCORE: any MATERIAL finding, no CRITICAL,
+    is `Restricted`. A live CP-0 declared Passed/93 over its own MATERIAL row
+    and the host accepted it; the vendor validator now reads the rows."""
+    markdown = _with_findings(CP0_MD, "MATERIAL")
+    result = CONTRACT.validate_handoff.validate_text(markdown.decode())
+    assert any("MATERIAL" in e and "Restricted" in e for e in result.errors)
+    assert _refused(CP0, markdown).code is RefusalCode.HANDOFF_MALFORMED
+
+
+@pytest.mark.parametrize("header", ["severity", "`Severity`", "Severity (CP-5A)"])
+@pytest.mark.parametrize("cell", ["MATERIAL", "`MATERIAL`", "**Material** — disclosed"])
+def test_the_finding_is_read_however_the_module_spelt_it(
+    header: str, cell: str
+) -> None:
+    markdown = _with_findings(CP0_MD, cell, header=header)
+    assert _refused(CP0, markdown).code is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_a_critical_finding_requires_blocked() -> None:
+    over_restricted = _with_findings(_markdown(CP0, authored=RESTRICTED), "CRITICAL")
+    result = CONTRACT.validate_handoff.validate_text(over_restricted.decode())
+    assert any("CRITICAL" in e and "Blocked" in e for e in result.errors)
+    over_blocked = _with_findings(_markdown(CP0, authored=BLOCKED), "CRITICAL")
+    assert CONTRACT.validate_handoff.validate_text(over_blocked.decode()).errors == ()
+    assert _refused(CP0, over_blocked).code is RefusalCode.HANDOFF_BLOCKED
+
+
+def test_a_material_finding_over_restricted_or_blocked_is_conformant() -> None:
+    restricted = _with_findings(
+        _markdown(CP0, authored=RESTRICTED), "MATERIAL", "MINOR"
+    )
+    assert _validate(CP0, restricted).qa_status == "Restricted"
+    blocked = _with_findings(_markdown(CP0, authored=BLOCKED), "MATERIAL")
+    assert _refused(CP0, blocked).code is RefusalCode.HANDOFF_BLOCKED
+
+
+def test_a_minor_finding_or_no_finding_leaves_the_declared_status_alone() -> None:
+    assert _validate(CP0, _with_findings(CP0_MD, "MINOR")).qa_status == "Passed"
+    # A column that is not a severity, and a severity cell outside the enum,
+    # are not findings: the rule reads the canon's three words and nothing else.
+    assert _validate(CP0, _with_findings(CP0_MD, "Severe")).qa_status == "Passed"
+    other = _with_findings(CP0_MD, "MATERIAL", header="Materiality")
+    assert _validate(CP0, other).qa_status == "Passed"
+    # Restricted with no finding row stays the module's own, stricter call.
+    assert _validate(CP0, _markdown(CP0, authored=RESTRICTED)).qa_status == "Restricted"
+
+
+def test_a_finding_inside_a_code_fence_is_not_a_finding() -> None:
+    fenced = CP0_MD.replace(
+        b"## Gaps & Conflicts\n\n",
+        b"## Gaps & Conflicts\n\n```\n| ID | Severity |\n|---|---|\n"
+        b"| 1 | MATERIAL |\n```\n\n",
+        1,
+    )
+    assert _validate(CP0, fenced).qa_status == "Passed"
+
+
 def test_no_validator_text_reaches_a_refusal() -> None:
     markdown = _markdown(
         L10, override={"issuer_name": ["x"]}, body_note=SECRET

@@ -1,12 +1,12 @@
 {
   "authority": "DEPLOY_V_BASELINE",
-  "baseline_digest": "9bc532840efdac8c0278af6d245f55c1b39a65b621ad999fd0a0d806e1d12b04",
+  "baseline_digest": "343e054d988f789b6d1ff0ab080618257782807c1d5be7bf60adb485a82c8504",
   "packages": {
     "cp-0-source-readiness": {
       "files": {
         "SKILL.md": {
-          "bytes": 33695,
-          "sha256": "20a3634526648cd4983fcfd412ba68162b9e832781abd7c90b5caa7a236a3e1d"
+          "bytes": 34100,
+          "sha256": "7e218046e967adff83f28364037b881d58b982b731cecc91d3cdbca8e118760d"
         },
         "references/CP-0_SCHEMA_REFERENCE.md": {
           "bytes": 2933,
@@ -17,8 +17,8 @@
           "sha256": "b1dc690e2ddb45632280abaa1f5a3d9ba3f63bd02f0871e8a83e7888f0320b40"
         },
         "references/CP-0__SourceReadiness__payload.schema.txt": {
-          "bytes": 6592,
-          "sha256": "d867d1b640bbe16c515822ae1d1302c6336ecf12d0740ec678eb6af2b1e25c87"
+          "bytes": 6840,
+          "sha256": "5730b9120ab4415007b3c07b6bf4ba77121ad740e1028848a0687d4749db96ac"
         },
         "references/CP-PARSE_SCHEMA_REFERENCE.md": {
           "bytes": 2020,
@@ -37,8 +37,8 @@
           "sha256": "45ad6ab2eeeb754ae46a716b7e947e3acac214ea2696ef5e072f10ef7d36451a"
         },
         "references/REF_CP-0_STEPS.md": {
-          "bytes": 22284,
-          "sha256": "d367c334f529a33e371b6c9568b5dce8d487e0f0d1bee3e8c15830555e46e78a"
+          "bytes": 22692,
+          "sha256": "ededc8b31ac236434dce3d7b03514a27f42029873dcd4dfb1010bd027eab3505"
         },
         "references/REF_CP-PARSE_STEPS.md": {
           "bytes": 14038,
@@ -57,8 +57,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -101,8 +101,8 @@
           "sha256": "8f90ad05f99ffe09ea6f223cbd67827bb4ab36f4d243e12645eac628dbff9233"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -153,8 +153,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -193,8 +193,8 @@
           "sha256": "8f90ad05f99ffe09ea6f223cbd67827bb4ab36f4d243e12645eac628dbff9233"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -237,8 +237,8 @@
           "sha256": "3073ed168e8f89b422b3421df4255a48a0875b1d44a90a53414ce078c2f7015b"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -269,8 +269,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -309,8 +309,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -365,8 +365,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -409,8 +409,8 @@
           "sha256": "3bb7fd7ea167ccb154ac92e819aaa6640c63a08648a3808ccaa7283e8a595722"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -469,8 +469,8 @@
           "sha256": "48eedacfa17fcb75ac17f67e3141639973aec1e7e0f00f3491896f702d27158f"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -513,8 +513,8 @@
           "sha256": "3bb7fd7ea167ccb154ac92e819aaa6640c63a08648a3808ccaa7283e8a595722"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -557,8 +557,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -637,8 +637,8 @@
           "sha256": "2e6c084747be7f67052c5c333fc80d5954f0fe6dcdba14e6b933fffaae3c1878"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -681,8 +681,8 @@
           "sha256": "19fbf04ce2c909dacc43037081e5da95c539ef4ac3e7e3839a1d70d5c13cd18b"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -721,8 +721,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -801,8 +801,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -845,8 +845,8 @@
           "sha256": "2e6c084747be7f67052c5c333fc80d5954f0fe6dcdba14e6b933fffaae3c1878"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -897,8 +897,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -949,8 +949,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -989,8 +989,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -1021,8 +1021,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         },
         "scripts/validate_research.py": {
           "bytes": 4145,
@@ -1113,8 +1113,8 @@
           "sha256": "02590c0bf151e1e291b72214df3311f686d88e576d60a80a6b5ca73ecc44a8d1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -1257,8 +1257,8 @@
           "sha256": "e0a54b1872094e1c691dd0e919623966811884c35a914499d07c0ea4eaef02b1"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     },
@@ -1425,8 +1425,8 @@
           "sha256": "558b7812f2445b90d6835566c0efffab86a2dda0bb085531477635d85663dc0d"
         },
         "scripts/validate_handoff.py": {
-          "bytes": 35638,
-          "sha256": "c640aaaf579907c63a72d5a5a0df5134ed89dbf273441846ec399353e3bbac9e"
+          "bytes": 37747,
+          "sha256": "c89be464c47483652ee5a84dc1821bbb33529c356b68b89c14b53b7e1b7223a1"
         }
       }
     }
