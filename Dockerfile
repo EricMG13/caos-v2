@@ -1,9 +1,23 @@
-# One process, the standard library's calculators, and nothing that renders a
-# document. `docs/DECISIONS.md` §14: no workbook build and no publication module,
-# so nothing here installs LibreOffice, poppler or a font -- which is 482 MB
-# across 176 packages, and 176 packages of standing CVE triage `pip-audit` does
-# not cover.
-#
+# One image, two commands: the API (this file's default) and the worker
+# (`server/engine/worker`; the compose files override CMD). No supervisor and
+# no reverse proxy inside the image -- the edge is operator infrastructure
+# (`docs/DECISIONS.md` §53, Task 4.5 decision 1) -- and nothing here installs
+# LibreOffice, poppler or a font (§14): that is 482 MB across 176 packages, and
+# 176 packages of standing CVE triage `pip-audit` does not cover.
+
+# ---- build: compile the static export; this stage never reaches the image ----
+# Digest-pinned; a tag alone is not a pin. node:24-slim (Debian bookworm).
+FROM node@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS build
+WORKDIR /app/frontend
+# The lock alone first, so a source change does not re-resolve dependencies.
+COPY frontend/package.json frontend/package-lock.json ./
+# --ignore-scripts: no package's install script runs in a build this repository
+# does not review line by line.
+RUN npm ci --ignore-scripts
+COPY frontend/ ./
+RUN npm run build
+
+# ---- runtime ----
 # Digest-pinned; a tag alone is not a pin. python:3.14-slim.
 # Re-pinned for CVE-2026-14456 (openssl, HIGH) -- the answer to a red image
 # scan is a re-pin, the same as a red audit is a recompile.
@@ -26,7 +40,8 @@ RUN apt-get update \
 # from the locked one is the thing --require-hashes exists to prevent.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CAOS_SITE_ROOT=/app/site
 
 WORKDIR /app
 
@@ -50,17 +65,28 @@ RUN pip install --no-cache-dir --require-hashes --only-binary :all: \
 
 COPY server/ ./server/
 COPY vendor/ ./vendor/
+# Only the compiled export -- no Node, no npm, no node_modules and no frontend
+# source reach this stage; the build stage above is discarded with it.
+COPY --from=build /app/frontend/dist ./site
 
 # Nothing here needs to write to the image or to be root to read it. The blob
-# store and the database are outside the container by design.
+# store and the database are outside the container by design. `/blobs` exists
+# here only so a fresh, empty named volume mounted over it inherits this
+# ownership on its first mount (the documented Docker volume-population
+# behaviour) -- an operator's real deployment mounts its own blob root instead.
 RUN useradd --system --uid 10001 --no-create-home caos \
-    && chown -R caos:caos /app
+    && mkdir -p /blobs \
+    && chown -R caos:caos /app /blobs
 USER 10001
 
 # The route surface (`docs/DECISIONS.md` §22). One worker: a run tail holds its
 # connection for up to five minutes, so how many of those a deployment can
 # afford is a question about its database's connection count -- not a default
-# worth guessing here.
+# worth guessing here. `--no-proxy-headers`: the edge guard reads the real
+# socket peer, not a client-forwarded header (finding 8); `--no-server-header`
+# names nothing about the process to an unauthenticated caller;
+# `--limit-concurrency` bounds unpooled connections (§11).
 EXPOSE 8000
-CMD ["python", "-m", "uvicorn", "server.api.app:app", \
-     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["python", "-m", "uvicorn", "server.api.site:application", \
+     "--host", "0.0.0.0", "--port", "8000", "--workers", "1", \
+     "--no-proxy-headers", "--no-server-header", "--limit-concurrency", "32"]

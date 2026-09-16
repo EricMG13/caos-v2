@@ -1,7 +1,20 @@
-# The image copies only these (Dockerfile); everything else -- .venv*, node_modules,
-# .dev-data, reports -- would only slow the build context upload.
+# The image copies only these (Dockerfile); everything else -- .venv*, .git,
+# .dev-data, reports -- would only slow the build context upload. `frontend/`
+# is admitted whole for the build stage, then stripped of its dev-only trees:
+# tests, fixtures, Playwright output and node_modules never reach even that
+# stage, and no runtime image copies Node, npm or a frontend source file at all
+# (Dockerfile decision 1: the build stage is discarded, only `dist/` survives).
 *
 !requirements.txt
 !server/
 !vendor/
+!frontend/
+frontend/node_modules
+frontend/dist
+frontend/dist-demo
+frontend/tests
+frontend/fixtures
+frontend/playwright-report
+frontend/test-results
+frontend/a11y-results
 **/__pycache__
