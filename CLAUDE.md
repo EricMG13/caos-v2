@@ -1442,12 +1442,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   databases under one transaction and advisory lock. Backup/restore and the
   no-downgrade rule are recorded in `docs/MIGRATIONS.md` and
   `docs/DECISIONS.md` §20a.
-- **The recorded digest proves the declared schema did not change, not that the
-  database still matches it.** `apply_schema` compares the SHA-256 of
-  `schema.sql` against what was applied; a table altered or dropped outside this
-  code afterwards passes unnoticed. It catches the failure that startup exists to
-  catch — a process meeting a database an older build created — and not
-  tampering. *Upgrade:* apply the declared schema into a scratch namespace and
+- **The recorded digests prove the declared history did not change, not that the
+  database still matches it.** `apply_schema` compares each migration's SHA-256
+  against its `store_migrations` row, and the SHA-256 of the whole ordered
+  `(version, name, digest)` history against `store_schema.applied_digest`. It
+  reads no `information_schema`, so a table altered or dropped outside this code
+  afterwards passes unnoticed. What it catches is a declared history that
+  disagrees with the applied one — edited, reordered, missing, or newer than this
+  build knows — and not tampering, which `docs/DECISIONS.md` §20a says in the
+  same breath as the migration policy: a checksum cannot see a change made to
+  the schema and its metadata together. The older database this entry used to
+  name as the caught case is no longer refused at all; §20a's prefix advancement
+  migrates it. *Upgrade:* apply the declared schema into a scratch namespace and
   diff `information_schema` against the live one, the day a database is edited by
   anything but this function.
 - **`budget_ledger` records a charge and enforces no ceiling.** One charge per
