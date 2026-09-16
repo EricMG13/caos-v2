@@ -448,3 +448,22 @@ def test_size_gate_rejects_over_limit_and_invalid_base(tmp_path: Path) -> None:
     assert "not-a-base" in invalid.stderr
     assert missing.returncode != 0
     assert "PR_BASE is required" in missing.stderr
+
+
+def test_the_vendored_bundle_is_not_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`vendor/deploy-v/` is read-only and pinned; a diff that only touches it is
+    not work this policy is measuring (docs/AI_CODE_QUALITY.md). Git's default
+    pathspec matching needs a `/` before the name, so `**/vendor/**` alone never
+    matched a root-level `vendor/...` path and the bundle was counted in full."""
+    repo, base = _size_repo(tmp_path, 1)
+    (repo / "vendor" / "deploy-v").mkdir(parents=True)
+    (repo / "vendor" / "deploy-v" / "SKILL.md").write_text(
+        "x\n" * 900, encoding="utf-8"
+    )
+    _git(repo, "add", "vendor")
+    _git(repo, "commit", "-qm", "vendor the bundle")
+    monkeypatch.chdir(repo)
+
+    assert check_pr_size.changed_lines(base) == 1
