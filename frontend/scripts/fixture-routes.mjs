@@ -18,15 +18,22 @@ export const SECTIONS = [
 export const ENABLED_SECTIONS = ["directory", "upload", "run", "analysis"];
 export const DISABLED_SECTIONS = SECTIONS.filter((section) => !ENABLED_SECTIONS.includes(section));
 
-/** The demo fixtures' case. A case section with no case sends no request. */
+/** The demo fixtures' case, for a section still on the legacy wire. A case
+    section with no case sends no request. */
 export const DEMO_CASE = "CASE-2026-CVNA01";
+
+/** Upload's v1 fixture (slice 4.1h) carries the case as a UUID; Run and
+    Analysis stay on the legacy string until their own slices cut over. */
+export const DEMO_CASE_BY_SECTION = { upload: "ff1fbf5a-e56f-4f84-a983-2f5a507675f0" };
 
 /** A section's page, with the demo case where the section is case-scoped.
     @param {string} section
     @param {string | null} [fixture] */
 export function sectionRoute(section, fixture = null) {
   const params = new URLSearchParams();
-  if (["upload", "run", "analysis"].includes(section)) params.set("case", DEMO_CASE);
+  if (["upload", "run", "analysis"].includes(section)) {
+    params.set("case", DEMO_CASE_BY_SECTION[section] ?? DEMO_CASE);
+  }
   if (fixture) params.set("fixture", fixture);
   const search = params.toString();
   return `/${section}/${search ? `?${search}` : ""}`;

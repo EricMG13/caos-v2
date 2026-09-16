@@ -17,8 +17,7 @@ import { figureCounts, isUncited, kindLabel } from "@/sections/report/RevisionEd
 import { shortDigest } from "@/sections/report/text";
 import { nodeAccept } from "@/sections/run/NodeDetail";
 import { severityOf } from "@/sections/run/RouteGraph";
-import { clock, withdrawRefusal } from "@/sections/upload/SourcePack";
-import type { SourceRow } from "@/wire/upload";
+import { clock } from "@/sections/upload/SourcePack";
 import { CHROME_KEYS, REQUIRED_KEYS } from "@/wire/keys";
 import type { LadderStep } from "@/wire/committee";
 import type { Figure, Paragraph } from "@/wire/report";
@@ -225,18 +224,5 @@ describe("the actions a run and an upload refuse", () => {
     expect(refusal?.code).toBe("NODE_NOT_ACCEPTABLE");
     expect(refusal?.clears).toContain("CP-4");
     expect(refusal?.clears).toContain("waiting on CP-1");
-  });
-
-  // Upload still reads the legacy wire here; this moves with its cutover.
-  test("a source already withdrawn refuses a second withdrawal, by either mark", () => {
-    const source = (over: Partial<SourceRow>): SourceRow =>
-      ({ source_id: "SRC-1", disposition: "ADMITTED", withdrawn_at: null, ...over }) as SourceRow;
-    expect(withdrawRefusal(source({}))).toBeNull();
-    expect(withdrawRefusal(source({ withdrawn_at: "2026-09-09T14:30:00Z" }))?.code).toBe(
-      "SOURCE_ALREADY_WITHDRAWN",
-    );
-    expect(withdrawRefusal(source({ disposition: "WITHDRAWN" }))?.code).toBe(
-      "SOURCE_ALREADY_WITHDRAWN",
-    );
   });
 });
