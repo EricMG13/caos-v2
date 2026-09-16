@@ -597,8 +597,15 @@ def test_version_thirteen_adds_empty_work_and_keeps_attempts_unleased(
         case_id = create_case(conn, BoundaryText.of("before work"))
         run_id = start_run(conn, case_id)
         conn.commit()
-        attempt = start_attempt(conn, run_id, "CP-0")
-        fail_run(conn, run_id)
+        # Rows as version 12 wrote them: the store functions now read run_work.
+        attempt = uuid4()
+        conn.execute(
+            "INSERT INTO run_attempts (attempt_id, run_id, route_node_id, ordinal)"
+            " VALUES (%s, %s, 'CP-0', 1)",
+            (attempt, run_id),
+        )
+        conn.execute("UPDATE runs SET status = 'FAILED' WHERE run_id = %s", (run_id,))
+        conn.commit()
         apply_schema(conn)
         assert conn.execute(
             "SELECT attempt_id, lease_token FROM run_attempts"

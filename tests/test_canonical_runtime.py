@@ -56,6 +56,7 @@ from server.store import StoreConnection, connect
 from server.store.events import lock_run
 from server.store.outcomes import accepted_rows
 from server.store.runs import block_run
+from server.store.work import Lease
 
 __all__ = ["harness", "route"]
 
@@ -265,10 +266,12 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     """The verdict is re-derived from the stored bill and diagnostic (P1)."""
     crashes = [RefusalCode.STORE_UNAVAILABLE]
 
-    def crashing(conn: StoreConnection, run_id: UUID) -> bool:
+    def crashing(
+        conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+    ) -> bool:
         if crashes:
             raise Refusal(crashes.pop())
-        return block_run(conn, run_id)
+        return block_run(conn, run_id, lease=lease)
 
     monkeypatch.setattr(runtime, "block_run", crashing)
     answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
@@ -302,10 +305,12 @@ def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
     """A diagnostic blob that will not read never counts as "not blocked"."""
     crashes = [RefusalCode.STORE_UNAVAILABLE]
 
-    def crashing(conn: StoreConnection, run_id: UUID) -> bool:
+    def crashing(
+        conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+    ) -> bool:
         if crashes:
             raise Refusal(crashes.pop())
-        return block_run(conn, run_id)
+        return block_run(conn, run_id, lease=lease)
 
     monkeypatch.setattr(runtime, "block_run", crashing)
     answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
