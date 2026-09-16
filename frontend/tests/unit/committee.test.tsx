@@ -4,8 +4,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { CommitteeSection } from "@/sections/committee/CommitteeSection";
-import { WATERMARK } from "@/sections/committee/Paper";
+import { Paper, WATERMARK } from "@/sections/committee/Paper";
 import type { DocumentOf } from "@/wire";
+import type { Citation } from "@/wire/shared";
+import type { CommitteeBody } from "@/wire/committee";
 
 // Vitest runs from frontend/; the fixtures sit beside the tests' package root.
 function load(name: string): DocumentOf<"committee"> {
@@ -208,6 +210,65 @@ describe("Committee", () => {
     expect(output).toHaveTextContent("The output is one HTML file");
     expect(output.getAttribute("data-output")).toBe(signer.body.deliverable.output);
     expect(q(container, "[data-paper] .rd-table")).toHaveTextContent("Total funded debt");
+  });
+
+  test("test_committee_paper_inserts_no_figure_absent_from_its_text", () => {
+    // F12: a figure whose text does not occur in the paragraph must never be
+    // inserted into the rendered paper. "$99" is not in "Revenue was $10."
+    const citation = (chip: string): Citation => ({
+      chip,
+      document_sha256: "0".repeat(64),
+      source_label: "D-01",
+      page: 1,
+      bboxes: [[0, 0, 1, 1]],
+      matched_text: "$10",
+      observed_at: "2026-09-14T00:00:00Z",
+      render_url: null,
+    });
+    const body: CommitteeBody = {
+      deliverable: {
+        title: "Test Memo",
+        issuer: "Test Issuer",
+        snapshot: "snp_test",
+        revision_id: "rev_1",
+        filed: false,
+        watermark: null,
+        output: "one HTML file",
+      },
+      artifacts: [],
+      narrative: { title: "Narrative", paragraphs: [] },
+      provenance: [],
+      paper: [
+        {
+          n: 1,
+          title: "Section",
+          module_id: "CP-1",
+          paragraphs: [
+            {
+              text: "Revenue was $10.",
+              figures: [
+                { text: "$10", citation: citation("D-01 p.1 ¶1") },
+                { text: "$99", citation: citation("D-01 p.1 ¶2") },
+              ],
+            },
+          ],
+          table: null,
+        },
+      ],
+      ladder: [],
+      receipt: null,
+      file: null,
+    };
+    const { container } = render(
+      <MemoryRouter>
+        <EvidenceProvider>
+          <Paper body={body} scope="all" />
+        </EvidenceProvider>
+      </MemoryRouter>,
+    );
+    const paragraph = q(container, ".rd-sec[data-n='1'] p.rd-p");
+    expect(paragraph.textContent).not.toContain("$99");
+    expect(container.querySelectorAll("[data-figure]")).toHaveLength(1);
   });
 
   test("the tabs scope the paper without leaving it", () => {

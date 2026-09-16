@@ -5,12 +5,19 @@
 export interface Segment<F> {
   text: string;
   figure: F | null;
+  /** False when this figure's own text was not found anywhere in `text`
+      (in order, after earlier matches). A caller must never render such a
+      figure inline — doing so would insert a value the source text never
+      stated (REPAIR_PLAN F12). It is still returned, so a caller that keeps
+      a register of every figure (cited or not) can still list it. */
+  placed: boolean;
 }
 
 /** Splits `text` around each figure's occurrence, in text order. Figures are
     matched in the order given, so a figure that repeats is matched to its
-    next occurrence; a figure the text does not contain is appended with no
-    text of its own and still renders its chip. */
+    next occurrence; a figure the text does not contain is appended with
+    `placed: false` and no text of its own — a caller renders it, if at all,
+    outside the prose (e.g. a figure register), never inline. */
 export function segments<F extends { text: string }>(text: string, figures: F[]): Segment<F>[] {
   const searched = new Map<string, number>();
   const hits: { figure: F; at: number }[] = [];
@@ -32,12 +39,12 @@ export function segments<F extends { text: string }>(text: string, figures: F[])
       unplaced.push(figure);
       continue;
     }
-    if (at > cursor) out.push({ text: text.slice(cursor, at), figure: null });
-    out.push({ text: figure.text, figure });
+    if (at > cursor) out.push({ text: text.slice(cursor, at), figure: null, placed: true });
+    out.push({ text: figure.text, figure, placed: true });
     cursor = at + figure.text.length;
   }
-  if (cursor < text.length) out.push({ text: text.slice(cursor), figure: null });
-  for (const figure of unplaced) out.push({ text: "", figure });
+  if (cursor < text.length) out.push({ text: text.slice(cursor), figure: null, placed: true });
+  for (const figure of unplaced) out.push({ text: "", figure, placed: false });
   return out;
 }
 

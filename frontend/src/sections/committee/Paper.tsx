@@ -70,13 +70,17 @@ function SectionView({ section }: { section: PaperSection }) {
       </h3>
       {section.paragraphs.map((paragraph, i) => (
         <p key={i} className="rd-p">
-          {segments(paragraph.text, paragraph.figures).map((segment, j) =>
-            segment.figure ? (
+          {segments(paragraph.text, paragraph.figures).map((segment, j) => {
+            // A figure not found in this paragraph's own text is never
+            // rendered inline: doing so would insert a value the text never
+            // stated (REPAIR_PLAN F12).
+            if (segment.figure && !segment.placed) return null;
+            return segment.figure ? (
               <Cite key={j} figure={segment.figure} />
             ) : (
               <span key={j}>{segment.text}</span>
-            ),
-          )}
+            );
+          })}
         </p>
       ))}
       {section.table ? <Table table={section.table} /> : null}

@@ -88,6 +88,13 @@ class _Packed:
     extraction_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedPack:
+    """A whole pack, extracted and packed, before any store access."""
+
+    documents: tuple[_Packed, ...]
+
+
 def admit_pack(  # noqa: PLR0913 -- one pack's store, blobs and policy, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
@@ -99,13 +106,27 @@ def admit_pack(  # noqa: PLR0913 -- one pack's store, blobs and policy, keyword-
 ) -> list[UUID]:
     """Admit every document or refuse the pack. Returns the new source ids.
 
+    `prepare_pack` then `admit_prepared`: extraction before the case lock, and
+    no commit -- the caller's transaction makes the pack whole or nothing.
+    """
+    pack = prepare_pack(documents, dispatch=dispatch, limits=limits)
+    return admit_prepared(conn, blobs, case_id, pack)
+
+
+def prepare_pack(
+    documents: Sequence[Document],
+    *,
+    dispatch: ExtractorDispatch = dispatch_by_content,
+    limits: AdmissionLimits = DEFAULT_LIMITS,
+) -> PreparedPack:
+    """Bound, extract and pack every document, touching no store.
+
     Each document is read by the extractor `dispatch` chooses from its own
     bytes (§44.6), so a mixed pack admits whole and a PDF named `.txt` is still
-    a PDF. Bytes go to the blob store under their digest; the row holds the
-    address. Text is extracted to tokens carrying page, region, line and
-    rectangle, and packed into blocks -- one row each, never a JSON column on
-    the source row, which is the ~8x read defect `docs/AI_CODE_QUALITY.md`
-    section 1 measures.
+    a PDF. Text is extracted to tokens carrying page, region, line and
+    rectangle, and packed into blocks -- one row each when admitted, never a
+    JSON column on the source row, which is the ~8x read defect
+    `docs/AI_CODE_QUALITY.md` section 1 measures.
 
     `limits` bounds the pack (document count, pack bytes) and each document
     (document bytes, then -- inside its extractor -- pages, tokens and
@@ -113,7 +134,6 @@ def admit_pack(  # noqa: PLR0913 -- one pack's store, blobs and policy, keyword-
     """
     if not documents:
         raise Refusal(RefusalCode.SOURCE_PACK_EMPTY)
-    _require_case(conn, case_id)
     _check_pack_limits(documents, limits)
 
     # Extract everything first. A document that cannot be read must refuse the
@@ -130,13 +150,25 @@ def admit_pack(  # noqa: PLR0913 -- one pack's store, blobs and policy, keyword-
     # rather than at the write, for the same reason the check above is here:
     # a line the boundary refuses is a line `read_evidence` refuses, so
     # admitting it would pin a source no run can read.
-    packed = [
-        _prepare(document, tokens, identity)
-        for document, (identity, tokens) in zip(documents, extracted, strict=True)
-    ]
+    return PreparedPack(
+        tuple(
+            _prepare(document, tokens, identity)
+            for document, (identity, tokens) in zip(documents, extracted, strict=True)
+        )
+    )
 
+
+def admit_prepared(
+    conn: StoreConnection, blobs: BlobStore, case_id: UUID, pack: PreparedPack
+) -> list[UUID]:
+    """Write a prepared pack under the case lock, in the caller's transaction.
+
+    Never commits: a refusal part way leaves rows the caller rolls back, and the
+    blobs already put are harmless content-addressed orphans.
+    """
+    _require_case(conn, case_id)
     lock_case(conn, case_id)
-    return [_admit_one(conn, blobs, case_id, one) for one in packed]
+    return [_admit_one(conn, blobs, case_id, one) for one in pack.documents]
 
 
 def _check_pack_limits(documents: Sequence[Document], limits: AdmissionLimits) -> None:

@@ -283,7 +283,9 @@ def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     try:
-        candidate = _pin(conn, run_id, source_version, bundle, research, subject)
+        candidate = pin_run_input_in(
+            conn, run_id, source_version, bundle, research, subject=subject
+        )
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -294,14 +296,16 @@ def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
     return candidate
 
 
-def _pin(  # noqa: PLR0913 -- pin_run_input's arguments
+def pin_run_input_in(  # noqa: PLR0913 -- pin_run_input's arguments
     conn: StoreConnection,
     run_id: UUID,
     source_version: int,
     bundle: Bundle,
-    research: object,
-    subject: RunSubject | None,
+    research: object = None,
+    *,
+    subject: RunSubject | None = None,
 ) -> RunInput:
+    """`pin_run_input`'s row and event in the caller's transaction; never commits."""
     if type(source_version) is not int or not 0 < source_version < 2**63:
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     # Every run pins the canonical adapter, whose handoffs name a subject.

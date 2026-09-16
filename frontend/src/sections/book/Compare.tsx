@@ -44,12 +44,17 @@ export function Compare({
   const labelOf = (metric: string) => labels.get(metric) ?? metric;
   const basis = basisOf(compare);
   const cases = compare.cases;
-  const deviating = cases.flatMap((entry) =>
-    compare.metrics.flatMap((metric) => {
+  // A case whose lens is refused (its served snapshot no longer matches the
+  // one it is bound to) contributes no value anywhere in the comparison,
+  // including the deviation notes below the grid — the grid itself already
+  // withholds its cells behind "LENS PINNED" (REPAIR_PLAN F13).
+  const deviating = cases.flatMap((entry) => {
+    if (refusedLens[entry.case_id]) return [];
+    return compare.metrics.flatMap((metric) => {
       const cell = entry.cells[metric];
       return cell?.deviation ? [{ entry, metric, cell }] : [];
-    }),
-  );
+    });
+  });
   const rowCells = (render: (entry: CompareCase) => ReactNode) =>
     cases.map((entry) => <div key={entry.case_id}>{render(entry)}</div>);
   return (
