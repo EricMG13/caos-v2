@@ -4,10 +4,10 @@ import type { ServedRole as ServedRoleWire } from "@/wire";
 
 export function ServedRole({ role }: { role: ServedRoleWire }) {
   return (
-    <div className="railrole" data-served-role={role.standing}>
+    <div className="railrole" data-served-role={role.standing ?? role.role}>
       <span>SERVED ROLE</span>
       <span className="ro">
-        {role.role} · {role.standing}
+        {role.role} · {role.standing ?? "NO STANDING"}
       </span>
     </div>
   );

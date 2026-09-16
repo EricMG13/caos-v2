@@ -5,22 +5,18 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Connect, type Plugin } from "vite";
 
-// Explicit demo dev and preview serve fixtures at the wire's routes. Ordinary
-// dev proxies to the real local API, and production carries none of this.
+// Explicit demo dev and preview serve fixtures at the v1 wire's routes, for the
+// four enabled sections only (brief 4.1, decision 9). Ordinary dev proxies to
+// the real local API, and production carries none of this.
 // `?fixture=<state>` selects
 // fixtures/states/<section>.<state>.json, or drives a transport state.
 const FIXTURES = fileURLToPath(new URL("./fixtures/", import.meta.url));
-const SECTIONS = new Set([
-  "directory",
-  "upload",
-  "analysis",
-  "book",
-  "run",
-  "model",
-  "report",
-  "committee",
-  "admin",
-]);
+
+/** The enabled section a v1 path names, or null. A disabled section is not served. */
+function sectionOf(pathname: string): string | null {
+  if (pathname === "/api/v1/directory") return "directory";
+  return /^\/api\/v1\/cases\/[^/]+\/(upload|run|analysis)$/.exec(pathname)?.[1] ?? null;
+}
 
 // The frame a run's stream has advanced to; the next fetch of /run reads it.
 let runFrame = 0;
@@ -123,8 +119,8 @@ const fixtureMiddleware: Connect.NextHandleFunction = (req, res, next) => {
     return;
   }
   const fixture = requested;
-  const section = /^\/api\/sections\/([a-z]+)$/.exec(pathname)?.[1];
-  if (section && SECTIONS.has(section)) {
+  const section = sectionOf(pathname);
+  if (section) {
     void serveSection(section, fixture, res);
     return;
   }
