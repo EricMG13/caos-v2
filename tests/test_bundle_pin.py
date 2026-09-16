@@ -18,6 +18,8 @@ import json
 from pathlib import Path
 
 import pytest
+from canonical_fixtures import CONTRACT, identity, upstream_ref
+from lite_route_fixtures import realistic_handoff_markdown
 
 BUNDLE = Path(__file__).resolve().parents[1] / "vendor" / "deploy-v"
 CATALOG = (
@@ -167,3 +169,56 @@ def test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read(
     text = (BUNDLE / relative).read_text(encoding="utf-8")
     assert "never a readiness ground" in text, relative
     assert "CP-0 is re-run" in text, relative
+
+
+# `docs/DECISIONS.md` §63: T5B.5 is where CP-5 records what became of a
+# calculation, and "not calculable from provided materials" is the answer its
+# runbook asks for when the sources carry none. Its two status columns are
+# exempt from the placeholder disqualifiers; its seven substantive columns are
+# not, so a validator still cannot pass by leaving the work blank.
+CP5_SKILL = "skills/cp-5-evidence-trace-validator/SKILL.md"
+T5B5_STATUS_COLUMNS = ("Status", "Claim Status")
+T5B5_PLACEHOLDER = "Not Calculable from Provided Materials"
+
+
+def _cp5_handoff() -> str:
+    cp0 = realistic_handoff_markdown(identity("CP-0"))
+    cp0_ref = upstream_ref(identity("CP-0"), cp0)
+    l10 = realistic_handoff_markdown(identity("CP-L10", upstream=(cp0_ref,)))
+    upstream = (cp0_ref, upstream_ref(identity("CP-L10"), l10))
+    return realistic_handoff_markdown(identity("CP-5", upstream=upstream)).decode()
+
+
+def _with_t5b5_cell(markdown: str, column: str, value: str) -> str:
+    """The fixture's first T5B.5 body row with one cell replaced, by column name."""
+    start = markdown.index("#### T5B.5\n")
+    lines = markdown[start:].split("\n")
+    columns = [cell.strip() for cell in lines[2].strip().strip("|").split("|")]
+    cells = [cell.strip() for cell in lines[4].strip().strip("|").split("|")]
+    cells[columns.index(column)] = value
+    lines[4] = "| " + " | ".join(cells) + " |"
+    return markdown[:start] + "\n".join(lines)
+
+
+def test_cp5_exempts_only_its_status_columns_from_the_disqualifiers() -> None:
+    skill = (BUNDLE / CP5_SKILL).read_text(encoding="utf-8")
+    rules = CONTRACT.completeness_check.load_contract(skill, "CP-5")
+    register = rules["registers"]["T5B.5"]
+    assert register["disqualifier_exempt_columns"] == list(T5B5_STATUS_COLUMNS)
+    assert register["critical_columns"] == register["columns"]
+    assert T5B5_PLACEHOLDER.casefold() in rules["blocklist"]
+    substantive = [c for c in register["columns"] if c not in T5B5_STATUS_COLUMNS]
+    assert len(substantive) == 7
+
+    handoff = _cp5_handoff()
+    check = CONTRACT.completeness_check.check
+    assert check(skill, handoff, "CP-5")[0] == []
+    for column in T5B5_STATUS_COLUMNS:
+        honest = _with_t5b5_cell(handoff, column, T5B5_PLACEHOLDER)
+        assert check(skill, honest, "CP-5")[0] == [], column
+    for column in substantive:
+        blank = _with_t5b5_cell(handoff, column, T5B5_PLACEHOLDER)
+        assert check(skill, blank, "CP-5")[0] == [
+            f"T5B.5 row 1: critical column '{column}' holds a disqualifying "
+            f"placeholder '{T5B5_PLACEHOLDER}'"
+        ]

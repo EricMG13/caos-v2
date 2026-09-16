@@ -689,3 +689,49 @@ authorisation, and it belongs with the `completeness_check.load_contract` half
 that §61 left open.
 
 Spend on this set to date: `$5.11`.
+
+## Build `30222a49` — CP-5 completes, and the last key is a draw
+
+Two runs against the build produced by `docs/DECISIONS.md` §63, which exempted
+T5B.5's `Status` and `Claim Status` from the disqualifying-placeholder rule.
+
+| | Run `c5da2040…` | Run `54ec3752…` |
+|---|---|---|
+| Route | COMPLETE | COMPLETE |
+| Artifacts | 3 | 3 |
+| Citations, all re-located | 4 | 9 |
+| `ready_met` | true | true |
+| `projections_met` | true | true |
+| Citation key | missed | missed |
+| Cost | `$1.04320025` | `$0.80026775` |
+
+**CP-5 is fixed.** It completed in both — in the first on its retry, in the
+second first time — where run `36d87283…` on the previous build was refused
+three times for writing the honest answer. All three of those stored bodies were
+replayed through the amended contract and produce no violation, so this is the
+same defect, measured before and after.
+
+**Every key now passes except one.** Readiness and all four declared conclusions
+are met in both runs. What misses is the single citation key: CP-L10 did not
+quote the `£1,021.7 million` Q4 goodwill impairment. Run `42e17048…` did quote
+it. So across three runs where CP-L10 produced an accepted screen, the material
+figure was surfaced once.
+
+### What that means, and it is not an instrument defect
+
+The earlier citation keys were replaced because they measured the draw. This one
+is different in kind: the Q4 goodwill impairment is *the* material change in the
+period, and a financial-change screen that does not surface it is a weaker
+screen. The key is doing the job an evidence key is for.
+
+So the honest reading of two misses is a finding about the model, not about the
+apparatus: **Terra surfaces the period's material figure inconsistently**, and a
+qualification bar that only passes when it does is the bar working. Lowering it
+to make a run pass would be the exact failure `docs/REPAIR_PLAN.md`'s guardrails
+name.
+
+No `complete` snapshot exists on `30222a49`. The path to one is a run in which
+CP-L10 cites the impairment; on the evidence so far that is roughly one run in
+three, at about `$0.90` each.
+
+Spend on this set to date: `$6.95`.

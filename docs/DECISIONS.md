@@ -2284,6 +2284,107 @@ unqualified pathways behind a generic success label — is unaffected by it, and
 any surface that reports qualification status must continue to report that
 there is none.
 
+## 2026-09-16 §63 — CP-5 may say a claim is not calculable: T5B.5's status columns exempted
+
+§62 deferred CP-5 until the other modules were deployed. On 16 September 2026
+the owner instructed that its completion be resolved now, which supersedes that
+deferral, and authorised **one** further edit to `vendor/deploy-v/` under §61's
+precedent — this one and no other. Upstream `github.com/EricMG13/Deploy-V@c4d2e356`
+does not carry it; the vendored tree is that build plus §61's two changes plus
+this one, and the next upstream pull either carries all three forward or
+supersedes them with an entry here. The edit and the pins it moves landed in
+`bb47f12`; this entry is the record that was still owed when that commit was
+made.
+
+**The change.** In `skills/cp-5-evidence-trace-validator/SKILL.md`, register
+T5B.5's `disqualifier_exempt_columns` moves from `none` to `Status; Claim
+Status`. Nothing else in the file, and nothing else in the bundle, changes.
+
+**Why.** `full_run_disqualifiers.critical_cell_values_casefold` lists
+`insufficient information`, `not calculable from provided materials`, `not
+assessable` and `unavailable`, and every column of T5B.5 — the calculation and
+assumption register — was critical with none exempt. T5B.5 is where CP-5
+reproduces a calculation and records what became of it, so "not calculable" in
+its `Status` column is the answer the runbook asks for when the sources carry
+none. Run `36d87283-ef92-49a2-a2b1-ef5928aaa5d2` refused CP-5 three times,
+each billed, with exactly `T5B.5 row 3: critical column 'Claim Status' holds a
+disqualifying placeholder 'Insufficient Information'` (attempts 1 and 2) and
+`T5B.5 row 2/3: critical column 'Status' holds a disqualifying placeholder
+'Not Calculable from Provided Materials'` (attempt 3). In each refused row the
+seven substantive columns were filled — the item, where it is used, the inputs,
+the formula or the reason there is none, the confidence, the credit relevance
+and the source trace — and the only cells that tripped the rule were the two
+that state the claim's standing. Handed two earnings releases, CP-5 said that
+covenant leverage is not calculable without the executed debt definitions and
+was refused for saying so; a validator that cannot write that there can pass
+only by overstating what the evidence supports. The precedent is in the same
+contract: T5.2 exempts `Evidence Status`, T5B.3 exempts `Classification` and
+`Claim Status`, T5B.6 exempts `Classification` — each the column that records
+the state of a thing rather than the thing.
+
+**Proved, not assumed.** The three refused bodies are retained in the run's
+blob root (`caos-qualify-9r7nyozi`, the `diagnostic_sha256` values in
+`qualification/vmo2-fy2025/v3-run7-capture.json`). Replayed through the
+bundle's own `completeness_check.check(skill_text, body, "CP-5")` — the call
+`server/methodology/handoff.py` makes — against the SKILL.md at `449750c` they
+produce one, one and two violations, the messages above verbatim; against the
+edited SKILL.md all three produce none. The same body with a placeholder moved
+into a substantive T5B.5 cell is still refused (`TBD` in `Formula or Logic`,
+`Unavailable` in `Source Trace`, `[Insufficient Information]` in `Item`), a
+T5B.5 with its rows removed is refused for having none, and `Not Assessable` in
+T5B.4's `Source Quality` — an unexempted register — is refused. No provider was
+called; the replay is against the checker and cost nothing.
+`tests/test_bundle_pin.py::test_cp5_exempts_only_its_status_columns_from_the_disqualifiers`
+holds the contract: exactly those two columns exempt, all nine still critical,
+the four phrases still in the blocklist, and a placeholder in any of the seven
+substantive columns of the LITE fixture's CP-5 handoff refused by name.
+
+**Judged and not widened.** Every one of the seventeen registers was read for a
+status-shaped critical column with the same problem. T5.1's `QA Status` and
+`Envelope / Headings Status` describe upstream handoffs that exist and take
+the QA vocabulary, T5.9's `Status` is an issue's open/closed state, and T5B.3's
+`Citation Present?` is a yes/no — none can honestly hold one of the four
+phrases. Two could: T5B.3's `Traceability Status` and T5B.7's `Assessment`,
+where "not assessable" is a plausible honest answer. Neither has been observed
+failing, and exempting a column on a hypothesis is how an exemption becomes the
+register; they stay critical, and the day a run refuses one of them for the
+honest answer is the day it gets its own line here.
+
+**What it costs.** An exempt column skips both the value blocklist and the
+substring rule, and the empty string is in the blocklist — so an empty `Status`
+or `Claim Status` cell now passes where it was refused before. That is exactly
+the property T5.2's, T5B.3's and T5B.6's exemptions already have, and the seven
+substantive columns still refuse an empty cell. Every run pinned to `cdea0c9f`
+— `36d87283…` and the re-run `RESULT.md` records against that build — now
+refuses `ORCHESTRATION_BUILD_MOVED` on re-proof, as §61 did to the runs before
+it. No live run has yet been made on the new build.
+
+**How the edit was made.** `verify_package.py --refresh` — the bundle's own
+procedure for an intentional edit — ran its 52 unit tests (2 skipped) and 10
+helper self-checks and regenerated `DEPLOY_V_INTEGRITY_v1.json`,
+`DEPLOY_V_MANIFEST.json`, `DEPLOY_V_BASELINE.json`,
+`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json` and the two Copilot memory prompts; the
+only content that moved is CP-5's entry, 23,285 to 23,301 bytes. Build id
+`30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18`. The
+manifest the host verifies at rest is `DEPLOY_V_INTEGRITY_v1.json`
+(`server/methodology/bundle.py::MANIFEST_NAME`); its SHA-256 is now
+`8ccc8ed035745b5fb3a18d1176f0bfbbbc2c7e337357bbf25828c3611f3d110e`, still
+68,657 bytes, so §35's ceiling reasoning is unchanged. The six host pins moved
+with it: `tests/test_bundle_pin.py` (`BUILD_ID`), `tests/test_methodology_bundle.py`
+(build id and manifest digest), `tests/test_qualification_matrix.py`,
+`tests/test_loop_charges.py`, `tests/test_canonical_proof.py`, and
+`tests/test_delivered_authority.py`, which re-measures CP-5's delivered
+authority at 165,548 bytes — the sixteen bytes of the edit. `docs/REPAIR_PLAN.md`
+line 40 still names `cdea0c9f`; that file is the owner's and is not edited
+here.
+
+**Decided against, here.** Widening to the two candidate columns above, for
+the reason given. The `completeness_check.load_contract` half §61 left open —
+the frontmatter and document-substring disqualifiers the host never reads —
+is a different rule and stays open. The bundle's own `tests/` were not
+extended, being upstream files outside the authorisation; the named test lives
+in the host suite.
+
 ## 2026-09-16 §64 — The three repair-plan findings that had no trace, traced
 
 `docs/REPAIR_PLAN.md` Phase 6's exit check wants each F01-F18 finding linked to
