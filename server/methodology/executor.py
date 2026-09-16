@@ -20,6 +20,7 @@ from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.gates import execution_input
+from server.store.work import Lease
 
 # The skill is the authority and the first delivered file; the vendor validators
 # read it. Every delivered file reaches the prompt (§45.1, `invocation.py`).
@@ -57,6 +58,8 @@ class Assignment:
     route: ResolvedRoute
     # The reserved attempt this call is made under.
     attempt_id: UUID
+    # The worker's claim the pre-transport check reads; None is a direct caller.
+    lease: Lease | None = None
 
 
 # Every block of the run's pinned source-set version, never the case's live set.

@@ -5,8 +5,9 @@ attempt, the stored input, the pinned route and node, the pinned adapter and
 the host identity are read in one unit before the call and again after it;
 the upstream the prompt named must be unchanged. The call is billed before any
 analysis, with the exact response body addressed as the call's diagnostic
-(§42.3), so a refused or Blocked handoff still says what was said -- and a
-Blocked verdict can be re-derived from it after a crash (`blocked_verdict`).
+(§42.3), so a refused or Blocked handoff still says what was said -- and after
+a crash the answer is accepted, blocked or explained from it, never paid for
+again (`replay_billed`, brief 4.3 D7).
 Then the handoff must be the vendor's conforming Markdown for exactly this
 invocation, and every citation must anchor in the delivered evidence: one that
 does not refuses the whole handoff, since the Markdown cannot be edited to drop
@@ -22,6 +23,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -129,14 +131,14 @@ def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:
     """The exact response body as a blob address (None when there is none), and
     whether a body that exists could not be stored.
 
-    The whole closed transport, not only its Markdown, so `blocked_verdict` can
+    The whole closed transport, not only its Markdown, so `replay_billed` can
     re-run the complete verdict -- citations included -- from stored facts.
     Lenient on purpose: this is what was said, not what is accepted. A blob
     that cannot be written leaves the address None so the bill still commits,
     and the attempt then refuses as a store fault: a verdict that was never
     stored cannot be honoured on recovery, so it must not be silently lost.
     The bytes are untrusted provider text, never `BoundaryText`: no reader may
-    render them, and only `blocked_verdict`'s full re-validation reads them.
+    render them, and only `replay_billed`'s full re-validation reads them.
     """
     if not isinstance(content, str) or len(content) > MAX_TRANSPORT_CHARS:
         return None, False
@@ -172,13 +174,11 @@ def execute_handoff(
             attempt_id=attempt,
             run_id=assignment.run_id,
             route_node_id=route_node_id,
+            lease=assignment.lease,
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
         context = _context(conn, blobs, bundle, assignment, identity)
-    delivered, lineage = context.delivered, context.lineage
-    contract = _contract(bundle)
-    authority = assemble_authority(bundle, assignment.module_id)
     # The record binds exactly the authority this prompt carries (§45.1).
     carried = delivered_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
@@ -215,8 +215,6 @@ def execute_handoff(
     if not isinstance(content, str) or charge is None or generation is None:
         raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
 
-    catalog = _catalog(bundle)
-    gate_expects = _gate_expects(assignment.route, assignment.module_id)
     with execution_reads(conn):
         check_attempt(
             conn,
@@ -225,53 +223,83 @@ def execute_handoff(
             route_node_id=route_node_id,
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
-        # The identity carries every accepted upstream digest, so this one
-        # comparison also catches an upstream rewritten during the call.
-        if _identity(conn, bundle, assignment) != identity:
-            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-        # ...and every ancestor's accepted pair, a record rewritten included.
-        if _lineage_moved(conn, assignment.run_id, lineage):
-            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-        # Exactly what the prompt was built from: pins are immutable, so the
-        # pre-call reading is this unit's too, without a second query.
-        blocks = _by_source(delivered)
-        markdown, citations = parse_response(content, delivered=frozenset(blocks))
-        projections = _unless_blocked(
-            lambda: validate_markdown(
-                contract,
-                catalog,
-                authority.files[SKILL],
-                markdown,
-                identity=identity,
-                gate_expects=gate_expects,
-            )
+        markdown, record = _answer(
+            conn,
+            bundle,
+            assignment,
+            identity=identity,
+            context=context,
+            carried=carried,
+            content=content,
         )
-        # A Blocked verdict ends the run only once its quotes are verified: an
-        # unanchorable Blocked handoff is an ordinary refusal (c-5b, P3-2).
-        anchored = verify_citations(conn, delivered=blocks, citations=citations)
-        if projections is None:
-            raise Refusal(RefusalCode.HANDOFF_BLOCKED)
+    return HandoffOutcome(
+        markdown=markdown,
+        record=record,
+        charge=charge,
+        model=model,
+        generation_id=generation,
+        diagnostic_sha256=diagnostic,
+    )
+
+
+def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
+    conn: StoreConnection,
+    bundle: Bundle,
+    assignment: Assignment,
+    *,
+    identity: HostIdentity,
+    context: _Context,
+    carried: DeliveredAuthority,
+    content: str,
+) -> tuple[bytes, bytes]:
+    """The one post-call verdict on a recorded answer: its Markdown and record.
+
+    Inside the caller's read unit, after it checked the attempt and the stored
+    pin; the live call and `replay_billed` both decide here, so they cannot
+    drift. `identity` is what the call was asked under. Refuses
+    `HANDOFF_BLOCKED` for a validated Blocked handoff whose quotes anchored.
+    """
+    # The identity carries every accepted upstream digest, so this one
+    # comparison also catches an upstream rewritten during the call.
+    if _identity(conn, bundle, assignment) != identity:
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    # ...and every ancestor's accepted pair, a record rewritten included.
+    if _lineage_moved(conn, assignment.run_id, context.lineage):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    # Exactly what the prompt was built from: pins are immutable, so the
+    # pre-call reading is this unit's too, without a second query.
+    blocks = _by_source(context.delivered)
+    markdown, citations = parse_response(content, delivered=frozenset(blocks))
+    authority = assemble_authority(bundle, assignment.module_id)
+    projections = _unless_blocked(
+        lambda: validate_markdown(
+            _contract(bundle),
+            _catalog(bundle),
+            authority.files[SKILL],
+            markdown,
+            identity=identity,
+            gate_expects=_gate_expects(assignment.route, assignment.module_id),
+        )
+    )
+    # A Blocked verdict ends the run only once its quotes are verified: an
+    # unanchorable Blocked handoff is an ordinary refusal (c-5b, P3-2).
+    anchored = verify_citations(conn, delivered=blocks, citations=citations)
+    if projections is None:
+        raise Refusal(RefusalCode.HANDOFF_BLOCKED)
     record = CanonicalRecord(
         artifact_sha256=hashlib.sha256(markdown).hexdigest(),
-        adapter_version=adapter,
+        adapter_version=methodology.CANONICAL_ADAPTER_VERSION,
         build_id=authority.build_id,
         manifest_sha256=bundle.manifest_sha256,
         authority_bundle_sha256=identity.authority_bundle_sha256,
         authority_digest=authority_digest(authority),
         delivered_authority_digest=delivered_authority_digest(carried),
         identity=identity,
-        lineage=lineage,
+        lineage=context.lineage,
         projections=projections,
         citations=tuple(anchored),
     )
-    return HandoffOutcome(
-        markdown=markdown,
-        record=record_bytes(record),
-        charge=charge,
-        model=model,
-        generation_id=generation,
-        diagnostic_sha256=diagnostic,
-    )
+    return markdown, record_bytes(record)
 
 
 def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
@@ -405,6 +433,96 @@ _STORE_FAULTS = frozenset(
 )
 
 
+class Verdict(StrEnum):
+    """What a billed answer's stored body re-derives to (brief 4.3 D7)."""
+
+    ANSWERED = "ANSWERED"
+    BLOCKED = "BLOCKED"
+    REFUSED = "REFUSED"
+
+
+@dataclass(frozen=True, slots=True)
+class Replayed:
+    """One billed, unaccepted, unexplained attempt and its re-derived verdict:
+    the outcome to accept when ANSWERED, the refusal's code when REFUSED."""
+
+    attempt_id: UUID
+    verdict: Verdict
+    outcome: HandoffOutcome | None = None
+    code: RefusalCode | None = None
+
+
+def replay_billed(  # noqa: PLR0913 -- one run's nodes, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    route_node_ids: Collection[str],
+) -> Replayed | None:
+    """The first billed answer of these nodes still owed a verdict, re-derived.
+
+    Inside the caller's read unit, so the live path and crash recovery decide
+    alike and a recorded answer is never paid for twice: an attempt with a known
+    charge, generation and stored body, no artifact and no `attempt_refusals`
+    row, in ordinal order. Its attempt and stored pin are checked as the live
+    post-call unit checks them, and those refusals -- about the run, not the
+    answer -- raise. The answer is then judged by `_answer` under the identity
+    its call could have named (`call_time_identity`), which must still be
+    `host_identity` now: a soft input accepted after the attempt started makes
+    it REFUSED `ROUTE_IDENTITY_INVALID`. A store fault always raises, never a
+    verdict. One query when nothing is owed.
+    """
+    rows = conn.execute(
+        "SELECT t.route_node_id, o.attempt_id, o.diagnostic_sha256, l.amount,"
+        " o.model, o.generation_id"
+        " FROM call_outcomes o JOIN run_attempts t USING (attempt_id)"
+        " JOIN budget_ledger l"
+        " ON (l.run_id, l.attempt_id) = (o.run_id, o.charged_attempt_id)"
+        " WHERE t.run_id = %s AND t.route_node_id = ANY(%s)"
+        " AND o.generation_id IS NOT NULL AND o.model IS NOT NULL"
+        " AND o.diagnostic_sha256 IS NOT NULL"
+        " AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.attempt_id = o.attempt_id)"
+        " AND NOT EXISTS"
+        " (SELECT 1 FROM attempt_refusals r WHERE r.attempt_id = o.attempt_id)"
+        " ORDER BY t.ordinal, t.route_node_id",
+        (run_id, list(route_node_ids)),
+    ).fetchall()
+    nodes = {node.route_node_id: node for node in route.nodes}
+    for route_node_id, attempt, diagnostic, charge, model, generation in rows:
+        node = nodes.get(str(route_node_id))
+        if node is None:
+            continue
+        attempt_id = UUID(str(attempt))
+        body = _stored_body(blobs, str(diagnostic))
+        assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
+        check_attempt(
+            conn,
+            attempt_id=attempt_id,
+            run_id=run_id,
+            route_node_id=node.route_node_id,
+        )
+        _stored_identity(
+            conn, assignment, bundle, adapter=methodology.CANONICAL_ADAPTER_VERSION
+        )
+        try:
+            markdown, record = _replayed_answer(conn, blobs, bundle, assignment, body)
+        except Refusal as refusal:
+            if refusal.code in _STORE_FAULTS:
+                raise
+            code = refusal.code
+        else:
+            outcome = HandoffOutcome(
+                markdown, record, charge, str(model), str(generation), str(diagnostic)
+            )
+            return Replayed(attempt_id, Verdict.ANSWERED, outcome=outcome)
+        if code is RefusalCode.HANDOFF_BLOCKED:
+            return Replayed(attempt_id, Verdict.BLOCKED)
+        return Replayed(attempt_id, Verdict.REFUSED, code=code)
+    return None
+
+
 def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
@@ -414,57 +532,16 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
     route: ResolvedRoute,
     route_node_ids: Collection[str],
 ) -> bool:
-    """Whether a billed attempt of one of these nodes answered a validated Blocked.
-
-    Brief correction 6 re-derived from committed facts, inside the caller's read
-    unit, so the live path and crash recovery decide alike: an unaccepted
-    attempt with a known charge and generation whose stored response body
-    re-validates -- identity rebuilt for that attempt, vendor validation, every
-    citation anchored -- to `HANDOFF_BLOCKED`. Any other refusal means that
-    attempt was an ordinary refusal. One query when nothing was billed.
-    """
-    rows = conn.execute(
-        "SELECT t.route_node_id, o.attempt_id, o.diagnostic_sha256"
-        " FROM call_outcomes o JOIN run_attempts t USING (attempt_id)"
-        " WHERE t.run_id = %s AND t.route_node_id = ANY(%s)"
-        " AND o.charged_attempt_id IS NOT NULL AND o.generation_id IS NOT NULL"
-        " AND o.diagnostic_sha256 IS NOT NULL AND NOT EXISTS"
-        " (SELECT 1 FROM artifacts a WHERE a.attempt_id = o.attempt_id)"
-        " ORDER BY t.route_node_id, t.ordinal",
-        (run_id, list(route_node_ids)),
-    ).fetchall()
-    nodes = {node.route_node_id: node for node in route.nodes}
-    blocks: dict[UUID, frozenset[str]] | None = None
-    for route_node_id, attempt, diagnostic in rows:
-        node = nodes.get(str(route_node_id))
-        if node is None:
-            continue
-        body = _stored_body(blobs, str(diagnostic))
-        if blocks is None:
-            # Once per call: every captured block, whatever the attempts.
-            try:
-                blocks = _by_source(_delivered(conn, run_id))
-            except Refusal as refusal:
-                if refusal.code in _STORE_FAULTS:
-                    raise
-                return False  # e.g. a withdrawn source: no verdict can be re-derived
-        if body is not None and _answered_blocked(
-            conn,
-            bundle,
-            route,
-            node,
-            run_id=run_id,
-            attempt_id=UUID(str(attempt)),
-            body=body,
-            blocks=blocks,
-        ):
-            return True
-    return False
+    """Whether the answer `replay_billed` owes first re-derives to Blocked."""
+    replayed = replay_billed(
+        conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=route_node_ids
+    )
+    return replayed is not None and replayed.verdict is Verdict.BLOCKED
 
 
 def _stored_body(blobs: BlobStore, diagnostic_sha256: str) -> str | None:
     """A billed attempt's stored body. A blob that will not read is a store
-    fault, never "not blocked": reading it as an answer would pay again."""
+    fault, never a verdict: reading it as a refusal would pay again."""
     try:
         data = blobs.get(diagnostic_sha256)
     except (OSError, Refusal):
@@ -477,55 +554,35 @@ def _stored_body(blobs: BlobStore, diagnostic_sha256: str) -> str | None:
         return None
 
 
-def _answered_blocked(  # noqa: PLR0913 -- one stored attempt, keyword-only
+def _replayed_answer(
     conn: StoreConnection,
+    blobs: BlobStore,
     bundle: Bundle,
-    route: ResolvedRoute,
-    node: RouteNode,
-    *,
-    run_id: UUID,
-    attempt_id: UUID,
-    body: str,
-    blocks: Mapping[UUID, frozenset[str]],
-) -> bool:
-    try:
-        # The call-time identity every reader shares: an unaccepted attempt has
-        # no record, so it names its blocking inputs and those accepted before.
-        identity = call_time_identity(
-            conn,
-            route,
-            host_identity(
-                conn,
-                bundle,
-                run_id=run_id,
-                route=route,
-                node=node,
-                attempt_id=attempt_id,
-            ),
-            attempt_id=attempt_id,
-            record=None,
-        )
-        markdown, citations = parse_response(body, delivered=frozenset(blocks))
-        authority = assemble_authority(bundle, node.module_id)
-        projections = _unless_blocked(
-            lambda: validate_markdown(
-                _contract(bundle),
-                _catalog(bundle),
-                authority.files[SKILL],
-                markdown,
-                identity=identity,
-                gate_expects=_gate_expects(route, node.module_id),
-            )
-        )
-        if projections is not None:
-            return False
-        # Anchored before Blocked is honoured, exactly as on the live path.
-        verify_citations(conn, delivered=blocks, citations=citations)
-    except Refusal as refusal:
-        if refusal.code in _STORE_FAULTS:
-            raise
-        return False
-    return True
+    assignment: Assignment,
+    body: str | None,
+) -> tuple[bytes, bytes]:
+    """`_answer` over a stored body, with the context its call was built from."""
+    if body is None:
+        raise Refusal(RefusalCode.PROVIDER_RESPONSE_INVALID)
+    # An unaccepted attempt has no record, so its call named its blocking
+    # inputs and the soft ones accepted before it started; `_answer` refuses
+    # the attempt when that is no longer every input accepted now.
+    identity = call_time_identity(
+        conn,
+        assignment.route,
+        _identity(conn, bundle, assignment),
+        attempt_id=assignment.attempt_id,
+        record=None,
+    )
+    return _answer(
+        conn,
+        bundle,
+        assignment,
+        identity=identity,
+        context=_context(conn, blobs, bundle, assignment, identity),
+        carried=delivered_authority(bundle, assignment.module_id),
+        content=body,
+    )
 
 
 def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
