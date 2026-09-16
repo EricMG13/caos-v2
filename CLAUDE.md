@@ -905,8 +905,37 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **CP-5 cannot say a claim is unverifiable in a column its contract calls
-  critical.** `cp-5-evidence-trace-validator/SKILL.md` lists `insufficient
+- **Nothing can sign a verdict.** `record_verdict` exists, binds provider, set
+  digest, build and the `complete` flag, and is tested; the read side is served
+  at `server/api/reads/qualification.py`. But no route or script calls it, and
+  `reviewer_id` is a caller-supplied UUID with no OIDC derivation — so the
+  producer half of `docs/REPAIR_PLAN.md` Phase 6 item 3 does not exist, and that
+  is the whole reason `qualification_verdicts` is empty everywhere (§62, §64).
+  A verdict is the one thing in this system a person asserts rather than the
+  host deriving, so this is the gap that keeps "is this build qualified"
+  unanswerable however green the gates are. *Upgrade:* a governed write that
+  derives `reviewer_id` from the authenticated actor the way every other
+  authority decision does, with the verdict document supplied by the reviewer
+  and the host originating nothing in it.
+- **The run-to-case binding lives in the matrix's only caller, not the matrix.**
+  `build_matrix` accepts any `runs` mapping and checks only that a label is
+  present; everything that makes a run the case's run — title, ceiling, profile,
+  selection, documents, provider, model — is enforced in `harness._eligible`.
+  Correct today because `perform` is the only path, and the transplant suite
+  proves it there. A second caller gets none of it. *Upgrade:* make
+  `build_matrix` private to the harness, or move the binding into it, the day
+  anything else wants a matrix.
+
+- ~~**CP-5 cannot say a claim is unverifiable in a column its contract calls
+  critical.**~~ Closed by `docs/DECISIONS.md` §63, the owner's second
+  authorised override of invariant 4: T5B.5's `Status` and `Claim Status`
+  now sit in `disqualifier_exempt_columns`, beside T5B.3's `Claim Status`
+  and T5.2's `Evidence Status`, and the three refused bodies of run
+  `36d87283…` replay clean while a placeholder in any of T5B.5's seven
+  substantive columns is still refused
+  (`test_cp5_exempts_only_its_status_columns_from_the_disqualifiers`). The
+  build moved with it, `cdea0c9f` -> `30222a49`. The original entry, for the
+  reader who wants the reason: `cp-5-evidence-trace-validator/SKILL.md` lists `insufficient
   information`, `not calculable from provided materials`, `not assessable` and
   `unavailable` among `critical_cell_values_casefold`, and T5B.5's Claim Status
   column exempts none of them. Run `36d87283…` refused CP-5 three times,
@@ -918,13 +947,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   differently, so what the rule selects for is wording. The projection keys
   cannot see it either: a refused CP-5 leaves no artifact, so its conclusion is
   unreadable and the row reads as a run that stopped. *Upgrade:* the mechanism
-  exists — `disqualifier_exempt_columns`, which T5B.6 already uses for
-  `Evidence Status` — so the question is which of CP-5's status columns should
+  exists — `disqualifier_exempt_columns`, which T5.2 already uses for
+  `Evidence Status` (the entry as first written credited T5B.6, which exempts
+  `Classification`) — so the question is which of CP-5's status columns should
   carry it. A bundle change, needing its own authorisation, and it belongs with
   the `completeness_check.load_contract` half §61 left open.
-  **Deferred by the owner on 16 September 2026 (`docs/DECISIONS.md` §62)
-  until the other modules are deployed** — an accepted limitation with a
-  named revisit, not an open defect nobody owns.
+  Deferred by the owner on 16 September 2026 (`docs/DECISIONS.md` §62) and
+  resolved by the owner's instruction the same day (§63).
 
 - ~~**`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**~~
   Closed by `docs/DECISIONS.md` §61, the owner's authorised override of

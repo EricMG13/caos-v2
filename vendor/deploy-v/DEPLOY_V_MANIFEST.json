@@ -1063,14 +1063,14 @@
         "CP-5A"
       ],
       "companion_count": 11,
-      "entry_bytes": 23285,
-      "entry_sha256": "7f21c8712cb40e871abaa1f855fdb95dded5df9887e354c39253e0492dd93390",
+      "entry_bytes": 23301,
+      "entry_sha256": "a9dd54666593604b0b978e4a7eb26f854f34c311fe1fa2fb2c25cc4d53d89457",
       "folder_slug": "cp-5-evidence-trace-validator",
       "module_id": "CP-5",
       "relative_file_hashes": {
         "SKILL.md": {
-          "bytes": 23285,
-          "sha256": "7f21c8712cb40e871abaa1f855fdb95dded5df9887e354c39253e0492dd93390"
+          "bytes": 23301,
+          "sha256": "a9dd54666593604b0b978e4a7eb26f854f34c311fe1fa2fb2c25cc4d53d89457"
         },
         "references/CP-5A_SCHEMA_REFERENCE.md": {
           "bytes": 4633,

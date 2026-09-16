@@ -2283,3 +2283,65 @@ qualification of a build. The guardrail in `docs/REPAIR_PLAN.md` — no shipping
 unqualified pathways behind a generic success label — is unaffected by it, and
 any surface that reports qualification status must continue to report that
 there is none.
+
+## 2026-09-16 §64 — The three repair-plan findings that had no trace, traced
+
+`docs/REPAIR_PLAN.md` Phase 6's exit check wants each F01-F18 finding linked to
+its regression and fix. F05, F07 and F17 appeared nowhere in this tree outside
+the plan: the work was done under other names and the F-numbers were never
+carried into a commit message or a test. Two are finished and were merely
+unlabelled; the third is finished in part and its remainder is stated here
+rather than left to be rediscovered.
+
+**F05 — governed writes have two concurrency holes. Fixed; §32, `f4ff307`.**
+`server/store/audit.py::governed_write` takes `lock_case` before `_lock_head`
+and before `_require_standing`, and `members.py::grant/revoke` take the same
+lock, so a revocation and a governed write have one commit order and two first
+writes on a case serialise on the case row rather than on an absent audit head.
+A raw `UniqueViolation` is now `STORE_UNAVAILABLE` with rollback. The
+regressions are in `tests/test_case_ordering.py`, which proves real two-connection
+blocking through `pg_blocking_pids` and fails if the waiter never blocks:
+`test_membership_change_first_refuses_waiting_approval[revoke|downgrade]` for the
+first hole, `test_two_first_approvals_serialize` for the second.
+
+**F07 — PDF admission and word extraction are incorrect. Fixed; §44, §47,
+`83fe083`, `e292238`.** `server/evidence/pdf.py::_runs` ends a run on pdfminer's
+virtual whitespace, so `A B` no longer extracts as `AB`
+(`tests/test_pdf_extraction.py::test_words_separated_by_positioning_are_separate_tokens`,
+which returns `["AlphaBeta"]` if reverted). `extract.py::dispatch_by_content`
+reads the bytes rather than the name
+(`tests/test_extractor_dispatch.py::test_a_pdf_named_txt_is_still_read_as_pdf`,
+and at the harness boundary
+`tests/test_qualification_prepare.py::test_the_harness_admits_pdfs_through_the_pdf_extractor`).
+Encrypted and unreadable documents get typed codes, and rectangles are
+top-left in displayed space at every quarter turn
+(`test_rotated_page_rectangles_are_top_left_in_displayed_space`).
+
+**F17 — qualification can certify the wrong identity. Fixed in part.**
+
+- *Run-to-case binding:* `harness.py::_eligible` re-reads the pinned `RunInput`
+  and refuses `RUN_INPUT_INVALID` unless title, ceiling, profile, selection,
+  research, model-extension presence and the pinned source-set members all match
+  the case; `perform` binds provider and model identity.
+  `tests/test_qualification_execution.py::test_real_approved_input_transplants_are_refused`
+  substitutes each of ten bindings in turn and requires a refusal with no prompt
+  sent. Fixed, `1f86f02` and `f95e8ba`.
+- *Verdict time:* `read_verdict` refuses a naive `now` and a future
+  `decided_at`. Fixed, `373ee07`; `tests/test_qualification.py`.
+- *Preflight before spend:* `prepare` resolves every route and builds every
+  label before the first `create_case`
+  (`test_whole_set_pure_defects_leave_no_setup`). Fixed.
+- *Unbounded on-disk reads:* fixed today. `on_disk.py::_bounded_bytes` stats the
+  path, refuses anything that is not a regular file, and refuses a document
+  larger than `admit_pack`'s own ceiling before reading it -- so a multi-gigabyte
+  document is not read into memory to be rejected afterwards, and a FIFO at a
+  declared path no longer blocks the loader.
+- *No authenticated producer:* **open.** `record_verdict` exists, is bound and is
+  tested, and `server/api/reads/qualification.py` serves the consumer, but
+  nothing in `server/` or `scripts/` calls it and `reviewer_id` is a
+  caller-supplied UUID with no OIDC derivation. This is why §62 records that
+  `qualification_verdicts` is empty everywhere: there is no route by which a
+  reviewer can sign. Recorded in `CLAUDE.md` as the open half.
+- *Caller-dependent binding:* `build_matrix` still accepts any `runs` mapping and
+  checks only label presence; the binding lives in `_eligible`, its only caller.
+  Recorded in `CLAUDE.md`.

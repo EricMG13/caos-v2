@@ -59,6 +59,10 @@ from server.store.run_inputs import RunSubject
 from server.store.runs import run_status
 from server.store.source_sets import pinned_live_sources
 
+# A run that declared its refusal must have ended on one. RUNNING and
+# RUNNABLE are not answers; CANCELLED did not answer the question asked.
+_ENDED = frozenset({RunStatus.BLOCKED, RunStatus.FAILED, RunStatus.COMPLETE})
+
 # A case label is authored and reaches a digest; it is a name, not prose.
 _LABEL_LIMIT = 128
 
@@ -402,6 +406,14 @@ def _refusal_met(
         and run_status(conn, run_id) is RunStatus.BLOCKED
     ):
         return True
+    # The run has to have *ended*, not merely written the code somewhere. A
+    # recorded refusal on a run still RUNNING or RUNNABLE is a node that failed
+    # and a run that has more to do, and `complete` waives its COMPLETE check
+    # for a met refusal -- so without this, a case could declare a refusal, have
+    # one attempt produce it, and be signable over a run that simply stopped
+    # being driven.
+    if run_status(conn, run_id) not in _ENDED:
+        return False
     return bool(
         conn.execute(
             "SELECT 1 FROM attempt_refusals r JOIN run_attempts t"

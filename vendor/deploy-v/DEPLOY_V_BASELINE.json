@@ -1,6 +1,6 @@
 {
   "authority": "DEPLOY_V_BASELINE",
-  "baseline_digest": "343e054d988f789b6d1ff0ab080618257782807c1d5be7bf60adb485a82c8504",
+  "baseline_digest": "b3f19e9f4e0c56fbdf14649597f7fc342f7c6582f66c2c0fcc30fac909fffc6e",
   "packages": {
     "cp-0-source-readiness": {
       "files": {
@@ -853,8 +853,8 @@
     "cp-5-evidence-trace-validator": {
       "files": {
         "SKILL.md": {
-          "bytes": 23285,
-          "sha256": "7f21c8712cb40e871abaa1f855fdb95dded5df9887e354c39253e0492dd93390"
+          "bytes": 23301,
+          "sha256": "a9dd54666593604b0b978e4a7eb26f854f34c311fe1fa2fb2c25cc4d53d89457"
         },
         "references/CP-5A_SCHEMA_REFERENCE.md": {
           "bytes": 4633,

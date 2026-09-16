@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from server.boundary_text import BoundaryText
+from server.evidence.extract import DEFAULT_LIMITS
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
@@ -316,6 +317,51 @@ def test_a_projection_key_is_read_as_declared(tmp_path: Path) -> None:
     )
     assert scope.field == "decision_scope"
     assert qualification_set_digest(keyed) != qualification_set_digest(plain)
+
+
+def test_a_document_that_is_not_a_regular_file_is_refused(tmp_path: Path) -> None:
+    """A FIFO at a declared path would block the loader until someone wrote.
+
+    `read_bytes` answers "what is at this path" only for files; on a FIFO it
+    waits, and a set that hangs its loader is a set nobody can time out. The
+    same check refuses a directory and a socket.
+    """
+    import os
+
+    root = tmp_path / "set"
+    root.mkdir()
+    written = _write(root, _manifest())
+    document = written / "documents" / "acme-2026" / "report.txt"
+    document.unlink()
+    os.mkfifo(document)
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(written)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_document_larger_than_admission_would_take_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refused at load, before its bytes are read into memory.
+
+    `admit_pack` bounds a document at 20 MiB, but it never saw one this large:
+    the loader read the whole file first and handed it over. The ceiling here is
+    admission's own, so a set that could not be admitted is not read either.
+    """
+    root = tmp_path / "set"
+    root.mkdir()
+    written = _write(root, _manifest())
+    monkeypatch.setattr(
+        "server.qualification.on_disk.DEFAULT_LIMITS",
+        replace(DEFAULT_LIMITS, max_document_bytes=8),
+    )
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(written)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
 
 
 def test_an_undeclared_key_at_the_top_of_the_manifest_is_refused(

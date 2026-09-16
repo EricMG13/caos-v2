@@ -14,7 +14,7 @@ ignored reports cannot override those contracts.
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
 | Latest accepted task | **Phase 6 accepted by the owner on 16 September 2026 with its gaps stated (`docs/DECISIONS.md` §62). Seven live runs, a complete green `make check`, two authorised bundle edits (§61), and one `complete` snapshot — pinned to the build §61 retired. No verdict exists and nothing is qualified.** |
-| Next task | Deploy the remaining modules. CP-5 is deferred until then (§62): it refuses on this corpus for writing the honest answer in a column its contract calls critical, and the fix is a bundle change under §61's precedent. Then a run on `cdea0c9f`, then the verdict. No result may be represented as qualified without an authenticated verdict over a `complete` snapshot, and none exists. |
+| Next task | Deploy the remaining modules. CP-5's refusal on this corpus — the honest answer in a column its contract called critical — was deferred by §62 and resolved by §63, which exempts T5B.5's two status columns and moves the build to `30222a49`; the three refused bodies replay clean, and no live run has yet been made on that build. Then a run on `30222a49`, then the verdict. No result may be represented as qualified without an authenticated verdict over a `complete` snapshot, and none exists. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -108,7 +108,8 @@ qualification of a build.
   `complete` snapshot, run `42e17048…` — pinned to build `a43cb903`, which §61
   retired, so it no longer re-proves against this tree.
 - **Not met, accepted anyway:** no verdict exists anywhere; no complete snapshot
-  on `cdea0c9f`; CP-5 does not complete on this corpus; one of eighteen
+  on `cdea0c9f` or on `30222a49`; CP-5's contract refusal is resolved by §63
+  but no run has been made under it; one of eighteen
   pathways has been run.
 - **Deferred:** CP-5 until the other modules are deployed. Its refusal is the
   completeness contract treating "insufficient information" and "not calculable
