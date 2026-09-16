@@ -304,6 +304,36 @@ def test_a_case_whose_gate_refused_a_module_cannot_receive_a_verdict() -> None:
     assert allowed.complete is True
 
 
+def test_a_case_whose_modules_concluded_otherwise_cannot_receive_a_verdict() -> None:
+    """The conclusion key is the one that measures the analysis.
+
+    A citation key asks whether a module's handful of quotes happened to
+    include a line. This asks what it concluded — and a snapshot where a module
+    reached the wrong conclusion is not signable however well it quoted.
+    """
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    wrong = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, projections_met=False),)),
+        ),
+    )
+
+    assert wrong.complete is False
+    right = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, projections_met=True),)),
+        ),
+    )
+    assert right.complete is True
+
+
 def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
     """A set may declare a refusal as its answer; meeting it is a result.
 

@@ -50,8 +50,10 @@ from typing import Any
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
+    PROJECTION_FIELDS,
     ExpectedCitation,
     ExpectedForecast,
+    ExpectedProjection,
     ForecastValue,
     QualificationCase,
     QualificationSet,
@@ -80,6 +82,7 @@ _OPTIONAL_CASE_KEYS = frozenset(
         "forecast",
         "expected_refusal",
         "expects_ready",
+        "expects_projection",
         "model_extension",
     }
 )
@@ -108,6 +111,7 @@ _SUBJECT_KEYS = frozenset(
 # The same bound `matrix.py` puts on a label when it digests one. Stated here
 # too because this is where an authored label first arrives.
 _LABEL_LIMIT = 128
+_PROJECTION_KEYS = frozenset({"module_id", "field", "value"})
 
 
 def load_qualification_set(root: Path) -> QualificationSet:
@@ -157,6 +161,7 @@ def _case(root: Path, entry: object) -> QualificationCase:
         forecast=_forecast(fields.get("forecast")),
         expected_refusal=_refusal(fields.get("expected_refusal")),
         expects_ready=_ready(fields.get("expects_ready")),
+        expects_projection=_projections(fields.get("expects_projection")),
         model_extension=_extension(fields.get("model_extension")),
     )
 
@@ -232,6 +237,43 @@ def _forecast(item: object) -> ExpectedForecast | None:
         limitation_flags=_strings(fields, "limitation_flags"),
         readiness=tuple(_pair(value) for value in readiness),
     )
+
+
+def _projections(item: object) -> tuple[ExpectedProjection, ...]:
+    """The host-projected conclusions the case expects, or a refusal.
+
+    The field name is checked here rather than at comparison time: a key naming
+    a field the host does not project would otherwise read as the module having
+    concluded the wrong thing, which is the one failure a key must never have.
+    """
+    if item is None:
+        return ()
+    if not isinstance(item, list) or not item:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    expects = []
+    for value in item:
+        if not isinstance(value, dict) or set(value) != _PROJECTION_KEYS:
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        field = value["field"]
+        if not isinstance(field, str) or field not in PROJECTION_FIELDS:
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        expects.append(
+            ExpectedProjection(
+                module_id=_bounded(value["module_id"]),
+                field=field,
+                value=_bounded(value["value"]),
+            )
+        )
+    if len({(e.module_id, e.field, e.value) for e in expects}) != len(expects):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(expects)
+
+
+def _bounded(value: object) -> str:
+    """One string from a declared key, bounded as pinned state must be."""
+    if not isinstance(value, str) or not value.strip():
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return BoundaryText.of(value.strip(), limit=_LABEL_LIMIT).value
 
 
 def _ready(item: object) -> tuple[str, ...]:

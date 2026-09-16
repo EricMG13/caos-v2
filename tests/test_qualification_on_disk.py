@@ -33,6 +33,7 @@ from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
     ExpectedForecast,
+    ExpectedProjection,
     ForecastValue,
     QualificationCase,
     QualificationSet,
@@ -263,6 +264,58 @@ def test_a_manifest_that_is_not_the_declared_shape_is_refused(
         assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID, (
             manifest
         )
+
+
+def test_a_projection_key_naming_a_field_the_host_does_not_project_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A mistyped field must refuse at load, not read as a failed conclusion.
+
+    Compared at match time it would return False, and the matrix would report
+    that the module concluded the wrong thing when the truth is that the key
+    asked about nothing. That is the one failure a key must never have.
+    """
+    root = tmp_path / "set"
+    root.mkdir()
+    manifest = _manifest()
+    cases = manifest["cases"]
+    assert isinstance(cases, list)
+    cases[0]["expects_projection"] = [
+        {"module_id": "CP-L10", "field": "qa_stat", "value": "Restricted"}
+    ]
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(_write(root, manifest))
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_projection_key_is_read_as_declared(tmp_path: Path) -> None:
+    """The declared conclusions reach the case, and move the set's digest."""
+    root = tmp_path / "set"
+    root.mkdir()
+    plain = load_qualification_set(_write(root, _manifest()))
+
+    keyed_root = tmp_path / "keyed"
+    keyed_root.mkdir()
+    manifest = _manifest()
+    cases = manifest["cases"]
+    assert isinstance(cases, list)
+    cases[0]["expects_projection"] = [
+        {"module_id": "CP-L10", "field": "qa_status", "value": "Restricted"},
+        {"module_id": "CP-L10", "field": "decision_scope", "value": "SCREENING_ONLY"},
+    ]
+    keyed = load_qualification_set(_write(keyed_root, manifest))
+
+    [expect, scope] = keyed.cases[0].expects_projection
+    assert isinstance(expect, ExpectedProjection)
+    assert (expect.module_id, expect.field, expect.value) == (
+        "CP-L10",
+        "qa_status",
+        "Restricted",
+    )
+    assert scope.field == "decision_scope"
+    assert qualification_set_digest(keyed) != qualification_set_digest(plain)
 
 
 def test_an_undeclared_key_at_the_top_of_the_manifest_is_refused(

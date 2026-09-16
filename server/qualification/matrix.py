@@ -48,8 +48,9 @@ from server.engine.route import READY, ResolvedRoute, readiness_from
 from server.engine.runtime import accepted_artifacts
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.methodology.canonical import accepted_handoff
+from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
+from server.methodology.handoff import Projections
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -103,6 +104,40 @@ class ExpectedForecast:
 
 
 @dataclass(frozen=True, slots=True)
+class ExpectedProjection:
+    """One host-projected field of one module's accepted handoff.
+
+    A citation key asks whether a module's handful of length-selected quotes
+    happened to include a particular line. This asks what the module concluded:
+    the fields the host re-derives from the accepted Markdown and compares
+    against the stored record (`accepted_projections`), so the answer is the
+    host's reading and not model narrative.
+
+    `value` is compared as a string against a scalar field, and as membership
+    against a list one — one rule for both, because "the screen was Restricted"
+    and "it flagged the missing audited statements" are the same kind of
+    question asked of differently shaped fields.
+    """
+
+    module_id: str
+    field: str
+    value: str
+
+
+PROJECTION_FIELDS = frozenset(
+    {
+        "qa_status",
+        "committee_status",
+        "confidence_band",
+        "decision_scope",
+        "limitation_flags",
+        "validation_warnings",
+        "downstream_consumers",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
 class QualificationCase:
     """One case of the set: its inputs, its route, and its answer key.
 
@@ -135,6 +170,10 @@ class QualificationCase:
     # module is invisible to a citation key -- the module never runs, so it
     # cites nothing, and every key aimed at it reads as a miss by the model.
     expects_ready: tuple[str, ...] = ()
+    # What the modules concluded, read from the host's own projections. See
+    # `ExpectedProjection`: this is the key that measures the analysis rather
+    # than the draw of quotes that happened to support it.
+    expects_projection: tuple[ExpectedProjection, ...] = ()
     # CP-CF is a host extension, so a forecast key must bind whether it was
     # present rather than silently qualifying the base route.
     model_extension: bool = False
@@ -164,6 +203,7 @@ class MatrixRow:
     forecast_met: bool | None
     expected_refusal_met: bool | None
     ready_met: bool | None = None
+    projections_met: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +284,13 @@ def _digested(case: QualificationCase) -> list[object]:
         entry.append(case.expected_refusal.value)
     if case.expects_ready:
         entry.append(sorted(case.expects_ready))
+    if case.expects_projection:
+        entry.append(
+            sorted(
+                [expect.module_id, expect.field, expect.value]
+                for expect in case.expects_projection
+            )
+        )
     return entry
 
 
@@ -322,6 +369,7 @@ def _row(
             None if case.expected_refusal is None else refusal is case.expected_refusal
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
+        projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
     )
 
 
@@ -355,6 +403,89 @@ def _ready_met(
         return False
     readiness = dict(readiness_from(route, accepted))
     return all(readiness.get(module) in READY for module in case.expects_ready)
+
+
+def _accepted_rows(
+    conn: StoreConnection, run_id: UUID
+) -> dict[str, tuple[str, str | None]]:
+    """Every accepted node of the run, keyed by route node."""
+    return {
+        str(row[0]): (str(row[1]), None if row[2] is None else str(row[2]))
+        for row in conn.execute(
+            "SELECT t.route_node_id, a.artifact_sha256, a.record_sha256"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s",
+            (run_id,),
+        ).fetchall()
+    }
+
+
+def _matches_projection(projections: Projections, expect: ExpectedProjection) -> bool:
+    """One expectation against the host's re-derived projections."""
+    if expect.field not in PROJECTION_FIELDS:
+        return False
+    found = getattr(projections, expect.field)
+    if isinstance(found, tuple):
+        return expect.value in found
+    return str(found) == expect.value
+
+
+def _projections_met(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+) -> bool | None:
+    """Whether every module concluded what the case says it should have.
+
+    Read through `accepted_projections`, which rebuilds the identity from the
+    store, requires the record to bind this Markdown, and re-parses the
+    projections from the Markdown to compare against the record (§42.4). A
+    module the case names that produced no accepted artifact is a miss, not a
+    skip: the question was asked and the run did not answer it.
+    """
+    if not case.expects_projection:
+        return None
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return False
+    accepted = _accepted_rows(conn, run_id)
+    wanted: dict[str, list[ExpectedProjection]] = {}
+    for expect in case.expects_projection:
+        wanted.setdefault(expect.module_id, []).append(expect)
+    for module_id, expects in wanted.items():
+        node = next((item for item in route.nodes if item.module_id == module_id), None)
+        if node is None:
+            return False
+        rows = conn.execute(
+            "SELECT a.artifact_sha256, a.record_sha256, a.attempt_id"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s AND t.route_node_id = %s",
+            (run_id, node.route_node_id),
+        ).fetchall()
+        if len(rows) != 1 or rows[0][1] is None:
+            return False
+        artifact_sha256, record_sha256, attempt_id = rows[0]
+        try:
+            projections = accepted_projections(
+                conn,
+                blobs,
+                bundle,
+                route,
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=UUID(str(attempt_id)),
+                artifact_sha256=str(artifact_sha256),
+                record_sha256=str(record_sha256),
+                accepted=accepted,
+            )
+        except Refusal:
+            return False
+        if not all(_matches_projection(projections, expect) for expect in expects):
+            return False
+    return True
 
 
 def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
@@ -553,6 +684,7 @@ def assert_measurable(qualification: QualificationSet) -> None:
             and case.forecast is None
             and case.expected_refusal is None
             and not case.expects_ready
+            and not case.expects_projection
         )
         or (case.forecast is not None and not case.forecast.values)
         for case in qualification.cases
