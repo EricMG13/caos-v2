@@ -13,10 +13,12 @@ import {
   WireShapeError,
   parseAnalysisDocument,
   parseDirectoryDocument,
+  parsePageDocument,
   parseRefusalBody,
   parseRunSectionDocument,
   parseUploadDocument,
   requireIdentity,
+  type PageDocument,
   type SectionDocument as V1Document,
 } from "@/wire/v1";
 
@@ -147,4 +149,72 @@ export async function fetchSection(
   if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
   const body = await bodyOf(response);
   return classifyV1(section, body, query);
+}
+
+// Evidence pages (brief 4.4, decision 7). Not a section document: no chrome,
+// never cached. A page the server will not serve -- withdrawn, outside the
+// run's pinned set, out of range, not permitted -- is one private 404 with no
+// text, and becomes `unavailable` here with nothing carried from its body.
+
+export interface PageQuery {
+  caseId: string;
+  runId: string;
+  sourceId: string;
+  page: number;
+}
+
+export type PageStatus =
+  | { kind: "ready"; document: PageDocument }
+  | { kind: "partial"; document: PageDocument }
+  | { kind: "error"; refusal: Refusal }
+  | { kind: "unavailable" }
+  | { kind: "offline" };
+
+export function pageUrl(query: PageQuery): string {
+  const [caseId, runId, sourceId] = [query.caseId, query.runId, query.sourceId].map(
+    encodeURIComponent,
+  );
+  return `/api/v1/cases/${caseId}/runs/${runId}/sources/${sourceId}/pages/${query.page}`;
+}
+
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** One page, validated whole and bound to exactly what was requested. */
+export async function fetchPage(query: PageQuery, signal?: AbortSignal): Promise<PageStatus> {
+  let response: Response;
+  try {
+    response = await fetch(pageUrl(query), { signal, headers: { accept: "application/json" } });
+  } catch {
+    return { kind: "offline" };
+  }
+  if (response.status === 404) return { kind: "unavailable" };
+  if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
+  let document: PageDocument;
+  try {
+    document = parsePageDocument(await bodyOf(response));
+  } catch (error) {
+    if (!(error instanceof WireShapeError)) throw error;
+    return {
+      kind: "error",
+      refusal: { code: "WIRE_SHAPE_INVALID", clears: "the page is the declared v1 shape" },
+    };
+  }
+  const { body } = document;
+  const bound =
+    same(body.case_id, query.caseId) &&
+    same(body.run_id, query.runId) &&
+    same(body.source_id, query.sourceId) &&
+    body.page === query.page;
+  if (!bound) {
+    return {
+      kind: "error",
+      refusal: {
+        code: "WIRE_IDENTITY_MISMATCH",
+        clears: "the page answers for the case, run, source and page requested",
+      },
+    };
+  }
+  return document.status === "partial"
+    ? { kind: "partial", document }
+    : { kind: "ready", document };
 }

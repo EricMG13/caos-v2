@@ -3,17 +3,18 @@
 // analysis and the reminder that the host performs no calculation; a pending
 // node is named with the state the route left it in, never invented.
 //
-// The evidence drawer is not mounted here: `CitationView.rects` are page
-// points, not the fractions `EvidenceDrawer` expects, and normalising them
-// needs the page's own dimensions -- rendering a page is 4.4. Citations are
-// shown inline instead.
+// Each source fact opens the evidence drawer by its identity (brief 4.4,
+// decision 9); the drawer reads the page's text layer and places the stored
+// rectangles over it.
 import { NODE_SEVERITY, nodeTone } from "./tone";
 import { SeverityMark } from "@/chrome/SeverityMark";
+import { useEvidence } from "@/evidence/EvidenceContext";
 import type { AnalysisDocument, CitationView, HandoffView, PendingNode } from "@/wire/v1";
 
 const SCREENING_NOTICE = "SCREENING ONLY: a screen, not committee clearance.";
 
-function SourceFacts({ facts }: { facts: readonly CitationView[] }) {
+function SourceFacts({ record, facts }: { record: string; facts: readonly CitationView[] }) {
+  const { openFact, activeFact } = useEvidence();
   return (
     <section className="pnl" data-source-facts>
       <header>
@@ -32,6 +33,22 @@ function SourceFacts({ facts }: { facts: readonly CitationView[] }) {
               data-withdrawn={fact.withdrawn_at !== null}
             >
               <span className="h">
+                <button
+                  type="button"
+                  className={`chip${fact.withdrawn_at !== null ? " withdrawn" : ""}`}
+                  aria-label={`Evidence ${fact.filename} p.${fact.page}${fact.withdrawn_at !== null ? " · source withdrawn" : ""}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={activeFact?.record_sha256 === record && activeFact.index === index}
+                  data-fact-chip={fact.source_id}
+                  onClick={(event) =>
+                    openFact(
+                      { record_sha256: record, source_id: fact.source_id, page: fact.page, index },
+                      event.currentTarget,
+                    )
+                  }
+                >
+                  p.{fact.page}
+                </button>{" "}
                 {fact.filename} · p.{fact.page}
               </span>
               <blockquote className="matched" style={{ margin: 0 }}>
@@ -117,7 +134,7 @@ function HandoffCard({ handoff }: { handoff: HandoffView }) {
             <b>Validation warnings.</b> {handoff.validation_warnings.join(", ")}
           </div>
         ) : null}
-        <SourceFacts facts={handoff.source_facts} />
+        <SourceFacts record={handoff.record_sha256} facts={handoff.source_facts} />
         <ModelAnalysis text={handoff.model_analysis} />
         <HostCalculation />
       </div>

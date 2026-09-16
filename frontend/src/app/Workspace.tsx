@@ -27,6 +27,7 @@ import { SectionTabs } from "@/chrome/SectionTabs";
 import { VerdictStrip } from "@/chrome/VerdictStrip";
 import { composeChrome, markDisabled } from "@/chrome/compose";
 import { fallbackChrome } from "@/chrome/fallback";
+import { EvidenceProvider } from "@/evidence/EvidenceContext";
 import { PageAlert } from "@/states/PageAlert";
 import { RegionState } from "@/states/RegionState";
 import { SectionBoundary } from "@/states/SectionBoundary";
@@ -220,15 +221,17 @@ export function Workspace({ section }: { section: Section }) {
         <main className="body" id="body" aria-label={SECTION_LABELS[section]}>
           {status.kind === "offline" ? <PageAlert sentence={OFFLINE_WORDING} /> : null}
           <VisibleSnapshotContext.Provider value={snapshot}>
-            <LedgerProvider>
-              <RegionState status={status} onReload={reload}>
-                {(doc) => (
-                  <SectionBoundary key={mountKey}>
-                    <View key={mountKey} document={doc} tab={activeTab} />
-                  </SectionBoundary>
-                )}
-              </RegionState>
-            </LedgerProvider>
+            <EvidenceProvider>
+              <LedgerProvider>
+                <RegionState status={status} onReload={reload}>
+                  {(doc) => (
+                    <SectionBoundary key={mountKey}>
+                      <View key={mountKey} document={doc} tab={activeTab} />
+                    </SectionBoundary>
+                  )}
+                </RegionState>
+              </LedgerProvider>
+            </EvidenceProvider>
           </VisibleSnapshotContext.Provider>
         </main>
       </div>
