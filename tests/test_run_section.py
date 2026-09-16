@@ -13,7 +13,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
 from httpx import Response
 from test_api_routes import (
@@ -34,14 +33,14 @@ from test_execution_freshness import _Harness
 from server.api import app as app_module
 from server.api.identity import TRUST_SWITCH
 from server.api.reads import run as run_read
-from server.api.wire import RunSectionDocument
+from server.api.wire import DirectoryDocument, RunSectionDocument
 from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
-from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route
 from server.store.runs import create_case, start_run
+from server.store.work import enqueue_run, request_cancel
 
 __all__ = ["catalog", "client", "harness", "lite", "route", "run"]
 
@@ -225,7 +224,7 @@ def test_a_run_beyond_the_bounded_list_is_still_displayed_and_the_list_noted(
     monkeypatch.setattr(run_read, "RUNS_MAX", 1)
     monkeypatch.setattr(run_read, "ATTEMPTS_MAX", 0)
     counter = _CountingConnection(conn)
-    app_module.app.dependency_overrides[run_read.run_store] = lambda: counter
+    app_module.app.dependency_overrides[app_module.store_connection] = lambda: counter
 
     document = _document(_section(client, case_id, older, viewer))
 
@@ -332,7 +331,7 @@ def test_an_anonymous_run_section_request_opens_no_store_connection(
         opened.append("store")
         yield conn
 
-    app_module.app.dependency_overrides[run_read.run_store] = counted
+    app_module.app.dependency_overrides[app_module.store_connection] = counted
 
     response = client.get(f"/api/v1/cases/{case_id}/run")
 
@@ -343,27 +342,30 @@ def test_an_anonymous_run_section_request_opens_no_store_connection(
     assert opened == []
 
 
-def test_the_run_section_derives_identity_by_the_app_rule(
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_cancelled_run_reaches_the_wire(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
 ) -> None:
-    """`run_actor` is the section's copy of `actor_from_request`: the same
-    headers make the same actor, and no identity is the same refusal."""
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
-    user = uuid4()
-    headers = [
-        (b"x-caos-user", str(user).encode()),
-        (b"x-forwarded-groups", b"caos-admins"),
-    ]
+    """Migration 0013 added `CANCELLED` to `runs.status`; `RunStatus` on the
+    wire (`server/api/wire.py`) carries it too, so a cancelled run validates in
+    both the Directory and the Run section instead of failing response
+    validation."""
+    conn, case_id = case
+    run_id, viewer = run
+    enqueue_run(conn, run_id)
+    conn.commit()
+    assert request_cancel(conn, run_id) is True
+    conn.commit()
 
-    def request(raw: list[tuple[bytes, bytes]]) -> Request:
-        return Request({"type": "http", "headers": raw})
-
-    assert run_read.run_actor(request(headers)) == app_module.actor_from_request(
-        request(headers)
+    directory = DirectoryDocument.model_validate(
+        client.get("/api/v1/directory", headers=_as(viewer)).json()
     )
-    with pytest.raises(Refusal) as refused:
-        run_read.run_actor(request([]))
-    assert refused.value.code is RefusalCode.NOT_AUTHENTICATED
+    [row] = directory.body.cases
+    assert row.latest_run is not None
+    assert row.latest_run.status == "CANCELLED"
+
+    document = _document(_section(client, case_id, run_id, viewer))
+    assert document.body.run is not None
+    assert document.body.run.status == "CANCELLED"
 
 
 def test_the_run_section_request_path_declares_its_store_budget(
@@ -375,7 +377,7 @@ def test_the_run_section_request_path_declares_its_store_budget(
     harness, viewer = lite
     _answer(harness, "CP-0")
     counter = _CountingConnection(harness.conn)
-    app_module.app.dependency_overrides[run_read.run_store] = lambda: counter
+    app_module.app.dependency_overrides[app_module.store_connection] = lambda: counter
 
     assert _section(client, harness.case_id, None, viewer).status_code == 200
 
