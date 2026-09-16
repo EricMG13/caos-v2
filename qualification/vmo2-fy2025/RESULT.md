@@ -370,3 +370,58 @@ the record, and a key picked from it would be measuring the model against
 itself.
 
 No run has been performed against this set.
+
+## DeepSeek re-tried against the fixed reader — 2026-09-16
+
+The v2 conclusion that DeepSeek V4 Pro is not qualified rested on three billed
+CP-0 attempts recorded as "returned N citations; none of their exact quotes
+appeared in the Markdown body" — the exact shape of the reader defect fixed at
+`7a12c6d`. That evidence was contaminated, so the model was re-tried.
+
+- Set: `ae70850d27d1860155ec772ac27e95d7747dd2e9ab944f87034e0215dde407d8`
+  (the re-cast key; CP-0 carries no expectation)
+- Profile/model: `openrouter/ionstream/default/65536` /
+  `deepseek/deepseek-v4-pro-0813`, the same profile the v2 run used
+- Price: `$0.0000009834` input, `$0.0000029502` output per token, dated
+  2026-09-16 from OpenRouter's published list; reservation `$1.2245139456` per
+  call
+- Run `ff71c457-70b8-44bd-b6ef-2099927b8936`, total `$0.33371808`
+
+A first attempt, run `9bde894f-47fd-4424-bf8b-7713bef2d406`, refused
+`PROVIDER_UNAVAILABLE` with **no charge and no generation**: Ionstream's shared
+pool returned 429. Indeterminate rather than failed, so the attempt kept its
+reservation and nothing was billed. Three probes at 8, 4,096 and 65,536
+completion tokens all returned 200 minutes later, so it was transient and not
+the host's fixed token ceiling.
+
+### Result
+
+| Module | Charge | Result |
+|---|---:|---|
+| CP-0 | `$0.15272064` | **accepted**, one artifact, one anchored citation |
+| CP-L10 | `$0.18099744` | `HANDOFF_MALFORMED`; the run stopped `RUNNING` |
+
+**CP-0 now passes.** Under v2 it failed three times in a row. That is the
+reader fix and the v3 provenance context together, and it means the v2 record
+overstated what was wrong with this model.
+
+**CP-L10 fails on its own merits.** The refusal is not the quotation rule —
+`parse_response` accepts the answer, and every cited quote is in the body. The
+bundle's own validator returns the error:
+
+    qa_status Restricted caps confidence_score at 59
+
+The module declared `qa_status: Restricted` and then scored itself above the
+cap the vendor contract sets for that status. Its register headings are also
+paraphrased rather than reproduced — `TL20.1 — Source and Scope Guard` for
+`Source and Scope Gate`, `TL40.3 —  decision screen`, `TL23.4 — Gaps` — where
+the Terra runs reproduced them exactly.
+
+**The verdict does not change: DeepSeek V4 Pro is not qualified.** What changes
+is the reason and the evidence behind it. The earlier "quoted none of its
+citations" finding should be read as the host's defect; this one — a module
+that contradicts the contract's own status rule — is the model's.
+
+Retained: database `caos_qualify_cf7b0d99f8474825b7ce7264bb385e43` (the 429),
+the second run's database and blob root are named in its capture beside this
+file.
