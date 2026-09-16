@@ -39,6 +39,8 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         "SOURCES_ADMITTED": "sources_changed",
         "GATE_RELEASED:SOURCE_SET": "runs_changed",
         "GATE_RELEASED:RESEARCH_PLAN": "runs_changed",
+        "RUN_CREATED": "runs_changed",
+        "RUN_INPUT_PINNED": "runs_changed",
         "RUN_ENQUEUED": "runs_changed",
         "RUN_REQUEUED": "runs_changed",
         "RUN_CANCEL_REQUESTED": "runs_changed",
