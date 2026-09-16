@@ -124,6 +124,33 @@ def require_lease(
     return row[0] is not None
 
 
+def holds_lease(conn: StoreConnection, run_id: UUID, lease: Lease | None) -> bool:
+    """Whether this caller still holds the run, without renewing or writing.
+
+    `lock_run` answers the same question by renewing, which a read block must
+    not do. This exists so a read-only check can put the lease refusal first:
+    a caller that lost the run is told that, before it is told anything about
+    what the run contains.
+    """
+    if lease is None:
+        return (
+            conn.execute(
+                "SELECT 1 FROM run_work WHERE run_id = %s", (run_id,)
+            ).fetchone()
+            is None
+        )
+    if not isinstance(lease, Lease) or lease.run_id != run_id:
+        return False
+    return (
+        conn.execute(
+            "SELECT 1 FROM run_work WHERE run_id = %s AND state = 'CLAIMED'"
+            " AND lease_token = %s",
+            (run_id, lease.token),
+        ).fetchone()
+        is not None
+    )
+
+
 def release(conn: StoreConnection, lease: Lease) -> bool:
     """Give a held run back to the queue. False when the lease is not held."""
     return bool(

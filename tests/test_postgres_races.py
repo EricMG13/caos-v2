@@ -50,7 +50,14 @@ from server.store.runs import (
     start_attempt,
     start_run,
 )
-from server.store.work import Lease, claim_run, enqueue_run, request_cancel, stop
+from server.store.work import (
+    Lease,
+    claim_run,
+    enqueue_run,
+    holds_lease,
+    request_cancel,
+    stop,
+)
 
 # The producer the store records beside every accepted artifact: what the
 # host configured, and the provider's own handle for the call.
@@ -585,6 +592,10 @@ def test_the_runtime_writes_under_its_executions_lease(
         assert _count(conn, "artifacts", run_id) == 0
         _refused(RefusalCode.LEASE_NOT_HELD, run)
         assert provider.calls == ["CP-0"], "a stale lease starts no attempt"
+        # The node is billed with no stored body, which is its own refusal --
+        # but the lease answer comes first, so `holds_lease` is what decides
+        # which of the two this caller is told.
+        assert not holds_lease(conn, run_id, lease)
         assert _count(conn, "run_attempts", run_id) == 1
 
 

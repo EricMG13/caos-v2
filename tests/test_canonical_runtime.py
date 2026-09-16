@@ -47,6 +47,7 @@ from server.methodology.canonical import (
     accepted_projections,
     blocked_verdict,
     replay_billed,
+    unexplained_charge,
 )
 from server.methodology.handoff import (
     Projections,
@@ -393,6 +394,46 @@ def test_a_body_that_cannot_be_stored_refuses_after_its_bill(
     monkeypatch.setattr(BlobStore, "put", failing)
     assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
     assert _counts(harness)[:2] == (1, [REPORTED])
+    _still_running(harness)
+
+
+def test_a_billed_node_with_no_stored_body_is_not_billed_again(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The charge committed, the body did not: nobody may pay twice by default.
+
+    `replay_billed` needs a diagnostic to settle the attempt from, and this
+    outcome has none, so before this refusal the next pass simply started a
+    fresh attempt, reserved again and called the provider again. Paying again
+    may be right, but it is an operator's decision -- so the run parks with a
+    code instead of spending.
+    """
+    answers = CanonicalCompletions(harness.source_id)
+    provider = _module_provider(harness, answers)
+    real_put = BlobStore.put
+
+    def failing(self: BlobStore, data: bytes) -> str:
+        if answers.bodies and data == answers.bodies[-1].encode():
+            raise OSError
+        return real_put(self, data)
+
+    monkeypatch.setattr(BlobStore, "put", failing)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    called = len(answers.prompts)
+    assert called == 1
+    harness.conn.rollback()
+
+    monkeypatch.setattr(BlobStore, "put", real_put)
+    node = unexplained_charge(
+        harness.conn,
+        run_id=harness.run_id,
+        route_node_ids=[node.route_node_id for node in harness.route.nodes],
+    )
+    assert node is not None, "the charged node with no body is the one found"
+    harness.conn.rollback()
+    assert _run_route(harness, provider) is RefusalCode.CALL_OUTCOME_UNEXPLAINED
+    assert len(answers.prompts) == called, "no second call for the same node"
+    assert _counts(harness)[:2] == (1, [REPORTED]), "and no second charge"
     _still_running(harness)
 
 
