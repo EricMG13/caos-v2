@@ -1015,3 +1015,85 @@ def test_reordered_contiguous_tokens_refuse_upgrade(
     with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
         apply_schema(conn)
     assert _records(conn) == before
+
+
+def test_version_fourteen_adds_empty_command_requests_to_a_populated_store(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Task 4.2 decision 6: migration 0014 advances a version-13 store with
+    rows in it, adding an empty receipt table and changing nothing else."""
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:13])
+            apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("before commands"))
+        run_id = start_run(conn, case_id)
+        conn.commit()
+        before = conn.execute("SELECT case_id, title FROM cases").fetchall()
+
+        apply_schema(conn)
+
+        assert store.MIGRATIONS[13][0] == "0014_command_requests"
+        assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
+            14,
+        )
+        assert conn.execute("SELECT case_id, title FROM cases").fetchall() == before
+        assert run_status(conn, run_id) is RunStatus.RUNNING
+        assert conn.execute("SELECT count(*) FROM command_requests").fetchone() == (0,)
+        conn.rollback()
+
+
+def test_command_requests_are_keyed_bounded_and_immutable(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    conn, _case_id = case
+    columns = conn.execute(
+        "SELECT column_name, data_type, is_nullable FROM information_schema.columns"
+        " WHERE table_name = 'command_requests' ORDER BY ordinal_position"
+    ).fetchall()
+    assert columns == [
+        ("actor_id", "uuid", "NO"),
+        ("scope", "uuid", "NO"),
+        ("idempotency_key", "uuid", "NO"),
+        ("command", "text", "NO"),
+        ("request_sha256", "text", "NO"),
+        ("status", "smallint", "NO"),
+        ("receipt", "jsonb", "NO"),
+        ("created_at", "timestamp with time zone", "NO"),
+    ]
+    insert = (
+        "INSERT INTO command_requests (actor_id, scope, idempotency_key, command,"
+        " request_sha256, status, receipt) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+    )
+    actor, scope, key = uuid4(), uuid4(), uuid4()
+    good = (actor, scope, key, "START_RUN", "a" * 64, 202, '{"ok": true}')
+    conn.execute(insert, good)
+    conn.commit()
+    for bad in (
+        (actor, scope, key, "START_RUN", "b" * 64, 202, "{}"),  # the primary key
+        (actor, scope, uuid4(), "start_run", "a" * 64, 202, "{}"),
+        (actor, scope, uuid4(), "START_RUN", "A" * 64, 202, "{}"),
+        (actor, scope, uuid4(), "START_RUN", "a" * 64, 409, "{}"),
+        (
+            actor,
+            scope,
+            uuid4(),
+            "START_RUN",
+            "a" * 64,
+            200,
+            '{"x": "' + "y" * 65_536 + '"}',
+        ),
+    ):
+        with pytest.raises(psycopg.errors.IntegrityError):
+            conn.execute(insert, bad)
+        conn.rollback()
+    for mutation in (
+        "UPDATE command_requests SET status = 200",
+        "DELETE FROM command_requests",
+        "TRUNCATE command_requests",
+    ):
+        with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+            conn.execute(mutation)
+        conn.rollback()
+    assert conn.execute("SELECT count(*) FROM command_requests").fetchone() == (1,)
+    conn.rollback()
