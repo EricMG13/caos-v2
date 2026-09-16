@@ -37,11 +37,12 @@ function v1Upload(role: { global_role: string; standing: string | null }, caseId
 
 describe("the wire", () => {
   test("test_wire_pinned_keys_match_fixtures", () => {
-    // Directory and Upload read the v1 wire since slice 4.1h (their `wire.ts`
-    // marker), so their fixtures no longer carry the legacy pinned keys this
-    // test checks; `test_every_enabled_demo_fixture_is_a_valid_v1_document`
+    // Every enabled section reads the v1 wire (their `wire.ts` marker):
+    // Directory and Upload since slice 4.1h, Run since 4.1i, Analysis since
+    // 4.1j. Their fixtures no longer carry the legacy pinned keys this test
+    // checks; `test_every_enabled_demo_fixture_is_a_valid_v1_document`
     // (tests/unit/directory.test.tsx) is their equivalent gate.
-    const V1_CUTOVER = ["directory", "upload", "run"];
+    const V1_CUTOVER = ["directory", "upload", "run", "analysis"];
     const documents = [
       ...SECTIONS.filter((section) => !V1_CUTOVER.includes(section)).map(
         (section) => `${section}.json`,
@@ -50,7 +51,10 @@ describe("the wire", () => {
         .filter((name) => !V1_CUTOVER.some((section) => name.startsWith(`${section}.`)))
         .map((name) => `states/${name}`),
     ];
-    expect(documents.length).toBeGreaterThanOrEqual(9);
+    // The floor: five legacy sections and the state fixtures beside them.
+    // It falls by one with each cutover and reaches zero when the legacy
+    // path goes, which is when this test goes with it.
+    expect(documents.length).toBeGreaterThanOrEqual(8);
     for (const name of documents) {
       const document = fixture(name);
       expect(keysMatch(document), name).toBe(true);
