@@ -44,7 +44,8 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import ResolvedRoute
+from server.engine.route import READY, ResolvedRoute, readiness_from
+from server.engine.runtime import accepted_artifacts
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_handoff
@@ -127,6 +128,13 @@ class QualificationCase:
     # credit-conclusion sets use this deterministic CP-CF answer key.
     forecast: ExpectedForecast | None = None
     expected_refusal: RefusalCode | None = None
+    # Module ids CP-0 must find ready. A readiness key, not a citation one: the
+    # host already projects `(module_id, readiness_status)` off CP-0's record
+    # (`server/engine/route.py`), so this is read from what the engine gated on
+    # rather than from prose. It exists because a gate that wrongly refuses a
+    # module is invisible to a citation key -- the module never runs, so it
+    # cites nothing, and every key aimed at it reads as a miss by the model.
+    expects_ready: tuple[str, ...] = ()
     # CP-CF is a host extension, so a forecast key must bind whether it was
     # present rather than silently qualifying the base route.
     model_extension: bool = False
@@ -155,6 +163,7 @@ class MatrixRow:
     missed: tuple[ExpectedCitation, ...]
     forecast_met: bool | None
     expected_refusal_met: bool | None
+    ready_met: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +242,8 @@ def _digested(case: QualificationCase) -> list[object]:
         )
     if case.expected_refusal is not None:
         entry.append(case.expected_refusal.value)
+    if case.expects_ready:
+        entry.append(sorted(case.expects_ready))
     return entry
 
 
@@ -310,7 +321,40 @@ def _row(
         expected_refusal_met=(
             None if case.expected_refusal is None else refusal is case.expected_refusal
         ),
+        ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
     )
+
+
+def _ready_met(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+) -> bool | None:
+    """Whether CP-0 found every module the case names ready to run.
+
+    Read from `readiness_from` — the same projection `node_states` gates on, so
+    this asks exactly the question the engine asked and not a re-reading of the
+    handoff's prose. `None` when the case names none.
+
+    A gate that refuses a module for the wrong reason is otherwise invisible:
+    the module never runs, so it cites nothing, and every citation key aimed at
+    it reads as the model failing to find evidence when the truth is that the
+    model was never asked.
+    """
+    if not case.expects_ready:
+        return None
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return False
+    try:
+        accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
+    except Refusal:
+        return False
+    readiness = dict(readiness_from(route, accepted))
+    return all(readiness.get(module) in READY for module in case.expects_ready)
 
 
 def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
@@ -505,7 +549,10 @@ def assert_measurable(qualification: QualificationSet) -> None:
     if any(
         not case.documents
         or (
-            not case.expects and case.forecast is None and case.expected_refusal is None
+            not case.expects
+            and case.forecast is None
+            and case.expected_refusal is None
+            and not case.expects_ready
         )
         or (case.forecast is not None and not case.forecast.values)
         for case in qualification.cases
