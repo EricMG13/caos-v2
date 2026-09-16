@@ -905,18 +905,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **Nothing can sign a verdict.** `record_verdict` exists, binds provider, set
-  digest, build and the `complete` flag, and is tested; the read side is served
-  at `server/api/reads/qualification.py`. But no route or script calls it, and
-  `reviewer_id` is a caller-supplied UUID with no OIDC derivation — so the
-  producer half of `docs/REPAIR_PLAN.md` Phase 6 item 3 does not exist, and that
-  is the whole reason `qualification_verdicts` is empty everywhere (§62, §64).
-  A verdict is the one thing in this system a person asserts rather than the
-  host deriving, so this is the gap that keeps "is this build qualified"
-  unanswerable however green the gates are. *Upgrade:* a governed write that
-  derives `reviewer_id` from the authenticated actor the way every other
-  authority decision does, with the verdict document supplied by the reviewer
-  and the host originating nothing in it.
+- ~~**Nothing can sign a verdict.**~~ Closed by
+  `server/api/commands/qualification.py` (`docs/DECISIONS.md` §65):
+  `POST /api/v1/qualification/{evidence_sha256}/verdict` takes the reviewer's
+  six-binding document, reads it with `read_verdict` against the store's
+  clock, and calls `record_verdict` with `reviewer_id` taken from the
+  authenticated `Actor` and from nowhere else — a body naming one is refused
+  as undeclared before a connection opens. The floor is the top global rank
+  (`ADMIN`, by `at_least`), because a verdict is the first authority here that
+  is account-wide rather than case-scoped; below it, and for evidence the store
+  does not hold, the answer is one private 404. What it does not do: nothing
+  here lets the host call itself qualified — the route records a person's
+  assertion over evidence `record_verdict` already bound, and refuses when the
+  snapshot is not `complete` or the bindings do not match. Two limits remain.
+  A second signature over the same evidence is refused
+  `VERDICT_BINDING_INVALID` by the one-verdict constraint rather than by a
+  code of its own, so a retried request cannot tell "already signed" from
+  "wrong bindings" (`tests/test_qualification_sign.py`); and the write is one
+  transaction with no `command_requests` receipt, because there is no case to
+  scope a key to. *Upgrade:* a `VERDICT_ALREADY_RECORDED` code the day a
+  client retries, and a global-scope receipt the day a second global write
+  arrives and the shape is worth generalising.
 - **The run-to-case binding lives in the matrix's only caller, not the matrix.**
   `build_matrix` accepts any `runs` mapping and checks only that a label is
   present; everything that makes a run the case's run — title, ceiling, profile,

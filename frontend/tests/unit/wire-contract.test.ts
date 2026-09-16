@@ -476,6 +476,8 @@ describe("the v1 wire contract", () => {
       "RetryRun",
       "CancelRun",
       "RunWork",
+      "SignVerdict",
+      "VerdictRecorded",
     ];
     expect(Object.keys(V1_COMMAND_SHAPES).sort()).toEqual([...commands].sort());
     const shapes = new Map(Object.entries(V1_COMMAND_SHAPES));

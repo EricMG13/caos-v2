@@ -64,12 +64,14 @@ from server.api.wire import (
     SectionNote,
     ServedRole,
     SetVersion,
+    SignVerdict,
     SourceRow,
     SourcesAdmitted,
     StartRun,
     Subject,
     UploadBody,
     UploadDocument,
+    VerdictRecorded,
     WorkView,
     wire_schema,
 )
@@ -299,6 +301,16 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     RetryRun: frozenset({"input_fingerprint"}),
     CancelRun: frozenset(),
     RunWork: frozenset({"run_id", "run_status", "work"}),
+    # A verdict (F17's producer, `docs/DECISIONS.md` §65): the reviewer's six
+    # bindings in, and the host's receipt out.
+    SignVerdict: frozenset(
+        (
+            "provider qualification_set_sha256 build_id decided_at expires_at reviewer"
+        ).split()
+    ),
+    VerdictRecorded: frozenset(
+        {"evidence_sha256", "reviewer_id", "decided_at", "expires_at"}
+    ),
 }
 
 REQUESTS: tuple[type[BaseModel], ...] = (
@@ -309,6 +321,7 @@ REQUESTS: tuple[type[BaseModel], ...] = (
     StartRun,
     RetryRun,
     CancelRun,
+    SignVerdict,
 )
 
 # What `frontend/src/wire/v1/shape.ts` can express. `title` and `description`
@@ -550,7 +563,7 @@ def test_every_section_router_declares_its_store_budget() -> None:
 
 def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> None:
     assert set(REQUESTS) <= set(V1_COMMANDS)
-    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 14
+    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 16
     defs = json.loads(COMMITTED.read_text(encoding="utf-8"))["$defs"]
     for model in V1_COMMANDS:
         assert model.__name__ in defs, model.__name__
@@ -561,6 +574,7 @@ def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> N
 
     # T1: a request names no actor, case, run or approver; the server derives them.
     authority = {"actor_id", "actor", "case_id", "run_id", "approver", "approver_id"}
+    authority |= {"reviewer_id"}  # a verdict's signer is the actor, never a field
     for request in REQUESTS:
         assert not authority & set(request.model_fields), request.__name__
 
@@ -581,3 +595,12 @@ def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> N
     for request in (StartRun, RetryRun, ApproveGate):
         field = defs[request.__name__]["properties"]["input_fingerprint"]
         assert field["pattern"] == "^[0-9a-f]{64}$"
+    # A verdict's moments are text the server's reader parses, not datetimes
+    # the wire would have judged first; the receipt's are the host's, aware.
+    for moment in ("decided_at", "expires_at"):
+        assert defs["SignVerdict"]["properties"][moment] == {
+            "maxLength": wire.MOMENT_CHARS,
+            "title": moment.replace("_", " ").title(),
+            "type": "string",
+        }
+        assert defs["VerdictRecorded"]["properties"][moment]["format"] == "date-time"

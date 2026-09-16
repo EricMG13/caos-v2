@@ -56,10 +56,12 @@ ROUTE_CHOICES_MAX = 16
 PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
 PAGE_LINES_MAX = 2000  # beyond it a page is partial, `LIST_TRUNCATED`
 PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `PAGE_NOT_AVAILABLE`
+MOMENT_CHARS = 64  # an ISO-8601 instant with its offset, as `read_verdict` reads it
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
 Sha256 = Annotated[str, Field(max_length=64, pattern="^[0-9a-f]{64}$")]
+Moment = Annotated[str, Field(max_length=MOMENT_CHARS)]
 RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"]
 WorkState = Literal["QUEUED", "CLAIMED", "STOPPED", "DONE"]  # `run_work.state`
 
@@ -227,6 +229,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.VERDICT_BINDING_INVALID: "Correct the verdict bindings.",
     _C.VERDICT_UNDECLARED_FIELD: "Remove undeclared verdict fields.",
     _C.VERDICT_EXPIRED: "Obtain a current verdict.",
+    _C.QUALIFICATION_EVIDENCE_NOT_FOUND: "Name qualification evidence you may sign.",
     _C.STORE_SCHEMA_DRIFT: "An operator must reconcile the schema.",
     _C.STORE_NOT_TRANSACTIONAL: "An operator must fix the store connection.",
     _C.STORE_NOT_CONFIGURED: "An operator must configure the store.",
@@ -895,6 +898,36 @@ class RunWork(BaseModel):
     work: WorkView
 
 
+class SignVerdict(BaseModel):
+    """A reviewer's verdict document: the six bindings `read_verdict` declares,
+    and nothing else. The shape is closed here; what the document *means* --
+    a naive or future `decided_at`, a passed expiry -- is the reader's to
+    decide, so the moments travel as text and are parsed once, there. The
+    reviewer's identity is not a field: the host derives it from the actor.
+    """
+
+    model_config = _CLOSED
+
+    provider: Id
+    qualification_set_sha256: Sha256
+    build_id: Id
+    decided_at: Moment
+    expires_at: Moment
+    reviewer: Id
+
+
+class VerdictRecorded(BaseModel):
+    """The receipt for a recorded verdict: which evidence, who the host bound
+    it to, and the currency the reviewer declared."""
+
+    model_config = _CLOSED
+
+    evidence_sha256: Sha256
+    reviewer_id: UUID
+    decided_at: AwareDatetime
+    expires_at: AwareDatetime
+
+
 V1_COMMANDS: tuple[type[BaseModel], ...] = (
     CreateCase,
     CaseCreated,
@@ -910,6 +943,8 @@ V1_COMMANDS: tuple[type[BaseModel], ...] = (
     RetryRun,
     CancelRun,
     RunWork,
+    SignVerdict,
+    VerdictRecorded,
 )
 
 

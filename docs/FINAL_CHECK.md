@@ -52,12 +52,14 @@ own capture.
 
 ## What is not true, and is accepted
 
-1. **No verdict exists, and none can be made.** `record_verdict` is written,
-   bound and tested, and the read side is served — but nothing in `server/` or
-   `scripts/` calls it, and `reviewer_id` has no derivation from an
-   authenticated actor. `qualification_verdicts` is empty in every database.
-   This is the open half of F17 (§64) and the reason "is this build qualified"
-   has no answer.
+1. **No verdict exists — but one can now be made.** Closed after this document
+   was first written: `POST /api/v1/qualification/{evidence_sha256}/verdict`
+   (§65) takes the reviewer's six-binding document and records it with
+   `reviewer_id` derived from the authenticated actor, from OIDC groups in
+   production. `ADMIN` signs; below that, and for evidence the store does not
+   hold, the answer is one private 404. `qualification_verdicts` is still empty
+   in every database, including the retained evidence behind this check —
+   because signing it is the reviewer's act, and no one has signed.
 2. **One pathway of eighteen has been qualified.** `LITE_CREDIT_22 /
    LITE_EARNINGS_UPDATE`. The plan wants every route intended to be advertised.
 3. **The model surfaces the material figure inconsistently.** It took three runs

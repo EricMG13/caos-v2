@@ -798,6 +798,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
             "read_gate_preview"
         ),
         "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval": "approve",
+        "/api/v1/qualification/{evidence_sha256}/verdict": "sign_verdict",
     }
 
 

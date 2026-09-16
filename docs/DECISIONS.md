@@ -2446,3 +2446,43 @@ top-left in displayed space at every quarter turn
 - *Caller-dependent binding:* `build_matrix` still accepts any `runs` mapping and
   checks only label presence; the binding lives in `_eligible`, its only caller.
   Recorded in `CLAUDE.md`.
+
+## 2026-09-16 §65 — A reviewer can sign a verdict; the host still cannot call itself qualified
+
+F17's open half (§64) is closed by `server/api/commands/qualification.py`:
+`POST /api/v1/qualification/{evidence_sha256}/verdict`. Before this there was no
+route by which a person asserted a verdict, which is why §62 recorded
+`qualification_verdicts` empty everywhere and the final check listed it first.
+
+The body is the reviewer's six-binding document (`SignVerdict`, closed at the
+wire), and `read_verdict` remains its only reader, judged against the store's
+clock — so the moments travel as text and what the document *means*, a naive or
+future `decided_at` or a passed expiry, is decided in one place rather than
+twice. `reviewer_id` is `Actor.user_id` as the edge derived it, from OIDC groups
+in production and from the trusted header only in development, and from nowhere
+else; it is not a field of the request, and a body naming one is an undeclared
+field refused before a connection opens.
+
+The floor is `ADMIN`, by `at_least` over `_RANK`. A verdict is the first
+authority in this system that is genuinely account-wide: every other write by an
+`ANALYST` also requires standing on the case, and here there is no case for
+standing to attach to, so the global role would be the sole authority and the
+lowest writing rank has never been sufficient alone. Below the floor, and for
+evidence the store does not hold, the answer is one private 404
+(`QUALIFICATION_EVIDENCE_NOT_FOUND`), so a caller cannot probe which evidence
+digests exist — the same shape the read route gives a `READER`.
+
+`record_verdict`'s bindings — provider against the host-recorded `provider:model`,
+set digest, build, and `complete` — are not repeated here, only mapped to the
+wire. The write is one transaction and a refusal rolls it back.
+
+**What this does not assert.** Nothing here lets the system call itself
+qualified. The route records a person's assertion over evidence the harness
+already produced and `record_verdict` already binds, and the label a reader sees
+is still `current_verdict` re-validating that document. Two limits: a second
+signature over the same evidence is refused `VERDICT_BINDING_INVALID` by the
+one-verdict constraint rather than by a code of its own, and there is no
+command receipt because there is no case scope to key one by. Verified against a
+throwaway clone of the retained `caos_qualify_5a47243d…`; that database still
+holds no verdict, because signing the evidence behind a final check is the
+reviewer's act and not this change's.

@@ -45,6 +45,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from server.api import health
 from server.api.commands import cases as cases_command
 from server.api.commands import execution as execution_command
+from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
 from server.api.deps import DATABASE_URL as DATABASE_URL
@@ -104,6 +105,8 @@ POLL_INTERVAL = 0.5
 # 400 would tell the caller their request was the problem.
 _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
+    # Below the signing floor or not held: one private answer, as for a case.
+    RefusalCode.QUALIFICATION_EVIDENCE_NOT_FOUND: 404,
     RefusalCode.RUN_NOT_FOUND: 404,
     RefusalCode.CASE_NOT_FOUND: 404,
     RefusalCode.DELIVERABLE_NOT_FOUND: 404,
@@ -212,7 +215,12 @@ for _section in (
 ):
     app.include_router(_section.router)
 app.include_router(health.router)
-for _commands in (cases_command, runs_command, execution_command):
+for _commands in (
+    cases_command,
+    runs_command,
+    execution_command,
+    qualification_command,
+):
     app.include_router(_commands.router)
 
 

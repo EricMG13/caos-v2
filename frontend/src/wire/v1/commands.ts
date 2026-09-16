@@ -41,6 +41,23 @@ const RunWork = object({
   run_status: enumOf(RUN_STATUSES),
   work: V1_SHAPES.WorkView,
 });
+// A verdict is the reviewer's document: the moments travel as text and are
+// read once, by the server's verdict reader. The receipt is the host's.
+const moment = string({ max: 64 });
+const SignVerdict = object({
+  provider: short,
+  qualification_set_sha256: hash,
+  build_id: short,
+  decided_at: moment,
+  expires_at: moment,
+  reviewer: short,
+});
+const VerdictRecorded = object({
+  evidence_sha256: hash,
+  reviewer_id: uuid,
+  decided_at: datetime,
+  expires_at: datetime,
+});
 
 /** Every command model `schema.json` declares, under its backend name. */
 export const V1_COMMAND_SHAPES = {
@@ -56,8 +73,10 @@ export const V1_COMMAND_SHAPES = {
   RunCreated,
   RunInputPinned,
   RunWork,
+  SignVerdict,
   SourcesAdmitted,
   StartRun,
+  VerdictRecorded,
 };
 
 export type CreateCase = Infer<typeof CreateCase>;
@@ -74,6 +93,8 @@ export type StartRun = Infer<typeof StartRun>;
 export type RetryRun = Infer<typeof RetryRun>;
 export type CancelRun = Infer<typeof CancelRun>;
 export type RunWork = Infer<typeof RunWork>;
+export type SignVerdict = Infer<typeof SignVerdict>;
+export type VerdictRecorded = Infer<typeof VerdictRecorded>;
 
 export const parseCaseCreated = (value: unknown): CaseCreated => parse(CaseCreated, value);
 export const parseSourcesAdmitted = (value: unknown): SourcesAdmitted =>
@@ -84,3 +105,6 @@ export const parseGatePreviewDocument = (value: unknown): GatePreviewDocument =>
   parse(GatePreviewDocument, value);
 export const parseGateApproved = (value: unknown): GateApproved => parse(GateApproved, value);
 export const parseRunWork = (value: unknown): RunWork => parse(RunWork, value);
+// No `parseVerdictRecorded`: the workspace has no sign control yet, and a
+// validator nothing calls is coverage without a caller. The shape is pinned
+// above so the day one arrives it is validated, not cast.
