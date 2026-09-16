@@ -53,6 +53,7 @@ from server.qualification.harness import (
     perform,
     prepare,
 )
+from server.qualification.matrix import QualificationSet
 from server.qualification.on_disk import load_qualification_set
 from server.qualification.store import performed_evidence, record_evidence
 from server.store import StoreConnection, apply_schema, connect
@@ -179,12 +180,61 @@ def _capture(
     }
 
 
+def _perform_until(  # noqa: PLR0913 -- one set, one loop, keyword-only tail
+    conn: StoreConnection,
+    blobs: BlobStore,
+    harness: Harness,
+    qualification: QualificationSet,
+    prepared: tuple[PreparedCase, ...],
+    *,
+    attempts: int,
+) -> PerformedSet:
+    """Re-enter `perform` on the same pins while a node refusal stops the set.
+
+    One refused node ends a whole set (`harness.perform` records `stopped` and
+    returns), and a set costs three provider calls, so a single unlucky module
+    throws away the two that succeeded. `perform` is re-enterable on the same
+    `prepared`: accepted nodes are read from the store rather than re-run, and
+    an explained refusal leaves the node ready for one fresh attempt, so this
+    buys another try at the node that stopped and nothing more.
+
+    It is bounded twice over. `attempts` caps the re-entries, and the run
+    ceiling is the real limit: every attempt reserves `worst_case(price)`
+    whether or not it is accepted, and `budget.py` never releases a
+    reservation, so a run cannot spend past its ceiling however many times this
+    loop asks.
+    """
+    performed = perform(
+        conn, blobs, harness, qualification=qualification, prepared=prepared
+    )
+    for remaining in range(attempts - 1, 0, -1):
+        if all(record.stopped is None for record in performed.performed):
+            return performed
+        stopped = next(
+            record.stopped for record in performed.performed if record.stopped
+        )
+        print(
+            json.dumps({"resumed_after": stopped.value, "attempts_left": remaining}),
+            flush=True,
+        )
+        performed = perform(
+            conn, blobs, harness, qualification=qualification, prepared=prepared
+        )
+    return performed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("set_root", type=Path, help="the on-disk qualification set")
     parser.add_argument("--expect-identity", required=True)
     parser.add_argument("--ceiling", required=True, type=Decimal)
     parser.add_argument("--capture", type=Path, help="where to write the JSON capture")
+    parser.add_argument(
+        "--attempts",
+        type=int,
+        default=1,
+        help="times to enter perform; >1 retries the node that stopped the set",
+    )
     args = parser.parse_args(argv)
 
     bundle = Bundle(REPO / "vendor/deploy-v")
@@ -226,8 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         blobs = BlobStore(blob_root)
         prepared = prepare(conn, blobs, harness, qualification=qualification)
         _approve_every_gate(conn, prepared)
-        performed = perform(
-            conn, blobs, harness, qualification=qualification, prepared=prepared
+        performed = _perform_until(
+            conn, blobs, harness, qualification, prepared, attempts=args.attempts
         )
         run_id = prepared[0].input.run_id
         document = _capture(conn, prepared, performed, run_id=run_id)
