@@ -31,6 +31,18 @@ This document is a review and implementation plan, not a claim that the defects 
 - Locally stored `origin/main`: `26d7ee99f6c90396ddb5f7c3614cdd733af4ed76`, three commits ahead. No fetch or pull was performed; this is not a claim about the current remote head.
 - Vendored Deploy V build: `a43cb903ca2751f79e77b6da71f6ea131b8462a32e1b549d65fd0f67389d185f`.
 - Its separately recorded manifest digest is `2fc17570822e33365722dbbab8c408babba1d3d3de0a267ab47009436eae2823`. See [bundle decision](/Users/ericguei/Documents/caos-v2/docs/DECISIONS.md:174).
+- **The bundle has since moved, and these two lines are the baseline this review
+  was performed against, not the current pin.** On 16 September 2026 the owner
+  authorised two edits inside `vendor/deploy-v/` — `CONDITIONAL` given a
+  source-only meaning and a discharge, and `validate_handoff.py` made to derive
+  the status floor from a handoff's own findings — recorded as
+  `docs/DECISIONS.md` §61, which overrides §13's pin. The tree now carries build
+  `cdea0c9fbb046321fdd6d0fb526b6bc74cf4c9e9e2ea4b381f1c4a61081e9d22`, manifest
+  digest `087bbdf8421aca31cac4e04adf3c85d779cc4822cff748e0715d24a82157b1da`.
+  Every run pinned to `a43cb903` refuses `ORCHESTRATION_BUILD_MOVED` on
+  re-proof. The two digests above are left as written because this section
+  records what was reviewed; a baseline edited to match today would be a claim
+  nobody made.
 
 The review covered the authored server, frontend, gate scripts and configuration through source reading and parallel fact gathering. All 89 frontend source files and 29 frontend test files were read; all assigned backend/runtime/evidence/methodology/calculation/deliverable/qualification source files were covered. Relevant backend tests and system, IA, rebuild, security and decision documents were traced. Vendored contracts and helpers were examined where the host uses or needs them; all manifest-covered vendor bytes were checked by the existing integrity tests. Generated locks and third-party dependencies were not manually audited line by line. Historical attempts inform the earlier architecture discussion; this defect list is specific to CAOS v2.
 
