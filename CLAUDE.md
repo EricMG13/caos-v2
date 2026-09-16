@@ -905,7 +905,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**
+- ~~**`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**~~
+  Closed by `docs/DECISIONS.md` §61, the owner's authorised override of
+  invariant 4: the verdict now names a source the effective-source set does not
+  carry, says how it is discharged, and says an upstream analytical handoff not
+  yet produced is never a readiness ground — in the same words in all three
+  places CP-0 reads it, with `test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read`
+  failing the day one of them drifts. The build moved with it, `a43cb903` ->
+  `cdea0c9f`. The original entry, for the reader who wants the reason:
   `cp-0-source-readiness/SKILL.md` defines it only as "emit `DO NOT RUN`", and
   nothing there says the condition must be a *source* condition — while line
   359 of the same file says source readiness must not assert whether upstream
@@ -919,8 +926,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   define the condition as source-only, name its discharge, and say that an
   upstream-handoff dependency is never a readiness ground. What the host may do
   without editing upstream is quote line 359 verbatim in `_GATE_INSTRUCTION`,
-  which restates the bundle rather than adding to it. The set now measures the
-  failure directly through `expects_ready`.
+  which restates the bundle rather than adding to it (done, `a40b2b4`). The set
+  also measures the failure directly through `expects_ready`.
 - **The bundle gates per consumer; the owner's statement of intent does not.**
   Told on 16 September 2026 that CP-0 "only classifies the documents to assess
   which pathways are available", the audit found the vendored methodology says
@@ -957,7 +964,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   register parser. *Upgrade:* keys of the form
   `(module, register_id, row, column, expected)` over those projections, the
   pattern `ExpectedForecast` already uses.
-- **The host accepts a handoff the vendor's own rule contradicts.**
+- ~~**The host accepts a handoff the vendor's own rule contradicts.**~~ Half
+  closed by `docs/DECISIONS.md` §61: `validate_handoff.py` now reads every
+  unfenced table headed `Severity` and refuses CRITICAL under any status but
+  `Blocked`, MATERIAL under `Passed` — the canon's own rule, which it had never
+  enforced. Verified against the artifact that exposed it: the DeepSeek CP-0
+  declaring `Passed` at 93 over its own MATERIAL row now errors with the body
+  line, and every module of the passing run still validates clean. What is
+  still open is the second half, `completeness_check.load_contract`, which reads
+  only the `critical_cell_*` disqualifiers and never
+  `frontmatter_limitation_flags`, `frontmatter_validation_warnings` or
+  `document_substrings_casefold`. That is a different rule with different
+  semantics and needs its own authorisation and entry. The original, for the
+  reader who wants the reason:
   `validate_text` checks `Restricted -> <=59` and `Blocked -> <=39` and nothing
   the other way, and `completeness_check.load_contract` reads only cell
   disqualifiers, never the `frontmatter_*` ones. So a module may declare a
