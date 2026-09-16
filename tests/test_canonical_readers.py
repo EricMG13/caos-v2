@@ -9,28 +9,25 @@ falling back to presence, which would read a gate-BLOCKED module as RUNNABLE.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CanonicalCompletions
 from conftest import priced
 from fastapi.testclient import TestClient
-from test_api_routes import _CountingConnection
+from test_api_routes import _CountingConnection, _section, _serve, _view
 from test_canonical_execution import harness, route
 from test_execution_freshness import _Harness
 from test_loop_charges import ESTIMATE
 
 from server.api import app as app_module
-from server.api.app import (
+from server.api.app import VENDORED_BUNDLE, app, methodology_bundle
+from server.api.reads import run as run_read
+from server.api.reads.run import (
     CANONICAL_READINESS_IO,
     IO_BUDGET,
     READINESS_ROWS,
-    RUN_READ_IO,
-    VENDORED_BUNDLE,
-    app,
-    blob_store,
-    methodology_bundle,
-    store_connection,
+    SECTION_READ_IO,
 )
 from server.engine.route import GATE_MODULE, EdgeType, NodeState
 from server.engine.runtime import Execution, run_route
@@ -65,9 +62,7 @@ def client(
     harness: _Harness, empty_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
-    app.dependency_overrides[store_connection] = lambda: harness.conn
-    app.dependency_overrides[blob_store] = lambda: harness.blobs
-    app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
+    _serve(harness.conn, harness.blobs, harness.bundle)
     try:
         with TestClient(app) as opened:
             yield opened
@@ -75,27 +70,25 @@ def client(
         app.dependency_overrides.clear()
 
 
-def _reader(harness: _Harness) -> dict[str, str]:
+def _reader(harness: _Harness) -> UUID:
     viewer = uuid4()
     grant(
         harness.conn, case_id=harness.case_id, user_id=viewer, standing=Standing.READER
     )
     harness.conn.commit()
-    return {"x-caos-user": str(viewer)}
+    return viewer
 
 
 def test_the_run_document_reads_a_completed_lite_run_from_its_records(
     harness: _Harness, client: TestClient
 ) -> None:
     _run(harness, CanonicalCompletions(harness.source_id))
-    headers = _reader(harness)
+    viewer = _reader(harness)
     counter = _CountingConnection(harness.conn)
-    app.dependency_overrides[store_connection] = lambda: counter
+    app.dependency_overrides[run_read.run_store] = lambda: counter
 
-    response = client.get(f"/api/runs/{harness.run_id}", headers=headers)
+    body = _view(_section(client, harness.case_id, harness.run_id, viewer))
 
-    assert response.status_code == 200, response.json()
-    body = response.json()
     assert body["status"] == "COMPLETE"
     by_module = {node["module_id"]: node for node in body["nodes"]}
     assert sorted(by_module) == ["CP-0", "CP-5", "CP-L10"]
@@ -114,7 +107,7 @@ def test_the_run_document_reads_a_completed_lite_run_from_its_records(
         for n in harness.route.nodes
     )
     assert 1 <= rows <= READINESS_ROWS
-    assert counter.executed == RUN_READ_IO + rows * CANONICAL_READINESS_IO
+    assert counter.executed == SECTION_READ_IO + rows * CANONICAL_READINESS_IO
     assert counter.executed <= IO_BUDGET
 
 
@@ -125,9 +118,9 @@ def test_a_gate_blocked_module_reads_as_blocked_by_its_verdict(
         harness,
         CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"}),
     )
-    headers = _reader(harness)
+    viewer = _reader(harness)
 
-    body = client.get(f"/api/runs/{harness.run_id}", headers=headers).json()
+    body = _view(_section(client, harness.case_id, harness.run_id, viewer))
 
     assert body["status"] == "BLOCKED"
     by_module = {node["module_id"]: node for node in body["nodes"]}

@@ -15,7 +15,7 @@ plan's standing rules. The first, identity derivation, is in
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -28,27 +28,23 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import BaseModel
 from test_canonical_execution import _accept, _node, _run, harness, route
 from test_execution_freshness import _Harness
 
 from server.api import app as app_module
 from server.api.app import (
-    IO_BUDGET,
-    RUN_READ_IO,
     TAIL_DEADLINE,
-    EdgeView,
-    NodeView,
-    RunDocument,
-    _node_view,
     app,
     blob_store,
     methodology_bundle,
-    read_run,
     read_run_events,
     store_connection,
 )
-from server.api.wire import CLEARS, RefusalBody
+from server.api.reads import run as run_read
+from server.api.reads.run import _node_view, node_readiness, read_run_section
+from server.api.wire import CLEARS, EdgeView, NodeView, RefusalBody, RunSectionDocument
 from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
@@ -101,8 +97,7 @@ def client(
     conn, _case_id = case
     blobs = BlobStore(tmp_path / "blobs")
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
-    app.dependency_overrides[store_connection] = lambda: conn
-    app.dependency_overrides[blob_store] = lambda: blobs
+    _serve(conn, blobs)
     try:
         with TestClient(app) as opened:
             yield opened
@@ -128,7 +123,7 @@ def lite(harness: _Harness, client: TestClient) -> tuple[_Harness, UUID]:
     The harness shares the `case` connection and the `tmp_path / "blobs"` root
     the client serves, and its bundle is the one records are verified under.
     """
-    app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
+    _serve(bundle=harness.bundle)
     viewer = uuid4()
     grant(
         harness.conn, case_id=harness.case_id, user_id=viewer, standing=Standing.READER
@@ -147,6 +142,50 @@ def _answer(
     _accept(harness, attempt, result)
 
 
+def _serve(
+    conn: StoreConnection | None = None,
+    blobs: BlobStore | None = None,
+    bundle: Bundle | None = None,
+) -> None:
+    """Override the app's dependencies and the Run section's alike: the section
+    resolves the app's at call time, so a test names both."""
+    pairs = (
+        (conn, (store_connection, run_read.run_store)),
+        (blobs, (blob_store, run_read.run_blobs)),
+        (bundle, (methodology_bundle, run_read.run_bundle)),
+    )
+    for value, dependencies in pairs:
+        for dependency in dependencies if value is not None else ():
+            # A closure, not a default argument: FastAPI reads an override's
+            # parameters as request inputs and copies their defaults.
+            app.dependency_overrides[dependency] = _constant(value)
+
+
+def _constant(value: object) -> Callable[[], object]:
+    return lambda: value
+
+
+def _section(
+    client: TestClient, case_id: UUID, run_id: UUID | None, user: UUID | None
+) -> Response:
+    """The Run section for `run_id` (or the latest run) as `user` would ask."""
+    query = "" if run_id is None else f"?run={run_id}"
+    headers = {} if user is None else _as(user)
+    response: Response = client.get(
+        f"/api/v1/cases/{case_id}/run{query}", headers=headers
+    )
+    return response
+
+
+def _view(response: Response) -> dict[str, Any]:
+    """The displayed run of a Run section that validated as its model."""
+    assert response.status_code == 200, response.json()
+    document = RunSectionDocument.model_validate(response.json())
+    assert document.body.run is not None
+    view: dict[str, Any] = document.body.run.model_dump(mode="json")
+    return view
+
+
 def _refused(code: str) -> dict[str, str]:
     """The one refusal body: the code and its host-constant clearance."""
     return {"code": code, "clears": CLEARS[RefusalCode(code)]}
@@ -158,7 +197,7 @@ def _as(user_id: UUID) -> dict[str, str]:
 
 
 def test_unauthorised_case_is_private_404(
-    client: TestClient, run: tuple[UUID, UUID]
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
 ) -> None:
     """A named test.
 
@@ -167,19 +206,24 @@ def test_unauthorised_case_is_private_404(
     problem with it: it confirms the id names something real, which for a case
     id is the fact worth protecting.
     """
+    _conn, case_id = case
     run_id, _viewer = run
     stranger = uuid4()
 
-    response = client.get(f"/api/runs/{run_id}", headers=_as(stranger))
+    response = _section(client, case_id, run_id, stranger)
+    unknown = _section(client, uuid4(), run_id, stranger)
 
-    assert response.status_code == 404
-    assert response.json() == _refused("RUN_NOT_FOUND")
+    assert response.status_code == unknown.status_code == 404
+    assert response.json() == unknown.json() == _refused("CASE_NOT_FOUND")
 
 
-def test_an_unknown_run_is_the_same_404(client: TestClient) -> None:
+def test_an_unknown_run_is_the_same_404(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
     """The other half of the pair. The two answers have to be identical, or the
     difference between them is the disclosure."""
-    response = client.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+    _run_id, viewer = run
+    response = _section(client, case[1], uuid4(), viewer)
 
     assert response.status_code == 404
     assert response.json() == _refused("RUN_NOT_FOUND")
@@ -191,23 +235,23 @@ def test_a_revoked_reader_stops_being_able_to_read_it(
     """Standing is read at the request, not cached in a session."""
     conn, case_id = case
     run_id, viewer = run
-    assert client.get(f"/api/runs/{run_id}", headers=_as(viewer)).status_code == 200
+    assert _section(client, case_id, run_id, viewer).status_code == 200
 
     revoke(conn, case_id=case_id, user_id=viewer)
     conn.commit()
 
-    assert client.get(f"/api/runs/{run_id}", headers=_as(viewer)).status_code == 404
+    assert _section(client, case_id, run_id, viewer).status_code == 404
 
 
 def test_a_request_with_no_identity_is_401_not_404(
-    client: TestClient, run: tuple[UUID, UUID]
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
 ) -> None:
     """Unauthenticated and unauthorised are different questions. "I do not know
     who you are" discloses nothing about the run, so it can be said plainly --
     and a client that got a 404 would retry the wrong thing forever."""
     run_id, _viewer = run
 
-    response = client.get(f"/api/runs/{run_id}")
+    response = _section(client, case[1], run_id, None)
 
     assert response.status_code == 401
     assert response.json() == _refused("NOT_AUTHENTICATED")
@@ -233,12 +277,13 @@ def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
     of later will help them.
     """
     app.dependency_overrides.pop(store_connection)
+    app.dependency_overrides.pop(run_read.run_store)
     if database_url is None:
         monkeypatch.delenv(app_module.DATABASE_URL, raising=False)
     else:
         monkeypatch.setenv(app_module.DATABASE_URL, database_url)
 
-    for path in (f"/api/runs/{uuid4()}", f"/api/runs/{uuid4()}/events"):
+    for path in (f"/api/v1/cases/{uuid4()}/run", f"/api/runs/{uuid4()}/events"):
         response = client.get(path)
 
         assert (response.status_code, response.json()) == (
@@ -260,7 +305,7 @@ def test_an_anonymous_request_opens_no_store_connection(
     the dependency's own call that is counted rather than the queries it then
     serves, because opening the connection is the cost.
     """
-    conn, _case_id = case
+    conn, case_id = case
     run_id, _viewer = run
     opened: list[str] = []
 
@@ -273,11 +318,14 @@ def test_an_anonymous_request_opens_no_store_connection(
         raise AssertionError  # never reached before identity
 
     app.dependency_overrides[store_connection] = counted
+    app.dependency_overrides[run_read.run_store] = counted
     app.dependency_overrides[methodology_bundle] = counted_bundle
+    app.dependency_overrides[run_read.run_bundle] = counted_bundle
 
-    for path in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/events"):
+    for path in (f"/api/v1/cases/{case_id}/run", f"/api/runs/{run_id}/events"):
         assert client.get(path).status_code == 401, path
     del app.dependency_overrides[methodology_bundle]
+    del app.dependency_overrides[run_read.run_bundle]
     assert opened == [], (
         "an anonymous request resolved the store dependency; identity is "
         "declared before it so that it does not"
@@ -340,10 +388,10 @@ def test_a_misconfigured_store_is_a_server_fault_not_a_bad_request(
     conn, _case_id = case
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     monkeypatch.delenv("CAOS_BLOB_ROOT", raising=False)
-    app.dependency_overrides[store_connection] = lambda: conn
+    _serve(conn)
     try:
         with TestClient(app) as opened:
-            response = opened.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+            response = _section(opened, uuid4(), None, uuid4())
     finally:
         app.dependency_overrides.clear()
 
@@ -373,7 +421,7 @@ def test_a_store_that_does_not_answer_is_a_server_fault(
             app_module.DATABASE_URL,
             "postgresql://caos@127.0.0.1:1/caos?connect_timeout=2",
         )
-        document = opened.get(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+        document = _section(opened, uuid4(), None, uuid4())
         tail = opened.get(f"/api/runs/{uuid4()}/events", headers=_as(uuid4()))
 
     for response in (document, tail):
@@ -445,17 +493,16 @@ def test_a_malformed_run_id_is_answered_like_any_unknown_run(
     same, and is asserted directly in
     `test_the_malformed_id_handler_derives_identity_of_its_own`."""
     _run_id, viewer = run
-    unknown = client.get(f"/api/runs/{uuid4()}", headers=_as(viewer))
+    unknown = client.get(f"/api/runs/{uuid4()}/events", headers=_as(viewer))
 
-    for path in ("/api/runs/not-a-run", "/api/runs/not-a-run/events"):
-        named = client.get(path, headers=_as(viewer))
-        anonymous = client.get(path)
+    named = client.get("/api/runs/not-a-run/events", headers=_as(viewer))
+    anonymous = client.get("/api/runs/not-a-run/events")
 
-        assert (named.status_code, named.json()) == (404, unknown.json())
-        assert (anonymous.status_code, anonymous.json()) == (
-            401,
-            _refused("NOT_AUTHENTICATED"),
-        )
+    assert (named.status_code, named.json()) == (404, unknown.json())
+    assert (anonymous.status_code, anonymous.json()) == (
+        401,
+        _refused("NOT_AUTHENTICATED"),
+    )
 
 
 def test_blob_store_is_rooted_at_the_environment_path(
@@ -466,34 +513,6 @@ def test_blob_store_is_rooted_at_the_environment_path(
     store = blob_store()
 
     assert store.root == tmp_path
-
-
-def test_the_run_document_carries_node_states_with_their_reasons(
-    client: TestClient,
-    case: tuple[StoreConnection, UUID],
-    run: tuple[UUID, UUID],
-    catalog: dict[str, Any],
-) -> None:
-    """Phase 6: "node states with their reasons". A state with no cause attached
-    tells a reader the run is stuck without telling them what it is stuck on."""
-    conn, _case_id = case
-    run_id, viewer = run
-    pin_route(conn, run_id, resolve_route(catalog, *LITE))
-
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
-
-    assert body["status"] == "RUNNING"
-    by_module = {node["module_id"]: node for node in body["nodes"]}
-    assert by_module["CP-0"]["state"] == "RUNNABLE"
-    assert by_module["CP-0"]["waiting_on"] == []
-    assert by_module["CP-L10"]["state"] == "BLOCKED"
-    assert {
-        (edge["source"], edge["type"]) for edge in by_module["CP-L10"]["waiting_on"]
-    } == {("CP-0", "REQUIRED")}
-    # No CP-0 artifact is accepted in this run, so the gate has not spoken for
-    # any module -- `gate_verdict` is the absence of a verdict, not a state
-    # this test happens not to exercise.
-    assert by_module["CP-L10"]["gate_verdict"] is None
 
 
 def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
@@ -507,7 +526,7 @@ def test_a_node_the_gate_blocked_says_so_on_the_run_surface(
     harness, viewer = lite
     _answer(harness, "CP-0", readiness={"CP-L10": "BLOCKED"})
 
-    body = client.get(f"/api/runs/{harness.run_id}", headers=_as(viewer)).json()
+    body = _view(_section(client, harness.case_id, harness.run_id, viewer))
 
     assert body["status"] == "RUNNING"
     by_module = {node["module_id"]: node for node in body["nodes"]}
@@ -538,7 +557,7 @@ def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
     )
     harness.conn.commit()
 
-    response = client.get(f"/api/runs/{harness.run_id}", headers=_as(viewer))
+    response = _section(client, harness.case_id, harness.run_id, viewer)
 
     assert (response.status_code, response.json()) == (
         503,
@@ -565,11 +584,11 @@ def test_the_one_qa_gate_reads_as_a_gate(
     """The catalog holds exactly one QA_GATE edge, `CP-5 -> CP-6`. A node held by
     it waits for the QA verdict; every other BLOCKED node is waiting for a
     module, and a surface that rendered both the same way would hide it."""
-    conn, _case_id = case
+    conn, case_id = case
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
 
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+    body = _view(_section(client, case_id, run_id, viewer))
 
     by_module = {node["module_id"]: node for node in body["nodes"]}
     assert by_module["CP-6"]["awaiting_gate"] is True
@@ -609,18 +628,40 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     assert by_module["CP-5"].waiting_on == []
 
 
+def test_node_readiness_is_the_shared_computation_node_view_builds_on(
+    catalog: dict[str, Any],
+) -> None:
+    """`node_readiness` is what `_node_view` (this module) and the legacy run
+    document's own `_node_view` (`server/api/app.py`) both call, so the two
+    wires cannot compute a node's unmet edges differently by drifting apart."""
+    full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    accepted: dict[str, NodeResult] = {}
+    states = node_states(full, accepted)
+    readiness = readiness_from(full, accepted)
+    cp0 = next(n for n in full.nodes if n.module_id == "CP-0")
+
+    unmet, awaiting_gate, gate_verdict = node_readiness(
+        full, accepted, cp0, states, readiness
+    )
+
+    view = _node_view(full, accepted, cp0, states, readiness)
+    assert [e.source for e in unmet] == [e.source for e in view.waiting_on]
+    assert awaiting_gate == view.awaiting_gate
+    assert gate_verdict == view.gate_verdict
+
+
 def test_nothing_is_awaited_on_a_run_that_is_no_longer_running(
     client: TestClient,
     case: tuple[StoreConnection, UUID],
     run: tuple[UUID, UUID],
     catalog: dict[str, Any],
 ) -> None:
-    conn, _case_id = case
+    conn, case_id = case
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
     block_run(conn, run_id)
 
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+    body = _view(_section(client, case_id, run_id, viewer))
 
     assert body["status"] == "BLOCKED"
     assert not any(node["awaiting_gate"] for node in body["nodes"])
@@ -642,7 +683,7 @@ def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
     path.chmod(0o644)
     path.write_bytes(b"not a handoff")
 
-    response = client.get(f"/api/runs/{harness.run_id}", headers=_as(viewer))
+    response = _section(client, harness.case_id, harness.run_id, viewer)
 
     assert (response.status_code, response.json()) == (
         503,
@@ -650,34 +691,26 @@ def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
     )
 
 
-def test_a_run_with_no_pinned_route_has_no_nodes(
-    client: TestClient, run: tuple[UUID, UUID]
-) -> None:
-    """A run before its plan gate. Not an error -- there is simply no route to
-    report states from yet, and inventing one would be the surface guessing."""
-    run_id, viewer = run
-
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
-
-    assert body["nodes"] == []
-    assert body["route_digest"] is None
-
-
 def test_the_run_document_refuses_an_undeclared_field(
-    client: TestClient, run: tuple[UUID, UUID]
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
 ) -> None:
     """§9's closed shape, on the way out as well as in. A response model that
     let an extra key through would let a store column reach a browser because
     somebody widened a SELECT."""
     run_id, viewer = run
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+    body = _section(client, case[1], run_id, viewer).json()
 
-    assert set(body) == set(RunDocument.model_fields)
+    assert set(body) == set(RunSectionDocument.model_fields)
     with pytest.raises(ValueError, match="extra_forbidden"):
-        RunDocument.model_validate({**body, "budget_ceiling": "40.00"})
+        RunSectionDocument.model_validate({**body, "budget_ceiling": "40.00"})
+    widened = {**body["body"]["run"], "budget_ceiling": "40.00"}
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        RunSectionDocument.model_validate(
+            {**body, "body": {**body["body"], "run": widened}}
+        )
 
 
-@pytest.mark.parametrize("model", [RunDocument, NodeView, EdgeView, RefusalBody])
+@pytest.mark.parametrize("model", [RunSectionDocument, NodeView, EdgeView, RefusalBody])
 def test_every_wire_model_forbids_an_undeclared_field(
     model: type[BaseModel],
 ) -> None:
@@ -691,15 +724,10 @@ def test_the_wire_key_sets_are_pinned() -> None:
     """ "A new field means a model change plus an updated pinned key set". This
     is the pinned key set: a field added to a response without a decision about
     it fails here first."""
-    assert set(RunDocument.model_fields) == {
-        "run_id",
-        "status",
-        "route_digest",
-        "nodes",
-    }
     assert set(NodeView.model_fields) == {
         "route_node_id",
         "module_id",
+        "stage",
         "state",
         "waiting_on",
         "awaiting_gate",
@@ -718,9 +746,10 @@ def test_every_refusal_body_is_code_and_clears_and_nothing_else(
     from the request, whichever answer the route gave."""
     answers = {
         RefusalCode.RUN_NOT_FOUND: client.get(
-            f"/api/runs/{uuid4()}", headers=_as(uuid4())
+            f"/api/runs/{uuid4()}/events", headers=_as(uuid4())
         ),
-        RefusalCode.NOT_AUTHENTICATED: client.get(f"/api/runs/{uuid4()}"),
+        RefusalCode.CASE_NOT_FOUND: _section(client, uuid4(), None, uuid4()),
+        RefusalCode.NOT_AUTHENTICATED: _section(client, uuid4(), None, None),
         RefusalCode.ENDPOINT_NOT_FOUND: client.get("/api/runs-not-declared"),
     }
 
@@ -757,7 +786,7 @@ def test_an_undeclared_api_path_or_method_answers_endpoint_not_found_in_the_refu
     outside `/api/` is this contract's to answer."""
     missing = client.get("/api/not-declared", headers=_as(uuid4()))
     anonymous = client.get("/api/not-declared")
-    wrong_method = client.post(f"/api/runs/{uuid4()}", headers=_as(uuid4()))
+    wrong_method = client.post(f"/api/v1/cases/{uuid4()}/run", headers=_as(uuid4()))
 
     for response, status in ((missing, 404), (anonymous, 404), (wrong_method, 405)):
         assert (response.status_code, response.json()) == (
@@ -772,14 +801,24 @@ def test_the_surface_is_exactly_the_routes_it_declares(
 ) -> None:
     """A route added without a test is a request path nobody agreed to. Listing
     them here means a new one has to be written down before it can ship."""
+    # A section's router is included as a whole, so its routes sit one level
+    # down in the app's list.
+    routes = [
+        inner
+        for route in app.routes
+        for inner in getattr(getattr(route, "original_router", None), "routes", [route])
+    ]
     declared = {
         route.path: route.endpoint.__name__
-        for route in app.routes
+        for route in routes
         if isinstance(route, APIRoute)
     }
 
     assert declared == {
-        "/api/runs/{run_id}": read_run.__name__,
+        "/api/v1/directory": "read_directory",
+        "/api/v1/cases/{case_id}/upload": "read_upload",
+        "/api/v1/cases/{case_id}/run": read_run_section.__name__,
+        "/api/runs/{run_id}": "read_run",
         "/api/runs/{run_id}/events": read_run_events.__name__,
     }
 
@@ -792,13 +831,13 @@ def test_the_reported_digest_is_the_one_that_was_pinned(
 ) -> None:
     """The document recomputes the digest from the route it read back. That is
     only sound while it still equals the digest execution reads."""
-    conn, _case_id = case
+    conn, case_id = case
     run_id, viewer = run
     pinned = pin_route(
         conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
     )
 
-    body = client.get(f"/api/runs/{run_id}", headers=_as(viewer)).json()
+    body = _view(_section(client, case_id, run_id, viewer))
 
     assert body["route_digest"] == pinned == pinned_route(conn, run_id)
 
@@ -809,13 +848,13 @@ def test_corrupt_route_is_a_sanitized_store_failure(
     run: tuple[UUID, UUID],
     catalog: dict[str, Any],
 ) -> None:
-    conn, _ = case
+    conn, case_id = case
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "LIQUIDITY_REVIEW"))
     with route_fault(conn):
         conn.execute("UPDATE run_routes SET route_digest = 'synthetic-corruption'")
     conn.commit()
-    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+    response = _section(client, case_id, run_id, viewer)
     assert response.status_code == 503
     assert response.json() == _refused("ROUTE_IDENTITY_INVALID")
 
@@ -830,15 +869,15 @@ def test_each_request_path_declares_what_it_costs_the_store(
     how the predecessor's ~8x read amplification went unnoticed -- so the number
     is counted here, not asserted from memory.
     """
-    conn, _case_id = case
+    conn, case_id = case
     run_id, viewer = run
     pin_route(conn, run_id, resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT"))
     counter = _CountingConnection(conn)
-    app.dependency_overrides[store_connection] = lambda: counter
+    app.dependency_overrides[run_read.run_store] = lambda: counter
 
-    assert client.get(f"/api/runs/{run_id}", headers=_as(viewer)).status_code == 200
+    assert _section(client, case_id, run_id, viewer).status_code == 200
 
-    assert counter.executed == RUN_READ_IO <= IO_BUDGET, (
+    assert counter.executed == run_read.UNPINNED_INPUT_IO <= run_read.IO_BUDGET, (
         "the run document costs what it says it costs; a read that grew with "
         "the size of the route would show up here first"
     )
@@ -1078,3 +1117,16 @@ class _CountingConnection:
     def execute(self, *args: object, **kwargs: object) -> object:
         self.executed += 1
         return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
+
+
+def test_the_legacy_run_document_stays_until_its_route_is_retired(
+    client: TestClient, run: tuple[UUID, UUID]
+) -> None:
+    """Slice 4.1d-1 keeps `/api/runs/{id}` serving `RunDocument` beside the
+    section route whose identity dependency is `run_read.run_actor`; 4.1d-2
+    retires the route and this test with it."""
+    run_id, viewer = run
+    response = client.get(f"/api/runs/{run_id}", headers=_as(viewer))
+    assert response.status_code == 200
+    app_module.RunDocument.model_validate(response.json())
+    assert callable(run_read.run_actor)
