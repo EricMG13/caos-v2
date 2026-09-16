@@ -238,10 +238,15 @@ test.describe.serial("journey", () => {
 
   test("journey: select the LITE route and pin the subject", async () => {
     await page.goto(`/run/?case=${caseId}`);
-    await expect(page.locator("[data-route-select] option")).toHaveCount(1);
-    await expect(page.locator("[data-route-select] option").first()).toHaveText(
-      "LITE_CREDIT_22 · LITE_EARNINGS_UPDATE",
-    );
+    await expect(page.locator("[data-route-select] option")).toHaveCount(2);
+    await expect(
+      page.locator("[data-route-select] option", {
+        hasText: "LITE_CREDIT_22 · LITE_EARNINGS_UPDATE",
+      }),
+    ).toHaveCount(1);
+    await page.locator("[data-route-select]").selectOption({
+      label: "LITE_CREDIT_22 · LITE_EARNINGS_UPDATE",
+    });
     // Retried as a whole, not just awaited longer: under load the command's
     // own response can be lost to the same transient 503 the connection-storm
     // comment on `waitForNode` describes, while the run it created still
