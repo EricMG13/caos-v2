@@ -242,6 +242,61 @@ const ModelBody = object({
 });
 const ModelDocument = sectionDocument(ModelBody);
 
+const NarrativeFigure = object({
+  route_node_id: short,
+  citation_index: int({ min: 0 }),
+  document_sha256: hash,
+  page: int({ min: 1 }),
+  matched_text: string({ max: 65536 }),
+});
+const NarrativeSpan = object({
+  text: nullable(string({ max: 2000 })),
+  figure: nullable(NarrativeFigure),
+});
+const ReportArtifact = object({
+  route_node_id: short,
+  artifact_sha256: hash,
+  record_sha256: hash,
+  markdown: string({ max: 26214400 }),
+  record: string({ max: 26214400 }),
+  qa_status: short,
+  committee_status: short,
+  decision_scope: short,
+  limitation_flags: array(text, 256),
+  validation_warnings: array(text, 256),
+});
+const reportFields = {
+  case_id: uuid,
+  displayed_run_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  case_title: text,
+  artifacts: array(ReportArtifact, 256),
+  narrative: array(array(NarrativeSpan, 64), 64),
+};
+const ReportBody = object(reportFields);
+const ReportDocument = sectionDocument(ReportBody);
+const FiledReceipt = object({
+  case_id: uuid,
+  run_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  signed_by: uuid,
+  frozen_by: uuid,
+  filed_by: uuid,
+  renderer_sha256: hash,
+  filed_event_sha256: hash,
+});
+const CommitteeBody = object({
+  ...reportFields,
+  state: enumOf(["frozen", "filed"]),
+  signed_by: array(uuid, 1000),
+  frozen_by: uuid,
+  filed_by: nullable(uuid),
+  receipt: nullable(FiledReceipt),
+});
+const CommitteeDocument = sectionDocument(CommitteeBody);
+
 // Events and evidence pages (brief 4.4, decisions 2, 7 and 8).
 /** The closed event names a case stream carries; a name only says what to refetch. */
 export const EVENT_NAMES = [
@@ -409,6 +464,14 @@ const RefusalBody = object({ code: RefusalCode, clears: text });
 
 /** Every model `schema.json` declares, under its backend name. */
 export const V1_SHAPES = {
+  NarrativeFigure,
+  NarrativeSpan,
+  ReportArtifact,
+  ReportBody,
+  ReportDocument,
+  FiledReceipt,
+  CommitteeBody,
+  CommitteeDocument,
   ModelValue,
   ModelPeriod,
   ModelForecast,
@@ -464,6 +527,8 @@ export type UploadDocument = Infer<typeof UploadDocument>;
 export type RunSectionDocument = Infer<typeof RunSectionDocument>;
 export type AnalysisDocument = Infer<typeof AnalysisDocument>;
 export type ModelDocument = Infer<typeof ModelDocument>;
+export type ReportDocument = Infer<typeof ReportDocument>;
+export type CommitteeDocument = Infer<typeof CommitteeDocument>;
 export type RefusalBody = Infer<typeof RefusalBody>;
 export type RefusalCode = Infer<typeof RefusalCode>;
 export type Chrome = Infer<typeof Chrome>;
@@ -482,7 +547,13 @@ export type ActionView = Infer<typeof ActionView>;
 export type WorkView = Infer<typeof WorkView>;
 export type RouteChoice = Infer<typeof RouteChoice>;
 export type SectionDocument =
-  DirectoryDocument | UploadDocument | RunSectionDocument | AnalysisDocument | ModelDocument;
+  | DirectoryDocument
+  | UploadDocument
+  | RunSectionDocument
+  | AnalysisDocument
+  | ModelDocument
+  | ReportDocument
+  | CommitteeDocument;
 
 export const parseDirectoryDocument = (value: unknown): DirectoryDocument =>
   parse(DirectoryDocument, value);
@@ -492,6 +563,9 @@ export const parseRunSectionDocument = (value: unknown): RunSectionDocument =>
 export const parseAnalysisDocument = (value: unknown): AnalysisDocument =>
   parse(AnalysisDocument, value);
 export const parseModelDocument = (value: unknown): ModelDocument => parse(ModelDocument, value);
+export const parseReportDocument = (value: unknown): ReportDocument => parse(ReportDocument, value);
+export const parseCommitteeDocument = (value: unknown): CommitteeDocument =>
+  parse(CommitteeDocument, value);
 export const parseRefusalBody = (value: unknown): RefusalBody => parse(RefusalBody, value);
 export const parsePageDocument = (value: unknown): PageDocument => parse(PageDocument, value);
 
@@ -514,7 +588,7 @@ function sameId(a: string | null | undefined, b: string | null | undefined): boo
  */
 export function requireIdentity(
   doc: SectionDocument,
-  expected: { caseId: string | null; runId?: string | null },
+  expected: { caseId: string | null; runId?: string | null; revisionId?: string },
 ): void {
   const subject = doc.chrome.subject;
   if (!sameId(subject?.case_id, expected.caseId)) throw new WireIdentityError();
@@ -524,6 +598,21 @@ export function requireIdentity(
   if (expected.runId !== undefined) {
     if (!("displayed_run_id" in doc.body)) throw new WireIdentityError();
     if (!sameId(doc.body.displayed_run_id, expected.runId)) throw new WireIdentityError();
+  }
+  if (expected.revisionId !== undefined) {
+    if (!("revision_id" in doc.body) || !sameId(doc.body.revision_id, expected.revisionId)) {
+      throw new WireIdentityError();
+    }
+  }
+  if ("receipt" in doc.body && doc.body.receipt !== null) {
+    const receipt = doc.body.receipt;
+    if (
+      !sameId(receipt.case_id, doc.body.case_id) ||
+      !sameId(receipt.run_id, doc.body.displayed_run_id) ||
+      !sameId(receipt.revision_id, doc.body.revision_id) ||
+      receipt.payload_sha256 !== doc.body.payload_sha256
+    )
+      throw new WireIdentityError();
   }
 }
 

@@ -542,6 +542,74 @@ class ModelBody(BaseModel):
     unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
 
 
+class NarrativeFigure(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    citation_index: Annotated[int, Field(ge=0)]
+    document_sha256: Sha256
+    page: Annotated[int, Field(ge=1)]
+    matched_text: Annotated[str, Field(max_length=QUOTE_CHARS)]
+
+
+class NarrativeSpan(BaseModel):
+    model_config = _CLOSED
+
+    text: Annotated[str, Field(max_length=2000)] | None
+    figure: NarrativeFigure | None
+
+
+class ReportArtifact(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    artifact_sha256: Sha256
+    record_sha256: Sha256
+    markdown: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
+    record: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
+    qa_status: Id
+    committee_status: Id
+    decision_scope: Id
+    limitation_flags: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    validation_warnings: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+
+
+class ReportBody(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    displayed_run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    case_title: Text
+    artifacts: Annotated[list[ReportArtifact], Field(max_length=ROUTE_NODES_MAX)]
+    narrative: Annotated[
+        list[Annotated[list[NarrativeSpan], Field(max_length=64)]], Field(max_length=64)
+    ]
+
+
+class FiledReceipt(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    signed_by: UUID
+    frozen_by: UUID
+    filed_by: UUID
+    renderer_sha256: Sha256
+    filed_event_sha256: Sha256
+
+
+class CommitteeBody(ReportBody):
+    state: Literal["frozen", "filed"]
+    signed_by: Annotated[list[UUID], Field(max_length=1000)]
+    frozen_by: UUID
+    filed_by: UUID | None
+    receipt: FiledReceipt | None
+
+
 SectionStatus = Literal["complete", "partial"]
 Notes = Annotated[list[SectionNote], Field(max_length=len(SectionNote))]
 
@@ -601,12 +669,29 @@ class ModelDocument(BaseModel):
     notes: Notes
 
 
+class ReportDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: ReportBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+class CommitteeDocument(ReportDocument):
+    body: CommitteeBody
+
+
 V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
     DirectoryDocument,
     UploadDocument,
     RunSectionDocument,
     AnalysisDocument,
     ModelDocument,
+    ReportDocument,
+    CommitteeDocument,
 )
 
 
