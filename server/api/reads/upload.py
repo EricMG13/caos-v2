@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from server.api.commands.availability import upload_actions
 from server.api.deps import Caller, Store
 from server.api.wire import (
     SOURCES_MAX,
@@ -75,7 +76,7 @@ def read_upload(actor: Caller, case_id: CasePath, conn: Store) -> UploadDocument
         chrome=Chrome(
             subject=Subject(case_id=case_id, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
-            actions=[],
+            actions=upload_actions(actor.role, standing),
         ),
         body=UploadBody(
             case_id=case_id,

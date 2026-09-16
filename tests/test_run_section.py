@@ -138,8 +138,14 @@ def test_a_case_with_no_run_is_observed_empty(
         "displayed_run_id": None,
         "runs": [],
         "run": None,
-        "route_choices": [],  # 4.2g fills these from `ADAPTER_ROUTES`
+        "route_choices": [
+            {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"}
+        ],
     }
+    actions = {str(view.action): view.refusal for view in document.chrome.actions}
+    assert actions["CREATE_RUN"] is not None  # the header named no writing group
+    assert actions["START_RUN"] is not None
+    assert actions["START_RUN"].code == "NOT_AUTHORISED"
 
 
 def test_the_lite_run_carries_its_pinned_input_gates_and_attempts(
@@ -367,6 +373,29 @@ def test_a_cancelled_run_reaches_the_wire(
     document = _document(_section(client, case_id, run_id, viewer))
     assert document.body.run is not None
     assert document.body.run.status == "CANCELLED"
+    assert document.body.run.work is not None
+    assert document.body.run.work.model_dump() == {
+        "state": "DONE",
+        "stop_code": None,
+        "cancel_requested": True,
+    }
+
+
+def test_the_run_section_carries_the_displayed_runs_work_row(
+    client: TestClient, case: tuple[StoreConnection, UUID], run: tuple[UUID, UUID]
+) -> None:
+    """`RunView.work` is the run's `run_work` row, and null before any enqueue."""
+    conn, case_id = case
+    run_id, viewer = run
+
+    before = _document(_section(client, case_id, run_id, viewer)).body.run
+    enqueue_run(conn, run_id)
+    conn.commit()
+    after = _document(_section(client, case_id, run_id, viewer)).body.run
+
+    assert before is not None and before.work is None
+    assert after is not None and after.work is not None
+    assert (after.work.state, after.work.cancel_requested) == ("QUEUED", False)
 
 
 def test_the_run_section_request_path_declares_its_store_budget(
