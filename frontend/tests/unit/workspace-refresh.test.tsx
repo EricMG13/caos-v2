@@ -38,6 +38,7 @@ interface Sent {
   url: string;
   signal: AbortSignal | undefined;
   answer(body: unknown, status?: number): void;
+  fail(): void;
 }
 let sent: Sent[] = [];
 
@@ -48,11 +49,12 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     (url: string, init?: RequestInit) =>
-      new Promise<Response>((resolve) => {
+      new Promise<Response>((resolve, reject) => {
         sent.push({
           url,
           signal: init?.signal ?? undefined,
           answer: (body, status = 200) => resolve(new Response(JSON.stringify(body), { status })),
+          fail: () => reject(new TypeError("NetworkError")),
         });
       }),
   );
@@ -158,8 +160,23 @@ describe("the workspace under its event tail", () => {
     FakeSource.all[0]!.readyState = FakeSource.CLOSED;
     await fire("error");
     expect(FakeSource.all[0]!.closed).toBe(true);
+    // The refetch decides what the closed stream meant.
+    expect(sent).toHaveLength(2);
+    await answer(1, { code: "CASE_NOT_FOUND", clears: "x" }, 404);
     expect(region(container).querySelector("[data-surface-state='unavailable']")).not.toBeNull();
     expect(confidence(container)).toBeNull();
+  });
+
+  test("a stream closed by a failed connection leaves the region offline, not unavailable", async () => {
+    const { container } = await mount("analysis", `/analysis/?case=${CASE}`);
+    await answer(0, analysis());
+    FakeSource.all[0]!.readyState = FakeSource.CLOSED;
+    await fire("error");
+    await act(async () => {
+      sent[1]!.fail();
+      await settle();
+    });
+    expect(region(container).querySelector("[data-surface-state='unavailable']")).toBeNull();
   });
 
   test("test_a_late_response_after_a_case_switch_is_discarded", async () => {

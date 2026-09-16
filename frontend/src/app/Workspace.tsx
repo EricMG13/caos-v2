@@ -93,10 +93,10 @@ export function Workspace({ section }: { section: Section }) {
               if (refetches(name, section)) load();
             },
             onReconnect: load,
-            onRefused: () => {
-              cancel();
-              put(UNAVAILABLE);
-            },
+            // A closed stream is a refusal or, in Firefox, a connection that
+            // never opened: EventSource cannot tell them apart. The document
+            // read can, so it decides: 404 unavailable, no connection offline.
+            onRefused: load,
           })
         : null;
     load();
