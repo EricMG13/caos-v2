@@ -1,29 +1,67 @@
-"""The wire contract under `/api/`: the one refusal body.
+"""The wire contract under `/api/`: the one refusal body and the v1 sections.
 
 Phase 4 Task 4.1, decision 3. Every non-success response carries
 `RefusalBody{code, clears}`; `clears` is `CLEARS[code]`, a host constant that
 says what would clear the refusal. It is never formatted, so no request or
 document text can reach it. `server/refusals.py` stays code-only.
+
+Decisions 5, 6 and 8: one closed document per enabled section, every key
+required, every string and list bounded. `python -m server.api.wire` prints
+their JSON Schema, committed at `frontend/src/wire/v1/schema.json`
+(`tests/test_wire_contract.py` proves the two equal).
 """
 
 from __future__ import annotations
 
+import json
+import sys
 from collections.abc import Mapping
+from enum import StrEnum
+from typing import Annotated, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic.json_schema import models_json_schema
 
+from server.api.identity import GlobalRole
+from server.engine.route import EdgeType, NodeState
+from server.methodology.handoff import MAX_FILE_BYTES, MAX_LINE_BYTES
 from server.refusals import RefusalCode
+from server.store.gates import Gate, GateState
+from server.store.members import Standing
 
 IO_BUDGET = 0
+
+_CLOSED = ConfigDict(extra="forbid", frozen=True)
+
+# Bounds. A string or list without one is refused by the contract test.
+ID_CHARS = 256  # route node, module, profile, selection, build ids
+TEXT_CHARS = 4096  # `BoundaryText`'s default limit: titles, filenames, labels
+QUOTE_CHARS = MAX_LINE_BYTES  # one quoted line of evidence
+MARKDOWN_CHARS = MAX_FILE_BYTES  # a whole handoff, as the validator bounds it
+CASES_MAX = 200  # beyond it the Directory is partial, `LIST_TRUNCATED`
+RUNS_MAX = 200
+SOURCES_MAX = 1000
+SET_VERSIONS_MAX = 1000
+ROUTE_NODES_MAX = 256
+ATTEMPTS_MAX = 4096
+CITATIONS_MAX = 1024
+RECTS_MAX = 256
+FLAGS_MAX = 256
+
+Id = Annotated[str, Field(max_length=ID_CHARS)]
+Text = Annotated[str, Field(max_length=TEXT_CHARS)]
+Sha256 = Annotated[str, Field(max_length=64, pattern="^[0-9a-f]{64}$")]
+RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED"]
 
 
 class RefusalBody(BaseModel):
     """Everything a declined request says: the code and what clears it."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = _CLOSED
 
     code: RefusalCode
-    clears: str
+    clears: Text
 
 
 _C = RefusalCode
@@ -137,3 +175,325 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.STORE_NOT_CONFIGURED: "An operator must configure the store.",
     _C.STORE_UNAVAILABLE: "Retry when the store answers.",
 }
+
+
+class SectionNote(StrEnum):
+    """Why a section document is partial or empty. Closed."""
+
+    LIST_TRUNCATED = "LIST_TRUNCATED"
+    ROUTE_NOT_PINNED = "ROUTE_NOT_PINNED"
+    HANDOFFS_PENDING = "HANDOFFS_PENDING"
+
+
+class Subject(BaseModel):
+    """The case the section is about."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    title: Text
+
+
+class ServedRole(BaseModel):
+    """Who the server answered as. Shown, and enables nothing (decision 5)."""
+
+    model_config = _CLOSED
+
+    global_role: GlobalRole
+    standing: Standing | None
+
+
+class Chrome(BaseModel):
+    """The authority facts the client composes its chrome from."""
+
+    model_config = _CLOSED
+
+    subject: Subject | None
+    served_role: ServedRole
+
+
+class RunSummary(BaseModel):
+    """One run of a case, as a list names it."""
+
+    model_config = _CLOSED
+
+    run_id: UUID
+    status: RunStatus
+    created_at: AwareDatetime
+    profile_id: Id | None
+    selection_id: Id | None
+
+
+class CaseRow(BaseModel):
+    """One case the actor holds live standing on."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    title: Text
+    created_at: AwareDatetime
+    standing: Standing
+    live_sources: int
+    latest_run: RunSummary | None
+
+
+class DirectoryBody(BaseModel):
+    model_config = _CLOSED
+
+    cases: Annotated[list[CaseRow], Field(max_length=CASES_MAX)]
+
+
+class SourceRow(BaseModel):
+    """One admitted source; withdrawal is read live."""
+
+    model_config = _CLOSED
+
+    source_id: UUID
+    filename: Text
+    document_sha256: Sha256
+    admitted_at: AwareDatetime
+    withdrawn_at: AwareDatetime | None
+    extractor_identity: Text | None
+    set_versions: Annotated[list[int], Field(max_length=SET_VERSIONS_MAX)]
+
+
+class SetVersion(BaseModel):
+    model_config = _CLOSED
+
+    version: int
+    fingerprint: Sha256
+    member_count: int
+
+
+class UploadBody(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    sources: Annotated[list[SourceRow], Field(max_length=SOURCES_MAX)]
+    set_versions: Annotated[list[SetVersion], Field(max_length=SET_VERSIONS_MAX)]
+
+
+class RunSubjectView(BaseModel):
+    """The pinned run subject."""
+
+    model_config = _CLOSED
+
+    issuer_id: Annotated[str, Field(max_length=128)]
+    issuer_name: Text
+    reporting_period: Text
+    analysis_date: Annotated[str, Field(max_length=10, pattern=r"^\d{4}-\d{2}-\d{2}$")]
+
+
+class GateView(BaseModel):
+    model_config = _CLOSED
+
+    gate: Gate
+    state: GateState
+
+
+class AttemptView(BaseModel):
+    model_config = _CLOSED
+
+    attempt_id: UUID
+    route_node_id: Id
+    ordinal: int | None
+    started_at: AwareDatetime
+    accepted: bool
+
+
+class EdgeView(BaseModel):
+    """One dependency a node is still waiting for, with its type."""
+
+    model_config = _CLOSED
+
+    source: Id
+    type: EdgeType
+
+
+class NodeView(BaseModel):
+    """A node's state and the reason for it."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    stage: int
+    state: NodeState
+    waiting_on: Annotated[list[EdgeView], Field(max_length=ROUTE_NODES_MAX)]
+    awaiting_gate: bool
+    gate_verdict: Id | None
+
+
+class RunView(BaseModel):
+    """The displayed run. Node states are recomputed, never stored."""
+
+    model_config = _CLOSED
+
+    run_id: UUID
+    status: RunStatus
+    created_at: AwareDatetime
+    route_digest: Sha256 | None
+    build_id: Id | None
+    source_set_version: int | None
+    subject: RunSubjectView | None
+    gates: Annotated[list[GateView], Field(max_length=len(Gate))]
+    nodes: Annotated[list[NodeView], Field(max_length=ROUTE_NODES_MAX)]
+    attempts: Annotated[list[AttemptView], Field(max_length=ATTEMPTS_MAX)]
+
+
+class RunBody(BaseModel):
+    """Latest and displayed run are separate identities (item 1)."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    latest_run_id: UUID | None
+    displayed_run_id: UUID | None
+    runs: Annotated[list[RunSummary], Field(max_length=RUNS_MAX)]
+    run: RunView | None
+
+
+class RectView(BaseModel):
+    """A rectangle in page coordinates, from the record."""
+
+    model_config = _CLOSED
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class CitationView(BaseModel):
+    """A host-verified citation; withdrawal is read live."""
+
+    model_config = _CLOSED
+
+    document_sha256: Sha256
+    filename: Text
+    page: int
+    matched_text: Annotated[str, Field(max_length=QUOTE_CHARS)]
+    rects: Annotated[list[RectView], Field(max_length=RECTS_MAX)]
+    withdrawn_at: AwareDatetime | None
+
+
+class HandoffView(BaseModel):
+    """One accepted handoff, labelled per §46.3."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    artifact_sha256: Sha256
+    record_sha256: Sha256
+    accepted_at: AwareDatetime
+    qa_status: Id
+    committee_status: Id
+    confidence_score: int
+    confidence_band: Id
+    limitation_flags: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    validation_warnings: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    decision_scope: Id
+    screening_only: bool
+    source_facts: Annotated[list[CitationView], Field(max_length=CITATIONS_MAX)]
+    model_analysis: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
+    host_calculation: Literal["NONE"]
+
+
+class PendingNode(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    state: NodeState
+
+
+class AnalysisBody(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    latest_run_id: UUID | None
+    displayed_run_id: UUID | None
+    subject: RunSubjectView | None
+    handoffs: Annotated[list[HandoffView], Field(max_length=ROUTE_NODES_MAX)]
+    pending: Annotated[list[PendingNode], Field(max_length=ROUTE_NODES_MAX)]
+
+
+SectionStatus = Literal["complete", "partial"]
+Notes = Annotated[list[SectionNote], Field(max_length=len(SectionNote))]
+
+
+class DirectoryDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: DirectoryBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+class UploadDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: UploadBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+class RunSectionDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: RunBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+class AnalysisDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: AnalysisBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
+    DirectoryDocument,
+    UploadDocument,
+    RunSectionDocument,
+    AnalysisDocument,
+)
+
+
+def wire_schema() -> str:
+    """The four documents and `RefusalBody` under `$defs`, keys sorted, one
+    definition per line and one trailing newline -- byte for byte the committed
+    schema, and a diff that names the model that moved."""
+    models: tuple[type[BaseModel], ...] = (*V1_DOCUMENTS, RefusalBody)
+    _, schema = models_json_schema(
+        [(model, "validation") for model in models],
+        ref_template="#/$defs/{model}",
+    )
+    definitions = schema.get("$defs", {})
+    if set(schema) != {"$defs"}:
+        raise ValueError  # everything is a definition; nothing else is printed
+    lines = [
+        f"  {json.dumps(name)}: "
+        + json.dumps(definitions[name], sort_keys=True, ensure_ascii=False)
+        for name in sorted(definitions)
+    ]
+    return '{"$defs": {\n' + ",\n".join(lines) + "\n}}\n"
+
+
+if __name__ == "__main__":
+    sys.stdout.write(wire_schema())

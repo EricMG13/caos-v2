@@ -48,6 +48,10 @@ from pydantic import BaseModel, ConfigDict
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api.identity import Actor, actor_from_headers
+from server.api.reads import analysis as analysis_read
+from server.api.reads import directory as directory_read
+from server.api.reads import run as run_read
+from server.api.reads import upload as upload_read
 from server.api.stream import IO_BUDGET as TAIL_IO_BUDGET
 from server.api.stream import TERMINAL, StreamEvent, tail
 from server.api.wire import CLEARS, RefusalBody
@@ -171,6 +175,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="CAOS", version="2", lifespan=_lifespan)
+# One router per section read (Task 4.1), so each slice adds its route in its
+# own module and none edits this one.
+for _section in (directory_read, upload_read, run_read, analysis_read):
+    app.include_router(_section.router)
 
 
 class EdgeView(BaseModel):
