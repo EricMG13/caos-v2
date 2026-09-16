@@ -25,7 +25,10 @@ from server.api.commands._request import (
 )
 from server.api.deps import Caller, Methodology, Store
 from server.api.wire import (
+    ApproveGate,
     CreateRun,
+    GateApproved,
+    GatePreviewDocument,
     PinRunInput,
     RunCreated,
     RunInputPinned,
@@ -40,6 +43,9 @@ from server.store.audit import GovernedAction
 from server.store.commands import request_digest, run_command
 from server.store.gates import (
     Gate,
+    GateApproval,
+    gate_preview,
+    release_gate_in,
     require_adapter_route,
 )
 from server.store.members import Standing
@@ -221,3 +227,96 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
         write=write,
     )
     return command_response(result, RunInputPinned)
+
+
+@router.get(
+    "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/preview",
+    response_model=GatePreviewDocument,
+)
+def read_gate_preview(
+    _actor: Caller,
+    gate: PathGate,
+    _standing: Reader,
+    case_id: UUID,
+    run_id: str,
+    conn: Store,
+) -> GatePreviewDocument:
+    """The exact content an approver is shown and the digests to submit.
+
+    Reading it records nothing and releases nothing; approval re-derives it.
+    """
+    run = _run_id(run_id)
+    pinned, observed_at = _owned_run(conn, case_id, run)
+    if not pinned:
+        raise Refusal(RefusalCode.RUN_INPUT_NOT_PINNED)
+    preview = gate_preview(conn, run, gate)
+    return GatePreviewDocument(
+        run_id=run,
+        gate=gate,
+        content=preview.content,
+        preview_sha256=preview.preview_sha256,
+        input_fingerprint=preview.input_fingerprint,
+        observed_at=observed_at,
+    )
+
+
+@router.post("/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval")
+def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
+    actor: Caller,
+    gate: PathGate,
+    key: Key,
+    _standing: Approver,
+    body: Annotated[ApproveGate, Depends(json_body(ApproveGate))],
+    case_id: UUID,
+    run_id: str,
+    conn: Store,
+) -> Response:
+    """Release one gate over the preview the approver submits, re-derived
+    under the case and run locks at commit."""
+    run = _run_id(run_id)
+    approval = GateApproval(
+        run_id=run,
+        gate=gate,
+        actor_id=actor.user_id,
+        preview_sha256=body.preview_sha256,
+        input_fingerprint=body.input_fingerprint,
+    )
+
+    def write(unit: StoreConnection) -> tuple[int, GateApproved]:
+        if not _owned_run(unit, case_id, run)[0]:
+            raise Refusal(RefusalCode.RUN_INPUT_NOT_PINNED)
+        release_gate_in(unit, approval)
+        return 200, GateApproved(
+            run_id=run,
+            gate=gate,
+            preview_sha256=body.preview_sha256,
+            input_fingerprint=body.input_fingerprint,
+        )
+
+    result = run_command(
+        conn,
+        scope=case_id,
+        key=key,
+        command="APPROVE_GATE",
+        request_sha256=request_digest(
+            "APPROVE_GATE",
+            case_id=case_id,
+            run_id=run,
+            gate=gate.value,
+            body=body.model_dump(mode="json"),
+        ),
+        action=GovernedAction(
+            case_id=case_id,
+            actor_id=actor.user_id,
+            action=f"GATE_RELEASED:{gate.value}",
+            requires=Standing.APPROVER,
+            payload={
+                "run_id": str(run),
+                "gate": gate.value,
+                "preview_sha256": body.preview_sha256,
+                "input_fingerprint": body.input_fingerprint,
+            },
+        ),
+        write=write,
+    )
+    return command_response(result, GateApproved)
