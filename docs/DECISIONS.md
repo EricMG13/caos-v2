@@ -1869,6 +1869,97 @@ an admission request, its thread and one of the image's 32 concurrency slots
 for fifty minutes. 300 s matches the edge's idle timeout (§53.1), past which
 the request would be cut anyway.
 
+## 2026-09-14 §54 — The closed forecast contract and independent reconciliation
+
+Task 5.1 repairs the dormant calculator's numerical contract; it does not
+enable CP-CF, a route, or the Model section. The host extension and verified
+execution binding remain Task 5.2. No upstream file changes.
+
+**Inputs.** The top-level keys are exactly `opening`, `periods`, `drivers`,
+`contractual`, `units`, `perimeter`, and optional `tolerance`. Every nested
+object is closed. Opening requires `cash`, `as_of_period_id` and
+`debt_by_facility[]` of `{facility_id, amount}`, with unique facilities.
+Periods require `{case, period_id, fiscal_year, days}`; `(case, period_id)` is
+unique, `days` is an integer string 1..366, and caller order is chain order
+within each case. Text labels pass BoundaryText/NFC with a 64-character bound
+and cannot be blank. Units require a three-uppercase-letter currency and scale
+`units`, `thousands`, `millions` or `billions`; units and perimeter carry to output.
+
+Drivers have unique requested `(case, period_id)`, required `status`,
+`stated_closing_debt`, `stated_closing_cash`, and the movement fields:
+`revenue`, `ebitda`, `cfo`, `capex`, `acquisitions_disposals`, `cash_interest`,
+`cash_taxes`, `distributions`, `issuance`, `optional_repayment`, `pik`,
+`capitalised_interest`, `fx_perimeter`. Every movement is required for READY.
+An explicit zero is zero; a missing movement makes the row unavailable with
+`DRIVER_FIELD_MISSING`. A missing driver is `DRIVER_MISSING`; an unready one is
+`DRIVER_NOT_READY`. Later rows of that case are `PRIOR_PERIOD_UNAVAILABLE`.
+Present invalid numerics refuse even in an unready or subsequently unavailable
+row. Missing stated balances refuse: reconciliation needs independent claims.
+
+Contractual input is exactly `amortisation[]` of
+`{case, period_id, facility_id, amount}`; every pair is requested and facility
+opened. Duplicate four-field entries (numeric amounts compared as Decimal)
+refuse. Different payments for one facility-period sum. No payment rows means
+zero repayment. `policy`, `maturities`, `coupons` and the old driver field
+`financing_investing` refuse `METHODOLOGY_INPUT_INVALID` until implemented.
+
+**Arithmetic.** Every numeric input must be a JSON string matching
+`^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?$`, matched over the entire string.
+No exponent, whitespace, plus, bool, JSON number, null or Decimal object is
+accepted. Amortisation, tolerance and movements are nonnegative, except signed
+acquisitions/disposals and FX/perimeter movements. Opening and stated closing
+balances may be negative: the movement sign rule does not constrain balances.
+Every sum, subtraction, division,
+comparison and quantization runs inside one fresh local
+`Context(prec=38, rounding=ROUND_HALF_EVEN,
+traps=[InvalidOperation, DivisionByZero, Overflow])`. Amounts emit six decimal
+places, ratios four. The ambient context supplies no arithmetic settings.
+
+```
+closing_debt = opening_debt + issuance + pik + capitalised_interest
+               - contractual_repayment - optional_repayment + fx_perimeter
+financing_investing = issuance - contractual_repayment - optional_repayment
+                      - acquisitions_disposals
+fcf = cfo - capex - cash_interest - cash_taxes
+closing_cash = opening_cash + fcf - distributions + financing_investing
+residual_debt = stated_closing_debt - closing_debt
+residual_cash = stated_closing_cash - closing_cash
+```
+
+Each case starts with the supplied opening debt sum and cash; subsequent
+openings equal the previous computed closes, checked with
+`FORECAST_CHAIN_BROKEN`. Either absolute residual above tolerance (default
+`0.001`, explicitly in the supplied units) gives `RESIDUAL_UNRECONCILED` and
+propagates unavailability. The failed row retains computed values/residuals as
+diagnostics, never as an available forecast. Tolerance equality passes.
+
+Gross leverage is closing debt/EBITDA, net leverage is (closing debt-closing
+cash)/EBITDA, interest coverage is EBITDA/cash interest, FCF/debt is FCF/closing
+debt; operating margin is EBITDA/revenue. Each ratio with a nonpositive
+denominator is `{value: null, reason: "ZERO_OR_NEGATIVE_DENOMINATOR"}`;
+otherwise it is `{value: "<four-place string>", reason: null}`. Accessible
+cash equals closing cash: restricted cash is unsupported. Liquidity runway is
+omitted because cash-sweep/minimum-cash/revolver/FX policy is unsupported.
+
+**Output and ceilings.** `cash_flow_forecast` returns exactly
+`{status, units, perimeter, rows, checks}`. Rows appear once per requested pair
+in request order, with computed fields or an unavailable reason; status is
+complete only when all rows are available. `forecast_bytes` serializes this
+object as UTF-8 JSON with sorted keys, compact separators, no NaN and no ASCII
+escaping. It is byte-identical under changed ambient Decimal contexts.
+One residual check per requested row records PASS/FAIL and its unavailable
+reason. Before any numeric parse, requests are bounded to 40 periods per case,
+6 cases, 40 opening facilities, 2,000 amortisation entries, at most one driver
+per requested pair, and `max_periods_per_case × cases × (1+facilities) <= 100000`.
+
+**Evidence and limits.** `tests/forecast_fixtures.py` supplies the inputs;
+the annual base/downside and quarterly base tests carry independent hand
+tables, including financing, FCF, debt/cash, ratios and chain openings.
+This proves arithmetic over supplied movements, not the economic validity of
+chosen drivers or a provider's credit conclusions. A negative computed balance
+is preserved; no unimplemented policy silently funds a cash deficit or floors
+debt. A relative tolerance or restricted-cash model needs a later decision.
+
 ## 2026-09-14 §55 — A bounded audit package with its own portable verifier
 
 **Decision.** Phase 5 Task 5.4a completes the package half of F15 without
@@ -1888,43 +1979,33 @@ signatures or proof that an entire receipt/audit chain was never replaced.
    with no exception chain. Its HTML output is unchanged.
 3. **Portable verifier version 1.** `verify(archive: bytes)` returns
    `(bool, str | None)`; malformed input is a fixed failure reason, never an
-   exception's text. The host `package.verify_package` wraps that result in
-   the existing `Verification`. A reader may run
+   exception's text. The host `package.verify_package` wraps that result in the
+   existing `Verification`. A reader may run
    `python -I -S verify_package.py <package.zip>` from any directory. The CLI
    prints `{"verified": true, "reason": null}` on success and exits 0, or a
    failed verdict and exits 1. It installs nothing, extracts nothing, and
    loads its renderer from the bounded archive bytes.
-4. **Bounds before member reads.** Archive ≤64 MiB; payload ≤32 MiB; export
-   ≤64 MiB; receipt ≤64 KiB; each Python member ≤1 MiB. Exactly five central
-   headers are checked before `ZipFile` can allocate member objects, so a
-   forged count cannot conceal an unbounded entry list. The format is
-   single-disk ZIP32 with no appended bytes; ZIP64/multi-disk containers are
+4. **Bounds before member reads.** Archive ≤64 MiB; payload ≤32 MiB; export ≤64
+   MiB; receipt ≤64 KiB; each Python member ≤1 MiB. Exactly five central
+   headers are checked before `ZipFile` can allocate member objects. The format
+   is single-disk ZIP32 with no appended bytes; ZIP64/multi-disk containers are
    unnecessary at these ceilings and refuse. Only STORED and DEFLATED are
    accepted, with no encryption and a declared ratio ≤100:1. Every deflate
-   output is capped at its limit plus one byte and must reach exactly the end
-   of its stream with no tail; actual size and CRC must match the directory.
-   Local names, flags, methods and member extents are checked too. We do not
-   rely on `ZipExtFile.read` for actual size: it silently truncates an inflated
-   body to a forged declared size, even if trailing output remains.
+   output is capped at its limit plus one byte and must reach the end of its
+   stream with no tail; actual size and CRC must match the directory.
 5. **Safe renderer loading.** The verifier embeds `RENDERER_SHA256` for its
    trusted build and refuses different renderer bytes before executing them.
    If the receipt carries `renderer_sha256` (Task 5.3), it must also match.
-   Update the pin with every renderer edit; the package tests detect drift.
-   An old package carries its old verifier and renderer, so it remains
-   independently checkable. The current host verifier accepts its own renderer
-   build only. The pin protects a trusted verifier from arbitrary archived
-   code; running a replaced verifier cannot authenticate the package. No
-   external trust anchor is introduced or claimed.
+   Update the pin with every renderer edit. This protects a trusted verifier
+   from arbitrary archived code; no external trust anchor is introduced.
 6. **Existing consistency checks remain:** receipt is a JSON object, payload
    hashes to `payload_sha256`, three named roles contain three distinct people,
    canonical Markdown/record digest pairs bind, and the archived renderer
-   reproduces the export byte for byte. Recorded projections are not freshly
-   re-derived from methodology authority here; store verification owns that.
-7. **Exclusive creation.** `write_package` opens `xb`, which atomically refuses
-   an existing path. Two concurrent writers leave one complete winner under
-   successful filesystem writes. This does not promise crash durability or
-   rollback after an I/O failure; a failed write can leave a partial new file,
-   which subsequent writers refuse and verification rejects.
+   reproduces the export byte for byte. Store verification owns live chain
+   proof.
+7. **Exclusive creation.** `write_package` opens `xb`, atomically refusing an
+   existing path. Two concurrent writers leave one complete winner under
+   successful filesystem writes; crash durability is not promised.
 
 **Evidence.** `tests/test_deliverable_package.py` proves isolated `-I -S`
 execution with only a package in the temporary directory, stdlib imports,
@@ -1968,3 +2049,10 @@ authority section; both the manifest and delivered-authority digests still
 bind the original bytes. Invalid ZIP containers and other non-UTF-8 authority
 still refuse. No workbook is executed, extracted or restored as a deliverable;
 the existing whole-request ceiling also bounds the encoded representation.
+**Evidence.** `tests/test_deliverable_package.py` covers isolated `-I -S`
+execution, stdlib imports, metadata-before-read bounds, duplicate/extra/
+missing/traversal names, encryption/method rejection, compression-ratio
+rejection, total malformed-input handling, concurrent exclusive writes,
+deterministic members, renderer-pin checks, and forged declared lengths/CRC/
+count failures. Existing render, filing and LITE route tests remain required;
+this decision does not enable filing routes.

@@ -893,23 +893,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 7.**
 
-- **`_ratio` divides at the process-global `Decimal` context.** Nothing under
-  `server/` sets a context, so the precision and rounding of every ratio come
-  from `decimal.getcontext()` — 28 significant digits by default, and mutable by
-  anything else in the process. The module's own promise is "same inputs,
-  byte-identical output", and it holds only while nothing else touches that
-  context; a library that set it on import would change these numbers without
-  changing this file. *Upgrade:* a `localcontext()` around the division with a
-  stated precision and rounding, which turns the output's shape into a decision
-  rather than an inheritance.
-- **The residual tolerance is absolute, not relative.** `residual >
-  inputs.tolerance` compares against a default of `0.001` while the host never
-  learns what units the model's balances are in. On figures stated in millions
-  that is effectively exact; on figures stated in units it is a cent, and the
-  same set of drivers reconciles or does not depending on a scale nobody
-  declared. The caller can pass a tolerance, which is what makes this a limit
-  rather than a defect. *Upgrade:* a tolerance stated relative to the balance it
-  is judging, the day a forecast request carries its own scale.
+- ~~**`_ratio` divides at the process-global `Decimal` context.**~~ Closed by
+  repair Task 5.1 (§54): the entire forecast runs in one local precision-38,
+  half-even context, with bounded string numerics and fixed output scales.
+  `test_same_request_is_byte_identical_under_changed_ambient_context` changes
+  precision, rounding, exponent limits and traps without changing output bytes.
+- **The residual tolerance is absolute, in declared units.** Repair Task 5.1
+  requires currency and scale and carries them with the perimeter. The default
+  `0.001` therefore means 0.001 units, thousands, millions or billions as
+  explicitly requested, and equality passes. Each signed debt/cash residual
+  remains visible and either magnitude above tolerance makes the row unavailable.
+  *Upgrade:* relative tolerance if a real model requires scale-independent
+  materiality. Accessible cash currently equals closing cash; policy, restricted
+  cash and liquidity runway require a later declared contract (§54).
 
 **Phase 6.**
 
