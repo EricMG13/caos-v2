@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { UploadSection } from "@/sections/upload/UploadSection";
 import { parseUploadDocument, type UploadDocument } from "@/wire/v1";
@@ -17,6 +17,15 @@ function mount(document: UploadDocument) {
     </MemoryRouter>,
   );
 }
+
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const sourceRow = (container: HTMLElement, id: string) =>
   container.querySelector<HTMLElement>(`table.reg[data-source-pack] tr[data-source="${id}"]`)!;
@@ -84,5 +93,209 @@ describe("Upload", () => {
     expect(partial.notes).toEqual(["LIST_TRUNCATED"]);
     const { container } = mount(partial);
     expect(container.querySelectorAll("tr[data-source]")).toHaveLength(partial.body.sources.length);
+  });
+
+  test("test_a_refused_action_renders_its_code_and_clearance_and_is_not_hidden", async () => {
+    const refused: UploadDocument = {
+      ...fixture,
+      chrome: {
+        ...fixture.chrome,
+        actions: [
+          {
+            action: "ADMIT_SOURCES",
+            refusal: { code: "NOT_AUTHORISED", clears: "your case standing is WRITER or higher" },
+          },
+        ],
+      },
+    };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    mount(refused);
+    const control = screen.getByRole("button", { name: "Admit sources" });
+    expect(control).toBeVisible();
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).not.toBeDisabled();
+    expect(control).toHaveAttribute("data-refusal", "NOT_AUTHORISED");
+    expect(control.title).toContain("NOT_AUTHORISED");
+    expect(control.title).toContain("your case standing is WRITER or higher");
+    expect(screen.getByText(/NOT_AUTHORISED/)).toBeInTheDocument();
+    expect(screen.getByText(/your case standing is WRITER or higher/)).toBeInTheDocument();
+    fireEvent.click(control);
+    await settle();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  test("an available admit-sources action posts a multipart command and refetches on success", async () => {
+    const live: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "ADMIT_SOURCES", refusal: null }] },
+    };
+    const newSourceId = "22222222-2222-4222-8222-222222222222";
+    const refreshed: UploadDocument = {
+      ...live,
+      body: {
+        ...live.body,
+        sources: [
+          ...live.body.sources,
+          {
+            source_id: newSourceId,
+            filename: "new-filing.pdf",
+            document_sha256: "b".repeat(64),
+            admitted_at: "2026-09-14T10:00:00Z",
+            withdrawn_at: null,
+            extractor_identity: null,
+            set_versions: [],
+          },
+        ],
+      },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ case_id: live.body.case_id, source_ids: [newSourceId] }, 201),
+      )
+      .mockResolvedValueOnce(jsonResponse(refreshed));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const file = new File(["contents"], "new-filing.pdf", { type: "application/pdf" });
+    const input = screen.getByLabelText("Documents to admit");
+    fireEvent.change(input, { target: { files: [file] } });
+    const control = screen.getByRole("button", { name: "Admit sources" });
+    expect(control).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(control);
+    await settle();
+    await settle();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [postUrl, postInit] = fetchSpy.mock.calls[0]!;
+    expect(postUrl).toBe(`/api/v1/cases/${live.body.case_id}/sources`);
+    const form = postInit.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect((form.getAll("document")[0] as File).name).toBe("new-filing.pdf");
+    expect(postInit.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fetchSpy.mock.calls[1]![0]).toBe(`/api/v1/cases/${live.body.case_id}/upload`);
+
+    expect(await screen.findByText("new-filing.pdf")).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("the file input is cleared after a successful admit", async () => {
+    const live: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "ADMIT_SOURCES", refusal: null }] },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ case_id: live.body.case_id, source_ids: [] }, 201))
+      .mockResolvedValueOnce(jsonResponse(live));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const file = new File(["contents"], "new-filing.pdf", { type: "application/pdf" });
+    const input = screen.getByLabelText("Documents to admit") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(input.files).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Admit sources" }));
+    await settle();
+    await settle();
+
+    // jsdom's `files` on a file input is a fixed snapshot once fireEvent sets
+    // it (there is no real OS picker to clear); `.value` is the one property
+    // this control's own reset can move, and is what a real browser clears
+    // its displayed filename from.
+    expect(input.value).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  test("the idempotency key is reused only for a retry of the same file set after offline, and replaced when the set changes", async () => {
+    const live: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "ADMIT_SOURCES", refusal: null }] },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(jsonResponse({ case_id: live.body.case_id, source_ids: [] }, 201))
+      .mockResolvedValueOnce(jsonResponse(live));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const fileA = new File(["a"], "a.pdf", { type: "application/pdf" });
+    const fileB = new File(["b"], "b.pdf", { type: "application/pdf" });
+    const input = screen.getByLabelText("Documents to admit");
+    const control = screen.getByRole("button", { name: "Admit sources" });
+
+    fireEvent.change(input, { target: { files: [fileA] } });
+    fireEvent.click(control);
+    await settle();
+    const key1 = fetchSpy.mock.calls[0]![1].headers["Idempotency-Key"];
+
+    // Same file set, retried after offline: the same key.
+    fireEvent.change(input, { target: { files: [fileA] } });
+    fireEvent.click(control);
+    await settle();
+    const key2 = fetchSpy.mock.calls[1]![1].headers["Idempotency-Key"];
+    expect(key2).toBe(key1);
+
+    // A different file set: a fresh key, even though the previous answer was
+    // offline.
+    fireEvent.change(input, { target: { files: [fileB] } });
+    fireEvent.click(control);
+    await settle();
+    await settle();
+    const key3 = fetchSpy.mock.calls[2]![1].headers["Idempotency-Key"];
+    expect(key3).not.toBe(key1);
+    vi.unstubAllGlobals();
+  });
+
+  test("a success whose refetch fails still shows a persistent success note, plus a visible refresh-failed state", async () => {
+    const live: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "ADMIT_SOURCES", refusal: null }] },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            case_id: live.body.case_id,
+            source_ids: [
+              "44444444-4444-4444-8444-444444444444",
+              "55555555-5555-4555-8555-555555555555",
+            ],
+          },
+          201,
+        ),
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const file = new File(["contents"], "new-filing.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText("Documents to admit"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Admit sources" }));
+
+    expect(await screen.findByText(/could not.*refresh|refresh.*failed/i)).toBeInTheDocument();
+    expect(document.querySelector("[data-admit-sources-success]")).toHaveTextContent("2");
+    vi.unstubAllGlobals();
+  });
+
+  test("an action absent from chrome.actions is not available, and is refused with ACTION_UNPLACED", () => {
+    const noActions: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [] },
+    };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    mount(noActions);
+    const control = screen.getByRole("button", { name: "Admit sources" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAttribute("data-refusal", "ACTION_UNPLACED");
+    fireEvent.click(control);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

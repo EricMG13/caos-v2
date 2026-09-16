@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { DirectorySection } from "@/sections/directory/DirectorySection";
 import { parseDirectoryDocument, parseUploadDocument, type DirectoryDocument } from "@/wire/v1";
@@ -17,6 +17,15 @@ function mount(document: DirectoryDocument) {
     </MemoryRouter>,
   );
 }
+
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const rowsOf = (container: HTMLElement) =>
   Array.from(container.querySelectorAll<HTMLElement>("table.reg[data-register] tbody tr"));
@@ -96,6 +105,196 @@ describe("Directory", () => {
     const { container } = mount(empty);
     expect(rowsOf(container)).toHaveLength(0);
     expect(container).toHaveTextContent("No case matches.");
+  });
+
+  test("test_a_refused_action_renders_its_code_and_clearance_and_is_not_hidden", async () => {
+    const refused: DirectoryDocument = {
+      ...fixture,
+      chrome: {
+        ...fixture.chrome,
+        actions: [
+          {
+            action: "CREATE_CASE",
+            refusal: { code: "NOT_AUTHORISED", clears: "your global role is ANALYST or higher" },
+          },
+        ],
+      },
+    };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    mount(refused);
+    const control = screen.getByRole("button", { name: "Create case" });
+    // Present, not hidden: it renders, carries the refusal, and is not the
+    // native `disabled` attribute (CLAUDE.md "Persona is not authority").
+    expect(control).toBeVisible();
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).not.toBeDisabled();
+    expect(control).toHaveAttribute("data-refusal", "NOT_AUTHORISED");
+    expect(control).toHaveTextContent("Create case");
+    expect(control.title).toContain("NOT_AUTHORISED");
+    expect(control.title).toContain("your global role is ANALYST or higher");
+    expect(screen.getByText(/NOT_AUTHORISED/)).toBeInTheDocument();
+    expect(screen.getByText(/your global role is ANALYST or higher/)).toBeInTheDocument();
+    fireEvent.click(control);
+    await settle();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  test("an available create-case action posts the command and refetches on success", async () => {
+    const live: DirectoryDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "CREATE_CASE", refusal: null }] },
+    };
+    const newCaseId = "11111111-1111-4111-8111-111111111111";
+    const refreshed: DirectoryDocument = {
+      ...live,
+      body: {
+        cases: [
+          {
+            case_id: newCaseId,
+            title: "Acme Holdings",
+            created_at: "2026-09-14T10:00:00Z",
+            standing: "ADMIN",
+            live_sources: 0,
+            latest_run: null,
+          },
+          ...live.body.cases,
+        ],
+      },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ case_id: newCaseId }, 201))
+      .mockResolvedValueOnce(jsonResponse(refreshed));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const input = screen.getByLabelText("New case title");
+    fireEvent.change(input, { target: { value: "Acme Holdings" } });
+    const control = screen.getByRole("button", { name: "Create case" });
+    expect(control).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(control);
+    await settle();
+    await settle();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [postUrl, postInit] = fetchSpy.mock.calls[0]!;
+    expect(postUrl).toBe("/api/v1/cases");
+    expect(JSON.parse(postInit.body as string)).toEqual({ title: "Acme Holdings" });
+    expect(postInit.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fetchSpy.mock.calls[1]![0]).toBe("/api/v1/directory");
+
+    expect(await screen.findByText("Acme Holdings")).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("the idempotency key is reused only for a retry of the same body after offline, and replaced when the body changes", async () => {
+    const live: DirectoryDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "CREATE_CASE", refusal: null }] },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(jsonResponse({ case_id: "x" }, 201))
+      .mockResolvedValueOnce(jsonResponse(live));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const input = screen.getByLabelText("New case title");
+    const control = screen.getByRole("button", { name: "Create case" });
+
+    fireEvent.change(input, { target: { value: "Acme" } });
+    fireEvent.click(control);
+    await settle();
+    const key1 = fetchSpy.mock.calls[0]![1].headers["Idempotency-Key"];
+
+    // Same body, retried after an offline answer: the same key.
+    fireEvent.click(control);
+    await settle();
+    const key2 = fetchSpy.mock.calls[1]![1].headers["Idempotency-Key"];
+    expect(key2).toBe(key1);
+
+    // The body changes before the next submit: a fresh key, even though the
+    // previous answer was offline.
+    fireEvent.change(input, { target: { value: "Acme Corp" } });
+    fireEvent.click(control);
+    await settle();
+    await settle();
+    const key3 = fetchSpy.mock.calls[2]![1].headers["Idempotency-Key"];
+    expect(key3).not.toBe(key1);
+    vi.unstubAllGlobals();
+  });
+
+  test("the idempotency key is replaced after any answer that is not offline, even for the same body", async () => {
+    const live: DirectoryDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "CREATE_CASE", refusal: null }] },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ code: "NOT_AUTHORISED", clears: "x" }, 403))
+      .mockResolvedValueOnce(jsonResponse({ case_id: "x" }, 201))
+      .mockResolvedValueOnce(jsonResponse(live));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    const input = screen.getByLabelText("New case title");
+    const control = screen.getByRole("button", { name: "Create case" });
+    fireEvent.change(input, { target: { value: "Acme" } });
+
+    fireEvent.click(control);
+    await settle();
+    const key1 = fetchSpy.mock.calls[0]![1].headers["Idempotency-Key"];
+
+    // Same body, but the last answer was a refusal, not offline: a fresh key.
+    fireEvent.click(control);
+    await settle();
+    await settle();
+    const key2 = fetchSpy.mock.calls[1]![1].headers["Idempotency-Key"];
+    expect(key2).not.toBe(key1);
+    vi.unstubAllGlobals();
+  });
+
+  test("a success whose refetch fails still shows a persistent success note, plus a visible refresh-failed state", async () => {
+    const live: DirectoryDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "CREATE_CASE", refusal: null }] },
+    };
+    const newCaseId = "33333333-3333-4333-8333-333333333333";
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ case_id: newCaseId }, 201))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    mount(live);
+    fireEvent.change(screen.getByLabelText("New case title"), { target: { value: "Acme" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create case" }));
+    await settle();
+    await settle();
+
+    expect(await screen.findByText(new RegExp(newCaseId))).toBeInTheDocument();
+    expect(screen.getByText(/could not.*refresh|refresh.*failed/i)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("an action absent from chrome.actions is not available, and is refused with ACTION_UNPLACED", () => {
+    const noActions: DirectoryDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [] },
+    };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    mount(noActions);
+    const control = screen.getByRole("button", { name: "Create case" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAttribute("data-refusal", "ACTION_UNPLACED");
+    fireEvent.click(control);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   test("test_every_enabled_demo_fixture_is_a_valid_v1_document", () => {

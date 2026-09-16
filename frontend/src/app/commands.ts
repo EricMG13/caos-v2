@@ -22,6 +22,7 @@ import type {
   RunInputPinned,
   RunWork,
 } from "@/wire/v1";
+import { OFFLINE_WORDING } from "./transport";
 import {
   WireShapeError,
   parseCaseCreated,
@@ -62,6 +63,23 @@ interface CommandRequest {
   url: string;
   body?: BodyInit;
   contentType?: string;
+}
+
+/** Why a command did not succeed, as the one sentence a control shows. Every
+    control says the same thing for the same outcome, which is why this lives
+    beside the commands rather than in each control that calls one. `ok` has no
+    failure to describe and is refused here rather than given a placeholder. */
+export function failureMessage<R>(result: CommandResult<R>): string {
+  switch (result.kind) {
+    case "refused":
+      return `${result.refusal.code} — clears when ${result.refusal.clears}`;
+    case "error":
+      return result.code;
+    case "offline":
+      return OFFLINE_WORDING;
+    default:
+      throw new Error("a successful command has no failure to describe");
+  }
 }
 
 const RESPONSE_INVALID = { kind: "error", code: "RESPONSE_INVALID" } as const;
