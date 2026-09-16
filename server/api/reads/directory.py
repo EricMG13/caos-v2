@@ -42,6 +42,7 @@ def read_directory(actor: Caller, conn: Store) -> DirectoryDocument:
         chrome=Chrome(
             subject=None,
             served_role=ServedRole(global_role=actor.role, standing=None),
+            actions=[],
         ),
         body=DirectoryBody(
             cases=[

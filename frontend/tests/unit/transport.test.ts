@@ -20,7 +20,7 @@ const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
 /** A v1 Upload document for `CASE`, served under `role`. */
 function v1Upload(role: { global_role: string; standing: string | null }, caseId = CASE) {
   return {
-    chrome: { subject: { case_id: caseId, title: "Acme" }, served_role: role },
+    chrome: { subject: { case_id: caseId, title: "Acme" }, served_role: role, actions: [] },
     body: { case_id: caseId, sources: [], set_versions: [] },
     observed_at: AT,
     observed_empty: false,

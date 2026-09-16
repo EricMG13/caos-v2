@@ -13,41 +13,62 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+import pytest
+from pydantic import BaseModel, ValidationError
 
 from server.api import wire
 from server.api.reads import analysis, directory, run, upload
 from server.api.wire import (
+    V1_COMMANDS,
     V1_DOCUMENTS,
+    ActionName,
+    ActionView,
     AnalysisBody,
     AnalysisDocument,
+    ApproveGate,
     AttemptView,
+    CancelRun,
+    CaseCreated,
     CaseRow,
     Chrome,
     CitationView,
+    CreateCase,
+    CreateRun,
     DirectoryBody,
     DirectoryDocument,
     EdgeView,
+    GateApproved,
+    GatePreviewDocument,
     GateView,
     HandoffView,
     NodeView,
     PendingNode,
+    PinRunInput,
     RectView,
     RefusalBody,
+    RetryRun,
+    RouteChoice,
     RunBody,
+    RunCreated,
+    RunInputPinned,
     RunSectionDocument,
     RunSubjectView,
     RunSummary,
     RunView,
+    RunWork,
     SectionNote,
     ServedRole,
     SetVersion,
     SourceRow,
+    SourcesAdmitted,
+    StartRun,
     Subject,
     UploadBody,
     UploadDocument,
+    WorkView,
     wire_schema,
 )
+from server.methodology.handoff import MAX_FILE_BYTES
 
 REPO = Path(__file__).resolve().parents[1]
 COMMITTED = REPO / "frontend" / "src" / "wire" / "v1" / "schema.json"
@@ -61,7 +82,10 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     RefusalBody: frozenset({"code", "clears"}),
     Subject: frozenset({"case_id", "title"}),
     ServedRole: frozenset({"global_role", "standing"}),
-    Chrome: frozenset({"subject", "served_role"}),
+    Chrome: frozenset({"subject", "served_role", "actions"}),
+    ActionView: frozenset({"action", "refusal"}),
+    WorkView: frozenset({"state", "stop_code", "cancel_requested"}),
+    RouteChoice: frozenset({"profile_id", "selection_id"}),
     DirectoryDocument: ENVELOPE,
     UploadDocument: ENVELOPE,
     RunSectionDocument: ENVELOPE,
@@ -117,9 +141,19 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "gates",
             "nodes",
             "attempts",
+            "work",
         }
     ),
-    RunBody: frozenset({"case_id", "latest_run_id", "displayed_run_id", "runs", "run"}),
+    RunBody: frozenset(
+        {
+            "case_id",
+            "latest_run_id",
+            "displayed_run_id",
+            "runs",
+            "run",
+            "route_choices",
+        }
+    ),
     RectView: frozenset({"x0", "y0", "x1", "y1"}),
     CitationView: frozenset(
         {
@@ -162,7 +196,41 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "pending",
         }
     ),
+    # Commands (Task 4.2, decisions 1 and 11): requests, then receipts.
+    CreateCase: frozenset({"title"}),
+    CaseCreated: frozenset({"case_id"}),
+    SourcesAdmitted: frozenset({"case_id", "source_ids"}),
+    CreateRun: frozenset({"profile_id", "selection_id"}),
+    RunCreated: frozenset({"case_id", "run_id", "route_digest"}),
+    PinRunInput: frozenset({"subject"}),
+    RunInputPinned: frozenset({"run_id", "source_set_version", "input_fingerprint"}),
+    GatePreviewDocument: frozenset(
+        {
+            "run_id",
+            "gate",
+            "content",
+            "preview_sha256",
+            "input_fingerprint",
+            "observed_at",
+        }
+    ),
+    ApproveGate: frozenset({"preview_sha256", "input_fingerprint"}),
+    GateApproved: frozenset({"run_id", "gate", "preview_sha256", "input_fingerprint"}),
+    StartRun: frozenset({"input_fingerprint"}),
+    RetryRun: frozenset({"input_fingerprint"}),
+    CancelRun: frozenset(),
+    RunWork: frozenset({"run_id", "run_status", "work"}),
 }
+
+REQUESTS: tuple[type[BaseModel], ...] = (
+    CreateCase,
+    CreateRun,
+    PinRunInput,
+    ApproveGate,
+    StartRun,
+    RetryRun,
+    CancelRun,
+)
 
 # What `frontend/src/wire/v1/shape.ts` can express. `title` and `description`
 # are carried and ignored.
@@ -227,7 +295,7 @@ def test_the_committed_wire_schema_is_the_models_schema() -> None:
     assert not printed.endswith("\n\n")
     assert COMMITTED.read_text(encoding="utf-8") == printed
     defs = json.loads(printed)["$defs"]
-    models: tuple[type[BaseModel], ...] = (*V1_DOCUMENTS, RefusalBody)
+    models: tuple[type[BaseModel], ...] = (*V1_DOCUMENTS, *V1_COMMANDS, RefusalBody)
     for model in models:
         assert model.__name__ in defs
 
@@ -278,6 +346,17 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         SectionNote.ROUTE_NOT_PINNED,
         SectionNote.HANDOFFS_PENDING,
     }
+    assert {action.value for action in ActionName} == {
+        "CREATE_CASE",
+        "ADMIT_SOURCES",
+        "CREATE_RUN",
+        "PIN_RUN_INPUT",
+        "APPROVE_SOURCE_SET",
+        "APPROVE_RESEARCH_PLAN",
+        "START_RUN",
+        "RETRY_RUN",
+        "CANCEL_RUN",
+    }
     assert [model.__name__ for model in V1_DOCUMENTS] == [
         "DirectoryDocument",
         "UploadDocument",
@@ -306,3 +385,38 @@ def test_the_wire_schema_uses_only_keywords_the_browser_validator_understands() 
 def test_every_section_router_declares_its_store_budget() -> None:
     for module in (directory, upload, run, analysis):
         assert isinstance(module.IO_BUDGET, int) and module.IO_BUDGET >= 0
+
+
+def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> None:
+    assert set(REQUESTS) <= set(V1_COMMANDS)
+    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 14
+    defs = json.loads(COMMITTED.read_text(encoding="utf-8"))["$defs"]
+    for model in V1_COMMANDS:
+        assert model.__name__ in defs, model.__name__
+        assert model.model_config.get("extra") == "forbid", model.__name__
+        assert model.model_config.get("frozen") is True, model.__name__
+        # Every object, the empty `CancelRun` included, states `required`.
+        assert set(defs[model.__name__]["required"]) == set(model.model_fields)
+
+    # T1: a request names no actor, case, run or approver; the server derives them.
+    authority = {"actor_id", "actor", "case_id", "run_id", "approver", "approver_id"}
+    for request in REQUESTS:
+        assert not authority & set(request.model_fields), request.__name__
+
+    # Undeclared fields refused, and the bounds the brief names hold.
+    fingerprint = "a" * 64
+    for bad in ({"input_fingerprint": fingerprint, "actor_id": "x"}, {}):
+        with pytest.raises(ValidationError):
+            StartRun.model_validate(bad)
+    with pytest.raises(ValidationError):
+        CancelRun.model_validate({"run_id": fingerprint})
+    assert defs["CreateCase"]["properties"]["title"]["maxLength"] == 256
+    assert defs["SourcesAdmitted"]["properties"]["source_ids"]["maxItems"] == 50
+    content = defs["GatePreviewDocument"]["properties"]["content"]["maxLength"]
+    assert content == wire.PREVIEW_CHARS == MAX_FILE_BYTES
+    assert defs["Chrome"]["properties"]["actions"]["maxItems"] == len(ActionName)
+    choices = defs["RunBody"]["properties"]["route_choices"]
+    assert choices["maxItems"] == 16
+    for request in (StartRun, RetryRun, ApproveGate):
+        field = defs[request.__name__]["properties"]["input_fingerprint"]
+        assert field["pattern"] == "^[0-9a-f]{64}$"

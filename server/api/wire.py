@@ -6,9 +6,11 @@ says what would clear the refusal. It is never formatted, so no request or
 document text can reach it. `server/refusals.py` stays code-only.
 
 Decisions 5, 6 and 8: one closed document per enabled section, every key
-required, every string and list bounded. `python -m server.api.wire` prints
-their JSON Schema, committed at `frontend/src/wire/v1/schema.json`
-(`tests/test_wire_contract.py` proves the two equal).
+required, every string and list bounded. Task 4.2, decisions 1, 10 and 11: the
+closed command requests and receipts (`V1_COMMANDS`), and the server-computed
+`Chrome.actions`. `python -m server.api.wire` prints their JSON Schema,
+committed at `frontend/src/wire/v1/schema.json` (`tests/test_wire_contract.py`
+proves the two equal).
 """
 
 from __future__ import annotations
@@ -48,11 +50,16 @@ ATTEMPTS_MAX = 4096
 CITATIONS_MAX = 1024
 RECTS_MAX = 256
 FLAGS_MAX = 256
+TITLE_CHARS = 256  # a case title a command sets
+SOURCE_IDS_MAX = 50  # `AdmissionLimits.max_documents`
+ROUTE_CHOICES_MAX = 16
+PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
 Sha256 = Annotated[str, Field(max_length=64, pattern="^[0-9a-f]{64}$")]
 RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"]
+WorkState = Literal["QUEUED", "CLAIMED", "STOPPED", "DONE"]  # `run_work.state`
 
 
 class RefusalBody(BaseModel):
@@ -116,6 +123,14 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.NOT_AUTHENTICATED: "Sign in.",
     _C.ENDPOINT_NOT_FOUND: "Use a declared path and method.",
     _C.NOT_AUTHORISED: "Obtain the required standing on the case.",
+    _C.REQUEST_INVALID: "Send a well-formed request body.",
+    _C.IDEMPOTENCY_KEY_REQUIRED: "Send a UUID Idempotency-Key header.",
+    _C.IDEMPOTENCY_KEY_REUSED: "Use a new Idempotency-Key for a different request.",
+    _C.RUN_INPUT_NOT_PINNED: "Pin the run input first.",
+    _C.RUN_ALREADY_STARTED: "Nothing; the run is already started.",
+    _C.RUN_NOT_STOPPED: "Retry only a stopped run.",
+    _C.ROUTE_NOT_ENABLED: "Select a route the adapter executes.",
+    _C.COMMAND_EXPECTATION_STALE: "Re-read the run and act on what it shows.",
     _C.METHODOLOGY_INPUT_INVALID: "Correct the calculation inputs.",
     _C.FORECAST_CHAIN_BROKEN: "Link each period to the one before it.",
     _C.FORECAST_RESIDUAL_UNRECONCILED: "Reconcile the balances within tolerance.",
@@ -203,6 +218,30 @@ class ServedRole(BaseModel):
     standing: Standing | None
 
 
+class ActionName(StrEnum):
+    """Every governed command a section can offer. Closed."""
+
+    CREATE_CASE = "CREATE_CASE"
+    ADMIT_SOURCES = "ADMIT_SOURCES"
+    CREATE_RUN = "CREATE_RUN"
+    PIN_RUN_INPUT = "PIN_RUN_INPUT"
+    APPROVE_SOURCE_SET = "APPROVE_SOURCE_SET"
+    APPROVE_RESEARCH_PLAN = "APPROVE_RESEARCH_PLAN"
+    START_RUN = "START_RUN"
+    RETRY_RUN = "RETRY_RUN"
+    CANCEL_RUN = "CANCEL_RUN"
+
+
+class ActionView(BaseModel):
+    """One action as the server judged it: available (`refusal` null) or refused
+    with the code the command would answer. Advisory; the command rechecks."""
+
+    model_config = _CLOSED
+
+    action: ActionName
+    refusal: RefusalBody | None
+
+
 class Chrome(BaseModel):
     """The authority facts the client composes its chrome from."""
 
@@ -210,6 +249,7 @@ class Chrome(BaseModel):
 
     subject: Subject | None
     served_role: ServedRole
+    actions: Annotated[list[ActionView], Field(max_length=len(ActionName))]
 
 
 class RunSummary(BaseModel):
@@ -324,6 +364,25 @@ class NodeView(BaseModel):
     gate_verdict: Id | None
 
 
+class WorkView(BaseModel):
+    """The run's `run_work` row, when it has been enqueued."""
+
+    model_config = _CLOSED
+
+    state: WorkState
+    stop_code: RefusalCode | None
+    cancel_requested: bool
+
+
+class RouteChoice(BaseModel):
+    """A (profile, selection) pair the adapter executes (`ADAPTER_ROUTES`)."""
+
+    model_config = _CLOSED
+
+    profile_id: Id
+    selection_id: Id
+
+
 class RunView(BaseModel):
     """The displayed run. Node states are recomputed, never stored."""
 
@@ -339,6 +398,7 @@ class RunView(BaseModel):
     gates: Annotated[list[GateView], Field(max_length=len(Gate))]
     nodes: Annotated[list[NodeView], Field(max_length=ROUTE_NODES_MAX)]
     attempts: Annotated[list[AttemptView], Field(max_length=ATTEMPTS_MAX)]
+    work: WorkView | None
 
 
 class RunBody(BaseModel):
@@ -351,6 +411,7 @@ class RunBody(BaseModel):
     displayed_run_id: UUID | None
     runs: Annotated[list[RunSummary], Field(max_length=RUNS_MAX)]
     run: RunView | None
+    route_choices: Annotated[list[RouteChoice], Field(max_length=ROUTE_CHOICES_MAX)]
 
 
 class RectView(BaseModel):
@@ -475,11 +536,138 @@ V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
 )
 
 
+# Commands (Task 4.2, decision 1). A request carries no actor, case, run or
+# approver: the actor is the caller and the ids come from the path (decision 2).
+# Digests in a request are expectations the command re-derives, never authority.
+
+
+class CreateCase(BaseModel):
+    model_config = _CLOSED
+
+    title: Annotated[str, Field(max_length=TITLE_CHARS)]
+
+
+class CaseCreated(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+
+
+class SourcesAdmitted(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    source_ids: Annotated[list[UUID], Field(max_length=SOURCE_IDS_MAX)]
+
+
+class CreateRun(BaseModel):
+    model_config = _CLOSED
+
+    profile_id: Id
+    selection_id: Id
+
+
+class RunCreated(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    route_digest: Sha256
+
+
+class PinRunInput(BaseModel):
+    model_config = _CLOSED
+
+    subject: RunSubjectView
+
+
+class RunInputPinned(BaseModel):
+    model_config = _CLOSED
+
+    run_id: UUID
+    source_set_version: int
+    input_fingerprint: Sha256
+
+
+class GatePreviewDocument(BaseModel):
+    """The exact content an approver is shown, and the digests to submit."""
+
+    model_config = _CLOSED
+
+    run_id: UUID
+    gate: Gate
+    content: Annotated[str, Field(max_length=PREVIEW_CHARS)]
+    preview_sha256: Sha256
+    input_fingerprint: Sha256
+    observed_at: AwareDatetime
+
+
+class ApproveGate(BaseModel):
+    model_config = _CLOSED
+
+    preview_sha256: Sha256
+    input_fingerprint: Sha256
+
+
+class GateApproved(BaseModel):
+    model_config = _CLOSED
+
+    run_id: UUID
+    gate: Gate
+    preview_sha256: Sha256
+    input_fingerprint: Sha256
+
+
+class StartRun(BaseModel):
+    model_config = _CLOSED
+
+    input_fingerprint: Sha256
+
+
+class RetryRun(BaseModel):
+    model_config = _CLOSED
+
+    input_fingerprint: Sha256
+
+
+class CancelRun(BaseModel):
+    # An empty object still states `required`, as the browser DSL emits it.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class RunWork(BaseModel):
+    model_config = _CLOSED
+
+    run_id: UUID
+    run_status: RunStatus
+    work: WorkView
+
+
+V1_COMMANDS: tuple[type[BaseModel], ...] = (
+    CreateCase,
+    CaseCreated,
+    SourcesAdmitted,
+    CreateRun,
+    RunCreated,
+    PinRunInput,
+    RunInputPinned,
+    GatePreviewDocument,
+    ApproveGate,
+    GateApproved,
+    StartRun,
+    RetryRun,
+    CancelRun,
+    RunWork,
+)
+
+
 def wire_schema() -> str:
-    """The four documents and `RefusalBody` under `$defs`, keys sorted, one
-    definition per line and one trailing newline -- byte for byte the committed
-    schema, and a diff that names the model that moved."""
-    models: tuple[type[BaseModel], ...] = (*V1_DOCUMENTS, RefusalBody)
+    """The four documents, the commands and `RefusalBody` under `$defs`, keys
+    sorted, one definition per line and one trailing newline -- byte for byte
+    the committed schema, and a diff that names the model that moved."""
+    models: tuple[type[BaseModel], ...] = (*V1_DOCUMENTS, *V1_COMMANDS, RefusalBody)
     _, schema = models_json_schema(
         [(model, "validation") for model in models],
         ref_template="#/$defs/{model}",
