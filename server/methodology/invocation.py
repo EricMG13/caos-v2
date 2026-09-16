@@ -66,6 +66,7 @@ from server.store.outcomes import accepted_rows, artifact_digests
 from server.store.routes import resolved_route
 from server.store.run_inputs import load_run_input
 from server.store.runs import MAX_ATTEMPT_ORDINAL, attempt_ordinal
+from server.store.source_sets import SourceSet
 
 _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 
@@ -393,7 +394,8 @@ You are executing methodology module {module_id} ({module_name}) at route node
 {route_node_id}. The steps the host performs itself follow, then every authority
 file for this module, each whole in its own section, then the accepted upstream
 handoffs and the host's register of their located citations, then the evidence
-you have been delivered. Use no other knowledge.
+you have been delivered. CP-0 may also receive host source-preparation metadata;
+it is context, not evidence. Use no other knowledge.
 
 Return one JSON object and nothing else, with exactly this shape:
 
@@ -807,6 +809,48 @@ def _authority_sections(authority: DeliveredAuthority, tag: str) -> str:
     )
 
 
+def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
+    """CP-0's verified source provenance, deliberately outside evidence."""
+    if source_set is None:
+        return ""
+    metadata = {
+        "source_set_version": source_set.version,
+        "source_set_fingerprint": source_set.fingerprint,
+        "managed_workspace": {
+            "kind": "host-pinned-run",
+            "original_store": "immutable content-addressed BlobStore",
+            "note": (
+                "The original_root values identify retained originals; they are "
+                "not model-accessible paths."
+            ),
+        },
+        "sources": [
+            {
+                "source_id": str(member.source_id),
+                "filename": member.filename,
+                "admitted_at": member.admitted_at,
+                "original_root": f"blob://sha256/{member.document_sha256}",
+                "original_sha256": member.document_sha256,
+                "extractor_identity": json.loads(member.extractor_identity),
+                "output_sha256": member.output_sha256,
+                "extraction_sha256": member.extraction_sha256,
+            }
+            for member in source_set.members
+        ],
+    }
+    body = json.dumps(metadata, sort_keys=True, ensure_ascii=False, indent=2)
+    return (
+        f"\n--- HOST SOURCE PREPARATION {tag} (host-owned preparation metadata, "
+        "not citable evidence) ---\n"
+        "The host verified these pinned source and original-blob identities before "
+        "this call. This does not attest that CP-0's triage, parsing, fidelity, "
+        "representation or package workflow has run: author and validate P1-P8 "
+        "yourself. Cite only the EVIDENCE section for source-content claims.\n"
+        + body
+        + f"\n--- END HOST SOURCE PREPARATION {tag} ---\n"
+    )
+
+
 def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-only
     contract: VendorContract,
     *,
@@ -818,6 +862,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     upstream_citations: Mapping[str, tuple[AnchoredCitation, ...]],
     route: ResolvedRoute,
     citation_candidates: Sequence[Citation] = (),
+    source_set: SourceSet | None = None,
 ) -> str:
     """The task, the host-owned front matter, the host's own steps, every
     delivered authority file, upstream, its citation register, evidence.
@@ -833,13 +878,21 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     context, never evidence. CP-0's T8 modules are the pinned route's,
     never a caller's list. Section markers carry a tag derived from every
     section's own bytes, the host-owned front matter included, so neither a
-    section's text nor a host-owned field value can reproduce one. Nothing is
+    section's text nor a host-owned field value can reproduce one. CP-0 also
+    receives its host-verified pinned source metadata as context, never as
+    evidence; it must still author and validate its P1-P8 workflow. Nothing is
     cut or summarised; the caller bounds it with `within_request_ceiling`.
     `citation_candidates` are exact delivered lines the host has already
     anchored uniquely; the final verifier remains authoritative.
     """
     if identity.module_id not in ADAPTER_MODULES:
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
+    if (source_set is None) != (identity.module_id != GATE_MODULE) or (
+        source_set is not None
+        and {member.source_id for member in source_set.members}
+        != {item.source_id for item in delivered}
+    ):
+        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     if (
         tuple(ref for ref, _ in upstream) != identity.upstream
         or identity.route_node_id not in {n.route_node_id for n in route.nodes}
@@ -882,6 +935,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _authority_sections(authority, "")
         + _upstream_section(upstream, uses, owned)
         + _citation_register(upstream, upstream_citations)
+        + _source_preparation_section(source_set, "")
         + evidence
     )
     # Host-owned values join the derivation: none of them can pre-compute a tag.
@@ -906,6 +960,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _authority_sections(authority, tag)
         + _upstream_section(upstream, uses, owned, tag)
         + _citation_register(upstream, upstream_citations, tag)
+        + _source_preparation_section(source_set, tag)
         + f"\n--- EVIDENCE {tag} ---\n"
         + evidence
         + f"\n--- END EVIDENCE {tag} ---\n"

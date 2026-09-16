@@ -94,6 +94,8 @@ from server.store.outcomes import (
     record_outcome,
     require_idle,
 )
+from server.store.run_inputs import load_run_input
+from server.store.source_sets import SourceSet, load_source_set
 
 _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 # One compiled contract per manifest: the manifest digests every vendor file.
@@ -233,6 +235,7 @@ def execute_handoff(
         markdown, record = _answer(
             conn,
             bundle,
+            blobs,
             assignment,
             identity=identity,
             context=context,
@@ -252,6 +255,7 @@ def execute_handoff(
 def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     conn: StoreConnection,
     bundle: Bundle,
+    blobs: BlobStore,
     assignment: Assignment,
     *,
     identity: HostIdentity,
@@ -270,6 +274,8 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     # comparison also catches an upstream rewritten during the call.
     if _identity(conn, bundle, assignment) != identity:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    if context.source_set is not None:
+        _assert_originals(blobs, context.source_set)
     # ...and every ancestor's accepted pair, a record rewritten included.
     if _lineage_moved(conn, assignment.run_id, context.lineage):
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
@@ -359,6 +365,46 @@ class _Context:
     # Each direct upstream's anchored citations, from its verified record.
     citations: dict[str, tuple[AnchoredCitation, ...]]
     candidates: tuple[Citation, ...]
+    source_set: SourceSet | None
+
+
+def _source_preparation(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    assignment: Assignment,
+    delivered: Sequence[Delivery],
+) -> SourceSet | None:
+    """CP-0 alone receives the verified source snapshot it must prepare."""
+    if assignment.module_id != GATE_MODULE:
+        return None
+    pin = load_run_input(conn, assignment.run_id)
+    if pin is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    source_set = load_source_set(conn, pin.case_id, pin.source_version)
+    if source_set is None or source_set.fingerprint != pin.source_fingerprint:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if {member.source_id for member in source_set.members} != {
+        item.source_id for item in delivered
+    }:
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+    _assert_originals(blobs, source_set)
+    return source_set
+
+
+def _assert_originals(blobs: BlobStore, source_set: SourceSet) -> None:
+    """Keep original-blob failures typed and free of filesystem context."""
+    refusal: RefusalCode | None = None
+    for member in source_set.members:
+        try:
+            blobs.get(member.document_sha256)
+        except OSError:
+            refusal = RefusalCode.STORE_UNAVAILABLE
+            break
+        except Refusal as caught:
+            refusal = caught.code
+            break
+    if refusal is not None:
+        raise Refusal(refusal)
 
 
 def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
@@ -375,6 +421,7 @@ def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
     the stored pin. Only accepted rows reach any part: a Blocked or refused
     attempt's diagnostic body is never read here."""
     delivered = _delivered(conn, assignment.run_id)
+    source_set = _source_preparation(conn, blobs, assignment, delivered)
     # Records first: what binds and re-validates is then read as context.
     records, lineage = _upstream_records(
         conn, blobs, bundle, assignment, identity.upstream
@@ -397,6 +444,7 @@ def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
         lineage=lineage,
         citations={node: record.citations for node, record in records.items()},
         candidates=candidates,
+        source_set=source_set,
     )
 
 
@@ -433,6 +481,7 @@ def _prompt(
         upstream_citations=context.citations,
         route=assignment.route,
         citation_candidates=context.candidates,
+        source_set=context.source_set,
     )
 
 
@@ -456,7 +505,13 @@ def _unless_blocked(validate: Callable[[], Projections]) -> Projections | None:
 
 # Refusals that say the store, not the answer, failed: never read as a verdict.
 _STORE_FAULTS = frozenset(
-    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+    {
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+    }
 )
 
 
@@ -604,6 +659,7 @@ def _replayed_answer(
     return _answer(
         conn,
         bundle,
+        blobs,
         assignment,
         identity=identity,
         context=_context(conn, blobs, bundle, assignment, identity),

@@ -218,3 +218,50 @@ with pinned Trivy 0.70.0: 2,849 backend tests, 21 race tests, security floors,
 
 Still required before Phase 6 can be cleared: one authorized live retry,
 OpenRouter per-generation reconciliation, and an authenticated external verdict.
+
+## Confidence review addendum — v3 CP-0 source provenance
+
+Effort: `xhigh`; scope is the uncommitted canonical adapter v3 candidate and
+its callers, persistence recovery, regressions and decision/contract/result
+records. User-owned `CLAUDE.md`, `.claude/skills/`, `AGENTS.md`,
+`PATHFINDER-2026-09-15/`, and `gemini-audit.md` are excluded.
+
+Least confident about (ranked):
+
+1. **A missing immutable original after a billed CP-0 response could become a
+   permanent model refusal.** Investigated → canonical acceptance rechecked
+   only indirectly through the normal answer path; typed blob failures were
+   not classified as recoverable store faults throughout the worker/outcome
+   path. Verdict → confirmed. Patch → recheck originals before accepting the
+   answer and classify every blob-address/digest/not-found fault with the
+   existing recoverable store faults. The delete/restore regression proves one
+   billed response is replayed, not rebilled or memorialized as a refusal.
+2. **A direct shared-prompt caller could omit CP-0 source preparation.**
+   Investigated → canonical supplied a source set, but the reusable builder
+   accepted `None`, so a future caller could recreate the Terra v2 defect.
+   Verdict → confirmed. Patch → require an exact source-set identity for CP-0
+   and prohibit it for every other module. Direct omission, extraneous context
+   and source-ID mismatch regressions prove the invariant.
+3. **The source-preparation record might turn host metadata into citable
+   evidence.** Investigated → it is a separately tagged, non-evidence block;
+   citation candidates are created only from delivered evidence. Verdict →
+   fine, verified by prompt-tag and citation-register tests.
+4. **A store I/O exception could leak original-path detail to the provider.**
+   Investigated → original verification maps both `OSError` and typed blob
+   errors to the existing terse refusal/store-fault flow before invocation.
+   Verdict → fine, verified by the no-provider-call OSError regression.
+5. **The v3 provenance record could permit P1–P8 to rely on raw originals.**
+   Investigated → only CP-0 receives verified preparation metadata; raw bytes
+   and the preparation section are absent from downstream prompts. Verdict →
+   by design. The pending live qualification tests whether Terra can now meet
+   the protocol, rather than assuming it can.
+
+Fixed: post-bill original-loss recovery and shared CP-0 source-set enforcement.
+
+Verified fine: CP-0 only receives the tagged preparation record; source IDs
+match both the pinned source set and delivered evidence; replay consumes the
+retained diagnostic without a second provider request; original I/O errors
+never invoke a provider.
+
+Still open: a fresh, user-authorized Terra v3 live run and external verdict.
+They are release evidence, not local code questions.

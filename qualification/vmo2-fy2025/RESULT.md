@@ -189,3 +189,30 @@ bound evidence digest is
 The retention failure is fixed; Gemini 3.8 Flash is not qualified for this
 one-shot canonical handoff contract. Do not buy another Gemini retry without a
 materially different, explicitly authorized protocol experiment.
+
+## OpenAI Terra provenance diagnosis — 2026-09-15
+
+The separately authorized Terra run used `openai/gpt-5.6-terra` through pinned
+`openrouter/openai/flex/high/65536`, with the same two-document VMO2 set and a
+`$22.00` maximum. CP-0 made one billed call: run
+`650a2618-0fbd-48d3-ad12-27bbbd7edc10`, attempt
+`9307791d-bdb5-456b-a8ea-36b82e8bbc99`, generation
+`gen-1789491046-8S6zV4AASHeN1hdJmopq`, charge `$0.23236475`.
+
+The response returned a controlled source-readiness block. Its diagnostic and
+performed evidence are retained locally (diagnostic digest
+`2c52bf3ac3ea29d1d1b2304087579a643b50fef374a12393c27c40cbdc07c1dd`,
+performed digest
+`17cd20b9a79fe742e37233ac1874e2fd342afec3ccc7447a8e7a067edb72b0cd`).
+It correctly observed that CP-0 had received evidence excerpts but not the
+host's immutable-original, source-root, extraction-manifest or managed-run
+facts needed to author P1–P8. It also identified the genuine limitation that
+the two earnings releases alone omit primary financial/legal material.
+
+This is not a Terra or OpenRouter protocol failure. The v2 prompt omitted
+metadata that the host already retained. `canonical-markdown-v3` now supplies
+the verified CP-0 source-preparation context and rechecks original blobs at
+acceptance/replay; it is a materially changed candidate. The v2 run produced no
+accepted artifact or qualification verdict and cannot be reused. A fresh,
+explicitly authorized live run is required after v3's local gates and, if the
+source set changes, after a new frozen qualification key is prepared.

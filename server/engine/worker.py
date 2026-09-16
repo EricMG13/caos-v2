@@ -47,7 +47,13 @@ BLOB_ROOT = "CAOS_BLOB_ROOT"
 MODEL_PRICE = "CAOS_MODEL_PRICE"
 VENDORED_BUNDLE = Path(__file__).resolve().parents[2] / "vendor" / "deploy-v"
 STORE_FAULTS = frozenset(
-    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+    {
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+    }
 )
 
 ExecutionFor = Callable[[StoreConnection, UUID, Lease], Execution]

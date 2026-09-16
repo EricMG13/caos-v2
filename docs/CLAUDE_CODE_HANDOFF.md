@@ -13,8 +13,8 @@ ignored reports cannot override those contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Durable-handoff recovery `40a13dd` persists the performed snapshot and bound evidence before return; its full local gate is green. The authorized Gemini retry was durably collected but failed CP-0's literal-quotation contract. Phase 6 remains release-blocked.** |
-| Next task | Select and explicitly authorize a materially different qualification candidate or protocol experiment, retain its disposable database/blob root, reconcile every generation, and obtain an external authenticated verdict. No result may be represented as qualified before that verdict. |
+| Latest accepted task | **Durable-handoff recovery `40a13dd` persists the performed snapshot and bound evidence before return; its full local gate is green. The authorized Gemini retry failed CP-0's literal-quotation contract. The later Terra diagnostic exposed the missing CP-0 provenance context; the v3 repair is pending end-of-phase gates. Phase 6 remains release-blocked.** |
+| Next task | The user authorized one fresh v3 Terra qualification. Finish the v3 local gates and phase reviews, then retain its disposable database/blob root, reconcile every generation, and obtain an external authenticated verdict. No result may be represented as qualified before that verdict. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -93,6 +93,31 @@ this documentation update has not rerun their gates or accepted new code.
 - **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
 
 ### Phase 6 qualification checkpoint — 15 September 2026
+
+### Phase 6 v3 CP-0 provenance checkpoint — 15 September 2026
+
+- **Cause and repair:** Terra's controlled CP-0 source-readiness block exposed
+  an adapter omission, not a provider incompatibility. The v3 adapter derives
+  CP-0's source-preparation record from the exact pinned `RunInput` and
+  `SourceSet`: immutable-original blob identity, source root, extraction
+  manifest and host-pinned context. The record is tagged non-citable; later
+  modules do not receive it.
+- **Shared-boundary enforcement:** the shared prompt builder rejects an absent,
+  extraneous or source-mismatched `SourceSet`; CP-0 alone receives the source
+  preparation. Canonical acceptance and replay recheck originals. Every typed
+  blob/store fault releases the attempt for safe billed-response replay rather
+  than recording an irrecoverable refusal.
+- **Regression evidence:** focused CP-0 prompt/canonical/upstream suites pass
+  (62 tests), including missing original before transport, original loss after
+  billing, blob restoration plus one billed replay, and direct-builder source
+  context omission/mismatch. Full local gate and end-of-phase reviews are
+  being run against this exact v3 tree before the authorized call.
+- **Qualification authority:** the user authorized one new `openai/gpt-5.6-terra`
+  call via `openrouter/openai/flex/high/65536`, using the unchanged frozen
+  two-document VMO2 set and the existing `$22.00` ceiling. It is a new
+  materially changed v3 candidate; the historical v2 Terra block has no
+  verdict and cannot be reused. Do not retry or alter the corpus without fresh
+  authorization and a newly frozen qualification identity.
 
 - **Candidate:** provider-profile and canonical-I/O remediation committed at
   `f95e8ba`; this handoff update follows as documentation only.

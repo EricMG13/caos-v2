@@ -182,12 +182,23 @@ class _Clock(Event):
         return self.is_set()
 
 
-def test_store_unavailable_backs_off_without_holding_a_claim(
+@pytest.mark.parametrize(
+    "code",
+    [
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+    ],
+)
+def test_store_fault_backs_off_without_holding_a_claim(  # noqa: PLR0913 -- parametrized store faults
     case: tuple[StoreConnection, UUID],
     route: ResolvedRoute,
     bundle: Bundle,
     blobs: BlobStore,
     empty_database: str,
+    code: RefusalCode,
 ) -> None:
     run = queued_run(case, route, bundle, blobs)
     config = WorkerConfig(
@@ -197,7 +208,7 @@ def test_store_unavailable_backs_off_without_holding_a_claim(
 
     def faulty(conn: StoreConnection, run_id: UUID, lease: object) -> object:
         built.append(run_id)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+        raise Refusal(code)
 
     connects = iter([False, True, True, True, True])
 

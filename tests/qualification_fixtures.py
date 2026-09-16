@@ -22,7 +22,7 @@ def qualification_performed() -> PerformedEvidence:
             route_digest="d" * 64,
             build_id="b" * 64,
             manifest_sha256="e" * 64,
-            adapter_version="canonical-markdown-v2",
+            adapter_version="canonical-markdown-v3",
             research_json=None,
             input_fingerprint="f" * 64,
         ),

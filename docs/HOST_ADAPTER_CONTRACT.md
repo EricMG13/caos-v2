@@ -1,7 +1,7 @@
 # Host adapter contract
 
-Observed at `26d7ee99f6c90396ddb5f7c3614cdd733af4ed76`; target contract
-decided in [DECISIONS.md §29](DECISIONS.md#2026-09-12-29--canonical-markdown-is-the-authoritative-handoff).
+The current canonical adapter implements the contract decided in
+[DECISIONS.md §29](DECISIONS.md#2026-09-12-29--canonical-markdown-is-the-authoritative-handoff).
 
 ## Authority and handoff
 
@@ -25,18 +25,34 @@ additional executable node. Preparation runs once
 scope; their archived contracts remain archived
 ([decision §14](DECISIONS.md#2026-09-10-14--the-host-places-no-model-build-and-no-publication-module-the-deliverable-is-rendered-by-the-host)).
 
-## Current versus target
+For `canonical-markdown-v3`, the host re-verifies every CP-0 source-set member
+against its delivered evidence and immutable original BlobStore object before
+the provider call, and re-verifies originals before accepting or replaying the
+answer. The tagged `HOST SOURCE PREPARATION` context contains the pinned
+source-set version/fingerprint and, for each source, its ID, filename,
+admission time, immutable `blob://sha256/...` root, original, extraction-output
+and extraction hashes, and extractor identity. It is host context, not citable
+evidence: only the `EVIDENCE` section may support source-content claims.
 
-| | Current implementation | Target adapter |
-|---|---|---|
-| Provider response | Closed JSON: cited `claims`, plus CP-0 readiness | Exact canonical Markdown plus validated projections |
-| Stored handoff | Host JSON envelope of claims/readiness | Validated canonical Markdown, unchanged, with host identity metadata and sidecars |
-| Upstream context | Direct predecessors' claim summaries | Direct predecessors' exact accepted Markdown and pinned identities |
-| Presentation | JSON-derived UI/report | Host rendering of the authoritative Markdown and projections |
+That context proves storage and provenance only. It does not claim that CP-0's
+triage, parsing, fidelity, representation or package workflow ran; CP-0 must
+author and validate P1–P8 itself. No other module receives this context. A
+missing or corrupt original after a billed call is a store fault: it is neither
+accepted nor written as a handoff refusal, and replay resumes from the retained
+diagnostic after the original is restored.
 
-The current JSON claims executor does **not** implement the target Markdown
-contract ([executor](../server/methodology/executor.py),
-[stored envelope](../server/methodology/runner.py)).
+## Current adapter
+
+| | Implementation |
+|---|---|
+| Provider response | Closed JSON transport containing canonical Markdown and citations |
+| Stored handoff | Validated canonical Markdown, unchanged, with host identity metadata and sidecars |
+| Upstream context | Direct predecessors' exact accepted Markdown and pinned identities |
+| Presentation | Host rendering of the authoritative Markdown and projections |
+
+The retired claims JSON executor is not an execution path for a canonical pin;
+the current [canonical executor](../server/methodology/canonical.py) validates
+and stores the handoff before the runtime may advance.
 
 ## Illustrative examples (not vendor-conformance fixtures)
 
