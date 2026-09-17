@@ -38,6 +38,13 @@ from server.store.outcomes import execution_reads
 # case, which is how an event written by a command is rebuilt (`payload_digests`)
 # -- so a frozen revision pays two, one signer and its freezer, and a filed one
 # pays a third for its filer.
+# The figures below are therefore stated **for one signer**, which is the only
+# shape any fixture has and no longer the only shape the store allows: the
+# opinions table is keyed per signer and `sign_opinion_in` refuses only a frozen
+# revision, so a second approver may sign before the freeze and costs one more
+# read. Measured at 53 for the frozen path with two signers. Recorded in
+# CLAUDE.md rather than absorbed into the number, because a budget fitted to the
+# widest shape stops measuring the common one.
 IO_BUDGET = {"report": 45, "committee": 59, "frozen": 52}
 router = APIRouter()
 

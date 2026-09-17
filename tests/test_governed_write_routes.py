@@ -33,9 +33,15 @@ from server.api.commands import deliverable, members
 from server.api.commands._request import require_case_admin
 from server.api.deps import actor_from_request
 from server.deliverable.filing import Receipt, filing_payload, sign_opinion
+from server.refusals import Refusal
 from server.store import StoreConnection, connect
 from server.store.audit import audit_trail, digest_of
-from server.store.commands import payload_digests, record_receipt
+from server.store.commands import (
+    REQUEST_KEY,
+    _WithRequest,
+    payload_digests,
+    record_receipt,
+)
 from server.store.members import Standing, standing_of
 
 __all__ = ["command_client", "harness", "lite", "route"]
@@ -682,7 +688,7 @@ def test_a_signature_sent_over_http_is_provable_beside_one_the_store_made(
 
 
 def test_payload_digests_accepts_both_writers_and_nothing_else(
-    lite: _Harness, empty_database: str
+    lite: _Harness,
 ) -> None:
     """An audit payload is digested and never stored, so a reader that proves an
     event bound exactly some fields has to rebuild what the writer built -- and
@@ -773,3 +779,20 @@ def test_a_malformed_path_id_is_refused_in_the_declared_body(
     answer = _post(command_client, f"/api/v1/cases/{case_id}{path}", actor)
 
     assert answer.json()["code"] == code, answer.text
+
+
+def test_a_payload_naming_the_request_digest_itself_is_refused() -> None:
+    """The envelope's view would shadow it, and disagree with itself doing so.
+
+    `_WithRequest` answers `request_sha256` from the envelope while `__iter__`
+    and `__len__` count the payload's own key once, so a payload carrying that
+    key would be a mapping whose length did not match its items. Unreachable --
+    no `GovernedAction` in the tree carries it -- and refused here because this
+    is the one place that would hide it rather than raise.
+    """
+    with pytest.raises(Refusal, match=r"^INTERNAL_FAULT$"):
+        _WithRequest({REQUEST_KEY: "a" * 64}, "b" * 64)
+
+    view = _WithRequest({"revision_id": "r"}, "b" * 64)
+    assert len(view) == len(list(view)) == 2
+    assert view[REQUEST_KEY] == "b" * 64

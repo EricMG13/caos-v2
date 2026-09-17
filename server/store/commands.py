@@ -203,11 +203,19 @@ class _WithRequest(Mapping[str, Any]):
     command never finished writing, and every reader that rebuilds it would
     refuse. Found by driving a filing over HTTP and reading it back
     (`tests/test_governed_write_routes.py::test_a_deliverable_filed_over_http_reads_back_from_the_committee_section`).
+
+    A payload of its own carrying `request_sha256` would be shadowed by the
+    envelope's: `__getitem__` would answer the envelope's value while `__iter__`
+    and `__len__` counted the payload's one key, so the view would disagree with
+    itself. No `GovernedAction` in the tree carries that key, and this is the one
+    place that would hide it, so it is refused rather than left to be found.
     """
 
     __slots__ = ("_payload", "_request_sha256")
 
     def __init__(self, payload: Mapping[str, Any], request_sha256: str) -> None:
+        if REQUEST_KEY in payload:
+            raise Refusal(RefusalCode.INTERNAL_FAULT)
         self._payload = payload
         self._request_sha256 = request_sha256
 
@@ -317,6 +325,12 @@ def payload_digests(
     a digest of the whole request -- so it is read back from the receipts this
     actor committed on this scope, which is the join
     `docs/DECISIONS.md`'s Repair Phase 4 ledger entry says no column makes.
+
+    `scope` is the **receipt's** scope, which is the case for every command but
+    one: `CREATE_CASE` records its receipt under `NIL_SCOPE` while its audit
+    event sits on the case it made, so a caller passing that case id could never
+    rebuild a `CASE_CREATED` payload. It would refuse fail-closed with nothing
+    saying why, which is why it is said here. No reader asks for that today.
 
     Bounded by one actor's committed commands on one case. The comparison stays
     exact in both directions: an event whose payload had any other field, or a
