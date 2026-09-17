@@ -186,22 +186,28 @@ Recorded here so a fresh clone does not depend on a Downloads file.
 | Opus 5 | `medium` (default dev) | daily-driver implementation | per-module fixtures and contract tests, route enablement slices, key authoring from documents, endpoints, wire, controls, per-task review |
 | Opus 5 | `max` with `ultrathink` | targeted invariant audits | each module's register semantics before its fixture is trusted; the money path; three-actor independence; two-worker interleavings; the trust trace |
 | Fable 5.1 | `low` / `medium` (agent default) | long-horizon autonomous execution | evidence selection, CP-DR brief delivery, the command chain, async store and second-worker fencing, signed assertion |
-| Fable 5.1 | `high` / `xhigh` | architecture and governance | phase and task briefs, vendor request documents, decision entries, both whole-phase reviews |
+| Fable 5.1 | `high` / `xhigh` | architecture and governance | phase and task briefs, vendor request documents, decision entries, and long-horizon implementation. **Not** reviews any more |
 
 ### Rules
 
 - A mixed slice takes the stricter row.
 - `ultrathink` is an Opus 5 lever only, at `max`. Never in a Fable prompt.
-- Both whole-phase reviews run on **Fable 5.1 `xhigh`** — actual `xhigh`, read back from the session record
-  before the review turn and written into the review report. If `xhigh` is
-  unsupported, the gate is unsatisfied.
-- **Task acceptance reviews run on Fable 5.1 `xhigh` too**, not `max`. Effort is
-  a setting and not a word in a prompt, so it is pinned where a setting lives:
-  `.claude/agents/task-acceptance-reviewer.md` carries `model: fable` and
-  `effort: xhigh`, beside the two whole-phase reviewers that already did. A
-  review dispatched any other way is a review that ran and not this gate, and
-  says so in its own report. The file is read at session start, so it governs
-  every session after the one that wrote it.
+- **Every review runs on Opus 5 `max` with `ultrathink`** — the two whole-phase
+  reviews and task acceptance alike. Changed by the owner on 17 September 2026
+  from Fable 5.1 `xhigh`, which is why the reviews before that date are recorded
+  against the older routing and are not re-run: a review is evidence about a tree
+  at a time, and re-running it under a new setting would not make the old one
+  untrue.
+- Effort is a setting and not a word in a prompt, so all three are pinned where a
+  setting lives: `.claude/agents/phase-confidence-reviewer.md`,
+  `phase-adversarial-auditor.md` and `task-acceptance-reviewer.md` each carry
+  `model: opus` and `effort: max`, and each says in its body that the review turn
+  opens with `ultrathink`. A run missing either the setting or the lever is a
+  review that ran and not this gate, and says so in its own report.
+- A subagent cannot read its own effort back, so what a report can attest is the
+  launch path and not the setting. The dispatch names the pinned definition; the
+  definition carries the setting. Where that is the whole of the evidence, say so
+  rather than asserting a number.
 - Record actual model, version and effort at every formal checkpoint. A word
   in a prompt is not a setting.
 - Stay strictly within the requested scope.
