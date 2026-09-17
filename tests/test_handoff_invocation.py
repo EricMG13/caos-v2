@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from canonical_fixtures import (
     BUNDLE,
     CATALOG,
     CONTRACT,
+    VENDORED,
     handoff_markdown,
     identity,
     skill,
@@ -39,6 +41,8 @@ from server.engine.route import (
 )
 from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.bundle import (
+    MANIFEST_NAME,
+    Bundle,
     delivered_authority,
     verified_bytes,
     verified_root_bytes,
@@ -1022,3 +1026,74 @@ def test_an_edge_carried_object_meets_the_boundary_on_other_lite_routes(
     held = [n.route_node_id for n in route.nodes if n.module_id in named.accepted_ids]
     stuck = [node for node in held if node not in accepted]
     assert not stuck, (stuck, states)
+
+
+def _bundle_with(tmp_path: Path, name: str, data: bytes) -> Bundle:
+    """A copy of the vendored bundle carrying `data` at `name`, manifest and all.
+
+    The manifest entry moves with the bytes, because a bundle whose manifest
+    still named the original would refuse at `verified_bytes` and never reach
+    the reader under test -- a test that passed for the wrong reason.
+    """
+    root = tmp_path / "deploy-v"
+    shutil.copytree(VENDORED, root)
+    slug = Bundle(root=root).skill_of(VENDOR_MODULE)["folder_slug"]
+    (root / "skills" / slug / name).write_bytes(data)
+    manifest_path = root / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    entry = next(s for s in manifest["skills"] if s["module_id"] == VENDOR_MODULE)
+    entry["relative_file_hashes"][name] = {
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    manifest_path.write_text(json.dumps(manifest))
+    return Bundle(root=root)
+
+
+def test_a_non_json_catalog_refuses_authority_bytes_mismatch_in_named_objects(
+    tmp_path: Path,
+) -> None:
+    """Verified bytes that will not parse are the bundle failing, not a route.
+
+    `json.loads` raising `ValueError` out of a reader is an untyped 500 at the
+    API and a crash in the runtime; the code says which authority moved.
+    """
+    catalog = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
+    bad = _bundle_with(tmp_path, catalog, b"{not json")
+    assert verified_bytes(bad, VENDOR_MODULE, catalog) == b"{not json"
+
+    with pytest.raises(Refusal) as refused:
+        named_objects(bad, LITE_ROUTE)
+
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+    assert refused.value.__context__ is None
+
+
+def test_an_extractor_identity_that_is_not_json_refuses_source_identity_invalid() -> (
+    None
+):
+    """The host's own stored extraction identity, rendered into CP-0's
+    preparation section. Bytes this server wrote that will not parse are a
+    store fault with a code, never a `ValueError` out of the prompt builder."""
+    delivered = _delivered()
+    source_set = _source_set(*(item.source_id for item in delivered))
+    broken = replace(source_set.members[0], extractor_identity="{not json")
+    source_set = replace(source_set, members=(broken, *source_set.members[1:]))
+
+    with pytest.raises(Refusal) as refused:
+        build_handoff_prompt(
+            CONTRACT,
+            identity=identity("CP-0"),
+            authority=delivered_authority(BUNDLE, "CP-0"),
+            catalog=CATALOG,
+            delivered=delivered,
+            upstream=(),
+            upstream_citations={},
+            route=LITE_ROUTE,
+            source_set=source_set,
+        )
+
+    assert refused.value.code is RefusalCode.SOURCE_IDENTITY_INVALID
+    # `from None`: the decoder's message never travels with the code.
+    assert refused.value.__suppress_context__ is True
+    assert refused.value.__cause__ is None

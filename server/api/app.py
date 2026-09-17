@@ -99,10 +99,11 @@ TAIL_DEADLINE = 300.0
 # second (CLAUDE.md known gaps -- `LISTEN`/`NOTIFY` is the upgrade).
 POLL_INTERVAL = 0.5
 
-# The status for each refusal that can leave a route here. Unauthorised is
-# absent on purpose: it is answered as RUN_NOT_FOUND before it can be raised.
-# The store's own faults are 503: the server cannot answer, whoever asks, and a
-# 400 would tell the caller their request was the problem.
+# The status for every refusal, total over `RefusalCode` the way `CLEARS` is:
+# a code a future route raises must not inherit 400 from a lookup default,
+# because "your request was wrong" is a claim about the caller and nothing
+# chose it. The store's own faults are 503: the server cannot answer, whoever
+# asks, and a 400 would tell the caller their request was the problem.
 _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
     # Below the signing floor or not held: one private answer, as for a case.
@@ -167,6 +168,84 @@ _STATUS = {
     RefusalCode.RUN_CANCEL_REQUESTED: 409,
     RefusalCode.COMMAND_EXPECTATION_STALE: 409,
     RefusalCode.ORCHESTRATION_BUILD_MOVED: 409,
+    # Every other code: 400, the status each was already served by the
+    # default this table replaced. The map is total so that a code added
+    # later cannot inherit "your request was wrong" without being read.
+    RefusalCode.BOUNDARY_TEXT_INVALID: 400,
+    RefusalCode.BOUNDARY_TEXT_TOO_LONG: 400,
+    RefusalCode.LEASE_NOT_HELD: 400,
+    RefusalCode.RUN_NODES_UNACCEPTED: 400,
+    RefusalCode.RUN_TERMINAL_STALE: 400,
+    RefusalCode.ATTEMPT_LIMIT_REACHED: 400,
+    RefusalCode.CALL_OUTCOME_INVALID: 400,
+    RefusalCode.CALL_OUTCOME_CONFLICT: 400,
+    RefusalCode.CALL_OUTCOME_LEGACY: 400,
+    RefusalCode.CALL_OUTCOME_UNEXPLAINED: 400,
+    RefusalCode.NODE_ALREADY_ACCEPTED: 400,
+    RefusalCode.MONEY_NOT_DECIMAL: 400,
+    RefusalCode.MONEY_INVALID: 400,
+    RefusalCode.BUDGET_ALREADY_RESERVED: 400,
+    RefusalCode.BUDGET_NOT_RESERVED: 400,
+    RefusalCode.BUDGET_CEILING_REACHED: 400,
+    RefusalCode.PROVIDER_NOT_CONFIGURED: 400,
+    RefusalCode.PROVIDER_CALL_INVALID: 400,
+    RefusalCode.CONTEXT_OVER_CEILING: 400,
+    RefusalCode.PROVIDER_UNAVAILABLE: 400,
+    RefusalCode.PROVIDER_OUTPUT_TRUNCATED: 400,
+    RefusalCode.PROVIDER_REFUSED: 400,
+    RefusalCode.PROVIDER_RESPONSE_INVALID: 400,
+    RefusalCode.ENVELOPE_INVALID: 400,
+    RefusalCode.ENVELOPE_UNDECLARED_FIELD: 400,
+    RefusalCode.ENVELOPE_UNCITED_CLAIM: 400,
+    RefusalCode.READINESS_INCOMPLETE: 400,
+    RefusalCode.ENDPOINT_NOT_FOUND: 400,
+    RefusalCode.EDGE_CONFIG_INVALID: 400,
+    RefusalCode.INTERNAL_FAULT: 400,
+    RefusalCode.REQUEST_INVALID: 400,
+    RefusalCode.IDEMPOTENCY_KEY_REQUIRED: 400,
+    RefusalCode.ROUTE_NOT_ENABLED: 400,
+    RefusalCode.METHODOLOGY_INPUT_INVALID: 400,
+    RefusalCode.FORECAST_CHAIN_BROKEN: 400,
+    RefusalCode.FORECAST_RESIDUAL_UNRECONCILED: 400,
+    RefusalCode.FORECAST_DRIVER_NOT_READY: 400,
+    RefusalCode.DELIVERABLE_PAYLOAD_INVALID: 400,
+    RefusalCode.NARRATIVE_FIGURE_UNREFERENCED: 400,
+    RefusalCode.NARRATIVE_REFERENCE_INVALID: 400,
+    RefusalCode.DELIVERABLE_UNCITED_FIGURE: 400,
+    RefusalCode.DELIVERABLE_NOT_SIGNED: 400,
+    RefusalCode.DELIVERABLE_NOT_FROZEN: 400,
+    RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING: 400,
+    RefusalCode.DELIVERABLE_ALREADY_FILED: 400,
+    RefusalCode.DELIVERABLE_ALREADY_FROZEN: 400,
+    RefusalCode.APPROVER_NOT_INDEPENDENT: 400,
+    RefusalCode.SOURCE_PACK_EMPTY: 400,
+    RefusalCode.SOURCE_NOT_READABLE: 400,
+    RefusalCode.SOURCE_ENCRYPTED: 400,
+    RefusalCode.SOURCE_HAS_NO_TEXT: 400,
+    RefusalCode.SOURCE_EXTRACTION_TIMEOUT: 400,
+    RefusalCode.CITATION_NOT_LOCATED: 400,
+    RefusalCode.CITATION_AMBIGUOUS: 400,
+    RefusalCode.CITATION_NOT_DELIVERED: 400,
+    RefusalCode.ROUTE_PROFILE_UNKNOWN: 400,
+    RefusalCode.ROUTE_SELECTION_UNKNOWN: 400,
+    RefusalCode.ROUTE_EXTENSION_OWNER_MISSING: 400,
+    RefusalCode.ROUTE_HAS_A_CYCLE: 400,
+    RefusalCode.ROUTE_DUPLICATE_MODULE: 400,
+    RefusalCode.QUALIFICATION_SET_EMPTY: 400,
+    RefusalCode.QUALIFICATION_KEY_UNANSWERABLE: 400,
+    RefusalCode.QUALIFICATION_SET_AMBIGUOUS: 400,
+    RefusalCode.QUALIFICATION_RUN_MISSING: 400,
+    RefusalCode.QUALIFICATION_SET_FILE_INVALID: 400,
+    RefusalCode.QUALIFICATION_SET_PATH_ESCAPES: 400,
+    RefusalCode.QUALIFICATION_SET_OVER_CEILING: 400,
+    RefusalCode.ORCHESTRATION_NOTHING_TO_PROVE: 400,
+    RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED: 400,
+    RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED: 400,
+    RefusalCode.ORCHESTRATION_CITATION_LOST: 400,
+    RefusalCode.VERDICT_INCOMPLETE: 400,
+    RefusalCode.VERDICT_BINDING_INVALID: 400,
+    RefusalCode.VERDICT_UNDECLARED_FIELD: 400,
+    RefusalCode.VERDICT_EXPIRED: 400,
 }
 
 
@@ -238,7 +317,7 @@ def _body(code: RefusalCode, status: int) -> Response:
 def _refused(_request: Request, refusal: Refusal) -> Response:
     """A refusal on the wire: the code, its constant clearance, and no part of
     what caused it."""
-    return _body(refusal.code, _STATUS.get(refusal.code, 400))
+    return _body(refusal.code, _STATUS[refusal.code])
 
 
 @app.exception_handler(StarletteHTTPException)
