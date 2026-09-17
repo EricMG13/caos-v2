@@ -230,8 +230,14 @@ def test_a_run_that_spent_past_one_worst_case_still_resumes(
     # completion cap, so that a priced request is a small fraction of a worst
     # case -- which is the gap Task 8.2 stopped paying for, and the only shape in
     # which "spent past one worst case, still affords its nodes" can exist. Under
-    # `PRICE` the output cap alone is over half a worst case, so three nodes cost
-    # more than one and the situation cannot arise.
+    # `PRICE` the output cap alone is 55.6 % of a worst case, so three nodes cost
+    # more than one and this test's shape -- one lump past a worst case, then all
+    # three nodes -- cannot arise. The underlying situation can: two nodes paid
+    # and one left is 0.556 of a worst case at any price. At about $3 and $15 per
+    # million tokens the cap is 24 % of a $4.13 worst case, so a $5 LITE run that
+    # has paid two nodes has less than one worst case left and its last node is
+    # affordable -- which is the real run the old guard refused on resume. The
+    # price here reproduces that ratio; `PRICE` is the artefact, not this.
     price = replace(PRICE, output_per_token=Decimal("0.0000000001"))
     run = _approved_run(
         conn, case_id, route, bundle, blobs, ceiling=worst_case(price) * 2

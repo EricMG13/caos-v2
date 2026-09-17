@@ -3076,9 +3076,14 @@ answered it yet; the analyst may clear it.
 when the case's current source-set version is newer than the run's pinned one.
 The run document carries no such fact: a source-set version is minted only when
 a run pins its input (`snapshot_in`), so a source admitted after the blocked
-run makes no new version until a successor pins, and the comparison the brief
-names has nothing to read. The control offers the link on the run's status
-alone. The server checks nothing about the successor's source set either, for
+run makes no new version until a successor pins, so the comparison as the brief
+worded it has nothing to read. It is **not built** rather than unbuildable: the
+run read already counts the case's live sources per request, and each version row
+stores its own member count, so "the live sources differ from the pinned set" is
+one more statement at most. Dropped because a prefill is a convenience and the
+control is correct without it, not because the fact is unreachable -- the
+distinction matters, because "cannot" closes a question that "did not" leaves
+open. The control offers the link on the run's status alone. The server checks nothing about the successor's source set either, for
 the reason under "What this does not do" below.
 
 The other half of what a reader needs is *which* source the verdict asked for,
@@ -3108,8 +3113,20 @@ question with a different discharge: the QA_GATE case ends a run BLOCKED with th
 frontier emptied, no source is named and nothing a successor supplies changes the
 verdict -- the discharge there is a human decision under unchanged pins. The
 Repair Phase 2 ledger entry "Only a QA `Passed` releases CP-6" owns that case;
-this entry's withdrawal covers a readiness verdict and nothing else, and the
-successor link is offered for the readiness case alone.
+this entry's withdrawal covers a readiness verdict and nothing else.
+
+**The link, though, is offered on a run's status alone.** This sentence said it
+was offered for the readiness case alone, which the code has never done and which
+the ledger delta beside it contradicted: `start_run` refuses any status but
+BLOCKED and reads nothing else, and the Run section pre-fills the control for a
+BLOCKED run with no successor yet. The host has no cheap fact to narrow on --
+`blocked_by` is `null` for both the readiness-CONDITIONAL case and the QA_GATE
+case, so telling them apart means reading the gate verdicts -- and a successor for
+a QA-blocked run is an ordinary new run an analyst chose, which nothing here
+should refuse. So: the *withdrawal of resume* is scoped to a readiness verdict;
+the *link* is not, and is built for the readiness case rather than restricted to
+it. Corrected by the Task 10.3 acceptance review, which read this sentence
+against `RunSection.tsx` and the store.
 
 **What this does not do.** A successor is an ordinary new run: it resolves and
 pins its own route, pins its own input over the case's sources as they are then,

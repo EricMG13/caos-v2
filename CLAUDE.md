@@ -181,6 +181,26 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 10.**
 
+- **A run that cannot afford its next node writes an attempt row before it is
+  refused.** `_affordable` reads the run's own ceiling rather than what is left
+  of it, which is what lets a resume finish (the reason is in `runtime.py`). The
+  cost is that a run whose ceiling covers one worst case but whose remainder no
+  longer covers its next priced request is admitted, and the refusal then comes
+  from `reserve` -- after `start_attempt` has committed a row and an
+  `ATTEMPT_STARTED` event. Measured at three `run_route` entries: three attempt
+  rows, three events, no reservation and no provider call. Before the fix that
+  run was refused with no row written. No money guard was lost: `reserve` refuses
+  under the run row lock, invariant 8 holds in the direction that matters, and
+  nothing spends. What is lost is tidiness -- an operator retrying such a run sees
+  its attempt count climb while nothing happens -- bounded by
+  `ATTEMPT_LIMIT_REACHED` at 256 per node and by there being a human between
+  retries. Recorded rather than fixed because the alternative is a second
+  affordability read that decides nothing, and a check whose answer no caller
+  acts on is how a gate starts looking stronger than it is. Found by the Task
+  10.3 acceptance review, which probed it rather than reading it. *Upgrade:* a
+  `remaining` read between `check_context` and `start_attempt` that refuses
+  before the row, the day an operator meets a climbing attempt count on a real
+  run and asks what it means.
 - **A gate record stored before `blockers` existed refuses at every reader if its
   T8 named a condition.** Task 10.3 added `Projections.blockers` and kept the
   record format still: `record_bytes` omits the field when it has no rows,
@@ -666,26 +686,49 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   it too; human QA approval is not consulted in Phase 2.
   *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
   practice wants restricted clearance to proceed.
-- **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
-  with unfinished required work recoverably blocked, and `run_route` now ends
-  such a run `BLOCKED` with one `RUN_BLOCKED` (migration 0010). Nothing moves a
-  BLOCKED run back to RUNNING: every spend guard refuses it and its stream
-  closes. "Recoverable" means nothing failed and the reason is re-derived from
-  the pins and accepted artifacts, not stored. *Upgrade:* not a resume. §61 defines the
-  CONDITIONAL verdict as naming a source the effective-source set does not
-  carry, discharged only when that source is supplied and CP-0 is re-run, and
-  under invariants 1 and 10 a run's source set and route are pinned, so that
-  discharge is a new run. A CAS back to RUNNING would reopen a run whose pins
-  cannot change. Completion Phase 10 records the link instead: the T8 blocker
-  cell projected so a reader sees which source the verdict asked for, and
-  `runs.supersedes_run_id` naming the run a successor replaces. That withdrawal
-  covers a readiness verdict and nothing else. A run also ends BLOCKED when the
-  frontier empties with required work unfinished -- for a QA_GATE whose source is
-  not `Passed` -- and there the discharge is a human decision under unchanged
-  pins, not a supplied source. The Repair Phase 2 entry "Only a QA `Passed`
-  releases CP-6" owns that case and names its own discharge; this entry does not
-  speak for it. Scoped after the Completion Phase 7 adversarial audit read the
-  two entries side by side and got two incompatible answers.
+- **BLOCKED ends the run; recovery is a new run, and the store records which
+  run answers which.** §39 calls an empty frontier with unfinished required work
+  recoverably blocked, and `run_route` ends such a run `BLOCKED` with one
+  `RUN_BLOCKED` (migration 0010). Nothing moves a BLOCKED run back to RUNNING:
+  every spend guard refuses it and its stream closes. "Recoverable" means
+  nothing failed and the reason is re-derived from the pins and accepted
+  artifacts, not stored. §72 withdrew the resume for good, on §61: the
+  CONDITIONAL verdict names a source the effective-source set does not carry,
+  discharged only when that source is supplied and CP-0 is re-run, and under
+  invariants 1 and 10 a run's source set and route are pinned, so the discharge
+  is a new run and a CAS back to RUNNING would reopen a run whose pins cannot
+  change. What records it is `runs.supersedes_run_id` (migration `0025`):
+  written by the insert that makes the successor and refused by trigger on any
+  later change, never a run's own id, at most one successor per predecessor by
+  the partial unique index `runs_one_successor`, served at both ends as
+  `RunView.supersedes` and `RunView.superseded_by`. `start_run` refuses a run of
+  another case with the same private `RUN_NOT_FOUND` an unknown run gets, any
+  status but BLOCKED `RUN_NOT_BLOCKED`, and a second successor
+  `RUN_ALREADY_SUPERSEDED` inside its own unit
+  (`tests/test_run_commands.py::test_a_successor_run_links_a_blocked_run_of_its_case`,
+  `test_a_successor_for_a_running_run_or_another_case_is_refused`,
+  `test_a_runs_predecessor_is_written_once_and_is_never_itself`, and
+  `tests/test_postgres_races.py::test_two_successors_for_one_blocked_run_commit_one`).
+  The T8 blocker cell is projected as `NodeView.gate_reason`, so a reader sees
+  which source the verdict asked for.
+  **Two scopes that are easy to conflate.** The withdrawal of resume covers a
+  readiness verdict and nothing else: a run also ends BLOCKED when the frontier
+  empties against a QA_GATE whose source is not `Passed`, and there the
+  discharge is a human decision under unchanged pins, which the Repair Phase 2
+  entry "Only a QA `Passed` releases CP-6" owns and this entry does not speak
+  for. The **link**, by contrast, is offered on a run's status alone, for both
+  causes: `blocked_by` is `null` in each, so telling them apart would mean
+  reading the gate verdicts, and a successor for a QA-blocked run is an ordinary
+  run an analyst chose. §72 said the link was for the readiness case alone until
+  the Task 10.3 acceptance review read that sentence against the code.
+  What the link does not do: a successor pins its own route and input and pays
+  for every node again, nothing carries an artifact across it, and nothing checks
+  that the successor's source set carries the source the verdict named -- the
+  host cannot read a model's prose as a source identifier, and inventing a match
+  would be a readiness ground of its own (invariant 4). *Upgrade:* a stored
+  anchor for which source a successor supplied, the day a reader wants the host
+  to say whether a successor answered its predecessor rather than only that it
+  claims to.
 - ~~**The terminal decision reads outside the run lock, and the store does not
   check it.**~~ Closed by Phase 4 Task 4.3c (§49.4): `complete_run` refuses
   `RUN_NODES_UNACCEPTED` while a pinned node is unaccepted and `complete_run`/
@@ -1385,27 +1428,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `CONTEXT_OVER_CEILING`, whose clearance text reads "Deliver less context to the
   module" -- true of the ceiling check it was written for and misleading here,
   where the context is unchanged and the reservation no longer covers it. The
-  code is right and the sentence a reader gets is not. *Upgrade:* a refusal code
-  of its own, with its own clearance, the day an operator meets this on a real
-  run; noted by the Task 8.2 acceptance review. What is left is the first
-  thing the entry asked for and the only one this repository cannot take:
-  nothing in the tree says what the live model costs, so `tests/test_live_run.py`
-  still prices it from a flat estimate. *Upgrade:* a user-confirmed dated price
-  for the configured live model. It is the owner's to give, and until it exists
-  every priced reservation is exact arithmetic over a number nobody has
-  confirmed. **And the qualification driver does not yet see the saving.**
+  code is right and the sentence a reader gets is not.
+  **Three things remain, and they are listed together rather than each beside its
+  own paragraph, because an entry carrying an upgrade clause per sentence is one
+  nobody reads to the end of.** First, nothing in the tree says what the live
+  model costs, so `tests/test_live_run.py` still prices it from a flat estimate,
+  and every priced reservation is exact arithmetic over an unconfirmed number.
+  Second, the qualification driver does not see the saving:
   `server/qualification/harness.py`'s `_affordable` still refuses
   `QUALIFICATION_SET_OVER_CEILING` when `worst_case(price) x len(route.nodes)`
   exceeds a run's ceiling, so at Terra's rates three LITE nodes are refused
-  against the $5 default before any case is prepared, exactly as before this
-  task -- `scripts/qualify.py` is unchanged in what it will admit even though
-  `run_route` now finishes such a run. The sentence recording that was deleted
-  with the old entry and is restored here, because a limitation that leaves the
-  tree only in a rewrite is the failure this ledger's own gate exists to catch;
-  the Task 8.2 acceptance review found it. *Upgrade:* price the harness's floor
-  on measured requests rather than on a worst case, or derive per-run ceilings
-  from the set's -- which is what the Rebuild Phase 10 entry "a qualification run
-  costs real money" already owes.
+  against the $5 default before any case is prepared, and `scripts/qualify.py`
+  admits exactly what it admitted before this task even though `run_route` now
+  finishes such a run. That sentence left the tree in a rewrite and is restored
+  here, which is the failure this ledger's own gate exists to catch, read the
+  other way round. Third, the borrowed clearance above.
+  *Upgrade:* a user-confirmed dated price for the configured live model, which is
+  the owner's to give; the harness's floor priced on measured requests, or per-run
+  ceilings derived from the set's, which is what the Rebuild Phase 10 entry "a
+  qualification run costs real money" already owes; and a refusal code of its own
+  for the reservation check, the day an operator meets it on a real run. The
+  second and third were found by the Task 8.2 acceptance review.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the
