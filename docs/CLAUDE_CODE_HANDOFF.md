@@ -18,7 +18,7 @@ contracts.
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 12**, by delivery order rather than phase number. Phases 7 and 8 are accepted; 9.1, 10.2 and 10.3 are in the branch and 10.4 was answered as a finding. **Task 10.1 was dispatched and stopped**: its remediation dependencies all landed, and what blocks it is invariant 4 rather than effort, so it is a vendor request. Phases 9, 10 and 11 are held by three owner inputs and six vendor requests; Phase 12 waits on nothing external and is therefore next. The audit remediation is complete (§75) and its four waves are merged |
+| Current task | **Completion Phase 12 is accepted** (record below, candidate `5a27ec9`), taken by delivery order rather than phase number. Phases 7 and 8 are accepted; 9.1, 10.2 and 10.3 are in the branch and 10.4 was answered as a finding. **Task 10.1 was dispatched and stopped**: its remediation dependencies all landed, and what blocks it is invariant 4 rather than effort, so it is a vendor request. Phases 9, 10 and 11 are held by three owner inputs and six vendor requests; Phase 12 waited on nothing external and is now accepted; what it did **not** deliver is stated in its acceptance record, because its own name overstates it. The audit remediation is complete (§75) and its four waves are merged |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
@@ -265,6 +265,68 @@ gap already observed rather than predicted: run `ff71c457…` on
   because 206 of its 248 rows are dated and editing them would cost the property
   that makes a dated record worth keeping. It is a ledger entry with its own
   upgrade path.
+
+## Completion Phase 12 acceptance record — 17 September 2026
+
+- **Accepted** at candidate `5a27ec9` on `sdd/integration-p12`, 34 commits over
+  `1b1ffcd`.
+- **Gate evidence, all at that head:** the full offline backend suite exit 0
+  with zero failures and zero errors; `ruff check` and `ruff format --check`
+  over `server tests scripts`; `mypy` (13 pre-existing `scripts/`
+  import-not-found, unchanged); `tsc --noEmit`; `npm run lint`, whose last two
+  steps are the vocabulary and untested-definition gates; 251 vitest; the
+  production build, 25 routes exported; and `make smoke-production` **green on
+  chromium, firefox and webkit, 22 tests each**, run from a worktree under
+  `/Users` because Docker cannot mount `/private/tmp` (its own ledger entry).
+- **Delivered:** five governed writes with their controls; Book served over
+  accepted CP-CF projections; `blocked_by` on the analysis document and a
+  Markdown renderer with a closed element set; the browser journey through
+  withdraw, save, sign, freeze, file, grant, revoke and Book compare on three
+  engines; a declared per-section bound on each upstream handoff; and the line
+  group, so a line past the group width is split rather than refusing the pack.
+- **What the phase is, said plainly, because its name overstates it.** "Complete
+  the governed workbench" is not an honest description of what landed, and the
+  confidence review said so. Of the seven governed writes, two have a control a
+  person can press; four have controls on a surface no person can reach, because
+  nothing in the workspace can make a case's first revision; grant and revoke
+  have no control anywhere. Book is reachable and structurally empty: no run
+  made through the API can carry CP-CF. Both are ledger entries, and Phase 12's
+  exit clause 4 is recorded in `docs/COMPLETION_PLAN.md` as met at unit level
+  and **unmeetable end to end** rather than as met.
+- **Whole-phase reviews:** both on **Opus 5 at `xhigh` with `ultrathink`**, the
+  owner's routing of this date (the cap is xhigh for every model; `max` is not
+  dispatched), through the pinned agent definitions. Neither report asserts its
+  own effort, because a subagent cannot read it back; what is attested is the
+  launch path.
+- **The confidence review found the seventh instance of the gate-axis class,
+  inside a gate this phase wrote.** The suppression budget was keyed on the
+  `noqa: PLR0913` marker, and ruff withholds that marker for dummy-named
+  parameters — this layer's own convention — so three new handlers at seven
+  positional parameters were uncharged: the true count went 24→27 while the
+  gate read 22→22, and the task report recorded five new charges because that is
+  what the gate showed. It also found the deliverable renderer **deleting**
+  model-authored text under a signature that binds it.
+- **The adversarial audit then returned BLOCK, and its P0 was mine.** The
+  remediation above made `members.withdraw` keyword-only and left a call site
+  passing seven positional arguments; I took the freeze without re-running the
+  suite. Fixing it uncovered that the withdrawal half of that concurrency test
+  had **never executed**. It also found four further renderer deletions — one of
+  which *fabricated* a two-column table the module never wrote — and the
+  **eighth** instance of the class: the test I had written as the remediation
+  for the seventh, which asserted that each line's longest four-character word
+  survived and could therefore see none of them.
+- **That pair is again the argument for two gates per phase**, and this time for
+  a third property: the second gate ran the suite. A review that reasons about
+  the code and a review that executes it fail differently, and the cheaper
+  discipline — re-run the gate after remediating — is the one that would have
+  caught the P0 before the auditor did.
+- **Open and recorded, not fixed:** two unreachable filing digest checks;
+  `EVIDENCE_NOT_AVAILABLE`'s clearance cannot discharge the repacking refusal;
+  `SAVE_REVISION` is judged on its floor alone, so Report opened at a
+  non-head revision offers a save the commit refuses; `_latest`'s `saved_at`
+  ordering can invert under a paused interleaving; and `SaveRevision`'s declared
+  bounds are unreachable behind `MAX_BODY_BYTES`. All carry entries with upgrade
+  paths.
 
 ## Completion Phase 8 acceptance record — 17 September 2026
 
