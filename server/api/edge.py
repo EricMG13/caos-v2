@@ -25,7 +25,9 @@ can do about one that appends instead of replacing.
 - *Dev mode* (no token): served only when both socket ends are loopback
   addresses and `Host` is `localhost`, `127.0.0.1` or `[::1]`. A published port
   on a tokenless image therefore answers health and nothing else, and a DNS
-  rebinding page is refused by its `Host`.
+  rebinding page is refused by its `Host`. No edge asserted anything here, so
+  `server/api/identity.py` reads no groups header at all in this mode: a peer
+  that passes the loopback check is READER unless the development switch is on.
 
 In both modes the token header is removed from the scope, so no application,
 log or refusal downstream can hold it; a repeated or lookalike identity header

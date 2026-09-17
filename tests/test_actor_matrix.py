@@ -26,7 +26,12 @@ from command_fixtures import command_client, command_headers, member
 from fastapi.testclient import TestClient
 from test_execution_commands import ROUTE, _ready, _Run
 
-from server.api.identity import TRUST_SWITCH, GlobalRole, actor_from_headers
+from server.api.identity import (
+    EDGE_TOKEN_ENV,
+    TRUST_SWITCH,
+    GlobalRole,
+    actor_from_headers,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store import commands as store_commands
@@ -189,8 +194,13 @@ def test_the_highest_group_wins(
     monkeypatch: pytest.MonkeyPatch, groups: str, expected: GlobalRole
 ) -> None:
     """Someone in two groups holds the greater of them, and a group this system
-    does not know grants nothing."""
+    does not know grants nothing.
+
+    In edge mode, which is the only mode that reads the header at all: an edge
+    stood between the client and this process and asserted the list.
+    """
     monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    monkeypatch.setenv(EDGE_TOKEN_ENV, "x" * 32)
 
     actor = actor_from_headers(_headers(**{"x-forwarded-groups": groups}))
 
@@ -314,10 +324,8 @@ def test_every_command_across_the_seven_actors_and_a_global_reader_writer(
     command_client: TestClient,
     case: tuple[StoreConnection, UUID],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     endpoint: str,
 ) -> None:
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
     conn, case_id = case
     actors = _actors(conn, case_id)
     # Every target is prepared before any request: a retry target's claim would
@@ -350,7 +358,6 @@ def test_a_commit_time_revocation_answers_the_private_404(
 ) -> None:
     """Standing held at the precheck and lost before the governed unit commits:
     the unit refuses, nothing lands, and the answer is the stranger's 404."""
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
     conn, case_id = case
     target = _target(conn, case_id, tmp_path, endpoint)
     user = member(conn, case_id, Standing.APPROVER)
@@ -384,3 +391,22 @@ def test_a_commit_time_revocation_answers_the_private_404(
     assert receipts == (0,)
     assert after == audited, "the revocation writes no event; the command wrote none"
     assert revocations == [user], "standing was lost after the precheck, not before"
+
+
+def test_without_a_token_or_the_switch_groups_grant_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C3: a loopback peer cannot pick ADMIN by sending groups to a tokenless API."""
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    monkeypatch.delenv("CAOS_EDGE_TOKEN", raising=False)
+    actor = actor_from_headers(_headers(**{"x-forwarded-groups": "caos-admins"}))
+    assert actor.role is GlobalRole.READER
+
+
+def test_in_edge_mode_groups_still_decide_the_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    monkeypatch.setenv("CAOS_EDGE_TOKEN", "x" * 32)
+    actor = actor_from_headers(_headers(**{"x-forwarded-groups": "caos-analysts"}))
+    assert actor.role is GlobalRole.ANALYST
