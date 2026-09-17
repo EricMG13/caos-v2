@@ -16,9 +16,9 @@ contracts.
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 6 signed off at `e59ad7b`** (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
-| Enabled routes | Two of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE` and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
+| Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 7** (reconcile the record, land the branch). Task 7.1 implemented at the commit this table lands in; Task 7.2's delivery record follows. Phase 7 is **not accepted** until the complete gate and both `xhigh` reviews run |
+| Current task | **Completion Phase 7** (reconcile the record, land the branch), implemented with both `xhigh` reviews and their remediation done. Phase 7 is **not accepted**: `make check` did not complete because `make image` needs the pinned Trivy `0.70.0` and this machine has `0.72.0`. See the Phase 7 gate and review record below for the one owner action that closes it. Tasks 8.1, 8.3, 8.4 and 9.1 are in the branch under their own phases |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) runs concurrently in `sdd/t1`–`sdd/t6` and is **not** a task of the completion plan. Its landed waves and the completion tasks each unblocks are recorded under Phase 7 Task 7.2 below |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
@@ -162,6 +162,68 @@ the ledger's policy; and the CP-0 gate lives at
 gap already observed rather than predicted: run `ff71c457…` on
 `LITE_EARNINGS_UPDATE` accepted a CP-0 declaring `Committee Ready` at 93 on a
 `SCREENING_ONLY` pathway.
+
+## Completion Phase 7 gate and review record — 17 September 2026
+
+- **Candidate:** `codex/execute-repair-plan` at `cf3d805`. Phase 7's work ends at
+  `acfe398`; `cf3d805` is Phase 8 Task 8.3 in the same branch. The per-commit
+  map, including which commits are later phases' work in the same range, is in
+  [`PHASE_7_EXIT_EVIDENCE.md`](PHASE_7_EXIT_EVIDENCE.md).
+- **Delivered:** the completion plan for Phases 7–13 with its twelve task briefs;
+  the ledger read back by `scripts/ledger_state.py` under a seven-test gate;
+  three struck entries, two withdrawn upgrade paths and four relabelled rebuild
+  headings; the per-PR delivery table with hosted results; the exit-evidence
+  record; the concurrent stream's records tracked.
+- **Whole-phase reviews:** both run at `xhigh` under
+  `.claude/agents/phase-confidence-reviewer.md` and
+  `.claude/agents/phase-adversarial-auditor.md`, which are tracked and pin that
+  effort. The confidence review returned CONCERNS with no P0/P1 and two P2s,
+  remediated in `fa6bbfe`. The separate adversarial audit then returned CONCERNS
+  with one P1 and six P2s, remediated in `885f416` and `acfe398`. The model was
+  Fable 5.1 in both cases, at `xhigh` rather than `max`, as the goal directed.
+- **The P1 is worth naming here.** It was produced by this phase's own two
+  commits read together: one deleted a blank line before a ledger phase heading,
+  the next made a heading require one, and the entry count -- the signal the
+  remediation relied on -- stayed identical while four entries moved under the
+  wrong phase. The gate now raises on such a heading. Writing the remediation
+  commit reproduced the same loss once more and the new rule caught it, which is
+  the strongest evidence it works that this phase can offer.
+- **Gate:** provider variables stripped on every command. `make check` **did not
+  run to completion, and Phase 7 is therefore not accepted.** Its components,
+  each run at the candidate:
+
+| Component | Result |
+|---|---|
+| `make test` (lint, types, offline suite, coverage floors, I/O budget) | exit 0; **3,009 passed**, 94 % branch coverage, all 23 route modules declare `IO_BUDGET` |
+| `make test-postgres-races` | exit 0; **22 passed** |
+| `make security` (Bandit, pip-audit `--require-hashes`, gitleaks) | exit 0; no issues, no known vulnerabilities, no leaks |
+| `make frontend-check` | exit 0; **90 workbench tests** with the units, builds and the accessibility matrix |
+| `make smoke-production` | exit 0; production image built, real-stack journey **15 passed** on the first engine |
+| `make image` | **not run** |
+| `tests/test_ledger.py` + `tests/test_gate_scripts.py` | **59 passed** |
+
+- **Why `make image` did not run, and what unblocks it.** The target refuses any
+  Trivy but the pinned `0.70.0`, which is the version CI installs; this machine
+  carries `0.72.0` and nothing else. Substituting `0.72.0` would be changing a
+  gate to get a pass, and installing a release binary is not something this
+  session takes on its own. It is one owner action:
+
+  ```
+  TRIVY=/path/to/trivy-0.70.0 make image
+  ```
+
+  Until it runs, no claim is made about the image's HIGH/CRITICAL surface.
+- **One disagreement recorded rather than settled.** The audit asked that
+  `docs/feature-status.csv`'s test citations be made to resolve. They were not:
+  206 of its 248 rows are dated and nine names across 14 rows were deleted with
+  the code they covered, so editing them would buy agreement with the tree at the
+  cost of the file being a record of its date. It is a ledger entry with its own
+  upgrade path instead. The audit's other finding on that file was taken: a
+  previous commit had rewritten all 249 line endings while changing six rows, and
+  the bytes are restored and pinned.
+- **Next:** the owner's `make image` run closes the gate, after which Phase 7 can
+  be accepted. Phase 8 Tasks 8.1, 8.3 and 8.4 and Phase 9 Task 9.1 are already in
+  the branch and are closed under their own phases' gates, not this one.
 
 ## Phase 5 acceptance record — 15 September 2026
 
