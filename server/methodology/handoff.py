@@ -411,7 +411,7 @@ def _no_constant(_: str) -> NoReturn:
     raise ValueError  # NaN and the infinities are not JSON
 
 
-def _strict_json(text: str) -> object:
+def strict_json(text: str) -> object:
     return json.loads(text, object_pairs_hook=_unique, parse_constant=_no_constant)
 
 
@@ -439,7 +439,7 @@ def _requested(item: object) -> Citation:
 def _transport(body: str) -> tuple[bytes, str, tuple[Citation, ...]]:
     if len(body) > MAX_TRANSPORT_CHARS:
         raise ValueError
-    wire = _closed(_strict_json(body), WIRE_KEYS)
+    wire = _closed(strict_json(body), WIRE_KEYS)
     text, citations = wire["canonical_markdown"], wire["citations"]
     if not isinstance(text, str) or not isinstance(citations, list) or not citations:
         raise ValueError
@@ -580,7 +580,7 @@ _rect = _each(
 
 
 def _decoded_record(data: bytes) -> CanonicalRecord:
-    document = _strict_json(data.decode("utf-8"))
+    document = strict_json(data.decode("utf-8"))
     if not isinstance(document, dict) or document.pop("format", None) != RECORD_FORMAT:
         raise ValueError
     citations = _each(
