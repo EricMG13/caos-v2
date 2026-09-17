@@ -22,12 +22,15 @@ import psycopg
 
 from server.boundary_text import BoundaryText
 from server.engine.route import (
+    EDGE_FIELDS,
+    NODE_FIELDS,
     Edge,
     EdgeType,
     ResolvedRoute,
     RouteNode,
     dependency_order,
     route_digest,
+    route_json,
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, committed_unit
@@ -52,9 +55,9 @@ def pin_route_in(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -
     resolved = _decode(raw)
     digest = route_digest(resolved)
     status = lock_run(conn, run_id)
-    stored = resolved_route(conn, run_id)
+    stored = route_pin(conn, run_id)
     if stored is not None:
-        if route_digest(stored) != digest:
+        if stored[1] != digest:
             raise Refusal(RefusalCode.ROUTE_ALREADY_PINNED)
         return digest
     if status is not RunStatus.RUNNING:
@@ -80,16 +83,27 @@ def pin_route_in(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -
 
 def pinned_route(conn: StoreConnection, run_id: UUID) -> str | None:
     """The digest pinned to this run, or None. What execution reads."""
-    route = resolved_route(conn, run_id)
-    return None if route is None else route_digest(route)
+    pin = route_pin(conn, run_id)
+    return None if pin is None else pin[1]
 
 
 def resolved_route(conn: StoreConnection, run_id: UUID) -> ResolvedRoute | None:
-    """The pinned route itself, rebuilt from the row, or None before the gate.
+    """The pinned route itself, or None before the gate. See `route_pin`."""
+    pin = route_pin(conn, run_id)
+    return None if pin is None else pin[0]
+
+
+def route_pin(conn: StoreConnection, run_id: UUID) -> tuple[ResolvedRoute, str] | None:
+    """The pinned route and its digest, rebuilt from the row, or None.
 
     Read back rather than re-resolved. A surface that resolved the catalog again
     to draw a running route would draw whatever the catalog says today, which is
     the one thing pinning exists to prevent.
+
+    The digest comes out with the route because deriving it is how the row is
+    checked: a stored digest that disagrees with the route beside it refuses
+    here, so a caller that hashed the returned route again could only ever get
+    the number this already vouched for.
     """
     try:
         row = conn.execute(
@@ -102,9 +116,10 @@ def resolved_route(conn: StoreConnection, run_id: UUID) -> ResolvedRoute | None:
     if row is None:
         return None
     route = _decode(row[3])
-    if (route.profile_id, route.selection_id, route_digest(route)) != row[:3]:
+    digest = route_digest(route)
+    if (route.profile_id, route.selection_id, digest) != row[:3]:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-    return route
+    return route, digest
 
 
 def _fields(value: object, fields: str) -> dict[str, Any]:
@@ -199,24 +214,11 @@ def _predicate(value: object) -> tuple[str, str]:
 
 def _canonical(resolved: ResolvedRoute) -> str:
     """Stored object shape; route_digest retains its established array shape."""
-    return dumps(
-        {
-            "profile_id": resolved.profile_id,
-            "selection_id": resolved.selection_id,
-            "nodes": [
-                {
-                    "route_node_id": node.route_node_id,
-                    "module_id": node.module_id,
-                    "stage": node.stage,
-                }
-                for node in resolved.nodes
-            ],
-            "edges": [
-                {"source": edge.source, "target": edge.target, "type": edge.type.value}
-                for edge in resolved.edges
-            ],
-            "predicates": resolved.predicates,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    rows = route_json(resolved)
+    rows["nodes"] = [
+        dict(zip(NODE_FIELDS, node, strict=True)) for node in rows["nodes"]
+    ]
+    rows["edges"] = [
+        dict(zip(EDGE_FIELDS, edge, strict=True)) for edge in rows["edges"]
+    ]
+    return dumps(rows, sort_keys=True, separators=(",", ":"))

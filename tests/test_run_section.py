@@ -37,8 +37,9 @@ from server.api.identity import TRUST_SWITCH
 from server.api.reads import run as run_read
 from server.api.wire import BlockedByView, DirectoryDocument, RunSectionDocument
 from server.boundary_text import BoundaryText
-from server.engine.route import resolve_route
+from server.engine.route import ResolvedRoute, resolve_route, route_digest
 from server.store import StoreConnection
+from server.store import routes as store_routes
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route
 from server.store.runs import create_case, start_run
@@ -521,3 +522,39 @@ def test_a_blocked_run_names_the_source_its_conditional_row_asked_for(
     assert reasons["CP-L10"] == ("READY", None)
     # The gate rules on its consumers, never on itself, so it has neither.
     assert reasons["CP-0"] == (None, None)
+
+
+def test_the_run_document_does_not_recompute_the_route_digest(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The digest the document carries is the one the read already derived.
+
+    `resolved_route` hashes the route it read to check it against the stored
+    column and refuses `ROUTE_IDENTITY_INVALID` when the two disagree, so a
+    second hash in the view could never answer differently -- it only hashed a
+    route the reader had already vouched for. The pin returns its digest now.
+    """
+    conn, case_id = case
+    run_id, viewer = run
+    pinned = pin_route(conn, run_id, resolve_route(catalog, *LITE))
+    digested: list[str] = []
+    hashed = route_digest
+
+    def counted(route: ResolvedRoute) -> str:
+        digested.append(route.selection_id)
+        return hashed(route)
+
+    # Both spellings: the store's reader, and the view that hashed the route a
+    # second time. `raising=False` so the view losing its import is a pass.
+    for module in (store_routes, run_read):
+        monkeypatch.setattr(module, "route_digest", counted, raising=False)
+
+    document = _document(_section(client, case_id, run_id, viewer))
+
+    assert document.body.run is not None
+    assert document.body.run.route_digest == pinned
+    assert digested == [LITE[1]]

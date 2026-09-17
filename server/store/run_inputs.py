@@ -12,12 +12,12 @@ import psycopg
 from server import methodology
 from server.boundary_text import BoundaryText
 from server.digest import canonical_digest, canonical_json
-from server.engine.route import ResolvedRoute, route_digest
+from server.engine.route import ResolvedRoute
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import RunEvent, append, lock_run
-from server.store.routes import resolved_route
+from server.store.routes import route_pin
 from server.store.source_sets import SourceSet, load_source_set
 
 # The vendor's `validate_handoff.SUBJECT_KEY_RE`, and 0011's CHECK.
@@ -239,7 +239,7 @@ def _load_run_input(
         owner = None if run is None else (run[0],)
         created = None if run is None else run[1]
         source = load_source_set(conn, pin.case_id, pin.source_version)
-        route = resolved_route(conn, run_id)
+        pinned = route_pin(conn, run_id)
         if (
             row[-1] != pin.format_version
             or owner != (pin.case_id,)
@@ -249,13 +249,13 @@ def _load_run_input(
             )
             or source is None
             or source.fingerprint != pin.source_fingerprint
-            or route is None
-            or route_digest(route) != pin.route_digest
+            or pinned is None
+            or pinned[1] != pin.route_digest
         ):
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     except psycopg.Error:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    return pin, route, source
+    return pin, pinned[0], source
 
 
 def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
@@ -306,15 +306,15 @@ def pin_run_input_in(  # noqa: PLR0913 -- pin_run_input's arguments
     if owner is None:
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     source = load_source_set(conn, owner[0], source_version)
-    route = resolved_route(conn, run_id)
-    if source is None or route is None:
+    pinned = route_pin(conn, run_id)
+    if source is None or pinned is None:
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     candidate = RunInput(
         run_id,
         owner[0],
         source.version,
         source.fingerprint,
-        route_digest(route),
+        pinned[1],
         bundle.build_id,
         bundle.manifest_sha256,
         methodology.CANONICAL_ADAPTER_VERSION,

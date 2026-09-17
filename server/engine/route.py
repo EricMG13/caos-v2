@@ -421,23 +421,42 @@ def blockers_from(
     return {}
 
 
+NODE_FIELDS = ("route_node_id", "module_id", "stage")
+EDGE_FIELDS = ("source", "target", "type")
+
+
+def route_json(route: ResolvedRoute) -> dict[str, Any]:
+    """The route as JSON rows, each in `NODE_FIELDS` / `EDGE_FIELDS` order.
+
+    One spelling of what a serialised route carries, for the two byte forms
+    that must never drift apart in content: `route_digest` below hashes these
+    rows with its edges sorted, and the stored pin
+    (`server/store/routes.py::_canonical`) keys each row by its field name and
+    keeps the route's own edge order. Both forms are pinned -- the digest by
+    invariant 10 and by every `run_routes.route_digest` already written, the
+    stored shape by every row that must still read back -- so this returns what
+    they share and leaves each caller to spell its own shape.
+    """
+    return {
+        "profile_id": route.profile_id,
+        "selection_id": route.selection_id,
+        "nodes": [
+            [node.route_node_id, node.module_id, node.stage] for node in route.nodes
+        ],
+        "edges": [[edge.source, edge.target, edge.type.value] for edge in route.edges],
+        # Passed through rather than coerced to lists: the stored pin is read
+        # back and validated, and `list()` over a malformed pair would turn a
+        # shape `_decode` refuses into one it accepts.
+        "predicates": route.predicates,
+    }
+
+
 def route_digest(route: ResolvedRoute) -> str:
     """The digest pinned at the plan gate. A function of the route alone."""
-    canonical = dumps(
-        {
-            "profile_id": route.profile_id,
-            "selection_id": route.selection_id,
-            "nodes": [
-                [node.route_node_id, node.module_id, node.stage] for node in route.nodes
-            ],
-            "edges": sorted(
-                [edge.source, edge.target, edge.type.value] for edge in route.edges
-            ),
-            "predicates": [list(pair) for pair in route.predicates],
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    rows = route_json(route)
+    rows["edges"] = sorted(rows["edges"])
+    rows["predicates"] = [list(pair) for pair in rows["predicates"]]
+    canonical = dumps(rows, sort_keys=True, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
