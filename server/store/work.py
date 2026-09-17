@@ -16,11 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-import psycopg
-
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import RunEvent, append, lock_run
 from server.store.outcomes import require_idle
 
@@ -66,7 +64,7 @@ def claim_run(
         raise Refusal(RefusalCode.BOUNDARY_TEXT_INVALID)
     _require_seconds(lease_seconds)
     require_idle(conn)
-    try:
+    with committed_unit(conn):
         row = conn.execute(
             "UPDATE run_work w SET state = 'CLAIMED', lease_token = w.lease_token + 1,"
             " worker = %s, stop_code = NULL,"
@@ -80,13 +78,6 @@ def claim_run(
             " RETURNING w.run_id, w.lease_token",
             (worker.value, lease_seconds),
         ).fetchone()
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return None if row is None else Lease(UUID(str(row[0])), int(row[1]))
 
 
