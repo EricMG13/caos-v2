@@ -14,10 +14,10 @@ pattern `tests/conftest.py`'s `empty_database` uses), and a fake completion
 provider standing in for OpenRouter so the run costs nothing and touches no
 network.
 
-This driver has no `--attempts` flag and no `_perform_until` retry loop --
-that arrived later, on `qualify.py`'s next revision. `perform` is called
-exactly once per run here, so the scenarios below exercise this file's actual
-shape rather than the later one's.
+The happy-path scenario below calls `qualify.main` with no `--attempts`, so
+it exercises the single-`perform` path regardless of whether this revision's
+`qualify.py` also carries `_perform_until`'s retry loop -- the default is one
+attempt either way, and the retry loop has no suite of its own to lean on.
 """
 
 from __future__ import annotations
@@ -231,13 +231,12 @@ def test_main_performs_a_full_qualification_set_against_a_real_database(
     assert matrix[0]["case_label"] == "lite-acme"
     assert matrix[0]["proven"] is True
     assert matrix[0]["missed"] == 0
-    # This driver's `_capture` carries only the fields it itself derives --
-    # unlike the later revision's, it has no `ready_met`/`forecast_met`/
-    # `expected_refusal_met` on a matrix row, because those columns did not
-    # exist on `QualificationMatrixRow` when this file was written.
-    assert "ready_met" not in matrix[0]
-    assert "forecast_met" not in matrix[0]
-    assert "expected_refusal_met" not in matrix[0]
+    # The LITE case here declares no forecast or readiness-gate expectation,
+    # so these three columns are present (this revision's `QualificationMatrixRow`
+    # carries them) but unset for a case that never asked to be judged by them.
+    assert matrix[0]["ready_met"] is None
+    assert matrix[0]["forecast_met"] is None
+    assert matrix[0]["expected_refusal_met"] is None
 
     # `--capture` writes exactly what was printed, plus the trailing newline
     # `qualify.main` adds -- the branch at scripts/qualify.py's `args.capture
