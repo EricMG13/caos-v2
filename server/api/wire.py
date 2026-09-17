@@ -214,6 +214,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.QUALIFICATION_SET_EMPTY: "Add at least one case to the set.",
     _C.QUALIFICATION_KEY_UNANSWERABLE: "Key only modules on the case's route.",
     _C.QUALIFICATION_SET_AMBIGUOUS: "Give each case a distinct identity.",
+    _C.QUALIFICATION_KEY_AMBIGUOUS: "Name one register row in the answer key.",
     _C.QUALIFICATION_RUN_MISSING: "Perform every case in the set.",
     _C.QUALIFICATION_SET_FILE_INVALID: "Correct the set manifest.",
     _C.QUALIFICATION_SET_PATH_ESCAPES: "Keep documents inside the set directory.",

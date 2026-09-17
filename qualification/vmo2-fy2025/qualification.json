@@ -46,6 +46,17 @@
           "field": "qa_status",
           "value": "Restricted"
         }
+      ],
+      "expects_register": [
+        {
+          "module_id": "CP-L10",
+          "register_id": "TL10.2",
+          "row_key": {
+            "topic_id": "LIQUIDITY_MATURITIES"
+          },
+          "column": "evidence_status",
+          "expected": "PARTIAL"
+        }
       ]
     }
   ]

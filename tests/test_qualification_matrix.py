@@ -44,6 +44,8 @@ from server.methodology.handoff import Projections
 from server.methodology.runner import ModuleProvider
 from server.qualification.matrix import (
     ExpectedCitation,
+    ExpectedProjection,
+    ExpectedRegister,
     Matrix,
     MatrixRow,
     QualificationCase,
@@ -582,3 +584,214 @@ def test_a_canonical_proof_names_exactly_the_quotes_it_anchored(ran: Ran) -> Non
     assert proof.anchored == {
         (module, ran.document_sha256, QUOTE) for module in ("CP-0", "CP-L10", "CP-5")
     }
+
+
+# --- Register keys (Completion Phase 8 Task 8.1) -----------------------------
+#
+# The third kind of key, and the first that can ask about a cell the host
+# projects no scalar for. The `ran` fixture's handoffs carry every register the
+# module's own contract declares, so what these assert is the comparison: which
+# row the key names, and what the cell has to say.
+
+# CP-0's T8 readiness register is the one the fixture fills with distinct rows,
+# one per pinned module, so a row key over `Module` names exactly one.
+_T8_READY = ExpectedRegister(
+    module_id="CP-0",
+    register_id="T8",
+    row_key=(("Module", "CP-5"),),
+    column="Readiness",
+    expected="READY",
+)
+
+
+def _registered(
+    ran: Ran,
+    *registers: ExpectedRegister,
+    projections: tuple[ExpectedProjection, ...] = (),
+) -> QualificationCase:
+    return replace(
+        _one_case(ran), expects_register=registers, expects_projection=projections
+    )
+
+
+def test_a_register_key_fails_a_run_whose_cell_says_the_wrong_thing(ran: Ran) -> None:
+    """The deliverable: a key over a register cell, scored against a real run.
+
+    `projections_met` stays True through both halves, which is the point of the
+    new key -- the seven projected scalars said what the case expected and the
+    register cell did not, so the two keys are measuring different things.
+    """
+    wrong = replace(_T8_READY, expected="BLOCKED")
+    projections = (ExpectedProjection("CP-0", "qa_status", "Passed"),)
+
+    [missed] = _matrix(
+        ran, QualificationSet(cases=(_registered(ran, wrong, projections=projections),))
+    ).rows
+    assert (missed.proven, missed.projections_met) == (True, True)
+    assert missed.registers_met is False
+
+    [met] = _matrix(
+        ran,
+        QualificationSet(cases=(_registered(ran, _T8_READY, projections=projections),)),
+    ).rows
+    assert (met.projections_met, met.registers_met) == (True, True)
+
+
+def test_a_case_that_declares_no_register_key_is_not_scored_for_one(ran: Ran) -> None:
+    """`None` is "not asked", and must not read as "answered"."""
+    [row] = _matrix(ran, QualificationSet(cases=(_one_case(ran),))).rows
+    assert row.registers_met is None
+
+
+def test_a_register_key_with_an_ambiguous_row_key_is_a_miss_not_a_match(
+    ran: Ran,
+) -> None:
+    """Two rows meet the row key, so the key does not name a row.
+
+    Taking the first would make the answer depend on the order the module wrote
+    its table in, which is the module's choice and not an answer.
+    """
+    # CP-L10's TL10.2 carries six body rows, identical in this fixture.
+    ambiguous = ExpectedRegister(
+        module_id="CP-L10",
+        register_id="TL10.2",
+        row_key=(("topic_id", "Recorded source p1"),),
+        column="materiality",
+        expected="Recorded source p1",
+    )
+    # The same cell in a single-row register of the same handoff is met, so what
+    # the miss above reports is the ambiguity and not an unreadable artifact.
+    single = ExpectedRegister(
+        module_id="CP-L10",
+        register_id="TL10.1",
+        row_key=(("subject_identity", "Recorded source p1"),),
+        column="scope_status",
+        expected="Recorded source p1",
+    )
+
+    [missed] = _matrix(ran, QualificationSet(cases=(_registered(ran, ambiguous),))).rows
+    [met] = _matrix(ran, QualificationSet(cases=(_registered(ran, single),))).rows
+    assert (missed.proven, missed.registers_met) == (True, False)
+    assert (met.proven, met.registers_met) == (True, True)
+
+
+def test_a_register_key_matches_after_nfc_and_whitespace_normalisation_only(
+    ran: Ran,
+) -> None:
+    """A padded, wrapped or differently composed cell is the same cell; a cell
+    in another case is not.
+
+    Markdown table cells are padded for alignment and prose is wrapped, so a key
+    that compared bytes would miss for typography. Case is a different matter:
+    every vendor vocabulary that has one is upper case, and folding it would let
+    a key pass over a value the bundle's own validators would refuse.
+    """
+    from server.qualification import matrix
+
+    padded = ExpectedRegister(
+        module_id="CP-0",
+        register_id="T8",
+        # The column name is matched under the same rule as the cell.
+        row_key=((" Module ", "CP-5"),),
+        column="Exact   command",
+        expected="Run   CP-5",
+    )
+    lowered = replace(padded, expected="run CP-5")
+
+    [met] = _matrix(ran, QualificationSet(cases=(_registered(ran, padded),))).rows
+    [missed] = _matrix(ran, QualificationSet(cases=(_registered(ran, lowered),))).rows
+    assert met.registers_met is True
+    assert missed.registers_met is False
+
+    # NFC, stated where the rule lives: the same text composed two ways is one
+    # cell, and the rule is one function both sides of the comparison go through.
+    assert matrix._normalised_cell("Café  au   lait") == "Café au lait"
+    assert matrix._normalised_cell("MATERIAL") != matrix._normalised_cell("Material")
+
+
+def test_a_register_key_naming_an_absent_register_is_a_miss(ran: Ran) -> None:
+    """A register the handoff does not carry answers nothing.
+
+    `T4C.4` is a real register of a module this route never runs, which is the
+    honest shape of the mistake: the key is well formed and this handoff has no
+    such table.
+    """
+    absent = ExpectedRegister(
+        module_id="CP-0",
+        register_id="T4C.4",
+        row_key=(("Module", "CP-5"),),
+        column="Readiness",
+        expected="READY",
+    )
+    [row] = _matrix(ran, QualificationSet(cases=(_registered(ran, absent),))).rows
+    assert (row.proven, row.registers_met) == (True, False)
+
+
+def test_a_register_key_naming_a_module_off_the_route_is_a_miss(ran: Ran) -> None:
+    """A module that produced no accepted artifact did not answer the question."""
+    elsewhere = replace(_T8_READY, module_id="CP-6")
+    [row] = _matrix(ran, QualificationSet(cases=(_registered(ran, elsewhere),))).rows
+    assert row.registers_met is False
+
+
+def test_register_keys_move_the_set_digest_and_are_order_independent(ran: Ran) -> None:
+    """The digest binds the new keys, and binds them as a set.
+
+    Two people writing the same register keys -- in another order, and naming a
+    row's cells in another order -- are holding the same set, so the digest a
+    reviewer signs must not move between them.
+    """
+    second = ExpectedRegister(
+        module_id="CP-L10",
+        register_id="TL10.1",
+        row_key=(("subject_identity", "Recorded source p1"),),
+        column="scope_status",
+        expected="Recorded source p1",
+    )
+    two_cells = replace(_T8_READY, row_key=(("Module", "CP-5"), ("Sequence", "1")))
+
+    plain = qualification_set_digest(QualificationSet(cases=(_one_case(ran),)))
+    keyed = qualification_set_digest(
+        QualificationSet(cases=(_registered(ran, two_cells, second),))
+    )
+    reordered = qualification_set_digest(
+        QualificationSet(
+            cases=(
+                _registered(
+                    ran,
+                    second,
+                    replace(two_cells, row_key=(("Sequence", "1"), ("Module", "CP-5"))),
+                ),
+            )
+        )
+    )
+
+    assert keyed != plain
+    assert keyed == reordered
+    for moved in (
+        replace(two_cells, expected="BLOCKED"),
+        replace(two_cells, column="Candidate command"),
+        replace(two_cells, register_id="T7"),
+        replace(two_cells, module_id="CP-5"),
+        replace(two_cells, row_key=(("Module", "CP-L10"), ("Sequence", "1"))),
+    ):
+        assert (
+            qualification_set_digest(
+                QualificationSet(cases=(_registered(ran, moved, second),))
+            )
+            != keyed
+        ), moved
+
+    # A case keyed only by a register measures something, so it is not the empty
+    # set `assert_measurable` refuses.
+    only = QualificationSet(
+        cases=(replace(_one_case(ran), expects=(), expects_register=(_T8_READY,)),)
+    )
+    assert len(qualification_set_digest(only)) == 64
+
+
+def test_two_identical_register_keys_for_one_case_are_refused(ran: Ran) -> None:
+    """One key, one question. Two would be scored twice and reported once."""
+    duplicate = _registered(ran, _T8_READY, _T8_READY)
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+        assert_unambiguous(QualificationSet(cases=(duplicate,)))

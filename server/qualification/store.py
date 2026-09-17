@@ -37,16 +37,24 @@ def _answered(row: MatrixRow) -> bool:
     """Whether this row is a result a reviewer could sign QUALIFIED over.
 
     Every key the case declared has to be answered, and a case may declare
-    three kinds: expected citations, an expected refusal, and an expected
-    forecast. `forecast_met` is `None` when no forecast was declared and a
-    bool when one was, so `is not False` is the test -- a case keyed only by a
+    five kinds: expected citations, an expected refusal, an expected forecast,
+    expected readiness, expected projections and expected register cells. Each
+    of the bool-or-None fields is `None` when its kind was not declared and a
+    bool when it was, so `is not False` is the test -- a case keyed only by a
     forecast (which `assert_measurable` allows) was otherwise signable with
     that forecast unmet, because nothing here read the field.
+
+    `registers_met` joined that list the day register keys existed, and for the
+    same reason: `assert_measurable` counts a register key as a declared
+    comparison, so a case keyed only by one would otherwise have been signable
+    with the cell wrong. A key the reviewer cannot see missed is a key that
+    measures nothing.
     """
     if (
         row.forecast_met is False
         or row.ready_met is False
         or row.projections_met is False
+        or row.registers_met is False
     ):
         return False
     if row.expected_refusal_met is not None:
@@ -374,6 +382,7 @@ def _matrix_document(performed: PerformedSet) -> dict[str, object] | None:
                 # CP-0 gated a module reads as the model citing nothing.
                 "ready_met": row.ready_met,
                 "projections_met": row.projections_met,
+                "registers_met": row.registers_met,
             }
             for row in matrix.rows
         ],

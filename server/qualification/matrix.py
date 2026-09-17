@@ -24,6 +24,12 @@ carries projections and citations and not typed figures. A key saying "net
 leverage is 4.2x" has nothing to compare against until the record carries the
 figure as a number, which is the known-gaps entry this module ships with.
 
+Beside the citations a key may also ask what a module *concluded*
+(`ExpectedProjection`, over the seven fields the host projects) and what it
+*wrote in a named register cell* (`ExpectedRegister`, read through the vendor's
+own register reader). None of the three is the conclusion's soundness, and a
+reviewer still reads the rows.
+
 **A canonical run is scored on its records** (`docs/DECISIONS.md` §42.4), and
 only on what the proof proved: the proof returns the citations it re-anchored
 under the pinned modules, and those are the run's -- nothing is read again, so
@@ -36,7 +42,8 @@ through it as committee clearance.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import unicodedata
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -51,6 +58,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
 from server.methodology.handoff import Projections
+from server.methodology.vendor import load_vendor_contract
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
@@ -143,6 +151,35 @@ PROJECTION_FIELDS = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
+class ExpectedRegister:
+    """One cell of one named register of one module's accepted handoff.
+
+    The third question an answer key can ask, and the first that reaches the
+    analysis itself. A citation key asks which quotes a module drew; a
+    projection key asks what its seven host-projected scalars said; this asks
+    what it *wrote in a named register cell* -- a liquidity bridge's figure, a
+    covenant term, a topic's materiality. Those live in the appendix registers
+    the vendor's own contract declares, and the vendor ships the reader
+    (`completeness_check.find_registers`), so the host locates the table by the
+    bundle's rules rather than by a parser of its own (invariant 4).
+
+    `row_key` names the row by its own cells -- `(("topic_id",
+    "LIQUIDITY_MATURITIES"),)` -- rather than by position, because row order is
+    the module's and a key that counted rows would measure the layout. Exactly
+    one row may match: zero and two are both misses, never a guess.
+
+    Authored from the documents, never from a run. A key taken from what a run
+    wrote measures the model against itself.
+    """
+
+    module_id: str
+    register_id: str
+    row_key: tuple[tuple[str, str], ...]
+    column: str
+    expected: str
+
+
+@dataclass(frozen=True, slots=True)
 class QualificationCase:
     """One case of the set: its inputs, its route, and its answer key.
 
@@ -182,6 +219,9 @@ class QualificationCase:
     # CP-CF is a host extension, so a forecast key must bind whether it was
     # present rather than silently qualifying the base route.
     model_extension: bool = False
+    # What the modules wrote in their registers. See `ExpectedRegister`: the key
+    # that can ask about a cell the host projects no scalar for.
+    expects_register: tuple[ExpectedRegister, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +249,7 @@ class MatrixRow:
     expected_refusal_met: bool | None
     ready_met: bool | None = None
     projections_met: bool | None = None
+    registers_met: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +337,22 @@ def _digested(case: QualificationCase) -> list[object]:
                 for expect in case.expects_projection
             )
         )
+    if case.expects_register:
+        entry.append(
+            sorted(
+                [
+                    expect.module_id,
+                    expect.register_id,
+                    # The row key is a set of cell conditions, not a sequence:
+                    # two authors naming the same row in either order name the
+                    # same row, and the digest has to agree with them.
+                    sorted([column, value] for column, value in expect.row_key),
+                    expect.column,
+                    expect.expected,
+                ]
+                for expect in case.expects_register
+            )
+        )
     return entry
 
 
@@ -377,6 +434,7 @@ def _row(
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
         projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
+        registers_met=_registers_met(conn, blobs, bundle, case=case, run_id=run_id),
     )
 
 
@@ -534,6 +592,141 @@ def _projections_met(
         except Refusal:
             return False
         if not all(_matches_projection(projections, expect) for expect in expects):
+            return False
+    return True
+
+
+def _normalised_cell(value: str) -> str:
+    """One register cell, column name or expected value, as a key compares them.
+
+    NFC first, because two spellings of the same character are the same cell to
+    a reader and a key authored in one must not miss a handoff written in the
+    other. Then every run of whitespace collapses to one space and the ends are
+    stripped: a Markdown table's cells are padded for alignment and a line may
+    be wrapped, neither of which is the module saying anything different.
+
+    **Case is preserved.** `MATERIAL` and `Material` are different values in
+    every vendor vocabulary that has one, and a comparison that folded case
+    would let a key pass over a cell the bundle's own validators would refuse.
+    """
+    return " ".join(unicodedata.normalize("NFC", value).split())
+
+
+def _cell(row: Mapping[str, str], column: str) -> str | None:
+    """One row's cell under `column`, normalised, or `None` if it is not there.
+
+    The column name is matched under the same rule as the cell, because a header
+    is padded and wrapped like any other cell. A register whose header names the
+    same column twice answers `None`: the host does not choose between them.
+    """
+    wanted = _normalised_cell(column)
+    found = [
+        value for name, value in row.items() if _normalised_cell(str(name)) == wanted
+    ]
+    if len(found) != 1:
+        return None
+    return _normalised_cell(str(found[0]))
+
+
+def _matches_register(
+    registers: Mapping[str, tuple[Sequence[str], Sequence[Mapping[str, str]]]],
+    expect: ExpectedRegister,
+) -> bool:
+    """One register expectation against what the vendor's reader found.
+
+    Exactly one row may meet the whole `row_key`. Zero is the register not
+    carrying the row the key asks about; two is the key not naming one row, and
+    picking the first would make the answer depend on the order the module wrote
+    its table in. Both are misses. An empty `row_key` selects nothing here --
+    the loader refuses one, and a Python caller's is not silently read as "any
+    row".
+    """
+    found = registers.get(expect.register_id)
+    if not expect.row_key or not isinstance(found, tuple) or len(found) != 2:
+        # Anything but the reader's `(header, rows)` is not this key's answer:
+        # the host reads the vendor's shape and invents no second one.
+        return False
+    _header, rows = found
+    matched = [
+        row
+        for row in rows
+        if isinstance(row, Mapping)
+        if all(
+            _cell(row, column) == _normalised_cell(value)
+            for column, value in expect.row_key
+        )
+    ]
+    if len(matched) != 1:
+        return False
+    return _cell(matched[0], expect.column) == _normalised_cell(expect.expected)
+
+
+def _registers_met(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+) -> bool | None:
+    """Whether every module wrote what the case says it should have written.
+
+    The Markdown is read through `accepted_handoff`, which binds the record to
+    it, and the registers are located by the vendor's own
+    `completeness_check.find_registers` from this bundle's verified bytes: the
+    host adds no table parser of its own (invariant 4). `None` when the case
+    names none; a module the case names that produced no single accepted
+    artifact, or an artifact that will not read, is a miss and not an exception
+    -- a row survives its own failure.
+    """
+    if not case.expects_register:
+        return None
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return False
+    accepted = _accepted_rows(conn, run_id)
+    find_registers = load_vendor_contract(bundle).completeness_check.find_registers
+    wanted: dict[str, list[ExpectedRegister]] = {}
+    for expect in case.expects_register:
+        wanted.setdefault(expect.module_id, []).append(expect)
+    for module_id, expects in wanted.items():
+        node = next((item for item in route.nodes if item.module_id == module_id), None)
+        if node is None:
+            return False
+        rows = conn.execute(
+            "SELECT a.artifact_sha256, a.record_sha256, a.attempt_id"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s AND t.route_node_id = %s",
+            (run_id, node.route_node_id),
+        ).fetchall()
+        if len(rows) != 1 or rows[0][1] is None:
+            return False
+        artifact_sha256, record_sha256, attempt_id = rows[0]
+        try:
+            markdown, _record = accepted_handoff(
+                conn,
+                blobs,
+                bundle,
+                route,
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=UUID(str(attempt_id)),
+                artifact_sha256=str(artifact_sha256),
+                record_sha256=str(record_sha256),
+                accepted=accepted,
+            )
+            registers = find_registers(
+                markdown.decode("utf-8"),
+                [expect.register_id for expect in expects],
+            )
+            if not isinstance(registers, dict):
+                return False
+            met = all(_matches_register(registers, expect) for expect in expects)
+        except (Refusal, ValueError, TypeError, UnicodeDecodeError):
+            # The reader's own faults included: an artifact the host cannot read
+            # is a case it cannot score, never a case that concluded correctly.
+            return False
+        if not met:
             return False
     return True
 
@@ -735,6 +928,7 @@ def assert_measurable(qualification: QualificationSet) -> None:
             and case.expected_refusal is None
             and not case.expects_ready
             and not case.expects_projection
+            and not case.expects_register
         )
         or (case.forecast is not None and not case.forecast.values)
         for case in qualification.cases
@@ -750,6 +944,7 @@ def assert_unambiguous(qualification: QualificationSet) -> None:
     labels = [case.label for case in qualification.cases]
     if len(set(labels)) != len(labels) or any(
         len(set(case.expects)) != len(case.expects)
+        or len(set(case.expects_register)) != len(case.expects_register)
         or (
             case.forecast is not None
             and len({value.name for value in case.forecast.values})

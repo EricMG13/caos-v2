@@ -55,6 +55,7 @@ from server.qualification.matrix import (
     ExpectedCitation,
     ExpectedForecast,
     ExpectedProjection,
+    ExpectedRegister,
     ForecastValue,
     QualificationCase,
     QualificationSet,
@@ -84,6 +85,7 @@ _OPTIONAL_CASE_KEYS = frozenset(
         "expected_refusal",
         "expects_ready",
         "expects_projection",
+        "expects_register",
         "model_extension",
     }
 )
@@ -115,6 +117,9 @@ _LABEL_LIMIT = 128
 # A manifest names cases; it never carries a document's bytes.
 MAX_MANIFEST_BYTES = 1024 * 1024
 _PROJECTION_KEYS = frozenset({"module_id", "field", "value"})
+_REGISTER_KEYS = frozenset(
+    {"module_id", "register_id", "row_key", "column", "expected"}
+)
 
 
 def load_qualification_set(root: Path) -> QualificationSet:
@@ -184,6 +189,7 @@ def _case(root: Path, entry: object) -> QualificationCase:
         expected_refusal=_refusal(fields.get("expected_refusal")),
         expects_ready=_ready(fields.get("expects_ready")),
         expects_projection=_projections(fields.get("expects_projection")),
+        expects_register=_registers(fields.get("expects_register")),
         model_extension=_extension(fields.get("model_extension")),
     )
 
@@ -287,6 +293,57 @@ def _projections(item: object) -> tuple[ExpectedProjection, ...]:
             )
         )
     if len({(e.module_id, e.field, e.value) for e in expects}) != len(expects):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(expects)
+
+
+def _registers(item: object) -> tuple[ExpectedRegister, ...]:
+    """The register cells the case expects, or a refusal.
+
+    Each row is `{module_id, register_id, row_key, column, expected}`, with
+    `row_key` an object of column to value -- the cells that name the one row,
+    which the digest then covers as a set. Every string is bounded here, because
+    this is where an authored key crosses into pinned state.
+
+    An empty `row_key` is refused with its own code: the file is well formed and
+    the key is not answerable, since "any row of the register" is not one row,
+    and a remedy that says "fix the manifest" would send the author looking at
+    the wrong thing.
+    """
+    if item is None:
+        return ()
+    if not isinstance(item, list) or not item:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    expects = []
+    for value in item:
+        if not isinstance(value, dict) or set(value) != _REGISTER_KEYS:
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        row_key = value["row_key"]
+        if not isinstance(row_key, dict):
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        if not row_key:
+            raise Refusal(RefusalCode.QUALIFICATION_KEY_AMBIGUOUS)
+        # Sorted on the bounded name, not the authored one, so two manifests
+        # naming the same cells carry the same key whatever the padding.
+        named = tuple(
+            sorted(
+                (_bounded(column), _bounded(cell)) for column, cell in row_key.items()
+            )
+        )
+        if len({column for column, _cell in named}) != len(named):
+            # Two spellings of one column name, bounded to the same string: the
+            # key names a row twice and may name it differently each time.
+            raise Refusal(RefusalCode.QUALIFICATION_KEY_AMBIGUOUS)
+        expects.append(
+            ExpectedRegister(
+                module_id=_bounded(value["module_id"]),
+                register_id=_bounded(value["register_id"]),
+                row_key=named,
+                column=_bounded(value["column"]),
+                expected=_bounded(value["expected"]),
+            )
+        )
+    if len(set(expects)) != len(expects):
         raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
     return tuple(expects)
 
