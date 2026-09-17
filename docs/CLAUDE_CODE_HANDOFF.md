@@ -59,7 +59,11 @@ Fable 5.1 at actual `xhigh`.
   being the four that collide with completion phase numbers.
 - **Two new ledger entries** under "Completion Phase 7": what the ledger gate
   cannot catch, and the demonstration Admin panel still claiming `/api/health`
-  is not served.
+  is not served. (The counts in this record are Task 7.1's own and did not
+  move with it: `fa6bbfe` struck a third entry, `budget_ledger`, and `885f416`
+  added a third, the status inventory's dated citations, so the phase ends at
+  three struck and three added. The Phase 7 gate and review record below
+  carries the closing state.)
 - **Six stale `feature-status.csv` rows** regenerated to name the tests that now
   prove them (ADM-01, API-09, INT-01, INT-02, ERR-16, ERR-17); 248 rows parse,
   only those six changed and only in two fields.
