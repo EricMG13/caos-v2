@@ -24,10 +24,8 @@ replay before the lookup is reached.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
@@ -35,6 +33,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from server.digest import canonical_digest
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
@@ -82,20 +81,15 @@ def request_digest(
     `[{filename_nfc, sha256}]` list in part order). Keys sorted, no spaces,
     UTF-8, and no NaN, so equal requests digest equally.
     """
-    canonical = json.dumps(
+    return canonical_digest(
         {
             "command": command,
             "case_id": None if case_id is None else str(case_id),
             "run_id": None if run_id is None else str(run_id),
             "gate": gate,
             "body": body,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
+        }
     )
-    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def find_receipt(

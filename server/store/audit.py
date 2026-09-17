@@ -84,7 +84,7 @@ def governed_write(
         previous, seq = _lock_head(conn, action.case_id)
         _require_standing(conn, action)
         write(conn)
-        payload_sha256 = _digest_of(action.payload)
+        payload_sha256 = digest_of(action.payload)
         entry_sha256 = _link(action, seq, previous, payload_sha256)
         conn.execute(
             "INSERT INTO audit_events (case_id, seq, actor_id, action, payload_sha256,"
@@ -211,10 +211,12 @@ def _lock_head(conn: StoreConnection, case_id: UUID) -> tuple[str, int]:
     return str(row[0]), int(row[1]) + 1
 
 
-def _digest_of(payload: Mapping[str, Any]) -> str:
+def digest_of(payload: Mapping[str, Any]) -> str:
     """The payload's digest, never the payload. An audit event records that a
     decision was made and what it bound to -- not the document behind it."""
-    canonical = json.dumps(dict(payload), sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        dict(payload), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 

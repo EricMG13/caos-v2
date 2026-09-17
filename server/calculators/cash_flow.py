@@ -7,7 +7,6 @@ The dictionary API is serialized as sorted, compact JSON by forecast_bytes.
 
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter
 from collections.abc import Mapping
@@ -24,6 +23,7 @@ from decimal import (
 from typing import Any
 
 from server.boundary_text import BoundaryText
+from server.digest import canonical_json
 from server.refusals import Refusal, RefusalCode
 
 MAX_FORECAST_PERIODS = 40
@@ -113,13 +113,7 @@ def cash_flow_forecast(request: Mapping[str, Any]) -> dict[str, Any]:
 
 def forecast_bytes(request: Mapping[str, Any]) -> bytes:
     """Canonical UTF-8 forecast output for the host calculator boundary."""
-    return json.dumps(
-        cash_flow_forecast(request),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode()
+    return canonical_json(cash_flow_forecast(request)).encode()
 
 
 def _object(

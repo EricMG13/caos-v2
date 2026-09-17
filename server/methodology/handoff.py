@@ -27,6 +27,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.digest import canonical_json
 from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.vendor import VendorContract
 from server.refusals import Refusal, RefusalCode
@@ -415,7 +416,7 @@ def _no_constant(_: str) -> NoReturn:
     raise ValueError  # NaN and the infinities are not JSON
 
 
-def _strict_json(text: str) -> object:
+def strict_json(text: str) -> object:
     return json.loads(text, object_pairs_hook=_unique, parse_constant=_no_constant)
 
 
@@ -443,7 +444,7 @@ def _requested(item: object) -> Citation:
 def _transport(body: str) -> tuple[bytes, str, tuple[Citation, ...]]:
     if len(body) > MAX_TRANSPORT_CHARS:
         raise ValueError
-    wire = _closed(_strict_json(body), WIRE_KEYS)
+    wire = _closed(strict_json(body), WIRE_KEYS)
     text, citations = wire["canonical_markdown"], wire["citations"]
     if not isinstance(text, str) or not isinstance(citations, list) or not citations:
         raise ValueError
@@ -534,13 +535,7 @@ def record_bytes(record: CanonicalRecord) -> bytes:
     for citation in document["citations"]:
         for box in citation["bboxes"]:
             box.update({key: float(box[key]) for key in ("x0", "y0", "x1", "y1")})
-    return json.dumps(
-        document,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    return canonical_json(document).encode("utf-8")
 
 
 def _exact[T](kind: type[T]) -> Callable[[object], T]:
@@ -584,7 +579,7 @@ _rect = _each(
 
 
 def _decoded_record(data: bytes) -> CanonicalRecord:
-    document = _strict_json(data.decode("utf-8"))
+    document = strict_json(data.decode("utf-8"))
     if not isinstance(document, dict) or document.pop("format", None) != RECORD_FORMAT:
         raise ValueError
     citations = _each(

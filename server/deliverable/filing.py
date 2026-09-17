@@ -87,7 +87,7 @@ def freeze(  # noqa: PLR0913 -- exact revision and authority for its re-proof
         _, digest = _revision(unit, case_id, revision_id)
         if _frozen(unit, case_id, revision_id) is not None:
             raise Refusal(RefusalCode.DELIVERABLE_ALREADY_FROZEN)
-        signatures = _signatures(unit, case_id, revision_id)
+        signatures = revision_signatures(unit, case_id, revision_id)
         if not signatures:
             raise Refusal(RefusalCode.DELIVERABLE_NOT_SIGNED)
         if signatures[0][1] != digest:
@@ -134,7 +134,7 @@ def file_deliverable(
         frozen_by, frozen_digest = frozen
         if frozen_digest != digest:
             raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
-        signatures = _signatures(unit, case_id, revision_id)
+        signatures = revision_signatures(unit, case_id, revision_id)
         if not signatures or any(
             signed_digest != digest for _, signed_digest in signatures
         ):
@@ -192,10 +192,11 @@ def receipt_bytes(receipt: Receipt) -> bytes:
         {key: str(value) for key, value in asdict(receipt).items()},
         sort_keys=True,
         separators=(",", ":"),
+        allow_nan=False,
     ).encode("utf-8")
 
 
-def _signatures(
+def revision_signatures(
     conn: StoreConnection, case_id: UUID, revision_id: UUID
 ) -> list[tuple[UUID, str]]:
     rows = conn.execute(

@@ -33,7 +33,9 @@ class Evidence:
     @property
     def sha256(self) -> str:
         return sha256(
-            json.dumps(asdict(self), sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                asdict(self), sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
         ).hexdigest()
 
 
@@ -160,7 +162,9 @@ def record_performed(conn: StoreConnection, performed: PerformedEvidence) -> str
             evidence.provider,
             evidence.model,
             performed.complete,
-            json.dumps(document, sort_keys=True, separators=(",", ":")),
+            json.dumps(
+                document, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ),
         ),
     )
     row = conn.execute(
@@ -395,7 +399,9 @@ def _matrix_document(performed: PerformedSet) -> dict[str, object] | None:
 
 def _digest(document: dict[str, object]) -> str:
     return sha256(
-        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            document, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
     ).hexdigest()
 
 
