@@ -48,7 +48,7 @@ from server.methodology.invocation import named_objects
 from server.pricing import ModelPrice, priced_request, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.budget import remaining, reserve
+from server.store.budget import ceiling_of, reserve
 from server.store.gates import execution_input
 
 # `artifact_digests` is re-exported: it now lives in the store (no import cycle).
@@ -179,12 +179,20 @@ def _affordable(conn: StoreConnection, run_id: UUID, price: ModelPrice) -> None:
     Since Task 8.2 each attempt reserves only what its own request costs, so a
     ceiling below one call's worst case is no longer met by the first
     reservation -- a run could start spending on a route it could never afford
-    a single full-sized call of. This is where invariant 8 keeps that property:
-    checked once, before any attempt row, reservation or call exists.
+    a single full-sized call of. This is where invariant 8 keeps that property.
+
+    It is the run's own ceiling that is read, not what is left of it. Reading
+    `remaining` made the check tighten as the run spent, so a run that finished
+    when it ran continuously was refused `BUDGET_CEILING_REACHED` on resume, one
+    node short, and every retry hit the same refusal -- "resume from accepted
+    attempts, never restart" (invariant 6) broken by a guard for invariant 8.
+    What refuses an operation the run can no longer pay for is `reserve`, under
+    the run row lock, which is where that decision belongs. Found by the Task 8.2
+    acceptance review, which reproduced it on the LITE fixture.
     """
     with execution_reads(conn):
-        left = remaining(conn, run_id)
-    if left < worst_case(price):
+        ceiling = ceiling_of(conn, run_id)
+    if ceiling < worst_case(price):
         raise Refusal(RefusalCode.BUDGET_CEILING_REACHED)
 
 

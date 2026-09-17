@@ -178,6 +178,30 @@ def remaining(conn: StoreConnection, run_id: UUID) -> Decimal:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
 
 
+def ceiling_of(conn: StoreConnection, run_id: UUID) -> Decimal:
+    """The run's own ceiling, unreduced by what it has spent.
+
+    `remaining` answers "may this next operation be paid for", which is what
+    invariant 8 refuses on. This answers a different question -- "could this run
+    ever have afforded one full-sized call" -- and it is a property of the run
+    rather than of its progress, so it must not shrink as the run spends. Since
+    Task 8.2 a reservation is the priced request rather than a worst case, and a
+    run can legitimately spend to within one worst case of its ceiling while
+    still affording its last node; reading `remaining` here refused exactly that
+    run on resume, one node short of finishing.
+    """
+    try:
+        row = conn.execute(
+            "SELECT budget_ceiling FROM runs WHERE run_id = %s", (run_id,)
+        ).fetchone()
+    except psycopg.Error:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    ceiling: Decimal = row[0]
+    return ceiling
+
+
 def reserved_for(conn: StoreConnection, attempt_id: UUID) -> Reservation | None:
     """What this attempt set aside and under which price, or None if it never
     reserved. A legacy row (`0024_reservation_price`) reads back as the

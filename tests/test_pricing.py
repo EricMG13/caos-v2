@@ -15,6 +15,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
+from conftest import reserve_at
 from test_runtime import _approved_run, blobs, bundle, route
 
 from server.blobs import BlobStore
@@ -24,8 +25,10 @@ from server.methodology.bundle import Bundle
 from server.pricing import ModelPrice, priced_request, worst_case
 from server.provider import MAX_COMPLETION_TOKENS, MAX_REQUEST_BYTES
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
-from server.store.budget import reserved_for
+from server.store import RunStatus, StoreConnection
+from server.store.budget import ceiling_of, remaining, reserved_for
+from server.store.outcomes import execution_reads
+from server.store.runs import run_status, start_attempt
 
 __all__ = ["blobs", "bundle", "route"]
 
@@ -195,3 +198,67 @@ def test_a_reservation_is_priced_on_the_request_not_on_the_byte_ceiling(
     assert all(
         row is not None and Decimal(0) < row.amount < worst_case(PRICE) for row in taken
     )
+
+
+def test_a_run_that_spent_past_one_worst_case_still_resumes(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    blobs: BlobStore,
+    bundle: Bundle,
+) -> None:
+    """The admission check reads the run's ceiling, not what is left of it.
+
+    Before Task 8.2 every reservation was a worst case, so "remaining below one
+    worst case" and "ceiling below one worst case" refused the same runs. Priced
+    reservations separate them: a run may legitimately spend to within one worst
+    case of its ceiling and still afford its remaining nodes. Reading the
+    remainder here refused exactly that run the next time `run_route` was
+    entered -- which is every resume, and every retry after one -- so a run that
+    finished when it ran continuously could not finish after a crash, with money
+    left and nothing wrong. Invariant 6 is "resume from accepted attempts, never
+    restart", and a guard for invariant 8 was breaking it.
+
+    What refuses an operation the run can no longer pay for is `reserve`, under
+    the run row lock. This refuses a run that could never have afforded one
+    full-sized call, which is a property of the ceiling and does not move.
+
+    Found by the Task 8.2 acceptance review, which reproduced it on the LITE
+    fixture; this is the same failure at the guard rather than through a crash.
+    """
+    conn, case_id = case
+    # A price whose worst case is dominated by the request rather than by the
+    # completion cap, so that a priced request is a small fraction of a worst
+    # case -- which is the gap Task 8.2 stopped paying for, and the only shape in
+    # which "spent past one worst case, still affords its nodes" can exist. Under
+    # `PRICE` the output cap alone is over half a worst case, so three nodes cost
+    # more than one and the situation cannot arise.
+    price = replace(PRICE, output_per_token=Decimal("0.0000000001"))
+    run = _approved_run(
+        conn, case_id, route, bundle, blobs, ceiling=worst_case(price) * 2
+    )
+    attempt = start_attempt(conn, run.run_id, route.nodes[0].route_node_id)
+    # Spent past the point where one worst case is left, as a priced run can be.
+    reserve_at(conn, attempt, worst_case(price) + Decimal("0.01"))
+    conn.commit()
+    with execution_reads(conn):
+        left = remaining(conn, run.run_id)
+        # The two readings this fix separates: what the run may still spend, and
+        # what it was ever allowed to spend. `ceiling_of` is the second and does
+        # not move as the run pays for its nodes.
+        assert ceiling_of(conn, run.run_id) == worst_case(price) * 2
+    assert left < worst_case(price), "the state this refused on"
+    assert left > worst_case(price) / 2, "and the money is genuinely there"
+
+    # The run is entered again, as a resume or a retry enters it.
+    run_route(
+        conn,
+        blobs,
+        run_id=run.run_id,
+        route=route,
+        execution=Execution(run.provider(), price, bundle),
+    )
+
+    # The point is that admission did not refuse. The run then finishes, which
+    # says the money was there all along: `reserve` priced each node and none
+    # of them needed a worst case.
+    assert run_status(conn, run.run_id) is RunStatus.COMPLETE

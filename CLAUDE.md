@@ -179,6 +179,34 @@ test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
 define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Completion Phase 10.**
+
+- **A gate record stored before `blockers` existed refuses at every reader if its
+  T8 named a condition.** Task 10.3 added `Projections.blockers` and kept the
+  record format still: `record_bytes` omits the field when it has no rows,
+  `_decoded_record` reads absence back as the empty tuple, an explicit
+  `blockers: []` is refused as a second spelling, and
+  `record_bytes(decoded) == data` holds for every record written before it
+  (`tests/test_handoff_record.py::test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty`).
+  What that does not save is the record whose T8 *does* carry a CONDITIONAL or
+  BLOCKED row. Every reader re-validates the Markdown and compares whole
+  projections -- `canonical.py`, `qualification/proof.py`,
+  `deliverable/canonical.py` -- so the rows now derived are rows the stored
+  record lacks, and the comparison refuses `ARTIFACT_RECORD_MISMATCH`. The class
+  is exactly the runs this feature exists for: a readiness-BLOCKED run's
+  accepted CP-0, stored before this change. Its frontier pass, its run document,
+  its proof and its deliverable all refuse. §72 and the commit that landed it
+  both said the stored records were untouched, which is true of their bytes and
+  false of their readers; the Task 10.3 acceptance review measured the
+  difference. Nothing is repaired in place, because a projection is re-derived
+  and never stored, and rewriting an accepted artifact to match a new derivation
+  is what invariant 3 forbids. *Discharge:* a new run. The pins a successor
+  takes are its own, so a re-run CP-0 writes a record carrying the rows, and
+  `runs.supersedes_run_id` is what says which run it answers. *Upgrade:* a
+  record-format version, the day a stored record must survive a projection the
+  host learned to read after it was written -- the same shape as §45.4's v1 to
+  v2, which had no backfill either.
+
 **Completion Phase 7.**
 
 - **The ledger's own gate reads citations and conventions, not claims.**
@@ -1359,7 +1387,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   still prices it from a flat estimate. *Upgrade:* a user-confirmed dated price
   for the configured live model. It is the owner's to give, and until it exists
   every priced reservation is exact arithmetic over a number nobody has
-  confirmed.
+  confirmed. **And the qualification driver does not yet see the saving.**
+  `server/qualification/harness.py`'s `_affordable` still refuses
+  `QUALIFICATION_SET_OVER_CEILING` when `worst_case(price) x len(route.nodes)`
+  exceeds a run's ceiling, so at Terra's rates three LITE nodes are refused
+  against the $5 default before any case is prepared, exactly as before this
+  task -- `scripts/qualify.py` is unchanged in what it will admit even though
+  `run_route` now finishes such a run. The sentence recording that was deleted
+  with the old entry and is restored here, because a limitation that leaves the
+  tree only in a rewrite is the failure this ledger's own gate exists to catch;
+  the Task 8.2 acceptance review found it. *Upgrade:* price the harness's floor
+  on measured requests rather than on a worst case, or derive per-run ceilings
+  from the set's -- which is what the Rebuild Phase 10 entry "a qualification run
+  costs real money" already owes.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the

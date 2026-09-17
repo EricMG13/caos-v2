@@ -541,8 +541,13 @@ def _edges_among(profile: Mapping[str, Any], modules: set[str]) -> tuple[Edge, .
     pin would take the frozen predicate for an enforced condition. The vendored
     catalog declares none (`tests/test_bundle_pin.py::test_the_vendored_catalog_
     carries_no_edge_this_engine_cannot_evaluate`), so this refuses at the first
-    upstream build that introduces one, which is also the first day a real
-    predicate exists for a grammar to parse. `CONDITIONAL` stays in `BLOCKING`
+    upstream build that puts one **on a resolved route**: the membership filter
+    above runs first, so an edge whose source or target is outside the resolved
+    node set is skipped like any other out-of-route edge, and a build carrying
+    one off every pathway refuses nothing. That is the right scope -- an edge no
+    pin carries misleads no reader of a pin -- and it is the scope the ledger
+    entry states. The docstring said "introduces one" until the Task 10.2
+    acceptance review read the two against the code. `CONDITIONAL` stays in `BLOCKING`
     and in the bundle's vocabulary (CONTEXT.md): it remains a CP-0 *verdict*,
     and only an *edge* of that type is refused.
     """
