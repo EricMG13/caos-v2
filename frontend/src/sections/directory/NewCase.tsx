@@ -107,6 +107,15 @@ export function NewCase({
       ) : (
         <CommandOutcome result={result} success="" />
       )}
+      {import.meta.env.MODE === "demo" ? (
+        <p className="note" data-demo-command-note>
+          <b>Available means the command would answer, not that it will succeed.</b> This
+          demonstration serves fixtures and reads only: its API refuses every command with
+          READ_ONLY_DEMO, a code the v1 wire does not declare, so the answer this control shows is
+          RESPONSE_INVALID. That is the workspace refusing an undeclared answer, which is what it
+          would do to any server that sent one.
+        </p>
+      ) : null}
       {refreshFailed ? (
         <p className="note warn" role="alert" data-new-case-refresh-failed>
           The case was created, but the register could not be refreshed. Reload to see it.

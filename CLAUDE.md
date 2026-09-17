@@ -475,16 +475,37 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   receipts stay; their replay is answered 404 by the visibility check before
   the lookup. *Upgrade:* a dated retention decision and a governed sweep, the
   day the table's size is measured.
-- **The demonstration workbench shows no available command.** The v1
-  fixtures carry `"actions": []`, so every command control in `make
-  dev-ui-demo` renders refused `ACTION_UNPLACED`, and the fixture middleware
-  answers any non-GET under `/api/` 405 `READ_ONLY_DEMO`. `ACTION_UNPLACED`'s
-  clearance (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still
-  says the API serves only the run document and its event stream, which has
-  not been true since §50. Availability is proven against the real API
+- **The demonstration workbench offers one available command, and its answer
+  is one the wire refuses.** ~~The v1 fixtures carry `"actions": []`, so every
+  command control in `make dev-ui-demo` renders refused `ACTION_UNPLACED`~~ --
+  `frontend/fixtures/directory.json` now carries `CREATE_CASE` available, and
+  `test_the_demonstration_directory_offers_one_available_command` drives the
+  published fixture. ~~`ACTION_UNPLACED`'s clearance
+  (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still says the
+  API serves only the run document and its event stream, which has not been
+  true since §50.~~ Closed by Task 12.2: `READ_ONLY_API` is deleted, the Ask
+  rail carries its own reason, and the clearance now names what is actually
+  missing -- a section whose read judges the action and names it in
+  `chrome.actions` -- held by
+  `an action nothing performs is refused with a reason that is true today`.
+  What stays open is the other half and a consequence of closing the first.
+  The other six enabled sections' fixtures still carry `"actions": []`, so
+  Upload's withdrawal and Report's four filing controls are demonstrated
+  refused and never available; availability against a real answer is still
+  proven against the real API
   (`test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code`)
-  and in unit tests, not in the workbench. *Upgrade:* correct the clearance
-  text, and fixture actions when a workbench spec needs an available control.
+  and in unit tests. And the fixture middleware answers any non-GET under
+  `/api/` 405 `READ_ONLY_DEMO`, a code `frontend/src/wire/v1/documents.ts`'s
+  closed `RefusalCode` does not declare, so pressing the one available control
+  renders `RESPONSE_INVALID` rather than the demo's own word. That is the wire
+  strictness rule working -- an undeclared answer is refused whoever sent it --
+  but it is not what a reader expects to be shown, so `NewCase` states it in
+  demo mode before the press rather than after. *Upgrade:* a demonstration API
+  that answers a declared refusal, which means either a `READ_ONLY_DEMO` the
+  server also knows (a wire change, and a code no production path would ever
+  send) or fixture actions refused with a real code; and fixture actions for
+  the remaining sections when a workbench spec needs an available control
+  there.
 
 - **An evidence page holds a read transaction while its frame is extracted.**
   `read_evidence_page` reads standing and the page's lines, then
