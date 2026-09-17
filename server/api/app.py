@@ -45,6 +45,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from server.api import health
 from server.api.commands import cases as cases_command
 from server.api.commands import execution as execution_command
+from server.api.commands import members as members_command
 from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
@@ -362,6 +363,7 @@ for _commands in (
     runs_command,
     execution_command,
     qualification_command,
+    members_command,
 ):
     app.include_router(_commands.router)
 

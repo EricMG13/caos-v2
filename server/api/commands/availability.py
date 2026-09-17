@@ -45,8 +45,21 @@ def directory_actions(role: GlobalRole) -> list[ActionView]:
     return [_view(_A.CREATE_CASE, [(role is GlobalRole.READER, _C.NOT_AUTHORISED)])]
 
 
-def upload_actions(role: GlobalRole, standing: Standing) -> list[ActionView]:
-    return [_view(_A.ADMIT_SOURCES, _floor(role, standing, Standing.WRITER))]
+def upload_actions(
+    role: GlobalRole, standing: Standing, live_sources: int
+) -> list[ActionView]:
+    """Admission, and the withdrawal that is invariant 1's second half.
+
+    A case with nothing live has nothing to withdraw; which source is named is
+    the command's to refuse, with the same code, from the path."""
+    writer = _floor(role, standing, Standing.WRITER)
+    return [
+        _view(_A.ADMIT_SOURCES, writer),
+        _view(
+            _A.WITHDRAW_SOURCE,
+            [*writer, (live_sources == 0, _C.EVIDENCE_NOT_AVAILABLE)],
+        ),
+    ]
 
 
 def run_actions(

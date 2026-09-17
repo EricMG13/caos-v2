@@ -32,6 +32,9 @@ from server.api.identity import (
     GlobalRole,
     actor_from_headers,
 )
+from server.blobs import BlobStore
+from server.boundary_text import BoundaryText
+from server.evidence.ingest import Document, admit_pack
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store import commands as store_commands
@@ -237,17 +240,26 @@ def test_the_switch_is_read_at_the_request_not_at_import(
 
 # Task 4.2's actor matrix, every command endpoint in one table. `None` is the
 # brief's "n/a": create case has no case to hold standing on.
-ACTORS = "anonymous nonmember reader writer approver revoked admin reader_writer"
+ACTORS = (
+    "anonymous nonmember reader writer approver revoked admin reader_writer case_admin"
+)
+# `case_admin` arrived with Task 12.1: membership is the first command whose
+# floor is ADMIN, so without it the matrix would have had no actor that could
+# succeed at one, and a table where every cell refuses proves only the refusal.
 MATRIX: dict[str, tuple[int | None, ...]] = {
-    "create-case": (401, 201, None, None, None, None, 201, 403),
-    "admit": (401, 404, 403, 201, 201, 404, 404, 403),
-    "runs": (401, 404, 403, 201, 201, 404, 404, 403),
-    "input": (401, 404, 403, 200, 200, 404, 404, 403),
-    "preview": (401, 404, 200, 200, 200, 404, 404, 200),
-    "approval": (401, 404, 403, 403, 200, 404, 404, 403),
-    "start": (401, 404, 403, 202, 202, 404, 404, 403),
-    "retry": (401, 404, 403, 202, 202, 404, 404, 403),
-    "cancel": (401, 404, 403, 202, 202, 404, 404, 403),
+    "create-case": (401, 201, None, None, None, None, 201, 403, None),
+    "admit": (401, 404, 403, 201, 201, 404, 404, 403, 201),
+    "runs": (401, 404, 403, 201, 201, 404, 404, 403, 201),
+    "input": (401, 404, 403, 200, 200, 404, 404, 403, 200),
+    "preview": (401, 404, 200, 200, 200, 404, 404, 200, 200),
+    "approval": (401, 404, 403, 403, 200, 404, 404, 403, 200),
+    "start": (401, 404, 403, 202, 202, 404, 404, 403, 202),
+    "retry": (401, 404, 403, 202, 202, 404, 404, 403, 202),
+    "cancel": (401, 404, 403, 202, 202, 404, 404, 403, 202),
+    # Task 12.1. Membership takes the ADMIN floor; withdrawal takes WRITER's.
+    "members": (401, 404, 403, 403, 403, 404, 404, 403, 201),
+    "revocation": (401, 404, 403, 403, 403, 404, 404, 403, 200),
+    "withdrawal": (401, 404, 403, 200, 200, 404, 404, 403, 200),
 }
 SUBJECT = {
     "issuer_id": "EXAMPLE",
@@ -271,6 +283,7 @@ def _actors(conn: StoreConnection, case_id: UUID) -> list[tuple[UUID | None, str
         (revoked, "ANALYST"),
         (uuid4(), "ADMIN"),
         (member(conn, case_id, Standing.WRITER), "READER"),
+        (member(conn, case_id, Standing.ADMIN), "ANALYST"),
     ]
 
 
@@ -279,6 +292,23 @@ def _target(
 ) -> tuple[str, dict[str, object] | None]:
     """A fresh path and JSON body on which `endpoint` succeeds for its floor."""
     runs = f"/api/v1/cases/{case_id}/runs"
+    if endpoint == "members":
+        return f"/api/v1/cases/{case_id}/members", {
+            "user_id": str(uuid4()),
+            "standing": "READER",
+        }
+    if endpoint == "revocation":
+        target = member(conn, case_id, Standing.READER)
+        return f"/api/v1/cases/{case_id}/members/{target}/revocation", {}
+    if endpoint == "withdrawal":
+        [source] = admit_pack(
+            conn,
+            BlobStore(tmp_path / "blobs"),
+            case_id=case_id,
+            documents=[Document(BoundaryText.of("a.txt"), b"Supplied report text.\n")],
+        )
+        conn.commit()
+        return f"/api/v1/cases/{case_id}/sources/{source}/withdrawal", {}
     if endpoint in ("start", "retry", "cancel"):
         run_id, fingerprint = _ready(conn, case_id, tmp_path, endpoint)
         body: dict[str, object] = (

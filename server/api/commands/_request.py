@@ -128,6 +128,11 @@ def require_case_approver(actor: Caller, case_id: CasePath, conn: Store) -> Stan
     return case_standing(conn, actor, case_id, Standing.APPROVER, write=True)
 
 
+def require_case_admin(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
+    """ADMIN standing: the floor for changing who else may act on the case."""
+    return case_standing(conn, actor, case_id, Standing.ADMIN, write=True)
+
+
 def command_response(result: CommandResult, model: type[BaseModel]) -> Response:
     """The receipt, validated against its model whether fresh or replayed."""
     body = model.model_validate(result.receipt).model_dump(mode="json")
