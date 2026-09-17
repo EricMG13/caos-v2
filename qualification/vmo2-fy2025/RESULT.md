@@ -370,3 +370,176 @@ the record, and a key picked from it would be measuring the model against
 itself.
 
 No run has been performed against this set.
+
+## DeepSeek re-tried against the fixed reader — 2026-09-16
+
+The v2 conclusion that DeepSeek V4 Pro is not qualified rested on three billed
+CP-0 attempts recorded as "returned N citations; none of their exact quotes
+appeared in the Markdown body", which reads like the reader defect fixed at
+`7a12c6d`. The model was re-tried on that suspicion.
+
+**That attribution was too broad, and is corrected below.** The surviving
+record does not support it for at least two of the three: attempt 2 refused
+`CITATION_NOT_DELIVERED` over a mutated source UUID, which `parse_response`
+raises *before* the quote check, and attempt 3 emitted `## Analysis` twice,
+which the vendor headings rule refuses whatever the quoting. Only attempt 1 is
+consistent with the reader defect, and its generation id places it inside the
+window between the candidate rule landing and the "do not enumerate candidates"
+hardening — consistent with a model listing every eligible block. The runs are
+gone, so this cannot be settled; what can be said is that the reader defect
+explains at most one of the three, not all three.
+
+- Set: `ae70850d27d1860155ec772ac27e95d7747dd2e9ab944f87034e0215dde407d8`
+  (the re-cast key; CP-0 carries no expectation)
+- Profile/model: `openrouter/ionstream/default/65536` /
+  `deepseek/deepseek-v4-pro-0813`, the same profile the v2 run used
+- Price: `$0.0000009834` input, `$0.0000029502` output per token, dated
+  2026-09-16 from OpenRouter's published list; reservation `$1.2245139456` per
+  call
+- Run `ff71c457-70b8-44bd-b6ef-2099927b8936`, total `$0.33371808`
+
+A first attempt, run `9bde894f-47fd-4424-bf8b-7713bef2d406`, refused
+`PROVIDER_UNAVAILABLE` with **no charge and no generation**: Ionstream's shared
+pool returned 429. Indeterminate rather than failed, so the attempt kept its
+reservation and nothing was billed. Three probes at 8, 4,096 and 65,536
+completion tokens all returned 200 minutes later, so it was transient and not
+the host's fixed token ceiling.
+
+### Result
+
+| Module | Charge | Result |
+|---|---:|---|
+| CP-0 | `$0.15272064` | **accepted**, one artifact, one anchored citation |
+| CP-L10 | `$0.18099744` | `HANDOFF_MALFORMED`; the run stopped `RUNNING` |
+
+**CP-0 now passes.** Under v2 it failed three times in a row. That is the
+reader fix and the v3 provenance context together, and it means the v2 record
+overstated what was wrong with this model.
+
+**CP-L10 fails on its own merits.** The refusal is not the quotation rule —
+`parse_response` accepts the answer, and every cited quote is in the body. The
+bundle's own validator returns the error:
+
+    qa_status Restricted caps confidence_score at 59
+
+The module declared `qa_status: Restricted` and then scored itself above the
+cap the vendor contract sets for that status. Its register headings are also
+paraphrased rather than reproduced — `TL20.1 — Source and Scope Guard` for
+`Source and Scope Gate`, `TL40.3 —  decision screen`, `TL23.4 — Gaps` — where
+the Terra runs reproduced them exactly.
+
+**The verdict does not change: DeepSeek V4 Pro is not qualified.** The reason
+does. This refusal is the model's, and precisely so: the cap lives in the same
+vendor script that computes the score
+(`cp-l10-financial-change-screen/scripts/confidence_score.py`), which applies
+`min(score, 59)` whenever a MATERIAL finding exists. The module listed three
+MATERIAL rows and scored itself 69. Terra satisfied the same rule four times
+out of four, so the corpus does not force the contradiction — it forces
+`Restricted`, which is a different thing.
+
+Two corrections to what was said above about this run:
+
+- The paraphrased register headings are **not** why it was refused. The
+  vendor's `completeness_check` finds registers by ID and returns zero
+  violations on this handoff; `validate_text` returns the cap error alone.
+- DeepSeek's **accepted** CP-0 broke the same kind of rule in the other
+  direction — `qa_status: Passed`, `committee_status: Committee Ready`,
+  `confidence_score: 93`, over a self-declared `SOURCE_GAP | MATERIAL` row.
+  The vendor validator checks only `Restricted → ≤59` and `Blocked → ≤39`, not
+  "MATERIAL implies Restricted", and `completeness_check.load_contract` reads
+  only cell disqualifiers, never the frontmatter ones. So the host accepted a
+  CP-0 that contradicts the rule that later refused the same model's CP-L10.
+  Ledgered in `CLAUDE.md`.
+
+Retained: database `caos_qualify_cf7b0d99f8474825b7ce7264bb385e43` (the 429),
+the second run's database and blob root are named in its capture beside this
+file.
+
+### Operator decision — 2026-09-16
+
+`deepseek/deepseek-v4-pro-0813` is **unapproved for use**. That is the
+operator's decision and it agrees with the evidence above: its only run against
+this set stopped mid-route on a contract violation the model owns.
+
+It is recorded here as a decision, not as a verdict. No `qualification_verdicts`
+row exists for this model or any other, and the host has no representation of
+"unapproved" — a model is simply not configured. The distinction matters: a
+verdict is digest-bound to performed evidence and re-checkable; this is a
+person's choice about what to configure.
+
+## Terra against the corrected key — 2026-09-16, and what it exposed
+
+Run `62698a60-c777-4153-9d21-d2dae189cf6c`, set
+`746ee12d82703d9c04399708be8f1ef4996023cd9cb4dfa844a7687ed3428cc6` (the
+borrowing key re-authored to the line that carries the fact). `$0.5161795`.
+
+CP-0 accepted (`$0.2511`, `Restricted`, 59, `READY_WITH_LIMITATIONS`). CP-L10
+accepted (`$0.2650795`, `Restricted`, 59, `Requires More Work`). Two artifacts,
+four citations, all anchored. The run then ended **BLOCKED** and CP-5 was never
+called, so all three keys are missed and `complete` is false.
+
+### Why it blocked
+
+**This section was wrong when first written, and is corrected here.** It said
+CP-0 judged CP-5 unready for want of audited statements and executed debt
+documents. That is not what CP-0 said. Its T8 row reads:
+
+    | 2 | CP-5 | Run CP-5 | DO NOT RUN
+    | …releases… | VMO2_CP-0_20260915.md plus completed CP-L10 handoff
+    | CONDITIONAL
+    | CP-L10 must first produce the selected-route analytical handoff for
+      traceability review. |
+
+The blocker is **sequencing**, not evidence. The gaps naming audited statements
+and executed debt documents list CP-5 among the modules they affect, and the
+first reading mistook that for the verdict's ground.
+
+That distinction is the whole finding, because CP-0's own contract forbids the
+verdict it gave. `cp-0-source-readiness/SKILL.md` line 359:
+
+> Source readiness does not assert that upstream analytical handoffs already
+> exist: navigation checks those separately.
+
+Sequencing is the dependency plan's job — the catalog's edges, plus the rule
+that a soft edge blocks while CP-0 has marked its source ready. CP-0 encoded
+"CP-L10 has not run yet" as a source-readiness verdict, which is exactly what
+that line tells it not to do. The host then honoured a structurally conformant
+artifact, as invariant 4 requires of it.
+
+So: not the corpus, not the host's reading, and not the `CP-L10 → CP-5`
+ADVISORY edge, which behaved as designed — once CP-0 marked CP-L10 ready that
+edge is blocking, which is how CP-5 is sequenced after the module it traces.
+
+### What it actually exposes
+
+Not a corpus that fails to support CP-5 — CP-5 needs no credit evidence; it
+traces the analysts' findings. What varies between runs is whether CP-0 keeps
+sequencing out of its readiness column. Run `e0e101b5…` did and the route
+completed; run `62698a60…` did not and the route could not.
+
+Behind the model's mistake is a gap in the bundle: `CONDITIONAL` is defined
+only as "emit `DO NOT RUN`". Nothing says the condition must be a *source*
+condition, and nothing discharges it within a run — the vendor's own
+`prepare_invocation.py` and `handoffs.py` refuse a conditional module exactly
+as the host does. A status that invites "conditional on an upstream handoff" is
+therefore fatal to the route in vendor and host alike.
+
+Three consequences:
+
+- `--attempts` did not fire and should not have. A validated Blocked handoff is
+  an answer, not a refusal: `Performed.stopped` is `None`, so the driver
+  correctly did not retry. Retrying would have been paying for a different
+  opinion.
+- `complete` is reachable, and the earlier claim that it was not rested on the
+  misreading above. What it needs is a CP-0 that does not put a sequencing
+  condition in a readiness column.
+- The remedies this section first proposed — drop CP-5 from the route, or
+  change the corpus — were aimed at the wrong cause and are withdrawn. Neither
+  would have helped: the same misuse recurs on any corpus.
+- The set now measures this directly. `expects_ready: ["CP-L10", "CP-5"]` reads
+  the host's own readiness projection, so a run where CP-0 gates CP-5 scores
+  `ready_met=false` and says so, instead of reporting three missed citations by
+  a module that was never asked to cite anything.
+
+No further run was made. Spend on this set to date: `$2.18` across four Terra
+runs and one DeepSeek run.
