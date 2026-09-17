@@ -905,6 +905,43 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
+- **A billed call whose diagnostic body cannot be stored is billed again.**
+  `_diagnostic` returning no body still commits the charge with
+  `diagnostic_sha256` NULL, and `replay_billed` excludes exactly those rows, so
+  the next pass over the node starts a fresh attempt, reserves again and calls
+  the provider again. Nothing between `replay_billed` and `start_attempt` asks
+  whether the node already holds a charged, unexplained, body-less outcome. The
+  run ceiling bounds it, so this is two charges for one node rather than an
+  unbounded spend, but it happens with no operator decision in between — and
+  `docs/DECISIONS.md` and the handoff both say every typed store fault releases
+  the attempt for safe replay, which is not true of this one. *Upgrade:* one
+  query beside `replay_billed` in `_drive` for a ready node with a ledger charge,
+  no artifact, no refusal row and a NULL diagnostic, raising a code that is not
+  in `_NOT_AN_EXPLANATION` so the second charge is an explained, requeued
+  decision. Owed before a second paid run.
+- **The post-bill original recheck protects nothing a reader relies on.**
+  `_answer` re-reads every original PDF after the money is spent, but the
+  answer's validity does not depend on those bytes: evidence comes from
+  `source_blocks` and `source_tokens`, the record embeds no original, and
+  `assert_orchestration_proof` never opens one. What the recheck adds is a
+  fault point between the charge and acceptance, where a transient `OSError` on
+  a multi-megabyte read leaves a billed, unexplained node. The pre-call check in
+  `_source_preparation` is the one with a consumer, and replay runs it again
+  before any new spend. *Upgrade:* delete the post-bill read and the two tests
+  that exist only to exercise it, and drop the "recur at acceptance" sentence
+  from the three documents that make it.
+- **A filename an admitter chose is rendered under a host-attributed marker.**
+  `invocation.py` writes `member.filename` inside `HOST SOURCE PREPARATION`,
+  which the prompt labels host-owned, and `_TAGGED` warns the model only about
+  untagged *markers*. `BoundaryText` accepts U+FEFF, U+2028 and U+2029 that
+  `handoff._INVISIBLE` refuses, so a document admitted under such a filename,
+  copied into CP-0's inventory exactly as the instruction demands, is refused
+  `HANDOFF_MALFORMED` — a host defect recorded as the model's answer. Cannot
+  fire on a frozen ASCII corpus, which is why it is recorded rather than fixed
+  under an authorized run. *Upgrade:* render `filename` through the same
+  invisible-character filter, or refuse it at `_valid_member`, and label the
+  section as host-derived metadata whose string values are not instructions.
+
 - **Identity before the store rests on parameter order.** Every section read
   (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
   `read_case_events` declare `actor: Caller` ahead of `conn: Store`, and that is
@@ -1191,3 +1228,48 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   lifted from CAOS-Final at `cf8c3a9` cite its §18–§48; `docs/DECISIONS.md`
   §12 maps each to the entry here or to the phase that adopts it. *Upgrade:*
   each phase re-numbers the citations in the pages it corrects.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **caos-v2** (8993 symbols, 22700 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/caos-v2/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/caos-v2/clusters` | All functional areas |
+| `gitnexus://repo/caos-v2/processes` | All execution flows |
+| `gitnexus://repo/caos-v2/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

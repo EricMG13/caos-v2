@@ -46,6 +46,14 @@ BLOB_ROOT = "CAOS_BLOB_ROOT"
 # `model,input_per_token,output_per_token,YYYY-MM-DD`: the worker's price (§49).
 MODEL_PRICE = "CAOS_MODEL_PRICE"
 VENDORED_BUNDLE = Path(__file__).resolve().parents[2] / "vendor" / "deploy-v"
+# Only the faults that are the *store's*, not one run's. A blob fault names a
+# run: releasing it would put that run back at the head of the queue (`release`
+# leaves `requested_at` alone) to fail the same way every poll, with no stop
+# code and no line on stderr. It is parked STOPPED with its code instead, which
+# is what tells an operator to restore the blob. Replay does not need the
+# release: `outcomes._NOT_AN_EXPLANATION` is what keeps a billed answer out of
+# `attempt_refusals`, and `_drive` asks `replay_billed` before any new attempt,
+# so a requeued run replays the body it already paid for.
 STORE_FAULTS = frozenset(
     {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
 )

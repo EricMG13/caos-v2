@@ -189,3 +189,97 @@ bound evidence digest is
 The retention failure is fixed; Gemini 3.8 Flash is not qualified for this
 one-shot canonical handoff contract. Do not buy another Gemini retry without a
 materially different, explicitly authorized protocol experiment.
+
+## OpenAI Terra provenance diagnosis — 2026-09-15
+
+The separately authorized Terra run used `openai/gpt-5.6-terra` through pinned
+`openrouter/openai/flex/high/65536`, with the same two-document VMO2 set and a
+`$22.00` maximum. CP-0 made one billed call: run
+`650a2618-0fbd-48d3-ad12-27bbbd7edc10`, attempt
+`9307791d-bdb5-456b-a8ea-36b82e8bbc99`, generation
+`gen-1789491046-8S6zV4AASHeN1hdJmopq`, charge `$0.23236475`.
+
+The response returned a controlled source-readiness block. Its diagnostic and
+performed evidence are retained locally (diagnostic digest
+`2c52bf3ac3ea29d1d1b2304087579a643b50fef374a12393c27c40cbdc07c1dd`,
+performed digest
+`17cd20b9a79fe742e37233ac1874e2fd342afec3ccc7447a8e7a067edb72b0cd`).
+It correctly observed that CP-0 had received evidence excerpts but not the
+host's immutable-original, source-root, extraction-manifest or managed-run
+facts needed to author P1–P8. It also identified the genuine limitation that
+the two earnings releases alone omit primary financial/legal material.
+
+This is not a Terra or OpenRouter protocol failure. The v2 prompt omitted
+metadata that the host already retained. `canonical-markdown-v3` now supplies
+the verified CP-0 source-preparation context and rechecks original blobs at
+acceptance/replay; it is a materially changed candidate. The v2 run produced no
+accepted artifact or qualification verdict and cannot be reused. A fresh,
+explicitly authorized live run is required after v3's local gates and, if the
+source set changes, after a new frozen qualification key is prepared.
+
+## OpenAI Terra v3 qualification run — 2026-09-16
+
+The first run of this set to finish its route. `canonical-markdown-v3` through
+the same pinned profile, the same frozen two-document corpus and the same
+answer key; the model is **still not qualified**, but for a different and much
+narrower reason than either run before it.
+
+- Adapter: `canonical-markdown-v3`
+- Provider/model: `openrouter/openai/flex/high/65536` / `openai/gpt-5.6-terra`
+- Price configuration: `$0.000002` input and `$0.000012` output per token
+  ($2.00 / $12.00 per million), dated 2026-09-16, read from OpenRouter's
+  published model list on the day of the run
+- Run ceiling: `$22.00`; reservation per call `$2.883584`
+- Local development run: `e0e101b5-a908-4b9b-913d-45184a6f3a54`
+- Qualification-set digest (unchanged):
+  `ec84bf8bbb1b45fd715d52466b9142778b4346ab13b252951db0b589209d07d1`
+- Evidence digest: `0a1b6faa43f5361b66f9acd391793a9ceeb56d54e8b05e676e8a41651d735476`
+- Performed digest: `fd20bb5f19dbd16fd3fe6f3e78229a4c9057c33bb6c42ff6191ee0245084b170`
+- Retained database `caos_test_d5b8c78452644d28be02943a6c3750c5`, blob root
+  `/var/folders/81/bwblpst93lb6wb3lwrk8k6800000gn/T/caos-vmo2-v3-yn_c83lm`
+
+### Run
+
+The route ran to `COMPLETE`. Every module answered on its **first** attempt —
+no retry, no refusal row, no replay:
+
+| Module | Charge | Generation | Result |
+|---|---:|---|---|
+| CP-0 | `$0.2534435` | `gen-1789546489-g3Hv4o2ZMMQ5ASVL5nxI` | accepted |
+| CP-L10 | `$0.28338425` | `gen-1789546572-n2msOOtl3OBd1ozbsiZx` | accepted |
+| CP-5 | `$0.2856555` | `gen-1789546646-XaxBVRgUVG4KHpSobgxk` | accepted |
+
+Total recorded charge `$0.82248325` against the `$22.00` ceiling. Three
+artifacts, fourteen citations, and the host re-located **all fourteen** in its
+own token index. The orchestration proof re-derived every record and every
+citation. `attempt_refusals` is empty.
+
+That settles what the two earlier runs could not. DeepSeek V4 Pro failed the
+literal-quotation contract three times and Terra under v2 returned a controlled
+readiness block; under v3 the same provider, corpus and key produce a completed
+route whose every quote anchors. The missing CP-0 provenance context was the
+cause, and supplying it was the fix.
+
+### Verdict
+
+**Not qualified.** The matrix row reads `proven=true, met=2, missed=1`:
+
+- **CP-L10 — met.** The £1,021.7 million Q4 goodwill impairment, quoted exactly.
+- **CP-5 — met.** The issuer's non-GAAP liquidity limitation, quoted exactly.
+- **CP-0 — missed.** The key names the current borrowing-capacity statement
+  ("When compliance reporting requirements have been completed and assuming no
+  change from 31…"). CP-0 cited four blocks from the correct documents,
+  including the consolidated third-party debt nominal amounts, but not that
+  sentence.
+
+This is a genuine evidence-selection miss, not a protocol failure: the module
+answered, quoted the right documents, and every quote it gave anchored. It
+simply did not select the block the key names.
+
+`qualification_performed.complete` is **false** and no verdict was recorded.
+That is the gate landed at `b456966` doing its job — before it, `complete` was
+`matrix is not None`, and this snapshot, missing a key, would have been
+signable as QUALIFIED. Nothing here may be represented as a qualified build.
+
+An upgrade attempt must be a new, separately authorized run; the corpus and key
+are unchanged, so it would not be a new qualification identity.

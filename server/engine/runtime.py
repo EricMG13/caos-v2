@@ -342,7 +342,13 @@ def _explain_live(
 
 
 _STORE_FAULTS = frozenset(
-    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+    {
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+    }
 )
 
 

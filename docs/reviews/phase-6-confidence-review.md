@@ -218,3 +218,97 @@ with pinned Trivy 0.70.0: 2,849 backend tests, 21 race tests, security floors,
 
 Still required before Phase 6 can be cleared: one authorized live retry,
 OpenRouter per-generation reconciliation, and an authenticated external verdict.
+
+## Confidence review addendum — v3 CP-0 source provenance
+
+Effort: `xhigh`; scope is the uncommitted canonical adapter v3 candidate and
+its callers, persistence recovery, regressions and decision/contract/result
+records. User-owned `CLAUDE.md`, `.claude/skills/`, `AGENTS.md`,
+`PATHFINDER-2026-09-15/`, and `gemini-audit.md` are excluded.
+
+Least confident about (ranked):
+
+1. **A missing immutable original after a billed CP-0 response could become a
+   permanent model refusal.** Investigated → canonical acceptance rechecked
+   only indirectly through the normal answer path; typed blob failures were
+   not classified as recoverable store faults throughout the worker/outcome
+   path. Verdict → confirmed. Patch → recheck originals before accepting the
+   answer and classify every blob-address/digest/not-found fault with the
+   existing recoverable store faults. The delete/restore regression proves one
+   billed response is replayed, not rebilled or memorialized as a refusal.
+2. **A direct shared-prompt caller could omit CP-0 source preparation.**
+   Investigated → canonical supplied a source set, but the reusable builder
+   accepted `None`, so a future caller could recreate the Terra v2 defect.
+   Verdict → confirmed. Patch → require an exact source-set identity for CP-0
+   and prohibit it for every other module. Direct omission, extraneous context
+   and source-ID mismatch regressions prove the invariant.
+3. **The source-preparation record might turn host metadata into citable
+   evidence.** Investigated → it is a separately tagged, non-evidence block;
+   citation candidates are created only from delivered evidence. Verdict →
+   fine, verified by prompt-tag and citation-register tests.
+4. **A store I/O exception could leak original-path detail to the provider.**
+   Investigated → original verification maps both `OSError` and typed blob
+   errors to the existing terse refusal/store-fault flow before invocation.
+   Verdict → fine, verified by the no-provider-call OSError regression.
+5. **The v3 provenance record could permit P1–P8 to rely on raw originals.**
+   Investigated → only CP-0 receives verified preparation metadata; raw bytes
+   and the preparation section are absent from downstream prompts. Verdict →
+   by design. The pending live qualification tests whether Terra can now meet
+   the protocol, rather than assuming it can.
+
+Fixed: post-bill original-loss recovery and shared CP-0 source-set enforcement.
+
+Verified fine: CP-0 only receives the tagged preparation record; source IDs
+match both the pinned source set and delivered evidence; replay consumes the
+retained diagnostic without a second provider request; original I/O errors
+never invoke a provider.
+
+Still open: a fresh, user-authorized Terra v3 live run and external verdict.
+They are release evidence, not local code questions.
+
+## Confidence review — Phase 6 v3 candidate (`1b7e455`), 16 September 2026
+
+Run on Fable 5.1 at high effort against the committed v3 tree, independently of
+the section above, and paired with the adversarial audit recorded beside it.
+
+Measured rather than argued:
+
+- **Request size.** The frozen VMO2 two-document CP-0 request, reconstructed
+  through the real extractor, `prepare_pack` and `build_handoff_prompt` and
+  encoded exactly as `OpenRouter.request_bytes` does for the Terra profile:
+  **452,905 bytes against `MAX_REQUEST_BYTES` of 1,048,576**. v3's
+  `HOST SOURCE PREPARATION` section is 3,134 bytes of that. `CONTEXT_OVER_CEILING`
+  fires in `check_context` before any attempt or reservation, so a ceiling
+  refusal could not burn the authorization.
+- **Answer-key satisfiability.** Emulating the candidate rule over the real
+  token index flags 93 of 1,751 anchorable blocks across 31 pages. Each of the
+  three key quotes is exactly one whole block, uniquely anchorable on its page,
+  and flagged `citation_candidate: true`. A compliant model can meet all three.
+
+Verified fine: the preparation section cannot be cited (`source_id` must be a
+delivered canonical UUID and the section's text is not in the token index); CP-0
+gating is enforced twice, in `_source_preparation` and in the builder's truth
+table; the rechecks read the store rather than a caller's copy; exactly-once
+holds on the original-loss path, where the bill and diagnostic commit before
+`_answer`, `BLOB_*` writes no refusal, and the budget counts
+`greatest(reservation, ledger)`.
+
+Two findings, both remediated before the live run:
+
+1. **A blocked run was signable** — `PerformedEvidence.complete` was literally
+   `matrix is not None`. A validated blocked readiness handoff (the shape the
+   Terra v2 run took) stops with nothing in `stopped`, still builds a matrix of
+   unproven rows, and could carry a reviewer's `QUALIFIED`. `complete` now also
+   requires every run `COMPLETE` and every row either proving its expected
+   citations or meeting the refusal its case declared.
+2. **A run-local blob fault was treated as a global store fault**, so a single
+   worker released and re-claimed the same run every poll — `release` leaves
+   `requested_at` alone and `claim_run` orders by it — with no stop code and
+   nothing on stderr. `worker.STORE_FAULTS` is back to the two store-wide codes;
+   a blob fault parks the run STOPPED with its code.
+
+Still open, and live-only: `max_completion_tokens` is shared between reasoning
+and visible output, reasoning is pinned `high`, and a v3 CP-0 answer is
+materially longer than the v2 readiness block. `finish_reason=length` fails
+closed as `PROVIDER_OUTPUT_TRUNCATED` after one bill; nothing in the tree is
+wrong, but it is the most likely way the single shot ends without an artifact.
