@@ -242,7 +242,7 @@ def test_a_record_that_no_longer_binds_its_markdown_refuses_artifact_record_mism
     harness.conn.rollback()
 
     assert (response.status_code, response.json()) == (
-        503,
+        500,
         _refused(RefusalCode.ARTIFACT_RECORD_MISMATCH),
     )
 

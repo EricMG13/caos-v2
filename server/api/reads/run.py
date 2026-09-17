@@ -100,7 +100,8 @@ SECTION_READ_IO = _FIXED_IO + WORK_IO + LIVE_IO + PINNED_INPUT_IO + len(Gate) * 
 # owner and ordinal, the accepted digests, and the call-time narrowing's
 # artifact read. Measured on a LITE run (`tests/test_canonical_readers.py`),
 # per such row. A row without its record refuses `ARTIFACT_RECORD_MISMATCH`
-# (503) at no further cost.
+# (500 -- the server's own bytes, not a store fault worth a retry) at no
+# further cost.
 CANONICAL_READINESS_IO = 10
 # Readiness rows are the gate's and each QA_GATE source's. The catalog carries
 # one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a
