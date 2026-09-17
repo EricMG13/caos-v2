@@ -192,7 +192,12 @@ def test_a_lite_route_completes_through_the_real_runtime(
 
 def _run_one_lite_node(harness: _Harness) -> None:
     """Run the LITE route with CP-L10 gate-blocked, so exactly one node is
-    called, billed and accepted before the empty frontier ends the run."""
+    called, billed and accepted before the empty frontier ends the run.
+
+    Both callers rest on the three assertions below: they are this helper's
+    contract, not either test's private working, so weaken one and the other
+    test stops saying what its name claims.
+    """
     answers = CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"})
     assert _run_route(harness, _module_provider(harness, answers)) is None
     called = [prompt.split(maxsplit=6)[5] for prompt in answers.prompts]

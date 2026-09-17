@@ -440,10 +440,15 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
 
     _execution_route(conn, run_id, route, execution.bundle)
     # ponytail: the executor recorded this outcome with the call, and `_accept`
-    # re-asserts exactly it before the artifact; a record here as well would be
-    # a knowing no-op costing a COMMIT and two row locks. Ceiling: a provider
-    # that returns a `ProviderResult` without having recorded its own bill
-    # would then first be recorded by acceptance, not before it.
+    # commits exactly it before it enters `_accept_artifact`, so no accepted
+    # artifact can be unbilled; a record here as well would be a knowing no-op
+    # costing a COMMIT and two row locks. Ceiling: a provider that returns
+    # without having billed its own call loses that call outright to a crash
+    # before acceptance -- `replay_billed` needs the joined ledger row and a
+    # stored body, `unexplained_charge` needs the outcome row, so neither
+    # matches and the node is re-attempted and paid for again with nobody
+    # deciding to. Nothing inside the acceptance unit can reach that window;
+    # only a record adjacent to the call can, which is where this one is.
     accept_attempt(
         conn,
         attempt_id=attempt_id,

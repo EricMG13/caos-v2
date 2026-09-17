@@ -644,6 +644,32 @@ def _reserved(harness: _Harness) -> UUID:
     return attempt
 
 
+def test_the_module_provider_commits_its_bill_before_it_returns(
+    harness: _Harness,
+) -> None:
+    """`Provider.execute`'s contract, on the only implementation that ships.
+
+    The loop no longer records the outcome after the call, so a provider that
+    returned without billing would lose that call to the next crash: nothing
+    would match `replay_billed` or `unexplained_charge`, and the node would be
+    paid for twice. An independent connection is what proves the row is
+    committed by the time `execute` returns, not merely written.
+    """
+    node = harness.route.nodes[0]
+    attempt = _reserved(harness)
+    result = _provider(harness, _Completions(harness.source_id)).execute(
+        node.route_node_id, node.module_id, attempt_id=attempt
+    )
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    with connect(harness.url) as observer:
+        outcome = observer.execute(
+            "SELECT model, generation_id, diagnostic_sha256 FROM call_outcomes"
+            " WHERE attempt_id = %s",
+            (attempt,),
+        ).fetchone()
+    assert outcome == (result.model, result.generation_id, result.diagnostic_sha256)
+
+
 def _blob_files(harness: _Harness) -> set[Path]:
     return {path for path in harness.blobs.root.rglob("*") if path.is_file()}
 

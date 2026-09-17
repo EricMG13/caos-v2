@@ -540,7 +540,15 @@ def test_a_terminal_transition_marks_work_done_in_the_same_transaction(
 
 @dataclass
 class _Reclaiming:
-    """A provider during whose call another worker reclaims the run."""
+    """A provider during whose call another worker reclaims the run.
+
+    It deliberately does not record its own call outcome, unlike every other
+    provider here and unlike `ModuleProvider`, which is what makes the bill
+    this test counts `_accept`'s own record rather than the provider's: since
+    the loop stopped recording, only acceptance can write that row. Read it as
+    a probe of the acceptance unit, never as a template for a new provider --
+    `Provider.execute` requires an implementation to bill its own call.
+    """
 
     url: str
     run_id: UUID
