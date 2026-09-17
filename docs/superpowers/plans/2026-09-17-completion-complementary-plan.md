@@ -195,6 +195,13 @@ Recorded here so a fresh clone does not depend on a Downloads file.
 - Both whole-phase reviews run on **Fable 5.1 `xhigh`** — actual `xhigh`, read back from the session record
   before the review turn and written into the review report. If `xhigh` is
   unsupported, the gate is unsatisfied.
+- **Task acceptance reviews run on Fable 5.1 `xhigh` too**, not `max`. Effort is
+  a setting and not a word in a prompt, so it is pinned where a setting lives:
+  `.claude/agents/task-acceptance-reviewer.md` carries `model: fable` and
+  `effort: xhigh`, beside the two whole-phase reviewers that already did. A
+  review dispatched any other way is a review that ran and not this gate, and
+  says so in its own report. The file is read at session start, so it governs
+  every session after the one that wrote it.
 - Record actual model, version and effort at every formal checkpoint. A word
   in a prompt is not a setting.
 - Stay strictly within the requested scope.
