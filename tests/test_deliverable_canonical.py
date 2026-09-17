@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CATALOG, CONTRACT, handoff_markdown, skill
-from conftest import every_block
+from conftest import every_block, recorded_statements
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -217,6 +217,19 @@ def test_the_payload_is_read_from_the_store_and_round_trips(lite: _Harness) -> N
         assert hashlib.sha256(record.encode()).hexdigest() == artifact["record_sha256"]
     assert payload_bytes(_payload(lite)) == payload_bytes(payload)
     assert lite.conn.info.transaction_status.name == "IDLE"
+
+
+def test_freezing_reads_each_source_page_once_and_verifies_authority_bytes(
+    lite: _Harness,
+) -> None:
+    """Three records quoting one page of one source: one `TokenIndex` for the
+    whole payload reads that page, its digest and its line numbering once, not
+    once per node -- the proof's shape (`test_canonical_proof`), which this
+    reader was never given."""
+    with recorded_statements(lite.conn) as statements:
+        assert len(_payload(lite)["artifacts"]) == len(LITE.nodes)
+    reads = ("FROM source_tokens AS tokens", "SELECT DISTINCT line_id")
+    assert [sum(read in s for s in statements) for read in reads] == [1, 1]
 
 
 @pytest.mark.parametrize("blob", [0, 1], ids=["markdown", "record"])
