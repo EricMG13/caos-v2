@@ -48,6 +48,8 @@ class RefusalCode(StrEnum):
     PROVIDER_CALL_INVALID = "PROVIDER_CALL_INVALID"
     # A module's whole context exceeds the request bound; nothing is cut (§45.3).
     CONTEXT_OVER_CEILING = "CONTEXT_OVER_CEILING"
+    # One upstream handoff exceeds its own declared section bound; nothing is cut.
+    UPSTREAM_SECTION_OVER_CEILING = "UPSTREAM_SECTION_OVER_CEILING"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
     PROVIDER_OUTPUT_TRUNCATED = "PROVIDER_OUTPUT_TRUNCATED"
     PROVIDER_REFUSED = "PROVIDER_REFUSED"

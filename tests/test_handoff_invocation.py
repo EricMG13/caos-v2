@@ -60,6 +60,7 @@ from server.methodology.handoff import (
 from server.methodology.invocation import (
     _FORECAST_EXTENSION,
     HOST_PERFORMED_SCRIPTS,
+    MAX_UPSTREAM_HANDOFF_BYTES,
     MODULE_AUTHORED_SCRIPTS,
     allowed_uses,
     build_handoff_prompt,
@@ -963,6 +964,58 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
         within_request_ceiling(provider, over)
     assert refused.value.code is RefusalCode.CONTEXT_OVER_CEILING
     assert refused.value.__context__ is None
+
+
+def test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt() -> None:
+    """The per-section bound the request ceiling never gave: one accepted
+    upstream handoff of exactly `MAX_UPSTREAM_HANDOFF_BYTES` is carried whole,
+    and one byte more refuses `UPSTREAM_SECTION_OVER_CEILING` -- naming the
+    section rather than the whole request, which is still far inside
+    `MAX_REQUEST_BYTES`, and cutting nothing out of it."""
+    gate = handoff_markdown(identity("CP-0"))
+    exact = gate.ljust(MAX_UPSTREAM_HANDOFF_BYTES, b" ")
+    assert len(exact) == MAX_UPSTREAM_HANDOFF_BYTES
+    provider = OpenRouter(api_key="never-sent", model=MODEL, transport=_NoTransport())
+
+    ref = upstream_ref(identity("CP-0"), exact)
+    prompt = _prompt(identity("CP-L10", (ref,)), upstream=((ref, exact),))
+    assert exact.decode() in prompt
+    whole = len(provider.request_bytes(prompt, json_object=True))
+
+    over = exact + b" "
+    ahead = upstream_ref(identity("CP-0"), over)
+    with pytest.raises(Refusal) as refused:
+        _prompt(identity("CP-L10", (ahead,)), upstream=((ahead, over),))
+    assert refused.value.code is RefusalCode.UPSTREAM_SECTION_OVER_CEILING
+    assert refused.value.__context__ is None
+    # The section, not the request: one more byte would have been sent.
+    assert whole + 1 < MAX_REQUEST_BYTES
+
+
+def test_the_declared_section_bound_leaves_the_widest_node_its_authority() -> None:
+    """Why the declared number is the number: a node's own delivered authority
+    beside its direct upstreams at the bound must still leave the request
+    ceiling room for evidence. A bundle that widens a node or grows an
+    authority set fails here rather than at the first FULL run.
+
+    Maximised over every node of every profile, not over one pair. The review
+    that asked for this found the single-pair form would pass a bundle whose
+    third profile carried a wider node, or whose CP-3 authority grew past the
+    quarter, while the arithmetic the declared number rests on no longer held.
+    CP-5 is the true maximum on this bundle and the assertion does not depend
+    on that staying true."""
+    worst = 0
+    for profile in CATALOG["profiles"].values():
+        edges = profile["edges"]
+        for node in {edge["target"] for edge in edges}:
+            upstreams = sum(1 for edge in edges if edge["target"] == node)
+            files = delivered_authority(BUNDLE, node).files
+            cost = upstreams * MAX_UPSTREAM_HANDOFF_BYTES + sum(
+                len(data) for _name, data in files
+            )
+            worst = max(worst, cost)
+    assert worst < MAX_REQUEST_BYTES
+    assert MAX_REQUEST_BYTES - worst > MAX_REQUEST_BYTES // 4
 
 
 class _NoTransport:
