@@ -51,7 +51,7 @@ Per-task lines say `Model/effort:`. A mixed task takes the stricter row. The coo
 | 2 — prompt and evidence | T7, T8, T9 | full `make check` once |
 | 3 — consolidation | T10, T11, T12, T13, T14, T15 | **landed** `b7c33f1`; full gate green including `make smoke-production` |
 | 4 — store, operator surface, residue | T16 (decision), T17, T18, T19, T20 | **landed** `18171e3`; full gate green including `make smoke-production` |
-| close | confidence-review → remediation → adversarial audit (Opus 5 `max` + `ultrathink`) → handoff update | — |
+| close | **done** — confidence-review → remediation → adversarial audit (Opus 5 `max` + `ultrathink`) → remediation → D3 as Task 21 (§75) → full gate green at `29b2208` | — |
 
 Owner decisions this plan needs (D1–D3) are stated at the end; tasks that depend on one say so.
 
