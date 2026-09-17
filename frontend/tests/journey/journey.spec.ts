@@ -1074,11 +1074,18 @@ test.describe.serial("journey", () => {
       expect(parked?.status).toBe("RUNNING");
       expect(parked?.nodes.map((node) => node.state)).not.toContain("COMPLETE");
       await other.page.goto(`/run/?case=${withdrawalCase}&run=${withdrawalRun}`);
-      for (const action of ["START_RUN", "RETRY_RUN"] as const) {
-        await expect(
-          other.page.locator(`[data-work-controls] [data-action='${action}']`),
-        ).toHaveAttribute("data-refusal", "EVIDENCE_NOT_AVAILABLE");
-      }
+      // `RETRY_RUN` is where the withdrawal is the only true refusal, so it is
+      // asserted exactly. For `START_RUN` two rules hold at once -- the run is
+      // already started and its sources are not live -- and which one the
+      // surface shows is the order of `availability.py`'s queue, not a fact
+      // about the withdrawal; asserting the exact code there would pin a list
+      // order and go red on an unrelated reorder.
+      await expect(
+        other.page.locator("[data-work-controls] [data-action='RETRY_RUN']"),
+      ).toHaveAttribute("data-refusal", "EVIDENCE_NOT_AVAILABLE");
+      await expect(
+        other.page.locator("[data-work-controls] [data-action='START_RUN']"),
+      ).toHaveAttribute("data-refusal", /^(EVIDENCE_NOT_AVAILABLE|RUN_ALREADY_STARTED)$/);
       for (const moduleId of ROUTE_NODES) {
         await expect(nodeLocator(other.page, moduleId)).not.toHaveAttribute(
           "data-state",
@@ -1095,6 +1102,13 @@ test.describe.serial("journey", () => {
       await expect(pdf).toContainText("Withdrawn");
     } finally {
       await other.context.close();
+      // The worker was stopped before this test's run was enqueued, and the
+      // start above is inside the try. `compose start` on a running service is
+      // a no-op, so starting it again here costs nothing and stops an
+      // assertion failure anywhere in this test from leaving the shared
+      // stack's worker down for every test after it -- the shape that turns
+      // one failure into six and makes triage read as a cascade.
+      await startJourneyWorker();
     }
 
     // The open drawer, never reloaded, now says its source is withdrawn and
@@ -1385,8 +1399,16 @@ test.describe.serial("journey", () => {
   test("journey: the Book names every credit of the portfolio on one stated basis", async () => {
     // What the Book can be driven to on this stack, and what it cannot.
     // `read_book` fills a credit's cells from the accepted CP-CF projection,
-    // and CP-CF is not a node of the LITE route -- the only route the
-    // canonical adapter executes. So every credit here is
+    // and no run made through the API can carry CP-CF on any pathway:
+    // `create_run` resolves the route with no `RouteExtensions`
+    // (`server/api/commands/runs.py`) and `CreateRun` carries no field to ask
+    // for one, while CP-CF is a host extension appended only by
+    // `resolve_route(..., extensions=RouteExtensions(model_extension=True))`,
+    // whose one caller is the qualification harness. Not a property of the
+    // LITE route: `ADAPTER_ROUTES` enables three pathways and
+    // `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's
+    // `MODEL_OWNERS`, so it would append CP-CF if anything asked. So every
+    // credit here is
     // `NO_ACCEPTED_FORECAST`, no period is served, no comparison table is
     // drawn and no cell exists to open a passport from. The ten-field
     // passport is therefore not reachable through the production stack at
@@ -1406,11 +1428,17 @@ test.describe.serial("journey", () => {
       await expect(row).toBeVisible();
       await expect(row).toContainText("NO_ACCEPTED_FORECAST");
     }
-    // No table, no cell, no passport -- said as an absence rather than left
-    // unasserted, so the day CP-CF runs here this test fails and is rewritten
-    // to open the passport instead of recording that it cannot.
+    // No table and no cell -- said as an absence rather than left unasserted,
+    // so the day CP-CF runs here this test fails and is rewritten to open the
+    // passport instead of recording that it cannot. Both markers appear the
+    // day a cell exists: `table.tbl` is the comparison table, drawn only for a
+    // non-empty `periodsOf(rows)`, and `[data-cell]` is `MetricCell`'s own.
+    // A `getByRole("dialog")` count stood here too and is removed: the only
+    // dialog on this page is `MetricPassport`, which nothing opens without a
+    // click on a cell, and this test clicks nothing -- so it read green in the
+    // reachable state as well as this one, and could not be the tripwire the
+    // sentence above claims.
     await expect(page.locator("table.tbl")).toHaveCount(0);
     await expect(page.locator("[data-cell]")).toHaveCount(0);
-    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
