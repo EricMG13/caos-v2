@@ -59,6 +59,7 @@ Admin = Annotated[Standing, Depends(require_case_admin)]
 @router.post("/api/v1/cases/{case_id}/members", status_code=201)
 def grant_standing(
     actor: Caller,
+    *,
     key: Key,
     _standing: Admin,
     body: Annotated[GrantStanding, Depends(json_body(GrantStanding))],
@@ -101,6 +102,7 @@ def grant_standing(
 @router.post("/api/v1/cases/{case_id}/members/{user_id}/revocation")
 def revoke_standing(
     actor: Caller,
+    *,
     key: Key,
     _standing: Admin,
     user_id: MemberPath,
@@ -140,6 +142,7 @@ def revoke_standing(
 @router.post("/api/v1/cases/{case_id}/sources/{source_id}/withdrawal")
 def withdraw(
     actor: Caller,
+    *,
     key: Key,
     _standing: Writer,
     source_id: SourcePath,
