@@ -462,6 +462,20 @@ const RefusalCode = enumOf([
   "STORE_UNAVAILABLE",
 ]);
 const RefusalBody = object({ code: RefusalCode, clears: text });
+const QualificationState = enumOf(["QUALIFIED", "UNQUALIFIED", "RESTRICTED", "UNAVAILABLE"]);
+const QualificationRead = object({
+  evidence_sha256: hash,
+  state: QualificationState,
+  qualification_set_sha256: nullable(hash),
+  performed_sha256: nullable(hash),
+  build_id: nullable(short),
+  adapter_version: nullable(short),
+  provider: nullable(short),
+  model: nullable(short),
+  reviewer: nullable(text),
+  decided_at: nullable(datetime),
+  expires_at: nullable(datetime),
+});
 
 /** Every model `schema.json` declares, under its backend name. */
 export const V1_SHAPES = {
@@ -506,6 +520,8 @@ export const V1_SHAPES = {
   RectView,
   RefusalBody,
   RefusalCode,
+  QualificationRead,
+  QualificationState,
   RouteChoice,
   RunBody,
   RunSectionDocument,
@@ -532,6 +548,8 @@ export type ReportDocument = Infer<typeof ReportDocument>;
 export type CommitteeDocument = Infer<typeof CommitteeDocument>;
 export type RefusalBody = Infer<typeof RefusalBody>;
 export type RefusalCode = Infer<typeof RefusalCode>;
+export type QualificationRead = Infer<typeof QualificationRead>;
+export type QualificationState = Infer<typeof QualificationState>;
 export type Chrome = Infer<typeof Chrome>;
 export type CaseRow = Infer<typeof CaseRow>;
 export type SourceRow = Infer<typeof SourceRow>;
@@ -568,6 +586,8 @@ export const parseReportDocument = (value: unknown): ReportDocument => parse(Rep
 export const parseCommitteeDocument = (value: unknown): CommitteeDocument =>
   parse(CommitteeDocument, value);
 export const parseRefusalBody = (value: unknown): RefusalBody => parse(RefusalBody, value);
+export const parseQualificationRead = (value: unknown): QualificationRead =>
+  parse(QualificationRead, value);
 export const parsePageDocument = (value: unknown): PageDocument => parse(PageDocument, value);
 
 export class WireIdentityError extends Error {

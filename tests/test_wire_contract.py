@@ -84,6 +84,12 @@ ENVELOPE = frozenset(
 
 # A new field is a model change, a regenerated schema and an edit here.
 PINNED: dict[type[BaseModel], frozenset[str]] = {
+    wire.QualificationRead: frozenset(
+        (
+            "evidence_sha256 state qualification_set_sha256 performed_sha256 build_id "
+            "adapter_version provider model reviewer decided_at expires_at"
+        ).split()
+    ),
     wire.NarrativeFigure: frozenset(
         "route_node_id citation_index document_sha256 page matched_text".split()
     ),

@@ -36,6 +36,8 @@ _UNSET = "CAOS_TEST_POSTGRES_URL is unset: no database to run the store suite ag
 _LIVE_CONFIGURATION = (
     "OPENROUTER_API_KEY",
     "OPENROUTER_MODEL",
+    "CAOS_MODEL_PRICE",
+    "CAOS_LIVE_BUDGET_CEILING",
     "CAOS_TEST_POSTGRES_URL",
 )
 

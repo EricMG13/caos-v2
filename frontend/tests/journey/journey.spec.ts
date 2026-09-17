@@ -90,7 +90,7 @@ function restartJourneyWorker(): Promise<void> {
   return restartService("journey-worker");
 }
 
-async function loginAs(page: Page, persona: "analyst" | "intruder"): Promise<void> {
+async function loginAs(page: Page, persona: "analyst" | "reader" | "intruder"): Promise<void> {
   const response = await page.request.get(`/_edge/login?persona=${persona}`);
   expect(response.status()).toBe(200);
 }
@@ -251,11 +251,15 @@ test.describe.serial("journey", () => {
     // while the worker claims the first, splitting this shared journey's
     // observed run from its executed run. A transient command failure must
     // fail this fresh-stack journey rather than silently changing its subject.
-    await page.locator("[data-create-run] [data-action='CREATE_RUN']").click();
-    await expect(page.locator("[data-create-run] [data-command-success]")).toContainText(
-      "Run created.",
-      { timeout: 15_000 },
-    );
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `/api/v1/cases/${caseId}/runs` &&
+          response.status() === 201,
+      ),
+      page.locator("[data-create-run] [data-action='CREATE_RUN']").click(),
+    ]);
     await expect(page.locator("[data-run]")).toBeVisible({ timeout: 15_000 });
     runId = (await page.locator("[data-run]").getAttribute("data-run")) ?? "";
     expect(runId).not.toBe("");
@@ -335,10 +339,15 @@ test.describe.serial("journey", () => {
     // not to whichever run is now latest. Only navigating to a different
     // `run` -- the one act "Reload" stands for here -- would show run 2's.
     const before = await page.locator("[data-run]").getAttribute("data-run");
-    await page.locator("[data-create-run] [data-action='CREATE_RUN']").click();
-    await expect(page.locator("[data-create-run] [data-command-success]")).toContainText(
-      "Run created.",
-    );
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `/api/v1/cases/${caseId}/runs` &&
+          response.status() === 201,
+      ),
+      page.locator("[data-create-run] [data-action='CREATE_RUN']").click(),
+    ]);
     // The API's own `--limit-concurrency 32` (Dockerfile) can answer a
     // request with a bare 503 "Service Unavailable" while the reload-driven
     // polling above (test 4's 300 s lease wait) still has connections
@@ -402,6 +411,21 @@ test.describe.serial("journey", () => {
         );
       })
       .toBe(true);
+  });
+
+  test("journey: a reader sees qualification as restricted beside the real PDF evidence", async ({
+    browser,
+  }) => {
+    const readerContext = await browser.newContext({ baseURL: EDGE_ORIGIN });
+    const reader = await readerContext.newPage();
+    await loginAs(reader, "reader");
+
+    await reader.goto(`/analysis/?case=${caseId}&run=${runId}&qualification=${"a".repeat(64)}`);
+    await expect(reader.getByLabel("Qualification")).toContainText("RESTRICTED");
+    await expect(reader.getByLabel("Qualification")).toContainText(
+      "Qualification metadata requires an analyst role.",
+    );
+    await readerContext.close();
   });
 
   test("Escape returns focus to the chip that opened the drawer", async () => {
