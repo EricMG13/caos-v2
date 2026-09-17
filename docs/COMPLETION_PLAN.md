@@ -881,13 +881,115 @@ not — is recorded with its authorization.
 
 ## 8. Smallest useful delivery order
 
-1. **Record and delivery:** the tree on `main`, the ledger true.
-2. **Instrument:** register keys, the price, verdict hygiene, the corpus
-   register, the five requests.
-3. **LITE pathways:** four deployed; three held on the vendor.
-4. **Large evidence:** selection, guard, successor runs.
-5. **FULL pathways:** eight deployed; one held on corpus.
-6. **The whole workbench**, then **two workers, a real edge, the pack.**
+Revised 17 September 2026, against the tree at `b8e06ac`. The phases keep
+their numbers, their tasks and their exit checks; what this section orders is
+*delivery*, and delivery no longer follows the phase numbers. Read with the
+handoff's "Completion plan state and what blocks each task", which is the
+per-task record this section summarises and does not replace.
+
+**Done.** Phases 7 and 8 are accepted (`38f4639`, one complete `make check`
+gated both). Of Phase 9, Task 9.1 is in the branch. Of Phase 10, 10.2 and 10.3
+are in the branch and 10.4 was answered as a finding rather than code.
+
+**Buildable now, in this order.**
+
+1. **Phase 12, the governed workbench, whole** (12.1–12.5). It is the one
+   remaining phase that waits on no owner input, no vendor answer and no
+   authorized run: the five store functions exist, D2 is decided (§74.4 leaves
+   Book at its shell), the remediation stream it was told to coordinate with is
+   complete and merged (§75), and every exit check is provable offline against
+   the production stack the journey already drives on three engines. It also
+   pays forward: the filing command is the natural T0 decision record Task 9.3
+   needs (§9 item 4 of this plan), so landing 12.1 turns one owner-authored
+   document into one the system can produce.
+2. **Two pieces of Task 10.1's work item that need no vendor answer**, taken
+   under Phase 10 without moving them:
+   - **The bounded line group** (`SYSTEM_SPEC.md` §5; the Phase 2 ledger entry
+     "One block per line; the bounded line group is not built"). Boeing's and
+     Ford's 10-K texts are what it is for, both are held read-only outside the
+     tree, and their admission is the first half of Phase 10's second exit
+     check. It changes the extractor's block packing and nothing about
+     delivery, so it does not depend on the T8 column.
+   - **The per-section prompt bound** (the Phase 5 ledger entry "An upstream
+     section is unbounded"). Measured today: `FULL_CREDIT_ASSESSMENT`'s CP-5
+     carries 16 direct upstreams and 165,548 bytes of its own authority, so
+     authority and upstream sections reach 47 % of `MAX_REQUEST_BYTES` at
+     20 KB per handoff before any evidence. A declared bound refuses, before
+     any attempt or reservation, with the section named -- never truncation
+     (Phase 10's guardrail). What it does not do is make a wide route fit:
+     that is per-node selection, which stays blocked. What it buys is that the
+     first wide pathway's refusal names the oversize section rather than the
+     whole request, and that Phase 11's precondition is met before its
+     documents arrive rather than after. The 20 KB figure is an assumption;
+     the real number arrives only when a FULL module produces a handoff.
+3. **Phase 13's host-only tasks** (13.1 async store and `gather`, 13.2 the
+   second worker in the race suite, 13.3 `LISTEN`/`NOTIFY` and worker
+   readiness, 13.5 store hygiene and gate scripts), after Phase 12. Only 13.4
+   (an identity-provider setting, TLS material) and 13.6 (an authorized nightly)
+   end outside the tree. This is buildable, not yet chosen: starting 13.2 before
+   10.1 lands means per-node delivery is later written onto a concurrent runtime,
+   a cost this plan has not priced, and the ledger's I6 residual ("a stale lease
+   holder can still pay once") is what the second worker has to answer first.
+
+**Deferred, and what each waits on.** None of these is paused for effort.
+
+| Delivery | Waits on | Freed by |
+|---|---|---|
+| Phase 9, Tasks 9.2–9.4 | a peer pack (9.2), a dated decision record (9.3), a research brief and its evidence (9.4): items 5–7 of `qualification/DOCUMENTS.md`'s sourcing list; then live-run authorization for each verdict | owner action 1, then 2 |
+| Phase 9, Tasks 9.5–9.7 | the LITE producers request (O03) | the vendor, or a §61-style authorization |
+| Phase 10, Task 10.1 | a per-module evidence demand the host may read without becoming a second reader of a vendor register: `docs/requests/2026-09-17-t8-source-files-column.md`, or a dated decision taking host ownership of a register's shape, which must first answer whether a model-authored register may decide what a downstream node can cite | the vendor, or owner action 3 |
+| Phase 10, Task 10.5 | nothing external; sequenced after the line group because both touch the extractor identity, and a declared normalisation belongs in the identity that the group's blocks are recorded under | -- |
+| Phase 11, all | the documents (items 1–5 of the sourcing list; the BA and F texts exist and are not yet copied in), the per-section bound above, and Task 10.1 for any pack over the ceiling; then live-run authorization per set. 11.9 also waits on a distressed issuer nobody has chosen (item 8) | owner action 1, then 2; 10.1 for 11.8 |
+| Phase 13, Tasks 13.4 and 13.6 | an identity-provider setting and TLS material (13.4); an authorized nightly (13.6) | owner action 2 for 13.6 |
+| Every live verdict | `qualification_verdicts` is empty in every database; nothing is qualified and nothing describes itself that way | owner action 2 |
+
+The six vendor requests under `docs/requests/` -- the LITE producers, the
+marker split, CP-0 gating versus classification, the unshipped rules, the LITE
+scope-to-status mapping, and the T8 source-files column -- are each a §61-style
+authorization or an upstream pull. The host closes none alone, and a route is
+not enabled on a workaround for any of them (Phase 9's first guardrail).
+
+### Why the order changed
+
+The plan's phases were sequenced by dependency: instrument before pathways,
+route semantics before the wide pathways, workbench and infrastructure last.
+That order was right when everything in it was buildable, and it stopped being
+buildable in one afternoon. Task 8.4's reading of the module skills turned
+"corpus" into eight named document sets the tree does not hold; Task 8.5 turned
+four bundle-side doubts into five written requests; Task 10.1 was dispatched
+and stopped because both ways of reading a per-module evidence demand breach
+invariant 4, which made it a sixth. After that, Phases 9, 10 and 11 were held
+by three owner inputs and six vendor requests, and the dependency order sent a
+reader into work that could not start while the one phase that could sat last
+but one. The handoff caught it first (`b8e06ac`); this section is the plan
+saying the same thing, so the two records agree.
+
+What did not change: the phase numbers, the tasks under each, their exit checks
+and guardrails, the definition of done. A pathway is still done only when its
+route is enabled, its set has keys, and its live result is recorded with its
+authorization -- so the buildable order above delivers no verdict by itself.
+
+**The three owner actions, in the order they free the most work.**
+
+1. **Source the documents.** `qualification/DOCUMENTS.md`'s sourcing list, in
+   its own order: copy in the BA and F texts already held read-only outside the
+   tree, then the executed debt documents by CIK, the rating actions, the
+   market-data extract, the peer pack, and author the decision record and the
+   research brief. They hold Tasks 9.2–9.4 and the whole of Phase 11. Nothing
+   here fetches one: invariant 1 makes web discovery structurally absent, so a
+   `to_source` row is a request to a person.
+2. **Authorize live runs**, naming provider, model, endpoint tag, reasoning
+   effort, ceiling and window per set. Every pathway's exit check ends in a
+   verdict, and no verdict exists over any snapshot. The runs begin only after
+   the documents for a set are admitted and its keys authored, so this action
+   frees work only behind the first.
+3. **Take, or decline, the dated decisions the plan leaves to the owner.** Two
+   are named: whether the host may own the shape of one register for evidence
+   selection, which is Task 10.1's alternative to waiting on the vendor; and
+   Task 10.3 part (b), whether a QA `Restricted` releases CP-6 as RESTRICTED.
+   Each is a §61-style entry. A decline is also an answer: it leaves 10.1 with
+   the vendor and 11.8 behind it, and the plan should then say so rather than
+   carry the task as pending.
 
 Skipped deliberately: another architecture pass, a generic agent platform, a
 second orchestration layer, workbook or Word output, automatic research, a
