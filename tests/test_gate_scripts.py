@@ -629,3 +629,21 @@ def test_the_typescript_half_is_wired_into_the_workspace_lint() -> None:
     package = (REPO / "frontend" / "package.json").read_text(encoding="utf-8")
 
     assert "scripts/check-tested.mjs" in json.loads(package)["scripts"]["lint"]
+
+
+def test_ledger_state_reports_and_refuses_a_contract_with_no_ledger(
+    tmp_path: Path,
+) -> None:
+    """The ledger reader is driven as a script, the way CI drives the others.
+
+    `tests/test_ledger.py` holds the rules; this is the entry point, and its two
+    exit codes are what a job would read: zero for a ledger it could read, two
+    for a contract whose ledger heading has moved or whose ledger is empty.
+    """
+    assert _run("ledger_state.py", "--report").returncode == 0
+
+    empty = tmp_path / "CLAUDE.md"
+    empty.write_text("# No ledger here\n\nnothing.\n", encoding="utf-8")
+    refused = _run("ledger_state.py", "--contract", str(empty))
+    assert refused.returncode == 2
+    assert "ledger" in refused.stderr.lower()

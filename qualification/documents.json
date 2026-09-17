@@ -1,0 +1,265 @@
+{
+  "as_of": "2026-09-17",
+  "note": "The hand-authored half of the document register. scripts/document_register.py reads this file plus every qualification/*/qualification.json, computes each document's digest from the bytes on disk, and emits qualification/DOCUMENTS.md's table. A module demand recorded here was read from that module's vendor/deploy-v/skills/cp-*/SKILL.md; where the SKILL.md states no document gate, `demand_verified` is false and the note says what the demand was inferred from. No source is a guess: an unknown location is null with what is known in the note.",
+  "documents": [
+    {
+      "id": "vmo2-q3-2025-earnings",
+      "issuer": "VMO2",
+      "document": "Virgin Media O2 Q3 2025 earnings release",
+      "modules": ["CP-0", "CP-L10", "CP-5", "CP-1", "CP-1B", "CP-2", "CP-8"],
+      "pathways": [
+        "LITE_EARNINGS_UPDATE",
+        "LITE_PORTFOLIO_DECISION",
+        "EARNINGS_UPDATE"
+      ],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/vmo2-fy2025/documents/Virgin-Media-O2-Q3-2025-Earnings-Release.pdf",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Admitted into the vmo2-fy2025 set. Publisher is Virgin Media O2's investor relations site; the exact release URL was not established here, so source is null. The earlier of the two periods: it is the T0 comparative for CP-1B's variance bridge and the T0 side of CP-8's outcome pair. 38,360 bytes of extracted text (pdfminer), well inside MAX_REQUEST_BYTES."
+    },
+    {
+      "id": "vmo2-q4-2025-earnings",
+      "issuer": "VMO2",
+      "document": "Virgin Media O2 Q4 2025 earnings release",
+      "modules": ["CP-0", "CP-L10", "CP-5", "CP-1", "CP-1B", "CP-2", "CP-8"],
+      "pathways": [
+        "LITE_EARNINGS_UPDATE",
+        "LITE_PORTFOLIO_DECISION",
+        "EARNINGS_UPDATE"
+      ],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/vmo2-fy2025/documents/Virgin-Media-O2-Q4-2025-Earnings-Release.pdf",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Admitted into the vmo2-fy2025 set and the document the only complete live snapshot cites. Publisher is Virgin Media O2's investor relations site; the exact release URL was not established here. The later period: CP-1B's current side and CP-8's outcome window. 51,942 bytes of extracted text (pdfminer)."
+    },
+    {
+      "id": "ccl-fy2025-10k",
+      "issuer": "CCL",
+      "document": "Carnival Corporation & plc FY2025 Form 10-K (text extract)",
+      "modules": [
+        "CP-0",
+        "CP-L10",
+        "CP-1",
+        "CP-1A",
+        "CP-1B",
+        "CP-1D",
+        "CP-2",
+        "CP-2A",
+        "CP-2D",
+        "CP-2E",
+        "CP-2G",
+        "CP-3C",
+        "CP-5"
+      ],
+      "pathways": [
+        "LITE_EARNINGS_UPDATE",
+        "LITE_PORTFOLIO_DECISION",
+        "LIQUIDITY_REVIEW",
+        "EARNINGS_UPDATE",
+        "COVENANT_REFINANCING",
+        "PORTFOLIO_DECISION",
+        "FULL_CREDIT_ASSESSMENT"
+      ],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025/documents/CCL_FY2025_10K.txt",
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/CCL_FY2025_10K.txt",
+      "demand_verified": true,
+      "note": "Admitted into the ccl-fy2025 set; byte-identical to the owner's three-issuer document register copy (both 8fa7fced…), so the external path is provenance rather than a second document. 311,896 bytes, inside MAX_REQUEST_BYTES. Meets CP-3C's stated source gate (`the maturity/debt schedule is the source gate`): the scheduled maturities table is present. Meets CP-2E's macro/hedging gate: Item 7A is present. CP-1A's ownership, governance and disclosure-quality registers are served, but its transaction registers have no named acquisition or sponsor deal in this pack, so CP-1A cannot be proven whole against CCL alone."
+    },
+    {
+      "id": "ba-fy2025-10k",
+      "issuer": "BA",
+      "document": "The Boeing Company FY2025 Form 10-K (text extract)",
+      "modules": [
+        "CP-0",
+        "CP-1",
+        "CP-1A",
+        "CP-1B",
+        "CP-1D",
+        "CP-2",
+        "CP-2A",
+        "CP-2D",
+        "CP-2E",
+        "CP-2G",
+        "CP-3C",
+        "CP-5"
+      ],
+      "pathways": [
+        "LIQUIDITY_REVIEW",
+        "EARNINGS_UPDATE",
+        "COVENANT_REFINANCING",
+        "FULL_CREDIT_ASSESSMENT"
+      ],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/BA_FY2025_10K.txt",
+      "demand_verified": true,
+      "note": "Held read-only outside the tree in the owner's three-issuer document register; nothing in this repository copies or admits it. 1,177,234 bytes — over MAX_REQUEST_BYTES (1,048,576), so it cannot reach a prompt whole until per-node evidence selection exists. Raw provenance beside it: raw/BA_FY2025_10K.html and raw/BA_companyfacts.json (XBRL company facts). An answer key for BA already exists (see key_sources)."
+    },
+    {
+      "id": "f-fy2025-10k",
+      "issuer": "F",
+      "document": "Ford Motor Company FY2025 Form 10-K (text extract)",
+      "modules": [
+        "CP-0",
+        "CP-1",
+        "CP-1B",
+        "CP-1D",
+        "CP-2",
+        "CP-2A",
+        "CP-2D",
+        "CP-2E",
+        "CP-2G",
+        "CP-3C",
+        "CP-5"
+      ],
+      "pathways": [
+        "LIQUIDITY_REVIEW",
+        "EARNINGS_UPDATE",
+        "FULL_CREDIT_ASSESSMENT"
+      ],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/F_FY2025_10K.txt",
+      "demand_verified": true,
+      "note": "Held read-only outside the tree. 1,922,743 bytes — nearly twice MAX_REQUEST_BYTES; the largest document in hand and the one that most needs per-node selection. Raw provenance: raw/F_FY2025_10K.html and raw/F_companyfacts.json. A finance-captive issuer, so CP-1's perimeter work is harder here than for CCL or BA."
+    },
+    {
+      "id": "ccl-debt-documents",
+      "issuer": "CCL",
+      "document": "Executed debt documents: indentures, credit agreements, maturity schedules",
+      "modules": ["CP-4", "CP-3C", "CP-4C"],
+      "pathways": [
+        "COVENANT_REFINANCING",
+        "PORTFOLIO_DECISION",
+        "FULL_CREDIT_ASSESSMENT",
+        "LITE_COVENANT_REFINANCING",
+        "DISTRESSED_RESTRUCTURING",
+        "LITE_DISTRESSED_RESTRUCTURING"
+      ],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "CP-4's runbook step 1 is a Document Gate whose output is `T4F.1 Controlling Documents`, so CP-4 cannot be proven on a 10-K's debt footnote: it construes provision-level clause meaning and needs the executed instruments. Public as EDGAR exhibits; CLAUDE.md-adjacent docs/COMPLETION_PLAN.md records CCL's CIK as 815097. No accession number or URL is asserted here because none was verified. CP-3C's own source gate (the maturity/debt schedule) is already met by ccl-fy2025-10k; these documents deepen CP-3C rather than unblock it."
+    },
+    {
+      "id": "ba-debt-documents",
+      "issuer": "BA",
+      "document": "Executed debt documents: indentures, credit agreements, maturity schedules",
+      "modules": ["CP-4", "CP-3C", "CP-4C"],
+      "pathways": [
+        "COVENANT_REFINANCING",
+        "PORTFOLIO_DECISION",
+        "FULL_CREDIT_ASSESSMENT"
+      ],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "As ccl-debt-documents. docs/COMPLETION_PLAN.md records BA's CIK as 12927. No accession number or URL asserted."
+    },
+    {
+      "id": "ccl-rating-actions",
+      "issuer": "CCL",
+      "document": "Dated agency rating actions, outlooks, watches and the applicable published criteria",
+      "modules": ["CP-2H"],
+      "pathways": [
+        "LITE_DISTRESSED_RESTRUCTURING",
+        "LITE_FULL_CREDIT_SCREEN",
+        "FULL_CREDIT_ASSESSMENT",
+        "DISTRESSED_RESTRUCTURING"
+      ],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "CP-2H Phase 1 (rating evidence gate) demands `dated issuer and instrument ratings, outlook/watch, recovery ratings where applicable, agency reports, issuer disclosures and current criteria`, and separates agency-issued evidence from management characterisation. It is a soft gate: the same phase says missing current rating evidence permits methodology-only work with limitations, and fabricated ratings are prohibited. So CP-2H can be proven Restricted without this and Passed only with it. Agency releases and criteria are entitlement-gated; an issuer's own disclosure of its ratings is the freely available substitute and is the weaker evidence CP-2H is told to label as such. No URL asserted."
+    },
+    {
+      "id": "ccl-market-data-extract",
+      "issuer": "CCL",
+      "document": "Dated market-data extract: instrument prices, spreads, curve points with observation timestamps",
+      "modules": ["CP-3D", "CP-3"],
+      "pathways": ["MARKET_DISLOCATION", "PORTFOLIO_DECISION", "RELATIVE_VALUE"],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "CP-3D Phase 1 (market evidence gate) demands instrument identifiers, currency, coupon, maturity, seniority, pricing convention, and per observation the source, entitlement, bid/mid/ask or evaluated status, observation time and staleness — and states that `required market observations cannot be replaced with model memory`. The owner supplies this as a document under its own digest; it is the one demand here that no filing can satisfy, because it is priced and timestamped rather than disclosed."
+    },
+    {
+      "id": "cruise-peer-pack",
+      "issuer": "CCL",
+      "document": "Peer pack: cruise-sector peers' FY2025 filings for the aligned metric set",
+      "modules": ["CP-1C"],
+      "pathways": ["LITE_RELATIVE_VALUE", "LITE_FULL_CREDIT_SCREEN", "RELATIVE_VALUE"],
+      "source": null,
+      "status": "to_source",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": false,
+      "note": "CP-1C's steps 0 and 1 are a Peer Discovery Gate and a Peer Data Gate, and its purpose is a defensible peer set benchmarked on aligned definitions — but the SKILL.md names no document form, so `a peer pack` is inferred from the gates rather than quoted from a demand. Each peer's own filing is the evidence CP-1C would have to cite, which is why this is a pack and not one table. Peers are the owner's to choose; naming them here would be the host choosing a peer set."
+    },
+    {
+      "id": "ccl-decision-record",
+      "issuer": "CCL",
+      "document": "A completed decision record at T0: thesis, expectations, dissent, and the decision date",
+      "modules": ["CP-8"],
+      "pathways": ["LITE_DECISION_LEDGER", "DECISION_LEDGER"],
+      "source": "owner-authored",
+      "status": "to_author",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "CP-8's status ladder makes this a hard gate: `Blocked: No decision record available to attribute. STOP — do not reconstruct a thesis after the fact.` So CP-8 cannot be proven against a filing alone, and the record must be dated before the outcome period it is measured over. The outcome side is already in hand for VMO2 (Q3 then Q4 2025); for CCL it would need a second period. Owner-authored, because nobody else holds the decision."
+    },
+    {
+      "id": "cp-dr-research-brief",
+      "issuer": null,
+      "document": "A CP-DR research brief and the supplied evidence its questions need",
+      "modules": ["CP-DR"],
+      "pathways": ["LITE_DEEP_RESEARCH", "DEEP_RESEARCH"],
+      "source": "owner-authored",
+      "status": "to_author",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "CP-DR's REQUIRED RESEARCH BRIEF section requires a materialized run-specific brief from vendor/deploy-v/skills/cp-os-credit-os/references/CP_DR_RESEARCH_BRIEF_V1.md, carrying subject, question, decision context, as-of, horizon, boundaries, source mode and budget. Its capability gate stops `Blocked` for `web_only` or `hybrid` when web research is unavailable, which here is structural (invariant 1: web discovery is absent, not disabled), so every CAOS brief must declare `supplied_only` and stay inside the pinned document register. Authored per set; the host has no route that delivers a brief yet."
+    },
+    {
+      "id": "distressed-disclosure-statement",
+      "issuer": null,
+      "document": "A distressed issuer's disclosure statement, plan or restructuring support agreement",
+      "modules": ["CP-4C"],
+      "pathways": ["DISTRESSED_RESTRUCTURING", "LITE_DISTRESSED_RESTRUCTURING"],
+      "source": null,
+      "status": "not_available",
+      "local_path": null,
+      "external_path": null,
+      "demand_verified": true,
+      "note": "CP-4C Phase 1 is a distress, jurisdiction and evidence gate: it requires evidence of payment or default risk, failed refinancing, distressed exchange or LME escalation, a covenant or enforcement event, adviser engagement, a filing or another named distress trigger, and `if no gate is met, return Not Applicable, not a speculative restructuring`. No issuer in hand is distressed, so CP-4C's substantive path cannot be proven over this document register at all — only its Not Applicable refusal can. Marked not_available rather than to_source because the document does not exist for these issuers; proving CP-4C needs a different issuer, which is a document register decision the owner takes, not a fetch."
+    }
+  ],
+  "key_sources": [
+    {
+      "id": "answer-key-3issuer",
+      "issuer": "CCL, BA, F",
+      "document": "ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer",
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/ANSWER_KEY_3ISSUER.md",
+      "as_of": "2026-07-19",
+      "note": "A key source, never an admitted document. It is the owner's independent reading of the three 10-Ks and is therefore what a qualification set's `expects` rows may be authored from — but admitting it would put the answers inside the evidence the modules read, which is the one thing a qualification key must not do. 8,268 bytes."
+    }
+  ]
+}
