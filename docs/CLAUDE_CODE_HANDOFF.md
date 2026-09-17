@@ -18,8 +18,8 @@ contracts.
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 10.** Phases 7 and 8 are accepted; 9.1 and 10.2–10.3 are in the branch and 10.4 was answered as a finding rather than code. Task 10.1, per-node evidence selection, is the next engineering and is now unblocked: the remediation stream's four waves are merged, so `verify_accepted` and the public `digest_of` are on the branch |
-| Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) runs concurrently in `sdd/t1`–`sdd/t6` and is **not** a task of the completion plan. Its landed waves and the completion tasks each unblocks are recorded under Phase 7 Task 7.2 below |
+| Current task | **Completion Phase 12**, by delivery order rather than phase number. Phases 7 and 8 are accepted; 9.1, 10.2 and 10.3 are in the branch and 10.4 was answered as a finding. **Task 10.1 was dispatched and stopped**: its remediation dependencies all landed, and what blocks it is invariant 4 rather than effort, so it is a vendor request. Phases 9, 10 and 11 are held by three owner inputs and six vendor requests; Phase 12 waits on nothing external and is therefore next. The audit remediation is complete (§75) and its four waves are merged |
+| Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
@@ -372,12 +372,12 @@ something this session cannot supply.
 
 | Phase | State | Waiting on |
 |---|---|---|
-| 7 | complete, both `xhigh` gates run and remediated | `make image` with the pinned Trivy `0.70.0` |
-| 8 | complete, both gates run and remediated, one BLOCK found and fixed | the same Trivy run |
+| 7 | **accepted** (`7e60121`), both gates run and remediated | -- |
+| 8 | **accepted** (`7e60121`), both gates run and remediated, one BLOCK found and fixed | -- |
 | 9 | 9.1 done; 9.2–9.4 not started; 9.5–9.7 held by design | eight document sets nobody has sourced, then live-run authorization |
-| 10 | 10.2 and 10.3 done; 10.4 answered as a finding; 10.1 not started | the remediation stream's wave 3 (T11, T14), merged by the peer but not yet on the shared branch |
+| 10 | 10.2 and 10.3 done; 10.4 answered as a finding; **10.1 dispatched and stopped** | the vendor, or a dated decision. Its remediation dependencies all landed; what blocks it is invariant 4, not effort. `docs/requests/2026-09-17-t8-source-files-column.md` |
 | 11 | not started | Phase 9's documents, and the per-section bound below |
-| 12 | not started | Phase 11 |
+| 12 | not started | **nothing external** -- the only remaining phase that waits on no owner input, no vendor answer and no authorized run |
 | 13 | not started | an identity-provider setting, TLS material, an authorized nightly |
 
 **The three blockers, in the order they free the most work.**
