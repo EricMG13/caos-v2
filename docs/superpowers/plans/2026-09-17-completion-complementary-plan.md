@@ -186,17 +186,27 @@ Recorded here so a fresh clone does not depend on a Downloads file.
 | Opus 5 | `medium` (default dev) | daily-driver implementation | per-module fixtures and contract tests, route enablement slices, key authoring from documents, endpoints, wire, controls, per-task review |
 | Opus 5 | `max` with `ultrathink` | targeted invariant audits | each module's register semantics before its fixture is trusted; the money path; three-actor independence; two-worker interleavings; the trust trace |
 | Opus 5 | `max` with `ultrathink` | long-horizon autonomous execution | what Fable 5.1 `low`/`medium` held: evidence selection, CP-DR brief delivery, the command chain, async store and second-worker fencing, the signed assertion |
-| Opus 5 | `max` with `ultrathink` | architecture and governance | what Fable 5.1 `high`/`xhigh` held: phase and task briefs, vendor request documents, decision entries, and every review |
-| ~~Fable 5.1~~ | — | — | **No Fable dispatch remains.** The owner replaced it with Opus 5 `max` and `ultrathink` on 17 September 2026 |
+| Opus 5 | `max` with `ultrathink` | architecture and governance | what Fable 5.1 `high`/`xhigh` held: phase and task briefs, vendor request documents, decision entries, and task-level review |
+| Opus 5 | **`xhigh`** with `ultrathink` | the two per-phase gates | the confidence review and the separate adversarial audit that close each phase. `xhigh`, not `max`: `CLAUDE.md` has said "both at actual `xhigh` reasoning" since the repair phases began, so the `max` pin contradicted the contract it was meant to satisfy |
+| **Fable 5.1** | **`xhigh`**, no `ultrathink` | the **one** final review across all phases | run once, after the last phase's own two gates have passed and been remediated; never for a single phase. Fable returns for this gate alone |
+| **Fable 5.1** | `high`, no `ultrathink` | plan updates | revising a plan document when the build turns up an issue that needs one |
 
 ### Rules
 
 - A mixed slice takes the stricter row.
-- `ultrathink` is an Opus 5 lever only, at `max`. That rule now governs nothing it
-  has to forbid, because no Fable dispatch is left — it is kept rather than deleted,
-  so that the constraint is already written down if Fable ever returns.
-- **Every slice Fable 5.1 held now runs on Opus 5 `max` with `ultrathink`**, not
-  only the reviews. The owner's instruction of 17 September 2026 named no scope, so
+- `ultrathink` is an Opus 5 lever only. It now governs two live cases again: the
+  final all-phases review and plan updates both run on Fable 5.1, and neither
+  prompt may carry it. The rule was kept rather than deleted when it briefly
+  governed nothing, which is why it was available within hours when Fable
+  returned.
+- **Every slice Fable 5.1 held runs on Opus 5 `max` with `ultrathink`, except the
+  two the owner named back on 17 September 2026**: the final review across all
+  phases (Fable 5.1 `xhigh`) and plan updates (Fable 5.1 `high`). The reason for
+  the first is disconfirming evidence rather than preference — every other review
+  in this repository runs on Opus, gates that share an architecture share blind
+  spots, and a different model reading the same tree is the only independent
+  check available at the end of a programme. Otherwise the replacement stands,
+  not only for the reviews. The owner's instruction of 17 September 2026 named no scope, so
   it is read as it was written: Opus 5 `max` with `ultrathink` **instead of**
   Fable 5.1, wherever Fable appeared. The reviews were the live case when it
   arrived and were rerouted first; the long-horizon implementation rows followed
@@ -209,10 +219,12 @@ Recorded here so a fresh clone does not depend on a Downloads file.
   10.3's second concern ran on Fable 5.1 `high` hours before this change and stays
   recorded that way.
 - Effort is a setting and not a word in a prompt, so all three are pinned where a
-  setting lives: `.claude/agents/phase-confidence-reviewer.md`,
-  `phase-adversarial-auditor.md` and `task-acceptance-reviewer.md` each carry
-  `model: opus` and `effort: max`, and each says in its body that the review turn
-  opens with `ultrathink`. A run missing either the setting or the lever is a
+  setting lives: `phase-confidence-reviewer.md` and `phase-adversarial-auditor.md`
+  carry `model: opus` and `effort: xhigh`; `task-acceptance-reviewer.md` carries
+  `model: opus` and `effort: max`; `final-phases-reviewer.md` carries
+  `model: fable` and `effort: xhigh` and says in its body **not** to use
+  `ultrathink`. Each Opus definition says in its body that the review turn opens
+  with `ultrathink`. A run missing either the setting or the lever is a
   review that ran and not this gate, and says so in its own report.
 - A subagent cannot read its own effort back, so what a report can attest is the
   launch path and not the setting. The dispatch names the pinned definition; the
