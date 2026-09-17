@@ -40,7 +40,8 @@ from test_loop_charges import ESTIMATE, MODEL, REPORTED
 from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
-from server.methodology import canonical, executor, invocation
+from server.evidence import read as evidence_read
+from server.methodology import canonical, invocation
 from server.methodology.canonical import (
     Replayed,
     Verdict,
@@ -377,8 +378,10 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
             route_node_ids=[screen],
         )
     assert verdict == _attempt_of(harness, "CP-5")
-    # The captured pins are read once, by the reader the verdict re-anchors on.
-    assert statements.count(executor._CAPTURED) == 1
+    # The delivered blocks are read once, in one statement, by the reader the
+    # verdict re-anchors on.
+    assert statements.count(evidence_read._RUN_BLOCKS_QUERY) == 1
+    assert evidence_read._RUN_BLOCK_QUERY not in statements
     harness.conn.rollback()
     replayed = replay_billed(
         harness.conn,

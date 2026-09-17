@@ -1,5 +1,7 @@
 """Run membership reads; caller authority integration remains a later task."""
 
+import json
+import traceback
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -11,20 +13,30 @@ import pytest
 from psycopg.pq import TransactionStatus
 from test_extraction_provenance import Reader
 from test_read_evidence import _CountingConnection
+from test_route_pinning import CATALOG_PATH, PROFILE
 from test_run_inputs import SUBJECT, Prepared, prepared
 from test_source_sets import _admit
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import resolve_route
 from server.evidence import read
 from server.evidence.extract import Extractor, PlainTextExtractor
+from server.evidence.ingest import Document, admit_pack
+from server.methodology.bundle import Bundle
 from server.refusals import Refusal
 from server.store import StoreConnection
+from server.store.members import Standing, grant
 from server.store.outcomes import execution_reads
+from server.store.routes import pin_route
 from server.store.run_inputs import load_run_input, pin_run_input
 from server.store.runs import create_case, start_run
 from server.store.source_sets import snapshot_source_set
 
 __all__ = ["prepared"]
+
+# The connection, its pinned run, and the two sources the pin captured.
+type Delivered = tuple[StoreConnection, UUID, UUID, UUID]
 
 
 @pytest.fixture
@@ -207,3 +219,80 @@ def test_run_read_owned_cleanup_never_adopts_pending_work(
             if fault == "cleanup"
             else conn.info.transaction_status is TransactionStatus.IDLE
         )
+
+
+@pytest.fixture
+def delivered(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Delivered:
+    """A pinned run over two sources of several blocks each: enough rows for a
+    batched read to come back short without coming back empty."""
+    conn, case_id = case
+    grant(conn, case_id=case_id, user_id=case_id, standing=Standing.WRITER)
+    first, second = admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=case_id,
+        documents=[
+            Document(BoundaryText.of("report.txt"), b"one\ntwo\nthree"),
+            Document(BoundaryText.of("note.txt"), b"four\nfive"),
+        ],
+    )
+    conn.commit()
+    sources = snapshot_source_set(conn, case_id)
+    run = start_run(conn, case_id)
+    route = resolve_route(
+        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
+    )
+    pin_route(conn, run, route)
+    pin_run_input(
+        conn, run, sources.version, Bundle(CATALOG_PATH.parents[3]), subject=SUBJECT
+    )
+    return conn, run, first, second
+
+
+def test_delivered_blocks_cost_one_query_per_run(delivered: Delivered) -> None:
+    conn, run, first, second = delivered
+    counter = _CountingConnection(conn)
+    rows = read.read_run_blocks(cast(StoreConnection, counter), run_id=run)
+    expected = sorted(
+        (source, f"b{index:06d}", 1, word)
+        for source, words in (
+            (first, ("one", "two", "three")),
+            (second, ("four", "five")),
+        )
+        for index, word in enumerate(words)
+    )
+    assert [
+        (source, block, page, text.value) for source, block, page, text in rows
+    ] == expected
+    assert counter.executed == read.IO_BUDGET == 1
+
+
+def test_batched_run_blocks_refuse_when_any_captured_block_is_withdrawn(
+    delivered: Delivered,
+) -> None:
+    conn, run, _, second = delivered
+    conn.execute(
+        "UPDATE sources SET withdrawn_at = now() WHERE source_id = %s", (second,)
+    )
+    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$") as caught:
+        read.read_run_blocks(conn, run_id=run)
+    assert caught.value.__cause__ is None
+    assert "four" not in "".join(traceback.format_exception(caught.value))
+
+
+def test_a_store_fault_in_the_batched_read_is_not_an_evidence_verdict(
+    delivered: Delivered, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn, run, _, _ = delivered
+    execute = psycopg.Connection.execute
+
+    def fail(c: StoreConnection, query: str, *args: object, **kwargs: object) -> object:
+        if query.startswith("WITH captured AS ("):
+            return execute(c, 'SELECT "private evidence"')
+        return execute(c, query, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(psycopg.Connection, "execute", fail)
+    with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$") as caught:
+        read.read_run_blocks(conn, run_id=run)
+    assert caught.value.__cause__ is None
+    assert "private evidence" not in "".join(traceback.format_exception(caught.value))

@@ -55,6 +55,48 @@ _RUN_BLOCK_QUERY = (
 )
 
 
+# `_RUN_BLOCK_QUERY` for every captured block at once: the same chain, with the
+# block predicate dropped and an order added. The run's captured membership is
+# the CTE, and the live chain is joined onto it, so the count of what the pin
+# captured and the rows that survived withdrawal and identity come back in one
+# statement -- a short list is a refusal, never a delivery (invariant 2). The
+# totals row is what carries that count when nothing survived: LEFT JOIN keeps
+# one row whose block columns are NULL rather than returning nothing to read.
+_RUN_BLOCKS_QUERY = (
+    "WITH captured AS ("
+    "SELECT inputs.case_id, inputs.source_version, inputs.source_fingerprint,"
+    " members.source_id, members.document_sha256, members.extractor_identity,"
+    " members.output_sha256, members.extraction_sha256,"
+    " blocks.block_id, blocks.page, blocks.text"
+    " FROM runs AS run"
+    " JOIN run_inputs AS inputs ON (inputs.run_id,inputs.case_id)"
+    " = (run.run_id,run.case_id)"
+    " JOIN source_set_members AS members ON (members.case_id,members.version)"
+    " = (inputs.case_id,inputs.source_version)"
+    " JOIN source_blocks AS blocks ON blocks.source_id = members.source_id"
+    " WHERE run.run_id = %s"
+    "), live AS ("
+    "SELECT captured.source_id, captured.block_id, captured.page, captured.text"
+    " FROM captured"
+    " JOIN source_set_versions AS versions"
+    " ON (versions.case_id,versions.version,versions.fingerprint)"
+    " = (captured.case_id,captured.source_version,captured.source_fingerprint)"
+    " JOIN live_sources AS sources ON (sources.case_id,sources.source_id)"
+    " = (captured.case_id,captured.source_id)"
+    " JOIN source_extractions AS extraction"
+    " ON extraction.source_id = sources.source_id"
+    " WHERE captured.document_sha256 = sources.document_sha256"
+    " AND captured.extractor_identity = extraction.extractor_identity"
+    " AND captured.output_sha256 = extraction.output_sha256"
+    " AND captured.extraction_sha256 = extraction.extraction_sha256"
+    ")"
+    " SELECT live.source_id, live.block_id, live.page, live.text, totals.captured"
+    " FROM (SELECT count(*) AS captured FROM captured) AS totals"
+    " LEFT JOIN live ON true"
+    " ORDER BY live.source_id, live.block_id"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class Block:
     """One block as the host holds it: its text, and the page it sits on.
@@ -94,6 +136,51 @@ def read_run_block(
     historical BOUNDARY_TEXT_INVALID/TOO_LONG refusals for stored text.
     """
     return _fetch_block(conn, _RUN_BLOCK_QUERY, (run_id, source_id), block_id)
+
+
+def read_run_blocks(
+    conn: StoreConnection, *, run_id: UUID
+) -> list[tuple[UUID, str, int, BoundaryText]]:
+    """Every block the run's pin captured, in `(source_id, block_id)` order.
+
+    One statement where the per-block reader was one statement per block: a pack
+    of twenty thousand lines cost twenty thousand round trips under the case
+    lock every time a prompt was built. The join is `read_run_block`'s, so the
+    same things are proven -- the block belongs to a source this run pinned, at
+    the document and extraction identity it was pinned at, and the source is
+    live now.
+
+    Fail closed: a count short of what the pin captured is a withdrawn or
+    altered source, and refuses `EVIDENCE_NOT_AVAILABLE` rather than delivering
+    the blocks that did survive. No text reaches the refusal (invariant 2).
+    A run with nothing pinned captures nothing and delivers nothing, which is
+    what the per-block reader's caller did too.
+
+    A database fault is `STORE_UNAVAILABLE`, not a verdict about the evidence:
+    this statement stands where the caller's own unwrapped pins query stood,
+    and that is the code a store fault on the delivery path has always carried
+    up to `execution_reads`. Typed and `from None` either way, so nothing the
+    statement quotes travels with it.
+    """
+    if not isinstance(run_id, UUID):
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE) from None
+    try:
+        rows = conn.execute(_RUN_BLOCKS_QUERY, (run_id,)).fetchall()
+    except psycopg.Error:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    if not rows:
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE) from None
+    captured = int(rows[0][4])
+    live = [row for row in rows if row[0] is not None]
+    if len(live) != captured:
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE) from None
+    try:
+        return [
+            (UUID(str(source)), str(block), int(page), BoundaryText.of(text))
+            for source, block, page, text, _ in live
+        ]
+    except Refusal as refused:
+        raise Refusal(refused.code) from None
 
 
 def _fetch_block(
