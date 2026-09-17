@@ -20,7 +20,11 @@ from server.store.source_sets import pinned_live_sources
 
 # Analysis' ten-node forecast route, including CP-CF's four owner proofs,
 # plus the live source pin. Measured by test_model_http_actor_matrix_and_declared_io.
-IO_BUDGET = 193
+# Raised from 193 by `citation_candidates` (server/evidence/citations.py,
+# "fix: supply anchorable citation candidates"), which verifies each proposed
+# citation against the delivered token index before offering it as a
+# candidate -- real per-citation work, not query growth left unaccounted for.
+IO_BUDGET = 196
 router = APIRouter()
 
 
