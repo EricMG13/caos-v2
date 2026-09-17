@@ -14,11 +14,11 @@ contracts.
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 6 signed off at `e59ad7b`** (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
+| Latest accepted phase | **Completion Phases 7 and 8 accepted at `38f4639`** (records below; one `make check` at exit 0 gated both). Earlier: Phase 6 `e59ad7b` (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 7** (reconcile the record, land the branch), implemented with both `xhigh` reviews and their remediation done. Phase 7 is **not accepted**: `make check` did not complete because `make image` needs the pinned Trivy `0.70.0` and this machine has `0.72.0`. See the Phase 7 gate and review record below for the one owner action that closes it. Tasks 8.1, 8.3, 8.4 and 9.1 are in the branch under their own phases |
+| Current task | **Completion Phase 10.** Phases 7 and 8 are accepted; 9.1 and 10.2–10.3 are in the branch and 10.4 was answered as a finding rather than code. Task 10.1, per-node evidence selection, is the next engineering and is now unblocked: the remediation stream's four waves are merged, so `verify_accepted` and the public `digest_of` are on the branch |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) runs concurrently in `sdd/t1`–`sdd/t6` and is **not** a task of the completion plan. Its landed waves and the completion tasks each unblocks are recorded under Phase 7 Task 7.2 below |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
@@ -228,6 +228,76 @@ gap already observed rather than predicted: run `ff71c457…` on
 - **Next:** the owner's `make image` run closes the gate, after which Phase 7 can
   be accepted. Phase 8 Tasks 8.1, 8.3 and 8.4 and Phase 9 Task 9.1 are already in
   the branch and are closed under their own phases' gates, not this one.
+
+## Completion Phase 7 acceptance record — 17 September 2026
+
+- **Accepted.** Candidate `38f4639`, branch `codex/execute-repair-plan`.
+- **Delivered:** the completion plan for Phases 7–13 and its twelve task briefs;
+  the known-gaps ledger read back by `scripts/ledger_state.py` under a
+  seven-test gate; three struck entries, two withdrawn upgrade paths and four
+  relabelled rebuild headings; the per-PR delivery table with hosted results;
+  the exit-evidence record; the concurrent stream's records tracked.
+- **Complete gate, `make check` exit 0** at this candidate:
+
+| Component | Result |
+|---|---|
+| offline suite | **3,100 passed**, 94 % branch coverage |
+| races | 23 passed |
+| Bandit / pip-audit / gitleaks | no issues, no known vulnerabilities, no leaks |
+| frontend units | 229 across 27 files |
+| workbench | 90 passed |
+| image gate | 2 targets examined, no fixable HIGH/CRITICAL |
+| production-image tests | 8 passed |
+| journeys | 15 on each of chromium, firefox and webkit |
+
+- **Whole-phase reviews:** both at `xhigh` on Fable 5.1, the routing in force
+  that morning. The confidence review returned CONCERNS with two P2s, remediated
+  in `fa6bbfe`; the separate adversarial audit then returned CONCERNS with one P1
+  and six P2s, remediated in `885f416` and `acfe398`.
+- **The P1 is the phase's own lesson.** It was produced by two of this phase's
+  commits read together: one deleted a blank line before a ledger heading, the
+  next required one, and the entry count — the signal the remediation trusted —
+  stayed identical while four entries moved under the wrong phase. The gate now
+  raises on such a heading, and writing the remediation reproduced the same loss
+  once more, which the new rule caught.
+- **One disagreement recorded rather than settled:** the audit asked that
+  `docs/feature-status.csv`'s citations be made to resolve; they were not,
+  because 206 of its 248 rows are dated and editing them would cost the property
+  that makes a dated record worth keeping. It is a ledger entry with its own
+  upgrade path.
+
+## Completion Phase 8 acceptance record — 17 September 2026
+
+- **Accepted.** Same candidate `38f4639` and the same complete gate above; the two
+  phases were gated together because Phase 8's work was already in the branch
+  when Phase 7's gate became runnable.
+- **Delivered:** register answer keys over the vendor's own register reader; the
+  dated price recorded with the reservation and the encoded request priced before
+  reserving; a verdict that must name a model its runs recorded, with
+  `VERDICT_ALREADY_RECORDED` and a nil-scope receipt; the document register with
+  its sourcing list; five vendor change requests.
+- **Whole-phase reviews:** both on **Opus 5 at `max` with `ultrathink`**, the
+  owner's routing of this date, dispatched through the pinned agent definitions.
+  Neither report asserts an effort, because a subagent cannot read its own back;
+  what is attested is the launch path.
+- **The confidence review found four CONFIRMED defects**, each reproduced with a
+  probe, remediated in `0f49891`. The one worth naming: a snapshot the store
+  itself called signable was refused as a wrong binding, because a case whose
+  declared refusal was met can leave a run that accepted nothing, and the model
+  comparison demanded every run confirm. One such case made a whole set
+  unsignable — and it is exactly the deliberately restricted case
+  `docs/REPAIR_PLAN.md` Phase 6 asks for.
+- **The adversarial audit then returned BLOCK on a critical the confidence
+  review had read and called safe.** The host asked the bundle's register
+  locator a narrower question than the bundle asks itself, and that list decides
+  which table answers. The audit built a handoff passing the vendor's own
+  completeness check with zero violations in which the one shipped answer key
+  scores `met` from a sibling register while the honest one says `MISSING`, plus
+  the mirror case where an honest handoff misses. Remediated in `0fd6841`; the
+  ledger entry that said this could not happen is struck, naming the test.
+- **That pair is the argument for two gates per phase.** The same code passed one
+  and failed the other, and the difference was that the second built its case
+  instead of reasoning about it.
 
 ## Completion Phase 8 close — in progress, 17 September 2026
 
