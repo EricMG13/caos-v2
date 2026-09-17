@@ -1439,27 +1439,45 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 3.**
 
-- **A route's predicates are frozen and never evaluated.** `ResolvedRoute`
-  carries them, `route_digest` covers them, and `server/store/routes.py` writes
-  and reads them back — and no code consults them. `CONDITIONAL` sits in
-  `BLOCKING` beside `REQUIRED`, so a conditional edge blocks unconditionally and
-  its condition decides nothing. That is the fail-closed direction, and the only
-  one available: a condition the host cannot evaluate must not be assumed met,
-  and the predecessor's failure was the opposite — edges that did not enforce
-  what they claimed. But invariant 10's "frozen predicates" are, for now, frozen
-  without yet being predicates, and a reader of the pin could take the presence
-  of a predicate for its enforcement. *Upgrade:* not an evaluator. The vendored
-  catalog declares 60 REQUIRED, 26 OPTIONAL, 29 ADVISORY and one QA_GATE typed
-  edge, and **no** CONDITIONAL edge, so the blocking branch is unreachable on
-  this bundle and a grammar written for it would be code for a route that does
-  not exist. The counts are already pinned:
-  `tests/test_bundle_pin.py::test_the_catalog_declares_no_conditional_edge` has
-  held since `4f06337`, which the first draft of this rewrite did not know and
-  the Completion Phase 7 audit found. What Completion Phase 10 still owes is the
-  refusal -- `_edges_among` `ROUTE_EDGE_UNSUPPORTED` rather
-  than pinning a route whose target would block whatever the evidence said. The
-  evaluator is owed the day that guard fails, which is also the first day a real
-  predicate exists to parse.
+- **A route's predicates are frozen and never evaluated, and an edge that would
+  need one is refused.** `ResolvedRoute` carries them, `route_digest` covers
+  them, and `server/store/routes.py` writes and reads them back — and no code
+  consults them. That is the fail-closed direction, and the only one available:
+  a condition the host cannot evaluate must not be assumed met, and the
+  predecessor's failure was the opposite — edges that did not enforce what they
+  claimed. But invariant 10's "frozen predicates" are, for now, frozen without
+  yet being predicates, and a reader of the pin could take the presence of a
+  predicate for its enforcement. What closes the reachable half of that reading
+  is Completion Phase 10 Task 10.2: `_edges_among` refuses
+  `ROUTE_EDGE_UNSUPPORTED` for a `CONDITIONAL` **edge** before the `Edge` is
+  built, so no such route resolves and none can be pinned — where before it
+  would have pinned a route whose target blocks whatever the evidence said. The
+  refusal is scoped to the route, not to the bundle: the membership filter runs
+  first, so a CONDITIONAL edge whose source or target is outside the resolved
+  node set is skipped as any other out-of-route edge is, and a build carrying
+  one off every pathway refuses nothing. That is deliberate — an edge no pin
+  carries misleads no reader of a pin — and it means this guard fires at the
+  first build that puts such an edge **on a resolved route**, not at the first
+  build that declares one anywhere. `CONDITIONAL` stays in `BLOCKING` and stays
+  in the bundle's vocabulary (`CONTEXT.md`): it remains a CP-0 *verdict*, which
+  `tests/test_route_resolution.py::test_a_conditional_verdict_blocks_like_a_blocked_one`
+  still holds, and only an edge of that type is refused. The refusal is a 503:
+  the pinned build's own catalog, not the caller's request, and no profile or
+  pathway a caller could name instead would avoid it. The branch is unreachable
+  on this bundle — the vendored catalog declares 60 REQUIRED, 26 OPTIONAL, 29
+  ADVISORY and one QA_GATE typed edge and **no** CONDITIONAL edge, pinned by
+  `tests/test_bundle_pin.py::test_the_catalog_declares_no_conditional_edge`
+  since `4f06337` and now as a whole census, through the engine and against a
+  mutated copy, by
+  `tests/test_bundle_pin.py::test_the_vendored_catalog_carries_no_edge_this_engine_cannot_evaluate`
+  — so a grammar written for it today would be code for a route that does not
+  exist. `tests/test_route_resolution.py::test_a_profile_with_a_conditional_edge_is_refused_at_resolution`
+  is the guard, and
+  `test_the_four_edge_types_this_engine_evaluates_still_resolve` says the guard
+  is one type rather than a narrowing of the other four. *Upgrade:* an
+  evaluator, owed the day that guard fires — which is also the first day an
+  upstream build carries a real predicate for a grammar to parse, and the day
+  the frozen `predicates` field has something to be read against.
 
 **Phase 2.**
 
@@ -1581,7 +1599,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **caos-v2** (8993 symbols, 22700 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **caos-v2** (10131 symbols, 24716 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
