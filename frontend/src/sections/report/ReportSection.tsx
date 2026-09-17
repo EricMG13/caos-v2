@@ -1,14 +1,8 @@
 // The saved Report payload, read only. Text stays text: this surface never
 // interprets markdown, follows evidence, or offers a legacy draft action.
+import { scrollArtifact } from "@/controls/scroll";
+import { NoteList } from "@/ds/atoms";
 import type { ReportDocument } from "@/wire/v1";
-import type { KeyboardEvent } from "react";
-
-function scrollArtifact(event: KeyboardEvent<HTMLPreElement>) {
-  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-    event.preventDefault();
-    event.currentTarget.scrollBy({ left: event.key === "ArrowRight" ? 40 : -40 });
-  }
-}
 
 /* Keyboard scroll makes static, wide canonical text reachable in every browser. */
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions */
@@ -50,12 +44,12 @@ function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][
         >
           {artifact.record}
         </pre>
-        <div className="note" data-report-limitations>
-          <b>Limitations.</b> {artifact.limitation_flags.join(", ") || "none"}
-        </div>
-        <div className="note" data-report-warnings>
-          <b>Validation warnings.</b> {artifact.validation_warnings.join(", ") || "none"}
-        </div>
+        <NoteList label="Limitations." values={artifact.limitation_flags} data-report-limitations />
+        <NoteList
+          label="Validation warnings."
+          values={artifact.validation_warnings}
+          data-report-warnings
+        />
       </div>
     </section>
   );

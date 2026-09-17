@@ -7,10 +7,11 @@
 // Never prose, string literals or JSX text. tests/test_vocabulary_rules.py
 // asserts ENFORCED below equals the Python gate's.
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { resolveGit } from "./git.mjs";
 
 export const ENFORCED = [
   "deal",
@@ -164,29 +165,6 @@ export function violations(path, text, banned) {
     }
   }
   return lines;
-}
-
-// Absolute path to `git`, resolved once from PATH's own directories (mirrors
-// scripts/tracked.py's shutil.which) — the subprocess below then runs that
-// resolved path, never the bare name "git" left for the child to look up.
-function resolveGit() {
-  const name = process.platform === "win32" ? "git.exe" : "git";
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    if (!dir) continue;
-    const candidate = resolve(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      // X_OK alone passes on an ordinary directory (its search/traverse bit),
-      // so a PATH entry that is a directory named "git" would otherwise be
-      // accepted here and crash the later execFileSync with EACCES — the same
-      // pitfall shutil.which's own _access_check guards against with
-      // `not os.path.isdir(fn)`. This mirrors that check.
-      if (!statSync(candidate).isDirectory()) return candidate;
-    } catch {
-      // not here; keep looking
-    }
-  }
-  throw new Error("git is not on PATH; the gate cannot determine what a PR carries");
 }
 
 function trackedTypeScript() {

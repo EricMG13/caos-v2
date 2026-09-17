@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { OFFLINE_WORDING } from "@/app/transport";
 import { UploadSection } from "@/sections/upload/UploadSection";
 import { parseUploadDocument, type UploadDocument } from "@/wire/v1";
 
@@ -232,6 +233,8 @@ describe("Upload", () => {
     fireEvent.click(control);
     await settle();
     const key1 = fetchSpy.mock.calls[0]![1].headers["Idempotency-Key"];
+    // An offline answer is announced, in the one offline sentence.
+    expect(screen.getByRole("alert")).toHaveTextContent(OFFLINE_WORDING);
 
     // Same file set, retried after offline: the same key.
     fireEvent.change(input, { target: { files: [fileA] } });

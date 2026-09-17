@@ -11,18 +11,20 @@
 // nothing happened: the success stands (the pack was admitted) beside a
 // distinct, visible refresh failure.
 import { useId, useRef, useState } from "react";
-import { admitSources, newIntent, type Intent } from "@/app/commands";
+import { admitSources } from "@/app/commands";
 import { sectionUrl } from "@/app/transport";
 import { RefusedControl } from "@/controls/RefusedControl";
-import { parseUploadDocument, type ActionView, type UploadDocument } from "@/wire/v1";
-
-function offlineMessage(): string {
-  return "The request did not reach the server.";
-}
+import { CommandOutcome, useCommand } from "@/sections/run/controls";
+import {
+  parseUploadDocument,
+  type ActionView,
+  type SourcesAdmitted,
+  type UploadDocument,
+} from "@/wire/v1";
 
 /** Upload's own document, re-read once after a success (brief 4.2, decision
     12). Reuses `sectionUrl` and the v1 parser rather than the section-status
-    classifier in `@/app/transport`, whose union of the four v1 documents this
+    classifier in `@/app/transport`, whose union of the v1 documents this
     control has no reason to narrow. */
 async function refetchUpload(caseId: string): Promise<UploadDocument | null> {
   const url = sectionUrl("upload", { case: caseId });
@@ -42,19 +44,10 @@ async function refetchUpload(caseId: string): Promise<UploadDocument | null> {
 }
 
 /** A stable key for the exact file set, order-sensitive, so two different
-    selections of the same size never compare equal by accident. */
+    selections of the same size never compare equal by accident. The intent's
+    key is reused only for a retry of the same set after an offline answer. */
 function fileSetKey(files: readonly File[]): string {
   return files.map((file) => `${file.name}:${file.size}:${file.lastModified}`).join("|");
-}
-
-/** What was last sent, so the same file set can retry an offline attempt on
-    its one key while any other outcome -- or a changed set -- draws a fresh
-    one (the coordinator's finding: a key is not a session, it is one
-    intent). */
-interface LastSubmitted {
-  bodyKey: string;
-  intent: Intent;
-  offline: boolean;
 }
 
 export function AdmitSources({
@@ -69,43 +62,20 @@ export function AdmitSources({
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const { pending, result, run } = useCommand<SourcesAdmitted>();
   const [refreshFailed, setRefreshFailed] = useState(false);
-  const lastSubmitted = useRef<LastSubmitted | null>(null);
   const refusal = action?.refusal ?? null;
 
   async function submit() {
     if (refusal || pending || files.length === 0) return;
-    const bodyKey = fileSetKey(files);
-    const previous = lastSubmitted.current;
-    const intent =
-      previous && previous.offline && previous.bodyKey === bodyKey ? previous.intent : newIntent();
-    setPending(true);
-    setError(null);
-    setSuccess(null);
     setRefreshFailed(false);
-    const result = await admitSources(caseId, files, intent);
-    if (result.kind === "ok") {
-      lastSubmitted.current = { bodyKey, intent, offline: false };
-      setFiles([]);
-      if (inputRef.current) inputRef.current.value = "";
-      setSuccess(`${result.receipt.source_ids.length} source(s) admitted.`);
-      const refreshed = await refetchUpload(caseId);
-      if (refreshed) onAdmitted(refreshed);
-      else setRefreshFailed(true);
-    } else if (result.kind === "refused") {
-      lastSubmitted.current = { bodyKey, intent, offline: false };
-      setError(`${result.refusal.code} — clears when ${result.refusal.clears}`);
-    } else if (result.kind === "error") {
-      lastSubmitted.current = { bodyKey, intent, offline: false };
-      setError(result.code);
-    } else {
-      lastSubmitted.current = { bodyKey, intent, offline: true };
-      setError(offlineMessage());
-    }
-    setPending(false);
+    const outcome = await run(fileSetKey(files), (intent) => admitSources(caseId, files, intent));
+    if (outcome.kind !== "ok") return;
+    setFiles([]);
+    if (inputRef.current) inputRef.current.value = "";
+    const refreshed = await refetchUpload(caseId);
+    if (refreshed) onAdmitted(refreshed);
+    else setRefreshFailed(true);
   }
 
   return (
@@ -129,16 +99,13 @@ export function AdmitSources({
       >
         {pending ? "Admitting…" : `Admit${files.length ? ` ${files.length}` : ""}`}
       </RefusedControl>
-      {error ? (
-        <p className="note crit" role="alert" data-admit-sources-error>
-          {error}
-        </p>
-      ) : null}
-      {success ? (
+      {result?.kind === "ok" ? (
         <p className="note ok" data-admit-sources-success>
-          {success}
+          {result.receipt.source_ids.length} source(s) admitted.
         </p>
-      ) : null}
+      ) : (
+        <CommandOutcome result={result} success="" />
+      )}
       {refreshFailed ? (
         <p className="note warn" role="alert" data-admit-sources-refresh-failed>
           The sources were admitted, but the pack could not be refreshed. Reload to see them.

@@ -20,6 +20,7 @@ import {
   type CommandResult,
   type Intent,
 } from "@/app/commands";
+import { OFFLINE_WORDING } from "@/app/transport";
 import { fetchSection } from "@/app/transport";
 import { RefusalNote, RefusedControl } from "@/controls/RefusedControl";
 import type {
@@ -175,16 +176,24 @@ export function CommandOutcome({
       </div>
     );
   }
-  if (result.kind === "refused") return <RefusalNote refusal={result.refusal} />;
+  // Every outcome but success is announced: a refusal a screen reader never
+  // hears is a form that silently did nothing.
+  if (result.kind === "refused") {
+    return (
+      <div className="note crit" role="alert">
+        <RefusalNote refusal={result.refusal} />
+      </div>
+    );
+  }
   if (result.kind === "offline") {
     return (
-      <div className="note" data-command-offline>
-        The request never reached the server. Retrying sends the same key.
+      <div className="note crit" role="alert" data-command-offline>
+        {OFFLINE_WORDING} Retrying sends the same key.
       </div>
     );
   }
   return (
-    <div className="note" data-command-error>
+    <div className="note crit" role="alert" data-command-error>
       RESPONSE_INVALID — the server&apos;s answer did not match the wire.
     </div>
   );

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { OFFLINE_WORDING } from "@/app/transport";
 import { DirectorySection } from "@/sections/directory/DirectorySection";
 import { parseDirectoryDocument, parseUploadDocument, type DirectoryDocument } from "@/wire/v1";
 
@@ -210,6 +211,8 @@ describe("Directory", () => {
     fireEvent.click(control);
     await settle();
     const key1 = fetchSpy.mock.calls[0]![1].headers["Idempotency-Key"];
+    // An offline answer is announced, in the one offline sentence.
+    expect(screen.getByRole("alert")).toHaveTextContent(OFFLINE_WORDING);
 
     // Same body, retried after an offline answer: the same key.
     fireEvent.click(control);
@@ -248,6 +251,8 @@ describe("Directory", () => {
     fireEvent.click(control);
     await settle();
     const key1 = fetchSpy.mock.calls[0]![1].headers["Idempotency-Key"];
+    // A refusal is announced, with its code and clearance.
+    expect(screen.getByRole("alert")).toHaveTextContent("NOT_AUTHORISED");
 
     // Same body, but the last answer was a refusal, not offline: a fresh key.
     fireEvent.click(control);
