@@ -28,10 +28,8 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
-import psycopg
-
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, rollback_or_close
+from server.store import StoreConnection, committed_unit
 from server.store.cases import lock_case
 from server.store.members import Standing, satisfies, standing_of
 
@@ -79,7 +77,7 @@ def governed_write(
     that its state and this function's audit event are one commit or none.
     `after_event` can persist an object naming this exact link before commit.
     """
-    try:
+    with committed_unit(conn):
         lock_case(conn, action.case_id, missing=RefusalCode.NOT_AUTHORISED)
         previous, seq = _lock_head(conn, action.case_id)
         _require_standing(conn, action)
@@ -107,18 +105,6 @@ def governed_write(
         )
         if after_event is not None:
             after_event(conn, entry_sha256)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        # Any failure at all, cancellation included. Letting this propagate with
-        # the transaction still open leaves the state `write` managed to make
-        # sitting in it, ready to be committed by whatever the caller does next
-        # -- state that landed without the event recording it, which is the one
-        # thing transactional pairing exists to prevent.
-        rollback_or_close(conn)
-        raise
     return entry_sha256
 
 

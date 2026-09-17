@@ -24,7 +24,7 @@ import psycopg
 from server import methodology
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
@@ -37,7 +37,7 @@ from server.store.outcomes import (
     artifact_digests,
     record_outcome,
 )
-from server.store.work import Lease, mark_work_done, require_lease
+from server.store.work import Lease, mark_work_done, require_lease, require_running
 
 # The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
 MAX_ATTEMPT_ORDINAL = 256
@@ -148,11 +148,8 @@ def start_attempt(
     charged against: a crash after a provider completed still has the attempt it
     completed (`docs/DECISIONS.md` §12, adopting CAOS-Final §21 with Phase 4).
     """
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
     try:
-        _require_uncancelled(conn, run_id, lease)
+        require_running(conn, run_id, lease)
     except BaseException:
         rollback_or_close(conn)
         raise
@@ -160,15 +157,8 @@ def start_attempt(
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
-    try:
+    with committed_unit(conn):
         attempt_id = _start(conn, run_id, route_node_id, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return attempt_id
 
 
@@ -200,15 +190,6 @@ def _start(
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
     return attempt_id
-
-
-def _require_uncancelled(
-    conn: StoreConnection, run_id: UUID, lease: Lease | None
-) -> None:
-    """The fence for new spend: the lease is held and no cancel was requested.
-    The caller holds `lock_run`."""
-    if require_lease(conn, run_id, lease):
-        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
 
 
 def attempt_ordinal(conn: StoreConnection, attempt_id: UUID) -> int:
@@ -253,15 +234,8 @@ def accept_attempt(
     The bill is unfenced; the acceptance is the lease holder's alone, and is
     not gated on a requested cancel (brief 4.3 D3, D4).
     """
-    try:
+    with committed_unit(conn):
         inserted = _accept(conn, attempt_id, accepted, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return inserted
 
 
@@ -480,7 +454,7 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
     RUNNING run is ended only by its lease holder, and its work row closes in
     the same transaction (brief 4.3 D3, I8). A BLOCKED move with a `verdict`
     records it in that transaction too, riding the same conditional update."""
-    try:
+    with committed_unit(conn):
         changed = 0
         if lock_run(conn, run_id) is RunStatus.RUNNING:
             require_lease(conn, run_id, lease)
@@ -494,13 +468,6 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
             mark_work_done(conn, run_id)
             if verdict is not None:
                 _record_blocking_verdict(conn, run_id, into, verdict)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return bool(changed)
 
 
