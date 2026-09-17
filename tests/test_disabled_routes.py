@@ -81,7 +81,7 @@ class _Counting:
     model: str = MODEL
     calls: list[str] = field(default_factory=list)
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         self.calls.append(module_id)
         raise AssertionError(module_id)
 

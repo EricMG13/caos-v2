@@ -87,10 +87,10 @@ class _Stoppable:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         if self.stopping.is_set():
             raise _Stopping
-        self.inner.check_context(route_node_id, module_id)
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID

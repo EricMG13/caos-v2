@@ -52,7 +52,7 @@ from server.engine.runtime import (
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.methodology.runner import ModuleProvider
-from server.pricing import worst_case
+from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
 from server.store.budget import reserve as reserve_budget
@@ -96,8 +96,8 @@ class _Provider:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -376,10 +376,11 @@ def test_the_final_pre_call_check_sees_a_late_revocation(
         attempt_id: UUID,
         amount: Decimal,
         *,
+        price: ModelPrice,
         lease: Lease | None = None,
     ) -> None:
         nonlocal reservations
-        original(connection, attempt_id, amount, lease=lease)
+        original(connection, attempt_id, amount, price=price, lease=lease)
         reservations += 1
         if reservations == 2:
             revoke(connection, case_id=case_id, user_id=UUID(str(actor[0])))
@@ -718,7 +719,7 @@ class _Uncallable:
 
     model: str = "a-model/for-the-test"
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         pytest.fail(f"{module_id} was prepared for a second call")
 
     def execute(
@@ -737,8 +738,8 @@ class _DiesAfterItsBill:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -908,7 +909,7 @@ def test_a_stored_answer_predating_a_later_soft_input_is_explained_not_accepted(
     conn.rollback()
     screen = _node_id(route, "CP-5")
     early = start_attempt(conn, run.run_id, screen)
-    reserve_budget(conn, early, worst_case(priced(ESTIMATE)))
+    reserve_budget(conn, early, worst_case(priced(ESTIMATE)), price=priced(ESTIMATE))
     run.provider().inner.execute(screen, "CP-5", attempt_id=early)
     conn.rollback()
 

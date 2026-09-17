@@ -63,10 +63,11 @@ class ModuleProvider:
         """The configured model identity this provider's calls are billed as."""
         return self.completions.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        """Build and bound the node's whole prompt before any attempt exists."""
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        """Build and bound the node's whole prompt before any attempt exists,
+        and report the request size the reservation is priced on."""
         node = self._node(route_node_id, module_id)
-        check_context(
+        return check_context(
             self.conn,
             self.bundle,
             self.blobs,

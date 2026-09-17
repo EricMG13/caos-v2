@@ -12,6 +12,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
+from conftest import reserve_at as reserve
 from test_execution_freshness import (
     _DuringCompletion,
     _Harness,
@@ -24,7 +25,6 @@ import server.store as store
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
-from server.store.budget import reserve
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.runs import (
     Accepted,

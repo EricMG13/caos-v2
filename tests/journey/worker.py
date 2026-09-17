@@ -99,11 +99,11 @@ class _ExitAfterFirstAccept:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         if self.returned and not self.marker.exists():
             self.marker.write_text("exited\n", encoding="utf-8")
             os._exit(KILLED)
-        self.inner.check_context(route_node_id, module_id)
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID

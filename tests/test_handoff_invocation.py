@@ -27,6 +27,7 @@ from canonical_fixtures import (
     skill,
     upstream_ref,
 )
+from conftest import reserve_at as reserve
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -67,13 +68,13 @@ from server.methodology.invocation import (
     named_objects,
     owned_objects,
     prospective_identity,
+    request_size,
     upstream_markdown,
     within_request_ceiling,
 )
 from server.methodology.vendor import VENDOR_MODULE, authority_bundle_sha256
 from server.provider import MAX_REQUEST_BYTES, OpenRouter
 from server.refusals import Refusal, RefusalCode
-from server.store.budget import reserve
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.routes import pin_route
 from server.store.run_inputs import RunSubject, load_run_input, pin_run_input
@@ -948,6 +949,11 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
     whole = evidence(fits)
     prompt = within_request_ceiling(provider, _prompt(gate, whole))
     assert len(provider.request_bytes(prompt, json_object=True)) == MAX_REQUEST_BYTES
+    # `request_size` is the number `within_request_ceiling` bounds and the number
+    # Task 8.2 prices the reservation on, so the bytes bounded here and the bytes
+    # paid for are the same bytes. Named directly rather than only through its
+    # wrapper, because a reservation now depends on what it returns.
+    assert request_size(provider, prompt) == MAX_REQUEST_BYTES
     tag = _tag(prompt)
     assert f"\n{whole[0].text.value}\n--- END EVIDENCE {tag} ---\n" in prompt
     over = _prompt(gate, evidence(fits + 1))

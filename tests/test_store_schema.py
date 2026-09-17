@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -223,11 +224,26 @@ def _populate(conn: StoreConnection, blobs: BlobStore) -> str:
         "INSERT INTO budget_ledger (attempt_id, run_id, amount) VALUES (%s, %s, 0.25)",
         (attempt_id, run_id),
     )
-    conn.execute(
-        "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
-        " VALUES (%s, %s, 0.50)",
-        (attempt_id, run_id),
-    )
+    # The price columns arrive with `0024_reservation_price`, and this helper
+    # populates both a legacy database (before them) and a migrated one (after,
+    # where they are NOT NULL with no default). Name them when they exist.
+    priced = conn.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_name ="
+        " 'budget_reservations' AND column_name = 'price_model'"
+    ).fetchone()
+    if priced is None:
+        conn.execute(
+            "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
+            " VALUES (%s, %s, 0.50)",
+            (attempt_id, run_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO budget_reservations (attempt_id, run_id, amount,"
+            " price_model, price_input, price_output, price_as_of)"
+            " VALUES (%s, %s, 0.50, 'synthetic/model', 0, 0.000002, '2026-09-17')",
+            (attempt_id, run_id),
+        )
     conn.execute(
         "INSERT INTO run_routes"
         " (run_id, profile_id, selection_id, route_digest, resolved)"
@@ -1168,3 +1184,65 @@ def test_apply_schema_keeps_a_store_fault_and_flattens_every_other_refusal(
         apply_schema(conn)
 
     assert caught.value.code is expected
+
+
+def test_the_migration_keeps_existing_reservation_amounts(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """`0024_reservation_price` adds the four price columns to rows that have
+    no price to record. The amounts are the money and must not move; the
+    migration defaults say plainly that these rows predate the columns.
+    """
+    with connect(empty_database) as conn:
+        _legacy(conn)
+        _populate(conn, BlobStore(tmp_path))
+        conn.commit()
+        before = conn.execute(
+            "SELECT attempt_id, amount FROM budget_reservations ORDER BY attempt_id"
+        ).fetchall()
+        assert before, "a scanner that scanned nothing is a failure"
+
+        apply_schema(conn)
+
+        assert (
+            conn.execute(
+                "SELECT attempt_id, amount FROM budget_reservations ORDER BY attempt_id"
+            ).fetchall()
+            == before
+        )
+        assert conn.execute(
+            "SELECT DISTINCT price_model, price_input, price_output, price_as_of"
+            " FROM budget_reservations"
+        ).fetchall() == [("legacy", Decimal(0), Decimal(0), date(1970, 1, 1))]
+        # The defaults migrated the rows that existed; they do not stand in for
+        # a price a new reservation failed to name.
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            conn.execute(
+                "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
+                " SELECT %s, run_id, 0.10 FROM budget_reservations LIMIT 1",
+                (uuid4(),),
+            )
+        conn.rollback()
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("price_model", ""),
+        ("price_input", "-1"),
+        ("price_output", "NaN"),
+        ("price_input", "Infinity"),
+    ],
+)
+def test_a_reservation_price_outside_its_constraint_refuses(
+    empty_database: str, tmp_path: Path, column: str, value: str
+) -> None:
+    """A stored price that names no model, or is not finite and nonnegative,
+    would be unreadable as the fact the column exists to hold."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _populate(conn, BlobStore(tmp_path))
+        given: object = value if column == "price_model" else Decimal(value)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(f"UPDATE budget_reservations SET {column} = %s", (given,))
+        conn.rollback()

@@ -13,6 +13,8 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import date
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -58,6 +60,7 @@ from server.methodology.handoff import (
 )
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
+from server.pricing import ModelPrice
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect, outcomes
@@ -330,8 +333,9 @@ class _UnbilledBlocked:
 
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        pass
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -534,8 +538,8 @@ class _ClaimsBlocked:
     module: str = "CP-0"
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -798,9 +802,10 @@ class _ChangesAfterCheck:
     change: Callable[[], None]
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        measured = self.inner.check_context(route_node_id, module_id)
         self.change()
+        return measured
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -833,3 +838,92 @@ def test_the_executor_rechecks_the_context_after_reservation(
     assert answers.calls == 0
     assert _counts(harness) == (0, [], 0, 1, 1)
     _still_running(harness)
+
+
+def test_a_reservation_never_falls_below_the_call_it_pays_for(
+    harness: _Harness,
+) -> None:
+    """Invariant 8 under Task 8.2's tighter bound, over a whole canonical run.
+
+    The reservation is no longer the byte ceiling, so the property has to be
+    asserted rather than assumed: priced on the request the provider was sent
+    and the completion cap, the only way past it is a provider billing more
+    than the price it was reserved under.
+    """
+    answers = CanonicalCompletions(harness.source_id)
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+
+    rows = harness.conn.execute(
+        "SELECT r.amount, l.amount, r.price_model FROM budget_reservations AS r"
+        " JOIN budget_ledger AS l USING (attempt_id, run_id)"
+    ).fetchall()
+    assert len(rows) == 3, "every attempt of the run reserved and was charged"
+    for reserved, charged, model in rows:
+        assert charged <= reserved, (reserved, charged)
+        assert model == MODEL, "under the price of the model that answered"
+    harness.conn.rollback()
+
+
+# A real frontier model's rates, where the request size actually moves the
+# price: $3/M input, $15/M output.
+_PRICED_INPUT = ModelPrice(
+    MODEL, Decimal("0.000003"), Decimal("0.000015"), date(2026, 9, 17)
+)
+
+
+@dataclass
+class _UnderMeasures:
+    """A provider whose pre-check under-reports the request it will send."""
+
+    inner: ModuleProvider
+
+    @property
+    def model(self) -> str:
+        return self.inner.model
+
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id) // 10
+
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        return self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
+
+
+def test_a_request_costing_more_than_was_reserved_refuses_before_the_call(
+    harness: _Harness,
+) -> None:
+    """The window Task 8.2 opens, closed inside the unit that spends.
+
+    The loop prices the prompt the pre-check built; the attempt unit builds its
+    own. A rebuilt prompt that is bigger, or a `CAOS_MODEL_PRICE` that moved
+    between the two, would otherwise call under a reservation too small for the
+    call -- invariant 8's "no provider call without a reservation" met in form
+    only. Whatever the cause, it reaches the executor as a reservation that
+    does not cover the request, which is what a pre-check reporting a tenth of
+    its own prompt reproduces here at the one seam it can enter by.
+
+    `execute_handoff` reads its own reservation back with the price it was
+    taken under and prices the request it is about to send against exactly
+    that, so the refusal costs no call and no charge.
+    """
+    answers = CanonicalCompletions(harness.source_id)
+    provider = _UnderMeasures(_module_provider(harness, answers))
+
+    with pytest.raises(Refusal) as caught:
+        run_route(
+            harness.conn,
+            harness.blobs,
+            run_id=harness.run_id,
+            route=harness.route,
+            execution=Execution(provider, _PRICED_INPUT, harness.bundle),
+        )
+
+    assert caught.value.code is RefusalCode.CONTEXT_OVER_CEILING
+    assert answers.prompts == [], "nothing reached the provider"
+    assert _counts(harness)[1] == [], "and nothing was charged"
+    # The reservation stands: nothing is released (`server/store/budget.py`).
+    assert harness.conn.execute(
+        "SELECT count(*) FROM budget_reservations"
+    ).fetchone() == (1,)
+    harness.conn.rollback()

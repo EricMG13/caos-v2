@@ -45,10 +45,10 @@ from server.methodology.canonical import (
     unexplained_charge,
 )
 from server.methodology.invocation import named_objects
-from server.pricing import ModelPrice, worst_case
+from server.pricing import ModelPrice, priced_request, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.budget import reserve
+from server.store.budget import remaining, reserve
 from server.store.gates import execution_input
 
 # `artifact_digests` is re-exported: it now lives in the store (no import cycle).
@@ -98,9 +98,11 @@ class Provider(Protocol):
     @property
     def model(self) -> str: ...
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         """Refuse a context the call could not carry (`CONTEXT_OVER_CEILING`),
-        before the loop starts an attempt or reserves anything (§45.3)."""
+        before the loop starts an attempt or reserves anything (§45.3), and
+        return the size in bytes of the request it would send -- what the
+        reservation is priced on (Task 8.2)."""
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -122,7 +124,8 @@ class Execution:
     One thing rather than loose arguments, because none is meaningful without
     the others -- a price with no provider reserves against nothing, and a
     provider with no price is a call invariant 8 forbids. Every call reserves
-    `worst_case(price)`, never a caller's guess (F06).
+    `priced_request(price, its own request size)`, never a caller's guess (F06);
+    `worst_case(price)` is the run's admission check (Task 8.2, §40).
     """
 
     provider: Provider
@@ -152,7 +155,7 @@ def run_route(
     # Priced for the configured model, or no attempt at all.
     if execution.price.model != getattr(execution.provider, "model", None):
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
-    worst_case(execution.price)
+    _affordable(conn, run_id, execution.price)
     route = _execution_route(conn, run_id, route, execution.bundle)
     # Read once from verified bundle bytes, handed to the pure engine (§46.1).
     named = named_objects(execution.bundle, route)
@@ -168,6 +171,21 @@ def run_route(
         _drive(
             conn, blobs, run_id=run_id, route=route, execution=execution, named=named
         )
+
+
+def _affordable(conn: StoreConnection, run_id: UUID, price: ModelPrice) -> None:
+    """Refuse a run whose whole ceiling cannot cover one worst-case call.
+
+    Since Task 8.2 each attempt reserves only what its own request costs, so a
+    ceiling below one call's worst case is no longer met by the first
+    reservation -- a run could start spending on a route it could never afford
+    a single full-sized call of. This is where invariant 8 keeps that property:
+    checked once, before any attempt row, reservation or call exists.
+    """
+    with execution_reads(conn):
+        left = remaining(conn, run_id)
+    if left < worst_case(price):
+        raise Refusal(RefusalCode.BUDGET_CEILING_REACHED)
 
 
 def _refuse_unexplained(
@@ -408,10 +426,19 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     # The whole prompt is built and bounded while nothing is started or set
     # aside: an over-ceiling context costs no attempt, reservation or call.
-    execution.provider.check_context(route_node_id, module_id)
+    measured = execution.provider.check_context(route_node_id, module_id)
     lease = execution.lease
     attempt_id = start_attempt(conn, run_id, route_node_id, lease=lease)
-    reserve(conn, attempt_id, worst_case(execution.price), lease=lease)
+    # Priced on the request that was just built and bounded, not on the
+    # transport ceiling: the attempt unit rebuilds the prompt and refuses to
+    # call if its own request costs more than this (`_within_reservation`).
+    reserve(
+        conn,
+        attempt_id,
+        priced_request(execution.price, measured),
+        price=execution.price,
+        lease=lease,
+    )
 
     _execution_route(conn, run_id, route, execution.bundle)
     refused: Refusal | None = None

@@ -25,6 +25,7 @@ from canonical_fixtures import (
     CanonicalCompletions,
 )
 from conftest import priced
+from conftest import reserve_at as reserve
 from test_run_events import RECORD, accept_nodes, approved_nodes
 
 from server.blobs import BlobStore
@@ -35,7 +36,6 @@ from server.engine.runtime import Execution, ProviderResult, run_route
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect, runs
-from server.store.budget import reserve
 from server.store.events import RunEvent, events_of
 from server.store.outcomes import check_call, execution_reads
 from server.store.runs import (
@@ -558,8 +558,9 @@ class _Reclaiming:
     def model(self) -> str:
         return MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        return None
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID

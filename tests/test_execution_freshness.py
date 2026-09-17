@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from conftest import _url_for, approve_run, priced
+from conftest import reserve_at as reserve
 from psycopg.pq import TransactionStatus
 from test_loop_charges import (
     ESTIMATE,
@@ -50,7 +51,6 @@ from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
-from server.store.budget import reserve
 from server.store.events import RunEvent, append, lock_run
 from server.store.gates import (
     Gate,
@@ -246,8 +246,9 @@ class _ArbitraryProvider:
     calls: int = 0
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        pass
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -992,8 +993,9 @@ class _Charged:
     charge: Decimal | None
     mutate: Callable[[], None] = lambda: None
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        pass
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID

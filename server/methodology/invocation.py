@@ -1059,11 +1059,22 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     return prompt
 
 
-def within_request_ceiling(provider: CompletionProvider, prompt: str) -> str:
-    """`prompt`, or `CONTEXT_OVER_CEILING` when the whole request the provider
-    would send for it -- model, parameters and JSON escapes, not the prompt's
-    encoding alone -- exceeds `MAX_REQUEST_BYTES` (§45.3). A canonical call
-    always asks for a JSON object, so that is the request bounded."""
-    if len(provider.request_bytes(prompt, json_object=True)) > MAX_REQUEST_BYTES:
+def request_size(provider: CompletionProvider, prompt: str) -> int:
+    """The whole request the provider would send for `prompt`, in bytes, or
+    `CONTEXT_OVER_CEILING` past `MAX_REQUEST_BYTES` (§45.3).
+
+    Model, parameters and JSON escapes, not the prompt's encoding alone. A
+    canonical call always asks for a JSON object, so that is the request
+    measured. The number is what the call is priced and reserved on (Task 8.2),
+    so the bytes bounded and the bytes paid for are the same bytes.
+    """
+    measured = len(provider.request_bytes(prompt, json_object=True))
+    if measured > MAX_REQUEST_BYTES:
         raise Refusal(RefusalCode.CONTEXT_OVER_CEILING)
+    return measured
+
+
+def within_request_ceiling(provider: CompletionProvider, prompt: str) -> str:
+    """`prompt`, bounded by `request_size`."""
+    request_size(provider, prompt)
     return prompt

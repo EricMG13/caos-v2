@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 from canonical_fixtures import CATALOG, CONTRACT, handoff_markdown, skill
 from conftest import every_block, recorded_statements
+from conftest import reserve_at as reserve
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -47,7 +48,6 @@ from server.methodology.handoff import CanonicalRecord, record_bytes, validate_m
 from server.methodology.invocation import accepted_lineage, host_identity
 from server.methodology.vendor import authority_bundle_sha256
 from server.refusals import Refusal, RefusalCode
-from server.store.budget import reserve
 from server.store.members import Standing, grant
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.runs import Accepted, accept_attempt, start_attempt

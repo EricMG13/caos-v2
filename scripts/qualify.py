@@ -45,6 +45,7 @@ from server.blobs import BlobStore
 from server.engine.worker import price_from_environment
 from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.bundle import Bundle
+from server.pricing import worst_case
 from server.provider import OpenRouter
 from server.qualification.harness import (
     Harness,
@@ -203,8 +204,8 @@ def _perform_until(  # noqa: PLR0913 -- one set, one loop, keyword-only tail
     buys another try at the node that stopped and nothing more.
 
     It is bounded twice over. `attempts` caps the re-entries, and the run
-    ceiling is the real limit: every attempt reserves `worst_case(price)`
-    whether or not it is accepted, and `budget.py` never releases a
+    ceiling is the real limit: every attempt reserves the priced cost of its own
+    request whether or not it is accepted, and `budget.py` never releases a
     reservation, so a run cannot spend past its ceiling however many times this
     loop asks.
     """
@@ -251,11 +252,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    price = price_from_environment(provider.model, os.environ["CAOS_MODEL_PRICE"])
     harness = Harness(
         bundle=bundle,
         catalog=json.loads((bundle.root / CATALOG).read_text()),
         completions=provider,
-        price=price_from_environment(provider.model, os.environ["CAOS_MODEL_PRICE"]),
+        price=price,
         ceiling=args.ceiling,
         run_ceiling=args.ceiling,
     )
@@ -272,8 +274,24 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     # Printed before the call, not after: a driver that dies mid-run must still
-    # leave the operator the two names that hold the evidence it paid for.
-    print(json.dumps({"database": database, "blob_root": str(blob_root)}), flush=True)
+    # leave the operator the two names that hold the evidence it paid for, and
+    # the dated price every reservation it is about to take will be priced on
+    # (Task 8.2) -- an operator reading the ceiling alone cannot tell whether a
+    # set was affordable at the price the worker was configured with.
+    print(
+        json.dumps(
+            {
+                "database": database,
+                "blob_root": str(blob_root),
+                "price_model": price.model,
+                "price_input_per_token": str(price.input_per_token),
+                "price_output_per_token": str(price.output_per_token),
+                "price_as_of": price.as_of.isoformat(),
+                "price_worst_case_per_call": str(worst_case(price)),
+            }
+        ),
+        flush=True,
+    )
 
     with connect(run_url) as conn:
         apply_schema(conn)

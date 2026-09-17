@@ -117,6 +117,12 @@ MIGRATIONS = (
         .with_name("0021_blocking_verdicts.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0024_reservation_price",
+        Path(__file__)
+        .with_name("0024_reservation_price.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

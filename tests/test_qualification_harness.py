@@ -977,9 +977,10 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
     empty_database: str, tmp_path: Path
 ) -> None:
     """Every kind of attempt a stopped node can hold, read back from the store."""
+    from conftest import reserve_at as reserve
+
     from server.qualification.harness import _unrun
     from server.store import apply_schema, connect
-    from server.store.budget import reserve
     from server.store.outcomes import CallOutcome, execution_reads, record_outcome
     from server.store.runs import start_attempt
 

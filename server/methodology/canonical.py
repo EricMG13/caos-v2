@@ -71,8 +71,8 @@ from server.methodology.invocation import (
     host_identity,
     prospective_identity,
     record_authority_matches,
+    request_size,
     upstream_markdown,
-    within_request_ceiling,
 )
 from server.methodology.vendor import (
     VENDOR_MODULE,
@@ -82,6 +82,7 @@ from server.methodology.vendor import (
 from server.provider import CompletionProvider, _reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.budget import reserved_for
 from server.store.outcomes import (
     CallOutcome,
     accepted_rows,
@@ -156,6 +157,39 @@ def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:
     return None, True
 
 
+def _within_reservation(
+    conn: StoreConnection,
+    provider: CompletionProvider,
+    prompt: str,
+    *,
+    attempt_id: UUID,
+) -> None:
+    """Refuse a request this attempt's reservation does not cover (Task 8.2).
+
+    The loop priced the prompt `check_context` built and reserved for it; this
+    unit builds its own under the attempt's own identity. A rebuilt prompt that
+    is larger -- or a configured price that moved between the two -- would
+    otherwise be sent under a reservation too small for it, which is invariant
+    8's "no provider call without a reservation" met only in form. So the
+    reservation is read back with the price it was taken under and the request
+    about to be sent is priced against exactly that price, before the call.
+
+    A missing reservation refuses here as well as in `check_call`: the unit that
+    spends checks it, not only the unit that ordered it.
+    """
+    from server.pricing import priced_request
+
+    measured = request_size(provider, prompt)
+    with execution_reads(conn):
+        taken = reserved_for(conn, attempt_id)
+    if taken is None:
+        raise Refusal(RefusalCode.BUDGET_NOT_RESERVED)
+    if taken.price.model != provider.model:
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    if priced_request(taken.price, measured) > taken.amount:
+        raise Refusal(RefusalCode.CONTEXT_OVER_CEILING)
+
+
 def execute_handoff(
     conn: StoreConnection,
     bundle: Bundle,
@@ -188,9 +222,8 @@ def execute_handoff(
     carried = delivered_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
     # carries exactly this attempt's identity, and refused again if it moved.
-    prompt = within_request_ceiling(
-        provider, _prompt(bundle, assignment, identity, context, carried)
-    )
+    prompt = _prompt(bundle, assignment, identity, context, carried)
+    _within_reservation(conn, provider, prompt, attempt_id=attempt)
 
     bundle.verify_manifest()
     model = producer_identifier(provider.model, limit=256)
@@ -321,14 +354,17 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
     route: ResolvedRoute,
     node: RouteNode,
     provider: CompletionProvider,
-) -> None:
-    """Build the node's whole prompt before any attempt, reservation or call.
+) -> int:
+    """Build the node's whole prompt before any attempt, reservation or call,
+    and return the request size the call will be priced on.
 
     The pre-call unit `execute_handoff` runs, under `prospective_identity`, so
     every refusal the prompt would raise -- `CONTEXT_OVER_CEILING` on the whole
     request `provider` would send, and a delivered file whose bytes moved -- is
     raised while nothing has been started or set aside (§45.3, invariant 8).
-    Nothing is kept: the attempt's own prompt is rebuilt from its own read unit.
+    The prompt itself is not kept: the attempt's own is rebuilt from its own
+    read unit, and the reservation this measurement produced is what that
+    rebuild is then checked against (Task 8.2).
     """
     assignment = Assignment(node.module_id, run_id, node, route, _NO_ATTEMPT)
     with execution_reads(conn):
@@ -340,7 +376,7 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
         )
         context = _context(conn, blobs, bundle, assignment, identity)
     authority = delivered_authority(bundle, node.module_id)
-    within_request_ceiling(
+    return request_size(
         provider, _prompt(bundle, assignment, identity, context, authority)
     )
 

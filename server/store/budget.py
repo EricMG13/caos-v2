@@ -10,6 +10,12 @@ accepts the artifact. A process that died after the provider completed would
 otherwise roll back the record of money that was really spent, and the retry
 would reserve against a ceiling that had forgotten it.
 
+*A reservation names its price.* The four `price_*` columns hold the dated
+price the amount was computed from (§40). The amount alone cannot be read back
+to one -- many prices and request sizes reach the same number -- and the unit
+that later spends reads the price back to check that the request it is about to
+send still fits what was set aside.
+
 *Nothing is released.* An indeterminate call may have reached the provider and
 may be billed (`docs/DECISIONS.md` §16: `PROVIDER_UNAVAILABLE` leaves the attempt
 indeterminate with its reservation). Releasing it would let the retry spend money
@@ -19,6 +25,8 @@ the price of a provider with no idempotency key, paid knowingly.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -30,6 +38,7 @@ from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.events import lock_run
 
 if TYPE_CHECKING:
+    from server.pricing import ModelPrice
     from server.store.work import Lease
 
 # What a run may spend when its caller names no ceiling. A run with no ceiling
@@ -54,14 +63,27 @@ def validate_spend(amount: Decimal) -> None:
         raise Refusal(RefusalCode.MONEY_INVALID)
 
 
+@dataclass(frozen=True, slots=True)
+class Reservation:
+    """What an attempt set aside, and the dated price that produced it."""
+
+    amount: Decimal
+    price: ModelPrice
+
+
 def reserve(
     conn: StoreConnection,
     attempt_id: UUID,
     amount: Decimal,
     *,
+    price: ModelPrice,
     lease: Lease | None = None,
 ) -> None:
     """Set `amount` aside for this attempt, or refuse `BUDGET_CEILING_REACHED`.
+
+    `price` is the dated price the amount was computed from and is stored with
+    it, so the row can be read back to what it was priced at rather than only
+    to a number (§40).
 
     Taken under the run row lock, which is what makes two connections reserving
     at once resolve to one: without it both read the same remaining balance and
@@ -69,7 +91,7 @@ def reserve(
     no cancel requested (brief 4.3 D3).
     """
     try:
-        _reserve(conn, attempt_id, amount, lease)
+        _reserve(conn, attempt_id, amount, price, lease)
         conn.commit()
     except psycopg.Error:
         rollback_or_close(conn)
@@ -80,12 +102,17 @@ def reserve(
 
 
 def _reserve(
-    conn: StoreConnection, attempt_id: UUID, amount: Decimal, lease: Lease | None
+    conn: StoreConnection,
+    attempt_id: UUID,
+    amount: Decimal,
+    price: ModelPrice,
+    lease: Lease | None,
 ) -> None:
     # `work` imports `outcomes`, which imports this module.
     from server.store.work import require_lease
 
     validate_spend(amount)
+    _validate_price(price)
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     run_id = _run_of(conn, attempt_id)
@@ -114,10 +141,33 @@ def _reserve(
     if amount > _remaining(conn, run_id):
         raise Refusal(RefusalCode.BUDGET_CEILING_REACHED)
     conn.execute(
-        "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
-        " VALUES (%s, %s, %s)",
-        (attempt_id, run_id, amount),
+        "INSERT INTO budget_reservations (attempt_id, run_id, amount,"
+        " price_model, price_input, price_output, price_as_of)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (
+            attempt_id,
+            run_id,
+            amount,
+            price.model,
+            price.input_per_token,
+            price.output_per_token,
+            price.as_of,
+        ),
     )
+
+
+def _validate_price(price: ModelPrice) -> None:
+    """A price the row can be read back from: a named model, exact rates, a date.
+
+    `server.pricing` imports this module, so the check lives here rather than
+    reaching back for `priced_request`; the two agree on what a price is.
+    """
+    if not isinstance(price.model, str) or not price.model:
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    validate_spend(price.input_per_token)
+    validate_spend(price.output_per_token)
+    if not isinstance(price.as_of, date) or isinstance(price.as_of, bool):
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
 
 
 def remaining(conn: StoreConnection, run_id: UUID) -> Decimal:
@@ -128,19 +178,24 @@ def remaining(conn: StoreConnection, run_id: UUID) -> Decimal:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
 
 
-def reserved_for(conn: StoreConnection, attempt_id: UUID) -> Decimal | None:
-    """What this attempt has set aside, or None if it never reserved."""
+def reserved_for(conn: StoreConnection, attempt_id: UUID) -> Reservation | None:
+    """What this attempt set aside and under which price, or None if it never
+    reserved. A legacy row (`0024_reservation_price`) reads back as the
+    unnamed price it was migrated with, which no caller may spend under."""
+    from server.pricing import ModelPrice
+
     try:
         row = conn.execute(
-            "SELECT amount FROM budget_reservations WHERE attempt_id = %s",
+            "SELECT amount, price_model, price_input, price_output, price_as_of"
+            " FROM budget_reservations WHERE attempt_id = %s",
             (attempt_id,),
         ).fetchone()
     except psycopg.Error:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     if row is None:
         return None
-    reserved: Decimal = row[0]
-    return reserved
+    amount, model, per_input, per_output, as_of = row
+    return Reservation(amount, ModelPrice(model, per_input, per_output, as_of))
 
 
 def _remaining(conn: StoreConnection, run_id: UUID) -> Decimal:

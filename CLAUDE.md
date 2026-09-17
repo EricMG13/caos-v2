@@ -1327,21 +1327,39 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the verified catalog at prompt time because `Edge` and the route pin do not
   carry it, so no route digest moved. Retrieval (Phase 5) remains the way to
   send less than the whole set.
-- **A run's price is supplied by its caller, not read from a table.**
-  `docs/DECISIONS.md` §40: every call reserves `pricing.worst_case(price)` --
-  every byte of the largest request (§38) as an input token plus the output cap
-  -- and `run_route` refuses a price for any model but the provider's configured
-  one before an attempt exists. Nothing in the tree says what the live model
-  costs, so `tests/test_live_run.py` still prices it from its flat estimate. The
-  byte bound is severe for a real model: at about $3/M input and $15/M output one
-  call reserves about $3.64, so under the $5 default ceiling a two-node route
-  cannot finish; the qualification harness refuses a set whose route length
-  times that worst case exceeds a run's ceiling before any case is prepared.
-  `ModelPrice.as_of` is carried but not stored beside the reservation, so a
-  reservation row does not say which price produced it. *Upgrade:* a
-  user-confirmed dated price for the configured live model, recorded with the
-  reservation, and pricing the actual encoded request once the prompt is built
-  before the reservation.
+- **A run's price is supplied by its caller; what it buys is now priced and
+  recorded.** `docs/DECISIONS.md` §40: `run_route` refuses a price for any model
+  but the provider's configured one before an attempt exists. Two of the three
+  things this entry asked for are done, by Completion Phase 8 Task 8.2. A
+  reservation is priced on the request that was actually built and bounded --
+  `pricing.priced_request(price, invocation.request_size(provider, prompt))`,
+  input per request byte because a token is at least one byte, output at the
+  completion cap -- rather than on `MAX_REQUEST_BYTES`, so the ~$3.64 worst case
+  that stopped a two-node route finishing under the $5 default ceiling is no
+  longer what is set aside: three LITE nodes now fit one ceiling
+  (`tests/test_loop_charges.py::test_a_small_prompt_reserves_its_priced_cost_not_the_byte_ceiling`).
+  `worst_case` stays the run-ceiling admission check, so invariant 8's "refuse
+  before overspend" is unchanged. And migration `0024` stores the dated price
+  beside the amount (`price_model`, `price_input`, `price_output`,
+  `price_as_of`), so a row reads back to what produced it rather than only to a
+  number
+  (`tests/test_budget.py::test_a_reservation_records_the_dated_price_that_produced_it`);
+  rows written before it say `legacy` and keep their amounts
+  (`tests/test_store_schema.py::test_the_migration_keeps_existing_reservation_amounts`).
+  Pricing the request rather than the ceiling creates a hazard the ceiling hid:
+  the loop prices the prompt `check_context` built, and the attempt unit builds
+  its own again, so a larger rebuild would be sent under too small a
+  reservation. `canonical._within_reservation` re-prices the request about to be
+  sent against the price its reservation was taken under and refuses
+  `CONTEXT_OVER_CEILING` before the provider is reached
+  (`tests/test_loop_charges.py::test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call`,
+  which was watched failing with the guard removed). What is left is the first
+  thing the entry asked for and the only one this repository cannot take:
+  nothing in the tree says what the live model costs, so `tests/test_live_run.py`
+  still prices it from a flat estimate. *Upgrade:* a user-confirmed dated price
+  for the configured live model. It is the owner's to give, and until it exists
+  every priced reservation is exact arithmetic over a number nobody has
+  confirmed.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the
