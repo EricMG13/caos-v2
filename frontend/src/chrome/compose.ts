@@ -14,6 +14,7 @@ const PURPOSE: Record<EnabledSection, string> = {
   analysis: "Accepted handoffs, their citations and the nodes still pending.",
   model: "The accepted CP-CF projection, exactly as the server supplied it.",
   report: "The exact saved revision, exactly as the server supplied it.",
+  committee: "The frozen or filed saved revision, exactly as the server supplied it.",
 };
 
 /** Rail entries with every disabled section marked unavailable. */
