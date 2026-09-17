@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -399,31 +400,47 @@ def test_every_portable_render_refusal_names_a_closed_host_code() -> None:
     assert raised <= {code.value for code in RefusalCode}
 
 
-def test_every_authored_line_reaches_the_page() -> None:
-    """The tag census above measures what the render *emits*; this measures
-    what it *removes*, which is the hazard.
+def test_every_authored_character_reaches_the_page() -> None:
+    """No authored character is deleted. That is the hazard; the axis is the
+    characters, and the first version of this test did not measure them.
 
-    A construct outside `ELEMENTS` has two honest outcomes: reach the page as
-    the characters the model wrote, or refuse. A third was happening -- a
-    line-leading HTML comment was consumed and emitted nothing -- and the tag
-    census could not see it, because a deleted construct produces no tag and a
-    subset assertion is unaffected by an absence. The signer's `payload_sha256`
-    binds the record's bytes and this is the only rendering of them a committee
-    reads, so text that vanishes is text bound and unseen.
+    It asserted that the single longest four-or-more-character word of each
+    line survived. The Completion Phase 12 adversarial audit found four
+    deletions it could not see, and the reasons are all the same reason: an
+    ordinal (`7.`) is two characters and never a line's longest word; the
+    corpus carried no fence, table, list, quote or heading, so three of the
+    four constructs were unreachable by it; and where a prose line was turned
+    into a fabricated table, every word survived as a header cell while the
+    `---` was gone. Its cheapest evasion was to emit one token per line, which
+    makes the deliverable worse -- so by `CLAUDE.md`'s own separator it was the
+    eighth instance of the class, written as the remediation for the seventh.
 
-    The property, stated over the constructs `ELEMENTS` does not name: every
-    non-blank authored line contributes at least one of its own non-space
-    characters to the page. Cheapest evasion of *this* rule is to render more
-    of what the model wrote, which is the fix.
+    The axis now: every non-whitespace character of the source appears, in
+    order, in the page's unescaped text, except the construct markers a
+    renderer legitimately consumes. Those are named in `CONSUMED` rather than
+    inferred, so a marker added to the allowance is a deliberate edit a reader
+    can see. The corpus carries one of every member of `ELEMENTS` plus the
+    constructs outside it.
     """
     authored_source = "\n\n".join(
         [
+            "# Heading one",
+            "###### Heading six",
+            "Ordinary prose with **strong**, *emphasis* and `a code span`.",
             "<!-- MATERIAL: management refused the covenant schedule -->",
             "A [link](https://example.test) and an ![image](x.png).",
             "A raw <span data-x='1'>tag</span> and an entity &amp;.",
-            "`a*b*c` and `**Total**` stay literal.",
-            "*a **b* c** never pairs.",
-            "Ordinary prose with **strong** and *emphasis*.",
+            # Deliberately not consecutive: a sequential run's later ordinals
+            # are drawn by the browser from `start`, so only a broken run puts
+            # every ordinal on the page as its own characters -- which is the
+            # case this corpus must carry for the check below to mean anything.
+            "7. Covenant headroom breached\n9. Waiver requested",
+            "- bullet one\n- bullet two",
+            "> A quoted caveat from the issuer.",
+            '```caos-forecast-v1\n{"driver": 1}\n``` trailing note',
+            "| Leverage | Headroom |\n| --- | --- |\n| 4.2x | 0.3x |",
+            "Leverage | covenant headroom\n---",
+            "***",
         ]
     )
     payload = json.loads(json.dumps(PAYLOAD_DATA))
@@ -432,15 +449,63 @@ def test_every_authored_line_reaches_the_page() -> None:
     page = render(payload).decode()
     authored = page.split("<h3>Analysis (model-authored, not host-verified)</h3>")[1]
     authored = authored.split("<h3>Deterministic calculations</h3>")[0]
+    # Compare on what a reader sees, not on the markup this module wrote. An
+    # `<ol start="7">` is the one place authored content is carried by an
+    # attribute rather than by text -- the browser draws the 7 -- so it is put
+    # back before the tags are stripped, and named here rather than silently
+    # allowed, because an attribute is exactly where a deletion could hide next.
+    shown_markup = re.sub(r'<ol start="([^"]+)">', r"\1", authored)
+    text = unescape(re.sub(r"<[^>]*>", "", shown_markup))
 
-    for line in authored_source.split("\n"):
-        if not line.strip():
-            continue
-        # The page escapes, so compare on a character the escaping preserves.
-        witness = max(
-            (word for word in re.findall(r"[A-Za-z0-9_.:/-]{4,}", line)),
-            key=len,
-            default="",
-        )
-        assert witness, line
-        assert witness in authored, (line, witness)
+    # Contiguously, not as a subsequence. A subsequence check over the whole
+    # page finds a line's letters scattered among unrelated words -- deleting
+    # "trailing note" still passed one, because those letters all occur
+    # elsewhere in order. That is the witness-word weakness in another form, so
+    # the comparison is over each line's alphanumerics as one run against the
+    # page's alphanumerics.
+    #
+    # Alphanumerics only: punctuation is shared between authored prose, this
+    # module's separators and the construct markers, and every deletion this
+    # test exists for carries alphanumerics. The one that does not -- a `---`
+    # turned into a fabricated table -- has its own test below.
+    shown_text = "".join(c for c in text if c.isalnum())
+    missing = [
+        line
+        for line in authored_source.split("\n")
+        if (content := "".join(c for c in line if c.isalnum()))
+        and content not in shown_text
+    ]
+    assert missing == [], (missing, text)
+
+
+def test_a_fabricated_table_is_not_asserted_for_a_prose_line() -> None:
+    """A page may not claim a structure the model did not write.
+
+    `_DELIMITER` matches a bare `---`, so a prose line carrying a pipe followed
+    by a thematic break was read as a one-column table and the page asserted a
+    `<table>` with an empty `<tbody>`. That is worse than the deletions beside
+    it: a reader cannot tell an invented table from an authored one, and a
+    deliverable's whole claim is that what is on the page is what was signed.
+    """
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact("Leverage | covenant headroom\n---")
+
+    page = render(payload).decode()
+    authored = page.split("<h3>Analysis (model-authored, not host-verified)</h3>")[1]
+    authored = authored.split("<h3>Deterministic calculations</h3>")[0]
+
+    assert "<table>" not in authored
+    assert "Leverage | covenant headroom" in unescape(authored)
+
+
+def test_a_consecutive_ordered_list_starts_where_the_model_numbered_it() -> None:
+    """The other half of the ordinal rule: a run that *is* consecutive keeps
+    its first number and lets the browser draw the rest, so a register
+    numbered from 7 is not renumbered from 1."""
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact("7. First\n8. Second")
+
+    page = render(payload).decode()
+
+    assert '<ol start="7">' in page
+    assert "<li>First</li>" in page

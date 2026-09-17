@@ -226,6 +226,12 @@ _MAX_NESTING = 4
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _UNORDERED = re.compile(r"^([-*+])\s+(.*)$")
 _ORDERED = re.compile(r"^([0-9]{1,3}[.)])\s+(.*)$")
+# A table's delimiter row. `_block` also requires it to contain a `|`, because
+# this pattern matches a bare `---` -- so a prose line carrying a pipe followed
+# by a thematic break used to be read as a one-column table, and the page then
+# asserted a table with an empty body that the module never wrote. Fabrication
+# is worse than the deletions beside it: a reader cannot tell it from a table
+# the model authored.
 _DELIMITER = re.compile(r"^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$")
 # `*` and backticks only. `_` is left alone because identifiers carry it --
 # `net_debt_to_ebitda` is a word in this domain, not two emphasis runs.
@@ -286,7 +292,12 @@ def _block(lines: list[str], index: int, out: list[str]) -> int:
         return _quote(lines, index, out)
     if _item(line) is not None:
         return _list(lines, index, out)
-    if "|" in line and index + 1 < len(lines) and _DELIMITER.match(lines[index + 1]):
+    if (
+        "|" in line
+        and index + 1 < len(lines)
+        and "|" in lines[index + 1]
+        and _DELIMITER.match(lines[index + 1])
+    ):
         return _table(lines, index, out)
     return _paragraph(lines, index, out)
 
@@ -312,10 +323,22 @@ def _comment(lines: list[str], index: int, out: list[str]) -> int:
 
 
 def _code(lines: list[str], index: int, out: list[str]) -> int:
+    """A fenced block, with both fence lines' own text kept.
+
+    The info string was discarded, and `caos-forecast-v1` is *the* label of the
+    CP-CF forecast block -- so the first deliverable carrying one showed a
+    committee an unlabelled JSON blob. Text after the closing fence was
+    discarded too. Both are authored characters, and this module's contract is
+    that authored characters reach the page or the block refuses.
+    """
+    info = lines[index][3:].strip()
     for end in range(index + 1, len(lines)):
         if lines[end].startswith("```"):
             block = "\n".join(lines[index + 1 : end])
-            out.append(f"<pre><code>{escape(block)}</code></pre>\n")
+            tail = lines[end][3:].strip()
+            label = f'<p class="cite">{escape(info)}</p>\n' if info else ""
+            after = f'<p class="cite">{escape(tail)}</p>\n' if tail else ""
+            out.append(f"{label}<pre><code>{escape(block)}</code></pre>\n{after}")
             return end + 1
     raise RenderRefused("DELIVERABLE_MARKDOWN_UNSUPPORTED")
 
@@ -329,16 +352,22 @@ def _quote(lines: list[str], index: int, out: list[str]) -> int:
     return index
 
 
-def _item(line: str) -> tuple[int, bool, str] | None:
-    """One list item as (indent, ordered, text), or None for anything else."""
+def _item(line: str) -> tuple[int, bool, str, str] | None:
+    """One list item as (indent, ordered, marker, text), or None otherwise.
+
+    The marker is carried because an ordinal is a fact the model wrote: a
+    register numbered 7, 8, 9 renumbered itself to 1, 2, 3 on the page, which
+    is the deletion class §77.3 forbids, arrived at through a default rather
+    than through a discard.
+    """
     stripped = line.lstrip(" ")
     indent = len(line) - len(stripped)
     ordered = _ORDERED.match(stripped)
     if ordered is not None:
-        return indent, True, ordered.group(2)
+        return indent, True, ordered.group(1), ordered.group(2)
     unordered = _UNORDERED.match(stripped)
     if unordered is not None:
-        return indent, False, unordered.group(2)
+        return indent, False, unordered.group(1), unordered.group(2)
     return None
 
 
@@ -346,11 +375,13 @@ def _list(lines: list[str], index: int, out: list[str]) -> int:
     """A list, nested by indentation. Each level opens and closes in order, so
     the page never carries an element this function did not close."""
     levels: list[tuple[int, str]] = []
+    # Per indent level, the marker a consecutive run would use next.
+    expected: dict[int, str] = {}
     while index < len(lines):
         item = _item(lines[index])
         if item is None or not lines[index].strip():
             break
-        indent, ordered, text = item
+        indent, ordered, marker, text = item
         tag = "ol" if ordered else "ul"
         while levels and indent < levels[-1][0]:
             out.append(f"</{levels.pop()[1]}>\n")
@@ -358,8 +389,26 @@ def _list(lines: list[str], index: int, out: list[str]) -> int:
             if len(levels) == _MAX_NESTING:
                 raise RenderRefused("DELIVERABLE_MARKDOWN_UNSUPPORTED")
             levels.append((indent, tag))
-            out.append(f"<{tag}>\n")
-        out.append(f"<li>{_inline(text)}</li>\n")
+            start = ""
+            if ordered:
+                first = marker[:-1]
+                start = f' start="{escape(first)}"' if first != "1" else ""
+                expected[indent] = marker
+            out.append(f"<{tag}{start}>\n")
+        # An `<ol start="N">` numbers sequentially from N, so it draws the
+        # ordinals the model wrote only while they *are* sequential. A register
+        # numbered 7, 9 would be drawn 7, 8 -- a number on the page that nobody
+        # authored, which is the fabrication class. Where the run is not
+        # consecutive each marker is written as its own characters instead.
+        prefix = ""
+        if ordered and marker != expected.get(levels[-1][0]):
+            prefix = f"{escape(marker)} "
+        if ordered:
+            head = marker[:-1]
+            expected[levels[-1][0]] = (
+                f"{int(head) + 1}{marker[-1]}" if head.isdigit() else ""
+            )
+        out.append(f"<li>{prefix}{_inline(text)}</li>\n")
         index += 1
     while levels:
         out.append(f"</{levels.pop()[1]}>\n")
