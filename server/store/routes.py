@@ -55,9 +55,9 @@ def pin_route_in(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -
     resolved = _decode(raw)
     digest = route_digest(resolved)
     status = lock_run(conn, run_id)
-    stored = resolved_route(conn, run_id)
+    stored = route_pin(conn, run_id)
     if stored is not None:
-        if route_digest(stored) != digest:
+        if stored[1] != digest:
             raise Refusal(RefusalCode.ROUTE_ALREADY_PINNED)
         return digest
     if status is not RunStatus.RUNNING:
