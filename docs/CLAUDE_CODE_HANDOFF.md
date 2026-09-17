@@ -225,6 +225,42 @@ gap already observed rather than predicted: run `ff71c457…` on
   be accepted. Phase 8 Tasks 8.1, 8.3 and 8.4 and Phase 9 Task 9.1 are already in
   the branch and are closed under their own phases' gates, not this one.
 
+## Completion plan state and what blocks each task — 17 September 2026
+
+Determined from the tree and the briefs, not from plan checkboxes. A task is
+"blocked" only where no amount of implementation effort in this session can
+satisfy its contract.
+
+| Task | State | Blocked on |
+|---|---|---|
+| 7.1, 7.2 | in the branch, reviewed, remediated | — |
+| 8.1 register keys | in the branch (`d88061e`, `da475c7`) | — |
+| 8.2 price with the reservation | in flight | — |
+| 8.3 verdict hygiene | in the branch (`cf3d805`) | — |
+| 8.4 document register | in the branch (`2b5103e`) | the owner's sourcing of eight document sets; nothing is fetched by the system |
+| 8.5 bundle requests | in the branch (`729e2cf`) | the vendor, or a dated §61-style authorization per request |
+| 9.1 `LITE_PORTFOLIO_DECISION` | in the branch (`1921448`, `da475c7`) | its live run and verdict need the owner's authorization |
+| 9.2 `LITE_RELATIVE_VALUE` | not started | a peer table document from 8.4's sourcing list. CP-1C's benchmark registers cannot be keyed against evidence the tree does not hold, and authoring a peer table here would be inventing the evidence a key measures |
+| 9.3 `LITE_DECISION_LEDGER` | not started | an owner-authored decision record (8.4 item 6) |
+| 9.4 `LITE_DEEP_RESEARCH` | not started | an owner-authored research brief and its evidence (8.4 item 7) |
+| 9.5–9.7 | held by design | the LITE producers request (O03) |
+| 10.1 per-node evidence selection | not started | remediation T7, T8, T11 and T14, which are waves 2–4 and have no branch. Its seam is exactly the readers those tasks rewrite |
+| 10.2 conditional-edge guard | in flight | — |
+| 10.3 successor runs | in flight | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
+| 11–13 | not started | 11 needs 8.4's documents and authorized runs; 13.4 needs an identity-provider setting and TLS material; 13.6 needs an authorized nightly |
+
+**Three things only the owner can unblock, in the order they gate the most
+work.** First, the documents in `qualification/DOCUMENTS.md`'s sourcing list:
+they gate Tasks 9.2, 9.3, 9.4 and the whole of Phase 11. Second, live-run
+authorization with a ceiling, which gates every pathway's verdict and so every
+pathway's exit check. Third, the pinned Trivy `0.70.0` for `make image`, which
+gates Phase 7's acceptance and every later phase gate that runs the complete
+gate.
+
+**One thing the remediation stream unblocks:** waves 2–4. Task 10.1 is the
+completion plan's largest remaining piece of engineering and cannot start
+before T7, T8, T11 and T14 land, because it changes the same four readers.
+
 ## Phase 5 acceptance record — 15 September 2026
 
 - **Candidate:** `ca65ec7`; GitNexus index-only refreshed at this commit
