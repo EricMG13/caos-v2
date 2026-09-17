@@ -62,6 +62,8 @@ export function devProxy(env: Record<string, string | undefined>): Record<string
 /** The enabled section a v1 path names, or null. A disabled section is not served. */
 function sectionOf(pathname: string): string | null {
   if (pathname === "/api/v1/directory") return "directory";
+  // Book is the portfolio: no case in its path.
+  if (pathname === "/api/v1/book") return "book";
   return (
     /^\/api\/v1\/cases\/[^/]+\/(upload|run|analysis|model|report|committee)$/.exec(pathname)?.[1] ??
     null

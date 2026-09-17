@@ -9,6 +9,7 @@ import {
   issue,
   navigate,
   refetches,
+  tailed,
   ticket,
   withWithdrawals,
   withdrawalsOf,
@@ -16,6 +17,7 @@ import {
 } from "./authority";
 import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { VisibleSnapshotContext, type VisibleSnapshot } from "./snapshot";
+import { LedgerProvider } from "./ledger";
 import { eventsUrl, openTail } from "./sse";
 import {
   OFFLINE_WORDING,
@@ -149,10 +151,12 @@ export function Workspace({ section }: { section: Section }) {
       authority.current = issue(authority.current);
     };
 
-    // Directory has no stream. The tail opens before the first fetch so a
-    // fixture stream's frame counter is reset before the document it drives.
+    // A section no event refetches opens no stream -- Directory, and Book,
+    // which is portfolio-scoped and which no case event names. The tail opens
+    // before the first fetch so a fixture stream's frame counter is reset
+    // before the document it drives.
     const tail =
-      caseId && section !== "directory"
+      caseId && tailed(section)
         ? openTail(eventsUrl(caseId, runId, fixture), {
             onEvent: (name) => {
               if (refetches(name, section)) load();
@@ -250,16 +254,20 @@ export function Workspace({ section }: { section: Section }) {
           {status.kind === "offline" ? <PageAlert sentence={OFFLINE_WORDING} /> : null}
           <VisibleSnapshotContext.Provider value={snapshot}>
             <EvidenceProvider>
-              <RegionState status={status} onReload={reload}>
-                {(doc) => (
-                  // A render failure is about the document that caused it:
-                  // the next one served clears it, without waiting for a
-                  // navigation to unmount the boundary.
-                  <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
-                    <View key={mountKey} document={doc} tab={activeTab} />
-                  </SectionBoundary>
-                )}
-              </RegionState>
+              {/* The snapshot ledger outlives the documents a section renders,
+                  so it sits above the boundary and the mount key. */}
+              <LedgerProvider>
+                <RegionState status={status} onReload={reload}>
+                  {(doc) => (
+                    // A render failure is about the document that caused it:
+                    // the next one served clears it, without waiting for a
+                    // navigation to unmount the boundary.
+                    <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
+                      <View key={mountKey} document={doc} tab={activeTab} />
+                    </SectionBoundary>
+                  )}
+                </RegionState>
+              </LedgerProvider>
             </EvidenceProvider>
           </VisibleSnapshotContext.Provider>
         </main>

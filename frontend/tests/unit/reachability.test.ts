@@ -58,21 +58,20 @@ test("a type-only import does not reach: the bundler erases it, so the file ship
   rmSync(root, { recursive: true, force: true });
 });
 
-// Book and Admin are unavailable in every mode (`src/app/sections.ts`), and on
-// 17 September 2026 the owner decided to reduce both to the shell
+// Admin is unavailable in every mode (`src/app/sections.ts`), and on
+// 17 September 2026 the owner decided to reduce it and the Book to the shell
 // `tests/workbench/chrome.spec.ts` asserts rather than keep implementations
-// nothing mounts. Their wire types and the Book's snapshot ledger went with
-// them; git keeps the code for the day either section is served. The walk
-// above cannot see this on its own: a `import type` is erased, so a retired
-// wire module is unreachable and still shipped as a file, and a reduction that
-// left one importer behind would compile clean. This is what says the deletion
-// was complete rather than merely compiling.
+// nothing mounts. Their legacy wire types went with them. The walk above
+// cannot see this on its own: an `import type` is erased, so a retired wire
+// module is unreachable and still shipped as a file, and a reduction that left
+// one importer behind would compile clean. This is what says the deletion was
+// complete rather than merely compiling.
 // Both spellings of each: `src/wire/index.ts` reached its two by a relative
-// specifier and `src/app/Workspace.tsx` reached the ledger by one, so a list
-// of `@/` paths alone would have read clean over three live importers. No
-// other `ledger`, `book` or `admin` module exists under `src/`.
+// specifier, so a list of `@/` paths alone would have read clean over two live
+// importers. No other `book` or `admin` wire module exists under `src/`.
+// `@/app/ledger` left this list in Task 12.3, which served the Book a v1
+// document and gave the snapshot ledger its caller back.
 const RETIRED = [
-  ["@/app/ledger", "./ledger"],
   ["@/wire/book", "./book"],
   ["@/wire/admin", "./admin"],
 ];
