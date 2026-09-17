@@ -409,3 +409,46 @@ def test_the_widest_jitter_stays_within_twenty_percent(
     assert worker.pause_seconds(config, 2) <= 2.0 * 1.2
     monkeypatch.setattr("server.engine.worker.secrets.randbelow", lambda _n: 0)
     assert worker.pause_seconds(config, 2) >= 2.0 * 0.8
+
+
+def test_a_stale_terminal_on_cancel_parks_the_run_and_never_escapes(  # noqa: PLR0913 -- the loop's own fixtures, plus the patch and the capture
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """W4: `cancel_run` refuses more than a lost lease -- `RUN_TERMINAL_STALE`
+    when the accepted set moved under it (§49.4). Re-raising it inside the
+    mapper leaves `work_once` with the claim still held, so the run is reclaimed
+    first after every lease expiry and the queue stops. It parks with its code
+    instead, the way every other refusal does."""
+    run = queued_run(case, route, bundle, blobs)
+
+    def cancelling(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
+
+    def stale(*args: object, **kwargs: object) -> None:
+        raise Refusal(RefusalCode.RUN_TERMINAL_STALE)
+
+    monkeypatch.setattr(worker, "cancel_run", stale)
+
+    assert (
+        work_once(
+            run.conn,
+            run.blobs,
+            execution_for=cancelling,  # type: ignore[arg-type]
+            config=CONFIG,
+            stopping=Event(),
+        )
+        == run.run_id
+    )
+
+    assert work_row(run.conn, run.run_id) == (
+        "STOPPED",
+        RefusalCode.RUN_TERMINAL_STALE.value,
+        None,
+        True,
+    )
+    assert capsys.readouterr().err.strip().splitlines()[-1] == "RUN_TERMINAL_STALE"

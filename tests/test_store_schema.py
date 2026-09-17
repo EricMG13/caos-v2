@@ -1131,3 +1131,20 @@ def test_command_requests_are_keyed_bounded_and_immutable(
         conn.rollback()
     assert conn.execute("SELECT count(*) FROM command_requests").fetchone() == (1,)
     conn.rollback()
+
+
+def test_apply_schema_keeps_an_inner_typed_code(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W6: a migration's own refusal is its own. Flattening every inner code
+    into drift tells an operator the declared history disagrees with the applied
+    one when what actually happened was that the store went away."""
+
+    def refusing(conn: StoreConnection, sql: str) -> None:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+
+    monkeypatch.setattr(store, "_migrate", refusing)
+    with connect(empty_database) as conn, pytest.raises(Refusal) as caught:
+        apply_schema(conn)
+
+    assert caught.value.code is RefusalCode.STORE_UNAVAILABLE

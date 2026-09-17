@@ -17,6 +17,7 @@ import os
 import secrets
 import signal
 import sys
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -155,8 +156,11 @@ def work_once(
     except Exception as fault:  # noqa: BLE001 -- neither a refusal nor a store error
         # Parked, not raised: a worker that died holding the claim would find the
         # same run first after every lease expiry and never reach the rest of the
-        # queue. The class alone is written; a message may quote a document.
-        print(type(fault).__name__, file=sys.stderr)
+        # queue. The class and the frame it was raised in are host facts; the
+        # message may quote a document and is never written.
+        frames = traceback.extract_tb(fault.__traceback__)
+        where = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "?"
+        print(f"{type(fault).__name__} at {where}", file=sys.stderr)
         _settle(conn, lambda: stop(conn, lease, RefusalCode.INTERNAL_FAULT))
     return lease.run_id
 
@@ -170,8 +174,13 @@ def _refused(conn: StoreConnection, lease: Lease, refused: Refusal) -> None:
         try:
             cancel_run(conn, lease.run_id, lease=lease)  # commits its own unit
         except Refusal as lost:
-            if lost.code is not RefusalCode.LEASE_NOT_HELD:
-                raise
+            # Not only a lost lease: `cancel_run` refuses a stale terminal too
+            # (§49.4), and raising here would leave `work_once` with the claim
+            # held and the run at the head of the queue for every later poll.
+            unmet = lost.code
+            if unmet is not RefusalCode.LEASE_NOT_HELD:
+                print(unmet.value, file=sys.stderr)
+                _settle(conn, lambda: stop(conn, lease, unmet))
     elif code in STORE_FAULTS:
         _settle(conn, lambda: release(conn, lease))
         raise Refusal(code)

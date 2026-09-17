@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
@@ -184,8 +185,15 @@ def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
     try:
         _migrate(conn, sql)
         conn.commit()
-    except (Refusal, psycopg.Error):
+    except Refusal:
+        # Every drift `_migrate` finds is already `STORE_SCHEMA_DRIFT`; what it
+        # raises otherwise is a different fault and keeps its own code.
         rollback_or_close(conn)
+        raise
+    except psycopg.Error as fault:
+        rollback_or_close(conn)
+        # SQLSTATE is a five-character class code, never text.
+        print(f"schema: sqlstate {fault.sqlstate or '?????'}", file=sys.stderr)
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
     except BaseException:
         rollback_or_close(conn)
