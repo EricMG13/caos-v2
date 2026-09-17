@@ -177,9 +177,10 @@ function resolveSpecifier(importer, specifier, src) {
 }
 
 // Every file the static import graph reaches from `entry`, `entry` included
-// -- `import`, `import type` and `export ... from` alike, because a type-only
-// import is still a file `tsc` and the bundler read. A specifier that resolves
-// to nothing is left to `tsc`, which refuses it with a better message. Only
+// -- `import` and `export ... from`, never `import type` or `export type`:
+// the bundler erases a type-only import, so a file only a type reaches ships
+// nothing and is exactly what this rule is for. A specifier that resolves to
+// nothing is left to `tsc`, which refuses it with a better message. Only
 // TypeScript files are parsed; a stylesheet or JSON file is reached and
 // stops there.
 export function importGraph(entry, src) {
@@ -201,6 +202,10 @@ export function importGraph(entry, src) {
         (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) &&
         statement.moduleSpecifier;
       if (!specifier || !ts.isStringLiteral(specifier)) continue;
+      const typeOnly = ts.isImportDeclaration(statement)
+        ? (statement.importClause?.isTypeOnly ?? false)
+        : statement.isTypeOnly;
+      if (typeOnly) continue;
       const target = resolveSpecifier(file, specifier.text, src);
       if (target) pending.push(target);
     }
@@ -208,12 +213,32 @@ export function importGraph(entry, src) {
   return reached;
 }
 
+// A file that declares only interfaces, type aliases and type-only imports or
+// re-exports is erased whole: it ships nothing, so it cannot be dead shipped
+// code, and `tsc` checks it at every use site (the "runtime exports only"
+// rule above, applied to a whole file). `run/types.ts` is the shape.
+export function shipsNothing(source, filename) {
+  const tree = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
+  return tree.statements.every(
+    (statement) =>
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isTypeAliasDeclaration(statement) ||
+      (ts.isImportDeclaration(statement) && (statement.importClause?.isTypeOnly ?? false)) ||
+      (ts.isExportDeclaration(statement) && statement.isTypeOnly),
+  );
+}
+
 // The section files the entry point cannot reach: the "reachable from the
 // entry point" rule above, over the files the export scan already holds.
 export function unreachableSections(files, src) {
   const reached = importGraph(join(src, "main.tsx"), src);
   const sections = join(src, "sections") + "/";
-  return files.filter((file) => file.startsWith(sections) && !reached.has(file));
+  return files.filter(
+    (file) =>
+      file.startsWith(sections) &&
+      !reached.has(file) &&
+      !shipsNothing(readFileSync(file, "utf8"), file),
+  );
 }
 
 function main(argv) {
