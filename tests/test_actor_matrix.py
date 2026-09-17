@@ -57,8 +57,13 @@ def test_production_never_trusts_role_header(
     The role is derived from the groups the proxy asserts and from nothing the
     caller can set. A role header that escalated would make every other authority
     check in this system a formality.
+
+    Production is edge mode, so the token is set: without it the floor would be
+    READER whatever either header said, and this test would pass for a reason
+    that is not its name.
     """
     monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    monkeypatch.setenv(EDGE_TOKEN_ENV, "x" * 32)
 
     actor = actor_from_headers(
         _headers(**{"x-caos-role": "ADMIN", "x-forwarded-groups": "caos-readers"})
