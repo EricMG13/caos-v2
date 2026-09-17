@@ -3045,24 +3045,41 @@ pin does not name or refuse for the same reason it refused before.
 
 **Decision (a) -- resume is withdrawn in favour of a link.** Nothing moves a
 BLOCKED run to RUNNING, and nothing is planned to. That withdrawal is decided
-here and holds from here. What will record the link instead is
-`runs.supersedes_run_id`: nullable, write-once by trigger, at most one successor
-per predecessor by a partial unique index, never a run's own id; `start_run`
-taking `supersedes` and, inside the caller's unit, selecting the target
-`FOR SHARE` and refusing `RUN_NOT_FOUND` for a run of another case -- the same
-code an unknown run gets, so neither answer tells a caller the other exists --
-`RUN_NOT_BLOCKED` for any status but BLOCKED, and `RUN_ALREADY_SUPERSEDED` for
-the second successor of one predecessor; with `POST
-/api/v1/cases/{case_id}/runs` carrying it, the audit payload binding it, and
-`RunView.supersedes` and `RunView.superseded_by` serving both ends.
+here and holds from here. What records the link instead is
+`runs.supersedes_run_id` (migration `0025_supersedes.sql`): nullable, never a
+run's own id (`runs_never_supersede_self`), at most one successor per
+predecessor by the partial unique index `runs_one_successor`, and written once
+by the insert that makes the successor -- the trigger
+`runs_supersedes_write_once` refuses every UPDATE that would change the column,
+to another run, to null, or from null onto a run after the fact, because a link
+written later would bypass the checks the insert's unit makes. `start_run` takes
+`supersedes` and, inside the caller's unit under the case lock, selects the
+target `FOR SHARE` so no transition moves it while the link is written; it
+refuses `RUN_NOT_FOUND` for a run of another case -- the same code, status and
+clearance an unknown run gets, so neither answer tells a caller the other run
+exists -- `RUN_NOT_BLOCKED` (409) for any status but BLOCKED, and
+`RUN_ALREADY_SUPERSEDED` (409) for the second successor of one predecessor,
+mapped from the index's declared name (`ONE_SUCCESSOR_PER_RUN`) and never from
+a driver message. `POST /api/v1/cases/{case_id}/runs` carries `supersedes` on
+every request, null for an ordinary run -- stated, not defaulted, because every
+v1 request field is required (`test_v1_command_models_are_closed_bounded_and_in_the_committed_schema`)
+-- and the audit payload binds it beside the selection and the route digest.
+`RunView.supersedes` and `RunView.superseded_by` serve both ends, read in one
+row for every displayed run (`SUPERSEDES_IO = 1`; the Run section's
+`IO_BUDGET` moved from 50 to 51, and a successor's `CREATE_RUN` costs one
+statement more than an ordinary run, `SUCCESSOR_RUN_IO`). The run panel names
+each end as a link to that run, and the create-run control offers `supersedes`
+pre-filled with the displayed run when it ended BLOCKED and nothing has
+answered it yet; the analyst may clear it.
 
-**None of that link is built yet, and this entry says so rather than reading as
-though it were.** The session that implemented Task 10.3 was stopped by a rate
-limit having finished the first of its two concerns. What exists is the half
-below: the blocker projection, `NodeView.gate_reason`, the record format and the
-page. The store column, the command, the read and their five tests are owed, and
-the migration ordinal `0025` is held for them. A decision may be taken before the
-code that serves it; what it may not do is describe that code in the past tense.
+**What the control does not know.** The brief asked the offer to be made only
+when the case's current source-set version is newer than the run's pinned one.
+The run document carries no such fact: a source-set version is minted only when
+a run pins its input (`snapshot_in`), so a source admitted after the blocked
+run makes no new version until a successor pins, and the comparison the brief
+names has nothing to read. The control offers the link on the run's status
+alone. The server checks nothing about the successor's source set either, for
+the reason under "What this does not do" below.
 
 The other half of what a reader needs is *which* source the verdict asked for,
 and that was being dropped: `parse_t8` returns `why_now_or_blocker` for every
@@ -3113,12 +3130,18 @@ that it is read from the gate and nowhere else;
 `test_an_explicitly_empty_blocker_list_is_not_the_canonical_form` are the record
 format; `test_a_blocked_run_names_the_source_its_conditional_row_asked_for` is
 the document over a real blocked LITE run;
-the three the link owes --
-`test_a_successor_run_links_a_blocked_run_of_its_case`,
-`test_a_successor_for_a_running_run_or_another_case_is_refused` and
-`test_two_successors_for_one_blocked_run_commit_one`, the command, the private
-404 and the race on two connections -- are **not written** and are owed with the
-store half; and the workspace's
+the link's own are `test_a_successor_run_links_a_blocked_run_of_its_case` (the
+command, the column, the audit payload's binding, both run documents, and the
+serial `RUN_ALREADY_SUPERSEDED`),
+`test_a_successor_for_a_running_run_or_another_case_is_refused` (`RUN_NOT_BLOCKED`,
+the private 404 as one body for a foreign and an unknown run, nothing inserted,
+no receipt, and the refused request's key still usable) and
+`test_two_successors_for_one_blocked_run_commit_one` (the race on two
+connections, the index refusing the loser inside its own unit);
+`test_a_runs_predecessor_is_written_once_and_is_never_itself` is the trigger
+and the CHECK; `test_each_run_command_meets_its_declared_store_budget` measures
+the successor's extra statement. The workspace's
 `test_a_gate_condition_is_shown_beside_the_verdict_it_qualifies` names the gate
-condition on the node. `test_the_run_panel_names_the_run_a_successor_replaces`
-is owed with the link it would read.
+condition on the node, `test_the_run_panel_names_the_run_a_successor_replaces`
+names both ends of the link in the run panel, and
+`test_a_blocked_run_not_yet_answered_offers_supersedes_prefilled` is the offer.
