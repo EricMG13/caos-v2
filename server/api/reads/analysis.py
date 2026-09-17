@@ -12,13 +12,19 @@ A run of another case, an unknown and a malformed run are one `RUN_NOT_FOUND`.
 
 from __future__ import annotations
 
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
-from server.api.reads.upload import READ_REQUIRES, CasePath
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RunQuery,
+    Store,
+    VisibleCase,
+)
 from server.api.wire import (
     AnalysisBody,
     AnalysisDocument,
@@ -42,7 +48,6 @@ from server.methodology.handoff import CanonicalRecord
 from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.members import satisfies, standing_of
 from server.store.routes import resolved_route
 
 # Fixed: standing; the case title, `now()`, latest run and the displayed run's
@@ -61,34 +66,18 @@ IO_BUDGET = FIXED_IO + LITE_NODES * PER_HANDOFF_IO
 router = APIRouter()
 
 
-def run_query(run: str | None = None) -> UUID | None:
-    """The `run` query, or `RUN_NOT_FOUND` for one that names no run. Parsed
-    here, like `case_path`, so a malformed run opens no connection."""
-    if run is None:
-        return None
-    try:
-        return UUID(run)
-    except ValueError:
-        raise Refusal(RefusalCode.RUN_NOT_FOUND) from None
-
-
-RunQuery = Annotated[UUID | None, Depends(run_query)]
-
-
 @router.get("/api/v1/cases/{case_id}/analysis", response_model=AnalysisDocument)
 def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
     actor: Caller,
     case_id: CasePath,
     run: RunQuery,
+    standing: VisibleCase,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
 ) -> AnalysisDocument:
-    """The order of the parameters is load-bearing: identity, the path and the
-    query, then the store."""
-    standing = standing_of(conn, case_id=case_id, user_id=actor.user_id)
-    if standing is None or not satisfies(standing, READ_REQUIRES):
-        raise Refusal(RefusalCode.CASE_NOT_FOUND)
+    """The order of the parameters is load-bearing: identity, the path, the
+    query and the caller's visibility of the case, then the store."""
     row = conn.execute(
         "SELECT title, now(),"
         " (SELECT run_id FROM runs WHERE case_id = c.case_id"
