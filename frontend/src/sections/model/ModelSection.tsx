@@ -41,6 +41,8 @@ export function ModelSection({ document }: { document: ModelDocument; tab: strin
             <dd>sha256:{forecast.artifact_sha256}</dd>
             <dt>Record</dt>
             <dd>sha256:{forecast.record_sha256}</dd>
+            <dt>QA</dt>
+            <dd data-qa-status>{forecast.qa_status}</dd>
             <dt>Units</dt>
             <dd>
               {forecast.currency} · {forecast.scale}

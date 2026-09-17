@@ -82,6 +82,7 @@ describe("Model v1", () => {
     expect(container).toHaveTextContent("ZERO_OR_NEGATIVE_DENOMINATOR");
     expect(container).toHaveTextContent("A required input is unavailable");
     expect(container).toHaveTextContent("LIMITED_HISTORY");
+    expect(container.querySelector("[data-qa-status]")).toHaveTextContent("ACCEPTED");
   });
 
   test("renders partial and hostile server text as text, never markup", () => {

@@ -178,7 +178,11 @@ def _handoff(view: _Handoff) -> str:
         + "\n<h3>Analysis (model-authored, not host-verified)</h3>\n"
         f"<pre>{escape(view.markdown)}</pre>\n"
         "<h3>Deterministic calculations</h3>\n"
-        "<p>None performed by the host on this route.</p>\n"
+        + (
+            "<p>CP-CF forecast projection performed by the host.</p>\n"
+            if _text(facts, "module_id") == "CP-CF"
+            else "<p>None performed by the host on this route.</p>\n"
+        )
     )
 
 

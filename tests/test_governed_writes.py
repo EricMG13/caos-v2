@@ -243,10 +243,12 @@ def test_a_rewritten_entry_breaks_the_chain(
         )
     assert verify_chain(conn, case_id) is True
 
+    conn.execute("SET LOCAL session_replication_role = replica")
     conn.execute(
         "UPDATE audit_events SET action = %s WHERE case_id = %s AND seq = 1",
         ("SOMETHING_ELSE", case_id),
     )
+    conn.execute("SET LOCAL session_replication_role = origin")
 
     assert verify_chain(conn, case_id) is False
 

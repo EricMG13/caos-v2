@@ -139,7 +139,9 @@ def _publication(
         " c.receipt_sha256 IS NOT NULL OR EXISTS (SELECT 1 FROM audit_events e"
         " LEFT JOIN deliverable_receipts r ON r.case_id=e.case_id"
         " AND r.filed_event_sha256=e.entry_sha256 WHERE e.case_id=p.case_id"
-        " AND e.action='DELIVERABLE_FILED' AND r.revision_id IS NULL)"
+        " AND e.action='DELIVERABLE_FILED' AND r.revision_id IS NULL"
+        " AND NOT EXISTS (SELECT 1 FROM legacy_filing_events l"
+        " WHERE l.case_id=e.case_id AND l.filed_event_sha256=e.entry_sha256))"
         " FROM deliverable_publications p LEFT JOIN deliverable_receipts c"
         " USING (case_id,revision_id)"
         " WHERE case_id=%s AND revision_id=%s",
