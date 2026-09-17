@@ -71,6 +71,85 @@ Fable 5.1 at actual `xhigh`.
   those two audits are untracked at the repository root, which this task made
   false. It belongs to the remediation stream and is not edited here.
 
+## Completion Phase 7 — Task 7.2 delivery record, 17 September 2026
+
+Read-only against GitHub; nothing was pushed and no ruleset was touched. The
+per-PR table with every hosted check result is in
+[CI_DELIVERY_SPLIT_PLAN.md](CI_DELIVERY_SPLIT_PLAN.md), which now carries a
+"landed as" column. What the measurement changed:
+
+- **`main` is `01c3724`** (PR #283), 25 merges past the `4f4f431` this plan was
+  drafted against. Ruleset 22701406 "main gates" is **active**.
+- **The undelivered remainder is 13,036 counted lines over 173 files**, not the
+  75,566 the Phase 6 checkpoint recorded nor the 123,065 the split plan names.
+  Most of the branch has landed. Phase 7's last merged PR on `main` is #283;
+  Phase 6 delivery is incomplete, with nine PRs open.
+- **Size was read from the hosted `size` job's own log**, not measured locally,
+  because `scripts/check_pr_size.py` hardcodes `HEAD` and cannot measure an
+  arbitrary PR without a checkout. A local three-dot diff systematically
+  overcounts once a predecessor was squash-merged: #263 measured 790 hosted
+  against 1,555 local, #266 124 against 942, #272 234 against 1,716, #282 700
+  against 1,523. Anyone quoting a local size for a PR is quoting the wrong
+  number.
+
+Three findings a reader should not have to rediscover:
+
+1. **#281 and #285 are recorded MERGED but are not on `main`.** Each merged into
+   a sibling PR's branch (#280's and #284's), and #280 was then closed unmerged.
+   #281 merged with `test` and `security` red and `sonarqube` skipped; #285 with
+   `security` red. Their content reaches `main` only if #284's stack merges.
+2. **#275 is the only over-cap merge since #258** (hosted `size` 1,965,
+   FAILURE) and its body carries no split attempt. The standing over-cap
+   authorization requires the proof in the PR body, so that row is unevidenced.
+3. **#296 is open and failing `size` at 879.**
+
+### Remediation stream, as of 17 September 2026
+
+Determined from commits, never from a plan checkbox. **Nothing in this stream is
+pushed, on `main`, or an ancestor of this branch.**
+
+| Wave | Tasks | State |
+|---|---|---|
+| 1 — correctness and security | T1–T6 | Commits exist for all six, integrated at `86b0cd0` on the local-only `sdd/integration-wave1`. Two follow-up commits (T2's test naming, two of T4's) are outside that integration. **No `make check` result is recorded for `86b0cd0` anywhere, and there is no hosted result because the branch is unpushed** |
+| 2 — prompt and evidence | T7, T8, T9 | no branch, no commits |
+| 3 — consolidation | T10–T15 | no branch, no commits |
+| 4 — store, operator surface, residue | T16–T20 | no branch, no commits; T16 is the owner's Book/Admin decision (D2) and no decision entry exists |
+
+Of the seven dependencies the completion plan names: **T2 and T3 are met by
+commits** on that unpushed branch; **T7, T8, T11, T13 and D2 are not met.** So
+Phase 10 Task 10.1, Phase 9 Task 9.4's prompt section, Phase 8 Tasks 8.2 and
+8.3, and every live qualification run remain blocked on that stream, exactly as
+the plan's Class C says.
+
+## Completion Phase 8 — requests pending on the vendor, 17 September 2026
+
+Five request documents under [`requests/`](requests/), none of which changes a
+vendored byte (`git diff --stat vendor/` is empty). Each awaits an upstream pull
+or its own §61-style authorization.
+
+| Request | Asks for | Holds |
+|---|---|---|
+| [LITE producers](requests/2026-09-17-lite-producers.md) | `accepted_object_id` on the two LITE edges that carry none (CP-2A, CP-3C), and CP-3C's prose block keyed so the host reads it | Tasks 9.5–9.7 |
+| [disqualifier marker split](requests/2026-09-17-disqualifier-marker-split.md) | the fixture markers split from the thin-evidence marker | §66's rejected enforcement |
+| [CP-0 gating](requests/2026-09-17-cp0-gating-vs-classification.md) | which governs: the bundle's per-consumer readiness gate or the owner's classification-only intent | the ledger's "the bundle gates per consumer" entry |
+| [unshipped rules](requests/2026-09-17-unshipped-rules.md) | code for `semantic_rules`, `document_substrings_casefold` and the LITE `required_payload_fields`, or a statement that the host owns them | §46.5's three unenforced rules |
+| [LITE scope and status](requests/2026-09-17-lite-scope-status.md) | a `decision_scope` to `committee_status` mapping enforced in the validator | a `SCREENING_ONLY` pathway accepting `Committee Ready` |
+
+Task 8.5 corrected five claims this plan had made about the bundle. Two of the
+four LITE objects **do** reach a consumer on a catalog edge
+(`lite_liquidity_sensitivity_screen` to CP-2H, line 2484;
+`lite_legal_structure_capacity_screen` to CP-4C, line 2491); the CP-L20/L23/L30/L40
+producers are **not** missing but absorbed into CP-L10 by
+`superseded_module_ids`, each an absorbed phase with its own owned object; CP-3C
+accepts three objects rather than the set the plan listed;
+`invocation.named_objects` drops a boundary no route input can meet rather than
+holding a consumer forever, so what holds those routes is `ADAPTER_ROUTES` plus
+the ledger's policy; and the CP-0 gate lives at
+`scripts/credit_os_v/handoffs.py`. The scope-and-status request also found the
+gap already observed rather than predicted: run `ff71c457…` on
+`LITE_EARNINGS_UPDATE` accepted a CP-0 declaring `Committee Ready` at 93 on a
+`SCREENING_ONLY` pathway.
+
 ## Phase 5 acceptance record — 15 September 2026
 
 - **Candidate:** `ca65ec7`; GitNexus index-only refreshed at this commit
