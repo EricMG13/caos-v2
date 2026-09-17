@@ -270,13 +270,22 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
 def test_two_successors_for_one_blocked_run_commit_one(empty_database: str) -> None:
     """At most one successor per predecessor (§72), under real contention.
 
-    Two connections each select the BLOCKED run `FOR SHARE` -- a share lock
-    contends with nothing but a writer, so both hold it -- and both insert.
-    The partial unique index `runs_one_successor` is the rule: the second
-    insert waits on the first's transaction and, once it commits, refuses
-    inside its own unit as the typed `RUN_ALREADY_SUPERSEDED`, mapped from the
-    index's declared name and never from a driver message. One link is
-    committed; the loser committed nothing."""
+    Two connections each call `start_run` against the same BLOCKED predecessor.
+    They do not meet at the index: `start_run` takes the case lock first
+    (`lock_case`, `FOR UPDATE` on the case row), so the second serialises there
+    and reaches its insert only after the first has committed. The partial unique
+    index `runs_one_successor` is the backstop that then refuses it, inside its
+    own unit, as the typed `RUN_ALREADY_SUPERSEDED` mapped from the index's
+    declared name and never from a driver message. One link is committed; the
+    loser committed nothing.
+
+    The index is not redundant with the lock: drop `runs_one_successor` and both
+    inserts commit, which is what makes this a rule rather than a consequence of
+    the lock ordering. The original docstring described the two connections
+    meeting at the index with both holding `FOR SHARE`, and the Task 10.3
+    acceptance review probed it: with the case lock held elsewhere, the second
+    caller hits `lock_timeout` before any share lock is taken. No host path
+    reaches the insert without the case lock."""
     with connect(empty_database) as conn:
         apply_schema(conn)
         case_id = create_case(conn, BoundaryText.of("Issuer"))
