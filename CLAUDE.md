@@ -1663,13 +1663,34 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   entirely in which handlers the director holds. *Upgrade:* fold it into the
   `provider` job, which already has a real endpoint on the other end, by asking
   the live provider for a status it will refuse.
-- **The gate's evidence demands are dropped.** A readiness row keeps
-  `module_id`, `readiness_status` and `readiness_effect`; CP-0's schema also
-  declares `evidence_demand` and `active_representation_ids`, which say *which*
-  sources a module needs (`docs/DECISIONS.md` §27). Nothing reads them yet, and
-  every module is still handed every block. *Upgrade:* per-module evidence
-  selection, which is the same change that would let a set with a 541-page
-  credit agreement run at all.
+- **The gate's evidence demands are dropped, and the host cannot read them at
+  all.** A readiness row keeps `module_id` and `readiness` -- **two** fields, not
+  the three this entry used to claim: `readiness_effect` appears nowhere under
+  `server/` and is not a field of the vendor's `Recommendation`. The entry
+  described the JSON payload schema's row as though it were the host's record,
+  which is the error that matters here, because the same confusion is what the
+  repair was specified against. CP-0's *schema* also declares `evidence_demand`,
+  `active_representation_ids` and a `content_to_module_map` (`docs/DECISIONS.md`
+  §27), and those live in `runtime_output` -- which
+  `invocation.py`'s `_FINAL_CHECK` explicitly tells the model **not** to author,
+  naming it among the fields that belong outside canonical front matter. So the
+  host asks CP-0 not to produce the very rows a per-module selection would read,
+  and no accepted record has ever carried one. The two ways to invent the fact
+  both breach invariant 4: all sixteen CP-0 registers declare `columns: none`,
+  so parsing the Markdown means a host table contract the bundle does not state;
+  and T8's fifth column, `Source files to attach`, is validated for row width by
+  the vendor and then discarded -- `parse_t8` reads cells 0,1,2,3,6,7 and never
+  cell 4 -- so keeping it would make the host a second reader of one table that
+  can disagree with the bundle's own. The catalog offers no third way: no
+  `evidence_demand`, `active_representation`, `source_files` or `evidence_class`
+  appears in it. Measured by Completion Phase 10 Task 10.1, which stopped rather
+  than build. *Upgrade:* not per-module selection as specified. It needs one of
+  three things first -- a bundle build whose `Recommendation` carries T8's fifth
+  column, which is the smallest and keeps invariant 4; or a dated decision taking
+  host ownership of a CP-0 register's shape, in the pattern of §61 and §63, which
+  has to answer whether a model-authored register may decide what evidence a
+  *downstream* node can cite; or a selection rule needing no gate row at all,
+  which narrows nothing and closes none of the entries this one is grouped with.
 - ~~**The workspace cannot show the cause yet.**~~ Closed by Phase 4 Task
   4.1i: the v1 `NodeView` carries `gate_verdict` and the Run section's node
   detail and reason (`frontend/src/sections/run/reason.ts`) draw it as the
@@ -1687,9 +1708,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   engine's answer.** `_state_for` returns RESTRICTED for a
   READY_WITH_LIMITATIONS module with no unmet edge, and `limitations_of` reports
   soft edges — so it answers `()`, the one condition its own docstring says must
-  not happen. The cause is not lost: the verdict's `readiness_effect` is stored
-  on the gate artifact and is where the state came from, and the run surface
-  carries the status as `NodeView.gate_verdict`. Widening `limitations_of` is
+  not happen. The cause is not lost: the readiness the gate
+  recorded is on the artifact and is where the state came from, and the run
+  surface carries it as `NodeView.gate_verdict`. (This entry said
+  `readiness_effect`, a field the host does not keep -- the same schema-for-record
+  confusion corrected in the evidence-demands entry above.) Widening `limitations_of` is
   the wrong way to add it — the return is `tuple[Edge, ...]`, a verdict is not
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from

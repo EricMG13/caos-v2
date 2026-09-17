@@ -776,6 +776,21 @@ pathway over the ceiling cannot be run and therefore cannot be qualified. The
 Phase 5 ledger entry "An upstream section is unbounded" carries the numbers.
 Treat this as a precondition of 11.9, not a risk.
 
+**Task 10.1 is blocked on the vendor or on the owner, not on effort.** It was
+dispatched and stopped rather than built. Per-node selection needs a per-module
+statement of which sources a module needs; CP-0's schema declares one, in
+`runtime_output`, and `invocation.py`'s `_FINAL_CHECK` explicitly tells the model
+not to author that. Parsing the Markdown registers means a host table contract
+the bundle does not state -- all sixteen declare `columns: none` -- and T8's
+`Source files to attach` column is validated by the vendor and then dropped by
+its own parser, so keeping it would make the host a second reader of one table.
+Both breach invariant 4. `docs/requests/2026-09-17-t8-source-files-column.md` is
+the smallest unblock; the alternative is a dated decision taking host ownership
+of a register's shape, which must first answer whether a model-authored register
+may decide what evidence a *downstream* node can cite. It may not be assumed:
+narrowing is monotone downward on anchoring, so that register could turn a later
+module's truthful quote of a pinned source into a refusal.
+
 **Exit checks**
 
 - Every FULL pathway except the one blocked on corpus is in `ADAPTER_ROUTES`
