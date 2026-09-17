@@ -604,13 +604,23 @@ export function requireIdentity(
       throw new WireIdentityError();
     }
   }
-  if ("receipt" in doc.body && doc.body.receipt !== null) {
-    const receipt = doc.body.receipt;
+  if ("receipt" in doc.body) {
+    const { receipt } = doc.body;
+    if (
+      (doc.body.state === "frozen" && (receipt !== null || doc.body.filed_by !== null)) ||
+      (doc.body.state === "filed" && (receipt === null || doc.body.filed_by === null))
+    ) {
+      throw new WireIdentityError();
+    }
+    if (receipt === null) return;
     if (
       !sameId(receipt.case_id, doc.body.case_id) ||
       !sameId(receipt.run_id, doc.body.displayed_run_id) ||
       !sameId(receipt.revision_id, doc.body.revision_id) ||
-      receipt.payload_sha256 !== doc.body.payload_sha256
+      receipt.payload_sha256 !== doc.body.payload_sha256 ||
+      !sameId(receipt.frozen_by, doc.body.frozen_by) ||
+      !sameId(receipt.filed_by, doc.body.filed_by) ||
+      !doc.body.signed_by.some((signer) => sameId(signer, receipt.signed_by))
     )
       throw new WireIdentityError();
   }

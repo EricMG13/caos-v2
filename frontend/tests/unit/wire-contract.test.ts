@@ -91,6 +91,22 @@ test("Report and Committee bind case/run/revision and exact receipt identity", (
     ),
   );
   expect(() => requireIdentity(wrong, expected)).toThrow(WireIdentityError);
+  for (const invalid of [
+    { ...filed, state: "frozen", filed_by: null },
+    { ...filed, state: "frozen", receipt: null },
+    { ...filed, receipt: null },
+    { ...filed, filed_by: null },
+    { ...filed, receipt: { ...filed.receipt, frozen_by: OTHER_RUN } },
+    { ...filed, receipt: { ...filed.receipt, filed_by: OTHER_RUN } },
+    { ...filed, receipt: { ...filed.receipt, signed_by: OTHER_RUN } },
+  ]) {
+    expect(() =>
+      requireIdentity(
+        parseCommitteeDocument(envelope(invalid, { case_id: CASE, title: "Issuer" })),
+        expected,
+      ),
+    ).toThrow(WireIdentityError);
+  }
   expect(() =>
     parseReportDocument(envelope({ ...body, html: "unsafe" }, { case_id: CASE, title: "Issuer" })),
   ).toThrow(WireShapeError);
