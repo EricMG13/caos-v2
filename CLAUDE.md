@@ -181,8 +181,102 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 12.**
 
+- **No run made through the API can carry CP-CF, so no Book cell and no
+  passport is reachable.** `create_run` resolves the route with no
+  `RouteExtensions` (`server/api/commands/runs.py`) and `CreateRun` carries no
+  field to ask for one (`server/api/wire.py`, `extra="forbid"`), while CP-CF is
+  a host extension appended only by
+  `resolve_route(..., extensions=RouteExtensions(model_extension=True))`
+  (`server/engine/route.py`'s `_model_node`), whose one caller anywhere is the
+  qualification harness. `accepted_forecast` returns `None` without a CP-CF
+  handoff, so every credit is `NO_ACCEPTED_FORECAST`, `periodsOf(rows)` is
+  empty, `BookSection` draws its credit list instead of a comparison table, and
+  there is no `[data-cell]` to open a passport from. **This is not a property of
+  the LITE pathway**: `ADAPTER_ROUTES` enables three pathways and
+  `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's `MODEL_OWNERS`,
+  so it would append CP-CF if anything asked. Completion Phase 12's exit clause
+  "a ten-field passport per cell" therefore rests on `test_passport_contract`
+  and the Book unit specs, not on the production stack; the journey records the
+  absence deliberately, so the day a cell exists
+  `journey: the Book names every credit of the portfolio on one stated basis`
+  fails and is rewritten to open the passport. Found by the Task 12.5
+  acceptance review, which read the route resolver where the task's own
+  reasoning had stopped one step short and recorded a false reason -- that
+  CP-CF "is not a node of the only route the canonical adapter executes" --
+  which was wrong twice over. *Upgrade:* a declared way for a run to request
+  the model extension, a `model_extension` field on `CreateRun` pinned in the
+  route digest like everything else; or a Book that says in its own document
+  that no pathway it can be served from produces a forecast.
+- **The filing chain cannot be reached from the workspace.** `sectionUrl`
+  answers `null` for **both** `report` and `committee` without a `revision`
+  (`frontend/src/app/transport.ts`), `read_report` refuses
+  `DELIVERABLE_NOT_FOUND` without the row, and the only thing that ever sets
+  `?revision` is `FilingControls`' own post-save `setParams` -- on the section
+  that needs it to load. So a case can never produce its *first* revision
+  through the UI, and with no revision there is nothing to sign, freeze or
+  file: the four governed writes Task 12.1 built and Task 12.2 placed are
+  unreachable by a person using the workspace, and Committee shares the
+  precondition. Every one of them works, proved through the production stack on
+  three engines by `frontend/tests/journey/journey.spec.ts`, which reaches the
+  first save as an authenticated request and asserts the surface is
+  `unavailable` without one -- because there is no press that would make it.
+  The journey citation is worth nothing to a gate: every journey test is titled
+  `journey: ...`, which neither `scripts/ledger_state.py` nor
+  `tests/test_phase_exits.py` can read, so the code paths above are the
+  citation that can be checked. *Upgrade:* a `SAVE_REVISION` control that does
+  not need a revision to exist -- composed from Analysis or Run, its success
+  the thing that first sets `?revision` -- or `report` served without
+  `revision`, answering the run's latest. Either is a task; neither is a change
+  a test may make.
+- **A digit in a draft is refused with a clearance the surface cannot
+  discharge.** `server/deliverable/revisions.py`'s `_span` refuses any ASCII
+  digit in narrative text `NARRATIVE_FIGURE_UNREFERENCED`, whose clearance
+  reads "Insert every financial figure through a validated reference" -- a
+  figure span naming a citation of a verified record, which `FilingControls`
+  cannot compose, as its own comment says. So an author who types a number is
+  told to perform an act the page offers no way to perform. The wire and the
+  store do support it, which the journey shows by saving one figure span over
+  the API and reading it back on the Report surface with the host's own
+  document, page and quote; the refusal itself is rendered in the browser.
+  *Upgrade:* a citation picker on the Report surface; failing that, a clearance
+  that names an act this surface can perform.
+- **Nothing renders a parked run's stop code.** `work.stop_code` is parsed at
+  `frontend/src/wire/v1/documents.ts` and rendered nowhere under
+  `frontend/src`, so an operator meeting a run parked `STOPPED` learns only
+  that Start and Retry are refused, and not that the store said
+  `EVIDENCE_NOT_AVAILABLE` because a captured source was withdrawn. The code is
+  on the wire, typed, and one line from being on screen. Journey-observed
+  rather than read: Task 12.5 polls that field to prove the park happened, from
+  a page that does not show it. Grant and revoke are the same shape one step
+  further on -- both commands have no control anywhere and no entry in
+  `ActionName`, deliberately, because no section serves an Admin panel to offer
+  them from, so the journey drives them as authenticated requests. *Upgrade:*
+  the stop code on the Run section's work panel beside the refused controls,
+  and the membership commands with Completion Phase 13's Admin work.
+- **A worktree outside `/Users` cannot run `make smoke-production`.**
+  `compose.smoke.yaml` bind-mounts `./tests:/app/tests:ro` into
+  `journey-worker`, and Docker Desktop on the development machine shares
+  `/Users` and not `/private/tmp`, so the mount comes up empty and the worker
+  exits `ModuleNotFoundError: No module named 'journey'` -- a failure that
+  names neither the mount nor the path. **Every standing worktree of this build
+  is under `/private/tmp`**, so this recurs for anyone who tries. Task 12.5's
+  assigned worktree was one of them; its three-engine gate was run from a
+  detached mirror worktree under `/Users`, and **the gate evidence is therefore
+  not reproducible from the branch's own worktree**: the mirror is deleted, it
+  used the same fixed ports and the same compose project name as any other
+  agent's smoke stack, and the only link between it and what landed is the
+  sha256 of the two committed files. *Upgrade:* `tests/journey/run.py` refuses
+  a repository root Docker cannot mount, with a code that says so, before it
+  builds anything -- which is also what would stop the next agent losing an
+  hour to it.
+
 - **The Book compares on earnings, not on leverage, and on four credits it did
-  not let you choose.** Task 12.3 declares six columns, the five whose operands
+  not let you choose.** Read this entry and the two after it against the one
+  above: no run made through the API carries CP-CF, so the cells, chips and
+  passports they describe are what the Book serves **when a forecast exists**,
+  which no API-created run produces today. The limits below are real and will
+  be met the day the model extension is requestable; they are not things a
+  reader meets now. Task 12.3 declares six columns, the five whose operands
   are the period's own accepted driver row and the EBITDA margin over two of
   them, because a cell can then name the driver behind it and that driver's
   evidence. The debt and cash roll-forward and the leverage metrics over them
@@ -229,7 +323,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `PER_ROW_IO` is `MODEL_IO - 1`, measured on the ten-node LITE forecast route,
   and `IO_BUDGET` is `2 + 4 x that` = 598. `read_analysis` costs
   `7 + 10 x handoffs`, so a `FULL_CREDIT_32` credit costs about 327 and four of
-  them about 1,310 against the declared 598. The convention is Model's and
+  them about 1,310 against the declared 598 -- arithmetic rather than a
+  measurement, and unreachable by any request while no pinned route carries
+  CP-CF. The convention is Model's and
   Analysis' -- both declare the shape they were measured on -- but the Book is
   the first reader to multiply it, so the gap between the declaration and the
   widest real request is four times anyone else's. The payload has the same
@@ -669,13 +765,40 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
   TLS material, which this task was not authorized to create.
 - **The production image and journey are proven locally, not in CI.**
-  `make smoke-production` is the last step of `make check`, and no CI
-  job runs it. The journey (slice 4.5e2) runs 13 tests on each of chromium,
-  firefox and webkit, but only the first engine meets the worker's real
-  exit-after-first-accept and the 300 s lease wait: the exit-once marker lives
-  in the shared blob volume, so the later engines restart the worker against
-  a run that has already finished. *Upgrade:* a CI job over the smoke stack
-  (Phase 6), and a per-engine marker if the recovery must be proven per engine.
+  `make smoke-production` is the last step of `make check`, and no CI job runs
+  it. The journey runs 22 tests on each of chromium, firefox and webkit.
+  **This entry used to say only the first engine met the worker's real
+  exit-after-first-accept and the 300 s lease wait, because "the exit-once
+  marker lives in the shared blob volume" -- and that understated the gate.**
+  `tests/journey/run.py`'s `run_project` brings up a stack per engine and its
+  `finally` always runs `compose_down(env)`, which is `down --volumes` and
+  removes the named `smoke-blobs` volume the marker lives in
+  (`JOURNEY_STATE_DIR: /blobs`), so each engine gets a fresh marker and its own
+  crash-once worker -- which the function's own docstring says. Task 12.5's
+  three per-engine durations, 5.7, 5.9 and 6.3 minutes against a 300 s lease
+  wait, are the measurement. Corrected at the Task 12.5 acceptance review,
+  which read the runner; an entry that understates a gate is the same defect as
+  one that overstates it, read the other way round. What remains true is the CI
+  half. *Upgrade:* a CI job over the smoke stack (Phase 6).
+- **A flake in one engine used to cost the other two engines' evidence.**
+  `tests/journey/run.py`'s `main` returned on the first engine's non-zero
+  status, so a single flaky test in chromium ended the gate with firefox and
+  webkit unrun and nobody able to say whether they would have passed. It
+  happened once while Task 12.5's gate was being run, and the re-run of the
+  same commit unchanged was green on all three. Every engine now runs and each
+  reports its own status, with the gate's exit still the first non-zero -- so
+  no failing run passes, and a flake costs one engine's evidence instead of
+  three. What is **not** fixed is the flakiness: two pre-existing tests each
+  flaked once in nine runs -- test 7's page fetch never leaving the browser
+  after the lease wait, and test 1's Create press firing no request -- and
+  `playwright.journey.config.ts` sets `retries: 0`, deliberately, because a
+  retried journey hides exactly this. The new Task 12.5 tests also add about
+  twenty navigations after test 15, each leaving an SSE tail held to
+  `TAIL_DEADLINE` against the API's `--limit-concurrency 32` (the "idle case
+  stream" entry above), and unlike `waitForNode` they carry no `toPass`
+  wrapper. *Upgrade:* diagnose the two flakes from a recorded trace rather than
+  by lengthening a wait, and a stream cap below the concurrency limit, which
+  the entry above already owes.
 
 **Repair Phase 3.**
 
