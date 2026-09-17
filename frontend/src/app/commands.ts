@@ -31,8 +31,10 @@ import {
   parseRunCreated,
   parseRunInputPinned,
   parseRunWork,
+  parseSourceWithdrawn,
   parseSourcesAdmitted,
   type RefusalBody,
+  type SourceWithdrawn,
   type SourcesAdmitted,
   type V1_SHAPES,
 } from "@/wire/v1";
@@ -228,4 +230,15 @@ export function cancelRun(
 ): Promise<CommandResult<RunWork>> {
   const request: CancelRun = {};
   return jsonCommand(intent, `${runPath(caseId, runId)}/cancel`, request, parseRunWork);
+}
+
+/** Invariant 1's second half: a pinned source is withdrawn, never deleted, and
+    the body is empty because the source is named in the path (Task 12.1). */
+export function withdrawSource(
+  caseId: string,
+  sourceId: string,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<SourceWithdrawn>> {
+  const url = `${casePath(caseId)}/sources/${encodeURIComponent(sourceId)}/withdrawal`;
+  return jsonCommand(intent, url, {}, parseSourceWithdrawn);
 }

@@ -286,6 +286,100 @@ describe("Upload", () => {
     vi.unstubAllGlobals();
   });
 
+  test("test_a_live_source_offers_withdrawal_and_a_withdrawn_one_offers_nothing", () => {
+    const live: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "WITHDRAW_SOURCE", refusal: null }] },
+    };
+    const { container } = mount(live);
+    const alive = live.body.sources.find((s) => s.withdrawn_at === null)!;
+    const gone = live.body.sources.find((s) => s.withdrawn_at !== null)!;
+    const control = sourceRow(container, alive.source_id).querySelector("button")!;
+    expect(control).toHaveAttribute("data-action", "WITHDRAW_SOURCE");
+    expect(control).toHaveAccessibleName(`Withdraw ${alive.filename}`);
+    expect(control).not.toHaveAttribute("aria-disabled");
+    // A withdrawn source has no act left to offer: the row already says when
+    // it was withdrawn, and the command would answer EVIDENCE_NOT_AVAILABLE.
+    expect(sourceRow(container, gone.source_id).querySelector("button")).toBeNull();
+  });
+
+  test("a refused withdrawal renders its code and clearance and is not hidden", () => {
+    const refused: UploadDocument = {
+      ...fixture,
+      chrome: {
+        ...fixture.chrome,
+        actions: [
+          {
+            action: "WITHDRAW_SOURCE",
+            refusal: { code: "NOT_AUTHORISED", clears: "the actor holds WRITER standing" },
+          },
+        ],
+      },
+    };
+    const { container } = mount(refused);
+    const alive = refused.body.sources.find((s) => s.withdrawn_at === null)!;
+    const control = sourceRow(container, alive.source_id).querySelector("button")!;
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAttribute("data-refusal", "NOT_AUTHORISED");
+    expect(container).toHaveTextContent("the actor holds WRITER standing");
+  });
+
+  test("an absent withdrawal action is ACTION_UNPLACED, and a click sends nothing", () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { container } = mount({ ...fixture, chrome: { ...fixture.chrome, actions: [] } });
+    const alive = fixture.body.sources.find((s) => s.withdrawn_at === null)!;
+    const control = sourceRow(container, alive.source_id).querySelector("button")!;
+    expect(control).toHaveAttribute("data-refusal", "ACTION_UNPLACED");
+    fireEvent.click(control);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  test("test_withdrawing_a_source_posts_its_withdrawal_and_re_reads_the_pack", async () => {
+    const live: UploadDocument = {
+      ...fixture,
+      chrome: { ...fixture.chrome, actions: [{ action: "WITHDRAW_SOURCE", refusal: null }] },
+    };
+    const alive = live.body.sources.find((s) => s.withdrawn_at === null)!;
+    const refreshed: UploadDocument = {
+      ...live,
+      body: {
+        ...live.body,
+        sources: live.body.sources.map((row) =>
+          row.source_id === alive.source_id
+            ? { ...row, withdrawn_at: "2026-09-17T09:00:00Z" }
+            : row,
+        ),
+      },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ case_id: live.body.case_id, source_id: alive.source_id }),
+      )
+      .mockResolvedValueOnce(jsonResponse(refreshed));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { container } = mount(live);
+    fireEvent.click(sourceRow(container, alive.source_id).querySelector("button")!);
+    await settle();
+    await settle();
+
+    // `withdrawSource` builds this request and `parseSourceWithdrawn` narrows
+    // its receipt; both are driven here through the mounted section rather
+    // than called directly, as is `refetchUpload`, the one GET after it.
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(`/api/v1/cases/${live.body.case_id}/sources/${alive.source_id}/withdrawal`);
+    expect(init.method).toBe("POST");
+    expect(init.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fetchSpy.mock.calls[1]![0]).toBe(`/api/v1/cases/${live.body.case_id}/upload`);
+    // The pack it re-read is what says the source is gone, never this control.
+    expect(sourceRow(container, alive.source_id)).toHaveClass("wd");
+    expect(sourceRow(container, alive.source_id).querySelector("button")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   test("an action absent from chrome.actions is not available, and is refused with ACTION_UNPLACED", () => {
     const noActions: UploadDocument = {
       ...fixture,
