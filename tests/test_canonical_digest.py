@@ -5,8 +5,8 @@ here names audit chains, signed payloads, filed receipts, route pins, command
 receipts and qualification sets that already exist in databases, so a value
 that moves is not a refactor -- it is stored rows that stop verifying. The
 fixture carries non-ASCII text and decimal strings because that is where the
-`ensure_ascii` split between the two families of sites is visible: the eight
-converted sites emit the characters, the seven left alone escape them.
+`ensure_ascii` split between the two families of sites is visible: the converted
+sites emit the characters, the escaping sites left alone escape them.
 """
 
 from __future__ import annotations
@@ -18,10 +18,8 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from forecast_fixtures import forecast_request
 
 from server.boundary_text import BoundaryText
-from server.calculators.cash_flow import forecast_bytes
 from server.deliverable.canonical import payload_bytes
 from server.deliverable.filing import Receipt, receipt_bytes
 from server.digest import canonical_digest, canonical_json
@@ -168,8 +166,10 @@ def _hex(value: bytes | str) -> str:
     return sha256(raw).hexdigest()
 
 
-# Every site this task touched, reduced to one hex string. The eight converted
-# sites come first; the seven that only gained `allow_nan=False` follow.
+# Every site this task touched, reduced to one hex string. The converted sites
+# come first; the ones that only gained `allow_nan=False` follow.
+# `server/calculators/cash_flow.py` is deliberately absent: it is byte-pinned by
+# `methodology/skills/HOST_INTEGRITY_v1.json`, so it was left exactly as it was.
 DIGESTS: dict[str, Callable[[], str]] = {
     "digest.canonical_json": lambda: _hex(canonical_json(FIXTURE)),
     "digest.canonical_digest": lambda: canonical_digest(FIXTURE),
@@ -185,9 +185,6 @@ DIGESTS: dict[str, Callable[[], str]] = {
         body=FIXTURE,
     ),
     "methodology.handoff.record_bytes": lambda: _hex(record_bytes(_record())),
-    "calculators.cash_flow.forecast_bytes": lambda: _hex(
-        forecast_bytes(forecast_request())
-    ),
     "store.audit.digest_of": lambda: digest_of(FIXTURE),
     "deliverable.canonical.payload_bytes": lambda: _hex(payload_bytes(FIXTURE)),
     "deliverable.filing.receipt_bytes": lambda: _hex(receipt_bytes(_receipt())),
@@ -208,9 +205,6 @@ DIGESTS: dict[str, Callable[[], str]] = {
 # Computed by running each callable at b194943, the parent of this task's first
 # commit. A value that moves is a stored digest that stops verifying.
 GOLDEN: dict[str, str] = {
-    "calculators.cash_flow.forecast_bytes": (
-        "9caec4e3375e011f081934f823eb8801d31d3040aea81646b6031786d2f177e5"
-    ),
     "deliverable.canonical.payload_bytes": (
         "44a2913914e4e55fe847ce3f3b947cc8a9031ebda4365f3289cd92adc181ff6b"
     ),
