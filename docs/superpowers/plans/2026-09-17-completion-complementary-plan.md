@@ -185,19 +185,29 @@ Recorded here so a fresh clone does not depend on a Downloads file.
 | Opus 5 | `low` | scaffolding and mechanical edits | fixture moves, schema regeneration, ledger relabelling, corpus admission manifests, docstrings, status edits |
 | Opus 5 | `medium` (default dev) | daily-driver implementation | per-module fixtures and contract tests, route enablement slices, key authoring from documents, endpoints, wire, controls, per-task review |
 | Opus 5 | `max` with `ultrathink` | targeted invariant audits | each module's register semantics before its fixture is trusted; the money path; three-actor independence; two-worker interleavings; the trust trace |
-| Fable 5.1 | `low` / `medium` (agent default) | long-horizon autonomous execution | evidence selection, CP-DR brief delivery, the command chain, async store and second-worker fencing, signed assertion |
-| Fable 5.1 | `high` / `xhigh` | architecture and governance | phase and task briefs, vendor request documents, decision entries, and long-horizon implementation. **Not** reviews any more |
+| Opus 5 | `max` with `ultrathink` | long-horizon autonomous execution | what Fable 5.1 `low`/`medium` held: evidence selection, CP-DR brief delivery, the command chain, async store and second-worker fencing, the signed assertion |
+| Opus 5 | `max` with `ultrathink` | architecture and governance | what Fable 5.1 `high`/`xhigh` held: phase and task briefs, vendor request documents, decision entries, and every review |
+| ~~Fable 5.1~~ | — | — | **No Fable dispatch remains.** The owner replaced it with Opus 5 `max` and `ultrathink` on 17 September 2026 |
 
 ### Rules
 
 - A mixed slice takes the stricter row.
-- `ultrathink` is an Opus 5 lever only, at `max`. Never in a Fable prompt.
-- **Every review runs on Opus 5 `max` with `ultrathink`** — the two whole-phase
-  reviews and task acceptance alike. Changed by the owner on 17 September 2026
-  from Fable 5.1 `xhigh`, which is why the reviews before that date are recorded
-  against the older routing and are not re-run: a review is evidence about a tree
-  at a time, and re-running it under a new setting would not make the old one
-  untrue.
+- `ultrathink` is an Opus 5 lever only, at `max`. That rule now governs nothing it
+  has to forbid, because no Fable dispatch is left — it is kept rather than deleted,
+  so that the constraint is already written down if Fable ever returns.
+- **Every slice Fable 5.1 held now runs on Opus 5 `max` with `ultrathink`**, not
+  only the reviews. The owner's instruction of 17 September 2026 named no scope, so
+  it is read as it was written: Opus 5 `max` with `ultrathink` **instead of**
+  Fable 5.1, wherever Fable appeared. The reviews were the live case when it
+  arrived and were rerouted first; the long-horizon implementation rows followed
+  once a peer session read the same instruction the broader way, which is the
+  more literal reading and the one that keeps two sessions on one branch from
+  routing differently.
+- Work already done under the older routing keeps its recorded model and effort and
+  is not re-run: a review, like a run, is evidence about a tree at a time, and
+  re-running one under a new setting would not make the earlier one untrue. Task
+  10.3's second concern ran on Fable 5.1 `high` hours before this change and stays
+  recorded that way.
 - Effort is a setting and not a word in a prompt, so all three are pinned where a
   setting lives: `.claude/agents/phase-confidence-reviewer.md`,
   `phase-adversarial-auditor.md` and `task-acceptance-reviewer.md` each carry
