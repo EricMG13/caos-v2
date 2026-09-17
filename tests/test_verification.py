@@ -196,3 +196,37 @@ def test_refuse_maps_each_step_to_the_callers_code_or_lets_it_through(
     ran.conn.rollback()
     assert theirs.value.code is RefusalCode.ORCHESTRATION_CITATION_LOST
     assert theirs.value.__cause__ is None and theirs.value.__context__ is None
+
+
+def test_the_runtime_read_still_refuses_a_tampered_sibling_file(
+    ran: _Harness,
+) -> None:
+    """The runtime's accepted read verifies every file of the module's
+    authority (`assemble_authority`), not `SKILL.md` alone: a reference file
+    beside it, changed on disk under an unchanged manifest, refuses the
+    accepted read whatever the per-manifest digest cache already holds. The
+    same read serves the Run and Analysis documents and the matrix."""
+    from server.methodology.canonical import accepted_projections
+
+    row = _row(ran, "CP-0")
+    # Warm the digest cache first, so only the direct read can catch it.
+    assert _verify(ran, row, reanchor=False).citations is None
+    ran.conn.rollback()
+    skill = ran.bundle.skill_of("CP-0")
+    sibling = next(n for n in sorted(skill["relative_file_hashes"]) if n != "SKILL.md")
+    path = ran.bundle.root / "skills" / skill["folder_slug"] / sibling
+    path.write_bytes(path.read_bytes() + b"\n")
+    with pytest.raises(Refusal) as refused:
+        accepted_projections(
+            ran.conn,
+            ran.blobs,
+            ran.bundle,
+            ran.route,
+            run_id=row.run_id,
+            route_node_id=row.route_node_id,
+            attempt_id=row.attempt_id,
+            artifact_sha256=row.artifact_sha256,
+            record_sha256=row.record_sha256,
+        )
+    ran.conn.rollback()
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH

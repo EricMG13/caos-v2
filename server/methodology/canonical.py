@@ -794,9 +794,10 @@ def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
     or its lineage is not the accepted chain the store holds now (§45.4);
     `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
     build, manifest or authority, as the proof maps it; `validate_markdown`'s
-    own code for a stored handoff that no longer validates. Citations are not
-    re-anchored (§42.4). The frontier keeps the per-manifest authority digest
-    cache. Caller owns the read.
+    own code for a stored handoff that no longer validates;
+    `AUTHORITY_BYTES_MISMATCH` for any file of the module's authority moved on
+    disk. Citations are not re-anchored (§42.4). The frontier keeps the
+    per-manifest authority digest cache. Caller owns the read.
     """
     verified = verify_accepted(
         conn,
@@ -817,6 +818,12 @@ def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
         refuse=_refuse,
     )
     node = next(n for n in route.nodes if n.route_node_id == route_node_id)
+    # Every file of the module's authority, verified on disk now: the shared
+    # steps read SKILL.md and compare cached digests, so this is what refuses
+    # a sibling reference file tampered under an unchanged manifest on the
+    # read that serves the frontier, the Run and Analysis documents and the
+    # matrix (§45.1). It is what the parent read paid; the cache costs nothing.
+    assemble_authority(bundle, node.module_id)
     if node.module_id == MODEL_MODULE:
         assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
         _forecast_inputs(
