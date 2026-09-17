@@ -207,7 +207,16 @@ def _publication(
     # per actor this read is looking for rather than once per entry of a trail
     # that is the whole case's: only these actors' events can satisfy `required`.
     accepted = {
-        actor: payload_digests(conn, scope=case_id, actor_id=actor, payload=bound)
+        actor: payload_digests(
+            conn,
+            scope=case_id,
+            actor_id=actor,
+            payload=bound,
+            # The only commands that can have written OPINION_SIGNED or
+            # DELIVERABLE_FROZEN; naming them keeps this read off the rest of
+            # the actor's receipts, which nothing collects.
+            commands=("SIGN_OPINION", "FREEZE_DELIVERABLE"),
+        )
         for _action, actor in required
     }
     events = {

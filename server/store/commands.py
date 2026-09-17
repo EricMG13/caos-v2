@@ -24,7 +24,7 @@ replay before the lookup is reached.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
@@ -313,7 +313,12 @@ def _replay(
 
 
 def payload_digests(
-    conn: StoreConnection, *, scope: UUID, actor_id: UUID, payload: Mapping[str, Any]
+    conn: StoreConnection,
+    *,
+    scope: UUID,
+    actor_id: UUID,
+    payload: Mapping[str, Any],
+    commands: Sequence[str],
 ) -> frozenset[str]:
     """Every digest an audit event for `payload` may legitimately carry.
 
@@ -332,16 +337,26 @@ def payload_digests(
     rebuild a `CASE_CREATED` payload. It would refuse fail-closed with nothing
     saying why, which is why it is said here. No reader asks for that today.
 
-    Bounded by one actor's committed commands on one case. The comparison stays
-    exact in both directions: an event whose payload had any other field, or a
-    different value in one of these, matches neither digest.
+    Bounded by the named `commands` this actor committed on this scope, not by
+    every receipt it holds. `command_requests` is never collected -- its own
+    ledger entry owns that -- and a case ADMIN can add rows to it cheaply and
+    successfully, because `grant` upserts, so a repeated grant with a fresh
+    idempotency key succeeds with no other effect. Without the filter this read
+    was an unbounded scan plus one canonical serialisation and one SHA-256 per
+    row, once per actor, on every committee read. The caller knows which
+    commands can have written the action it is rebuilding; naming them is what
+    bounds this. Found by the Completion Phase 12 adversarial audit.
+
+    The comparison stays exact in both directions: an event whose payload had
+    any other field, or a different value in one of these, matches neither
+    digest.
     """
     exact = dict(payload)
     digests = {digest_of(exact)}
     rows = conn.execute(
         "SELECT request_sha256 FROM command_requests"
-        " WHERE scope = %s AND actor_id = %s",
-        (scope, actor_id),
+        " WHERE scope = %s AND actor_id = %s AND command = ANY(%s)",
+        (scope, actor_id, list(commands)),
     ).fetchall()
     digests |= {digest_of({**exact, REQUEST_KEY: str(row[0])}) for row in rows}
     return frozenset(digests)

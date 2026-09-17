@@ -650,6 +650,7 @@ def test_a_deliverable_filed_over_http_reads_back_from_the_committee_section(
         scope=lite.case_id,
         actor_id=receipt.filed_by,
         payload=filing_payload(receipt),
+        commands=("FILE_DELIVERABLE",),
     )
     lite.conn.rollback()
     assert filed.payload_sha256 in accepted
@@ -687,6 +688,12 @@ def test_a_signature_sent_over_http_is_provable_beside_one_the_store_made(
     assert answer.json()["body"]["state"] == "frozen"
 
 
+# The commands that can write the three filing actions, which is what bounds
+# `payload_digests`' receipt read. Not `_FILING` above: that is the four
+# *actions* the controls are drawn from.
+_FILING_COMMANDS = ("SIGN_OPINION", "FREEZE_DELIVERABLE", "FILE_DELIVERABLE")
+
+
 def test_payload_digests_accepts_both_writers_and_nothing_else(
     lite: _Harness,
 ) -> None:
@@ -704,7 +711,9 @@ def test_payload_digests_accepts_both_writers_and_nothing_else(
     actor = _approver(lite)
     bound = {"revision_id": str(uuid4()), "payload_sha256": "a" * 64}
 
-    before = payload_digests(conn, scope=case_id, actor_id=actor, payload=bound)
+    before = payload_digests(
+        conn, scope=case_id, actor_id=actor, payload=bound, commands=_FILING_COMMANDS
+    )
     assert before == {digest_of(bound)}, "no receipt yet: only the store's own form"
 
     key, request = uuid4(), "b" * 64
@@ -720,7 +729,9 @@ def test_payload_digests_accepts_both_writers_and_nothing_else(
     )
     conn.commit()
 
-    after = payload_digests(conn, scope=case_id, actor_id=actor, payload=bound)
+    after = payload_digests(
+        conn, scope=case_id, actor_id=actor, payload=bound, commands=_FILING_COMMANDS
+    )
 
     assert after == {digest_of(bound), digest_of({**bound, "request_sha256": request})}
     for wrong in (
@@ -730,9 +741,9 @@ def test_payload_digests_accepts_both_writers_and_nothing_else(
     ):
         assert digest_of(wrong) not in after, wrong
     # Another actor's receipt is not this actor's request.
-    assert payload_digests(conn, scope=case_id, actor_id=uuid4(), payload=bound) == {
-        digest_of(bound)
-    }
+    assert payload_digests(
+        conn, scope=case_id, actor_id=uuid4(), payload=bound, commands=_FILING_COMMANDS
+    ) == {digest_of(bound)}
     conn.rollback()
 
 

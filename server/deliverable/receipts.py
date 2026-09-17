@@ -86,7 +86,11 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
         or filed.actor_id != filer
         or filed.payload_sha256
         not in payload_digests(
-            conn, scope=case_id, actor_id=filer, payload=filing_payload(receipt)
+            conn,
+            scope=case_id,
+            actor_id=filer,
+            payload=filing_payload(receipt),
+            commands=("FILE_DELIVERABLE",),
         )
         or not verify_chain(conn, case_id)
         or trail[-1].entry_sha256 != audit_head(conn, case_id)
