@@ -123,6 +123,30 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     ),
     wire.ReportDocument: ENVELOPE,
     wire.CommitteeDocument: ENVELOPE,
+    wire.BookColumn: frozenset({"key", "label"}),
+    wire.BookResearch: frozenset({"route_node_id", "module_id", "qa_status"}),
+    # The ten fields of IA_SPEC.md 4.4, and nothing beside them: a passport
+    # that grew an eleventh would be this host asserting something the
+    # accepted record does not say.
+    wire.BookPassport: frozenset(
+        (
+            "definition period scenario evidence_date computed_at snapshot method "
+            "derivation citations supporting_research"
+        ).split()
+    ),
+    wire.BookCell: frozenset({"column", "value", "unavailable_reason", "passport"}),
+    wire.BookPeriod: frozenset(
+        {"case", "period_id", "fiscal_year", "days", "unavailable_reason", "cells"}
+    ),
+    wire.BookRow: frozenset(
+        (
+            "case_id title standing subject displayed_run_id displayed_run_status "
+            "snapshot currency scale periods unavailable_reason refusal"
+        ).split()
+    ),
+    wire.BookBasis: frozenset({"period", "scenario", "accepted_only"}),
+    wire.BookBody: frozenset({"basis", "columns", "rows"}),
+    wire.BookDocument: ENVELOPE,
     wire.ModelValue: frozenset({"name", "value", "unavailable_reason"}),
     wire.ModelPeriod: frozenset(
         {"case", "period_id", "fiscal_year", "days", "values", "unavailable_reason"}
@@ -467,6 +491,7 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "RunSectionDocument",
         "AnalysisDocument",
         "ModelDocument",
+        "BookDocument",
         "ReportDocument",
         "CommitteeDocument",
     ]

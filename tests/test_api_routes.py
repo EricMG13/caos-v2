@@ -56,6 +56,7 @@ from server.api.commands import runs as runs_command
 from server.api.deps import actor_from_request
 from server.api.edge import is_api_path, refusal_body, startup_failed
 from server.api.reads import analysis as analysis_read
+from server.api.reads import book as book_read
 from server.api.reads import directory as directory_read
 from server.api.reads import model as model_read
 from server.api.reads import reports as reports_read
@@ -874,6 +875,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
 
     assert declared == {
         "/api/v1/directory": "read_directory",
+        "/api/v1/book": "read_book",
         "/api/v1/cases/{case_id}/upload": "read_upload",
         "/api/v1/cases/{case_id}/run": read_run_section.__name__,
         "/api/v1/cases/{case_id}/analysis": "read_analysis",
@@ -920,6 +922,7 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
             run_read,
             analysis_read,
             model_read,
+            book_read,
             reports_read,
         )
         for route in router.router.routes
@@ -930,6 +933,14 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         for path, route in routes.items()
     }
     assert calls["/api/v1/directory"] == [actor_from_request, store_connection]
+    # The Book is portfolio-scoped: no case in its path, so no `case_path` and
+    # no `visible_case`. Standing is read per credit from the listing instead.
+    assert calls["/api/v1/book"] == [
+        actor_from_request,
+        store_connection,
+        deps.blob_store,
+        deps.methodology_bundle,
+    ]
     assert calls["/api/v1/cases/{case_id}/upload"] == [
         actor_from_request,
         deps.case_path,
