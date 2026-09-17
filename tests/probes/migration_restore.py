@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess  # nosec B404
 import sys
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -30,6 +31,8 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute
 from server.evidence.read import read_block
+from server.qualification.store import Evidence, current_verdict, record_verdict
+from server.qualification.verdict import read_verdict
 from server.refusals import Refusal, RefusalCode
 from server.store import MIGRATIONS, StoreConnection, apply_schema, connect
 from server.store.budget import remaining, reserve
@@ -116,7 +119,35 @@ def _backup_schema(conn: StoreConnection, prefix_seven: bool) -> None:
         apply_schema(conn)
 
 
-def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa: PLR0915
+def _record_qualification(conn: StoreConnection) -> tuple[Evidence, datetime]:
+    """A current, exact verdict that the restored application must still read."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    evidence = Evidence(
+        "a" * 64,
+        "b" * 64,
+        "restore-build",
+        "restore-adapter",
+        "restore-provider",
+        "restore-model",
+    )
+    verdict = read_verdict(
+        {
+            "provider": "restore-provider:restore-model",
+            "qualification_set_sha256": evidence.qualification_set_sha256,
+            "build_id": evidence.build_id,
+            "decided_at": now.isoformat(),
+            "expires_at": (now + timedelta(days=1)).isoformat(),
+            "reviewer": "restore reviewer",
+        },
+        now=now,
+    )
+    record_verdict(conn, evidence=evidence, reviewer_id=uuid4(), verdict=verdict)
+    return evidence, now
+
+
+def main(  # noqa: C901, PLR0915 -- the three restore scenarios share one proof
+    *, migrated: bool = False, prefix_seven: bool = False
+) -> None:
     docker = shutil.which("docker")
     assert docker is not None, "Docker CLI required for this manual proof"
     env = {
@@ -134,6 +165,7 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
     }
     created: list[str] = []
     original, restored = (f"caos_restore_{uuid4().hex}" for _ in range(2))
+    qualification: tuple[Evidence, datetime] | None = None
     with psycopg.connect(_ADMIN, autocommit=True) as admin, TemporaryDirectory() as tmp:
         try:
             admin.execute(
@@ -170,7 +202,14 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
                             (attempt, run, route.nodes[0].route_node_id),
                         )
                         conn.commit()
-                        reserve(conn, attempt, Decimal("0.25"))
+                        # This backup predates `run_work`: write the historical
+                        # reservation row instead of calling today's lease-aware API.
+                        conn.execute(
+                            "INSERT INTO budget_reservations "
+                            "(attempt_id, run_id, amount) VALUES (%s, %s, %s)",
+                            (attempt, run, Decimal("0.25")),
+                        )
+                        conn.commit()
                     else:
                         pin = pin_run_input(
                             conn,
@@ -195,6 +234,8 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
                                 record_sha256=blobs.put(b"restore record"),
                             ),
                         )
+                    if not prefix_seven:
+                        qualification = _record_qualification(conn)
                 columns = _columns(conn)
                 before = _records(conn, columns)
                 catalog = _catalog(conn)
@@ -260,6 +301,15 @@ def main(*, migrated: bool = False, prefix_seven: bool = False) -> None:  # noqa
                     assert load_run_input(conn, run) == pin
                     spent = Decimal("4.75") if prefix_seven else Decimal("4.25")
                     assert remaining(conn, run) == spent
+                    if not prefix_seven:
+                        assert qualification is not None
+                        evidence, now = qualification
+                        assert (
+                            current_verdict(
+                                conn, evidence=evidence, now=now
+                            ).reviewer.value
+                            == "restore reviewer"
+                        )
                 if prefix_seven:
                     _check_early_attempt(conn, run, attempt, route)
                 _check_frozen(conn, sources.members[0].source_id if migrated else None)
