@@ -57,6 +57,7 @@ from server.methodology.handoff import (
     validate_markdown,
 )
 from server.methodology.invocation import (
+    _FORECAST_EXTENSION,
     HOST_PERFORMED_SCRIPTS,
     MODULE_AUTHORED_SCRIPTS,
     allowed_uses,
@@ -1108,8 +1109,7 @@ def test_evidence_is_grouped_by_source_page_with_one_header() -> None:
     assert "citation_candidate" not in prompt
 
 
-def test_every_host_section_opens_and_closes_with_a_tagged_marker() -> None:
-    prompt = prompt_for()
+def _paired_markers(prompt: str) -> tuple[list[str], list[str]]:
     found = re.search(r"--- HOST-OWNED FRONT MATTER ([0-9a-f]{16}) ", prompt)
     assert found is not None
     tag = found.group(1)
@@ -1117,8 +1117,36 @@ def test_every_host_section_opens_and_closes_with_a_tagged_marker() -> None:
     # matched up to the tag, not to the line's end.
     opened = re.findall(rf"^--- (?!END )([A-Z0-9 -]+?) {tag}\b", prompt, re.M)
     closed = re.findall(rf"^--- END ([A-Z0-9 -]+?) {tag}\b", prompt, re.M)
+    return opened, closed
+
+
+@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def test_every_host_section_opens_and_closes_with_a_tagged_marker(
+    module_id: str,
+) -> None:
+    """The gate carries source preparation and its own final check; a
+    consumer carries UPSTREAM and the citation register instead."""
+    gate = handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), gate)
+    upstream = () if module_id == "CP-0" else ((ref, gate),)
+    of = identity(module_id, tuple(r for r, _ in upstream))
+    prompt = _prompt(of, upstream=upstream)
+    opened, closed = _paired_markers(prompt)
     assert opened, "no tagged section opened"
     assert sorted(opened) == sorted(closed), (opened, closed)
+    expected = {"UPSTREAM", "UPSTREAM CITATION REGISTER"} if upstream else set()
+    assert expected <= set(closed)
+    assert ("HOST SOURCE PREPARATION" in closed) is (module_id == "CP-0")
+    assert ("CP-0 FINAL CHECK" in closed) is (module_id == "CP-0")
+
+
+def test_the_forecast_extension_opens_and_closes_with_a_tagged_marker() -> None:
+    """No LITE fixture reaches a CP-CF route, so the one section the gate
+    and the LITE consumers never carry is asserted on its text."""
+    tag = "0123456789abcdef"
+    section = _FORECAST_EXTENSION.format(tag=tag)
+    assert section.startswith(f"--- HOST FORECAST EXTENSION {tag} ---\n")
+    assert section.endswith(f"\n--- END HOST FORECAST EXTENSION {tag} ---\n")
 
 
 def test_the_tag_rule_describes_the_markers_the_prompt_emits() -> None:
