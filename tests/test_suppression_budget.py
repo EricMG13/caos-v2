@@ -27,6 +27,13 @@ threshold; and any unit over raw markers rises here by construction.
 Positional width was 22 before the wave and is 22 after it. The wave added no
 new way to call anything wrongly, which is the claim this file should have
 been making all along.
+
+The criterion that picked this unit, stated once rather than three times: two
+of the three units considered were gameable in the direction of making the
+code *worse* -- the caller-count one rewarded the consolidation it meant to
+punish, and a count of named parameters would have let `(a, b, *rest)` go from
+charged to clear while becoming unbounded. This one is the one where gaming it
+is the fix.
 """
 
 import ast
