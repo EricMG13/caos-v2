@@ -2,7 +2,6 @@
 
 import json
 import traceback
-from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
@@ -11,17 +10,15 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from psycopg.pq import TransactionStatus
-from test_extraction_provenance import Reader
 from test_read_evidence import _CountingConnection
 from test_route_pinning import CATALOG_PATH, PROFILE
-from test_run_inputs import SUBJECT, Prepared, prepared
+from test_run_inputs import SUBJECT, Prepared, _prepare, prepared
 from test_source_sets import _admit
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
 from server.evidence import read
-from server.evidence.extract import Extractor, PlainTextExtractor
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal
@@ -63,23 +60,16 @@ def test_run_read_keeps_captured_membership_after_later_admission(
     assert load_run_input(conn, run) == pin
 
 
-@pytest.mark.parametrize(
-    "fault", ["missing-run", "missing-input", "wrong-case", "withdrawn"]
-)
-def test_run_read_refuses_unavailable_membership(
-    pinned: Prepared, tmp_path: Path, fault: str
-) -> None:
+@pytest.mark.parametrize("fault", ["missing-run", "missing-input", "withdrawn"])
+def test_run_read_refuses_unavailable_membership(pinned: Prepared, fault: str) -> None:
     """A run that captured nothing is the shortest short delivery there is:
-    an empty list would be a delivery, so all four refuse."""
+    an empty list would be a delivery, so all three refuse."""
     conn, run, sources, _, _ = pinned
     source = sources.members[0].source_id
     if fault == "missing-run":
         run = uuid4()
     elif fault == "missing-input":
         run = start_run(conn, sources.case_id)
-    elif fault == "wrong-case":
-        other = create_case(conn, BoundaryText.of("other"))
-        run = start_run(conn, other)
     else:
         conn.execute(
             "UPDATE sources SET withdrawn_at = now() WHERE source_id = %s", (source,)
@@ -91,18 +81,35 @@ def test_run_read_refuses_unavailable_membership(
     assert counter.executed == 1
 
 
-@pytest.mark.parametrize("different_extractor", [False, True])
+def test_a_run_delivers_only_the_members_its_own_case_pinned(
+    pinned: Prepared, tmp_path: Path
+) -> None:
+    """A source is bound to its case. Both cases admit the same bytes, so only
+    the join's `(case_id, source_id)` keeps one run's evidence out of the
+    other's -- the property the retired per-block reader held by refusing a
+    foreign block, which a whole-run read states as what each run delivers."""
+    conn, run, sources, _, _ = pinned
+    other = create_case(conn, BoundaryText.of("other"))
+    other_run, other_sources, bundle, _ = _prepare(conn, other, tmp_path)
+    pin_run_input(conn, other_run, other_sources.version, bundle, subject=SUBJECT)
+    mine, theirs = sources.members[0].source_id, other_sources.members[0].source_id
+    assert mine != theirs
+    assert (
+        sources.members[0].document_sha256 == other_sources.members[0].document_sha256
+    )
+    assert [source for source, *_ in read.read_run_blocks(conn, run_id=run)] == [mine]
+    assert [source for source, *_ in read.read_run_blocks(conn, run_id=other_run)] == [
+        theirs
+    ]
+
+
 def test_equal_bytes_do_not_admit_a_post_pin_source(
-    pinned: Prepared, tmp_path: Path, different_extractor: bool
+    pinned: Prepared, tmp_path: Path
 ) -> None:
     conn, run, sources, _, _ = pinned
-    extractor = Reader(replace(PlainTextExtractor().identity, name="other"))
-    added = _admit(
-        conn,
-        sources.case_id,
-        tmp_path,
-        cast(Extractor, extractor) if different_extractor else None,
-    )
+    # The extractor is immaterial: a source admitted after the pin is not a
+    # member of the pinned version, so it never enters the captured set at all.
+    added = _admit(conn, sources.case_id, tmp_path)
     assert (
         read.read_block(conn, source_id=added, block_id="b000000").text.value == "one"
     )

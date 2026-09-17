@@ -136,9 +136,10 @@ def read_run_blocks(
         rows = conn.execute(_RUN_BLOCKS_QUERY, (run_id,)).fetchall()
     except psycopg.Error:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    # `totals` is one row whatever the run is, so `rows` is never empty and the
-    # captured count is always readable -- including the zero a run with no pin
-    # captures, which is the shortest short delivery there is.
+    # `totals` is one row whatever the run is, so the captured count is always
+    # readable -- including the zero a run with no pin captures, which is the
+    # shortest short delivery there is. The empty arm is belt and braces rather
+    # than a case: zero refuses below either way.
     captured = int(rows[0][4]) if rows else 0
     live = [row for row in rows if row[0] is not None]
     if captured == 0 or len(live) != captured:
