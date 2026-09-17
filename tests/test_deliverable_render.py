@@ -397,3 +397,50 @@ def test_every_portable_render_refusal_names_a_closed_host_code() -> None:
         "DELIVERABLE_MARKDOWN_UNSUPPORTED",
     }
     assert raised <= {code.value for code in RefusalCode}
+
+
+def test_every_authored_line_reaches_the_page() -> None:
+    """The tag census above measures what the render *emits*; this measures
+    what it *removes*, which is the hazard.
+
+    A construct outside `ELEMENTS` has two honest outcomes: reach the page as
+    the characters the model wrote, or refuse. A third was happening -- a
+    line-leading HTML comment was consumed and emitted nothing -- and the tag
+    census could not see it, because a deleted construct produces no tag and a
+    subset assertion is unaffected by an absence. The signer's `payload_sha256`
+    binds the record's bytes and this is the only rendering of them a committee
+    reads, so text that vanishes is text bound and unseen.
+
+    The property, stated over the constructs `ELEMENTS` does not name: every
+    non-blank authored line contributes at least one of its own non-space
+    characters to the page. Cheapest evasion of *this* rule is to render more
+    of what the model wrote, which is the fix.
+    """
+    authored_source = "\n\n".join(
+        [
+            "<!-- MATERIAL: management refused the covenant schedule -->",
+            "A [link](https://example.test) and an ![image](x.png).",
+            "A raw <span data-x='1'>tag</span> and an entity &amp;.",
+            "`a*b*c` and `**Total**` stay literal.",
+            "*a **b* c** never pairs.",
+            "Ordinary prose with **strong** and *emphasis*.",
+        ]
+    )
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact(authored_source)
+
+    page = render(payload).decode()
+    authored = page.split("<h3>Analysis (model-authored, not host-verified)</h3>")[1]
+    authored = authored.split("<h3>Deterministic calculations</h3>")[0]
+
+    for line in authored_source.split("\n"):
+        if not line.strip():
+            continue
+        # The page escapes, so compare on a character the escaping preserves.
+        witness = max(
+            (word for word in re.findall(r"[A-Za-z0-9_.:/-]{4,}", line)),
+            key=len,
+            default="",
+        )
+        assert witness, line
+        assert witness in authored, (line, witness)

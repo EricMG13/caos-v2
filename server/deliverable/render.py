@@ -269,8 +269,8 @@ def _block(lines: list[str], index: int, out: list[str]) -> int:
     line = lines[index]
     if not line.strip():
         return index + 1
-    if line.lstrip().startswith("<!--"):  # invisible in any reading of it
-        return _comment(lines, index)
+    if line.lstrip().startswith("<!--"):
+        return _comment(lines, index, out)
     if line.startswith("```"):
         return _code(lines, index, out)
     if line.rstrip() in {"---", "***", "___"}:
@@ -291,9 +291,22 @@ def _block(lines: list[str], index: int, out: list[str]) -> int:
     return _paragraph(lines, index, out)
 
 
-def _comment(lines: list[str], index: int) -> int:
+def _comment(lines: list[str], index: int, out: list[str]) -> int:
+    """An HTML comment reaches the page as the characters the model wrote.
+
+    It used to be consumed and emit nothing, on the reasoning that a comment is
+    "invisible in any reading of it". That is true of a Markdown renderer and
+    false here. A signer's `payload_sha256` binds the record's bytes, and this
+    is the only rendering of them a committee reads, so a construct that
+    vanished took model-authored text out of the document the signature covers
+    -- a MATERIAL caveat written as a comment would have been bound and unseen.
+    Every other construct outside `ELEMENTS` reaches the page escaped; this one
+    now does too, which is the rule this file already states.
+    """
     for end in range(index, len(lines)):
         if "-->" in lines[end]:
+            block = "\n".join(lines[index : end + 1])
+            out.append(f"<pre>{escape(block)}</pre>\n")
             return end + 1
     raise RenderRefused("DELIVERABLE_MARKDOWN_UNSUPPORTED")
 
@@ -407,6 +420,17 @@ def _inline(text: str) -> str:
     as what the model wrote, and inert. A delimiter is a delimiter only where
     Markdown's own flanking rule says so (`2 * 3` is arithmetic), and a run
     that never pairs makes the whole text literal rather than half-rendered.
+
+    Two rules this function used to get wrong, found by the Completion Phase 12
+    confidence review. **A code span's contents are literal**: `` `a*b*c` ``
+    rendered as `<code>a<em>b</em>c</code>`, which dropped the two asterisks the
+    model wrote from the page -- the same defect as deleting a comment, inside
+    a construct `ELEMENTS` names and Markdown defines as literal. And
+    **delimiters close in the order they opened**: `*a **b* c**` produced
+    `<em>a <strong>b</em> c</strong>`, which is not well-formed. A delimiter
+    that would close out of order is not a delimiter, which leaves its opener
+    unpaired and makes the whole text literal -- the fallback this function
+    already had.
     """
     pieces = _INLINE.split(text)
     marks: list[str] = []
@@ -415,17 +439,29 @@ def _inline(text: str) -> str:
         if position % 2 == 0:  # `re.split` alternates text and delimiter
             spans.append(escape(piece))
             continue
+        if marks and marks[-1] == "`" and piece != "`":
+            # Inside a code span nothing is a delimiter.
+            spans.append(escape(piece))
+            continue
         spans.append(_delimiter(piece, pieces, position, marks))
     return escape(text) if marks else "".join(spans)
 
 
 def _delimiter(piece: str, pieces: list[str], position: int, marks: list[str]) -> str:
-    """One delimiter as a tag or as itself, by what sits either side of it."""
+    """One delimiter as a tag or as itself, by what sits either side of it.
+
+    A run closes only the innermost open delimiter (`marks[-1]`); one that
+    matches an outer opener is written as itself, which leaves that opener
+    unpaired and sends `_inline` to its literal fallback rather than emitting
+    mis-nested tags.
+    """
     tag = {"**": "strong", "*": "em", "`": "code"}[piece]
     before, after = pieces[position - 1], pieces[position + 1]
     if piece in marks:
+        if marks[-1] != piece:
+            return escape(piece)
         if tag == "code" or (before and not before[-1].isspace()):
-            marks.remove(piece)
+            marks.pop()
             return f"</{tag}>"
         return escape(piece)
     if tag == "code" or (after and not after[0].isspace()):
