@@ -1,5 +1,5 @@
 // One screen. The chrome never changes; only the body does (IA_SPEC.md 1).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useSearchParams } from "react-router";
 import {
   INITIAL,
@@ -18,7 +18,13 @@ import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { VisibleSnapshotContext, type VisibleSnapshot } from "./snapshot";
 import { eventsUrl, openTail } from "./sse";
 import { LedgerProvider } from "./ledger";
-import { OFFLINE_WORDING, fetchSection, sectionUrl, type RegionStatus } from "./transport";
+import {
+  OFFLINE_WORDING,
+  fetchSection,
+  sectionUrl,
+  type RegionStatus,
+  type WorkspaceDocument,
+} from "./transport";
 import { SECTION_VIEWS } from "./views";
 import { DecisionBrief } from "@/chrome/DecisionBrief";
 import { Rail } from "@/chrome/Rail";
@@ -204,7 +210,15 @@ export function Workspace({ section }: { section: Section }) {
   const chrome = chromeOf(section, status);
   const activeTab =
     (tabChoice?.key === key ? tabChoice.value : null) ?? chrome?.tabs[0]?.id ?? null;
-  const View = SECTION_VIEWS[section];
+  // ponytail: one erasure, here rather than nine in the registry. `section`
+  // is a runtime value, so the lookup yields the union of nine differently
+  // typed views and no document satisfies them all; the registry has already
+  // checked each view against its own document, and a disabled section never
+  // reaches this render with a document to mount.
+  const View = SECTION_VIEWS[section] as ComponentType<{
+    document: WorkspaceDocument;
+    tab: string | null;
+  }>;
   // With no document there is still a section: the bands carry its state.
   const fallback = fallbackChrome(status);
 

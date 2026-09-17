@@ -610,7 +610,9 @@ export class WireIdentityError extends Error {
   }
 }
 
-function sameId(a: string | null | undefined, b: string | null | undefined): boolean {
+/** Two ids name one thing when they agree ignoring case; two absent ids do
+    too, so a receipt with no filer matches a body with none. */
+export function sameId(a: string | null | undefined, b: string | null | undefined): boolean {
   return (a ?? null)?.toLowerCase() === (b ?? null)?.toLowerCase();
 }
 

@@ -13,7 +13,7 @@ export const SECTIONS = [
   "admin",
 ];
 
-/** The six sections served in every mode; the other three render `unavailable`
+/** The seven sections served in every mode; Book and Admin render `unavailable`
     with no request (brief 4.1, decision 9). Mirrors src/app/sections.ts. */
 export const ENABLED_SECTIONS = [
   "directory",

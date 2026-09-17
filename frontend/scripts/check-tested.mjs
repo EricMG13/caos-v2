@@ -26,14 +26,25 @@
 //   the module's stem, so an export named exactly after its own file is named
 //   by any import of that file. `sev` in `@/ds/sev` is the shape. Worth
 //   knowing before reading a clean run as proof.
+//   *A section file must be reachable from the entry point.* The rule above
+//   has a hole the first three cannot see: a test can name an export whose
+//   file nothing in `src/` imports, and the file then lives on to satisfy
+//   this gate and for no other reason -- eight components did, for months,
+//   behind three such tests. So every file under `src/sections/` must sit on
+//   the static import graph walked from `src/main.tsx`; one that only a test
+//   reaches, or only another unreachable file reaches, is refused here. Only
+//   `src/sections/` is held to it: a `ds/` atom or a `wire/` type may be
+//   built ahead of the section that composes it, a section may not.
 //
-// tests/test_gate_scripts.py drives this as a process, over a fabricated
-// workspace, the way CI drives it over the real one.
+// tests/unit/reachability.test.ts and tests/unit/check-tested.test.ts assert
+// the rules where the `typescript` they need is installed; tests/test_gate_scripts.py
+// reads EXEMPT and the lint wiring from here.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { resolveGit } from "./git.mjs";
 
 // Resolved on call, not at import: the rules below are pure and a test that
 // imports them for those rules should not have to be running from a file URL.
@@ -103,20 +114,6 @@ function isWordChar(character) {
   return character !== undefined && /[A-Za-z0-9_$]/.test(character);
 }
 
-// `shutil.which`'s check, in the shape scripts/tracked.py and
-// check-vocabulary.mjs already use: a directory named `git` on PATH is not git.
-function resolveGit() {
-  for (const entry of (process.env.PATH ?? "").split(delimiter)) {
-    const candidate = join(entry || ".", "git");
-    try {
-      if (!statSync(candidate).isDirectory()) return candidate;
-    } catch {
-      // not here; keep looking
-    }
-  }
-  throw new Error("git is not on PATH; the gate cannot determine what a PR carries");
-}
-
 function tracked(root, patterns) {
   const out = execFileSync(resolveGit(), ["ls-files", "-z", "--", ...patterns], {
     cwd: repo(),
@@ -154,6 +151,71 @@ function walk(directory, suffixes) {
   });
 }
 
+// A bare specifier is a package, which is never a file of ours; a `@/` one is
+// rooted at `src` (tsconfig `paths`); a relative one at the importer. The
+// extension is tried the way the bundler tries it, an index file last.
+function resolveSpecifier(importer, specifier, src) {
+  let base;
+  if (specifier.startsWith("@/")) base = join(src, specifier.slice(2));
+  else if (specifier.startsWith(".")) base = resolve(dirname(importer), specifier);
+  else return null;
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    join(base, "index.ts"),
+    join(base, "index.tsx"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // not this spelling; try the next
+    }
+  }
+  return null;
+}
+
+// Every file the static import graph reaches from `entry`, `entry` included
+// -- `import`, `import type` and `export ... from` alike, because a type-only
+// import is still a file `tsc` and the bundler read. A specifier that resolves
+// to nothing is left to `tsc`, which refuses it with a better message. Only
+// TypeScript files are parsed; a stylesheet or JSON file is reached and
+// stops there.
+export function importGraph(entry, src) {
+  const reached = new Set();
+  const pending = [resolve(entry)];
+  while (pending.length) {
+    const file = pending.pop();
+    if (reached.has(file) || !existsSync(file)) continue;
+    reached.add(file);
+    if (!/\.tsx?$/.test(file)) continue;
+    const tree = ts.createSourceFile(
+      file,
+      readFileSync(file, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    for (const statement of tree.statements) {
+      const specifier =
+        (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) &&
+        statement.moduleSpecifier;
+      if (!specifier || !ts.isStringLiteral(specifier)) continue;
+      const target = resolveSpecifier(file, specifier.text, src);
+      if (target) pending.push(target);
+    }
+  }
+  return reached;
+}
+
+// The section files the entry point cannot reach: the "reachable from the
+// entry point" rule above, over the files the export scan already holds.
+export function unreachableSections(files, src) {
+  const reached = importGraph(join(src, "main.tsx"), src);
+  const sections = join(src, "sections") + "/";
+  return files.filter((file) => file.startsWith(sections) && !reached.has(file));
+}
+
 function main(argv) {
   const at = argv.indexOf("--root");
   const root = at === -1 ? null : argv[at + 1];
@@ -175,6 +237,10 @@ function main(argv) {
         found.push(`${file}:${line}: '${name}' has no test naming it`);
       }
     }
+  }
+  const src = root ? join(root, "src") : join(repo(), "frontend", "src");
+  for (const file of unreachableSections(files, src)) {
+    found.push(`${file}: unreachable from src/main.tsx; nothing in src/ imports it`);
   }
   for (const line of found) console.log(line);
   console.error(`tested: ${files.length} files, ${found.length} findings`);

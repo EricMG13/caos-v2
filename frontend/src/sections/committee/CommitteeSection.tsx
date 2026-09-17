@@ -1,23 +1,9 @@
+import { scrollArtifact } from "@/controls/scroll";
+import { NoteList } from "@/ds/atoms";
 import type { CommitteeDocument } from "@/wire/v1";
-import type { KeyboardEvent } from "react";
-
-function scrollArtifact(event: KeyboardEvent<HTMLPreElement>) {
-  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-    event.preventDefault();
-    event.currentTarget.scrollBy({ left: event.key === "ArrowRight" ? 40 : -40 });
-  }
-}
 
 /* Keyboard scroll makes static, wide canonical text reachable in every browser. */
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions */
-function Values({ label, values }: { label: string; values: readonly string[] }) {
-  return (
-    <div className="note">
-      <b>{label}</b> {values.length ? values.join(", ") : "none"}
-    </div>
-  );
-}
-
 function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts"][number] }) {
   return (
     <section className="pnl" data-committee-artifact={artifact.route_node_id}>
@@ -56,8 +42,8 @@ function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts
         >
           {artifact.record}
         </pre>
-        <Values label="Limitations." values={artifact.limitation_flags} />
-        <Values label="Validation warnings." values={artifact.validation_warnings} />
+        <NoteList label="Limitations." values={artifact.limitation_flags} />
+        <NoteList label="Validation warnings." values={artifact.validation_warnings} />
       </div>
     </section>
   );

@@ -36,6 +36,7 @@ import {
   type SourcesAdmitted,
   type V1_SHAPES,
 } from "@/wire/v1";
+import { bodyOf } from "./transport";
 
 /** Drawn from the shared shapes rather than redeclared here. */
 type Gate = Infer<typeof V1_SHAPES.Gate>;
@@ -65,14 +66,6 @@ interface CommandRequest {
 }
 
 const RESPONSE_INVALID = { kind: "error", code: "RESPONSE_INVALID" } as const;
-
-async function bodyOf(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
 
 /** The primitive every command below builds on: one fetch, classified into
     the four-way result above. A POST carries the intent's key; a GET (the
