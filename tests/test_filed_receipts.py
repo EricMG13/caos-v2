@@ -21,9 +21,9 @@ from server.store import connect
 from server.store.audit import (
     GENESIS,
     GovernedAction,
-    _digest_of,
     _link,
     audit_trail,
+    digest_of,
     verify_chain,
 )
 from server.store.members import Standing
@@ -415,7 +415,7 @@ def test_receipt_migration_preserves_legacy_filing_without_inventing_bytes(
         action = GovernedAction(
             case_id, filer, "DELIVERABLE_FILED", Standing.APPROVER, payload
         )
-        digest = _digest_of(payload)
+        digest = digest_of(payload)
         event = _link(action, 1, GENESIS, digest)
         conn.execute(
             "INSERT INTO audit_events"
@@ -466,7 +466,7 @@ def test_released_receipt_prefix_refuses_an_ambiguous_receiptless_filing(
         action = GovernedAction(
             case_id, filer, "DELIVERABLE_FILED", Standing.APPROVER, payload
         )
-        digest = _digest_of(payload)
+        digest = digest_of(payload)
         event = _link(action, 1, GENESIS, digest)
         conn.execute(
             "INSERT INTO audit_events"
