@@ -18,6 +18,7 @@ from server.deliverable.filing import (
     file_deliverable,
     freeze,
     receipt_bytes,
+    revision_signatures,
     sign_opinion,
 )
 from server.refusals import Refusal
@@ -66,6 +67,21 @@ def test_signing_binds_the_stored_digest_with_no_caller_digest(lite: _Harness) -
     lite.conn.rollback()
     assert row is not None
     assert row[0] == hashlib.sha256(payload_bytes(_read(lite, revision))).hexdigest()
+
+
+def test_revision_signatures_names_the_signer_and_its_bound_digest(
+    lite: _Harness,
+) -> None:
+    revision = _save(lite)
+    _sign(lite, revision)
+    signatures = revision_signatures(lite.conn, lite.case_id, revision)
+    lite.conn.rollback()
+    assert signatures == [
+        (
+            lite.approver,
+            hashlib.sha256(payload_bytes(_read(lite, revision))).hexdigest(),
+        )
+    ]
 
 
 def test_freeze_persists_exactly_the_signed_bytes(lite: _Harness) -> None:

@@ -16,7 +16,6 @@ extractor implements the same protocol and nothing above this module changes.
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -24,6 +23,7 @@ from itertools import islice
 from typing import Protocol
 
 from server.boundary_text import BoundaryText
+from server.digest import canonical_json
 from server.refusals import Refusal, RefusalCode
 
 # A fixed-pitch cell, in points. 7.2 x 12.0 is a 12pt monospace at its usual
@@ -108,12 +108,8 @@ class ExtractorIdentity:
         for text in texts:
             if type(text) is not str or BoundaryText.of(text).value != text:
                 raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID)
-        canonical = json.dumps(
-            {"name": self.name, "version": self.version, "config": self.config},
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
+        canonical = canonical_json(
+            {"name": self.name, "version": self.version, "config": self.config}
         )
         BoundaryText.of(canonical)
         return canonical
