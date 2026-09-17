@@ -1615,7 +1615,7 @@ def test_failure_while_deriving_context_makes_no_call(
 
     node, attempt = _attempt_at(harness, int(stage == "upstream"))
     owner, name = {
-        "evidence": (executor, "read_run_block"),
+        "evidence": (executor, "read_run_blocks"),
         "upstream": (canonical, "upstream_markdown"),
     }[stage]
     real = getattr(owner, name)

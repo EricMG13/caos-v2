@@ -26,7 +26,9 @@ from server.store.source_sets import pinned_live_sources
 # conditional on `include_candidates` -- true only for a provider call's own
 # prompt build, not for a read. A read's `_context` call passes the default
 # (`include_candidates=False`), so this path no longer pays for it.
-IO_BUDGET = 193
+# 193 -> 149: read_run_blocks (server/evidence/read.py) reads every captured
+# block of a node's delivery in one statement instead of one per block.
+IO_BUDGET = 149
 router = APIRouter()
 
 
