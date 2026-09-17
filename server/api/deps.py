@@ -1,6 +1,7 @@
 """The shared request dependencies every section read and `app.py` itself
-declare on their routes: who is asking, the request's store connection, the
-blob store, and the process's vendored methodology bundle.
+declare on their routes: who is asking, the ids the request names, the
+request's store connection, the blob store, and the process's vendored
+methodology bundle.
 
 Moved out of `server/api/app.py` (Task 4.1c) so the section reads under
 `server/api/reads/` can depend on these functions directly instead of each
@@ -18,8 +19,17 @@ still the same function object -- an existing override of `app_module.X`
 overrides this module's `X` too, because they are one object under two names.
 `app.py`'s `_lifespan` keeps using `_database_url` the same way.
 
-No round trip of its own: `IO_BUDGET = 0`, the same declaration
-`server/api/identity.py` makes for the same reason.
+The id parsers (`case_path`, `run_path`, `run_query`, `revision_query`) are
+typed `str` and parsed here rather than typed `UUID`, so a malformed id is
+answered in the declared refusal body instead of FastAPI's 422 -- and, as
+dependencies declared after identity and before the store, without opening a
+connection. `visible_case` is the one round trip this module makes: the
+caller's live standing on the path's case, refused as a private
+`CASE_NOT_FOUND` below the reading floor, so an unknown case and a case the
+caller may not read are one answer. Additive for now: existing section reads
+keep their own local id parsers and standing checks until each is moved over
+on its own reviewed change, so this module gaining a definition does not by
+itself change any route's behavior.
 """
 
 from __future__ import annotations
@@ -29,6 +39,7 @@ from functools import cache
 from os import environ
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, Request
 from psycopg import OperationalError
@@ -38,8 +49,13 @@ from server.blobs import BlobStore
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
+from server.store.members import Standing, satisfies, standing_of
 
-IO_BUDGET = 0
+IO_BUDGET = 1  # `visible_case`: the caller's standing on the case
+
+# Reading a case -- any section of it, its events, an evidence page -- is
+# holding live standing on it; holding more grants nothing further here.
+READ_REQUIRES = Standing.READER
 
 DATABASE_URL = "CAOS_DATABASE_URL"
 BLOB_ROOT = "CAOS_BLOB_ROOT"
@@ -118,3 +134,72 @@ Caller = Annotated[Actor, Depends(actor_from_request)]
 Store = Annotated[StoreConnection, Depends(store_connection)]
 Blobs = Annotated[BlobStore, Depends(blob_store)]
 Methodology = Annotated[Bundle, Depends(methodology_bundle)]
+
+
+def parse_uuid(value: str, code: RefusalCode) -> UUID:
+    """`value` as a UUID, or the refusal `code` a request naming nothing gets.
+
+    Raised outside the `except`: the ValueError's message quotes the input --
+    a path, a query or a header the client chose -- and `from None` would
+    still leave it on `__context__`.
+    """
+    parsed: UUID | None
+    try:
+        parsed = UUID(value)
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        raise Refusal(code)
+    return parsed
+
+
+def case_path(case_id: str) -> UUID:
+    """The path's case id, or the refusal a case the caller may not read gets."""
+    return parse_uuid(case_id, RefusalCode.CASE_NOT_FOUND)
+
+
+def run_path(run_id: str) -> UUID:
+    """The path's run id, or `RUN_NOT_FOUND`.
+
+    Declared after the case's visibility on a route that has one, so a
+    stranger with a malformed run id is answered about the case, not the run.
+    """
+    return parse_uuid(run_id, RefusalCode.RUN_NOT_FOUND)
+
+
+def run_query(run: str | None = None) -> UUID | None:
+    """The `run` query, or `RUN_NOT_FOUND` for one that names no run."""
+    return None if run is None else parse_uuid(run, RefusalCode.RUN_NOT_FOUND)
+
+
+def revision_query(revision: str | None = None) -> UUID:
+    """The `revision` query, required: absent or malformed names no deliverable."""
+    return parse_uuid(revision or "", RefusalCode.DELIVERABLE_NOT_FOUND)
+
+
+def readable(standing: Standing | None) -> Standing:
+    """The one visibility rule: live standing at or above `READ_REQUIRES`, or
+    the private `CASE_NOT_FOUND` a stranger, a revoked member and an unknown
+    case all get. `visible_case` applies it to a standing read on its own; a
+    read that folds the membership join into its projection row applies it to
+    the standing that row carries."""
+    if standing is None or not satisfies(standing, READ_REQUIRES):
+        raise Refusal(RefusalCode.CASE_NOT_FOUND)
+    return standing
+
+
+def visible_case(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
+    """The caller's live standing on the path's case, one query.
+
+    Its own sub-dependencies keep the order that matters: identity, then the
+    path, then the store -- so a route declaring `VisibleCase` before `Store`
+    still opens no connection for an anonymous or malformed request.
+    """
+    return readable(standing_of(conn, case_id=case_id, user_id=actor.user_id))
+
+
+CasePath = Annotated[UUID, Depends(case_path)]
+RunPath = Annotated[UUID, Depends(run_path)]
+RunQuery = Annotated[UUID | None, Depends(run_query)]
+RevisionQuery = Annotated[UUID, Depends(revision_query)]
+VisibleCase = Annotated[Standing, Depends(visible_case)]
