@@ -411,32 +411,49 @@ def test_the_widest_jitter_stays_within_twenty_percent(
     assert worker.pause_seconds(config, 2) >= 2.0 * 0.8
 
 
-def test_a_store_fault_on_cancel_backs_off_instead_of_parking(  # noqa: PLR0913 -- the loop's own fixtures, plus the patch and the capture
+@pytest.mark.parametrize(
+    "refused",
+    [RefusalCode.STORE_UNAVAILABLE, RefusalCode.RUN_NOT_FOUND],
+)
+def test_a_cancel_that_refuses_backs_off_or_parks_but_never_escapes(  # noqa: PLR0913 -- the loop's own fixtures, plus the patch, the capture and the code
     case: tuple[StoreConnection, UUID],
     route: ResolvedRoute,
     bundle: Bundle,
     blobs: BlobStore,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    refused: RefusalCode,
 ) -> None:
-    """W4: `cancel_run` refuses `STORE_UNAVAILABLE` when the store cannot take
-    its unit, and that heals on its own -- released, the lease expires, the run
-    is reclaimed and the cancel is retried. Parking it would turn a transient
-    fault into a stop an operator has to requeue by hand; re-raising it without
-    releasing would leave `work_once` holding the claim. It does both: the
-    claim is released and the code reaches the loop's back-off."""
+    """W4: the two codes `cancel_run` can refuse beside a lost lease, each
+    treated as its own recovery allows.
+
+    `STORE_UNAVAILABLE` heals itself -- released, the lease expires, the run is
+    reclaimed with its cancel still pending and the cancel is retried -- so it
+    takes the loop's back-off; parking it would turn a transient fault into a
+    stop an operator has to requeue by hand. `RUN_NOT_FOUND` has no such
+    recovery, so it parks with its code, because raising it would leave
+    `work_once` holding the claim and the run at the head of every later poll.
+    """
     run = queued_run(case, route, bundle, blobs)
+    # What `request_cancel` records for a run a worker holds; recorded here
+    # before the claim because this test's `execution_for` stands in for the
+    # fence that would otherwise read it.
+    run.conn.execute(
+        "UPDATE run_work SET cancel_requested_at = now() WHERE run_id = %s",
+        (run.run_id,),
+    )
+    run.conn.commit()
 
     def cancelling(conn: StoreConnection, run_id: UUID, lease: object) -> object:
         raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
 
-    def unavailable(*args: object, **kwargs: object) -> None:
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+    def refusing(*args: object, **kwargs: object) -> None:
+        raise Refusal(refused)
 
-    monkeypatch.setattr(worker, "cancel_run", unavailable)
+    monkeypatch.setattr(worker, "cancel_run", refusing)
 
-    with pytest.raises(Refusal) as caught:
-        work_once(
+    def claim() -> UUID | None:
+        return work_once(
             run.conn,
             run.blobs,
             execution_for=cancelling,  # type: ignore[arg-type]
@@ -444,7 +461,31 @@ def test_a_store_fault_on_cancel_backs_off_instead_of_parking(  # noqa: PLR0913 
             stopping=Event(),
         )
 
-    assert caught.value.code is RefusalCode.STORE_UNAVAILABLE
-    # Released, not stopped: the next claim retries the cancel.
-    assert work_row(run.conn, run.run_id) == ("QUEUED", None, None, True)
-    assert capsys.readouterr().err == ""
+    if refused is RefusalCode.STORE_UNAVAILABLE:
+        with pytest.raises(Refusal) as caught:
+            claim()
+        assert caught.value.code is refused
+        # Released, not stopped, and the request that the run be cancelled
+        # survives the release -- which is what makes the retry a retry.
+        assert work_row(run.conn, run.run_id) == ("QUEUED", None, None, True)
+        assert _cancel_requested(run.conn, run.run_id)
+        assert capsys.readouterr().err == ""
+    else:
+        assert claim() == run.run_id, "returned, not raised"
+        assert work_row(run.conn, run.run_id) == (
+            "STOPPED",
+            refused.value,
+            None,
+            True,
+        )
+        assert capsys.readouterr().err.strip().splitlines()[-1] == refused.value
+
+
+def _cancel_requested(conn: StoreConnection, run_id: UUID) -> bool:
+    row = conn.execute(
+        "SELECT cancel_requested_at IS NOT NULL FROM run_work WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    conn.rollback()
+    assert row is not None
+    return bool(row[0])
