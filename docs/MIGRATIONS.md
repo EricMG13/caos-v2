@@ -37,6 +37,28 @@ Concurrency is verified with the existing default **READ COMMITTED** startup
 connections. Higher isolation levels and caller-owned transaction policies are
 not a supported startup mode; the helper does not pre-commit to change them.
 
+## Allocated ordinals, and two that are dead
+
+**`0022` and `0023` are permanent gaps. Never take them.** Two concurrent
+streams were allocating ordinals in September 2026: the audit remediation
+reserved `0022` and `0023` for its own tasks, and the completion stream landed
+`0024_reservation_price` and `0025_supersedes` before either was written. The
+remediation then took `0026_case_members_by_user` and
+`0027_evidence_statement_trigger`.
+
+The gaps cannot be filled. `apply_schema` verifies an ordered immutable prefix
+and `MIGRATIONS` is indexed by tuple position, so a migration inserted at
+`0022` today **applies green on a fresh database** and refuses
+`STORE_SCHEMA_DRIFT` only against a deployment that has already advanced past
+it. That is the worst failure shape available: it passes in development and
+refuses in production.
+
+Take the next ordinal from the tail of `MIGRATIONS` in
+`server/store/__init__.py`, never from a plan or a task brief. Several tracked
+planning documents still describe the tree as being at `0021` with `0022` and
+`0023` held; they were true when written and are not now. This paragraph is the
+answer; a document dated before the migration you are about to write is not.
+
 ## Executed disposable proof
 
 On 2026-09-12, run from the repository:

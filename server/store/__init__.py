@@ -129,6 +129,10 @@ MIGRATIONS = (
         "0025_supersedes",
         Path(__file__).with_name("0025_supersedes.sql").read_text(encoding="utf-8"),
     ),
+    # `0022` and `0023` are permanent gaps -- two streams allocated at once and
+    # `0024`/`0025` landed first. Never fill them: ordering is tuple position,
+    # so a migration inserted below the applied head passes on a fresh database
+    # and refuses STORE_SCHEMA_DRIFT only in production (`docs/MIGRATIONS.md`).
     (
         "0026_case_members_by_user",
         Path(__file__)

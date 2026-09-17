@@ -245,6 +245,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Audit remediation (2026-09-17).**
 
+- **A tokenless host believes the subject header, so a loopback peer who knows a
+  member's id reads that member's cases.** §70.2 closed C3's *role* hole: with
+  no `CAOS_EDGE_TOKEN` and no trust switch the global role is READER and no
+  header can raise it. The *subject* is unchanged -- `x-caos-user` is parsed as
+  a UUID and believed -- and `server/api/deps.py`'s visibility resolves per-case
+  standing from it, admitting any live standing at or above READER. So a peer
+  that passes the loopback bind and the Host check and knows a member's UUID
+  reads that member's cases in full: the section documents, the event stream,
+  evidence pages including document text, and the report and committee
+  deliverables. Writes are closed -- every governed command refuses a global
+  READER before it reaches the store -- so this is disclosure, not tampering.
+  It needs the host process, which binds loopback only; the documented
+  deployment is an authenticating edge that sets both headers, where the token
+  branch takes over and the groups are the identity provider's. The plan's
+  deferred table rejected a signed-assertion edge partly on the claim that
+  C3's fix "removes the only unrecorded hole", which was true of the role and
+  not of the subject. Found by the phase adversarial audit. *Upgrade:* the
+  signed assertion the two edge entries above already owe, which makes the
+  subject the identity provider's rather than a header's; nothing short of it
+  makes a tokenless host safe to expose, and nothing should expose one.
+
 - **A provider that returns without billing and then crashes is paid twice,
   with nobody deciding to.** §70.3 deleted the frontier loop's duplicate
   outcome record, and with it the loop's own enforcement that a returned call
@@ -254,6 +275,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   unbilled and then crashes before acceptance leaves no `call_outcomes` row, so
   neither `replay_billed` nor `unexplained_charge` matches, the node is
   re-attempted and the money is spent again without an operator choosing it.
+  What holds the obligation for every implementation that ships is
+  `execute_handoff` recording the outcome unconditionally before any post-call
+  refusal -- not `check_call`, which refuses a *second* recorder and so cannot
+  make a provider bill at all. This entry said `check_call` when it was first
+  written, copied from §70.3, and both were corrected at the phase adversarial
+  audit that read the function.
   This is the same shape as "A billed call whose diagnostic body cannot be
   stored is billed again", which was closed by giving the operator the choice;
   this one has no such arm. The run ceiling bounds it, so it is two charges for

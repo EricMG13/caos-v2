@@ -2811,6 +2811,18 @@ win in edge mode. The local developer loop is unaffected: the dev proxy sets
 the subject and role headers and never groups, and `.env.example` already
 carried the switch.
 
+**What survives, which this entry did not say.** The rule fixes the *role*. The
+*subject* is still `x-caos-user` taken verbatim in tokenless mode -- it is
+parsed as a UUID and believed. Writes are closed, because every governed
+command refuses a global READER, but per-case standing resolves from that
+subject, so a peer that passes the loopback and Host checks and knows a
+member's UUID reads that member's cases: sections, the event stream, evidence
+pages and the deliverables. That is read-only and it needs the host itself, not
+the documented image. The plan's deferred table rejects a signed-assertion edge
+on the grounds that "C3's one-line fix removes the only unrecorded hole"; it
+removes the role hole, and this is the one the sentence overlooked. Recorded in
+`CLAUDE.md`'s known gaps at the phase adversarial audit, which found it.
+
 **What this is not.** No test in the tree asserts the new rule over HTTP. The
 HTTP escalation test reads as though it does, and does not: under the switch it
 passed identically before this change. Exactly one test fails if this change is
@@ -2856,8 +2868,13 @@ confidence review, which found the heading claiming more than the body.
 
 **What is given up.** The loop no longer enforces that a returned call was
 billed; each `Provider` owes it, and that obligation is now a docstring plus
-its tests. For every implementation that ships it holds structurally, because
-`check_call` refuses a second recorder. The cost of a future implementation
+its tests. For every implementation that ships it holds structurally -- but not
+for the reason this entry first gave. It said `check_call` refuses a second
+recorder, which is true and is *at-most-once*: it cannot make a provider bill
+at all. What actually holds the obligation is `execute_handoff` calling
+`record_outcome` unconditionally, ahead of every post-call refusal, on a path
+that cannot return with a `None` charge. The conclusion stood; the mechanism
+named did not support it. Corrected at the phase adversarial audit. The cost of a future implementation
 forgetting is not a refusal: a provider that returns without billing and then
 crashes before acceptance leaves no `call_outcomes` row, so neither
 `replay_billed` nor `unexplained_charge` matches, and the node is re-attempted
