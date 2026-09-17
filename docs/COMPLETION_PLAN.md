@@ -766,6 +766,16 @@ corpus:
 9. `DISTRESSED_RESTRUCTURING` (11.9): CP-4C's distress gate; **blocked on
    corpus** until a distressed issuer's documents are sourced; brief held.
 
+**Before the first wide pathway runs, the per-section bound is owed.** Measured
+on 17 September 2026: `FULL_CREDIT_ASSESSMENT`'s CP-5 carries 16 direct
+upstreams and 165,548 bytes of its own delivered authority, so authority plus
+upstream sections alone reach 47 % of `MAX_REQUEST_BYTES` at 20 KB per handoff,
+before any evidence. The only route ever measured is LITE's at about 210 KB.
+`CONTEXT_OVER_CEILING` refuses the whole request rather than truncating it, so a
+pathway over the ceiling cannot be run and therefore cannot be qualified. The
+Phase 5 ledger entry "An upstream section is unbounded" carries the numbers.
+Treat this as a precondition of 11.9, not a risk.
+
 **Exit checks**
 
 - Every FULL pathway except the one blocked on corpus is in `ADAPTER_ROUTES`

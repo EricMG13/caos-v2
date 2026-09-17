@@ -1613,9 +1613,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   file changed on disk between the two can make it refuse, but with Phase 4's
   concurrent workers an upstream accepted in between can make the pre-check
   pass and the re-check refuse with a reservation held (no call is made).
-  *Upgrade:* a declared per-section bound the day a wide route or a large pack
-  comes near the ceiling, and Phase 4's lease fencing the node's inputs
-  between the two checks.
+  **That day is measurable and close.** On the catalog's widest
+  pathway, `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
+  upstreams**, and its own delivered authority is 165,548 bytes. At a modest
+  20 KB per upstream handoff the authority and upstream sections alone come to
+  493,228 bytes -- 47 % of `MAX_REQUEST_BYTES` -- before a single byte of
+  evidence, and the evidence section carries every block of every pinned source.
+  The only route ever measured is LITE's, three nodes and at most two upstreams,
+  whose prompts run about 210 KB. So the first FULL pathway to run is a
+  plausible `CONTEXT_OVER_CEILING`, which refuses the whole request rather than
+  truncating it: the run does not proceed at all, and a pathway that cannot run
+  cannot be qualified. Measured on 17 September 2026 from the vendored catalog
+  and the bundle's own authority bytes, because nobody had taken the number this
+  deferral rested on.
+  *Upgrade:* a declared per-section bound, owed with Phase 11's first wide
+  pathway rather than on a future measurement, and Phase 4's lease fencing the
+  node's inputs between the two checks.
 
 **Phase 4.**
 
