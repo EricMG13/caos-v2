@@ -245,6 +245,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Audit remediation (2026-09-17).**
 
+- **A revision filed before a renderer change cannot be packaged verifiably
+  again.** `server/deliverable/filing.py` records `renderer_sha256` from the
+  `render.py` of the day the revision was filed; `build_package` embeds the
+  renderer of the day the package is built; and `verify_package._contents`
+  refuses when the receipt's hash and the embedded renderer disagree. So the
+  moment the renderer changes -- as Completion Phase 12 Task 12.4 changed it --
+  every revision filed before it can no longer be turned into a package that
+  verifies. Unreachable today, which is why it is recorded rather than fixed:
+  no route serves a package and `write_package` has no caller outside the
+  suite. It becomes real the day a deliverable export route exists, and it will
+  arrive silently, because the filing that breaks is one nobody is looking at.
+  Found by the Task 12.4 review, which noticed that the task reasoned carefully
+  about not breaking filed deliverables retroactively and stopped one step
+  short of this one. *Upgrade:* verify a package against the renderer its
+  receipt names rather than the one this build holds -- the archived verifier
+  already works that way, which is the whole of §55's design -- or re-render
+  and re-file on a renderer change, which is a governed write and a decision.
+
 - **The wire says "come back later" honestly at 5xx and not at 400.** §75 split
   the twenty-four permanently-failing codes off 503: 500 for a fault no retry
   clears, 503 with `Retry-After` for the one that a retry does. What it did not
