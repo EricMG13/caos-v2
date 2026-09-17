@@ -67,7 +67,7 @@ def test_a_canonical_route_pins_the_canonical_adapter_and_requires_a_subject(
     assert refused.value.code is RefusalCode.RUN_INPUT_INVALID
     assert load_run_input(conn, lite) is None and events_of(conn, lite) == before
     pin = pin_run_input(conn, lite, source.version, bundle, subject=SUBJECT)
-    assert pin.adapter_version == "canonical-markdown-v1"
+    assert pin.adapter_version == "canonical-markdown-v3"
     assert load_run_input(conn, lite) == pin
 
 

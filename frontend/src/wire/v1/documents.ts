@@ -193,7 +193,7 @@ const HandoffView = object({
   screening_only: bool,
   source_facts: array(CitationView, 1024),
   model_analysis: string({ max: 26214400 }),
-  host_calculation: literal("NONE"),
+  host_calculation: enumOf(["NONE", "CP_CF_FORECAST"]),
 });
 const PendingNode = object({ route_node_id: short, module_id: short, state: NodeState });
 const AnalysisBody = object({
@@ -206,6 +206,97 @@ const AnalysisBody = object({
 });
 const AnalysisDocument = sectionDocument(AnalysisBody);
 
+const ModelValue = object({
+  name: short,
+  value: nullable(string({ max: 64, pattern: "^-?[0-9]+(\\.[0-9]+)?$" })),
+  unavailable_reason: nullable(literal("ZERO_OR_NEGATIVE_DENOMINATOR")),
+});
+const ModelPeriod = object({
+  case: text,
+  period_id: text,
+  fiscal_year: text,
+  days: string({ max: 3, pattern: "^[0-9]+$" }),
+  values: array(ModelValue, 40),
+  unavailable_reason: nullable(text),
+});
+const ModelForecast = object({
+  route_node_id: short,
+  artifact_sha256: hash,
+  record_sha256: hash,
+  accepted_at: datetime,
+  qa_status: short,
+  limitation_flags: array(text, 256),
+  validation_warnings: array(text, 256),
+  currency: string({ max: 3, pattern: "^[A-Z]{3}$" }),
+  scale: enumOf(["units", "thousands", "millions", "billions"]),
+  perimeter: text,
+  periods: array(ModelPeriod, 240),
+});
+const ModelBody = object({
+  case_id: uuid,
+  latest_run_id: nullable(uuid),
+  displayed_run_id: nullable(uuid),
+  subject: nullable(RunSubjectView),
+  forecast: nullable(ModelForecast),
+  unavailable_reason: nullable(literal("NO_ACCEPTED_FORECAST")),
+});
+const ModelDocument = sectionDocument(ModelBody);
+
+const NarrativeFigure = object({
+  route_node_id: short,
+  citation_index: int({ min: 0 }),
+  document_sha256: hash,
+  page: int({ min: 1 }),
+  matched_text: string({ max: 65536 }),
+});
+const NarrativeSpan = object({
+  text: nullable(string({ max: 2000 })),
+  figure: nullable(NarrativeFigure),
+});
+const ReportArtifact = object({
+  route_node_id: short,
+  artifact_sha256: hash,
+  record_sha256: hash,
+  markdown: string({ max: 26214400 }),
+  record: string({ max: 26214400 }),
+  qa_status: short,
+  committee_status: short,
+  decision_scope: short,
+  limitation_flags: array(text, 256),
+  validation_warnings: array(text, 256),
+});
+const reportFields = {
+  case_id: uuid,
+  displayed_run_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  case_title: text,
+  artifacts: array(ReportArtifact, 256),
+  narrative: array(array(NarrativeSpan, 64), 64),
+};
+const ReportBody = object(reportFields);
+const ReportDocument = sectionDocument(ReportBody);
+const FiledReceipt = object({
+  case_id: uuid,
+  run_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  signed_by: uuid,
+  frozen_by: uuid,
+  filed_by: uuid,
+  renderer_sha256: hash,
+  filed_event_sha256: hash,
+});
+const CommitteeBody = object({
+  ...reportFields,
+  state: enumOf(["frozen", "filed"]),
+  signed_by: array(uuid, 1000),
+  frozen_by: uuid,
+  filed_by: nullable(uuid),
+  receipt: nullable(FiledReceipt),
+});
+const CommitteeDocument = sectionDocument(CommitteeBody);
+
 // Events and evidence pages (brief 4.4, decisions 2, 7 and 8).
 /** The closed event names a case stream carries; a name only says what to refetch. */
 export const EVENT_NAMES = [
@@ -214,6 +305,7 @@ export const EVENT_NAMES = [
   "run_terminal",
   "sources_changed",
   "runs_changed",
+  "filing_changed",
 ] as const;
 const EventName = enumOf(EVENT_NAMES);
 const FrameView = object({
@@ -264,6 +356,7 @@ const RefusalCode = enumOf([
   "CALL_OUTCOME_INVALID",
   "CALL_OUTCOME_CONFLICT",
   "CALL_OUTCOME_LEGACY",
+  "CALL_OUTCOME_UNEXPLAINED",
   "NODE_ALREADY_ACCEPTED",
   "MONEY_NOT_DECIMAL",
   "MONEY_INVALID",
@@ -311,6 +404,9 @@ const RefusalCode = enumOf([
   "FORECAST_RESIDUAL_UNRECONCILED",
   "FORECAST_DRIVER_NOT_READY",
   "DELIVERABLE_PAYLOAD_INVALID",
+  "DELIVERABLE_NOT_FOUND",
+  "NARRATIVE_FIGURE_UNREFERENCED",
+  "NARRATIVE_REFERENCE_INVALID",
   "DELIVERABLE_UNCITED_FIGURE",
   "DELIVERABLE_NOT_SIGNED",
   "DELIVERABLE_NOT_FROZEN",
@@ -367,9 +463,36 @@ const RefusalCode = enumOf([
   "STORE_UNAVAILABLE",
 ]);
 const RefusalBody = object({ code: RefusalCode, clears: text });
+const QualificationState = enumOf(["QUALIFIED", "UNQUALIFIED", "RESTRICTED", "UNAVAILABLE"]);
+const QualificationRead = object({
+  evidence_sha256: hash,
+  state: QualificationState,
+  qualification_set_sha256: nullable(hash),
+  performed_sha256: nullable(hash),
+  build_id: nullable(short),
+  adapter_version: nullable(short),
+  provider: nullable(short),
+  model: nullable(short),
+  reviewer: nullable(text),
+  decided_at: nullable(datetime),
+  expires_at: nullable(datetime),
+});
 
 /** Every model `schema.json` declares, under its backend name. */
 export const V1_SHAPES = {
+  NarrativeFigure,
+  NarrativeSpan,
+  ReportArtifact,
+  ReportBody,
+  ReportDocument,
+  FiledReceipt,
+  CommitteeBody,
+  CommitteeDocument,
+  ModelValue,
+  ModelPeriod,
+  ModelForecast,
+  ModelBody,
+  ModelDocument,
   ActionName,
   ActionView,
   AnalysisBody,
@@ -398,6 +521,8 @@ export const V1_SHAPES = {
   RectView,
   RefusalBody,
   RefusalCode,
+  QualificationRead,
+  QualificationState,
   RouteChoice,
   RunBody,
   RunSectionDocument,
@@ -419,8 +544,13 @@ export type DirectoryDocument = Infer<typeof DirectoryDocument>;
 export type UploadDocument = Infer<typeof UploadDocument>;
 export type RunSectionDocument = Infer<typeof RunSectionDocument>;
 export type AnalysisDocument = Infer<typeof AnalysisDocument>;
+export type ModelDocument = Infer<typeof ModelDocument>;
+export type ReportDocument = Infer<typeof ReportDocument>;
+export type CommitteeDocument = Infer<typeof CommitteeDocument>;
 export type RefusalBody = Infer<typeof RefusalBody>;
 export type RefusalCode = Infer<typeof RefusalCode>;
+export type QualificationRead = Infer<typeof QualificationRead>;
+export type QualificationState = Infer<typeof QualificationState>;
 export type Chrome = Infer<typeof Chrome>;
 export type CaseRow = Infer<typeof CaseRow>;
 export type SourceRow = Infer<typeof SourceRow>;
@@ -437,7 +567,13 @@ export type ActionView = Infer<typeof ActionView>;
 export type WorkView = Infer<typeof WorkView>;
 export type RouteChoice = Infer<typeof RouteChoice>;
 export type SectionDocument =
-  DirectoryDocument | UploadDocument | RunSectionDocument | AnalysisDocument;
+  | DirectoryDocument
+  | UploadDocument
+  | RunSectionDocument
+  | AnalysisDocument
+  | ModelDocument
+  | ReportDocument
+  | CommitteeDocument;
 
 export const parseDirectoryDocument = (value: unknown): DirectoryDocument =>
   parse(DirectoryDocument, value);
@@ -446,7 +582,13 @@ export const parseRunSectionDocument = (value: unknown): RunSectionDocument =>
   parse(RunSectionDocument, value);
 export const parseAnalysisDocument = (value: unknown): AnalysisDocument =>
   parse(AnalysisDocument, value);
+export const parseModelDocument = (value: unknown): ModelDocument => parse(ModelDocument, value);
+export const parseReportDocument = (value: unknown): ReportDocument => parse(ReportDocument, value);
+export const parseCommitteeDocument = (value: unknown): CommitteeDocument =>
+  parse(CommitteeDocument, value);
 export const parseRefusalBody = (value: unknown): RefusalBody => parse(RefusalBody, value);
+export const parseQualificationRead = (value: unknown): QualificationRead =>
+  parse(QualificationRead, value);
 export const parsePageDocument = (value: unknown): PageDocument => parse(PageDocument, value);
 
 export class WireIdentityError extends Error {
@@ -468,7 +610,7 @@ function sameId(a: string | null | undefined, b: string | null | undefined): boo
  */
 export function requireIdentity(
   doc: SectionDocument,
-  expected: { caseId: string | null; runId?: string | null },
+  expected: { caseId: string | null; runId?: string | null; revisionId?: string },
 ): void {
   const subject = doc.chrome.subject;
   if (!sameId(subject?.case_id, expected.caseId)) throw new WireIdentityError();
@@ -478,6 +620,31 @@ export function requireIdentity(
   if (expected.runId !== undefined) {
     if (!("displayed_run_id" in doc.body)) throw new WireIdentityError();
     if (!sameId(doc.body.displayed_run_id, expected.runId)) throw new WireIdentityError();
+  }
+  if (expected.revisionId !== undefined) {
+    if (!("revision_id" in doc.body) || !sameId(doc.body.revision_id, expected.revisionId)) {
+      throw new WireIdentityError();
+    }
+  }
+  if ("receipt" in doc.body) {
+    const { receipt } = doc.body;
+    if (
+      (doc.body.state === "frozen" && (receipt !== null || doc.body.filed_by !== null)) ||
+      (doc.body.state === "filed" && (receipt === null || doc.body.filed_by === null))
+    ) {
+      throw new WireIdentityError();
+    }
+    if (receipt === null) return;
+    if (
+      !sameId(receipt.case_id, doc.body.case_id) ||
+      !sameId(receipt.run_id, doc.body.displayed_run_id) ||
+      !sameId(receipt.revision_id, doc.body.revision_id) ||
+      receipt.payload_sha256 !== doc.body.payload_sha256 ||
+      !sameId(receipt.frozen_by, doc.body.frozen_by) ||
+      !sameId(receipt.filed_by, doc.body.filed_by) ||
+      !doc.body.signed_by.some((signer) => sameId(signer, receipt.signed_by))
+    )
+      throw new WireIdentityError();
   }
 }
 

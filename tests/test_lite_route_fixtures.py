@@ -38,8 +38,7 @@ from lite_route_fixtures import (
 from lite_route_fixtures import _yaml as _frontmatter_yaml
 
 from server.methodology.handoff import invocation_fields, validate_markdown
-
-MAX_COMPLETION_TOKENS = 32_768
+from server.provider import MAX_COMPLETION_TOKENS
 
 
 def _cp0_markdown(*, readiness: dict[str, str] | None = None) -> bytes:

@@ -1,143 +1,133 @@
-import { readFileSync } from "node:fs";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
-import { EvidenceProvider } from "@/evidence/EvidenceContext";
+import { render, screen } from "@testing-library/react";
 import { ModelSection } from "@/sections/model/ModelSection";
 import { propagatedFrom } from "@/sections/model/Projection";
-import { PASSPORT_FIELDS, type DocumentOf } from "@/wire";
+import type { ProjectionPeriod } from "@/wire/model";
+import { parseModelDocument, type ModelDocument } from "@/wire/v1";
 
-const load = (path: string): DocumentOf<"model"> =>
-  JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
-const doc = load("../../fixtures/model.json");
+const CASE = "00000000-0000-4000-8000-000000000001";
+const RUN = "00000000-0000-4000-8000-0000000000a1";
+const HASH = "a".repeat(64);
 
-function mount(tab: string | null = null) {
-  return render(
-    <MemoryRouter>
-      <EvidenceProvider>
-        <ModelSection document={doc} tab={tab} />
-      </EvidenceProvider>
-    </MemoryRouter>,
-  );
+function model(overrides: Record<string, unknown> = {}): ModelDocument {
+  const body = {
+    case_id: CASE,
+    latest_run_id: RUN,
+    displayed_run_id: RUN,
+    subject: null,
+    forecast: {
+      route_node_id: "CP-CF",
+      artifact_sha256: HASH,
+      record_sha256: "b".repeat(64),
+      accepted_at: "2026-09-14T10:00:00Z",
+      qa_status: "ACCEPTED",
+      limitation_flags: ["LIMITED_HISTORY"],
+      validation_warnings: ["Hostile <img src=x> warning"],
+      currency: "USD",
+      scale: "millions",
+      perimeter: "Consolidated <img src=x>",
+      periods: [
+        {
+          case: "Base",
+          period_id: "Q1",
+          fiscal_year: "2026",
+          days: "90",
+          values: [
+            { name: "cash", value: "123.45", unavailable_reason: null },
+            {
+              name: "coverage",
+              value: null,
+              unavailable_reason: "ZERO_OR_NEGATIVE_DENOMINATOR",
+            },
+          ],
+          unavailable_reason: "A required input is unavailable",
+        },
+      ],
+    },
+    unavailable_reason: null,
+    ...overrides,
+  };
+  return parseModelDocument({
+    chrome: {
+      subject: { case_id: CASE, title: "Issuer" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body,
+    observed_at: "2026-09-14T10:00:00Z",
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  });
 }
 
-const table = (container: HTMLElement, name: string) =>
-  container.querySelector<HTMLTableElement>(`table.proj[data-projection][data-case="${name}"]`)!;
-
-describe("Model", () => {
-  test("test_projection_unavailable_propagates_forward", () => {
-    const { container } = mount();
-    const downside = table(container, "DOWNSIDE");
-    expect(downside).not.toBeNull();
-    const rows = [...downside.querySelectorAll<HTMLTableRowElement>("tbody tr[data-period]")];
-    expect(rows.length).toBe(8);
-    const unav = downside.querySelector<HTMLTableRowElement>("tr.unav[data-reason]")!;
-    expect(unav).toHaveAttribute("data-period", "2027Q2");
-    expect(unav.dataset["reason"]).toContain("residual 0.700 > tolerance 0.001");
-    expect(unav).toHaveTextContent("residual 0.700 > tolerance 0.001");
-    expect(unav.querySelector("td.resid")).toHaveTextContent("0.700");
-    const later = rows.slice(rows.indexOf(unav) + 1);
-    expect(later.length).toBe(4);
-    for (const row of later) {
-      expect(row).toHaveClass("prop");
-      expect(row).toHaveAttribute("data-propagated", "true");
-      expect(row).toHaveTextContent("unavailable · propagated from 2027Q2");
-      expect(row.querySelectorAll(".cellbtn").length).toBe(0);
-      expect(row.querySelector("td.resid")).toBeNull();
-      // No number is read from a propagated period: no figure cell at all.
-      expect(row.querySelectorAll("td").length).toBe(2);
-      expect(row).not.toHaveTextContent(/0\.000|\b0\b/);
-    }
-    for (const row of rows.slice(0, rows.indexOf(unav))) expect(row).not.toHaveClass("unav");
-    // BASE is unaffected.
-    const base = table(container, "BASE");
-    expect(base.querySelectorAll("tr.unav, tr.prop").length).toBe(0);
-    expect(base.querySelectorAll("tbody tr[data-period]").length).toBe(8);
-    for (const cell of base.querySelectorAll("td.resid")) expect(cell).toHaveTextContent("0.000");
-    expect(container).toHaveTextContent("Why 2027Q2 DOWNSIDE is unavailable.");
+describe("Model v1", () => {
+  test("propagatedFrom names the originating unavailable period", () => {
+    expect(
+      propagatedFrom(
+        [
+          { period_id: "Q1", state: "unavailable", propagated: false },
+          { period_id: "Q2", state: "unavailable", propagated: true },
+        ] as ProjectionPeriod[],
+        1,
+      ),
+    ).toBe("Q1");
   });
 
-  test("test_residual_is_its_own_column", () => {
-    const { container } = mount();
-    for (const name of ["BASE", "DOWNSIDE"]) {
-      const t = table(container, name);
-      const heads = [...t.querySelectorAll("thead th")];
-      const resid = t.querySelector("th.resid")!;
-      expect(resid).toHaveTextContent("RESIDUAL");
-      expect(resid).toHaveAttribute("scope", "col");
-      const index = heads.indexOf(resid);
-      expect(index).toBeGreaterThan(0);
-      for (const row of t.querySelectorAll("tbody tr[data-period]:not(.prop)")) {
-        const cells = row.querySelectorAll("td");
-        expect(cells[index]).toHaveClass("resid");
-        expect(row.querySelectorAll("td.resid").length).toBe(1);
-      }
-    }
-    const periods = doc.body.cases[1]!.periods;
-    expect(propagatedFrom(periods, 7)).toBe("2027Q2");
-    expect(propagatedFrom(periods, 2)).toBeNull();
+  test("renders the accepted projection as server strings with every explicit limitation", () => {
+    const { container } = render(<ModelSection document={model()} tab={null} />);
+    expect(container.querySelector("[data-model-v1]")).toHaveAttribute("data-run", RUN);
+    expect(container).toHaveTextContent("CP-CF");
+    expect(container).toHaveTextContent(`sha256:${HASH}`);
+    expect(container).toHaveTextContent("123.45");
+    expect(container).toHaveTextContent("ZERO_OR_NEGATIVE_DENOMINATOR");
+    expect(container).toHaveTextContent("A required input is unavailable");
+    expect(container).toHaveTextContent("LIMITED_HISTORY");
+    expect(container.querySelector("[data-qa-status]")).toHaveTextContent("ACCEPTED");
   });
 
-  test("test_projected_cell_opens_a_passport_with_driver", () => {
-    const { container } = mount();
-    const button = table(container, "DOWNSIDE").querySelector<HTMLButtonElement>(
-      'tr[data-period="2027Q1"] button.cellbtn[data-passport-id]',
-    )!;
-    expect(button).not.toBeNull();
-    expect(doc.body.passports[button.dataset["passportId"]!]).toBeDefined();
-    fireEvent.click(button);
-    const dialog = screen.getByRole("dialog");
-    const passport = dialog.querySelector("[data-passport]")!;
-    expect(passport).not.toBeNull();
-    for (const field of PASSPORT_FIELDS) {
-      expect(passport.querySelector(`[data-passport-field="${field}"]`)).not.toBeNull();
-    }
-    expect(passport.querySelectorAll("[data-passport-field]").length).toBe(
-      PASSPORT_FIELDS.length + 1,
+  test("renders partial and hostile server text as text, never markup", () => {
+    const partial = parseModelDocument({
+      ...model(),
+      status: "partial",
+      notes: ["HANDOFFS_PENDING"],
+    });
+    const { container } = render(<ModelSection document={partial} tab={null} />);
+    expect(container).toHaveTextContent("Consolidated <img src=x>");
+    expect(container).toHaveTextContent("Hostile <img src=x> warning");
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("button, input, select, textarea")).toBeNull();
+  });
+
+  test("renders the declared no-forecast reason without projecting a value", () => {
+    render(
+      <ModelSection
+        document={model({ forecast: null, unavailable_reason: "NO_ACCEPTED_FORECAST" })}
+        tab={null}
+      />,
     );
-    const driver = passport.querySelector('[data-passport-field="driver"]')!;
-    expect(driver).toHaveTextContent(/d-0\d/);
-    expect(driver.querySelector("button.chip[data-chip]")).not.toBeNull();
-    expect(dialog).toHaveTextContent("PROJECTED");
-    // The formula bar follows the selection.
-    expect(container.querySelector(".formulabar")).toHaveTextContent("DOWNSIDE · 2027Q1");
-    expect(container.querySelector(".formulabar code")?.textContent?.startsWith("=")).toBe(true);
+    expect(screen.getByText("NO_ACCEPTED_FORECAST")).toBeInTheDocument();
+    expect(screen.queryByText("123.45")).toBeNull();
   });
 
-  test("every figure cell is a passport button and every id resolves", () => {
-    const { container } = mount();
-    const buttons = container.querySelectorAll<HTMLButtonElement>(
-      "button.cellbtn[data-passport-id]",
-    );
-    expect(buttons.length).toBeGreaterThan(100);
-    for (const button of buttons) {
-      expect(doc.body.passports[button.dataset["passportId"]!]).toBeDefined();
-    }
-    expect(container.querySelector("th.resid")).not.toBeNull();
-  });
-
-  test("the right column reads drivers, first breach, tolerance and the accepted artifact", () => {
-    const { container } = mount();
-    const drivers = container.querySelectorAll(".driver");
-    expect(drivers.length).toBe(7);
-    for (const row of drivers) expect(row.querySelector("button.chip[data-chip]")).not.toBeNull();
-    expect(container.querySelector('[data-driver="d-05"] [data-chip]')).toHaveAttribute(
-      "data-chip",
-      "D-04 p.68 ¶2",
-    );
-    expect(container.querySelector('[data-breach="DOWNSIDE"]')).toHaveTextContent("2027Q1");
-    expect(container.querySelector('[data-breach="BASE"]')).toHaveTextContent(
-      "none in 8 available periods",
-    );
-    expect(container).toHaveTextContent(`sha256:${doc.body.artifact_sha256}`);
-    expect(container).toHaveTextContent(doc.body.accepted_at);
-    expect(container).toHaveTextContent("Tolerance0.001");
-    expect(container).toHaveTextContent("Not on this page, by decision.");
-    expect(screen.queryByRole("button", { name: /download|sign|save|edit/i })).toBeNull();
-  });
-
-  test("the drivers tab shows the driver rows in the centre", () => {
-    const { container } = mount("drivers");
-    expect(container.querySelector("table.proj")).toBeNull();
-    expect(container.querySelectorAll(".driver").length).toBe(14);
+  test("renders a period-level unavailable reason even when it has no values", () => {
+    const source = model();
+    const document = parseModelDocument({
+      ...source,
+      body: {
+        ...source.body,
+        forecast: {
+          ...source.body.forecast!,
+          periods: [
+            {
+              ...source.body.forecast!.periods[0]!,
+              values: [],
+              unavailable_reason: "INPUT_MISSING",
+            },
+          ],
+        },
+      },
+    });
+    render(<ModelSection document={document} tab={null} />);
+    expect(screen.getByText("INPUT_MISSING")).toBeInTheDocument();
   });
 });

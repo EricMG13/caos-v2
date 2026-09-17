@@ -30,7 +30,12 @@ from uuid import UUID
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
-from server.evidence.citations import AnchoredCitation, verify_citations
+from server.evidence.citations import (
+    AnchoredCitation,
+    Citation,
+    citation_candidates,
+    verify_citations,
+)
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -89,6 +94,8 @@ from server.store.outcomes import (
     record_outcome,
     require_idle,
 )
+from server.store.run_inputs import load_run_input
+from server.store.source_sets import SourceSet, load_source_set
 
 _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 # One compiled contract per manifest: the manifest digests every vendor file.
@@ -178,7 +185,9 @@ def execute_handoff(
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
-        context = _context(conn, blobs, bundle, assignment, identity)
+        context = _context(
+            conn, blobs, bundle, assignment, identity, include_candidates=True
+        )
     # The record binds exactly the authority this prompt carries (§45.1).
     carried = delivered_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
@@ -226,6 +235,7 @@ def execute_handoff(
         markdown, record = _answer(
             conn,
             bundle,
+            blobs,
             assignment,
             identity=identity,
             context=context,
@@ -245,6 +255,7 @@ def execute_handoff(
 def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     conn: StoreConnection,
     bundle: Bundle,
+    blobs: BlobStore,
     assignment: Assignment,
     *,
     identity: HostIdentity,
@@ -263,6 +274,8 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     # comparison also catches an upstream rewritten during the call.
     if _identity(conn, bundle, assignment) != identity:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    if context.source_set is not None:
+        _assert_originals(blobs, context.source_set)
     # ...and every ancestor's accepted pair, a record rewritten included.
     if _lineage_moved(conn, assignment.run_id, context.lineage):
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
@@ -286,6 +299,7 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     anchored = verify_citations(conn, delivered=blocks, citations=citations)
     if projections is None:
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
+    _forecast_inputs(bundle, assignment.module_id, markdown, context)
     record = CanonicalRecord(
         artifact_sha256=hashlib.sha256(markdown).hexdigest(),
         adapter_version=methodology.CANONICAL_ADAPTER_VERSION,
@@ -328,7 +342,9 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
         identity = prospective_identity(
             conn, bundle, run_id=run_id, route=route, node=node
         )
-        context = _context(conn, blobs, bundle, assignment, identity)
+        context = _context(
+            conn, blobs, bundle, assignment, identity, include_candidates=True
+        )
     authority = delivered_authority(bundle, node.module_id)
     within_request_ceiling(
         provider, _prompt(bundle, assignment, identity, context, authority)
@@ -348,29 +364,87 @@ class _Context:
     lineage: tuple[LineageRef, ...]
     # Each direct upstream's anchored citations, from its verified record.
     citations: dict[str, tuple[AnchoredCitation, ...]]
+    candidates: tuple[Citation, ...]
+    source_set: SourceSet | None
 
 
-def _context(
+def _source_preparation(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    assignment: Assignment,
+    delivered: Sequence[Delivery],
+) -> SourceSet | None:
+    """CP-0 alone receives the verified source snapshot it must prepare."""
+    if assignment.module_id != GATE_MODULE:
+        return None
+    pin = load_run_input(conn, assignment.run_id)
+    if pin is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    source_set = load_source_set(conn, pin.case_id, pin.source_version)
+    if source_set is None or source_set.fingerprint != pin.source_fingerprint:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    if {member.source_id for member in source_set.members} != {
+        item.source_id for item in delivered
+    }:
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+    _assert_originals(blobs, source_set)
+    return source_set
+
+
+def _assert_originals(blobs: BlobStore, source_set: SourceSet) -> None:
+    """Keep original-blob failures typed and free of filesystem context."""
+    refusal: RefusalCode | None = None
+    for member in source_set.members:
+        try:
+            blobs.get(member.document_sha256)
+        except OSError:
+            refusal = RefusalCode.STORE_UNAVAILABLE
+            break
+        except Refusal as caught:
+            refusal = caught.code
+            break
+    if refusal is not None:
+        raise Refusal(refusal)
+
+
+def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
+    *,
+    include_candidates: bool = False,
 ) -> _Context:
     """The delivered evidence, the verified upstream, its whole accepted lineage
     and its citation register, read inside the caller's unit after it checked
     the stored pin. Only accepted rows reach any part: a Blocked or refused
     attempt's diagnostic body is never read here."""
     delivered = _delivered(conn, assignment.run_id)
+    source_set = _source_preparation(conn, blobs, assignment, delivered)
     # Records first: what binds and re-validates is then read as context.
     records, lineage = _upstream_records(
         conn, blobs, bundle, assignment, identity.upstream
+    )
+    candidates = (
+        citation_candidates(
+            conn,
+            delivered=_by_source(delivered),
+            proposed=tuple(
+                Citation(item.source_id, item.page, item.text.value)
+                for item in delivered
+            ),
+        )
+        if include_candidates
+        else ()
     )
     return _Context(
         delivered=delivered,
         upstream=upstream_markdown(blobs, identity.upstream),
         lineage=lineage,
         citations={node: record.citations for node, record in records.items()},
+        candidates=candidates,
+        source_set=source_set,
     )
 
 
@@ -406,6 +480,8 @@ def _prompt(
         upstream=context.upstream,
         upstream_citations=context.citations,
         route=assignment.route,
+        citation_candidates=context.candidates,
+        source_set=context.source_set,
     )
 
 
@@ -429,7 +505,13 @@ def _unless_blocked(validate: Callable[[], Projections]) -> Projections | None:
 
 # Refusals that say the store, not the answer, failed: never read as a verdict.
 _STORE_FAULTS = frozenset(
-    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+    {
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+    }
 )
 
 
@@ -450,6 +532,40 @@ class Replayed:
     verdict: Verdict
     outcome: HandoffOutcome | None = None
     code: RefusalCode | None = None
+
+
+def unexplained_charge(
+    conn: StoreConnection,
+    *,
+    run_id: UUID,
+    route_node_ids: Sequence[str],
+) -> str | None:
+    """A ready node already paid for whose answer was never stored.
+
+    `_diagnostic` can fail to write its body after `record_outcome` has already
+    committed the charge: the bytes are gone, and `replay_billed` cannot settle
+    the attempt because it requires a diagnostic to read. Left alone the next
+    pass starts a fresh attempt, reserves again and calls the provider again,
+    so one node is billed twice with nobody deciding that it should be. The
+    run ceiling bounds it; nothing else does.
+
+    Returns the first such node, for a caller that refuses rather than spends.
+    Paying again may well be the right answer -- but it is an operator's to
+    give, which is what parking the run with a code asks for.
+    """
+    row = conn.execute(
+        "SELECT t.route_node_id FROM call_outcomes o JOIN run_attempts t"
+        " USING (attempt_id) JOIN budget_ledger l"
+        " ON (l.run_id, l.attempt_id) = (o.run_id, o.charged_attempt_id)"
+        " WHERE t.run_id = %s AND t.route_node_id = ANY(%s)"
+        " AND o.diagnostic_sha256 IS NULL"
+        " AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.attempt_id = o.attempt_id)"
+        " AND NOT EXISTS"
+        " (SELECT 1 FROM attempt_refusals r WHERE r.attempt_id = o.attempt_id)"
+        " ORDER BY t.ordinal, t.route_node_id LIMIT 1",
+        (run_id, list(route_node_ids)),
+    ).fetchone()
+    return None if row is None else str(row[0])
 
 
 def replay_billed(  # noqa: PLR0913 -- one run's nodes, keyword-only
@@ -577,6 +693,7 @@ def _replayed_answer(
     return _answer(
         conn,
         bundle,
+        blobs,
         assignment,
         identity=identity,
         context=_context(conn, blobs, bundle, assignment, identity),
@@ -709,7 +826,46 @@ def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
     )
     if projections != record.projections:
         raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    if node.module_id == "CP-CF":
+        assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
+        _forecast_inputs(
+            bundle,
+            node.module_id,
+            markdown,
+            _context(conn, blobs, bundle, assignment, identity),
+        )
     return record, projections
+
+
+def _forecast_inputs(
+    bundle: Bundle, module: str, markdown: bytes, context: _Context
+) -> None:
+    """The same owner-binding check at acceptance, replay and every accepted read."""
+    if module != "CP-CF":
+        return
+    from server.methodology.forecast import (
+        validate_driver_mapping,
+        validate_forecast_bindings,
+    )
+
+    upstream = {ref.module_id: data for ref, data in context.upstream}
+    citations = {
+        ref.module_id: context.citations[ref.route_node_id]
+        for ref, _data in context.upstream
+    }
+    validate_forecast_bindings(markdown, upstream, citations)
+    validate_driver_mapping(_contract(bundle), markdown, upstream["CP-2G"])
+    parse = _contract(bundle).validate_handoff.validate_text
+    fields = parse(markdown.decode()).fields
+    for data in upstream.values():
+        owner = parse(data.decode()).fields
+        if (
+            owner["qa_status"] == "Restricted" and fields["qa_status"] != "Restricted"
+        ) or any(
+            not set(owner[key]) <= set(fields[key])
+            for key in ("limitation_flags", "validation_warnings")
+        ):
+            raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
 
 
 def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
@@ -815,7 +971,9 @@ def _upstream_records(
 def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
     if module_id != GATE_MODULE:
         return frozenset()
-    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+    # The vendor T8 cannot name host modules; CP-CF is released by its four
+    # REQUIRED owner/gate edges, after these exact vendor readiness rows.
+    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
 
 
 def _identity(

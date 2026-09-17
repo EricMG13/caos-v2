@@ -36,7 +36,7 @@ from server.engine.route import (
     node_states,
     resolve_route,
 )
-from server.evidence.citations import AnchoredCitation, Rect
+from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.bundle import (
     delivered_authority,
     verified_bytes,
@@ -44,6 +44,7 @@ from server.methodology.bundle import (
 )
 from server.methodology.executor import Delivery
 from server.methodology.handoff import (
+    INVISIBLE,
     HostIdentity,
     UpstreamRef,
     expected_filename,
@@ -72,6 +73,7 @@ from server.store.outcomes import CallOutcome, record_outcome
 from server.store.routes import pin_route
 from server.store.run_inputs import RunSubject, load_run_input, pin_run_input
 from server.store.runs import Accepted, accept_attempt, start_attempt, start_run
+from server.store.source_sets import SourceSet, SourceSetMember
 
 __all__ = ["harness"]
 
@@ -93,16 +95,24 @@ def _prompt(
     of: HostIdentity,
     delivered: list[Delivery] | None = None,
     upstream: tuple[tuple[UpstreamRef, bytes], ...] = (),
+    citation_candidates: tuple[Citation, ...] = (),
 ) -> str:
+    items = _delivered() if delivered is None else delivered
     return build_handoff_prompt(
         CONTRACT,
         identity=of,
         authority=delivered_authority(BUNDLE, of.module_id),
         catalog=CATALOG,
-        delivered=_delivered() if delivered is None else delivered,
+        delivered=items,
         upstream=upstream,
         upstream_citations={ref.route_node_id: ANCHORED for ref in of.upstream},
         route=LITE_ROUTE,
+        citation_candidates=citation_candidates,
+        source_set=(
+            _source_set(*(item.source_id for item in items))
+            if of.module_id == "CP-0"
+            else None
+        ),
     )
 
 
@@ -339,6 +349,143 @@ def _delivered() -> list[Delivery]:
     ]
 
 
+def _source_set(*source_ids: UUID, filename: str = "issuer-report.pdf") -> SourceSet:
+    sources = source_ids or (uuid4(),)
+    return SourceSet(
+        uuid4(),
+        1,
+        "b" * 64,
+        tuple(
+            SourceSetMember(
+                source,
+                f"{number:x}" * 64,
+                filename,
+                "2026-09-15T00:00:00+00:00",
+                '{"config":{},"name":"caos.test","version":"1"}',
+                f"{number + 1:x}" * 64,
+                f"{number + 2:x}" * 64,
+            )
+            for number, source in enumerate(sources, start=1)
+        ),
+    )
+
+
+def test_cp0_source_preparation_is_tagged_context_not_evidence() -> None:
+    delivered = _delivered()
+    source_set = _source_set(*(item.source_id for item in delivered))
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=source_set,
+    )
+    tag = _tag(prompt)
+    section = f"--- HOST SOURCE PREPARATION {tag}"
+    assert section in prompt and "not citable evidence" in prompt
+    expected_root = (
+        f'"original_root": "blob://sha256/{source_set.members[0].document_sha256}'
+    )
+    assert expected_root in prompt
+    assert prompt.index(section) < prompt.index(f"--- EVIDENCE {tag} ---")
+
+
+def test_a_filename_the_host_renders_can_always_be_quoted_back() -> None:
+    """The host must not name a document in a way its own reader refuses.
+
+    `BoundaryText` admits U+2028, U+2029 and U+FEFF, so a document can be
+    admitted under a filename carrying one. `handoff.INVISIBLE` refuses those
+    same characters in a module's answer, and the preparation section is
+    labelled host-owned -- so CP-0 copying the name into its P2 inventory,
+    exactly as instructed, would be refused HANDOFF_MALFORMED for a string the
+    host chose to show it.
+    """
+    delivered = _delivered()
+    hostile = "\ufeffReport\u2028Q4.pdf"
+    source_set = _source_set(*(item.source_id for item in delivered), filename=hostile)
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=source_set,
+    )
+
+    assert not INVISIBLE.intersection(prompt), "nothing invisible reaches the model"
+    assert '"filename": "ReportQ4.pdf"' in prompt
+
+
+def test_only_cp0_can_receive_source_preparation() -> None:
+    with pytest.raises(Refusal) as refused:
+        build_handoff_prompt(
+            CONTRACT,
+            identity=identity("CP-L10"),
+            authority=delivered_authority(BUNDLE, "CP-L10"),
+            catalog=CATALOG,
+            delivered=_delivered(),
+            upstream=(),
+            upstream_citations={},
+            route=LITE_ROUTE,
+            source_set=_source_set(),
+        )
+    assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+
+
+def test_cp0_requires_exact_source_preparation_membership() -> None:
+    delivered = _delivered()
+    for source_set in (None, _source_set(delivered[0].source_id)):
+        with pytest.raises(Refusal) as refused:
+            build_handoff_prompt(
+                CONTRACT,
+                identity=identity("CP-0"),
+                authority=delivered_authority(BUNDLE, "CP-0"),
+                catalog=CATALOG,
+                delivered=delivered,
+                upstream=(),
+                upstream_citations={},
+                route=LITE_ROUTE,
+                source_set=source_set,
+            )
+        assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+
+
+def test_source_preparation_values_cannot_pre_compute_the_section_tag() -> None:
+    delivered = _delivered()
+    source_ids = tuple(item.source_id for item in delivered)
+    base = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=_source_set(*source_ids),
+    )
+    old_tag = _tag(base)
+    changed = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=_source_set(*source_ids, filename=f"issuer-{old_tag}.pdf"),
+    )
+    assert _tag(changed) != old_tag
+
+
 def test_provider_claimed_identity_never_survives(harness: _Harness) -> None:
     _accept(harness, "CP-0")
     lite = _identity(harness, "CP-L10", _attempt(harness, "CP-L10"))
@@ -404,6 +551,56 @@ def test_the_prompt_carries_exact_upstream_bytes_and_every_block(
         upstream_markdown(harness.blobs, (*final.upstream[:1], _missing(final)))
     assert unreadable.value.code is RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE
     assert unreadable.value.__context__ is None
+
+
+@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def test_the_prompt_repeats_the_closed_contract_after_evidence(
+    module_id: str,
+) -> None:
+    gate = handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), gate)
+    upstream = () if module_id == "CP-0" else ((ref, gate),)
+    of = identity(module_id, tuple(r for r, _ in upstream))
+    delivered = _delivered()
+    candidate = Citation(
+        delivered[0].source_id, delivered[0].page, delivered[0].text.value
+    )
+    prompt = _prompt(
+        of, delivered=delivered, upstream=upstream, citation_candidates=(candidate,)
+    )
+    tag = _tag(prompt)
+    reminder = prompt.split(f"--- END EVIDENCE {tag} ---\n", 1)[1]
+    compact = " ".join(reminder.split())
+
+    assert "Return exactly one JSON object" in reminder
+    assert "add only the model-authored fields named in the final check" in prompt
+    authored = (
+        "confidence_score, confidence_band, qa_status, committee_status, "
+        "limitation_flags, validation_warnings, downstream_consumers"
+    )
+    assert f"Add only these model-authored front-matter fields: {authored}." in compact
+    assert "Do not add any other front-matter fields" in compact
+    assert "appears exactly once on its cited evidence page" in compact
+    assert (
+        f"citation_candidate: true\nsource_id: {candidate.source_id}\n"
+        f"page: {candidate.page}\n{candidate.matched_text}" in prompt
+    )
+    assert "Use only evidence whose host header says `citation_candidate: true`" in (
+        compact
+    )
+    assert "eligible, not required" in compact
+    assert "Do not enumerate all eligible candidates" in compact
+    assert "omit every candidate not quoted in the Markdown body" in compact
+    assert "copy its complete `matched_text` under `## Evidence Trace`" in compact
+    source_ids = json.dumps(
+        sorted({str(item.source_id) for item in delivered}), separators=(",", ":")
+    )
+    assert f"Valid `source_id` values are exactly: {source_ids}." in reminder
+    assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
+    assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
+    t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"
+    assert (t8_header in reminder) is (module_id == "CP-0")
+    assert "matched_text" in reminder and "Markdown body" in reminder
 
 
 def _missing(of: HostIdentity) -> UpstreamRef:
@@ -748,7 +945,8 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
     whole = evidence(fits)
     prompt = within_request_ceiling(provider, _prompt(gate, whole))
     assert len(provider.request_bytes(prompt, json_object=True)) == MAX_REQUEST_BYTES
-    assert prompt.endswith(whole[0].text.value)
+    tag = _tag(prompt)
+    assert f"\n{whole[0].text.value}\n--- END EVIDENCE {tag} ---\n" in prompt
     over = _prompt(gate, evidence(fits + 1))
     # Its JSON encoding alone fits with room to spare; the request does not.
     assert len(json.dumps(over)) < MAX_REQUEST_BYTES
@@ -772,8 +970,9 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     prompt = _prompt(gate, delivered)
     tag = _tag(prompt)
     files = len(delivered_authority(BUNDLE, "CP-0").files)
-    # Instructions, front matter (2), host steps, each file (2), evidence.
-    assert prompt.count(tag) == 5 + 2 * files and tag not in forged
+    # Instructions, front matter (2), host steps, each file (2), source prep
+    # (2), evidence (2), check.
+    assert prompt.count(tag) == 9 + 2 * files and tag not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
 
 

@@ -1,0 +1,92 @@
+# The disposable production-image stack (Task 4.5 decision 11). Project
+# `caos-workbench-smoke`: a database of its own, no dev volume and no dev
+# port, brought up and torn down with `--volumes` by `make smoke-production`
+# and `tests/journey/run.py`. `IMAGE` names the image `make smoke-production`
+# already built; nothing here builds it again.
+name: caos-workbench-smoke
+
+services:
+  smoke-postgres:
+    image: postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    environment:
+      POSTGRES_DB: caos_smoke
+      POSTGRES_USER: caos_smoke
+      POSTGRES_PASSWORD: local-smoke-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U caos_smoke -d caos_smoke"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  api:
+    image: ${IMAGE:-caos-workbench:local}
+    depends_on:
+      smoke-postgres:
+        condition: service_healthy
+    environment:
+      CAOS_DATABASE_URL: postgresql://caos_smoke:local-smoke-only@smoke-postgres:5432/caos_smoke
+      CAOS_BLOB_ROOT: /blobs
+      CAOS_EDGE_TOKEN: ${CAOS_EDGE_TOKEN}
+      CAOS_PUBLIC_ORIGIN: ${CAOS_PUBLIC_ORIGIN}
+    ports:
+      - "127.0.0.1:18000:8000"
+    volumes:
+      - smoke-blobs:/blobs
+    healthcheck:
+      # 503 is a legitimate answer -- not_ready is still an answer, and the
+      # probe loop needs its own first round (up to PROBE_INTERVAL) after boot
+      # -- so this fails only on no response at all, never on the status code.
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u\ntry:\n u.urlopen('http://127.0.0.1:8000/api/health', timeout=2)\nexcept u.HTTPError:\n pass"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # A real worker, no provider credential -- proves `PROVIDER_NOT_CONFIGURED`
+  # (decision 10) without spending anything. Never started by `up` alone.
+  worker:
+    image: ${IMAGE:-caos-workbench:local}
+    command: ["python", "-m", "server.engine.worker"]
+    profiles: ["smoke"]
+    depends_on:
+      smoke-postgres:
+        condition: service_healthy
+    environment:
+      CAOS_DATABASE_URL: postgresql://caos_smoke:local-smoke-only@smoke-postgres:5432/caos_smoke
+      CAOS_BLOB_ROOT: /blobs
+    volumes:
+      - smoke-blobs:/blobs
+
+  # The deterministic journey provider (decision 10). `./tests` is read-only
+  # and never in the image; the same blob volume as `api`, the image's own uid.
+  # Mounted at /app/tests, not /opt/caos-tests as the brief's decision 10 says:
+  # `tests/canonical_fixtures.py` finds `vendor/deploy-v` as its parent's
+  # sibling, and the image keeps `vendor/` under /app.
+  journey-worker:
+    image: ${IMAGE:-caos-workbench:local}
+    command: ["python", "-m", "journey.worker"]
+    profiles: ["journey"]
+    depends_on:
+      smoke-postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      CAOS_DATABASE_URL: postgresql://caos_smoke:local-smoke-only@smoke-postgres:5432/caos_smoke
+      CAOS_BLOB_ROOT: /blobs
+      PYTHONPATH: /app/tests:/app
+      JOURNEY_EXIT_AFTER_FIRST_ACCEPT: ${JOURNEY_EXIT_AFTER_FIRST_ACCEPT:-}
+      # The exit-once marker lives in the blob volume: the image created
+      # /blobs as uid 10001, so a fresh named volume there is writable and
+      # survives `restart`. A host bind mount is not -- Docker Desktop's
+      # file sharing presents it as root:root 0755 whatever the host mode.
+      # Nothing lists the blob root, and the name is no sha256 address.
+      JOURNEY_STATE_DIR: /blobs
+    volumes:
+      - smoke-blobs:/blobs
+      - ./tests:/app/tests:ro
+
+volumes:
+  smoke-blobs:

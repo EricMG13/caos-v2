@@ -78,6 +78,38 @@ MIGRATIONS = (
         .with_name("0014_command_requests.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0015_revisions",
+        Path(__file__).with_name("0015_revisions.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0016_filed_receipts",
+        Path(__file__).with_name("0016_filed_receipts.sql").read_text(encoding="utf-8"),
+    ),
+    (
+        "0017_legacy_filing_events",
+        Path(__file__)
+        .with_name("0017_legacy_filing_events.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0018_qualification_verdicts",
+        Path(__file__)
+        .with_name("0018_qualification_verdicts.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0019_one_qualification_verdict",
+        Path(__file__)
+        .with_name("0019_one_qualification_verdict.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0020_qualification_performed",
+        Path(__file__)
+        .with_name("0020_qualification_performed.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
@@ -217,6 +249,15 @@ def _migrate(conn: StoreConnection, sql: str) -> None:
             from server.store.extraction_integrity import _verify_extractions_v1
 
             _verify_extractions_v1(conn)
+        if (version, name) == (17, "0017_legacy_filing_events") and applied_count == 16:
+            ambiguous = conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM audit_events e"
+                " LEFT JOIN deliverable_receipts r ON r.case_id=e.case_id"
+                " AND r.filed_event_sha256=e.entry_sha256"
+                " WHERE e.action='DELIVERABLE_FILED' AND r.revision_id IS NULL)"
+            ).fetchone()
+            if ambiguous != (False,):
+                raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
         if not (legacy and version == 1):
             conn.execute(MIGRATIONS[version - 1][1])
         conn.execute(

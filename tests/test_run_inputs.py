@@ -108,7 +108,7 @@ def test_complete_input_roundtrip_exact_terminal_replay(prepared: Prepared) -> N
     assert pin.route_digest == route_digest(route)
     assert pin.build_id == bundle.build_id
     assert pin.manifest_sha256 == bundle.manifest_sha256
-    assert pin.adapter_version == "canonical-markdown-v1"
+    assert pin.adapter_version == "canonical-markdown-v3"
     assert pin.research_json is not None and json.loads(pin.research_json) == research
     research["source_mode"] = "changed"
     assert load_run_input(conn, run) == pin
@@ -217,7 +217,7 @@ def test_changed_host_or_research_refuses_replay_but_history_is_readable(
             (tmp_path / "DEPLOY_V_INTEGRITY_v1.json").write_text(raw + "  ")
     if changed == "adapter":
         monkeypatch.setattr(
-            methodology, "CANONICAL_ADAPTER_VERSION", "canonical-markdown-v2"
+            methodology, "CANONICAL_ADAPTER_VERSION", "canonical-markdown-v4"
         )
     assert load_run_input(conn, run) == pin
     expected = (

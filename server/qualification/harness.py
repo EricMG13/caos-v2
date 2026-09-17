@@ -63,9 +63,11 @@ import psycopg
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import (
+    MODEL_MODULE,
     NodeResult,
     NodeState,
     ResolvedRoute,
+    RouteExtensions,
     node_states,
     resolve_route,
 )
@@ -75,20 +77,22 @@ from server.methodology.bundle import Bundle
 from server.methodology.invocation import named_objects
 from server.methodology.runner import ModuleProvider
 from server.pricing import ModelPrice, worst_case
-from server.provider import CompletionProvider
+from server.provider import CompletionProvider, OpenRouter
 from server.qualification.matrix import (
     Matrix,
     QualificationCase,
     QualificationSet,
     assert_measurable,
+    assert_unambiguous,
     build_matrix,
+    qualification_set_digest,
 )
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.gates import execution_input
-from server.store.outcomes import execution_reads, require_idle
+from server.store.outcomes import execution_reads, producer_identifier, require_idle
 from server.store.routes import pin_route, resolved_route
 from server.store.run_inputs import RunInput, pin_run_input, valid_subject
 from server.store.runs import create_case, run_status, start_run
@@ -118,6 +122,9 @@ class Harness:
     # nothing bounded the set until this, and two hundred cases were two
     # hundred routes' worth of calls, each individually within budget.
     ceiling: Decimal
+    # The ceiling for each run the harness prepares. Defaults to the ordinary
+    # run ceiling; an authorized live qualification can name a larger bound.
+    run_ceiling: Decimal = CEILING
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +217,9 @@ class PreparedCase:
 
     case_label: str
     input: RunInput
+    qualification_set_sha256: str
+    provider: str
+    model: str
 
 
 def prepare(
@@ -225,10 +235,15 @@ def prepare(
     Existing helpers commit separately; earlier preparations survive later failure.
     """
     assert_measurable(qualification)
-    _distinct(qualification)
+    assert_unambiguous(qualification)
     _answerable(qualification)
     routes = [
-        resolve_route(harness.catalog, case.profile_id, case.selection_id)
+        resolve_route(
+            harness.catalog,
+            case.profile_id,
+            case.selection_id,
+            extensions=RouteExtensions(model_extension=case.model_extension),
+        )
         for case in qualification.cases
     ]
     titles = [
@@ -238,7 +253,10 @@ def prepare(
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     _subjects(qualification)
+    provider = _provider_identity(harness.completions)
+    model = _model_identity(harness.completions)
     require_idle(conn)
+    set_digest = qualification_set_digest(qualification)
     prepared = []
     try:
         with execution_reads(conn):
@@ -246,7 +264,7 @@ def prepare(
         for case, title, route in zip(qualification.cases, titles, routes, strict=True):
             case_id = create_case(conn, title)
             admit_pack(conn, blobs, case_id=case_id, documents=list(case.documents))
-            run_id = start_run(conn, case_id)
+            run_id = start_run(conn, case_id, budget_ceiling=harness.run_ceiling)
             conn.commit()
             source = snapshot_source_set(conn, case_id)
             pin_route(conn, run_id, route)
@@ -260,6 +278,9 @@ def prepare(
                         harness.bundle,
                         subject=case.subject,
                     ),
+                    set_digest,
+                    provider,
+                    model,
                 )
             )
     except psycopg.Error:
@@ -290,13 +311,22 @@ def perform(
     # is empty, and "it has no documents" is the more useful of two true
     # answers about the same defect.
     assert_measurable(qualification)
-    _distinct(qualification)
+    assert_unambiguous(qualification)
     _answerable(qualification)
+    set_digest = qualification_set_digest(qualification)
+    provider = _provider_identity(harness.completions)
+    model = _model_identity(harness.completions)
     if len(prepared) != len(qualification.cases) or any(
         type(item) is not PreparedCase
         or type(item.input) is not RunInput
         or type(item.case_label) is not str
+        or type(item.qualification_set_sha256) is not str
+        or type(item.provider) is not str
+        or type(item.model) is not str
         or item.case_label != case.label
+        or item.qualification_set_sha256 != set_digest
+        or item.provider != provider
+        or item.model != model
         or type(item.input.run_id) is not UUID
         or type(item.input.case_id) is not UUID
         for case, item in zip(qualification.cases, prepared, strict=True)
@@ -327,16 +357,67 @@ def perform(
             break
 
     if any(record.stopped is not None for record in performed):
-        return PerformedSet(tuple(performed), None)
-    with execution_reads(conn):
-        matrix = build_matrix(
-            conn,
-            blobs,
-            harness.bundle,
-            qualification=qualification,
-            runs={record.case_label: record.run_id for record in performed},
-        )
-    return PerformedSet(tuple(performed), matrix)
+        result = PerformedSet(tuple(performed), None)
+    else:
+        with execution_reads(conn):
+            matrix = build_matrix(
+                conn,
+                blobs,
+                harness.bundle,
+                qualification=qualification,
+                runs={record.case_label: record.run_id for record in performed},
+            )
+        result = PerformedSet(tuple(performed), matrix)
+    _persist_performed(conn, prepared, result)
+    return result
+
+
+def _persist_performed(
+    conn: StoreConnection,
+    prepared: tuple[PreparedCase, ...],
+    performed: PerformedSet,
+) -> None:
+    """Persist the exact result before a caller can discard its run database."""
+    from server.qualification.store import (
+        performed_evidence,
+        record_evidence,
+        record_performed,
+    )
+
+    try:
+        snapshot = performed_evidence(prepared=prepared, performed=performed)
+        record_performed(conn, snapshot)
+        record_evidence(conn, snapshot.evidence)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+
+
+def _provider_identity(provider: object) -> str:
+    """The configured provider, never a response-body claim."""
+    if type(provider) is OpenRouter and provider.upstream_provider is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    value = (
+        provider.qualification_identity
+        if type(provider) is OpenRouter
+        else getattr(provider, "provider", None)
+    )
+    identity = producer_identifier(value, limit=256)
+    if identity is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return identity
+
+
+def _model_identity(provider: CompletionProvider) -> str:
+    """The configured model a prepared qualification set is allowed to call."""
+    model = producer_identifier(provider.model, limit=256)
+    if model is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return model
 
 
 def _eligible(
@@ -366,9 +447,17 @@ def _eligible(
         (pin.case_id, pin.source_version),
     ).fetchall()
     if (
-        owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
+        owner
+        != (
+            BoundaryText.of(case.label, limit=_LABEL_LIMIT).value,
+            harness.run_ceiling,
+        )
         or (route.profile_id, route.selection_id)
         != (case.profile_id, case.selection_id)
+        or (
+            any(node.module_id == MODEL_MODULE for node in route.nodes)
+            != case.model_extension
+        )
         or pin.research_json is not None
         or sorted(members)
         != sorted(
@@ -388,8 +477,8 @@ def _affordable(
 
     Invariant 8 one level up, and the same shape: a ceiling refuses the
     operation that would breach it *before* it happens. Each run opened here
-    takes `server.store.budget.CEILING`, so what the set may spend is that times
-    the number of cases.
+    takes `Harness.run_ceiling`, so what the set may spend is that times the
+    number of cases.
 
     Compared against the worst case rather than an estimate of the likely one.
     A set admitted because it would *probably* come in under would be a
@@ -398,13 +487,16 @@ def _affordable(
     the guess was good.
     """
     validate_spend(harness.ceiling)
-    if Fraction(CEILING) * len(qualification.cases) > Fraction(harness.ceiling):
+    validate_spend(harness.run_ceiling)
+    if Fraction(harness.run_ceiling) * len(qualification.cases) > Fraction(
+        harness.ceiling
+    ):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
     # Every node of a case's route reserves one worst case against that run's
     # ceiling; a route that cannot fit would pay for calls it cannot finish.
     # A floor, not a bound: a refused analysis reserves again.
     call = Fraction(worst_case(harness.price))
-    if any(call * len(route.nodes) > Fraction(CEILING) for route in routes):
+    if any(call * len(route.nodes) > Fraction(harness.run_ceiling) for route in routes):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
 
 
@@ -419,18 +511,6 @@ def _subjects(qualification: QualificationSet) -> None:
     for case in qualification.cases:
         if not valid_subject(case.subject):
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-
-
-def _distinct(qualification: QualificationSet) -> None:
-    """Two cases under one label make "the answer" depend on read order.
-
-    `build_matrix` refuses this too, and only once every case has been paid
-    for — which is what the paragraph above promises does not happen. Checked
-    here so that promise is true.
-    """
-    labels = [case.label for case in qualification.cases]
-    if len(set(labels)) != len(labels):
-        raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
 
 
 def _perform_one(
@@ -603,5 +683,7 @@ def _answerable(qualification: QualificationSet) -> None:
     """
     for case in qualification.cases:
         carried = {sha256(document.data).hexdigest() for document in case.documents}
-        if any(expect.document_sha256 not in carried for expect in case.expects):
+        if any(expect.document_sha256 not in carried for expect in case.expects) or (
+            case.forecast is not None and not case.model_extension
+        ):
             raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)

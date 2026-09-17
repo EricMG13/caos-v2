@@ -11,7 +11,7 @@ import { SECTIONS, type AnyDocument, type Severity } from "@/wire";
 
 const FIXTURES = `${resolve(process.cwd(), "fixtures")}/`;
 // Every enabled section reads the v1 wire (brief 4.1, decision 9; slices
-// 4.1h-j): its document's `chrome` carries only `{subject, served_role}`
+// 4.1h-k): its document's `chrome` carries only `{subject, served_role}`
 // (composed into the legacy `Chrome` shape by `@/chrome/compose`, not stored
 // on the fixture itself), so the generic legacy-chrome fixtures this file
 // scans are exactly the five disabled sections' own.
@@ -133,9 +133,8 @@ describe("the chrome", () => {
       Object.values(record).forEach(walk);
     };
     for (const [, doc] of documents()) walk(doc);
-    // A scan that found nothing would pass every assertion below. Run frames
-    // are v1 since 4.1i and carry no refusals; 4.1j retires this legacy scan.
-    expect(clauses.length).toBeGreaterThan(10);
+    // The remaining legacy fixtures still prove the scanner itself is live.
+    expect(clauses.length).toBeGreaterThan(0);
     for (const clause of clauses) {
       // Every surface reads it as "Clears when " + clause + ".".
       expect(clause).toMatch(/^[a-z]/);

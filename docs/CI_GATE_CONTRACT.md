@@ -65,8 +65,12 @@ the exact eventual PR head; local checks do not post those statuses.
 - Image build, Trivy scan coverage and no fixable HIGH/CRITICAL findings.
   `image` is not in the hosted required-check list but remains a workflow and
   plan obligation.
-- Live provider job is scheduled/dispatched, never on push/PR. Do not invoke
-  paid tests or workflow dispatch without explicit spend authorization.
+- Live provider job is scheduled/dispatched, never on push/PR. It requires the
+  secret `OPENROUTER_API_KEY` plus repository variables `OPENROUTER_MODEL`,
+  optional `OPENROUTER_PROVIDER` and `OPENROUTER_REASONING_EFFORT`,
+  `CAOS_MODEL_PRICE` (dated per-token price) and
+  `CAOS_LIVE_BUDGET_CEILING` (positive per-run ceiling). Do not invoke paid
+  tests or workflow dispatch without explicit spend authorization.
 - Preserve action SHA pins, job timeouts and superseded-run cancellation.
 
 Existing CI run 34695306468 succeeded for baseline engineering/image jobs;

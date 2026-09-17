@@ -12,12 +12,17 @@ import {
   V1_SHAPES,
   WireIdentityError,
   WireShapeError,
+  parse,
   parseAnalysisDocument,
+  parseModelDocument,
+  parseReportDocument,
+  parseCommitteeDocument,
   parseCaseCreated,
   parseDirectoryDocument,
   parseGateApproved,
   parseGatePreviewDocument,
   parsePageDocument,
+  parseQualificationRead,
   parseRefusalBody,
   parseRunCreated,
   parseRunInputPinned,
@@ -37,6 +42,127 @@ const OTHER_RUN = "11111111-2222-4333-8444-555555555555";
 const AT = "2026-09-14T10:00:00.123456Z";
 const SHA = "a".repeat(64);
 const SOURCE = "216ec234-c70c-4a5f-8ae6-f4a0262bbe84";
+
+test("Report and Committee bind case/run/revision and exact receipt identity", () => {
+  const body = {
+    case_id: CASE,
+    displayed_run_id: RUN,
+    revision_id: SOURCE,
+    payload_sha256: SHA,
+    case_title: "Issuer",
+    artifacts: [],
+    narrative: [[{ text: "<script>plain text</script>", figure: null }]],
+  };
+  const expected = { caseId: CASE, runId: RUN, revisionId: SOURCE };
+  const report = parseReportDocument(envelope(body, { case_id: CASE, title: "Issuer" }));
+  expect(report.body.narrative).toEqual(body.narrative);
+  const filed = {
+    ...body,
+    state: "filed",
+    signed_by: [CASE],
+    frozen_by: RUN,
+    filed_by: SOURCE,
+    receipt: {
+      case_id: CASE,
+      run_id: RUN,
+      revision_id: SOURCE,
+      payload_sha256: SHA,
+      signed_by: CASE,
+      frozen_by: RUN,
+      filed_by: SOURCE,
+      renderer_sha256: SHA,
+      filed_event_sha256: SHA,
+    },
+  };
+  const committee = parseCommitteeDocument(envelope(filed, { case_id: CASE, title: "Issuer" }));
+  for (const doc of [report, committee]) {
+    expect(() => requireIdentity(doc, expected)).not.toThrow();
+    for (const changed of [
+      { caseId: OTHER_CASE },
+      { runId: OTHER_RUN },
+      { revisionId: OTHER_RUN },
+    ]) {
+      expect(() => requireIdentity(doc, { ...expected, ...changed })).toThrow(WireIdentityError);
+    }
+  }
+  const wrong = parseCommitteeDocument(
+    envelope(
+      { ...filed, receipt: { ...filed.receipt, revision_id: OTHER_RUN } },
+      { case_id: CASE, title: "Issuer" },
+    ),
+  );
+  expect(() => requireIdentity(wrong, expected)).toThrow(WireIdentityError);
+  for (const invalid of [
+    { ...filed, state: "frozen", filed_by: null },
+    { ...filed, state: "frozen", receipt: null },
+    { ...filed, receipt: null },
+    { ...filed, filed_by: null },
+    { ...filed, receipt: { ...filed.receipt, frozen_by: OTHER_RUN } },
+    { ...filed, receipt: { ...filed.receipt, filed_by: OTHER_RUN } },
+    { ...filed, receipt: { ...filed.receipt, signed_by: OTHER_RUN } },
+  ]) {
+    expect(() =>
+      requireIdentity(
+        parseCommitteeDocument(envelope(invalid, { case_id: CASE, title: "Issuer" })),
+        expected,
+      ),
+    ).toThrow(WireIdentityError);
+  }
+  expect(() =>
+    parseReportDocument(envelope({ ...body, html: "unsafe" }, { case_id: CASE, title: "Issuer" })),
+  ).toThrow(WireShapeError);
+  expect(() =>
+    parse(V1_SHAPES.NarrativeFigure, {
+      route_node_id: "CP-0",
+      citation_index: -1,
+      document_sha256: SHA,
+      page: 1,
+      matched_text: "figure",
+    }),
+  ).toThrow(WireShapeError);
+});
+
+test("Model is closed and binds the displayed run independently of latest", () => {
+  const document = {
+    chrome: {
+      subject: { case_id: CASE, title: "Issuer" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: CASE,
+      latest_run_id: OTHER_RUN,
+      displayed_run_id: RUN,
+      subject: null,
+      forecast: null,
+      unavailable_reason: "NO_ACCEPTED_FORECAST",
+    },
+    observed_at: AT,
+    observed_empty: true,
+    status: "partial",
+    notes: [],
+  };
+  const parsed = parseModelDocument(document);
+  expect(() => requireIdentity(parsed, { caseId: CASE, runId: RUN })).not.toThrow();
+  expect(() => requireIdentity(parsed, { caseId: CASE, runId: OTHER_RUN })).toThrow(
+    WireIdentityError,
+  );
+  expect(() => requireIdentity(parsed, { caseId: OTHER_CASE, runId: RUN })).toThrow(
+    WireIdentityError,
+  );
+  expect(() => parseModelDocument({ ...document, arbitrary: "payload" })).toThrow(WireShapeError);
+  expect(() =>
+    parseModelDocument({ ...document, body: { ...document.body, unavailable_reason: "fixture" } }),
+  ).toThrow(WireShapeError);
+  const ratio = {
+    name: "metrics.interest_coverage",
+    value: null,
+    unavailable_reason: "ZERO_OR_NEGATIVE_DENOMINATOR",
+  };
+  expect(parse(V1_SHAPES.ModelValue, ratio)).toEqual(ratio);
+  expect(() => parse(V1_SHAPES.ModelValue, { ...ratio, value: 6 })).toThrow(WireShapeError);
+  expect(() => parse(V1_SHAPES.ModelValue, { ...ratio, value: "NaN" })).toThrow(WireShapeError);
+});
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -296,6 +422,28 @@ function refuses(parse: () => unknown, path?: string): void {
 }
 
 describe("the v1 wire contract", () => {
+  test("test_parseQualificationRead_refuses_undeclared_or_unbound_fields", () => {
+    const current = {
+      evidence_sha256: SHA,
+      state: "QUALIFIED",
+      qualification_set_sha256: "b".repeat(64),
+      performed_sha256: "c".repeat(64),
+      build_id: "build",
+      adapter_version: "adapter",
+      provider: "openrouter",
+      model: "model",
+      reviewer: "Reviewer",
+      decided_at: AT,
+      expires_at: "2026-09-16T10:00:00Z",
+    };
+    expect(parseQualificationRead(current).state).toBe("QUALIFIED");
+    refuses(() => parseQualificationRead({ ...current, extra: true }), "$");
+    refuses(
+      () => parseQualificationRead({ ...current, evidence_sha256: "bad" }),
+      "$.evidence_sha256",
+    );
+  });
+
   test("test_v1_shapes_equal_the_committed_backend_schema", () => {
     const defs = committed();
     const all = { ...V1_SHAPES, ...V1_COMMAND_SHAPES };
@@ -537,6 +685,7 @@ describe("the v1 wire contract", () => {
       "run_terminal",
       "sources_changed",
       "runs_changed",
+      "filing_changed",
     ]);
   });
 

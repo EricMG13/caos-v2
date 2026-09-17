@@ -21,6 +21,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
+from hashlib import sha256
 from typing import Any, NoReturn
 from uuid import UUID
 
@@ -33,18 +34,37 @@ from server.refusals import Refusal, RefusalCode
 # Both sets are enforced together at one point, `gates.require_adapter_route`
 # (execution input and acceptance); the readers below check modules alone.
 # Extending the adapter means extending both, with the contract tests.
-ADAPTER_MODULES = frozenset({"CP-0", "CP-L10", "CP-5"})
+ADAPTER_MODULES = frozenset(
+    {
+        "CP-0",
+        "CP-L10",
+        "CP-5",
+        "CP-1",
+        "CP-4",
+        "CP-1C",
+        "CP-2A",
+        "CP-3D",
+        "CP-2",
+        "CP-2G",
+        "CP-3",
+        "CP-CF",
+    }
+)
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
 # work item 6): adapter modules on any other pathway stay disabled.
-ADAPTER_ROUTES = frozenset({("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")})
+ADAPTER_ROUTES = frozenset(
+    {("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE"), ("FULL_CREDIT_32", "RELATIVE_VALUE")}
+)
 GATE_MODULE = "CP-0"
 ZERO_SHA256 = "0" * 64
 # The vendor's frozen reader limits (CREDIT_OS_RUNTIME_LIMITS_v1).
 MAX_FILE_BYTES = 26_214_400
 MAX_FRONTMATTER_BYTES = 262_144
 MAX_LINE_BYTES = 65_536
-# Characters BoundaryText keeps that still make one text read as two.
-_INVISIBLE = frozenset("\u2028\u2029\ufeff")
+# Characters BoundaryText keeps that still make one text read as two. Public
+# because the prompt builder must drop what this refuses, so that a filename
+# the host renders can always be quoted back (invocation._printable).
+INVISIBLE = frozenset("\u2028\u2029\ufeff")
 _UPGRADE_KEYS = ("credit_os_parent_run_id", "credit_os_upgrade_source_sha256")
 
 
@@ -131,7 +151,7 @@ def invocation_fields(
             run_id=identity.run_id,
             profile_id=identity.profile_id,
             selection_id=identity.selection_id,
-            route_node_id=identity.route_node_id,
+            route_node_id=_envelope_node(identity),
             module_id=identity.module_id,
             module_name=identity.module_name,
             expected_output_filename=expected_filename(identity),
@@ -143,6 +163,14 @@ def invocation_fields(
             ordinal=identity.ordinal,
         ),
     )
+    if identity.module_id == "CP-CF":
+        # The vendor grammar stops at stage 99. Validate its shared envelope
+        # fields there, then bind our declared stage-100 host occurrence.
+        envelope["route_node_id"] = identity.route_node_id
+        seed = "\x00".join(
+            (identity.run_id, identity.route_node_id, str(identity.ordinal))
+        )
+        envelope["attempt_id"] = "ATT-CP-CF-" + sha256(seed.encode()).hexdigest()[:16]
     return {
         "module_id": identity.module_id,
         "module_name": identity.module_name,
@@ -173,6 +201,15 @@ def invocation_fields(
     }
 
 
+def _envelope_node(identity: HostIdentity) -> str:
+    if identity.module_id != "CP-CF":
+        return identity.route_node_id
+    expected = f"RN-{identity.profile_id}-{identity.selection_id}-100-CP-CF"
+    if identity.route_node_id != expected:
+        raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
+    return f"RN-{identity.profile_id}-{identity.selection_id}-99-CP-CF"
+
+
 def _text(markdown: bytes) -> str:
     malformed = Refusal(RefusalCode.HANDOFF_MALFORMED)
     if len(markdown) > MAX_FILE_BYTES:
@@ -183,7 +220,7 @@ def _text(markdown: bytes) -> str:
         text = None
     # Canonical Markdown is LF-only; a CR would let the host and the vendor
     # disagree about where lines, and so the front matter, end.
-    if text is None or "\r" in text or _INVISIBLE.intersection(text):
+    if text is None or "\r" in text or INVISIBLE.intersection(text):
         raise malformed
     try:
         clean = BoundaryText.of(text, limit=len(text)).value == text
@@ -289,14 +326,24 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     ) or any(fields.get(key) is not None for key in _UPGRADE_KEYS):
         raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
 
-    violations = _or_refuse(
-        RefusalCode.HANDOFF_INCOMPLETE,
-        lambda: contract.completeness_check.check(
-            skill.decode("utf-8"), text, identity.module_id
-        )[0],
+    violations = (
+        []
+        if identity.module_id == "CP-CF"
+        else _or_refuse(
+            RefusalCode.HANDOFF_INCOMPLETE,
+            lambda: contract.completeness_check.check(
+                skill.decode("utf-8"), text, identity.module_id
+            )[0],
+        )
     )
     if violations:
         raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
+    if identity.module_id == "CP-CF":
+        from server.methodology.forecast import forecast_projection
+
+        forecast_projection(markdown)
+        if fields["committee_status"] not in {"Draft Only", "Restricted"}:
+            raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
     readiness = (
         _readiness(contract, catalog, text, gate_expects)
         if identity.module_id == GATE_MODULE
@@ -415,13 +462,44 @@ def _body_words(text: str) -> list[str]:
     return "\n".join(lines[closing + 1 :]).split()
 
 
+# Marks a body may put around a quotation without making it a different quote.
+_QUOTATION = "\"'\u2018\u2019\u201c\u201d\u201e\u201f\u00ab\u00bb"
+
+
 def _quoted(words: list[str], quote: str) -> bool:
+    """Whether the body quotes this text as whole tokens, typography aside.
+
+    A module writes its Evidence Trace as prose, and prose puts quotation marks
+    around a quotation: the body's tokens are then `\u201cRecorded` and `p1\u201d`
+    where the quote's are `Recorded` and `p1`. Refusing that is a host defect
+    recorded as the model's answer, which is what the CP-L10 attempt of the
+    second paid Terra run died of.
+
+    Only the two outer tokens are stripped, and only of quotation marks, so the
+    quote's own words and its internal punctuation still have to match exactly.
+    Nothing here widens what may be *cited*: `verify_citations` anchors against
+    the document's own tokens and is untouched. This decides only whether the
+    module quoted, in its own narrative, what it says it quoted.
+    """
     # ponytail: linear scan per citation; an index when bodies grow large.
     wanted = quote.split()
-    return any(
-        words[i : i + len(wanted)] == wanted
-        for i in range(len(words) - len(wanted) + 1)
-    )
+    if not wanted:
+        return False
+    span = len(wanted)
+    for start in range(len(words) - span + 1):
+        window = words[start : start + span]
+        if window == wanted:
+            return True
+        if window[1:-1] != wanted[1:-1]:
+            continue
+        first = window[0].lstrip(_QUOTATION)
+        last = window[-1].rstrip(_QUOTATION)
+        if span == 1:
+            first = first.rstrip(_QUOTATION)
+            last = first
+        if first == wanted[0] and last == wanted[-1]:
+            return True
+    return False
 
 
 def parse_response(

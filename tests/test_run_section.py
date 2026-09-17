@@ -139,7 +139,8 @@ def test_a_case_with_no_run_is_observed_empty(
         "runs": [],
         "run": None,
         "route_choices": [
-            {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"}
+            {"profile_id": "FULL_CREDIT_32", "selection_id": "RELATIVE_VALUE"},
+            {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"},
         ],
     }
     actions = {str(view.action): view.refusal for view in document.chrome.actions}

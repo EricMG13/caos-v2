@@ -5,17 +5,17 @@ This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/REPAIR_PLAN.md` owns phase outcomes. Historical rebuild phases and
 ignored reports cannot override those contracts.
 
-## Current checkpoint — observed 14 September 2026
+## Current checkpoint — observed 15 September 2026
 
 | Item | Recorded state |
 |---|---|
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 3 accepted at `3400b6c`** (Phase 2 `b4298dc`; records below) |
-| Latest accepted task | **Phase 3 Task 3.4 accepted at `3400b6c`** (3.1 `a8acbc6`, 3.2 `fffe5c8`, 3.3 `1bb0cfd`) |
-| Next task | Phase 4 in progress: Task 4.1 (section wire, §50) and Task 4.3 (worker, §49) integrated through `d0b9dd8`; 4.2 (commands, §51), 4.4 (events and evidence pages, §52) and 4.5 (edge, health, image, journey, §53) open per their briefs in `docs/superpowers/plans/2026-09-14-phase-4-task-4.*-brief.md` |
-| Phase | Phase 3 authorized by the user's goal of 13 September 2026 |
+| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
+| Latest accepted task | **Two Terra v3 qualification runs, a complete green `make check`, and three defects they found. The first finished its route (3 artifacts, 14 citations all anchored, `$0.82248325`); the second was refused by our own reader and exposed it. Phase 6 remains release-blocked.** |
+| Next task | Author CP-0's replacement expectation from its own contract — not from what a previous run cited — and re-freeze the set. Then one authorized run against digest `ae70850d…`, then the verdict decision. No result may be represented as qualified without an external authenticated verdict over a `complete` snapshot. |
+| Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
@@ -23,11 +23,266 @@ Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
 
+## Phase 5 acceptance record — 15 September 2026
+
+- **Candidate:** `ca65ec7`; GitNexus index-only refreshed at this commit
+  (8,603 nodes, 22,018 edges, 373 clusters, 300 flows; status up to date).
+- **Delivered:** bounded authenticated Model, Report and Committee reads;
+  exact saved revisions and filing receipts; CP-CF-aware projections;
+  `filing_changed` invalidation; migration `0017` seals legitimate legacy
+  filing classifications and fails closed on receiptless post-migration data;
+  fresh per-browser journey stacks; static, keyboard-scrollable saved artifact
+  text that preserves canonical whitespace and contains wide rows.
+- **Complete gate:** provider variables stripped, `make check` exit 0: 2,817
+  backend tests, 21 races, clean lint/type/Bandit/pip-audit/gitleaks, 225
+  frontend units, zero accessibility violations, 90 workbench tests,
+  production-image checks, and 13 journeys each in Chromium (5.4m), Firefox
+  (5.5m), and WebKit (5.8m).
+- **Whole-phase reviews:** independent xhigh confidence and adversarial reviews
+  both PASS with no P0/P1/P2; see
+  [confidence](reviews/phase-5-confidence-review.md) and
+  [adversarial](reviews/phase-5-adversarial-audit.md).
+- **Next:** implement Phase 6.1–6.4 offline, then stop for the explicitly
+  authorized, capped live 6.5 validation.
+
 Accepted predecessor evidence is retained in Git: Task17d2 application/proofs
 at `f8cd738`/`ceabf9f`, Task17d3 ending with `1e720db`, and Task17e ending
 with `acf334d`. The tracked `CLAUDE.md` at `694660b` records acceptance
 through Task17e. Original logs and detailed reviews remain local supplements;
 this documentation update has not rerun their gates or accepted new code.
+
+## Phase 6 offline implementation checkpoint — 15 September 2026
+
+- **State:** Task 6.1, the verdict-clock guard, and the deterministic portion
+  of Task 6.2 are implemented and verified locally; Phase 6 is **not
+  accepted**.  The next accepted checkpoint still requires the restricted/PDF
+  production journey, Tasks 6.3–6.4, and all end-of-phase gates and reviews.
+- **Committed guards:** `5524f2c` binds preparation to the exact qualification
+  set; `e55ab19` additionally binds provider and model; `5cedb95` rejects
+  duplicate case labels and duplicate citation answer keys; `373ee07` and
+  `032e497` reject future-dated verdicts and validate the supplied review
+  clock before comparison.  The execution and qualification-focused pytest
+  suites, Ruff format/check, diff check, and pre-commit hooks passed for each
+  slice.  No provider credentials or live calls were used.
+- **Index evidence:** GitNexus was incrementally refreshed at `032e497`
+  (8,617 nodes, 22,063 edges, 372 clusters, 300 flows).  Its caller trace
+  confirms that existing governed writes and commands are case-scoped, while
+  a qualification verdict covers a complete, potentially multi-case set;
+  do not bind one to an arbitrary application case merely to reuse that API.
+- **Deterministic conclusion key:** `994b004` adds a closed CP-CF forecast key
+  (independent value, period/scenario, currency/scale, perimeter, QA,
+  limitations and gate-readiness checks), its on-disk form, exact host-route
+  extension binding, and regressions for wrong amount, unit and perimeter.
+  It reads the accepted artifact through the existing host recomputation seam,
+  never model prose.  CP-CF is a declared host extension of the enabled
+  FULL_CREDIT_32/RELATIVE_VALUE route, so a qualification case now binds the
+  extension explicitly.  The proof no longer asks vendor navigation T8 to
+  name that host-only extension; CP-CF's accepted artifact remains independently
+  proved.  Restricted/refusal examples and the real PDF production journey
+  remain required before Task 6.2 can be accepted.
+
+### Phase 6 engineering checkpoint — 15 September 2026
+
+- **Candidate:** `d4bdde5`; GitNexus refreshed at the prior source checkpoint with 8,761 nodes, 22,354 edges, 378 clusters and 300 flows.
+- **Completed offline work:** whole-set and provider/model/route binding; independent CP-CF conclusion qualification; immutable evidence and verdict migrations; current authenticated exact-evidence read; restricted Reader/PDF UI; restore probe; and cross-browser production journey coverage.
+- **Gate evidence:** `make check` passed all code, test, scan, frontend, accessibility and workbench gates before its pinned Trivy prerequisite; the verified temporary Trivy 0.70.0 completed `make image smoke-production`. Backend: 2,833 passed; races: 21 passed; frontend unit: 230 passed; workbench: 90 passed; production image: 8 passed. Firefox and WebKit subsequently passed the 14-test production journey after `d4bdde5`; Chromium had passed in the preceding smoke run.
+- **Phase-end reviews:** [confidence](reviews/phase-6-confidence-review.md) and [adversarial](reviews/phase-6-adversarial-audit.md). The browser journey's transient-success assertion was the sole confirmed defect and is repaired in `d4bdde5`.
+- **Not accepted as release qualification:** no explicit live-provider authorization was supplied, so 6.5 was not run; GitHub-hosted required checks have not been confirmed for this candidate. Keep release status blocked until both are satisfied.
+- **CI size gate:** `PR_BASE=eebb1327a5b77ea75775e793b420251595336f29 make check-size` currently fails at 75,566 counted changed lines against `main` (ceiling: 800). This accumulated repair branch must be split into reviewable PRs before it can satisfy the repository CI policy.
+- **Application-wide adversarial audit:** [audit](reviews/application-adversarial-audit.md) refreshed GitNexus at `5054d7c` and reviewed every deployable trust boundary. It found no new confirmed in-repository exploit, but independently confirms the live-qualification, hosted-check, trusted-edge and PR-size blockers above.
+- **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
+
+### Phase 6 qualification checkpoint — 15 September 2026
+
+### Phase 6 second run, three fixes, and a re-cast key — 16 September 2026
+
+- **The second run failed on us, not on the model.** CP-L10 answered in full —
+  33 KB, every section, five citations all present in its own Markdown — and
+  `parse_response` refused `HANDOFF_MALFORMED` because the Evidence Trace wrote
+  them as prose does, in quotation marks: the whole-token rule compared `“The`
+  against `The`. DeepSeek's three attempts are recorded in the same words
+  ("quoted none of them in the body"), so four paid attempts across two models
+  have been blamed on the corpus for a defect in our reader. Fixed at
+  `7a12c6d` and verified against the stored answer that died, which now parses
+  with its five citations. `verify_citations` is untouched.
+- **Two Phase 6 gaps closed** (`cf6905d`): a billed call whose diagnostic body
+  could not be stored is no longer silently billed again — `unexplained_charge`
+  parks the run `CALL_OUTCOME_UNEXPLAINED` for an operator, with `holds_lease`
+  keeping the lease answer first; and an admitter-chosen filename no longer
+  reaches the prompt carrying characters the host's own reader refuses. The
+  third, the post-bill original recheck, is kept rather than removed, and the
+  ledger says why instead of promising a deletion.
+- **The driver is in the tree.** `scripts/qualify.py` replaces the script that
+  lived in `/private/tmp` and nearly took two runs' evidence with it. It
+  refuses before spending when the environment resolves to an unexpected
+  profile, and prints its database and blob root before the first call.
+- **The answer key was re-cast.** CP-0's borrowing-capacity expectation moved
+  to CP-5: it is a credit fact, not a readiness fact, and CP-0 is
+  `SourceReadiness`. The set digest moved `ec84bf8b…` → `ae70850d…`, so the two
+  runs performed are not comparable to anything after it. CP-0 now carries no
+  expectation and one is owed, authored from its contract rather than from what
+  a run cited.
+- **Nothing has been run against the new set.** Spend so far: `$1.33`.
+
+### Phase 6 v3 qualification result — 16 September 2026
+
+- **Gates:** a complete `make check` is green on `b456966` — lint, mypy over 225
+  files, 2865 tests, 21 race tests, bandit/pip-audit/gitleaks, the frontend half
+  (230 unit, a11y, 90 workbench, both builds), the image half with the pinned
+  Trivy 0.70.0, and the production smoke stack (8 image tests, 14 journey tests
+  on all three engines).
+- **Reviews:** the Phase 6 confidence review and adversarial audit were rerun
+  against the v3 tree on Fable 5.1. Both cleared it to spend, each with a
+  condition, and both conditions were met before the call: `complete` now means
+  proven, and the worker's blob-fault reclassification was reverted. Findings and
+  remediation are in `docs/reviews/phase-6-*.md`; three accepted gaps are
+  ledgered in `CLAUDE.md`.
+- **Run:** `e0e101b5-a908-4b9b-913d-45184a6f3a54` completed its route. CP-0,
+  CP-L10 and CP-5 each answered on the first attempt; fourteen citations, all
+  re-located by the host; no refusal row; `$0.82248325` of a `$22.00` ceiling.
+  The confidence review's predicted truncation risk did not materialise.
+- **Verdict:** not qualified. Two of three answer keys met; CP-0 missed the
+  borrowing-capacity statement its key names, having cited four other blocks from
+  the correct documents. A selection miss, not a protocol failure.
+  `qualification_performed.complete` is false, `qualification_verdicts` is empty,
+  and nothing may be represented as qualified. Full record in
+  [result](../qualification/vmo2-fy2025/RESULT.md).
+
+### Phase 6 v3 CP-0 provenance checkpoint — 15 September 2026
+
+- **Cause and repair:** Terra's controlled CP-0 source-readiness block exposed
+  an adapter omission, not a provider incompatibility. The v3 adapter derives
+  CP-0's source-preparation record from the exact pinned `RunInput` and
+  `SourceSet`: immutable-original blob identity, source root, extraction
+  manifest and host-pinned context. The record is tagged non-citable; later
+  modules do not receive it.
+- **Shared-boundary enforcement:** the shared prompt builder rejects an absent,
+  extraneous or source-mismatched `SourceSet`; CP-0 alone receives the source
+  preparation. Canonical acceptance and replay recheck originals. Every typed
+  blob/store fault releases the attempt for safe billed-response replay rather
+  than recording an irrecoverable refusal.
+- **Regression evidence:** focused CP-0 prompt/canonical/upstream suites pass
+  (62 tests), including missing original before transport, original loss after
+  billing, blob restoration plus one billed replay, and direct-builder source
+  context omission/mismatch. Full local gate and end-of-phase reviews are
+  being run against this exact v3 tree before the authorized call.
+- **Qualification authority:** the user authorized one new `openai/gpt-5.6-terra`
+  call via `openrouter/openai/flex/high/65536`, using the unchanged frozen
+  two-document VMO2 set and the existing `$22.00` ceiling. It is a new
+  materially changed v3 candidate; the historical v2 Terra block has no
+  verdict and cannot be reused. Do not retry or alter the corpus without fresh
+  authorization and a newly frozen qualification identity.
+
+- **Candidate:** provider-profile and canonical-I/O remediation committed at
+  `f95e8ba`; this handoff update follows as documentation only.
+- **Authorized profile:** DeepSeek V4 Pro 0813 through
+  `openrouter/ionstream/xhigh`, the frozen VMO2 FY2025 public corpus,
+  `canonical-markdown-v2`, and a `$22.00` ceiling.
+- **Result:** run `62307d9b-f2d4-49f3-b015-82fea3b07298` stopped at CP-0 as
+  `CITATION_NOT_DELIVERED`. Generation
+  `gen-1789475926-OwNgVKf0G7QapLweplaL` used 6,286 native reasoning tokens,
+  finished with `stop`, and cost `$0.177133888`. No downstream module,
+  artifact, proof, qualification evidence or verdict exists. See the
+  [result](../qualification/vmo2-fy2025/RESULT.md) and §58.
+- **Compatibility conclusion:** fallback routing, absent reasoning and
+  truncation are ruled out for this run. This profile remains unqualified for
+  the current one-shot canonical handoff contract; the evidence does not show
+  that every DeepSeek deployment is incapable of the workflow.
+- **Remediation:** qualification now binds one lowercase OpenRouter endpoint
+  tag and reasoning effort, refuses an automatic provider pool, and advances
+  the prompt identity to v2. Prompt-only citation-candidate work no longer
+  leaks into accepted-read I/O.
+- **Local verification:** repository-wide Ruff, formatting and mypy passed;
+  the PostgreSQL-backed suite passed 2,844 tests at 95% coverage, all 22 I/O
+  budgets passed, and all 21 race tests passed. Bandit, pip-audit and gitleaks
+  passed; frontend lint/types/build, 230 units, 171 accessibility checks and 90
+  three-engine workbench tests passed. The focused prompt/citation and
+  model-budget set passed 40 tests. Image/production-journey evidence remains
+  the preceding `d4bdde5` checkpoint because this slice changes no image or UI
+  code.
+- **Reviews:** the Phase 6 [confidence](reviews/phase-6-confidence-review.md)
+  and [adversarial](reviews/phase-6-adversarial-audit.md) records include the
+  profile remediation and the accepted-read I/O fix. Their code verdict is
+  clean after remediation; release qualification remains negative.
+- **Hosted delivery:** per the user, GitHub and CI work is owned by the other
+  session and is reported passed there. This local checkpoint did not push or
+  independently re-query hosted status; the historical local size result above
+  is not the status of that separately managed delivery work.
+- **Replacement result:** Gemini 3.8 Flash at
+  `openrouter/google-ai-studio/high` was subsequently run against the same
+  frozen corpus. Run `7c9c8d60-7b42-4f38-9b42-bb4e1d1afb47`, generation
+  `gen-1789477949-PdZ0oPgEZZGQjoUQbTE1`, stopped at CP-0 as
+  `PROVIDER_OUTPUT_TRUNCATED`: 29,454 reasoning and 32,761 completion tokens,
+  `finish_reason=length`, cost `$0.25356225`. The shipped 32,768 ceiling—not
+  citation validation—was the controlling failure. No qualification evidence
+  or verdict exists.
+- **65,536 follow-up:** committed candidate `691637b` bound the changed profile
+  `openrouter/google-ai-studio/high/65536` and reached `perform()` under the
+  same `$22.00` ceiling. Its temporary collector then failed while JSON-
+  encoding the proof's `frozenset`, and cleanup deleted the disposable database
+  before run/generation/charge facts were printed. OpenRouter activity
+  reconciliation is unavailable to this account without a management key
+  (`403`). Treat the external work and its cost as indeterminate; it creates no
+  qualification evidence or verdict and must not be repeated without fresh
+authorization. The collector has been fixed to serialize proof fields
+explicitly for any future authorized run. The shared `perform()` boundary now
+also persists an immutable performed snapshot and its bound evidence row before
+it returns; retain the disposable database and matching blob root until an
+external reviewer records the verdict against the emitted evidence digest.
+- **Recovered retry:** candidate `40a13dd` completed the one authorized fresh
+  Gemini retry and retained its performed snapshot/evidence pair. Run
+  `1590edfc-a747-4c69-ae1a-06455edeb1a7`, generation
+  `gen-1789486082-I1BG57GiSspM6MntssMu`, was served by Google AI Studio,
+  finished with `stop`, used 177,062 prompt, 36,606 completion and 28,952
+  reasoning tokens, and cost `$0.270069`. CP-0 stopped as
+  `HANDOFF_MALFORMED`. Safe replay proves the closed JSON, all four delivered
+  citations and vendor Markdown were valid, but Gemini changed case and/or
+  punctuation when copying every citation into `## Evidence Trace`; no literal
+  quotation remained. The host correctly refused it. This is a model/protocol
+  incompatibility, not a provider, ceiling, evidence-retention or vendor-
+  Markdown-validation defect. Gemini has no positive qualification evidence.
+
+## Phase 4 acceptance record — 14 September 2026
+
+- **Candidate:** `codex/execute-repair-plan` at `0deb4a4`; GitNexus index-only
+  refreshed at `5657ade` (the reviewed candidate) before the exit reviews.
+- **Tasks** (briefs `docs/superpowers/plans/2026-09-14-phase-4-task-4.{1..5}-brief.md`,
+  decisions §49–§53): 4.1 section wire and 4.3 worker through `d0b9dd8`;
+  4.2 commands `1d50568`..`943f57f`; 4.4 case stream and evidence pages
+  `0a582eb`..`62a6286`; 4.5 edge, site, health, image and journey
+  `1f910bf`..`7e47a8a`, fixes `a0ca593`, `9858af7`, `0db50fa`; docs
+  `0341990`, `40e8464`, `7387536`, `5657ade`.
+- **Exit evidence:** every REPAIR_PLAN Phase 4 exit check maps to named tests
+  in [PHASE_4_EXIT_EVIDENCE.md](PHASE_4_EXIT_EVIDENCE.md).
+- **Complete gate at `0deb4a4`:** `make check` with the pinned Trivy 0.70.0 exit
+  0: backend 2573 passed, races 20 passed, lint/types/Bandit/pip-audit/gitleaks
+  clean, frontend 235 unit tests, accessibility 0 violations, 84 browser
+  workbench tests, image built and scanned, production image tests 8 passed,
+  real-stack journey 39 passed (chromium, firefox, webkit).
+- **Whole-phase confidence review:** Claude Opus 5 (`claude-opus-5`) at
+  **xhigh** with ultrathink, read back from the session record (`effort:
+  "xhigh"`, 17:38:40Z) before the review ([report](reviews/phase-4-confidence-review.md)).
+  One confirmed P2 -- an unexpected worker fault killed the process with its
+  claim held, so the run blocked the queue after each lease expiry -- fixed in
+  `b8d905f`; a pre-existing jitter-bound flake fixed in `9e6247f`; one open P3
+  (commits `5e06b92` and `75f6810` are 10 and 9 lines over the 800-line gate,
+  not rewritten on the shared branch). Backend gate after remediation: 2571
+  passed.
+- **Whole-phase adversarial audit:** same model and effort with ultrathink,
+  read back at 17:49:56Z ([report](reviews/phase-4-adversarial-audit.md)).
+  Verdict CONCERNS: one P1 (promoted) -- no pack-level extraction deadline, so
+  one writer's fifty-document pack could hold an admission request fifty
+  minutes -- fixed in `420f628` (§51 refinement, `max_pack_seconds`); a P3
+  section-list drift test added in `1ca4989`; two P3 recorded (unauthenticated
+  readiness codes; the smoke credential in `compose.smoke.yaml`).
+- **Accepted limits:** the CLAUDE.md "Repair Phase 4" ledger (audit payloads
+  hold digests only; receipts kept forever; demo shows no available command;
+  evidence page holds a read transaction during frame extraction; demo stream
+  frame counter shared; static shared edge token; an edge that does not strip
+  identity is undetectable; worker has no readiness; stream concurrency counts
+  against `--limit-concurrency 32`; test-edge cookie without `Secure`; smoke
+  stack and journey local, not CI, with the worker exit proven on the first
+  engine only).
 
 ## Phase 3 acceptance record — 14 September 2026
 
@@ -130,11 +385,11 @@ Run every shell command with provider variables removed. Use the workbench
 as the tool working directory:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER git status --short --branch
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER git rev-parse HEAD
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make doctor
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER gitnexus analyze --force --index-only
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER gitnexus status
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER git status --short --branch
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER git rev-parse HEAD
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make doctor
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER gitnexus analyze --force --index-only
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER gitnexus status
 ```
 
 Use installed GitNexus 1.6.9; the observed executable is under
@@ -247,7 +502,7 @@ intended diff and run the serial backend gate with the isolated URL supplied
 privately to the process and Make:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
 ```
 
 Stage explicit owned paths and run all repository staged/pre-commit checks.
@@ -256,7 +511,7 @@ fix confirmed findings, rerun affected gates and commit remediation. Only then
 run the final size gate, which measures committed `base...HEAD`:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make check-size PR_BASE="${PR_BASE:?set exact proposed PR base}"
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make check-size PR_BASE="${PR_BASE:?set exact proposed PR base}"
 ```
 
 Record the real target base and candidate hash; if the task base differs,
@@ -273,7 +528,7 @@ At phase freeze run the complete repository gate, including frontend/browser
 and image coverage:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER TRIVY="${TRIVY:?set pinned Trivy path}" IMAGE=caos-workbench:check make check
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER TRIVY="${TRIVY:?set pinned Trivy path}" IMAGE=caos-workbench:check make check
 ```
 
 Then one `confidence-review` over the whole phase/affected callers at actual

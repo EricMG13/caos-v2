@@ -73,6 +73,33 @@ class RefusalBody(BaseModel):
     clears: Text
 
 
+class QualificationState(StrEnum):
+    """What this caller can truthfully say about one exact evidence identity."""
+
+    QUALIFIED = "QUALIFIED"
+    UNQUALIFIED = "UNQUALIFIED"
+    RESTRICTED = "RESTRICTED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class QualificationRead(BaseModel):
+    """A global qualification result; it is not a case section document."""
+
+    model_config = _CLOSED
+
+    evidence_sha256: Sha256
+    state: QualificationState
+    qualification_set_sha256: Sha256 | None
+    performed_sha256: Sha256 | None
+    build_id: Id | None
+    adapter_version: Id | None
+    provider: Id | None
+    model: Id | None
+    reviewer: Text | None
+    decided_at: AwareDatetime | None
+    expires_at: AwareDatetime | None
+
+
 _C = RefusalCode
 
 # Total over `RefusalCode` (`test_every_refusal_code_has_a_constant_clearance`).
@@ -119,6 +146,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.HANDOFF_INCOMPLETE: "An operator must verify the stored handoff.",
     _C.HANDOFF_UNDECLARED_FIELD: "An operator must verify the stored handoff.",
     _C.HANDOFF_MODULE_UNSUPPORTED: "Select a route the adapter executes.",
+    _C.CALL_OUTCOME_UNEXPLAINED: "An operator must decide whether to pay again.",
     _C.ARTIFACT_RECORD_MISMATCH: "An operator must verify the stored record.",
     _C.READINESS_INVALID: "An operator must verify the gate artifact.",
     _C.READINESS_INCOMPLETE: "Retry the gate attempt.",
@@ -142,6 +170,13 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.FORECAST_RESIDUAL_UNRECONCILED: "Reconcile the balances within tolerance.",
     _C.FORECAST_DRIVER_NOT_READY: "Complete the driver first.",
     _C.DELIVERABLE_PAYLOAD_INVALID: "Correct the deliverable payload.",
+    _C.DELIVERABLE_NOT_FOUND: "Name a saved revision of this case.",
+    _C.NARRATIVE_FIGURE_UNREFERENCED: (
+        "Insert every financial figure through a validated reference."
+    ),
+    _C.NARRATIVE_REFERENCE_INVALID: (
+        "Reference a citation in the accepted revision artifacts."
+    ),
     _C.DELIVERABLE_UNCITED_FIGURE: "Cite every figure.",
     _C.DELIVERABLE_NOT_SIGNED: "Sign the deliverable first.",
     _C.DELIVERABLE_NOT_FROZEN: "Freeze the deliverable first.",
@@ -467,7 +502,7 @@ class HandoffView(BaseModel):
     screening_only: bool
     source_facts: Annotated[list[CitationView], Field(max_length=CITATIONS_MAX)]
     model_analysis: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
-    host_calculation: Literal["NONE"]
+    host_calculation: Literal["NONE", "CP_CF_FORECAST"]
 
 
 class PendingNode(BaseModel):
@@ -487,6 +522,120 @@ class AnalysisBody(BaseModel):
     subject: RunSubjectView | None
     handoffs: Annotated[list[HandoffView], Field(max_length=ROUTE_NODES_MAX)]
     pending: Annotated[list[PendingNode], Field(max_length=ROUTE_NODES_MAX)]
+
+
+class ModelValue(BaseModel):
+    model_config = _CLOSED
+
+    name: Id
+    value: Annotated[str, Field(max_length=64, pattern=r"^-?[0-9]+(\.[0-9]+)?$")] | None
+    unavailable_reason: Literal["ZERO_OR_NEGATIVE_DENOMINATOR"] | None
+
+
+class ModelPeriod(BaseModel):
+    model_config = _CLOSED
+
+    case: Text
+    period_id: Text
+    fiscal_year: Text
+    days: Annotated[str, Field(max_length=3, pattern=r"^[0-9]+$")]
+    values: Annotated[list[ModelValue], Field(max_length=40)]
+    unavailable_reason: Text | None
+
+
+class ModelForecast(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    artifact_sha256: Sha256
+    record_sha256: Sha256
+    accepted_at: AwareDatetime
+    qa_status: Id
+    limitation_flags: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    validation_warnings: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    currency: Annotated[str, Field(max_length=3, pattern="^[A-Z]{3}$")]
+    scale: Literal["units", "thousands", "millions", "billions"]
+    perimeter: Text
+    periods: Annotated[list[ModelPeriod], Field(max_length=240)]
+
+
+class ModelBody(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    latest_run_id: UUID | None
+    displayed_run_id: UUID | None
+    subject: RunSubjectView | None
+    forecast: ModelForecast | None
+    unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
+
+
+class NarrativeFigure(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    citation_index: Annotated[int, Field(ge=0)]
+    document_sha256: Sha256
+    page: Annotated[int, Field(ge=1)]
+    matched_text: Annotated[str, Field(max_length=QUOTE_CHARS)]
+
+
+class NarrativeSpan(BaseModel):
+    model_config = _CLOSED
+
+    text: Annotated[str, Field(max_length=2000)] | None
+    figure: NarrativeFigure | None
+
+
+class ReportArtifact(BaseModel):
+    model_config = _CLOSED
+
+    route_node_id: Id
+    artifact_sha256: Sha256
+    record_sha256: Sha256
+    markdown: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
+    record: Annotated[str, Field(max_length=MARKDOWN_CHARS)]
+    qa_status: Id
+    committee_status: Id
+    decision_scope: Id
+    limitation_flags: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+    validation_warnings: Annotated[list[Text], Field(max_length=FLAGS_MAX)]
+
+
+class ReportBody(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    displayed_run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    case_title: Text
+    artifacts: Annotated[list[ReportArtifact], Field(max_length=ROUTE_NODES_MAX)]
+    narrative: Annotated[
+        list[Annotated[list[NarrativeSpan], Field(max_length=64)]], Field(max_length=64)
+    ]
+
+
+class FiledReceipt(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    signed_by: UUID
+    frozen_by: UUID
+    filed_by: UUID
+    renderer_sha256: Sha256
+    filed_event_sha256: Sha256
+
+
+class CommitteeBody(ReportBody):
+    state: Literal["frozen", "filed"]
+    signed_by: Annotated[list[UUID], Field(max_length=1000)]
+    frozen_by: UUID
+    filed_by: UUID | None
+    receipt: FiledReceipt | None
 
 
 SectionStatus = Literal["complete", "partial"]
@@ -537,11 +686,40 @@ class AnalysisDocument(BaseModel):
     notes: Notes
 
 
+class ModelDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: ModelBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+class ReportDocument(BaseModel):
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: ReportBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
+class CommitteeDocument(ReportDocument):
+    body: CommitteeBody
+
+
 V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
     DirectoryDocument,
     UploadDocument,
     RunSectionDocument,
     AnalysisDocument,
+    ModelDocument,
+    ReportDocument,
+    CommitteeDocument,
 )
 
 
@@ -555,6 +733,7 @@ EventName = Literal[
     "run_terminal",
     "sources_changed",
     "runs_changed",
+    "filing_changed",
 ]
 
 
@@ -742,6 +921,7 @@ def wire_schema() -> str:
     models: tuple[type[BaseModel], ...] = (
         *V1_DOCUMENTS,
         PageDocument,
+        QualificationRead,
         *V1_COMMANDS,
         RefusalBody,
     )

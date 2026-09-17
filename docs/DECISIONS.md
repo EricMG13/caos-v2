@@ -797,6 +797,18 @@ archived compatibility; it is not inserted into the catalog route, so extraction
 and preparation do not run twice. The no-Excel/no-Word decision and archived
 workbook/publication contracts remain unchanged.
 
+`canonical-markdown-v3` makes that delivery concrete. Before CP-0 is called,
+the canonical adapter verifies every pinned member remains delivered and each
+original BlobStore object still hashes to its pinned digest. It gives CP-0 a
+tagged, non-citable `HOST SOURCE PREPARATION` context with source-set identity,
+the content-addressed original root and provenance fields. The same original
+checks recur before accepting or replaying the response. This is enough to
+establish host-held preparation facts, but it does not certify the model-owned
+P1–P8 workflow; CP-0 still authors and validates those registers. The context
+does not reach downstream modules. An original blob lost after billing is a
+store fault, not an answer verdict: the worker releases the run and replay uses
+the already billed diagnostic once the operator restores the blob.
+
 **Reason.** The current claims JSON discards the bundle's complete registers and
 cannot become canonical merely because the host stores it. Adding a second model
 summary would create competing authority; preserving the exact validated
@@ -1117,7 +1129,7 @@ accepted as a complete answer. Injected transports face the same byte checks.
 Incomplete native HTTP framing refuses `PROVIDER_UNAVAILABLE`, including when
 the received prefix happens to be valid JSON; bounded reads retain this check.
 
-Every request sets `max_completion_tokens: 32768`, `allow_fallbacks: false`, and
+Every request sets `max_completion_tokens: 65536`, `allow_fallbacks: false`, and
 `require_parameters: true`. The current [OpenRouter chat contract](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion)
 names `max_completion_tokens` and deprecates `max_tokens`; its [routing contract](https://openrouter.ai/docs/guides/routing/provider-selection)
 documents the required-parameter restriction. HTTPS-only, no redirects or retries,
@@ -1467,9 +1479,10 @@ loop or retrieval layer is added.
    compatibility block (`NAMED_LITE_OBJECT_ACCEPTED`, `accepted_lite_object_ids`)
    and holds CP-5 BLOCKED, with no call, until an accepted upstream owns one of
    those objects. Driven by vendor fields, not a hardcoded graph.
-2. **Completion cap.** `MAX_COMPLETION_TOKENS` stays 32,768; a length-truncated
-   answer refuses `PROVIDER_OUTPUT_TRUNCATED`, keeps its bill and accepts
-   nothing. Any raise needs authorized live evidence (Phase 6).
+2. **Completion cap.** The initial 32,768-token cap refused a length-truncated
+   answer, kept its bill and accepted nothing. §59 raises the current cap to
+   65,536 after authorized live evidence; length truncation still refuses and
+   accepts nothing.
 3. **Read model** labels land in the deliverable render only (source fact =
    host-verified citations; analysis = model Markdown; host calculation = none);
    API models arrive in Phase 4.
@@ -1599,3 +1612,601 @@ every stale write, and no lock is held across transport.
 **Why.** The repair plan requires versioned models, settled identity and refusal
 semantics, whole-document validation and no pretence that `/api/runs` was a
 section document.
+
+## 2026-09-14 §51 — Governed commands: one audited unit and one receipt per intent
+
+**Decision.** Phase 4 Task 4.2 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.2-brief.md`):
+
+1. **Nine endpoints under `/api/v1/cases`.** Create case (`POST`), admit
+   sources (`/{case}/sources`), create run (`/{case}/runs`, the route resolved
+   and pinned in the same unit), pin input (`/runs/{run}/input`, snapshotting
+   the case's live sources in the same unit), a gate preview (`GET
+   /runs/{run}/gates/{gate}/preview`) and approval (`POST …/approval`) for
+   `source-set` and `research-plan`, and start, retry and cancel. Start, retry
+   and cancel are the only writers of `run_work`; none calls a provider, and
+   `test_command_modules_import_no_runtime_provider_or_transport` holds that.
+2. **Authority is derived, in order.** Identity (401), path ids, the
+   `Idempotency-Key` header (400 `IDEMPOTENCY_KEY_REQUIRED`, before a body is
+   read), visibility (no live standing is the private 404), the global role (a
+   write needs ANALYST or ADMIN), the command's case floor (403
+   `NOT_AUTHORISED`), the bounded body, then the governed write, which
+   rechecks standing under the case lock; a `NOT_AUTHORISED` there answers
+   `CASE_NOT_FOUND`. No request carries an actor, case, run or approver. Create
+   case inserts the case, grants its creator ADMIN and writes `CASE_CREATED` in
+   one transaction.
+3. **Idempotency (migration 0014).** `command_requests` holds one immutable
+   receipt per `(actor_id, scope, idempotency_key)`, scope the case or the nil
+   UUID for create case, beside `request_sha256` -- canonical JSON of
+   `{command, case_id, run_id, gate, body}`, an admission's body being
+   `[{filename, sha256}]` in part order. Only committed successes are recorded,
+   as the governed unit's last domain statement, so state, run events, the
+   work row, the audit event and the receipt commit together or not at all. A
+   key already committed replays its status and receipt with
+   `Idempotency-Replayed: true` and writes nothing; under another digest it is
+   409 `IDEMPOTENCY_KEY_REUSED`. A concurrent twin finds the first receipt
+   under the case lock, or waits on the primary key's `ON CONFLICT DO NOTHING`
+   under the nil scope, rolls back its whole unit and replays. A refusal burns
+   no key.
+4. **In-transaction store entry points.** `pin_route_in`, `pin_run_input_in`,
+   `snapshot_in` and `release_gate_in` write in the caller's transaction (the
+   committing wrappers call them); `release_gate_in` takes the run lock and
+   refuses `RUN_NOT_RUNNING`. Lock order stays case, run, `run_work`.
+5. **Conflicts, not faults.** Approval re-derives the preview under the case
+   and run locks (`GATE_APPROVAL_MISMATCH`, `EVIDENCE_NOT_AVAILABLE`,
+   `RUN_NOT_RUNNING`). Start and retry classify inside the unit: no pin
+   `RUN_INPUT_NOT_PINNED`; another build, manifest or adapter
+   `ORCHESTRATION_BUILD_MOVED`; then `execution_input`; a fingerprint other
+   than the body's `COMMAND_EXPECTATION_STALE`; then `RUN_ALREADY_STARTED` or
+   `RUN_NOT_STOPPED`. Cancel of an unqueued run enqueues and requests cancel in
+   one unit. A route pair outside `ADAPTER_ROUTES` is `ROUTE_NOT_ENABLED`
+   before resolution. Each is 409; oversize is 413 `SOURCE_TOO_LARGE`.
+6. **Bodies.** JSON commands need `application/json` of at most 16 KiB; any
+   failure is 400 `REQUEST_INVALID`, never FastAPI's 422 quoting the input.
+   Admission needs `multipart/form-data` with a declared `Content-Length` no
+   larger than `max_pack_bytes` plus 1 MiB and no `Transfer-Encoding`, checked
+   from headers; after the floor the standing read's transaction is closed, the
+   form is parsed (`max_files=50`, `max_fields=0`, the stream held to its
+   declared length), only file parts named `document` are taken, each filename
+   `BoundaryText` of at most 255 characters and not blank. The receipt is
+   looked up before extraction; `prepare_pack` then extracts (the §47 child for
+   a PDF) with no transaction open and no case lock held, and one unit runs
+   `admit_prepared`, `SOURCES_ADMITTED` and the receipt. The pack is admitted
+   whole or not at all.
+7. **Dependency.** `python-multipart==0.0.32`, pinned and hashed in
+   `requirements.txt` and `requirements-dev.txt`, authorized by the user on
+   2026-09-14. Starlette's `Request.form` requires it; nothing else imports it.
+8. **Availability is advisory.** `Chrome.actions` is computed by the pure
+   functions of `server/api/commands/availability.py` from facts each read
+   already holds, in the order the command checks them, so a refused action
+   names the code its command would answer now. It grants nothing; the command
+   rechecks at commit. The Run document adds `RunView.work` and
+   `RunBody.route_choices` (at most 16, from `ADAPTER_ROUTES`).
+9. **The browser.** `frontend/src/app/commands.ts` validates every receipt and
+   preview whole. A control holds one `crypto.randomUUID()` key per intent,
+   reused only when the previous call carried the identical body and never
+   reached the server, and replaced after any answer. Controls render from
+   `chrome.actions`, present and refused rather than hidden (an absent entry is
+   `ACTION_UNPLACED`); a success refetches its section once.
+10. **CSRF, first half.** No CORS middleware, exact content types and a
+    mandatory custom header, so a cross-site simple form POST is refused before
+    any effect. Origin and `Sec-Fetch-Site` are §53's.
+
+**Why.** REPAIR_PLAN Phase 4 work item 3 asks for idempotent, server-authorized
+commands with stale-preview and changed-authority conflicts. The committing
+store pins could not share a transaction with an audit event or a receipt, and
+`admit_pack` extracted before it locked, so neither could be governed as it
+stood. A key per intent is what makes a retried request after a lost
+acknowledgement safe to send, and recording only committed successes means a
+refusal never has to be un-remembered.
+
+## 2026-09-14 §52 — One name-only case stream, and evidence pages from the token index
+
+**Decision.** Phase 4 Task 4.4 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.4-brief.md`):
+
+1. **One stream per case.** `GET /api/v1/cases/{case_id}/events?run=` needs
+   READER standing (else the private 404; a run of another case is
+   `RUN_NOT_FOUND`) and carries the case's audit actions plus the named run's
+   `run_events`. `/api/runs/{run_id}/events` is retired. Directory opens no
+   stream.
+2. **Closed names, no payloads.** `EventName` is `run_progress`,
+   `handoff_accepted`, `run_terminal`, `sources_changed`, `runs_changed` and
+   `filing_changed` (`server/api/events.py` `STREAM_NAMES`). Admission and withdrawal are
+   `sources_changed`; create run, pin input, both gate releases, start, retry
+   and cancel are `runs_changed`; sign, freeze and file are `filing_changed`,
+   which refetches Report and Committee; `CASE_CREATED` and `REVISION_SAVED`
+   are silent. A test fails a
+   `RunEvent` or audit action that is neither named nor declared silent. The
+   browser's `REFETCHES` table says which sections each name refetches;
+   revocation has no name.
+3. **Composite cursor.** Each frame is `id: {audit_seq}.{run_seq}`, `event:
+   {name}`, `data: {}`; the first frame is the cursor alone, at the heads. A
+   `Last-Event-ID` that is missing, not ASCII digits in that shape, longer than
+   sixteen digits a half, or ahead of the heads resumes from the heads, and
+   delivery is strictly after the marker. Silent rows advance the cursor.
+4. **Lifetime.** Standing is rechecked before each named frame and on each
+   poll; losing it closes the stream, and the reconnect's 404 closes the
+   browser's `EventSource`. Once the run's terminal event is delivered, or the
+   marker is past it, `run_events` is not read again (F16). The stream closes
+   at `TAIL_DEADLINE` (300 s) and the browser reconnects with its marker.
+5. **Refetch.** One fetch per section in flight; a name arriving mid-flight
+   causes exactly one more. A case or run change closes the tail, aborts the
+   fetch and discards any late answer. A refetch under the same analytical
+   identity (Run: the shown run; Analysis: the displayed run and its sorted
+   `record_sha256`s) replaces the view; another identity is held as pending
+   until Reload, while withdrawals from the latest document still mark the
+   shown one. The view mounts under `case|displayedRun`, so a refresh keeps
+   selection, and a section that throws renders `RENDER_FAILED`.
+6. **A closed stream refetches.** `EventSource` cannot tell a refusal from a
+   connection that never opened (Firefox closes both), so a closed tail
+   triggers a document read, and that answer decides: 404 is unavailable, no
+   connection is offline. Every reopen refetches the visible documents.
+7. **Evidence pages.**
+   `GET /api/v1/cases/{case}/runs/{run}/sources/{source}/pages/{page}` checks
+   identity, READER standing, then the run's case, and serves a source only
+   while it is live and a member of the run's pinned source-set version with
+   matching document, extractor identity and output digests. Anything else --
+   a page outside 1..500, a malformed source id, a withdrawn or re-extracted
+   source, bytes that no longer hash to the pin, a child that refuses -- is one
+   404 `PAGE_NOT_AVAILABLE` with no text. It is a new code because
+   `EVIDENCE_NOT_AVAILABLE` is a command's 409 (§51.5). Responses are
+   `no-store`.
+8. **A text layer, not a rendering.** The page is its `source_tokens` grouped
+   by `(region_id, line_id)` into joined text and union rectangles in stored
+   coordinates, at most 2,000 lines (else `partial`, `LIST_TRUNCATED`). The
+   frame follows the stored identity: `caos.pdfminer` v2 is the crop with y
+   down, v1 the layout crop with y up (§44.4), `caos.plain-text` its recorded
+   cells; PDF frames come from the §47 child under the admission deadline and
+   decoded-byte budget. The browser places lines and citation rectangles with
+   one `toFraction`, draws no rectangle outside the frame and says how many it
+   did not draw. The drawer is labelled "Text layer from the token index".
+9. **The drawer is bound to the visible snapshot.** It holds a citation's
+   identity `(record_sha256, source_id, page, index)` and the snapshot key it
+   was opened on, and re-resolves both each render: another key or a citation
+   no longer present closes it; a withdrawal shows in it; a pending document
+   the user has not reloaded never reaches it.
+
+**Why.** REPAIR_PLAN Phase 4 work items 1, 5 and 6. Withdrawal is an audit
+action, which a run tail never read, so a stream per case is the one that can
+say it. A payload would be a second copy of state the client is about to fetch
+under its own authority check. A page renderer would put an untrusted-PDF
+parser with its own CVE stream on a request path; the token index is the
+coordinate space citations were anchored in (invariant 11).
+
+## 2026-09-14 §53 — The edge guard, one site application, readiness and the smoke stack
+
+**Decision.** Phase 4 Task 4.5 (brief `docs/superpowers/plans/2026-09-14-phase-4-task-4.5-brief.md`):
+
+1. **The edge contract** (`server/api/edge.py`'s docstring). The operator's
+   edge authenticates with OIDC and forwards only to a private listener. It
+   strips inbound `x-caos-user`, `x-forwarded-groups`, `x-caos-role`,
+   `x-caos-edge-token`, every header whose name contains `_`, and its own
+   session cookie; it sets exactly one `x-caos-user`, `x-forwarded-groups` and
+   `x-caos-edge-token`; it passes `origin`, `sec-fetch-*`, `idempotency-key`,
+   `last-event-id`, `content-type` and `content-length`. Its cookie is
+   `__Host-`, `Secure; HttpOnly; SameSite=Lax` (Strict breaks the OIDC
+   return); SSE is unbuffered with an idle timeout above 300 s.
+2. **Two modes, from the environment on every use.** *Edge mode*
+   (`CAOS_EDGE_TOKEN` set): the token is at least 32 bytes,
+   `CAOS_PUBLIC_ORIGIN` a bare `scheme://host[:port]`, and
+   `CAOS_TRUST_ROLE_HEADER` absent, or the lifespan fails
+   `EDGE_CONFIG_INVALID`; every request but `GET|HEAD /api/health` carries
+   exactly one token equal under `hmac.compare_digest`, or is 403
+   `EDGE_NOT_TRUSTED` before routing, identity or body. *Dev mode* (no token):
+   both socket ends are loopback and `Host` is `localhost`, `127.0.0.1` or
+   `[::1]`, or 403. A tokenless image on a published port answers health and
+   nothing else. The token header is removed from the scope before anything
+   downstream runs.
+3. **Identity switch rule.** `actor_from_headers` believes `x-caos-role` only
+   when the switch is `1` and no edge token is set; otherwise the role comes
+   from groups.
+4. **Header hygiene, both modes.** A repeated identity header, or a name that
+   differs from one only by case or `_` for `-`, is 401 `NOT_AUTHENTICATED`.
+5. **Origin, the second half of §51.10.** Under `/api`: an `Origin` outside
+   the allowed set (`CAOS_PUBLIC_ORIGIN`, or `http://{localhost,127.0.0.1,[::1]}:{5173,8000}`
+   in dev mode) is refused; a safe method needs `Sec-Fetch-Site` absent,
+   `none` or `same-origin`; an unsafe one `same-origin`, or no
+   `Sec-Fetch-Site` with an allowed `Origin`. Otherwise 403 `ORIGIN_REFUSED`.
+   No CORS middleware.
+6. **Every response** carries the CSP `default-src 'none'; script-src 'self';
+   style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self';
+   base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src
+   'none'; require-trusted-types-for 'script'; trusted-types 'none'`,
+   `nosniff`, `no-referrer`, COOP and CORP `same-origin`, and a cache policy
+   (`/api` `no-store`, `/assets/` immutable for a year, else `no-cache`); any
+   `set-cookie` or `access-control-*` header is dropped. FastAPI's docs,
+   ReDoc and OpenAPI routes are not served. A directive is widened only for a
+   named violation recorded here; none has been.
+7. **One site application.** `server.api.site:application` is `EdgeGuard`
+   over a dispatcher: `/api` and `/api/*` (and the lifespan) go to
+   `server.api.app:app`, so routing's 404 and 405 there stay
+   `ENDPOINT_NOT_FOUND`; everything else is a GET/HEAD read of
+   `CAOS_SITE_ROOT` without symlinks, where `/` and each section path serve
+   `index.html` and any other method is a bodiless 405. With the root unset
+   non-API paths are 404; set without `index.html`, the lifespan fails.
+8. **`GET /api/health`.** A closed `HealthDocument{status, store, bundle,
+   blobs, checked_at}`, 200 only when all three probes are `OK` and the round
+   is under 30 s old (`PROBE_STALE` after, `PROBE_NOT_RUN` before the first).
+   One lifespan task probes every 10 s, each probe in a thread under 2 s
+   (`PROBE_TIMEOUT`), never two rounds at once: store connects with a 2 s
+   timeout and runs a read-only `verify_schema`; bundle compares a fresh
+   manifest with the process's; blobs checks the root is a usable directory,
+   writing nothing. The route needs no token or identity and does no I/O.
+9. **One image, two commands, no proxy inside.** A digest-pinned
+   `node:24-slim` build stage runs `npm ci --ignore-scripts && npm run build`
+   and only `dist` reaches the runtime (`/app/site`, `CAOS_SITE_ROOT`). The
+   API runs `uvicorn server.api.site:application --workers 1
+   --no-proxy-headers --no-server-header --limit-concurrency 32`; the worker
+   is `python -m server.engine.worker`. `make dev-api` serves the same
+   application on 127.0.0.1 with `--no-proxy-headers`.
+10. **Dev identity lives in the Vite proxy.** It removes every client
+    `x-caos-*`, `x-forwarded-*`, `forwarded` and `_` header, then sets
+    `x-caos-user` from `CAOS_DEV_USER` and `x-caos-role` from `CAOS_DEV_ROLE`
+    (default ANALYST); without `CAOS_DEV_USER` it sets nothing and the API
+    answers 401.
+11. **Smoke stack.** `compose.smoke.yaml`, project `caos-workbench-smoke`: a
+    digest-pinned PostgreSQL on tmpfs with no host port, the API on
+    `127.0.0.1:18000` in edge mode with its own blob volume, a credential-less
+    `worker` (profile `smoke`) and the deterministic `journey-worker` (profile
+    `journey`, `./tests` mounted read-only at `/app/tests` -- not
+    `/opt/caos-tests` as the brief wrote, because `tests/canonical_fixtures.py`
+    finds `vendor/deploy-v` as its parent's sibling -- with its exit-once marker
+    in the blob volume the image's uid owns; `tests/` is never in the image).
+    The test edge retries a refused upstream connect for a GET for up to 30 s
+    and answers 502 after, so a browser's stream reconnect meets a restarted
+    API rather than an error Firefox and WebKit treat as final; an unsafe
+    method is never retried.
+    `make smoke-production` builds the image, runs `pytest -m production_image`
+    with `CAOS_REQUIRE_IMAGE=1`, then `tests/journey/run.py`, which starts the
+    stack, the host test edge on 127.0.0.1:18080 and Playwright, and always
+    takes the stack down with its volumes. It is the last step of `make
+    check`; `make test` deselects `production_image`.
+
+**Why.** REPAIR_PLAN Phase 4 work item 7. The image listened on `0.0.0.0` and
+believed any well-formed identity header, and nothing proved a request had
+passed the edge; a shared token is the proof available with the standard
+library alone (JWT verification needs a dependency, mTLS certificates).
+Mounting static files inside FastAPI shadowed API refusals and served a CDN
+script the policy refuses; a dispatcher keeps the two surfaces apart. A
+proxy inside the image would be packages to scan and a supervisor to run for
+what is operator infrastructure anyway.
+
+## 2026-09-14 §51 refinement — one extraction deadline for the whole pack
+
+**Decision.** `AdmissionLimits.max_pack_seconds` (300 s) bounds a pack's
+extraction as a whole: each document's deadline is the earlier of its own
+`max_seconds` (60 s, §44.1) and the pack's, and a pack past it refuses
+`SOURCE_EXTRACTION_TIMEOUT` with nothing written.
+
+**Why.** The Phase 4 adversarial audit found that only the per-document
+deadline existed, so one authenticated writer's fifty-document pack could hold
+an admission request, its thread and one of the image's 32 concurrency slots
+for fifty minutes. 300 s matches the edge's idle timeout (§53.1), past which
+the request would be cut anyway.
+
+## 2026-09-14 §54 — The closed forecast contract and independent reconciliation
+
+Task 5.1 repairs the dormant calculator's numerical contract; it does not
+enable CP-CF, a route, or the Model section. The host extension and verified
+execution binding remain Task 5.2. No upstream file changes.
+
+**Inputs.** The top-level keys are exactly `opening`, `periods`, `drivers`,
+`contractual`, `units`, `perimeter`, and optional `tolerance`. Every nested
+object is closed. Opening requires `cash`, `as_of_period_id` and
+`debt_by_facility[]` of `{facility_id, amount}`, with unique facilities.
+Periods require `{case, period_id, fiscal_year, days}`; `(case, period_id)` is
+unique, `days` is an integer string 1..366, and caller order is chain order
+within each case. Text labels pass BoundaryText/NFC with a 64-character bound
+and cannot be blank. Units require a three-uppercase-letter currency and scale
+`units`, `thousands`, `millions` or `billions`; units and perimeter carry to output.
+
+Drivers have unique requested `(case, period_id)`, required `status`,
+`stated_closing_debt`, `stated_closing_cash`, and the movement fields:
+`revenue`, `ebitda`, `cfo`, `capex`, `acquisitions_disposals`, `cash_interest`,
+`cash_taxes`, `distributions`, `issuance`, `optional_repayment`, `pik`,
+`capitalised_interest`, `fx_perimeter`. Every movement is required for READY.
+An explicit zero is zero; a missing movement makes the row unavailable with
+`DRIVER_FIELD_MISSING`. A missing driver is `DRIVER_MISSING`; an unready one is
+`DRIVER_NOT_READY`. Later rows of that case are `PRIOR_PERIOD_UNAVAILABLE`.
+Present invalid numerics refuse even in an unready or subsequently unavailable
+row. Missing stated balances refuse: reconciliation needs independent claims.
+
+Contractual input is exactly `amortisation[]` of
+`{case, period_id, facility_id, amount}`; every pair is requested and facility
+opened. Duplicate four-field entries (numeric amounts compared as Decimal)
+refuse. Different payments for one facility-period sum. No payment rows means
+zero repayment. `policy`, `maturities`, `coupons` and the old driver field
+`financing_investing` refuse `METHODOLOGY_INPUT_INVALID` until implemented.
+
+**Arithmetic.** Every numeric input must be a JSON string matching
+`^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?$`, matched over the entire string.
+No exponent, whitespace, plus, bool, JSON number, null or Decimal object is
+accepted. Amortisation, tolerance and movements are nonnegative, except signed
+acquisitions/disposals and FX/perimeter movements. Opening and stated closing
+balances may be negative: the movement sign rule does not constrain balances.
+Every sum, subtraction, division,
+comparison and quantization runs inside one fresh local
+`Context(prec=38, rounding=ROUND_HALF_EVEN,
+traps=[InvalidOperation, DivisionByZero, Overflow])`. Amounts emit six decimal
+places, ratios four. The ambient context supplies no arithmetic settings.
+
+```
+closing_debt = opening_debt + issuance + pik + capitalised_interest
+               - contractual_repayment - optional_repayment + fx_perimeter
+financing_investing = issuance - contractual_repayment - optional_repayment
+                      - acquisitions_disposals
+fcf = cfo - capex - cash_interest - cash_taxes
+closing_cash = opening_cash + fcf - distributions + financing_investing
+residual_debt = stated_closing_debt - closing_debt
+residual_cash = stated_closing_cash - closing_cash
+```
+
+Each case starts with the supplied opening debt sum and cash; subsequent
+openings equal the previous computed closes, checked with
+`FORECAST_CHAIN_BROKEN`. Either absolute residual above tolerance (default
+`0.001`, explicitly in the supplied units) gives `RESIDUAL_UNRECONCILED` and
+propagates unavailability. The failed row retains computed values/residuals as
+diagnostics, never as an available forecast. Tolerance equality passes.
+
+Gross leverage is closing debt/EBITDA, net leverage is (closing debt-closing
+cash)/EBITDA, interest coverage is EBITDA/cash interest, FCF/debt is FCF/closing
+debt; operating margin is EBITDA/revenue. Each ratio with a nonpositive
+denominator is `{value: null, reason: "ZERO_OR_NEGATIVE_DENOMINATOR"}`;
+otherwise it is `{value: "<four-place string>", reason: null}`. Accessible
+cash equals closing cash: restricted cash is unsupported. Liquidity runway is
+omitted because cash-sweep/minimum-cash/revolver/FX policy is unsupported.
+
+**Output and ceilings.** `cash_flow_forecast` returns exactly
+`{status, units, perimeter, rows, checks}`. Rows appear once per requested pair
+in request order, with computed fields or an unavailable reason; status is
+complete only when all rows are available. `forecast_bytes` serializes this
+object as UTF-8 JSON with sorted keys, compact separators, no NaN and no ASCII
+escaping. It is byte-identical under changed ambient Decimal contexts.
+One residual check per requested row records PASS/FAIL and its unavailable
+reason. Before any numeric parse, requests are bounded to 40 periods per case,
+6 cases, 40 opening facilities, 2,000 amortisation entries, at most one driver
+per requested pair, and `max_periods_per_case × cases × (1+facilities) <= 100000`.
+
+**Evidence and limits.** `tests/forecast_fixtures.py` supplies the inputs;
+the annual base/downside and quarterly base tests carry independent hand
+tables, including financing, FCF, debt/cash, ratios and chain openings.
+This proves arithmetic over supplied movements, not the economic validity of
+chosen drivers or a provider's credit conclusions. A negative computed balance
+is preserved; no unimplemented policy silently funds a cash deficit or floors
+debt. A relative tolerance or restricted-cash model needs a later decision.
+
+## 2026-09-14 §55 — A bounded audit package with its own portable verifier
+
+**Decision.** Phase 5 Task 5.4a completes the package half of F15 without
+changing §14's scope: internal consistency, not externally authenticated
+signatures or proof that an entire receipt/audit chain was never replaced.
+
+1. **Exactly five members:** `payload.json`, `receipt.json`,
+   `deliverable.html`, `render.py`, `verify_package.py`. The two Python members
+   are exact build-time source bytes. Names are unique and exact; extras,
+   directory entries, traversal, absolute names, backslashes and embedded NULs
+   refuse. Building uses sorted names, fixed ZIP timestamps/permissions/system,
+   and DEFLATED level 9. Identical inputs and renderer/verifier bytes under the
+   same Python/zlib build produce identical archive bytes.
+2. **Portable render.** `render.py` imports only standard-library modules and
+   raises local `RenderRefused(ValueError)` with its existing code as a string.
+   `host.render_payload` maps this to the existing host `RefusalCode`/`Refusal`,
+   with no exception chain. Its HTML output is unchanged.
+3. **Portable verifier version 1.** `verify(archive: bytes)` returns
+   `(bool, str | None)`; malformed input is a fixed failure reason, never an
+   exception's text. The host `package.verify_package` wraps that result in the
+   existing `Verification`. A reader may run
+   `python -I -S verify_package.py <package.zip>` from any directory. The CLI
+   prints `{"verified": true, "reason": null}` on success and exits 0, or a
+   failed verdict and exits 1. It installs nothing, extracts nothing, and
+   loads its renderer from the bounded archive bytes.
+4. **Bounds before member reads.** Archive ≤64 MiB; payload ≤32 MiB; export ≤64
+   MiB; receipt ≤64 KiB; each Python member ≤1 MiB. Exactly five central
+   headers are checked before `ZipFile` can allocate member objects. The format
+   is single-disk ZIP32 with no appended bytes; ZIP64/multi-disk containers are
+   unnecessary at these ceilings and refuse. Only STORED and DEFLATED are
+   accepted, with no encryption and a declared ratio ≤100:1. Every deflate
+   output is capped at its limit plus one byte and must reach the end of its
+   stream with no tail; actual size and CRC must match the directory.
+5. **Safe renderer loading.** The verifier embeds `RENDERER_SHA256` for its
+   trusted build and refuses different renderer bytes before executing them.
+   If the receipt carries `renderer_sha256` (Task 5.3), it must also match.
+   Update the pin with every renderer edit. This protects a trusted verifier
+   from arbitrary archived code; no external trust anchor is introduced.
+6. **Existing consistency checks remain:** receipt is a JSON object, payload
+   hashes to `payload_sha256`, three named roles contain three distinct people,
+   canonical Markdown/record digest pairs bind, and the archived renderer
+   reproduces the export byte for byte. Store verification owns live chain
+   proof.
+7. **Exclusive creation.** `write_package` opens `xb`, atomically refusing an
+   existing path. Two concurrent writers leave one complete winner under
+   successful filesystem writes; crash durability is not promised.
+
+**Evidence.** `tests/test_deliverable_package.py` proves isolated `-I -S`
+execution with only a package in the temporary directory, stdlib imports,
+metadata-before-read bounds, duplicate/extra/missing/traversal names,
+encryption/method rejection, compression-ratio rejection, total malformed-input
+handling, concurrent exclusive writes, deterministic members, renderer-pin
+checks, and forged declared lengths/CRC/counts. Existing render, filing and
+LITE route tests remain required; this decision does not enable filing routes.
+
+## 2026-09-14 §56 — Prove the smallest forecast-owner catalog pathway
+
+**Decision.** Phase 5.2a selects `FULL_CREDIT_32` / `RELATIVE_VALUE`, the
+nine-node pathway containing CP-1, CP-2G, CP-4 and every required predecessor.
+`DISTRESSED_RESTRUCTURING` needs thirteen nodes and `FULL_CREDIT_ASSESSMENT`
+nineteen. Those larger pathways remain disabled. The adapter adds only this
+pathway beside LITE earnings, after deterministic canonical contract proofs
+for CP-1, CP-1C, CP-2, CP-4, CP-3D, CP-2A, CP-2G and CP-3.
+Run choices continue to derive from the same adapter allowlist.
+
+The real runtime must preserve every direct accepted upstream digest, exact
+Markdown and anchored citation; Restricted limitations survive downstream;
+Blocked CP-1 accepts nothing and prevents further calls. OPTIONAL and ADVISORY
+edges retain the catalog engine's semantics. The request ceiling is unchanged.
+Offline structural and lineage evidence does not qualify economic conclusions
+or authorize live-provider evaluation.
+
+**CP-2G boundary.** Its vendor schema declares twelve columns and exactly 42
+rows: BASE/DOWNSIDE, three fiscal years, three division-growth slots plus four
+financing/investing drivers. Its `driver_id` vocabulary is `division_growth`,
+`acquisitions_disposals`, `net_equity_issue_repay`, `dividends_paid`,
+`other_investing_financing`; `status` is READY/NOT_APPLICABLE. This is not the
+CP-CF movement vocabulary. Task 5.2b must map it explicitly and obtain any
+missing operational movements from accepted owners; 5.2a does not rename
+vendor columns, fabricate missing inputs or enable CP-CF.
+
+**Binary authority.** CP-3's manifest lists two XLSX references,
+`REF_CP-3B_Portfolio_Constraints.xlsx` and `REF_CP-3_Sector_RV.xlsx`. The
+UTF-8-only prompt previously refused them. These exact CP-3 references now
+retain their complete verified bytes as explicitly labelled base64 in the
+authority section; both the manifest and delivered-authority digests still
+bind the original bytes. Invalid ZIP containers and other non-UTF-8 authority
+still refuse. No workbook is executed, extracted or restored as a deliverable;
+the existing whole-request ceiling also bounds the encoded representation.
+**Evidence.** `tests/test_deliverable_package.py` covers isolated `-I -S`
+execution, stdlib imports, metadata-before-read bounds, duplicate/extra/
+missing/traversal names, encryption/method rejection, compression-ratio
+rejection, total malformed-input handling, concurrent exclusive writes,
+deterministic members, renderer-pin checks, and forged declared lengths/CRC/
+count failures. Existing render, filing and LITE route tests remain required;
+this decision does not enable filing routes.
+
+## 2026-09-14 §57 — Save the host revision before sign, freeze and file
+
+Task 5.3 replaces caller-supplied revision labels, digests and freeze payloads
+with a host-minted UUID and immutable stored payload. `save_revision` derives
+every accepted canonical artifact in pinned route order under the governed
+case lock, obtains the case title from the store, validates the narrative and
+stores its canonical bytes in the content-addressed blob store. An incomplete
+or refused route cannot be saved; accepted restrictions and limitations remain
+in the exact records and render. No provider is involved.
+
+Migration `0015_revisions` adds immutable `deliverable_revisions` rows. The
+legacy opinion/publication keys are text, so a generated canonical UUID text
+key enables composite `(case_id, revision_id)` foreign keys without converting
+legacy labels. `NOT VALID` preserves existing history while enforcing every
+new signature/publication's saved case/revision ownership. No old labels are
+backfilled with fabricated revisions.
+
+Narrative is at most 64 paragraphs of 1–64 spans: bounded text or an accepted
+artifact's `(route_node_id, citation_index)` reference. Text is normalized by
+BoundaryText with a 2,000-character ceiling; ASCII digits refuse
+`NARRATIVE_FIGURE_UNREFERENCED`. References resolve to the accepted anchored
+document, page and matched text, with unknown/malformed references refused.
+This syntactic control is not semantic detection of numbers spelled in words
+or misleading qualitative prose; the independent human review still owns that.
+
+Sign reads the stored digest under the lock. Freeze re-proves the stored
+revision inside the same governed write, compares exact bytes and the current
+signature, then records the frozen digest. No signer can freeze; no signer or
+freezer can file. A frozen revision admits no later signature and can freeze
+and file only once. `read_revision` and `prove_revision` participate in their
+caller's transaction; the latter requires the caller to hold the case lock
+for a governed transition. Live withdrawal or moved authority refuses re-proof;
+archived package consistency remains independent of live source availability.
+
+Filing returns case/run/revision identity, all three actors, payload and
+renderer digests, and `filed_event_sha256` returned by its own governed write.
+The receipt never reads the possibly advanced audit head after commit. The
+renderer digest is computed before filing and included in its audit payload.
+The portable renderer accepts the new spans, and its verifier pin changes with
+its exact source bytes; historical string narratives remain renderable only
+for old payloads, never accepted by the new save boundary.
+
+Codex execution uses Astra high for this high-risk revision boundary. Ordinary
+task review and scoped gates precede integration; phase confidence/adversarial
+reviews remain coordinator-owned at actual xhigh after the whole phase.
+
+## 2026-09-15 §58 — Qualification binds OpenRouter endpoint and reasoning profile
+
+The September 15 DeepSeek qualification calls exposed a false premise in §16
+and §25: `allow_fallbacks: false` prevents a second endpoint after the selected
+one fails, but OpenRouter still chooses that first endpoint by price and
+availability. Reconciliation showed that all three calls ran on Ionstream and
+used zero reasoning tokens. They therefore test `openrouter/ionstream/default`,
+not DeepSeek's first-party reasoning profile.
+
+`OpenRouter` now accepts optional `OPENROUTER_PROVIDER` and
+`OPENROUTER_REASONING_EFFORT`. A provider value is sent as the sole ordered
+endpoint with fallbacks disabled; the reasoning value is sent through
+OpenRouter's reasoning-effort contract. A pinned qualification provider
+identity includes both settings and the completion ceiling (for example
+`openrouter/deepseek/max/65536`), while an unset legacy profile remains
+`openrouter`. Invalid values refuse before transport.
+The model id and dated conservative price remain separately bound.
+The qualification harness refuses that unpinned legacy profile; automatic
+routing remains available only to ordinary calls that cannot mint a verdict.
+
+The canonical prompt changed during citation remediation, so the adapter is
+advanced from `canonical-markdown-v1` to `canonical-markdown-v2`. Old v1 pins
+remain historical and cannot execute as v2. A new positive qualification must
+prepare a fresh v2 run; it cannot reuse the three cross-revision failures.
+
+OpenRouter provider routing takes the endpoint catalog's lowercase `tag`, not
+its display name, so mixed-case values refuse before transport. The configured
+account returned `404 No endpoints found` for the live first-party `deepseek`
+tag even without reasoning or JSON constraints. An `ionstream`/`xhigh` JSON
+probe did succeed and reconciliation recorded 15 native reasoning tokens, but a
+probe is not a qualification run.
+
+The authorized frozen-v2 `ionstream`/`xhigh` qualification then used 6,286
+native reasoning tokens and finished with `stop`; the host still refused CP-0
+as `CITATION_NOT_DELIVERED`. No downstream module ran and no qualification
+evidence or verdict was created. This rules out automatic routing, absent
+reasoning and truncation for that failure. A same-input temperature-zero repeat
+would change no controlled variable, so the run was not repeated.
+
+At that checkpoint, this did not qualify DeepSeek or raise the 32,768
+completion cap. It made a controlled endpoint/reasoning experiment possible
+through the existing runtime and kept ordinary/offline gates credential-free.
+
+## 2026-09-15 §59 — Gemini replacement is bounded by the shipped output ceiling
+
+The authorized replacement candidate is `google/gemini-3.8-flash` through the
+pinned OpenRouter `google-ai-studio` endpoint at reasoning effort `high`.
+Google supports structured output and up to 65,536 output tokens for this
+model; the exact shipped CAOS runtime initially requested at most 32,768.
+
+The frozen VMO2 CP-0 call was served by Google AI Studio, used 29,454 native
+reasoning tokens, exhausted 32,761 native completion tokens, and finished with
+`length`. The host therefore recorded `PROVIDER_OUTPUT_TRUNCATED` before any
+artifact or qualification evidence existed. The `$0.25356225` charge remains
+inside the authorized `$22.00` ceiling.
+
+Do not repeat that same high-reasoning, 32,768-token request. The authorized
+remediation raises the shared CAOS ceiling to the model's 65,536 maximum, which
+also raises each run's conservative reservation. The changed ceiling is bound
+in the fresh execution profile identity
+`openrouter/google-ai-studio/high/65536`; it requires verification before the
+one authorized paid retry.
+
+That retry reached the temporary qualification collector, which returned from
+`perform()` but then failed while JSON-encoding a proof's `frozenset` of anchored
+citations. Cleanup dropped its disposable database before it emitted generation
+or charge data. The account cannot use OpenRouter's aggregate activity endpoint
+for reconciliation without a management key (`403`). Its actual route outcome
+is therefore indeterminate and creates no artifact, evidence or verdict. The
+next execution persists its immutable performed snapshot and its bound evidence
+identity in the migrated store before `perform()` returns; the collector only
+confirms and retains that state for external review. Do not repeat this paid
+attempt without fresh authorization.
+
+## 2026-09-15 §60 — Preserve literal quotation at the canonical boundary
+
+The recovery run at profile `openrouter/google-ai-studio/high/65536` completed
+normally and retained its performed snapshot and bound evidence. Its CP-0
+response was valid closed JSON, its four citations were all delivered and
+uniquely anchored, and its canonical Markdown passed the vendor validator. The
+host refused it only because none of those evidence quotations occurred
+character-for-character in the Markdown body. Safe structural comparison found
+case-only variation for three quotations and punctuation-normalized variation
+for all four, including the required Evidence Trace section.
+
+This is a Gemini 3.8 Flash one-shot protocol incompatibility. It is not a
+reason to relax `parse_response`: a citation needs both an exact source anchor
+and an exact occurrence in the model's handoff, so a reviewer can see the same
+words supporting the claim. General punctuation/case normalization would admit
+meaning-changing edits and would weaken the pinned canonical contract. The
+model is therefore unqualified; its performed evidence cannot mint a verdict.
+Any future spend must be a separately authorized, materially different
+candidate or protocol experiment.

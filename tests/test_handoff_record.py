@@ -147,7 +147,7 @@ def _record(**changes: object) -> CanonicalRecord:
     )
     values: dict[str, object] = {
         "artifact_sha256": hashlib.sha256(CP0_MD).hexdigest(),
-        "adapter_version": "canonical-markdown-v1",
+        "adapter_version": "canonical-markdown-v3",
         "build_id": "build-1",
         "manifest_sha256": "a" * 64,
         "authority_bundle_sha256": CP0.authority_bundle_sha256,
@@ -322,6 +322,43 @@ def test_the_record_carries_no_model_authored_claims() -> None:
         "projections",
         "citations",
     }
+
+
+@pytest.mark.parametrize(
+    "marks",
+    ['"{}"', "\u201c{}\u201d", "\u2018{}\u2019", "\u00ab{}\u00bb", "'{}'"],
+)
+def test_a_quote_the_body_wraps_in_quotation_marks_is_still_quoted(
+    marks: str,
+) -> None:
+    """Typography around a quotation does not make the quotation absent.
+
+    A module writes its Evidence Trace as prose, and prose puts quotation marks
+    around a quotation. The whole-token rule then reads `\u201cRecorded` and
+    `p1\u201d` and refuses the entire handoff -- a host defect recorded as the
+    model's answer, and what the CP-L10 attempt of the second paid Terra run
+    actually died of. The evidence anchor is untouched: `verify_citations`
+    still matches the document's own tokens exactly, so nothing here widens
+    what may be cited, only what counts as having quoted it.
+    """
+    body = wire(
+        f"---\nmodule_id: CP-0\n---\n\n## Evidence Trace\n\n- E-01, p.1: "
+        f"{marks.format(QUOTE)}\n".encode(),
+        [_citation()],
+    )
+    markdown, citations = parse_response(body, delivered=DELIVERED)
+    assert len(citations) == 1
+    assert citations[0].matched_text == QUOTE
+    assert markdown
+
+
+def test_a_quotation_mark_inside_the_quote_still_matches_whole_tokens() -> None:
+    """Only the edges are typography; the middle is the quote itself."""
+    body = wire(
+        b"---\nmodule_id: CP-0\n---\n\nRecorded elsewhere p1\n",
+        [_citation()],
+    )
+    assert _parse_refused(body) is RefusalCode.HANDOFF_MALFORMED
 
 
 @pytest.mark.parametrize(

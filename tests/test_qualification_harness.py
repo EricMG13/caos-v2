@@ -50,7 +50,7 @@ from server.boundary_text import BoundaryText
 from server.engine.route import NodeState
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.provider import Completion, encode_request
+from server.provider import Completion, OpenRouter, encode_request
 from server.qualification.harness import (
     Attempted,
     Harness,
@@ -58,6 +58,7 @@ from server.qualification.harness import (
     PerformedSet,
     PreparedCase,
     Unrun,
+    _provider_identity,
     perform,
     prepare,
 )
@@ -88,6 +89,20 @@ PROFILE = LITE_PROFILE
 SELECTION = LITE_SELECTION
 SUBJECT = RunSubject("ACME", "Acme Holdings plc", "FY2026", "2026-09-13")
 L10, CP5 = f"RN-{PROFILE}-{SELECTION}-02-CP-L10", f"RN-{PROFILE}-{SELECTION}-03-CP-5"
+
+
+def test_openrouter_qualification_requires_an_upstream_pin() -> None:
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        _provider_identity(OpenRouter(api_key="k", model="m"))
+
+    assert (
+        _provider_identity(
+            OpenRouter(api_key="k", model="m", upstream_provider="ionstream")
+        )
+        == "openrouter/ionstream/default/65536"
+    )
+
+
 ESTIMATE = Decimal("0.50")
 # Enough for any set these tests build: the per-run ceiling times ten.
 SET_CEILING = CEILING * 10
@@ -118,6 +133,7 @@ class _Completions:
 
     # What the host configured; with fallbacks off it is what answers.
     model: str = "a-model/for-the-test"
+    provider: str = "qualification-test"
     qa_by_module: dict[str, str] = field(default_factory=dict)
 
     def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
@@ -155,6 +171,10 @@ class _DamagesWhatWasAccepted:
         """Whatever it wraps. A double that invented its own identity would
         record a producer no test had asked for."""
         return self.inner.model
+
+    @property
+    def provider(self) -> str:
+        return self.inner.provider
 
     # What to damage on the second call. Two shapes of a store that moved
     # under a running set, and `perform` must survive both.
@@ -335,6 +355,11 @@ def test_the_harness_performs_every_case_and_reports_one_row_each(
         assert len(runs) == 2
         for [run_id] in runs:
             assert run_status(conn, UUID(str(run_id))) is RunStatus.COMPLETE
+        assert conn.execute(
+            "SELECT p.complete,count(e.evidence_sha256)"
+            " FROM qualification_performed p LEFT JOIN qualification_evidence e"
+            " USING (performed_sha256) GROUP BY p.complete"
+        ).fetchall() == [(True, 1)]
 
 
 def test_the_harness_runs_through_the_same_loop_as_everything_else(
@@ -600,6 +625,11 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
         # matrix is withheld rather than built over the cases that happened to
         # run first.
         assert performed.matrix is None
+        assert conn.execute(
+            "SELECT p.complete,count(e.evidence_sha256)"
+            " FROM qualification_performed p LEFT JOIN qualification_evidence e"
+            " USING (performed_sha256) GROUP BY p.complete"
+        ).fetchall() == [(False, 1)]
 
 
 def test_a_case_that_stops_ends_the_set_without_discarding_it(

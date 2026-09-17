@@ -47,6 +47,7 @@ from server.methodology.canonical import (
     accepted_projections,
     blocked_verdict,
     replay_billed,
+    unexplained_charge,
 )
 from server.methodology.handoff import (
     Projections,
@@ -61,7 +62,9 @@ from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.events import lock_run
 from server.store.outcomes import accepted_rows
+from server.store.run_inputs import load_run_input
 from server.store.runs import block_run
+from server.store.source_sets import load_source_set
 from server.store.work import Lease
 
 __all__ = ["harness", "route"]
@@ -344,6 +347,38 @@ def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
     _still_running(harness)
 
 
+def test_a_lost_original_after_billing_replays_after_it_is_restored(
+    harness: _Harness,
+) -> None:
+    pin = load_run_input(harness.conn, harness.run_id)
+    assert pin is not None
+    source_set = load_source_set(harness.conn, pin.case_id, pin.source_version)
+    assert source_set is not None
+    original = harness.blobs.get(source_set.members[0].document_sha256)
+    harness.conn.rollback()
+    lost = False
+
+    def remove_once() -> None:
+        nonlocal lost
+        if not lost:
+            harness.blobs.path_of(source_set.members[0].document_sha256).unlink()
+            lost = True
+
+    answers = _answers(harness, during=remove_once)
+    provider = _module_provider(harness, answers)
+    assert _run_route(harness, provider) is RefusalCode.BLOB_NOT_FOUND
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    row = harness.conn.execute("SELECT count(*) FROM attempt_refusals").fetchone()
+    assert row == (0,)
+    harness.conn.rollback()
+    _still_running(harness)
+
+    assert harness.blobs.put(original) == source_set.members[0].document_sha256
+    assert _run_route(harness, provider) is None
+    assert len(answers.delegate.prompts) == 3
+    assert _counts(harness) == (3, [REPORTED] * 3, 3, 3, 3)
+
+
 def test_a_body_that_cannot_be_stored_refuses_after_its_bill(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -359,6 +394,46 @@ def test_a_body_that_cannot_be_stored_refuses_after_its_bill(
     monkeypatch.setattr(BlobStore, "put", failing)
     assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
     assert _counts(harness)[:2] == (1, [REPORTED])
+    _still_running(harness)
+
+
+def test_a_billed_node_with_no_stored_body_is_not_billed_again(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The charge committed, the body did not: nobody may pay twice by default.
+
+    `replay_billed` needs a diagnostic to settle the attempt from, and this
+    outcome has none, so before this refusal the next pass simply started a
+    fresh attempt, reserved again and called the provider again. Paying again
+    may be right, but it is an operator's decision -- so the run parks with a
+    code instead of spending.
+    """
+    answers = CanonicalCompletions(harness.source_id)
+    provider = _module_provider(harness, answers)
+    real_put = BlobStore.put
+
+    def failing(self: BlobStore, data: bytes) -> str:
+        if answers.bodies and data == answers.bodies[-1].encode():
+            raise OSError
+        return real_put(self, data)
+
+    monkeypatch.setattr(BlobStore, "put", failing)
+    assert _run_route(harness, provider) is RefusalCode.STORE_UNAVAILABLE
+    called = len(answers.prompts)
+    assert called == 1
+    harness.conn.rollback()
+
+    monkeypatch.setattr(BlobStore, "put", real_put)
+    node = unexplained_charge(
+        harness.conn,
+        run_id=harness.run_id,
+        route_node_ids=[node.route_node_id for node in harness.route.nodes],
+    )
+    assert node is not None, "the charged node with no body is the one found"
+    harness.conn.rollback()
+    assert _run_route(harness, provider) is RefusalCode.CALL_OUTCOME_UNEXPLAINED
+    assert len(answers.prompts) == called, "no second call for the same node"
+    assert _counts(harness)[:2] == (1, [REPORTED]), "and no second charge"
     _still_running(harness)
 
 

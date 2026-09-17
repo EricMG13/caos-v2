@@ -32,7 +32,8 @@ Playwright, Docker, Trivy 0.70.0, and installed GitNexus 1.6.9.
 - The vendored methodology bundle is immutable. New host behavior must not edit
   a file that exists upstream.
 - Every shell command starts by unsetting `OPENROUTER_API_KEY`,
-  `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `CAOS_REQUIRE_PROVIDER`.
+  `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, `OPENROUTER_PROVIDER`,
+  `OPENROUTER_REASONING_EFFORT`, and `CAOS_REQUIRE_PROVIDER`.
 - No live/paid provider call, hosted write, push, PR, merge, deploy, CI-rule
   change, dependency change, or destructive data cleanup without separate
   authorization.

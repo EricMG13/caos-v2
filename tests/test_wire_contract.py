@@ -84,6 +84,72 @@ ENVELOPE = frozenset(
 
 # A new field is a model change, a regenerated schema and an edit here.
 PINNED: dict[type[BaseModel], frozenset[str]] = {
+    wire.QualificationRead: frozenset(
+        (
+            "evidence_sha256 state qualification_set_sha256 performed_sha256 build_id "
+            "adapter_version provider model reviewer decided_at expires_at"
+        ).split()
+    ),
+    wire.NarrativeFigure: frozenset(
+        "route_node_id citation_index document_sha256 page matched_text".split()
+    ),
+    wire.NarrativeSpan: frozenset({"text", "figure"}),
+    wire.ReportArtifact: frozenset(
+        (
+            "route_node_id artifact_sha256 record_sha256 markdown record qa_status "
+            "committee_status decision_scope limitation_flags validation_warnings"
+        ).split()
+    ),
+    wire.ReportBody: frozenset(
+        (
+            "case_id displayed_run_id revision_id payload_sha256 case_title "
+            "artifacts narrative"
+        ).split()
+    ),
+    wire.FiledReceipt: frozenset(
+        (
+            "case_id run_id revision_id payload_sha256 signed_by frozen_by filed_by "
+            "renderer_sha256 filed_event_sha256"
+        ).split()
+    ),
+    wire.CommitteeBody: frozenset(
+        (
+            "case_id displayed_run_id revision_id payload_sha256 case_title artifacts "
+            "narrative state signed_by frozen_by filed_by receipt"
+        ).split()
+    ),
+    wire.ReportDocument: ENVELOPE,
+    wire.CommitteeDocument: ENVELOPE,
+    wire.ModelValue: frozenset({"name", "value", "unavailable_reason"}),
+    wire.ModelPeriod: frozenset(
+        {"case", "period_id", "fiscal_year", "days", "values", "unavailable_reason"}
+    ),
+    wire.ModelForecast: frozenset(
+        {
+            "route_node_id",
+            "artifact_sha256",
+            "record_sha256",
+            "accepted_at",
+            "qa_status",
+            "limitation_flags",
+            "validation_warnings",
+            "currency",
+            "scale",
+            "perimeter",
+            "periods",
+        }
+    ),
+    wire.ModelBody: frozenset(
+        {
+            "case_id",
+            "latest_run_id",
+            "displayed_run_id",
+            "subject",
+            "forecast",
+            "unavailable_reason",
+        }
+    ),
+    wire.ModelDocument: ENVELOPE,
     RefusalBody: frozenset({"code", "clears"}),
     Subject: frozenset({"case_id", "title"}),
     ServedRole: frozenset({"global_role", "standing"}),
@@ -377,6 +443,9 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "UploadDocument",
         "RunSectionDocument",
         "AnalysisDocument",
+        "ModelDocument",
+        "ReportDocument",
+        "CommitteeDocument",
     ]
 
 
@@ -407,6 +476,7 @@ def test_event_names_and_the_page_document_are_in_the_committed_schema() -> None
         "run_terminal",
         "sources_changed",
         "runs_changed",
+        "filing_changed",
     ]
     assert defs["EventName"] == {"enum": names, "type": "string"}
     assert list(get_args(wire.EventName)) == names

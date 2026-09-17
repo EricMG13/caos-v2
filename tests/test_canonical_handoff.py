@@ -186,7 +186,7 @@ def test_an_upgrade_link_is_refused() -> None:
 
 
 def test_a_module_outside_the_adapter_is_refused() -> None:
-    other = dataclasses.replace(L10, module_id="CP-1")
+    other = dataclasses.replace(L10, module_id="CP-DR")
     assert _refused(other, L10_MD).code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
 
 

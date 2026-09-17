@@ -43,6 +43,7 @@ On 2026-09-12, run from the repository:
 
 ```sh
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
+  -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT \
   -u CAOS_REQUIRE_PROVIDER \
   DOCKER_HOST=unix:///Users/ericguei/.colima/default/docker.sock \
   .venv/bin/python tests/probes/migration_restore.py
@@ -218,3 +219,76 @@ from the run's pinned adapter (§42.1), and the accept replay compares it with
 the other stored facts. Readers that refuse a NULL record arrive with slice
 f-1. The restore probe carries only claims-route artifacts, whose record stays
 NULL across restore and upgrade.
+
+## Version 13 — run work, lease tokens and attempt refusals — 2026-09-14
+
+Version 13 (`0013_run_work`) is additive. It creates two empty tables --
+`run_work`, one row per enqueued run with its state, fencing `lease_token`,
+lease and cancel request, and `attempt_refusals`, write-once (triggers refuse
+UPDATE, DELETE and TRUNCATE) -- adds a nullable `run_attempts.lease_token`,
+and widens the `runs` status and `run_events` name CHECKs to admit
+`CANCELLED`/`RUN_CANCELLED` (`docs/DECISIONS.md` §49). Existing attempts keep
+NULL and existing rows satisfy the wider CHECKs, so the upgrade cannot refuse a
+populated store; `test_version_thirteen_adds_empty_work_and_keeps_attempts_unleased`
+advances a version-12 store and proves it.
+
+## Version 14 — command receipts — 2026-09-14
+
+Version 14 (`0014_command_requests`) is additive. It creates one empty table,
+`command_requests`, keyed by `(actor_id, scope, idempotency_key)`, with CHECKs
+on the command name, the lowercase SHA-256 `request_sha256`, a success status
+(200, 201 or 202) and a receipt of at most 65,536 bytes, and two triggers that
+refuse UPDATE, DELETE and TRUNCATE (`docs/DECISIONS.md` §51.3). No existing
+table is altered and nothing is backfilled, so the upgrade cannot refuse a
+populated store; `test_version_fourteen_adds_empty_command_requests_to_a_populated_store`
+advances a version-13 store and finds the table empty. Rows are written only
+by a committed command and no code path removes one.
+
+## Version 15 — immutable saved revisions — 2026-09-14
+
+`0015_revisions` adds immutable host-UUID revision metadata. Payload bytes live
+in the blob store and must be backed up together with these rows. Composite
+case/revision foreign keys on new opinions and publications reference a
+generated canonical text form of the UUID. They are `NOT VALID`: old text-label
+history stays readable without fabricated saved payloads; new writes must name
+a saved revision of the same case. The populated version-14 migration test
+preserves a legacy signature and refuses a new detached signature.
+
+## Versions 16 and 17 — filing receipts and the sealed legacy boundary — 2026-09-15
+
+`0016_filed_receipts` adds immutable exact receipts for every new filed
+deliverable. It deliberately backfills nothing: earlier digest-only filings
+remain historical and cannot be represented as newly created receipt bytes.
+
+`0017_legacy_filing_events` snapshots every receiptless `DELIVERABLE_FILED`
+hash only when it follows `0016` in the same atomic upgrade from a pre-0016
+prefix. It seals that set with foreign-key and no-mutation guards, and makes
+audit events update/delete/truncate immutable. A store already at version 16
+that contains any receiptless filing refuses version 17 as ambiguous: an
+operator must recover or validate it rather than silently blessing a missing
+current receipt. Readers trust the sealed set, never a live event timestamp,
+so a post-cutover receipt cannot be bypassed by backdating. The receipt
+migration regressions prove both legacy preservation and the ambiguous-prefix
+refusal.
+
+## Versions 18–20 — qualification evidence, performed snapshots and one current verdict
+
+`0018_qualification_verdicts` adds global immutable qualification evidence and
+authenticated reviewer verdicts. Qualification sets can span cases, so these
+rows deliberately do not use the case-scoped governed-write tables. Migration
+19 makes one evidence identity resolve to exactly one reviewer decision; a
+reader cannot select a convenient verdict by row order. Migration 20 adds the
+immutable performed snapshot that supplies the evidence digest and binds its
+set, build, adapter, provider and model identities. New evidence rows refuse
+unless that exact snapshot already exists; a detached performed hash cannot be
+reviewed or shown as qualified. Partial snapshots remain auditable but cannot
+receive or read as a current verdict.
+Migration 20 deliberately does not backfill old evidence: rows without a
+snapshot remain audit history but cannot read as qualified.
+
+The owned restore probe now writes one synthetic current verdict over exact set,
+performed, build, adapter, provider, and model identities into its current
+backup. After restoring into a newly created database and copied blob root, it
+reads that same verdict through `current_verdict` at the recorded clock. This
+proves migration history, immutable qualification rows, and the current-reader
+binding survive the same-revision restore; it does not perform a provider call.

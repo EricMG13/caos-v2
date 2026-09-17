@@ -1,0 +1,253 @@
+## Adversarial review — Phase 6 (`ca7b13a..d4bdde5`)
+
+**Scope:** qualification execution, persistence/read API, qualification chrome, migrations, recovery and the three-engine production journey.  **Verdict:** CONCERNS.
+
+### Warnings
+
+1. **Release evidence remains incomplete.** The authorized capped DeepSeek
+   smoke run and production UI checks are now complete, and the live test
+   reserves from a dated configured price plus an explicit run ceiling rather
+   than a flat estimate. That does not authorize the application to advertise
+   a route as qualified: qualification still requires an externally
+   authenticated verdict for the exact provider/model/route/call/token/cost/
+   time window. Do not mint or substitute that evidence locally.
+
+### Notes
+
+1. **SSE disconnect noise.** Saboteur observed `httpx.RemoteProtocolError` in the intentionally dropped-stream journey while Playwright still passed. This is expected test-induced disconnect behavior, but makes smoke logs noisier; treat a change in status or an unhandled server failure as actionable, not this known cleanup noise.
+2. **Global qualification visibility is a policy seam.** Security Auditor confirmed the endpoint deliberately is not case-scoped. It authenticates callers and hides metadata from readers, but any future role expansion must explicitly decide which non-reader global roles may read evidence by digest.
+3. **Transient success text is not a reliable end-to-end assertion.** New Hire traced the timing to the immediate read-back. Unit coverage deliberately holds the refetch to test the text; the production journey now tests the durable contract.
+
+No code blocker was found beyond the already-remediated browser assertion. Security scans, race checks, backend/frontend checks and production image checks passed locally; this audit does not substitute for the missing authorized live qualification or GitHub-hosted checks.
+
+## Adversarial review addendum — provider-profile remediation
+
+Effort: `xhigh`, run separately after confidence remediation and verification.
+
+**Scope:** owned `dc25c65..f95e8ba` provider, qualification, adapter,
+environment, tests and evidence documentation. **Verdict:** CLEAN after
+remediation.
+
+### Remediated findings
+
+1. **Saboteur — dynamic provider could mint an overbroad verdict (critical).**
+   `allow_fallbacks: false` did not choose the first endpoint, and an unset pin
+   still left qualification on a dynamic pool. The request now orders one tag
+   and the qualification harness refuses an unpinned OpenRouter provider.
+2. **New Hire — display name and endpoint tag were indistinguishable
+   (warning).** `DeepSeek` looked valid but OpenRouter requires catalog tag
+   `deepseek`. Lowercase validation, a concrete example and a regression make
+   the contract explicit.
+3. **Security Auditor — a profile change silently changes the external data
+   recipient (warning).** The README now states that changing the provider
+   requires fresh authorization; offline gates scrub the new variables and no
+   credential or response body enters tracked evidence.
+4. **Saboteur — prompt guidance leaked into accepted-read I/O (warning).**
+   Citation candidates were built by every `_context` caller, including replay
+   and accepted CP-CF validation, exceeding the declared model I/O budget.
+   Candidate generation is now explicit at prompt construction only; the
+   existing budget regression passes without raising the budget.
+
+### Notes
+
+1. First-party DeepSeek remains inaccessible under the current OpenRouter
+   account/workspace policy. The code fails closed; account-policy changes are
+   external administration, not an application workaround.
+2. The successful reasoning probe and failed full run establish only
+   `openrouter/ionstream/xhigh` behavior. They do not justify a claim about
+   every DeepSeek deployment or a positive qualification verdict.
+
+The blocking invariants found by the personas were fixed at their shared
+boundaries and covered by focused regressions. No unresolved code blocker
+remains; release qualification remains correctly negative.
+
+Post-remediation verification passed 2,844 PostgreSQL-backed tests, 21 race
+tests, all I/O budgets, repository lint/types/security, frontend build, 230
+units, 171 accessibility entries and 90 three-engine workbench tests.
+
+## Adversarial review addendum — 65,536-token Gemini retry
+
+Effort: `xhigh`, after the confidence remediation and before the authorized
+live call. **Verdict:** CLEAN after remediation.
+
+### Remediated findings
+
+1. **Saboteur — 32k and 65k calls could obtain interchangeable qualification
+   evidence (critical).** The vendor `build_id` does not fingerprint the host
+   completion policy. The provider identity now appends the exact ceiling;
+   changing it forces a fresh prepared identity and rejects stale preparation.
+2. **New Hire — the new profile contract was implicit (warning).** A bare
+   numeric suffix would otherwise be easy to mistake for a model revision.
+   The decision record names it as the completion ceiling and provider/harness
+   regressions assert the complete profile string.
+3. **Security Auditor — an allowlist change could turn a false-positive fix
+   into a secret-scanning blind spot (warning).** The exception is anchored to
+   the two public enum values exactly; it neither ignores a file nor broadens
+   to arbitrary `key=value` content. A full-history gitleaks scan remains
+   clean.
+
+### Notes
+
+1. Raising a shared ceiling may make an unrelated future configured endpoint
+   unavailable if it does not accept 65,536 output tokens. Required parameters
+   and disabled fallbacks make that a safe refusal rather than a silent provider
+   change. Make a per-model policy only if a supported configured model needs a
+   different bound.
+2. The 4 MiB response-byte limit can still fail closed on an exceptionally
+   large encoded response. It is a separate transport guard, intentionally not
+   relaxed by this narrowly scoped output-token change.
+
+No unresolved repository code or security blocker remained for the single
+authorized Gemini call. Its temporary reporter then failed after `perform()`
+returned and erased the disposable record; therefore it created no usable
+execution evidence, and no retry is authorized. Even a successfully captured
+future result cannot create a qualification verdict without external
+authenticated review.
+
+## Adversarial review addendum — durable qualification handoff
+
+Effort: `xhigh`; scope is the uncommitted Phase 6 recovery candidate, excluding
+user-owned working-tree files. **Verdict:** CLEAN after remediation; this is
+not a release qualification verdict.
+
+### Remediated findings
+
+1. **Saboteur — kill the reporter after `perform()` returns (critical).** The
+   old path held the only result in process memory. The shared execution
+   boundary now commits the immutable snapshot and exact evidence identity
+   before control returns; complete and stopped-path regressions assert both.
+2. **New Hire — a new execution caller must remember two obscure store calls
+   (warning).** Snapshot/evidence creation now belongs to `perform()`, the one
+   common execution path, not to a disposable script. The reporter only
+   validates and serializes that state.
+3. **Security Auditor — an attacker could attach an old evidence row to a
+   snapshot with a matching digest but different declared identity (warning).**
+   Snapshot/evidence joins now compare all five identity fields and incomplete
+   snapshots cannot be promoted to current verdicts. Regression covers the
+   substituted legacy record.
+4. **Saboteur — stop the first case of a multi-case set (warning).** Initial
+   prefix validation contradicted its own shorter-record allowance. It now
+   compares the shorter prefix after its explicit upper-bound check; the
+   affected multi-case and injected-read-failure regressions pass.
+
+### Notes
+
+1. The retained local database and blob root are reviewer evidence, not a
+   substitute for the required external six-field authenticated verdict.
+2. The snapshot document deliberately excludes prompts, source text and model
+   response bodies; it contains only the pins, outcomes, hashes and anchors
+   needed to evaluate the execution.
+
+The candidate has no remaining local code finding from these personas. Its
+three-scenario migration restore proof and full CI-equivalent gate passed:
+2,849 backend tests, 21 race tests, security, frontend, accessibility,
+workbench, image, and all three 14-step production journeys. Authorized live
+execution and external review remain release prerequisites.
+
+## Adversarial review addendum — v3 CP-0 provenance
+
+Effort: `xhigh`; scope is the uncommitted canonical adapter v3 candidate,
+including its shared prompt builder, execution/replay, worker classification,
+tests and supporting records. User-owned working-tree files are excluded.
+**Verdict:** CLEAN after remediation; this is not a release qualification
+verdict.
+
+### Remediated findings
+
+1. **Saboteur — remove the immutable original after billing (critical).** The
+   response could have been written as a terminal refusal even though its
+   diagnostic was retained and a restored original would make replay safe.
+   Canonical acceptance now revalidates originals, and the shared recovery
+   classifications requeue all typed blob faults. The regression deletes an
+   original after transport, restores it, and proves exactly one billed replay.
+2. **New Hire — call the generic prompt builder directly (warning).** The
+   important CP-0 provenance fact lived in one caller convention, not a shared
+   contract. The builder now expresses the small truth table itself: exact
+   source set for CP-0, none for P1–P8. Focused tests cover both invalid sides
+   and exact membership.
+3. **Security Auditor — smuggle source metadata into a downstream prompt
+   (warning).** A caller could have used source preparation as ungoverned
+   pseudo-evidence. The builder forbids the context outside CP-0, labels it
+   non-citable, and source membership is bound to delivered evidence. Prompt
+   tag and citation-register regressions prove it is not an evidence channel.
+
+### Notes
+
+1. Extraction metadata is trusted only after the runtime loads the pinned,
+   validated source set; the builder guard is a second shared-boundary check,
+   not a replacement for source-set validation.
+2. The two-document frozen set may still be insufficient for a successful
+   Terra artifact. That is a qualification result to observe, not a reason to
+   broaden the corpus or silently relax the canonical contract.
+
+The three personas' confirmed defects were repaired at the shared boundaries
+and covered by 62 focused CP-0/canonical/upstream tests. The complete local
+gate is rerun after this v3 change; a fresh authorized Terra run and external
+authenticated verdict remain the only phase-release evidence not local to the
+repository.
+
+## Adversarial audit — Phase 6 v3 candidate (`1b7e455`), 16 September 2026
+
+Run on Fable 5.1 at maximum effort against the committed v3 tree, adversarially
+and independently of the confidence review beside it. Verdict: CONCERNS, no P0,
+two P1s — both around the run rather than in it, both fixed before the spend.
+
+**F1 (P1, fixed).** A BLOCKED run that never completed its route was `complete`
+for verdict purposes. `PerformedEvidence.complete` was `matrix is not None`;
+`build_matrix` runs whenever no case *stopped*, and a validated blocked
+readiness handoff returns normally with `stopped is None`. `record_verdict`'s
+only host-side check is that `complete` column, so a reviewer could sign
+`QUALIFIED` over a matrix whose only row was `proven=False` with every key
+missed — precisely the shape of the Terra v2 run.
+`tests/test_qualification_store.py`'s incomplete-snapshot test covered only
+`matrix=None`, and the harness test proving a BLOCKED run builds a matrix never
+asked whether that matrix could be signed. Fixed: `complete` now requires every
+run `COMPLETE` and every row either proven with nothing missed or meeting its
+declared refusal, with three named tests.
+
+**F2 (P1, fixed).** v3 reclassified `BLOB_*` as transient worker faults, so
+`_refused` released the lease instead of parking the run. `release` writes no
+code and leaves `requested_at` alone while `claim_run` orders by it, so a
+tampered or lost original put the run into a silent unbounded requeue loop —
+2,366 block reads per pass, no stop code, no event, nothing on stderr. The test
+that covered it asserted `("QUEUED", None, None, True)`, enshrining the absence
+of any durable record. v3 is what created the dependency: before it, nothing in
+execution read an original. Fixed by reverting the `worker.STORE_FAULTS`
+widening; the `canonical._STORE_FAULTS` widening is kept, because that one
+correctly re-raises instead of writing a verdict. Replay is unaffected —
+`outcomes._NOT_AN_EXPLANATION` is what keeps a billed answer out of
+`attempt_refusals`, and `_drive` consults `replay_billed` before any new attempt.
+
+Recorded and not fixed, each owed before a *second* paid run:
+
+- **F3 (P2).** A diagnostic body that cannot be stored commits the charge with
+  `diagnostic_sha256` NULL, which `replay_billed` excludes, and nothing between
+  `replay_billed` and `start_attempt` asks whether the node already has a
+  charged, unexplained, body-less outcome — so the next pass bills again.
+  Bounded by the run ceiling, but two charges for one node with no operator
+  decision in between. The DECISIONS/HANDOFF text asserts the opposite.
+- **F4 (P2).** The post-bill original recheck in `_answer` adds a fault point
+  between the charge and acceptance that protects nothing a downstream reader
+  relies on: evidence comes from `source_blocks`/`source_tokens`, the record
+  embeds no original bytes, and the proof never reads an original.
+- **F5 (P3).** `runtime._STORE_FAULTS`'s widened members are unreachable, and
+  the set is hand-synchronised in four places.
+- **F6 (P3).** Claims the code does not support: "extraction manifest" overstates
+  three digests of a JSON document nobody retains; "the context does not reach
+  downstream modules" is true of the *section* but CP-0 authors P1–P8 from it and
+  its Markdown is delivered as UPSTREAM; and the "worker releases the run"
+  sentence describes a worker the authorized run does not use.
+- **F7 (P3).** `member.filename` is admitter-controlled and rendered under a
+  host-attributed marker; `BoundaryText` keeps U+FEFF/U+2028/U+2029 that
+  `handoff._INVISIBLE` refuses, so such a filename copied into CP-0's inventory
+  as instructed would be refused `HANDOFF_MALFORMED` and blamed on the model.
+  Cannot fire on the frozen VMO2 filenames, which are plain ASCII.
+
+Verified with code, no finding: the release path cannot double-bill, lose a
+charge, or replay against a different pin for the v3 originals faults
+(`run_inputs` and `source_set_members` have no UPDATE or DELETE path under
+`server/`); the preparation section cannot be anchored as a citation; the
+ceiling measures the same bytes `_post` sends — **452,993 bytes against
+1,048,576** on the frozen set; no v3 path turns a host fault into
+`HANDOFF_MALFORMED` or `CITATION_NOT_DELIVERED` except F7; no refusal carries
+document- or provider-derived text.

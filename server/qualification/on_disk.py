@@ -48,9 +48,12 @@ from pathlib import Path
 from typing import Any
 
 from server.boundary_text import BoundaryText
+from server.evidence.extract import DEFAULT_LIMITS
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
+    ExpectedForecast,
+    ForecastValue,
     QualificationCase,
     QualificationSet,
 )
@@ -61,11 +64,44 @@ from server.store.run_inputs import RunSubject, valid_subject
 # in there" is not a declared form.
 MANIFEST = "qualification.json"
 
+# A manifest names cases; it never carries a document's bytes.
+MAX_MANIFEST_BYTES = 1024 * 1024
+
 # The keys each declared object carries, and nothing else. Closed both ways for
 # the reason every wire model here is (`CLAUDE.md`, wire strictness): a key this
 # loader ignores is a statement the author believed they had made.
-_CASE_KEYS = frozenset({"label", "profile_id", "selection_id", "documents", "expects"})
+_CASE_KEYS = frozenset(
+    {
+        "label",
+        "profile_id",
+        "selection_id",
+        "documents",
+        "expects",
+    }
+)
+_OPTIONAL_CASE_KEYS = frozenset(
+    {
+        "forecast",
+        "expected_refusal",
+        "expects_ready",
+        "model_extension",
+    }
+)
 _EXPECT_KEYS = frozenset({"module_id", "document_sha256", "matched_text"})
+_FORECAST_KEYS = frozenset(
+    {
+        "scenario",
+        "period_id",
+        "values",
+        "currency",
+        "scale",
+        "perimeter",
+        "qa_status",
+        "limitation_flags",
+        "readiness",
+    }
+)
+_FORECAST_VALUE_KEYS = frozenset({"name", "value"})
 # Optional on a case, closed when present. Whether the values are a subject a
 # pin accepts is `prepare`'s question, asked before it writes anything.
 _SUBJECT_KEY = "subject"
@@ -91,10 +127,29 @@ def load_qualification_set(root: Path) -> QualificationSet:
     )
 
 
+def _bounded_bytes(path: Path, limit: int) -> bytes:
+    """A regular file's bytes, refused before reading if it is too large.
+
+    `read_bytes` on a path nobody bounded is the whole defect: a declared
+    document of several gigabytes is read into memory before `admit_pack`'s own
+    ceilings ever see it, and a FIFO at the declared path blocks the loader for
+    as long as nothing writes to it. `is_file()` answers the second -- it is
+    false for a FIFO, a socket and a directory -- and `st_size` answers the
+    first without reading anything.
+
+    The document limit is `admit_pack`'s own, so a set that would be refused at
+    admission is refused at load instead of being read first.
+    """
+    status = path.stat()  # OSError here is the caller's refusal
+    if not path.is_file() or status.st_size > limit:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return path.read_bytes()
+
+
 def _manifest(root: Path) -> Mapping[str, Any]:
     """The manifest, parsed. Absent or unparseable says nothing about a set."""
     try:
-        parsed = json.loads((root / MANIFEST).read_bytes())
+        parsed = json.loads(_bounded_bytes(root / MANIFEST, MAX_MANIFEST_BYTES))
     except (OSError, ValueError):
         raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID) from None
     if not isinstance(parsed, dict):
@@ -107,7 +162,11 @@ def _manifest(root: Path) -> Mapping[str, Any]:
 def _case(root: Path, entry: object) -> QualificationCase:
     """One declared case, with its documents read from beside the manifest."""
     declared = isinstance(entry, dict) and _SUBJECT_KEY in entry
-    keys = _CASE_KEYS | {_SUBJECT_KEY} if declared else _CASE_KEYS
+    keys = _CASE_KEYS | {
+        key for key in _OPTIONAL_CASE_KEYS if isinstance(entry, dict) and key in entry
+    }
+    if declared:
+        keys |= {_SUBJECT_KEY}
     fields = _closed(entry, keys)
     documents = _declared(fields, "documents")
     expects = _declared(fields, "expects")
@@ -118,6 +177,10 @@ def _case(root: Path, entry: object) -> QualificationCase:
         selection_id=_text(fields, "selection_id"),
         expects=tuple(_expect(item) for item in expects),
         subject=_subject(fields[_SUBJECT_KEY]) if declared else None,
+        forecast=_forecast(fields.get("forecast")),
+        expected_refusal=_refusal(fields.get("expected_refusal")),
+        expects_ready=_ready(fields.get("expects_ready")),
+        model_extension=_extension(fields.get("model_extension")),
     )
 
 
@@ -154,7 +217,7 @@ def _document(root: Path, declared: object) -> Document:
         raise Refusal(RefusalCode.QUALIFICATION_SET_PATH_ESCAPES)
 
     try:
-        data = target.read_bytes()
+        data = _bounded_bytes(target, DEFAULT_LIMITS.max_document_bytes)
     except OSError:
         # Named and not there. A set is its bytes; one document short is not a
         # smaller set, it is a set nobody can measure the same way twice.
@@ -171,6 +234,67 @@ def _expect(item: object) -> ExpectedCitation:
         document_sha256=_text(fields, "document_sha256"),
         matched_text=_text(fields, "matched_text"),
     )
+
+
+def _forecast(item: object) -> ExpectedForecast | None:
+    if item is None:
+        return None
+    fields = _closed(item, _FORECAST_KEYS)
+    values = _declared(fields, "values")
+    readiness = _declared(fields, "readiness")
+    return ExpectedForecast(
+        scenario=_text(fields, "scenario"),
+        period_id=_text(fields, "period_id"),
+        values=tuple(
+            ForecastValue(**_closed(value, _FORECAST_VALUE_KEYS)) for value in values
+        ),
+        currency=_text(fields, "currency"),
+        scale=_text(fields, "scale"),
+        perimeter=_text(fields, "perimeter"),
+        qa_status=_text(fields, "qa_status"),
+        limitation_flags=_strings(fields, "limitation_flags"),
+        readiness=tuple(_pair(value) for value in readiness),
+    )
+
+
+def _ready(item: object) -> tuple[str, ...]:
+    """The module ids CP-0 must find ready, or a refusal.
+
+    Declared as a list of module ids; absent means the case asks nothing of
+    readiness. Bounded and de-duplicated here, because this crosses into the
+    set's digest and a key that differs only by repetition would digest twice.
+    """
+    if item is None:
+        return ()
+    if not isinstance(item, list) or not item:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    modules = []
+    for value in item:
+        if not isinstance(value, str) or not value.strip():
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        modules.append(BoundaryText.of(value.strip(), limit=_LABEL_LIMIT).value)
+    if len(set(modules)) != len(modules):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(modules)
+
+
+def _refusal(item: object) -> RefusalCode | None:
+    if item is None:
+        return None
+    if not isinstance(item, str):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    try:
+        return RefusalCode(item)
+    except ValueError:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID) from None
+
+
+def _extension(item: object) -> bool:
+    if item is None:
+        return False
+    if type(item) is not bool:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return item
 
 
 def _closed(entry: object, keys: frozenset[str]) -> Mapping[str, Any]:
@@ -195,6 +319,23 @@ def _text(fields: Mapping[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
     return value
+
+
+def _strings(fields: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = _declared(fields, key)
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(value)
+
+
+def _pair(item: object) -> tuple[str, str]:
+    if (
+        not isinstance(item, list)
+        or len(item) != 2
+        or any(not isinstance(value, str) or not value.strip() for value in item)
+    ):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return item[0], item[1]
 
 
 def _boundary(name: str) -> BoundaryText:

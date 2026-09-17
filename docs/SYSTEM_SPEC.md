@@ -223,97 +223,84 @@ and zero denominators are refused before use.
 
 ### 6.1 `cash_flow_forecast` — the deterministic forecast calculator
 
-The gap this closes: CP-2G states its roll-forward rules in prose and emits 42
-driver rows, but no calculator computes the projection. Leverage and coverage
-are recomputed deterministically *over* arithmetic the model performed. This
-calculator moves the arithmetic to the host and leaves CP-2G doing what needs a
-model — choosing drivers, with rationale and evidence.
+The calculator in `server/calculators/cash_flow.py` computes the forecast from
+module-authored drivers. Decision §54 freezes the implemented contract.
+It currently has no production caller: the verified CP-CF extension and
+allowlisted invocation remain Task 5.2 (§6.2); no upstream file gains code.
 
-**Binding.** `cash_flow_forecast` is declared once, with its helper set and its
-work factor, and its code ships in `scripts/` of the host-added CP-CF folder.
-Under `docs/DECISIONS.md` §25 a module selects a calculator only when its own
-folder ships the script, so CP-CF is the only caller: CP-2G's folder is upstream
-and gains no file (§6.2). An earlier draft bound the pair to CP-2G as well,
-which §25 makes impossible without an upstream edit.
+**Closed input.** Required top-level fields are `opening`, `periods`,
+`drivers`, `contractual`, `units`, `perimeter`; only `tolerance` is optional.
 
-**Inputs** (model-authored, host-validated before any code is selected):
-
-| Field | Meaning |
+| Field | Supported meaning |
 |---|---|
-| `opening` | `debt_by_facility[]`, `cash`, `as_of_period_id` — from the last CP-1 actual |
-| `periods[]` | `period_id`, `fiscal_year`, `case`, `days` — ordered, one row per case-period |
-| `drivers[]` | CP-2G's `cp_model_forecast_drivers` rows, `status` included |
-| `contractual` | `amortisation[]`, `maturities[]`, `coupons[]` per facility |
-| `policy` | `cash_sweep_pct`, `min_cash`, `revolver_limit`, `fx` |
-| `tolerance` | reconciliation tolerance, default `Decimal("0.001")` |
+| `opening` | Required `cash`, `as_of_period_id`, `debt_by_facility[]` of `{facility_id, amount}`; unique facilities |
+| `periods[]` | Required `period_id`, `fiscal_year`, `case`, `days`; unique case-period, caller order per case, integer-string days 1..366 |
+| `drivers[]` | Unique requested case-period, status and both stated closing balances, and §54's 13 movements |
+| `contractual` | Required `amortisation[]` with requested case-period, opened facility, amount; unique four-field entries |
+| `units` | Required `{currency, scale}`: three uppercase currency letters, units/thousands/millions/billions |
+| `perimeter` | Nonblank BoundaryText/NFC label, at most 64 characters |
+| `tolerance` | Nonnegative reconciliation tolerance, default `"0.001"`, in the supplied units |
 
-**Output.** Per case-period: `operating` (revenue, ebitda, margin, cfo),
-`investing` (capex, acquisitions_disposals), `financing` (cash interest, cash
-taxes, distributions, issuance, contractual and optional repayment), `fcf`,
-`debt` (opening, pik, capitalised_interest, fx_perimeter, closing), `cash`
-(opening, closing, accessible), `residual`, `metrics` (gross and net leverage,
-interest coverage, fcf_to_debt, liquidity_runway_periods), and
-`unavailable_reason`. Plus a `checks[]` list of `SemanticCheck` records in the
-shape `cp_model_v3/calculations.py` defines.
+All nested objects are closed. Policy (sweep, minimum cash, revolver, FX),
+maturities, coupons and the old driver `financing_investing` field refuse
+`METHODOLOGY_INPUT_INVALID`. A missing movement on READY gives
+`DRIVER_FIELD_MISSING`; a missing driver gives `DRIVER_MISSING`; status other
+than READY gives `DRIVER_NOT_READY`. Present malformed numbers refuse the
+whole request even if their row would be unavailable.
 
-**The two identities it computes**, taken verbatim from CP-2G's calculation
-controls:
+**The identities.** Contractual repayment sums that case-period's amortisation
+rows, zero only when there are none. Acquisitions/disposals and FX/perimeter
+are signed; all other movements are nonnegative.
 
 ```
 closing_debt = opening_debt + issuance + pik + capitalised_interest
-             − contractual_repayment − optional_repayment ± fx_perimeter
-
-closing_cash = opening_cash + cfo − capex − cash_interest − cash_taxes
-             − distributions ± financing_investing
+               - contractual_repayment - optional_repayment + fx_perimeter
+financing_investing = issuance - contractual_repayment - optional_repayment
+                      - acquisitions_disposals
+fcf = cfo - capex - cash_interest - cash_taxes
+closing_cash = opening_cash + fcf - distributions + financing_investing
+residual_debt = stated_closing_debt - closing_debt
+residual_cash = stated_closing_cash - closing_cash
 ```
 
-**Invariants.**
+Each case starts from supplied opening balances and chains computed closes.
+A disagreement is `FORECAST_CHAIN_BROKEN`. Either residual magnitude above
+tolerance makes the row `RESIDUAL_UNRECONCILED`; equality passes. Every later
+row in that case is `PRIOR_PERIOD_UNAVAILABLE`, without affecting another case.
 
-1. **Decimal only, end to end.** JSON has no decimal type, so every numeric in
-   the input carries as a **string** and is parsed with `Decimal(str)`. A JSON
-   float in a numeric field is `METHODOLOGY_INPUT_INVALID`, not a silent
-   coercion — binary floating point cannot represent a cent. Output numerics
-   are strings too. The module contains no `float`, matching
-   `cp_model_v3/calculations.py`, which has zero `float(` calls.
-   This is stricter than the existing calculators, which accept JSON numbers;
-   the difference is deliberate and is the one place the new calculator does
-   not simply copy the incumbent contract.
-2. **Chained, asserted.** `opening[n+1] == closing[n]` per case, checked rather
-   than assumed. A break is `FORECAST_CHAIN_BROKEN`.
-3. **The residual is explicit and never forced to zero.** This is CP-2G's own
-   rule made executable: if `abs(residual) > tolerance`, the period is
-   `unavailable` and says so.
-4. **Unavailability propagates forward.** A period that cannot be computed makes
-   every later period in that case unavailable. It is never read as zero growth
-   — also CP-2G's rule.
-5. **Non-finite values and zero denominators are refused before use**
-   (invariant 7). Leverage against zero EBITDA is `null` with a reason, never
-   an infinity.
-6. **Pure.** No I/O, no clock, no randomness. Same inputs, byte-identical output.
+**Numeric boundary.** Every input number is a JSON string matching the entire
+`-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?` grammar, never a JSON number, bool,
+exponent or non-finite value. One local precision-38, half-even Decimal context
+with InvalidOperation/DivisionByZero/Overflow traps covers all arithmetic.
+Amounts serialize to six places, ratios to four; no ambient context is read.
 
-**Work factor**, host-enforced in `_enforce_work_factor` before the vendor
-script's own guards, so a looser script can never widen what model-authored
-input may cost:
+**Output.** `cash_flow_forecast` returns
+`{status, units, perimeter, rows[], checks[]}`; `forecast_bytes` produces
+sorted-key, compact UTF-8 canonical JSON. Rows appear in requested order and
+carry case, period, fiscal year and days, with computed fields or an unavailable
+reason. Computed fields are operating (including EBITDA/revenue margin),
+investing, financing (including derived financing/investing), FCF, debt, cash,
+both signed residuals and metrics. Failed residual rows retain diagnostics.
+Accessible cash equals closing cash; restricted cash and liquidity runway are
+not implemented. Units and perimeter carry to output.
 
-```
-MAX_FORECAST_PERIODS    = 40     # ten years quarterly
-MAX_FORECAST_CASES      = 6
-MAX_FORECAST_FACILITIES = 40
-periods × cases × (1 + facilities) ≤ 100_000
-```
+Metrics are closing debt/EBITDA, (closing debt-closing cash)/EBITDA,
+EBITDA/cash interest and FCF/closing debt. Each returns
+`{value: "<four-place string>", reason: null}` or, for a nonpositive
+denominator, `{value: null, reason: "ZERO_OR_NEGATIVE_DENOMINATOR"}`.
+A null ratio does not itself make a period unavailable.
+Each requested row has a residual check with `check_id`, PASS/FAIL `outcome`
+and `reason`; these are host records, not an archived workbook schema.
 
-**`calculation_output_complete`**: `status == "complete"`, the requested
-`(case, period_id)` set is non-empty, and the output contains every requested
-pair exactly once, with no extra pairs. Every requested period has finite
-closing debt, finite closing cash and a non-empty `metrics`. An explicitly
-unavailable period makes the calculation incomplete; it and its reason still
-appear in the output, with unavailability propagated forward. One successful
-period cannot stand in for the requested horizon. A ratio that is `null` with
-the zero-denominator reason allowed above is not itself a missing period.
-
-**Refusals** — typed, public-safe, no vendor or filesystem detail:
-`METHODOLOGY_INPUT_INVALID`, `FORECAST_CHAIN_BROKEN`,
-`FORECAST_RESIDUAL_UNRECONCILED`, `FORECAST_DRIVER_NOT_READY`.
+**Completeness and ceilings.** Complete means every requested pair appears
+exactly once and is available. Missing values never become zero.
+Before parsing any numeric, the host bounds 40 periods per case, 6 cases,
+40 facilities, 2,000 amortisation entries, one driver per requested pair and
+`max_periods_per_case × cases × (1 + facilities) <= 100000`.
+The calculation is pure; the same request yields identical canonical bytes
+under any ambient Decimal context. Invalid input refuses
+`METHODOLOGY_INPUT_INVALID`; driver/residual issues use row reasons, retiring
+the old whole-request driver/residual refusals on this path.
 
 ### 6.2 CP-CF — CashFlowEngine, and the no-edit rule
 
@@ -388,9 +375,14 @@ the export from the frozen payload.
 
 ## 8. Identity and authority
 
-- Development trusts a role header. Production derives role from OIDC groups
-  only; a client role header never escalates.
-- Unknown runs and unauthorized runs return the same 404.
+- Development trusts a role header, and only a loopback peer on a loopback
+  `Host` is served without an edge token. Production is edge mode: a request
+  without the operator edge's token is refused before routing, role comes from
+  OIDC groups only, and a client role header never escalates
+  (`docs/DECISIONS.md` §53).
+- A repeated or lookalike identity header is not authenticated; an unsafe API
+  request needs a same-origin fetch or the allowed `Origin`.
+- Unknown and unauthorized cases and runs return the same 404.
 - Case standing (`READER`/`WRITER`/`APPROVER`/`ADMIN`) and global role are
   separate and both are rechecked at commit time, not only at request time.
 - **Persona is not authority.** The workspace section a user is looking at
@@ -409,10 +401,12 @@ they went with those services (`docs/DECISIONS.md` §48).
 One document per section, not per widget — the per-widget query pattern is what
 produced the open-envelope carve-outs in the current tree.
 
-Run progress reaches the browser as SSE over `run_events` with `Last-Event-ID`
-resume. Membership is rechecked before each event; the stream closes once a
-terminal run is fully delivered, and tails close after five minutes for edge
-reauthentication. The client never reads event payloads — an event name triggers
+Case and run progress reach the browser as one SSE stream per case
+(`/api/v1/cases/{case}/events`, `?run=` for a run's events) over `audit_events`
+and `run_events`, with a composite `Last-Event-ID` resume (`docs/DECISIONS.md`
+§52). Membership is rechecked before each event; the run half ends once its
+terminal is delivered, each idle poll writes an SSE comment so a disconnect is
+noticed, and streams close after five minutes for edge reauthentication. The client never reads event payloads — an event name triggers
 a refetch.
 
 ---
@@ -435,15 +429,18 @@ arrives with the first logger (`docs/DECISIONS.md` §45).
 
 ## 11. Deployment and failure
 
-Repair Phase 4 target: one API instance, one worker, one PostgreSQL, one blob
-store and one reverse proxy. API and worker use the same verified schema/bundle
-and blob configuration. Bound request and worker concurrency explicitly; do not
-assume an instance ceiling without enforcing it.
+One image, run as two containers -- the API (`server.api.site:application`,
+one uvicorn worker, `--limit-concurrency 32`, `--no-proxy-headers`) and the
+polling worker -- beside one PostgreSQL, one blob store and the operator's
+authenticating edge, which is not in the image. The API serves the static
+export and `/api` from one origin behind the edge guard. API and worker use the
+same verified schema, bundle and blob configuration (`docs/DECISIONS.md` §53).
 
-`GET /api/health` serves liveness and readiness on one strict model — store,
-bundle, blob store — 200 when all hold, 503 otherwise. The
-probes really run, at most once per TTL, on a shared background task with a
-deadline. The route skips auth and the rate ceiling.
+`GET /api/health` serves readiness on one closed model -- store, bundle, blob
+store -- 200 when all three hold and the last round is fresh, 503 otherwise.
+The probes run every 10 s on one background task, each under a 2 s deadline;
+the route reads the cached round, needs no identity or edge token, and does no
+I/O. The worker serves no health route.
 
 Failure posture, in order of preference: refuse before acting; if acting,
 commit exactly once; if uncertain, recompute rather than restore.

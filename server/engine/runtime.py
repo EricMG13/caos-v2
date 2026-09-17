@@ -18,6 +18,7 @@ lived to record it (`server/store/budget.py`).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
@@ -41,6 +42,7 @@ from server.methodology.canonical import (
     accepted_projections,
     blocked_verdict,
     replay_billed,
+    unexplained_charge,
 )
 from server.methodology.invocation import named_objects
 from server.pricing import ModelPrice, worst_case
@@ -66,7 +68,7 @@ from server.store.runs import (
     complete_run,
     start_attempt,
 )
-from server.store.work import Lease
+from server.store.work import Lease, holds_lease
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +164,27 @@ def run_route(
         )
 
 
+def _refuse_unexplained(
+    conn: StoreConnection,
+    run_id: UUID,
+    ready: Sequence[str],
+    lease: Lease | None,
+) -> None:
+    """Refuse a ready node already paid for whose answer was never stored.
+
+    `replay_billed` needs a body to settle from; this outcome has none, so the
+    next pass would start a fresh attempt and pay for the same node twice with
+    nobody choosing to. The lease answer comes first: a caller that lost the
+    run is told that before it is told anything about what the run contains,
+    which is the order every write in `_run_node` takes.
+    """
+    if unexplained_charge(conn, run_id=run_id, route_node_ids=ready) is None:
+        return
+    if not holds_lease(conn, run_id, lease):
+        raise Refusal(RefusalCode.LEASE_NOT_HELD)
+    raise Refusal(RefusalCode.CALL_OUTCOME_UNEXPLAINED)
+
+
 def _drive(  # noqa: PLR0913 -- one run, keyword-only
     conn: StoreConnection,
     blobs: BlobStore,
@@ -193,6 +216,11 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
                 if ready
                 else None
             )
+            # A charge whose body was never stored cannot be replayed, and
+            # starting a fresh attempt over it would pay for the same node
+            # twice without anyone choosing to. Park the run instead.
+            if ready and replayed is None:
+                _refuse_unexplained(conn, run_id, ready, execution.lease)
         if replayed is not None:
             if not _settle(conn, blobs, replayed, run_id=run_id, lease=execution.lease):
                 return
@@ -342,7 +370,13 @@ def _explain_live(
 
 
 _STORE_FAULTS = frozenset(
-    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+    {
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+    }
 )
 
 

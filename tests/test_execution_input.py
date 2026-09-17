@@ -186,7 +186,7 @@ def test_current_bundle_and_adapter_are_distinct_from_historical_readability(
         current = Bundle(tmp_path)
     elif change == "adapter":
         monkeypatch.setattr(
-            methodology, "CANONICAL_ADAPTER_VERSION", "canonical-markdown-v2"
+            methodology, "CANONICAL_ADAPTER_VERSION", "canonical-markdown-v4"
         )
     elif change == "moving":
         path.write_text(raw + " ")

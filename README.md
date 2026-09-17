@@ -57,15 +57,34 @@ locks, installs the pinned local pre-commit runner, and runs
 configuration is present; it never prints values. Live-provider variables are
 optional and should remain absent during ordinary development.
 
-The API and UI are separate processes. The ordinary UI proxies `/api` to the
-real local API on `127.0.0.1:8000`; API/UI route compatibility remains a later
-phase, so an absent or unknown API route fails visibly rather than falling back
-to sample data:
+The API, worker and UI are separate processes. `make dev-api` serves the
+guarded site application on `127.0.0.1:8000` and answers only loopback
+requests. The ordinary UI proxies `/api` to it and asserts the local actor
+itself: `CAOS_DEV_USER` (a UUID) and `CAOS_DEV_ROLE` (`READER`, `ANALYST` or
+`ADMIN`; default `ANALYST`), set in the environment file the setup copied.
+Without `CAOS_DEV_USER` the API answers 401. An absent or unknown API route
+fails visibly rather than falling back to sample data. The worker needs a
+configured provider and a dated `CAOS_MODEL_PRICE`, and refuses to start
+without them:
 
 ```sh
-make dev-api  # http://127.0.0.1:8000; `make dev` is an alias
-make dev-ui   # http://127.0.0.1:5173
+make dev-api     # http://127.0.0.1:8000; `make dev` is an alias
+make dev-worker  # the one polling worker
+make dev-ui      # http://127.0.0.1:5173
 ```
+
+`make test-provider` is a separately authorized paid mode. It additionally
+requires `CAOS_MODEL_PRICE` (`model,input_per_token,output_per_token,YYYY-MM-DD`)
+and `CAOS_LIVE_BUDGET_CEILING` (a positive decimal). The test reserves the
+configured worst-case price before each call and refuses the next call before
+that per-run ceiling would be exceeded; it never prints credential values.
+`OPENROUTER_PROVIDER` may pin one upstream endpoint by its lowercase OpenRouter
+provider slug (for example, `deepseek`) and
+`OPENROUTER_REASONING_EFFORT` may select `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh` or `max`. A qualification verdict binds that execution profile;
+qualification therefore requires an explicit provider slug. Ordinary live calls
+may leave both unset for the legacy automatic/default profile. Changing the
+provider changes the external data recipient and requires fresh authorization.
 
 Sample screens are available only in explicit demonstration mode. They carry a
 prominent read-only banner and fixture handlers reject commands:
@@ -99,8 +118,8 @@ PR_BASE=<exact-pr-base> make check-size
 ```
 
 `make check` runs backend checks, the explicit two-connection race suite,
-frontend production and fixture checks, security and image scanning
-sequentially. The separate PR-only size command requires the exact proposed
+frontend production and fixture checks, security, image scanning and
+`make smoke-production` sequentially. The separate PR-only size command requires the exact proposed
 base. The offline gate removes inherited provider credentials and
 never makes paid calls. It cannot manufacture the hosted Sonar or required
 GitHub statuses described in [`docs/CI_GATE_CONTRACT.md`](docs/CI_GATE_CONTRACT.md).
@@ -109,3 +128,27 @@ GitHub statuses described in [`docs/CI_GATE_CONTRACT.md`](docs/CI_GATE_CONTRACT.
 If GitNexus reports the known incremental `file_fts` index failure, rebuild only
 that local index with `gitnexus analyze --force --index-only`, then confirm it
 with `gitnexus status`.
+
+## Production image
+
+One image runs as two containers: the API
+(`server.api.site:application`, serving `/api` and the static export from one
+origin) and the worker (`python -m server.engine.worker`). It expects an
+authenticating edge in front of it that sets `x-caos-user`,
+`x-forwarded-groups` and the shared `x-caos-edge-token`; the contract is in
+`server/api/edge.py` and `docs/DECISIONS.md` §53. In edge mode the API needs
+`CAOS_EDGE_TOKEN` (at least 32 bytes), `CAOS_PUBLIC_ORIGIN`, and no
+`CAOS_TRUST_ROLE_HEADER`, or it refuses to start. Started without a token, it
+answers only `GET /api/health`.
+
+The disposable local proof builds the image, boots it on its own database and
+blob volume (`compose.smoke.yaml`, project `caos-workbench-smoke`), runs the
+image tests, then the real-browser journey through a test edge, and removes
+the stack with its volumes. It needs Docker and never touches the development
+database or blobs:
+
+```sh
+make smoke-production
+```
+
+No CI job runs this target.

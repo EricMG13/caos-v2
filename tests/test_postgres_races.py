@@ -50,7 +50,14 @@ from server.store.runs import (
     start_attempt,
     start_run,
 )
-from server.store.work import Lease, claim_run, enqueue_run, request_cancel, stop
+from server.store.work import (
+    Lease,
+    claim_run,
+    enqueue_run,
+    holds_lease,
+    request_cancel,
+    stop,
+)
 
 # The producer the store records beside every accepted artifact: what the
 # host configured, and the provider's own handle for the call.
@@ -60,6 +67,98 @@ GENERATION = "gen-for-the-test"
 ARTIFACT = "c" * 64
 CHARGE = Decimal("0.0142")
 APPENDERS = 8
+
+
+def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
+    empty_database: str, tmp_path: Path
+) -> None:
+    import inspect
+    from dataclasses import replace
+    from typing import cast
+
+    from test_deliverable_canonical import LITE, _accept
+    from test_execution_freshness import _Harness, harness
+    from test_filing_chain import _actor, _freeze, _sign
+    from test_revisions import _save
+
+    from server.deliverable.filing import file_deliverable
+    from server.deliverable.receipts import read_filed_receipt
+    from server.store.audit import audit_trail, verify_chain
+
+    make_harness = cast(
+        Callable[[tuple[StoreConnection, UUID], Path, ResolvedRoute], _Harness],
+        inspect.unwrap(harness),
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        cases = []
+        for index in range(2):
+            case_id = create_case(conn, BoundaryText.of(f"Issuer {index}"))
+            conn.commit()
+            held = make_harness((conn, case_id), tmp_path / str(index), LITE)
+            for module in ("CP-0", "CP-L10", "CP-5"):
+                _accept(held, module)
+            cases.append((held, _save(held), _actor(held), _actor(held)))
+
+        for stage in ("sign", "freeze", "file"):
+            barrier = Barrier(4)
+
+            def race(index: int, stage: str = stage, barrier: Barrier = barrier) -> str:
+                held, revision, freezer, filer = cases[index // 2]
+                with connect(empty_database) as other:
+                    current = replace(held, conn=other)
+                    barrier.wait(10)
+                    try:
+                        if stage == "sign":
+                            _sign(current, revision)
+                        elif stage == "freeze":
+                            _freeze(current, revision, freezer)
+                        else:
+                            receipt = file_deliverable(
+                                other,
+                                held.blobs,
+                                case_id=held.case_id,
+                                actor_id=filer,
+                                revision_id=revision,
+                            )
+                            assert (receipt.case_id, receipt.run_id) == (
+                                held.case_id,
+                                held.run_id,
+                            )
+                    except Refusal as refused:
+                        return refused.code.value
+                    return "OK"
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                outcomes = list(pool.map(race, range(4)))
+            expected = {
+                "sign": ["OK", "OK"],
+                "freeze": ["OK", "DELIVERABLE_ALREADY_FROZEN"],
+                "file": ["OK", "DELIVERABLE_ALREADY_FILED"],
+            }[stage]
+            for pair in (outcomes[:2], outcomes[2:]):
+                assert sorted(pair) == sorted(expected)
+        for held, revision, _, _ in cases:
+            actions = [entry.action for entry in audit_trail(conn, held.case_id)]
+            assert (
+                actions.count("DELIVERABLE_FROZEN")
+                == actions.count("DELIVERABLE_FILED")
+                == 1
+            )
+            assert verify_chain(conn, held.case_id)
+            rows = conn.execute(
+                "SELECT receipt_sha256 FROM deliverable_receipts WHERE case_id=%s",
+                (held.case_id,),
+            ).fetchall()
+            assert len(rows) == 1
+            assert read_filed_receipt(
+                conn,
+                held.blobs,
+                held.bundle,
+                case_id=held.case_id,
+                run_id=held.run_id,
+                revision_id=revision,
+            ) == held.blobs.get(rows[0][0])
 
 
 @pytest.fixture
@@ -493,6 +592,10 @@ def test_the_runtime_writes_under_its_executions_lease(
         assert _count(conn, "artifacts", run_id) == 0
         _refused(RefusalCode.LEASE_NOT_HELD, run)
         assert provider.calls == ["CP-0"], "a stale lease starts no attempt"
+        # The node is billed with no stored body, which is its own refusal --
+        # but the lease answer comes first, so `holds_lease` is what decides
+        # which of the two this caller is told.
+        assert not holds_lease(conn, run_id, lease)
         assert _count(conn, "run_attempts", run_id) == 1
 
 

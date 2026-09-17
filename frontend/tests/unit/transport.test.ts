@@ -3,19 +3,32 @@ import { resolve } from "node:path";
 import { createElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { UNAVAILABLE_WORDING, fetchSection, sectionUrl } from "@/app/transport";
+import {
+  UNAVAILABLE_WORDING,
+  fetchQualification,
+  fetchSection,
+  qualificationUrl,
+  sectionUrl,
+} from "@/app/transport";
 import { ENABLED_SECTIONS, isEnabledSection } from "@/app/sections";
 import { Workspace } from "@/app/Workspace";
 import { Rail } from "@/chrome/Rail";
 import { composeChrome, markDisabled } from "@/chrome/compose";
 import { SECTIONS } from "@/wire";
-import { parseUploadDocument } from "@/wire/v1";
+import {
+  parseCommitteeDocument,
+  parseModelDocument,
+  parseReportDocument,
+  parseUploadDocument,
+} from "@/wire/v1";
 
 const CASE = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const OTHER_CASE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const RUN = "7e6d5c4b-3a29-4817-a6f5-e4d3c2b1a098";
 const AT = "2026-09-14T10:00:00.123456Z";
+const REVISION = "4f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 const DISABLED = SECTIONS.filter((section) => !isEnabledSection(section));
+const QUALIFICATION = "a".repeat(64);
 
 /** A v1 Upload document for `CASE`, served under `role`. */
 function v1Upload(role: { global_role: string; standing: string | null }, caseId = CASE) {
@@ -26,6 +39,85 @@ function v1Upload(role: { global_role: string; standing: string | null }, caseId
     observed_empty: false,
     status: "complete",
     notes: [],
+  };
+}
+
+function v1Model(runId = RUN) {
+  return {
+    chrome: {
+      subject: { case_id: CASE, title: "Acme" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: CASE,
+      latest_run_id: runId,
+      displayed_run_id: runId,
+      subject: null,
+      forecast: null,
+      unavailable_reason: "NO_ACCEPTED_FORECAST",
+    },
+    observed_at: AT,
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  };
+}
+
+function v1Report({
+  caseId = CASE,
+  runId = RUN,
+  revisionId = REVISION,
+}: { caseId?: string; runId?: string; revisionId?: string } = {}) {
+  return {
+    chrome: {
+      subject: { case_id: caseId, title: "Acme" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: caseId,
+      displayed_run_id: runId,
+      revision_id: revisionId,
+      payload_sha256: "a".repeat(64),
+      case_title: "Acme",
+      artifacts: [],
+      narrative: [],
+    },
+    observed_at: AT,
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  };
+}
+
+function v1Committee({
+  caseId = CASE,
+  runId = RUN,
+  revisionId = REVISION,
+  receiptRevisionId = revisionId,
+}: { caseId?: string; runId?: string; revisionId?: string; receiptRevisionId?: string } = {}) {
+  const report = v1Report({ caseId, runId, revisionId });
+  return {
+    ...report,
+    body: {
+      ...report.body,
+      state: "filed",
+      signed_by: [CASE],
+      frozen_by: RUN,
+      filed_by: REVISION,
+      receipt: {
+        case_id: caseId,
+        run_id: runId,
+        revision_id: receiptRevisionId,
+        payload_sha256: "a".repeat(64),
+        signed_by: CASE,
+        frozen_by: RUN,
+        filed_by: REVISION,
+        renderer_sha256: "b".repeat(64),
+        filed_event_sha256: "c".repeat(64),
+      },
+    },
   };
 }
 
@@ -44,6 +136,42 @@ describe("the transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })));
     expect(await fetchSection("analysis", { case: CASE })).toEqual({ kind: "unavailable" });
     expect(UNAVAILABLE_WORDING).toBe("Unavailable or not permitted.");
+  });
+
+  test("qualification reads bind the returned state to the requested evidence", async () => {
+    const body = {
+      evidence_sha256: QUALIFICATION,
+      state: "RESTRICTED",
+      qualification_set_sha256: null,
+      performed_sha256: null,
+      build_id: null,
+      adapter_version: null,
+      provider: null,
+      model: null,
+      reviewer: null,
+      decided_at: null,
+      expires_at: null,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body))));
+
+    expect(qualificationUrl(QUALIFICATION)).toBe(`/api/v1/qualification/${QUALIFICATION}`);
+    expect(await fetchQualification(QUALIFICATION)).toEqual({ kind: "ready", document: body });
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ ...body, evidence_sha256: "b".repeat(64) })),
+        ),
+    );
+    expect(await fetchQualification(QUALIFICATION)).toEqual({
+      kind: "error",
+      refusal: {
+        code: "WIRE_IDENTITY_MISMATCH",
+        clears: "the qualification result is bound to the requested evidence",
+      },
+    });
   });
 
   test("any other non-2xx is a typed refusal, never exception text", async () => {
@@ -100,9 +228,18 @@ describe("the transport", () => {
       `/api/v1/cases/${CASE}/run?run=${RUN}`,
     );
     expect(sectionUrl("analysis", { case: CASE })).toBe(`/api/v1/cases/${CASE}/analysis`);
+    expect(sectionUrl("model", { case: "a/b?c", run: RUN })).toBe(
+      `/api/v1/cases/a%2Fb%3Fc/model?run=${RUN}`,
+    );
+    expect(sectionUrl("model", { case: CASE })).toBe(`/api/v1/cases/${CASE}/model`);
+    for (const section of ["report", "committee"] as const) {
+      expect(sectionUrl(section, { case: "a/b?c", run: RUN, revision: REVISION })).toBe(
+        `/api/v1/cases/a%2Fb%3Fc/${section}?run=${RUN}&revision=${REVISION}`,
+      );
+    }
     expect(sectionUrl("run", { case: "a/b?c" })).toBe("/api/v1/cases/a%2Fb%3Fc/run");
     // A caseless case section, or a disabled section, has no URL at all.
-    for (const section of ["upload", "run", "analysis"] as const) {
+    for (const section of ["upload", "run", "analysis", "model", "report", "committee"] as const) {
       expect(sectionUrl(section, { run: RUN })).toBeNull();
     }
     for (const section of DISABLED) expect(sectionUrl(section, { case: CASE })).toBeNull();
@@ -122,7 +259,7 @@ describe("the transport", () => {
   test("a caseless case section is unavailable and sends no request", async () => {
     const spy = vi.fn();
     vi.stubGlobal("fetch", spy);
-    for (const section of ["upload", "run", "analysis"] as const) {
+    for (const section of ["upload", "run", "analysis", "model"] as const) {
       expect(await fetchSection(section, {})).toEqual({ kind: "unavailable" });
     }
     for (const section of DISABLED) {
@@ -132,8 +269,16 @@ describe("the transport", () => {
   });
 
   test("test_disabled_sections_render_unavailable_without_a_request", async () => {
-    expect([...ENABLED_SECTIONS]).toEqual(["directory", "upload", "run", "analysis"]);
-    expect(DISABLED).toEqual(["book", "model", "report", "committee", "admin"]);
+    expect([...ENABLED_SECTIONS]).toEqual([
+      "directory",
+      "upload",
+      "run",
+      "analysis",
+      "model",
+      "report",
+      "committee",
+    ]);
+    expect(DISABLED).toEqual(["book", "admin"]);
     const spy = vi.fn();
     const tail = vi.fn();
     vi.stubGlobal("fetch", spy);
@@ -161,6 +306,90 @@ describe("the transport", () => {
     }
     expect(spy).not.toHaveBeenCalled();
     expect(tail).not.toHaveBeenCalled();
+  });
+
+  test("a supplied Model run is parser-bound to the displayed run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(v1Model(OTHER_CASE)))),
+    );
+    expect(await fetchSection("model", { case: CASE, run: RUN })).toEqual({
+      kind: "error",
+      refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+    });
+    expect(parseModelDocument(v1Model()).body.displayed_run_id).toBe(RUN);
+  });
+
+  test("Report requires and binds the exact case, run and revision", async () => {
+    const mismatches = [
+      v1Report({ caseId: OTHER_CASE }),
+      v1Report({ runId: OTHER_CASE }),
+      v1Report({ revisionId: OTHER_CASE }),
+    ];
+    const spy = vi.fn(async () => new Response(JSON.stringify(mismatches.shift())));
+    vi.stubGlobal("fetch", spy);
+    for (const query of [
+      { case: CASE, run: RUN },
+      { case: CASE, revision: REVISION },
+      { run: RUN, revision: REVISION },
+    ]) {
+      expect(await fetchSection("report", query)).toEqual({ kind: "unavailable" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    for (let index = 0; index < 3; index += 1) {
+      expect(await fetchSection("report", { case: CASE, run: RUN, revision: REVISION })).toEqual({
+        kind: "error",
+        refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+      });
+    }
+    expect(parseReportDocument(v1Report()).body.revision_id).toBe(REVISION);
+  });
+
+  test("Committee requires and binds exact case/run/revision including its receipt", async () => {
+    const mismatches = [
+      v1Committee({ caseId: OTHER_CASE }),
+      v1Committee({ runId: OTHER_CASE }),
+      v1Committee({ revisionId: OTHER_CASE }),
+      v1Committee({ receiptRevisionId: OTHER_CASE }),
+    ];
+    const spy = vi.fn(async () => new Response(JSON.stringify(mismatches.shift())));
+    vi.stubGlobal("fetch", spy);
+    for (const query of [
+      { case: CASE, run: RUN },
+      { case: CASE, revision: REVISION },
+      { run: RUN, revision: REVISION },
+    ]) {
+      expect(await fetchSection("committee", query)).toEqual({ kind: "unavailable" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    for (let index = 0; index < 4; index += 1) {
+      expect(await fetchSection("committee", { case: CASE, run: RUN, revision: REVISION })).toEqual(
+        {
+          kind: "error",
+          refusal: { code: "WIRE_IDENTITY_MISMATCH", clears: expect.any(String) },
+        },
+      );
+    }
+    expect(parseCommitteeDocument(v1Committee()).body.receipt?.revision_id).toBe(REVISION);
+  });
+
+  test("the rail preserves an exact Report or Committee selection for every section", () => {
+    render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(Rail, {
+          section: "committee",
+          entries: null,
+          local: null,
+          servedRole: null,
+          search: `?case=${CASE}&run=${RUN}&revision=${REVISION}`,
+        }),
+      ),
+    );
+    for (const link of screen.getAllByRole("link")) {
+      expect(link.getAttribute("href")).toContain(`case=${CASE}&run=${RUN}&revision=${REVISION}`);
+    }
   });
 
   test("test_served_role_is_displayed_and_enables_nothing", () => {

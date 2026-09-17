@@ -14,8 +14,60 @@ const json = (path: string): Record<string, unknown> => JSON.parse(text(path));
 const CASE = "00000000-0000-4000-8000-000000000001";
 const OTHER = "00000000-0000-4000-8000-0000000000ff";
 const RUN = "00000000-0000-4000-8000-0000000000b2";
+const REVISION = "00000000-0000-4000-8000-0000000000c3";
 const analysis = () => json("../../fixtures/analysis.json");
 const otherCase = () => JSON.parse(text("../../fixtures/analysis.json").replaceAll(CASE, OTHER));
+const model = () => ({
+  chrome: {
+    subject: { case_id: CASE, title: "Issuer" },
+    served_role: { global_role: "READER", standing: "READER" },
+    actions: [],
+  },
+  body: {
+    case_id: CASE,
+    latest_run_id: RUN,
+    displayed_run_id: RUN,
+    subject: null,
+    forecast: null,
+    unavailable_reason: "NO_ACCEPTED_FORECAST",
+  },
+  observed_at: "2026-09-14T10:00:00Z",
+  observed_empty: false,
+  status: "complete",
+  notes: [],
+});
+const report = () => ({
+  chrome: {
+    subject: { case_id: CASE, title: "Issuer" },
+    served_role: { global_role: "READER", standing: "READER" },
+    actions: [],
+  },
+  body: {
+    case_id: CASE,
+    displayed_run_id: RUN,
+    revision_id: REVISION,
+    payload_sha256: "a".repeat(64),
+    case_title: "Issuer",
+    artifacts: [],
+    narrative: [],
+  },
+  observed_at: "2026-09-14T10:00:00Z",
+  observed_empty: false,
+  status: "complete",
+  notes: [],
+});
+const committee = () => ({
+  ...report(),
+  body: {
+    ...report().body,
+    state: "frozen",
+    signed_by: [CASE],
+    frozen_by: RUN,
+    filed_by: null,
+    receipt: null,
+  },
+});
+const filedCommittee = () => json("../../fixtures/committee-v1.json");
 
 class FakeSource {
   static CONNECTING = 0;
@@ -137,6 +189,61 @@ describe("the workspace under its event tail", () => {
     expect(sent).toHaveLength(1);
     await fire("handoff_accepted");
     expect(sent).toHaveLength(2);
+  });
+
+  test("Model refetches only its named document events", async () => {
+    await mount("model", `/model/?case=${CASE}&run=${RUN}`);
+    expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/model?run=${RUN}`);
+    await answer(0, model());
+    await fire("run_progress");
+    expect(sent).toHaveLength(1);
+    for (const name of ["handoff_accepted", "run_terminal", "sources_changed", "runs_changed"]) {
+      await fire(name);
+      await answer(sent.length - 1, model());
+    }
+    expect(sent).toHaveLength(5);
+  });
+
+  test("Report requires a direct exact selection and refreshes for saved-source or filing changes", async () => {
+    await mount("report", `/report/?case=${CASE}&run=${RUN}`);
+    expect(sent).toHaveLength(0);
+    await mount("report", `/report/?case=${CASE}&run=${RUN}&revision=${REVISION}`);
+    expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/report?run=${RUN}&revision=${REVISION}`);
+    await answer(0, report());
+    for (const name of ["run_progress", "handoff_accepted", "run_terminal", "runs_changed"]) {
+      await fire(name);
+    }
+    expect(sent).toHaveLength(1);
+    await fire("sources_changed");
+    expect(sent).toHaveLength(2);
+    await answer(1, report());
+    await fire("filing_changed");
+    expect(sent).toHaveLength(3);
+  });
+
+  test("Committee requires the same exact selection and refreshes from frozen to filed", async () => {
+    await mount("committee", `/committee/?case=${CASE}&run=${RUN}`);
+    expect(sent).toHaveLength(0);
+    const { container } = await mount(
+      "committee",
+      `/committee/?case=${CASE}&run=${RUN}&revision=${REVISION}`,
+    );
+    expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/committee?run=${RUN}&revision=${REVISION}`);
+    await answer(0, committee());
+    for (const name of ["run_progress", "handoff_accepted", "run_terminal", "runs_changed"]) {
+      await fire(name);
+    }
+    expect(sent).toHaveLength(1);
+    await fire("sources_changed");
+    expect(sent).toHaveLength(2);
+    await answer(1, committee());
+    await fire("filing_changed");
+    expect(sent).toHaveLength(3);
+    await answer(2, filedCommittee());
+    expect(container.querySelector("[data-committee-filing]")).toHaveAttribute(
+      "data-state",
+      "filed",
+    );
   });
 
   test("test_names_arriving_mid_flight_cause_exactly_one_more_fetch", async () => {

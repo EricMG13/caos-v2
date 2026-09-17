@@ -1,362 +1,426 @@
-"""Phase 7 exit: the forecast is complete, honest about its residual, and finite.
+"""Forecast contract regressions and independent hand-calculated answer keys."""
 
-`docs/REBUILD_PLAN.md` Phase 7 names three:
-`test_forecast_complete_requires_every_requested_period`,
-`test_forecast_residual_is_not_forced_to_zero` and
-`test_forecast_unavailability_propagates`.
-
-The one worth reading twice is the residual. The model states what it believes a
-period closes at; the host computes the same thing from the two identities in
-`SYSTEM_SPEC.md` §6.1. The residual is the difference between them. Computing the
-closing balance and calling that the answer would make the residual zero by
-construction and the reconciliation vacuous -- which is the failure §6.1 exists
-to prevent, not a tidier implementation of it.
-"""
-
-from __future__ import annotations
-
-from decimal import Decimal
+import json
+from copy import deepcopy
+from decimal import ROUND_DOWN, Decimal, Inexact, localcontext
 from typing import Any
 
 import pytest
+from forecast_fixtures import forecast_request
 
-from server.calculators.cash_flow import (
-    MAX_FORECAST_CASES,
-    MAX_FORECAST_PERIODS,
-    Period,
-    cash_flow_forecast,
-)
+from server.calculators import cash_flow
+from server.calculators.cash_flow import cash_flow_forecast, forecast_bytes
 from server.refusals import Refusal, RefusalCode
 
-OPENING_DEBT = Decimal("1000")
-OPENING_CASH = Decimal("100")
 
-
-def _driver(period_id: str, case: str = "BASE", **overrides: str) -> dict[str, Any]:
-    """A period that balances: every movement stated, and the closing balances
-    the identities produce from them."""
-    row: dict[str, Any] = {
-        "period_id": period_id,
-        "case": case,
-        "status": "READY",
-        "revenue": "500",
-        "ebitda": "100",
-        "cfo": "80",
-        "capex": "20",
-        "cash_interest": "10",
-        "cash_taxes": "5",
-        "distributions": "0",
-        "issuance": "0",
-        "optional_repayment": "0",
-        "pik": "0",
-        "capitalised_interest": "0",
-        "fx_perimeter": "0",
-        "financing_investing": "0",
-        # opening 1000, amortisation 50 -> 950; opening 100 + 80 - 20 - 10 - 5 -> 145
-        "stated_closing_debt": "950",
-        "stated_closing_cash": "145",
-    }
-    row.update(overrides)
-    return row
-
-
-def _request(
-    periods: list[tuple[str, str]],
-    drivers: list[dict[str, Any]],
-    amortisation: list[dict[str, str]] | None = None,
-) -> dict[str, Any]:
-    return {
-        "opening": {
-            "debt_by_facility": {"TLB": str(OPENING_DEBT)},
-            "cash": str(OPENING_CASH),
-            "as_of_period_id": "FY25",
-        },
-        "periods": [
-            {
-                "period_id": period_id,
-                "fiscal_year": period_id[2:],
-                "case": case,
-                "days": "365",
-            }
-            for period_id, case in periods
-        ],
-        "drivers": drivers,
-        "contractual": {
-            "amortisation": amortisation
-            if amortisation is not None
-            else [
-                {"case": case, "period_id": period_id, "amount": "50"}
-                for period_id, case in periods
-            ]
-        },
-        "policy": {"cash_sweep_pct": "0", "min_cash": "0", "revolver_limit": "0"},
-        "tolerance": "0.001",
-    }
-
-
-def test_a_balancing_period_computes_both_identities() -> None:
-    result = cash_flow_forecast(_request([("FY26", "BASE")], [_driver("FY26")]))
-
-    [row] = result["periods"]
-    assert result["status"] == "complete"
-    assert row["debt"]["closing"] == "950"
-    assert row["cash"]["closing"] == "145"
-    assert row["residual"] == "0"
-    assert row["unavailable_reason"] is None
-
-
-def test_forecast_residual_is_not_forced_to_zero() -> None:
-    """A named exit test. The model's stated close disagrees with the identity,
-    and the answer is that it disagrees -- not a balancing figure.
-
-    The stated debt is 900 where the identities give 950. A calculator that
-    computed the close and reported it would show a residual of zero and a
-    period that reconciled, which is exactly the reassurance this must not give.
-    """
-    result = cash_flow_forecast(
-        _request(
-            [("FY26", "BASE")],
-            [_driver("FY26", stated_closing_debt="900")],
-        )
-    )
-
-    [row] = result["periods"]
-    assert row["residual"] == "50"
-    assert row["unavailable_reason"] is not None
-    assert "residual" in row["unavailable_reason"]
-    assert result["status"] == "incomplete"
-
-
-def test_a_residual_inside_the_tolerance_is_reported_and_survives() -> None:
-    """Reported either way. Under tolerance it does not make the period
-    unavailable, which is what a tolerance is for."""
-    result = cash_flow_forecast(
-        _request(
-            [("FY26", "BASE")],
-            [_driver("FY26", stated_closing_cash="145.0005")],
-        )
-    )
-
-    [row] = result["periods"]
-    assert Decimal(row["residual"]) > 0
-    assert row["unavailable_reason"] is None
-    assert result["status"] == "complete"
-
-
-def test_forecast_unavailability_propagates() -> None:
-    """A named exit test. A period that could not be computed makes every later
-    period in that case unavailable -- never read as zero growth."""
-    result = cash_flow_forecast(
-        _request(
-            [("FY26", "BASE"), ("FY27", "BASE"), ("FY28", "BASE")],
-            [
-                _driver("FY26", stated_closing_debt="1"),  # breaks here
-                _driver("FY27"),
-                _driver("FY28"),
-            ],
-        )
-    )
-
-    first, second, third = result["periods"]
-    assert first["unavailable_reason"] is not None
-    assert second["unavailable_reason"] is not None
-    assert third["unavailable_reason"] is not None
-    assert "FY26" in second["unavailable_reason"], "it says which period broke"
-    assert second["cash"]["closing"] is None, "not zero, and not carried forward"
-    assert result["status"] == "incomplete"
-
-
-def test_unavailability_does_not_cross_into_another_case() -> None:
-    """Cases are independent horizons. A DOWNSIDE that cannot be computed says
-    nothing about BASE."""
-    result = cash_flow_forecast(
-        _request(
-            [("FY26", "BASE"), ("FY26", "DOWNSIDE")],
-            [
-                _driver("FY26", case="BASE"),
-                _driver("FY26", case="DOWNSIDE", stated_closing_cash="1"),
-            ],
-        )
-    )
-
-    rows = {row["case"]: row for row in result["periods"]}
-    assert rows["BASE"]["unavailable_reason"] is None
-    assert rows["DOWNSIDE"]["unavailable_reason"] is not None
-
-
-def test_forecast_complete_requires_every_requested_period() -> None:
-    """A named exit test. One successful period cannot stand in for the horizon.
-
-    Every requested pair appears exactly once, and an unavailable one keeps its
-    place with its reason -- a horizon that dropped its failures would read as a
-    shorter horizon that worked.
-    """
-    requested = [("FY26", "BASE"), ("FY27", "BASE")]
-    result = cash_flow_forecast(
-        _request(
-            requested,
-            [_driver("FY26"), _driver("FY27", stated_closing_cash="0")],
-        )
-    )
-
-    pairs = [(row["period_id"], row["case"]) for row in result["periods"]]
-    assert pairs == requested, "every requested pair, exactly once, in order"
-    assert result["status"] == "incomplete", "one good period is not the horizon"
-    assert result["periods"][0]["unavailable_reason"] is None
-    assert result["periods"][1]["unavailable_reason"] is not None
-
-
-def test_a_period_carries_its_case_so_two_horizons_cannot_be_confused() -> None:
-    """`Period` is the unit the whole calculation is keyed on. The case is part
-    of its identity, not a label beside it -- FY26 BASE and FY26 DOWNSIDE are
-    two different periods, and a chain that mixed them would carry one case's
-    closing balance into the other's opening."""
-    base = Period(period_id="FY26", fiscal_year="2026", case="BASE", days=Decimal(365))
-    downside = Period(
-        period_id="FY26", fiscal_year="2026", case="DOWNSIDE", days=Decimal(365)
-    )
-
-    assert base != downside
-    assert base.days == Decimal(365)
-
-
-def test_a_duplicate_case_period_is_refused() -> None:
-    """ "Exactly once" is unanswerable if the request asks twice."""
+def refused(request: dict[str, Any]) -> None:
     with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(
-            _request(
-                [("FY26", "BASE"), ("FY26", "BASE")],
-                [_driver("FY26")],
+        cash_flow_forecast(request)
+    assert caught.value.code == RefusalCode.METHODOLOGY_INPUT_INVALID
+
+
+def test_annual_base_and_downside_reconcile_to_hand_calculated_values() -> None:
+    """Hand table, USD millions. Opening debt=700+300=1000, cash=100.
+    Debt movement=30+2+3-20-10-5=0; financing=30-20-10-15=-15.
+    Base FCF=80-20-10-5=45; cash movement=45-4-15=26.
+    Downside FCF=40-20-10-5=5; cash movement=5-4-15=-14.
+    case/year | debt | cash | FCF | gross | net   | coverage | FCF/debt
+    BASE 26   | 1000 | 126  | 45  | 10    | 8.74  | 10       | .045
+    BASE 27   | 1000 | 152  | 45  | 10    | 8.48  | 10       | .045
+    DOWN 26   | 1000 | 86   | 5   | 20    | 18.28 | 5        | .005
+    DOWN 27   | 1000 | 72   | 5   | 20    | 18.56 | 5        | .005
+    """
+    result = cash_flow_forecast(forecast_request())
+    assert result["status"] == "complete"
+    expected = [
+        ("126", "45", "10.0000", "8.7400", "10.0000", "0.0450"),
+        ("152", "45", "10.0000", "8.4800", "10.0000", "0.0450"),
+        ("86", "5", "20.0000", "18.2800", "5.0000", "0.0050"),
+        ("72", "5", "20.0000", "18.5600", "5.0000", "0.0050"),
+    ]
+    for row, (cash, fcf, gross, net, coverage, fcf_debt) in zip(
+        result["rows"], expected, strict=True
+    ):
+        assert row["debt"]["closing"] == "1000.000000"
+        assert row["cash"]["closing"] == row["cash"]["accessible"] == cash + ".000000"
+        assert row["fcf"] == fcf + ".000000"
+        assert row["financing"]["financing_investing"] == "-15.000000"
+        assert row["residual_debt"] == row["residual_cash"] == "0.000000"
+        assert row["metrics"] == dict(
+            zip(
+                ("gross_leverage", "net_leverage", "interest_coverage", "fcf_to_debt"),
+                [
+                    {"value": value, "reason": None}
+                    for value in (gross, net, coverage, fcf_debt)
+                ],
+                strict=True,
             )
         )
 
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
 
-
-def test_a_period_with_no_driver_is_refused() -> None:
-    with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(_request([("FY26", "BASE")], []))
-
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
-
-
-def test_a_driver_that_is_not_ready_is_refused() -> None:
-    with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(
-            _request([("FY26", "BASE")], [_driver("FY26", status="DRAFT")])
-        )
-
-    assert caught.value.code is RefusalCode.FORECAST_DRIVER_NOT_READY
-
-
-def test_a_float_in_a_numeric_field_is_refused() -> None:
-    """Invariant 1. By the time a float exists the cent is already gone, so
-    converting it would launder a value the model never stated."""
-    request = _request([("FY26", "BASE")], [_driver("FY26")])
-    request["drivers"][0]["ebitda"] = 100.5
-
-    with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(request)
-
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
-
-
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
-def test_a_non_finite_numeric_is_refused_before_use(value: str) -> None:
-    request = _request([("FY26", "BASE")], [_driver("FY26")])
-    request["drivers"][0]["ebitda"] = value
-
-    with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(request)
-
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
-
-
-def test_a_zero_denominator_is_null_with_no_infinity() -> None:
-    """Invariant 7. Leverage against zero EBITDA is `null`, never an infinity --
-    and a null ratio is not itself a missing period."""
-    result = cash_flow_forecast(
-        _request(
-            [("FY26", "BASE")],
-            [_driver("FY26", ebitda="0", cfo="80")],
-        )
-    )
-
-    [row] = result["periods"]
-    assert row["metrics"]["gross_leverage"] is None
-    assert row["metrics"]["net_leverage"] is None
-    assert row["unavailable_reason"] is None, "a null ratio is not a failure"
-    assert result["status"] == "complete"
-
-
-def test_the_chain_carries_each_close_into_the_next_open() -> None:
-    """Invariant 2: `opening[n+1] == closing[n]`, per case."""
-    result = cash_flow_forecast(
-        _request(
-            [("FY26", "BASE"), ("FY27", "BASE")],
-            [
-                _driver("FY26"),
-                # opening 950 - 50 -> 900; opening 145 + 45 -> 190
-                _driver("FY27", stated_closing_debt="900", stated_closing_cash="190"),
-            ],
-        )
-    )
-
-    first, second = result["periods"]
-    assert second["debt"]["opening"] == first["debt"]["closing"]
-    assert second["cash"]["opening"] == first["cash"]["closing"]
-    assert result["status"] == "complete"
-
-
-def test_the_work_factor_refuses_a_horizon_past_the_ceiling() -> None:
-    """Host-enforced before any arithmetic, so model-authored input cannot widen
-    what a calculation may cost."""
-    periods = [(f"FY{n:02d}", "BASE") for n in range(MAX_FORECAST_PERIODS + 1)]
-
-    with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(
-            _request(periods, [_driver(period_id) for period_id, _ in periods])
-        )
-
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
-
-
-def test_the_work_factor_refuses_too_many_cases() -> None:
-    cases = [f"CASE{n}" for n in range(MAX_FORECAST_CASES + 1)]
-    periods = [("FY26", case) for case in cases]
-
-    with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(
-            _request(periods, [_driver("FY26", case=case) for case in cases])
-        )
-
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
-
-
-def test_the_same_request_twice_is_the_same_answer() -> None:
-    """Invariant 6: pure. No clock, no randomness, byte-identical output."""
-    request = _request([("FY26", "BASE")], [_driver("FY26")])
-
-    first = cash_flow_forecast(request)
-    second = cash_flow_forecast(request)
-
-    assert first == second
-
-
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
-def test_a_non_finite_decimal_is_refused_like_a_non_finite_string(value: str) -> None:
-    """Invariant 7 is about the value, not about how it was spelled.
-
-    `_decimal` accepts a `Decimal` that a caller already parsed -- which is the
-    one path that reached a ratio without passing the finiteness check, so
-    `Decimal("Infinity")` divided into a leverage figure and `Decimal("NaN")`
-    compared false against every tolerance and reported a period that
-    reconciles.
+def test_quarterly_base_case_reconciles_to_hand_calculated_values() -> None:
+    """Debt movement=5+1-2-1=3; financing=5-2-1-(-2)=4.
+    FCF=20-5-2-1=12; cash movement=12+4=16; coverage=25/2=12.5.
+    quarter | opening debt/cash | closing debt/cash | gross | net | FCF/debt
+    Q1      | 1000/100          | 1003/116          | 40.12 | 35.48 | .0120
+    Q2      | 1003/116          | 1006/132          | 40.24 | 34.96 | .0119
+    FCF/debt: 12/1003=.011964...; 12/1006=.011928..., rounded half even.
     """
-    request = _request([("FY26", "BASE")], [_driver("FY26")])
-    request["drivers"][0]["ebitda"] = Decimal(value)
+    result = cash_flow_forecast(forecast_request(quarterly=True))
+    assert result["status"] == "complete"
+    for row, values in zip(
+        result["rows"],
+        [
+            ("1003", "116", "40.1200", "35.4800", "0.0120"),
+            ("1006", "132", "40.2400", "34.9600", "0.0119"),
+        ],
+        strict=True,
+    ):
+        debt, cash, gross, net, ratio = values
+        assert row["debt"]["closing"] == debt + ".000000"
+        assert row["cash"]["closing"] == cash + ".000000"
+        assert row["fcf"] == "12.000000"
+        assert row["metrics"] == dict(
+            zip(
+                ("gross_leverage", "net_leverage", "interest_coverage", "fcf_to_debt"),
+                [
+                    {"value": value, "reason": None}
+                    for value in (gross, net, "12.5000", ratio)
+                ],
+                strict=True,
+            )
+        )
+    assert result["rows"][1]["debt"]["opening"] == "1003.000000"
+    assert result["rows"][1]["cash"]["opening"] == "116.000000"
 
+
+def test_missing_driver_field_is_unavailable_and_propagates_not_zero() -> None:
+    request = forecast_request()
+    del request["drivers"][0]["cfo"]
+    result = cash_flow_forecast(request)
+    assert result["status"] == "incomplete"
+    assert [row["unavailable_reason"] for row in result["rows"]] == [
+        "DRIVER_FIELD_MISSING",
+        "PRIOR_PERIOD_UNAVAILABLE",
+        None,
+        None,
+    ]
+    request["drivers"].pop(0)
+    assert (
+        cash_flow_forecast(request)["rows"][0]["unavailable_reason"] == "DRIVER_MISSING"
+    )
+
+
+def test_explicit_zero_is_zero_and_missing_is_unavailable() -> None:
+    request = forecast_request(quarterly=True)
+    assert (
+        cash_flow_forecast(request)["rows"][0]["financing"]["distributions"]
+        == "0.000000"
+    )
+    del request["drivers"][0]["distributions"]
+    assert (
+        cash_flow_forecast(request)["rows"][0]["unavailable_reason"]
+        == "DRIVER_FIELD_MISSING"
+    )
+
+
+def test_unready_driver_makes_its_case_unavailable_and_other_cases_compute() -> None:
+    request = forecast_request()
+    request["drivers"][0]["status"] = "DRAFT"
+    assert [
+        row["unavailable_reason"] for row in cash_flow_forecast(request)["rows"]
+    ] == ["DRIVER_NOT_READY", "PRIOR_PERIOD_UNAVAILABLE", None, None]
+
+
+@pytest.mark.parametrize("collection", ["periods", "drivers", "amortisation"])
+def test_duplicate_or_extraneous_periods_drivers_and_amortisation_are_refused(
+    collection: str,
+) -> None:
+    request = forecast_request()
+    rows = (
+        request["contractual"][collection]
+        if collection == "amortisation"
+        else request[collection]
+    )
+    rows.append(deepcopy(rows[0]))
+    refused(request)
+    rows.pop()
+    if collection != "periods":
+        rows[0]["period_id"] = "UNKNOWN"
+    else:
+        request["opening"]["debt_by_facility"].append(
+            {"facility_id": "TERM", "amount": "1"}
+        )
+    refused(request)
+
+
+@pytest.mark.parametrize(
+    "target,key",
+    [
+        ("top", "policy"),
+        ("top", "unknown"),
+        ("contractual", "maturities"),
+        ("contractual", "coupons"),
+        ("opening", "unknown"),
+        ("units", "unknown"),
+        ("drivers", "financing_investing"),
+        ("periods", "unknown"),
+        ("amortisation", "unknown"),
+        ("debt_by_facility", "unknown"),
+    ],
+)
+def test_policy_maturities_coupons_and_unknown_keys_are_refused(
+    target: str, key: str
+) -> None:
+    request = forecast_request()
+    targets = {
+        "top": request,
+        **request,
+        "drivers": request["drivers"][0],
+        "periods": request["periods"][0],
+        "amortisation": request["contractual"]["amortisation"][0],
+        "debt_by_facility": request["opening"]["debt_by_facility"][0],
+    }
+    targets[target][key] = "0"
+    refused(request)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1.5,
+        1,
+        True,
+        None,
+        "1e4",
+        "1e1000000",
+        "1" * 19,
+        "0.1234567",
+        "+1",
+        " 1",
+        "01",
+        "NaN",
+        "Infinity",
+        Decimal("1"),
+        "-1",
+        "1\n",
+    ],
+)
+def test_float_int_bool_exponent_and_oversized_numbers_are_refused_before_arithmetic(
+    value: object,
+) -> None:
+    request = forecast_request()
+    request["drivers"][0]["cfo"] = value
+    refused(request)
+
+
+def test_zero_denominator_ratio_is_null_with_its_reason() -> None:
+    request = forecast_request()
+    request["drivers"][0]["ebitda"] = "0"
+    assert cash_flow_forecast(request)["rows"][0]["metrics"]["gross_leverage"] == {
+        "value": None,
+        "reason": "ZERO_OR_NEGATIVE_DENOMINATOR",
+    }
+
+
+def test_residual_over_tolerance_is_unavailable_with_reason() -> None:
+    request = forecast_request()
+    request["drivers"][0]["stated_closing_cash"] = "126.001"
+    assert cash_flow_forecast(request)["status"] == "complete"
+    request["drivers"][0]["stated_closing_cash"] = "125.998999"
+    rows = cash_flow_forecast(request)["rows"]
+    assert rows[0]["residual_cash"] == "-0.001001"
+    assert rows[0]["unavailable_reason"] == "RESIDUAL_UNRECONCILED"
+    assert rows[1]["unavailable_reason"] == "PRIOR_PERIOD_UNAVAILABLE"
+
+
+def test_same_request_is_byte_identical_under_changed_ambient_context() -> None:
+    request = forecast_request(quarterly=True)
+    expected = forecast_bytes(request)
+    assert (
+        expected
+        == json.dumps(
+            cash_flow_forecast(request), sort_keys=True, separators=(",", ":")
+        ).encode()
+    )
+    with localcontext() as context:
+        context.prec = 2
+        context.rounding = ROUND_DOWN
+        context.Emax = 2
+        context.traps[Inexact] = True
+        assert forecast_bytes(request) == expected
+        assert context.prec == 2 and context.traps[Inexact]
+
+
+def test_units_and_perimeter_are_required_and_carried() -> None:
+    for field in ("units", "perimeter"):
+        request = forecast_request()
+        assert cash_flow_forecast(request)[field] == request[field]
+        del request[field]
+        refused(request)
+
+
+@pytest.mark.parametrize(
+    "ceiling", ["periods", "cases", "facilities", "amortisation", "work"]
+)
+def test_work_factor_refuses_before_any_numeric_is_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+    ceiling: str,
+) -> None:
+    request = forecast_request()
+    if ceiling == "periods":
+        request["periods"] = [
+            {"case": "BASE", "period_id": str(n), "fiscal_year": "2026", "days": "bad"}
+            for n in range(41)
+        ]
+    elif ceiling == "cases":
+        request["periods"] = [{"case": str(n), "days": "bad"} for n in range(7)]
+    elif ceiling == "facilities":
+        request["opening"]["debt_by_facility"] = [{}] * 41
+    elif ceiling == "amortisation":
+        request["contractual"]["amortisation"] = [{}] * 2001
+    else:
+        monkeypatch.setattr(cash_flow, "MAX_WORK", 1)
+
+    def numeric_was_parsed(*args: object, **kwargs: object) -> None:
+        pytest.fail("work factor must precede numeric parsing")
+
+    monkeypatch.setattr(cash_flow, "_decimal", numeric_was_parsed)
+    refused(request)
+
+
+def test_forecast_complete_requires_every_requested_period() -> None:
+    test_missing_driver_field_is_unavailable_and_propagates_not_zero()
+
+
+def test_forecast_residual_is_not_forced_to_zero() -> None:
+    test_residual_over_tolerance_is_unavailable_with_reason()
+
+
+def test_forecast_unavailability_propagates() -> None:
+    test_unready_driver_makes_its_case_unavailable_and_other_cases_compute()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("perimeter", ""),
+        ("perimeter", "x" * 65),
+        ("perimeter", "x" + chr(0x202E) + "y"),
+        ("units", {"currency": "usd", "scale": "millions"}),
+        ("units", {"currency": "USD", "scale": []}),
+        ("opening", None),
+        ("drivers", None),
+        ("periods", []),
+        ("tolerance", "-0.001"),
+        ("contractual", {"amortisation": None}),
+    ],
+)
+def test_malformed_forecast_boundaries_refuse(field: str, value: object) -> None:
+    request = forecast_request()
+    request[field] = value
+    refused(request)
+
+
+@pytest.mark.parametrize("days", ["0", "367", "1.0", "-1", 90])
+def test_days_are_bounded_integer_strings(days: object) -> None:
+    request = forecast_request()
+    request["periods"][0]["days"] = days
+    refused(request)
+
+
+def test_case_chain_uses_request_order_and_bad_hidden_values_still_refuse() -> None:
+    request = forecast_request()
+    request["periods"] = [request["periods"][i] for i in [2, 0, 3, 1]]
+    assert [
+        (row["case"], row["period_id"]) for row in cash_flow_forecast(request)["rows"]
+    ] == [
+        ("DOWNSIDE", "FY26"),
+        ("BASE", "FY26"),
+        ("DOWNSIDE", "FY27"),
+        ("BASE", "FY27"),
+    ]
+    request["drivers"][0]["status"] = "DRAFT"
+    request["drivers"][1]["capex"] = "NaN"
+    refused(request)
+
+
+def test_negative_closing_debt_has_an_unavailable_ratio() -> None:
+    request = forecast_request(quarterly=True)
+    request["drivers"][0].update(
+        optional_repayment="1005", stated_closing_debt="-1", stated_closing_cash="-888"
+    )
+    row = cash_flow_forecast(request)["rows"][0]
+    assert row["unavailable_reason"] is None
+    assert row["metrics"]["fcf_to_debt"] == {
+        "value": None,
+        "reason": "ZERO_OR_NEGATIVE_DENOMINATOR",
+    }
+
+
+def test_largest_numbers_remain_finite_under_fixed_precision() -> None:
+    request = forecast_request(quarterly=True)
+    request["opening"]["cash"] = "999999999999999999.999999"
+    request["drivers"][0]["stated_closing_cash"] = "999999999999999999.999999"
+    request["drivers"][0]["ebitda"] = "0.000001"
+    row = cash_flow_forecast(request)["rows"][0]
+    assert row["cash"]["closing"] == "1000000000000000015.999999"
+    assert row["residual_cash"] == "-16.000000"
+    assert row["metrics"]["net_leverage"]["value"] == "-999999999999999012999999.0000"
+
+
+def test_amortisation_sums_opened_facilities_and_distinct_payments() -> None:
+    request = forecast_request()
+    payments = request["contractual"]["amortisation"]
+    payments.extend(
+        [
+            {"case": "BASE", "period_id": "FY26", "facility_id": "BOND", "amount": "5"},
+            {"case": "BASE", "period_id": "FY26", "facility_id": "TERM", "amount": "3"},
+        ]
+    )
+    request["drivers"][0].update(stated_closing_debt="992", stated_closing_cash="118")
+    row = cash_flow_forecast(request)["rows"][0]
+    assert row["unavailable_reason"] is None
+    assert row["financing"]["contractual_repayment"] == "28.000000"
+    payments[-1]["facility_id"] = "UNKNOWN"
+    refused(request)
+
+
+def test_every_case_may_have_its_own_forty_period_ids() -> None:
+    request = forecast_request()
+    request["drivers"] = []
+    request["contractual"]["amortisation"] = []
+    request["periods"] = [
+        {
+            "case": str(case),
+            "period_id": f"{case}-{period}",
+            "fiscal_year": "2026",
+            "days": "366",
+        }
+        for case in range(6)
+        for period in range(40)
+    ]
+    result = cash_flow_forecast(request)
+    assert len(result["rows"]) == len(result["checks"]) == 240
+    assert result["status"] == "incomplete"
+
+
+def test_chain_disagreement_is_a_typed_refusal() -> None:
     with pytest.raises(Refusal) as caught:
-        cash_flow_forecast(request)
+        cash_flow._check_chain(
+            {"debt": {"closing": "1.000000"}, "cash": {"closing": "2.000000"}},
+            (Decimal("2"), Decimal("2")),
+        )
+    assert caught.value.code is RefusalCode.FORECAST_CHAIN_BROKEN
 
-    assert caught.value.code is RefusalCode.METHODOLOGY_INPUT_INVALID
+
+def test_signed_opening_balances_are_preserved_without_a_policy_plug() -> None:
+    """Debt=-700+300=-400; debt movement=0. Cash=-100+45-4-15=-74."""
+    request = forecast_request()
+    request["opening"]["debt_by_facility"][0]["amount"] = "-700"
+    request["opening"]["cash"] = "-100"
+    request["drivers"][0].update(stated_closing_debt="-400", stated_closing_cash="-74")
+    row = cash_flow_forecast(request)["rows"][0]
+    assert row["unavailable_reason"] is None
+    assert row["debt"]["closing"] == "-400.000000"
+    assert row["cash"]["closing"] == "-74.000000"

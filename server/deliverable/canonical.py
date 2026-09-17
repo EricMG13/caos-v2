@@ -19,15 +19,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.deliverable.filing import freeze
-from server.engine.route import ResolvedRoute, RouteNode
+from server.engine.route import MODEL_MODULE, ResolvedRoute, RouteNode
 from server.evidence.citations import Citation, verify_citations
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import captured_blocks
@@ -67,7 +66,12 @@ def payload_bytes(payload: dict[str, Any]) -> bytes:
 
 
 def canonical_payload(
-    conn: StoreConnection, blobs: BlobStore, bundle: Bundle, revision: Revision
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    revision: Revision,
+    *,
+    _in_unit: bool = False,
 ) -> dict[str, Any]:
     """Every accepted canonical artifact of the run, proven, in route order.
 
@@ -82,7 +86,7 @@ def canonical_payload(
     refusal carries text.
     """
     run_id = revision.run_id
-    with execution_reads(conn):
+    with nullcontext() if _in_unit else execution_reads(conn):
         owner = conn.execute("SELECT case_id FROM runs WHERE run_id = %s", (run_id,))
         if owner.fetchone() != (revision.case_id,):
             raise Refusal(RefusalCode.RUN_NOT_FOUND)
@@ -183,7 +187,10 @@ class _Reader:
         ):
             raise mismatch
         markdown = self.blobs.get(artifact)
-        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE}
+        gate = frozenset(n.module_id for n in route.nodes) - {
+            GATE_MODULE,
+            MODEL_MODULE,
+        }
         projections = None
         with suppress(Refusal):  # a stored handoff that no longer validates
             projections = validate_markdown(
@@ -223,13 +230,15 @@ def freeze_canonical(
     A pair moved since signing re-derives other bytes, so `freeze` refuses
     `DELIVERABLE_MOVED_SINCE_SIGNING` (or the read refuses with its own code).
     """
-    payload = payload_bytes(canonical_payload(conn, blobs, bundle, revision))
+    from server.deliverable.filing import freeze
+
     return freeze(
         conn,
+        blobs,
+        bundle,
         case_id=revision.case_id,
         actor_id=actor_id,
-        revision_id=revision.revision_id,
-        payload=payload,
+        revision_id=UUID(revision.revision_id.value),
     )
 
 
@@ -239,7 +248,7 @@ def verify_frozen(  # noqa: PLR0913 -- the revision and the bytes held for it
     bundle: Bundle,
     *,
     case_id: UUID,
-    revision_id: BoundaryText,
+    revision_id: UUID,
     payload: bytes,
 ) -> None:
     """Refuse unless `payload` is this frozen revision and the store still proves it.
@@ -248,26 +257,22 @@ def verify_frozen(  # noqa: PLR0913 -- the revision and the bytes held for it
     when the bytes are not the frozen digest or no longer re-derive; the read's
     own code when a pair it binds has moved.
     """
+    from server.deliverable.revisions import prove_revision
+
     with execution_reads(conn):
         row = conn.execute(
             "SELECT payload_sha256 FROM deliverable_publications"
             " WHERE case_id = %s AND revision_id = %s",
-            (case_id, revision_id.value),
+            (case_id, str(revision_id)),
         ).fetchone()
-    if row is None:
-        raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
-    held = None
-    with suppress(Exception):  # any shape but a payload is bytes that moved
-        decoded = json.loads(payload)
-        told = decoded.get("narrative")
-        held = Revision(
-            case_id=case_id,
-            run_id=UUID(decoded["run_id"]),
-            case_title=BoundaryText.of(decoded["case_title"]),
-            revision_id=revision_id,
-            narrative=None if told is None else BoundaryText.of(told),
-        )
-    if held is None or hashlib.sha256(payload).hexdigest() != row[0]:
-        raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
-    if payload_bytes(canonical_payload(conn, blobs, bundle, held)) != payload:
-        raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
+        if row is None:
+            raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
+        if hashlib.sha256(payload).hexdigest() != row[0]:
+            raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
+        if (
+            prove_revision(
+                conn, blobs, bundle, case_id=case_id, revision_id=revision_id
+            )
+            != payload
+        ):
+            raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)

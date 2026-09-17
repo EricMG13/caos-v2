@@ -186,8 +186,8 @@ def test_a_host_control_reads_orchestration_proof_never_qualified(
     """Phase 10's named exit, over a canonical run.
 
     Behaviourally the control returns ORCHESTRATION_PROOF over a run that did
-    something; structurally `QUALIFIED` is named only by the enum that declares
-    it and the reader that relays a reviewer's signed verdict.
+    something; structurally `QUALIFIED` is named only by its assurance/verdict
+    binding and the exact-evidence API wire/read that relays that binding.
     """
     proof = _prove(ran)
     assert proof.assurance is Assurance.ORCHESTRATION_PROOF
@@ -195,6 +195,8 @@ def test_a_host_control_reads_orchestration_proof_never_qualified(
     assert proof.route_digest == route_digest(ran.route)
     assert proof.artifacts == len(ran.route.nodes)
     assert names_qualified() == {
+        "server/api/reads/qualification.py",
+        "server/api/wire.py",
         "server/qualification/__init__.py",
         "server/qualification/verdict.py",
     }

@@ -1035,11 +1035,45 @@ def test_version_fourteen_adds_empty_command_requests_to_a_populated_store(
 
         assert store.MIGRATIONS[13][0] == "0014_command_requests"
         assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
-            14,
+            len(store.MIGRATIONS),
         )
         assert conn.execute("SELECT case_id, title FROM cases").fetchall() == before
         assert run_status(conn, run_id) is RunStatus.RUNNING
         assert conn.execute("SELECT count(*) FROM command_requests").fetchone() == (0,)
+        conn.rollback()
+
+
+def test_version_fifteen_adds_revisions_to_a_populated_store(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:14])
+            apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Legacy filing"))
+        run_id = start_run(conn, case_id)
+        signer = uuid4()
+        conn.execute(
+            "INSERT INTO deliverable_opinions"
+            " (case_id,revision_id,payload_sha256,signed_by) VALUES (%s,%s,%s,%s)",
+            (case_id, "legacy-label", "a" * 64, signer),
+        )
+        conn.commit()
+        apply_schema(conn)
+        assert store.MIGRATIONS[14][0] == "0015_revisions"
+        assert run_status(conn, run_id) is RunStatus.RUNNING
+        assert conn.execute(
+            "SELECT revision_id FROM deliverable_opinions"
+        ).fetchone() == ("legacy-label",)
+        assert conn.execute(
+            "SELECT count(*) FROM deliverable_revisions"
+        ).fetchone() == (0,)
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            conn.execute(
+                "INSERT INTO deliverable_opinions"
+                " (case_id,revision_id,payload_sha256,signed_by) VALUES (%s,%s,%s,%s)",
+                (case_id, str(uuid4()), "a" * 64, signer),
+            )
         conn.rollback()
 
 

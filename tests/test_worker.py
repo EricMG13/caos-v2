@@ -182,12 +182,60 @@ class _Clock(Event):
         return self.is_set()
 
 
-def test_store_unavailable_backs_off_without_holding_a_claim(
+@pytest.mark.parametrize(
+    "code",
+    [
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_NOT_FOUND,
+    ],
+)
+def test_a_blob_fault_parks_the_run_with_its_code(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    code: RefusalCode,
+) -> None:
+    """A blob fault names one run, so it parks rather than going back in the queue.
+
+    `release` leaves `requested_at` alone and `claim_run` orders by it, so a
+    released run is re-claimed first every poll. A lost or tampered original
+    does not heal on its own, so releasing it would spin the worker on that run
+    forever with no stop code, no event and nothing on stderr. STOPPED with the
+    code is the signal to restore the blob; the operator requeues, and
+    `replay_billed` uses the body already paid for.
+    """
+    run = queued_run(case, route, bundle, blobs)
+
+    def faulty(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        raise Refusal(code)
+
+    assert (
+        work_once(
+            run.conn,
+            run.blobs,
+            execution_for=faulty,  # type: ignore[arg-type]
+            config=CONFIG,
+            stopping=Event(),
+        )
+        == run.run_id
+    )
+
+    assert work_row(run.conn, run.run_id) == ("STOPPED", code.value, None, True)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL],
+)
+def test_store_fault_backs_off_without_holding_a_claim(  # noqa: PLR0913 -- parametrized store faults
     case: tuple[StoreConnection, UUID],
     route: ResolvedRoute,
     bundle: Bundle,
     blobs: BlobStore,
     empty_database: str,
+    code: RefusalCode,
 ) -> None:
     run = queued_run(case, route, bundle, blobs)
     config = WorkerConfig(
@@ -197,7 +245,7 @@ def test_store_unavailable_backs_off_without_holding_a_claim(
 
     def faulty(conn: StoreConnection, run_id: UUID, lease: object) -> object:
         built.append(run_id)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+        raise Refusal(code)
 
     connects = iter([False, True, True, True, True])
 
@@ -322,6 +370,34 @@ def test_no_api_module_reaches_the_runtime_or_a_provider_transport() -> None:
     assert _reaches(ast.parse("from server.engine.runtime import run_route")) == {
         "server.engine.runtime.run_route"
     }
+
+
+def test_an_unexpected_fault_parks_the_run_and_the_worker_goes_on(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A fault that is neither a refusal nor a store error must not kill the
+    worker with the claim still held: the run would be reclaimed first after
+    every lease expiry and block the queue. It is parked `INTERNAL_FAULT`
+    (retry requeues it), the fault's class alone is written, and `work_once`
+    returns so the loop polls on."""
+    run = queued_run(case, route, bundle, blobs)
+
+    def fault() -> None:
+        raise RuntimeError("an unexpected fault with text that must not be shown")  # noqa: TRY003 -- the text is the point
+
+    completions = CanonicalCompletions(run.source_id, during=fault)
+
+    assert drive(run, completions) == run.run_id
+
+    assert work_row(run.conn, run.run_id) == ("STOPPED", "INTERNAL_FAULT", None, True)
+    assert run_status(run.conn, run.run_id) is RunStatus.RUNNING
+    run.conn.rollback()
+    written = capsys.readouterr().err
+    assert "RuntimeError" in written and "must not be shown" not in written
 
 
 def test_the_widest_jitter_stays_within_twenty_percent(

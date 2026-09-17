@@ -28,13 +28,19 @@ from collections.abc import Mapping, Sequence
 from html import escape
 from typing import Any
 
-from server.refusals import Refusal, RefusalCode
-
 # Every approved copy says so on its face. The bytes that carry an opinion are
 # not the bytes that carry a filing (`SYSTEM_SPEC.md` §7).
 PENDING = "PENDING APPROVAL"
 # A pathway scope that is a screen, never committee clearance (`handoff.py`).
 SCREENING_ONLY = "SCREENING_ONLY"
+
+
+class RenderRefused(ValueError):
+    """A portable render refusal; the host maps its code at its boundary."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 def render(payload: Mapping[str, Any]) -> bytes:
@@ -48,7 +54,7 @@ def render(payload: Mapping[str, Any]) -> bytes:
     revision = _text(payload, "revision_id")
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
 
     # A canonical artifact's page facts come from its record (§41).
     views = [_canonical(artifact) for artifact in artifacts]
@@ -92,7 +98,7 @@ class _Handoff:
         projections = record.get("projections")
         citations = record.get("citations")
         if not isinstance(projections, Mapping) or not isinstance(citations, list):
-            raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+            raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
         self.projections = projections
         self.citations = citations
         self.provenance = {
@@ -127,7 +133,7 @@ def canonical_bound(artifact: Mapping[str, Any]) -> bool:
 
 def _canonical(artifact: Mapping[str, Any]) -> _Handoff:
     if not canonical_bound(artifact):
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
     return _Handoff(str(artifact["markdown"]), json.loads(str(artifact["record"])))
 
 
@@ -144,9 +150,9 @@ def _handoff(view: _Handoff) -> str:
     scope = _text(facts, "decision_scope")
     flags = facts.get("limitation_flags")
     if not isinstance(flags, list) or not all(isinstance(f, str) for f in flags):
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
     if not view.citations:
-        raise Refusal(RefusalCode.DELIVERABLE_UNCITED_FIGURE)
+        raise RenderRefused("DELIVERABLE_UNCITED_FIGURE")
     screen = (
         '<p class="status">SCREENING ONLY: a screen, not committee clearance</p>\n'
         if scope == SCREENING_ONLY
@@ -172,13 +178,17 @@ def _handoff(view: _Handoff) -> str:
         + "\n<h3>Analysis (model-authored, not host-verified)</h3>\n"
         f"<pre>{escape(view.markdown)}</pre>\n"
         "<h3>Deterministic calculations</h3>\n"
-        "<p>None performed by the host on this route.</p>\n"
+        + (
+            "<p>CP-CF forecast projection performed by the host.</p>\n"
+            if _text(facts, "module_id") == "CP-CF"
+            else "<p>None performed by the host on this route.</p>\n"
+        )
     )
 
 
 def _citation(citation: object) -> str:
     if not isinstance(citation, Mapping):
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
     quote = escape(_text(citation, "matched_text"))
     document = escape(_text(citation, "document_sha256"))
     page = escape(str(citation.get("page", "")))
@@ -189,11 +199,30 @@ def _citation(citation: object) -> str:
 
 
 def _narrative(narrative: object) -> str:
-    if narrative is None:
+    if narrative is None or narrative == []:
         return ""
-    if not isinstance(narrative, str):
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-    return f"<h2>Analyst narrative</h2>\n<p>{escape(narrative)}</p>\n"
+    # Historical payloads remain renderable; the save boundary accepts only spans.
+    if isinstance(narrative, str):
+        return f"<h2>Analyst narrative</h2>\n<p>{escape(narrative)}</p>\n"
+    if not isinstance(narrative, list) or len(narrative) > 64:
+        raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
+    paragraphs = []
+    for paragraph in narrative:
+        if not isinstance(paragraph, list) or not 1 <= len(paragraph) <= 64:
+            raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
+        paragraphs.append(
+            "<div>" + "".join(_span(span) for span in paragraph) + "</div>\n"
+        )
+    return "<h2>Analyst narrative</h2>\n" + "".join(paragraphs)
+
+
+def _span(span: object) -> str:
+    if isinstance(span, Mapping):
+        if set(span) == {"text"} and isinstance(span["text"], str):
+            return escape(span["text"])
+        if set(span) == {"figure"}:
+            return _citation(span["figure"])
+    raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
 
 
 def _provenance(artifacts: Sequence[object]) -> str:
@@ -215,5 +244,5 @@ def _provenance(artifacts: Sequence[object]) -> str:
 def _text(mapping: Mapping[str, Any], key: str) -> str:
     value = mapping.get(key)
     if not isinstance(value, str) or not value:
-        raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
+        raise RenderRefused("DELIVERABLE_PAYLOAD_INVALID")
     return value

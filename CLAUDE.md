@@ -141,11 +141,13 @@ Standing rules that back them:
   `make doctor`, and `make dev-up`. This creates the locked Python 3.14/3.12
   and Node 24 environments, starts the persistent dev database on 55436 and
   the ephemeral test-admin database on 55437, and preserves local blobs.
-- `make dev-api` (`make dev` is an alias) — the API alone on port 8000. It
-  needs `CAOS_DATABASE_URL` and `CAOS_BLOB_ROOT`, both read per request, and
-  advances the verified migration prefix at startup. No worker, nothing seeded.
-- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000. It
-  fails visibly for routes not built yet. `make dev-ui-demo` is the separately
+- `make dev-api` (`make dev` is an alias) — the guarded site application on
+  127.0.0.1:8000, loopback only (§53). It needs `CAOS_DATABASE_URL` and
+  `CAOS_BLOB_ROOT`, both read per request, and advances the verified migration
+  prefix at startup. `make dev-worker` is the worker; nothing is seeded.
+- `make dev-ui` — the real UI on port 5173, proxying `/api` to port 8000 as
+  the local actor `CAOS_DEV_USER` (role `CAOS_DEV_ROLE`, default ANALYST);
+  without it the API answers 401. `make dev-ui-demo` is the separately
   labelled, read-only fixture workbench; it is never integration evidence.
 - `make test` — the offline suite with PostgreSQL required; paid provider tests
   remain deselected.
@@ -154,7 +156,9 @@ Standing rules that back them:
   fails rather than skips without them.
 - `make check` — the complete offline engineering gate: required PostgreSQL,
   backend lint/types/tests/coverage/I/O/races/security, frontend lint/types/unit/
-  production and demo builds/a11y/workbench, then the image gate, sequentially.
+  production and demo builds/a11y/workbench, the image gate, then
+  `make smoke-production` (the production image and real-stack journey),
+  sequentially.
   `make check-fast` is explicitly partial; `make check-size PR_BASE=<commit>` is
   the separate PR-only size gate.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
@@ -171,7 +175,127 @@ plan govern present work. Correct a stale entry when its owning task proves
 the replacement behavior. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Repair Phase 5.**
+
+- **Package verification proves consistency, not authenticity.** Task 5.4a
+  (§55) ships a bounded stdlib verifier and exact renderer bytes; its trusted
+  renderer hash prevents arbitrary archived code from executing. Replacing the
+  verifier and the whole package can still produce a lying verdict: there is
+  no external signature trust anchor. The current host verifier accepts its
+  renderer build only; older packages use their own archived verifier. ZIP64,
+  multi-disk containers and trailing bytes refuse within the ZIP32 size bounds.
+  *Upgrade:* an authenticated external digest/signature and renderer-version
+  registry if archival verification becomes an authenticity service.
+- **Exclusive package creation is not crash durability.** `write_package`
+  uses `xb`, so simultaneous writers cannot overwrite one another, but an I/O
+  failure or crash may leave a partial new file that later writes refuse.
+  It has no fsync or atomic publication protocol. *Upgrade:* staged durable
+  writes and exclusive publication when this library becomes a filing exporter.
+
+**Repair Phase 4.**
+
+- **An audit event cannot be read back to the ids its command made.**
+  `governed_write` stores only `payload_sha256`, never the payload, so a
+  `RUN_CREATED` or `SOURCES_ADMITTED` row says a command happened without
+  naming the run or sources. The payload binds the command's
+  `request_sha256`, and the ids are in the `command_requests` receipt under
+  that digest, but no column joins the two rows: an auditor needs the
+  request itself to recompute the payload digest. *Upgrade:* a
+  `request_sha256` column on `audit_events` (a migration), the day an audit
+  reader needs the join.
+- **Receipts are kept forever, including a revoked member's.**
+  `command_requests` is UPDATE/DELETE/TRUNCATE-immutable and nothing collects
+  it, so it grows by one row per committed command. A revoked member's
+  receipts stay; their replay is answered 404 by the visibility check before
+  the lookup. *Upgrade:* a dated retention decision and a governed sweep, the
+  day the table's size is measured.
+- **The demonstration workbench shows no available command.** The v1
+  fixtures carry `"actions": []`, so every command control in `make
+  dev-ui-demo` renders refused `ACTION_UNPLACED`, and the fixture middleware
+  answers any non-GET under `/api/` 405 `READ_ONLY_DEMO`. `ACTION_UNPLACED`'s
+  clearance (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still
+  says the API serves only the run document and its event stream, which has
+  not been true since §50. Availability is proven against the real API
+  (`test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code`)
+  and in unit tests, not in the workbench. *Upgrade:* correct the clearance
+  text, and fixture actions when a workbench spec needs an available control.
+
+- **An evidence page holds a read transaction while its frame is extracted.**
+  `read_evidence_page` reads standing and the page's lines, then
+  `server/evidence/page.py` reads the whole document blob and, for a PDF, runs
+  the §47 child for its frame, under the admission deadline (60 s) and decoded
+  budget -- all with the request's read transaction open and its unpooled
+  connection held. Each request pays an interpreter start and a full blob read,
+  and nothing caches a frame, so a reader paging a large PDF repeats both.
+  *Upgrade:* a frame stored at admission beside the extraction, or a cache
+  keyed by `(document_sha256, extractor identity, page)`, and the transaction
+  closed before the child, the day page latency is measured.
+- **The demonstration event stream keeps one process-wide frame counter.**
+  `frontend/vite.config.ts`'s fixture stream advances a single `runFrame`
+  (and `staleAdvanced`) for the whole dev server, reset when a fresh stream
+  opens, so two tabs or two concurrent workbench specs tailing it move each
+  other's Run document. The evidence workbench specs refuse the demo stream
+  for that reason. Demo mode only; the real stream has no shared state.
+  *Upgrade:* per-stream frames the day a spec needs two tails at once.
+
+- **The edge proves itself with one static shared secret.** Edge mode trusts
+  any request carrying `CAOS_EDGE_TOKEN` (§53.2): anything on the private
+  network that learns it can assert any subject and groups, the process holds
+  one token at a time so rotating it means restarting the API, and nothing
+  binds a request to the edge's authentication of it. *Upgrade:* verifying the
+  identity provider's signed assertion (a dependency and a dated decision), or
+  mutual TLS between edge and API.
+- **The API cannot tell whether the edge stripped a client's identity.** The
+  guard refuses a repeated or lookalike identity header, which catches an edge
+  that appends; an edge that forwards a client's `x-forwarded-groups` and sets
+  none of its own is indistinguishable from a correct one, and that client
+  chooses its global role. The contract lives in `server/api/edge.py`, §53.1
+  and the test edge (`tests/journey/edge.py`), not in anything the API can
+  check. *Upgrade:* the signed assertion above, which makes the groups the
+  identity provider's rather than a header's.
+- **The worker has no readiness.** The API's `/api/health` probes the store,
+  bundle and blob root it uses; `server/engine/worker.py` serves no listener,
+  and `compose.smoke.yaml` gives the worker no healthcheck. A worker that
+  exited 2 (`PROVIDER_NOT_CONFIGURED`) or is backing off on store faults is
+  visible only in its exit code and logs, and a queued run simply waits.
+  *Upgrade:* a heartbeat the worker writes and health reads, the day an
+  operator has to alert on a stalled queue.
+- **An idle case stream held its thread until the deadline.** Fixed in
+  `0db50fa`: each poll now ends in an SSE comment, so a disconnected browser
+  releases its worker thread and uvicorn concurrency slot within one
+  `POLL_INTERVAL`. What remains is the poll itself (the Phase 6 entry "A run
+  tail polls") and `--limit-concurrency 32` counting every open stream: 32
+  watching tabs refuse a 33rd request with 503. *Upgrade:* `LISTEN`/`NOTIFY`
+  and a stream cap below the concurrency limit, the day real watchers measure it.
+- **The test edge's session cookie is weaker than the contract's.** Over
+  `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
+  drops `Secure` and the `__Host-` prefix the contract names and keeps
+  `HttpOnly` and `SameSite=Lax`. The journey therefore proves SameSite and the
+  Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
+  TLS material, which this task was not authorized to create.
+- **The production image and journey are proven locally, not in CI.**
+  `make smoke-production` is the last step of `make check`, and no CI
+  job runs it. The journey (slice 4.5e2) runs 13 tests on each of chromium,
+  firefox and webkit, but only the first engine meets the worker's real
+  exit-after-first-accept and the 300 s lease wait: the exit-once marker lives
+  in the shared blob volume, so the later engines restart the worker against
+  a run that has already finished. *Upgrade:* a CI job over the smoke stack
+  (Phase 6), and a per-engine marker if the recovery must be proven per engine.
+
 **Repair Phase 3.**
+
+- **RELATIVE_VALUE is proven offline, not economically qualified.** Task
+  5.2a (§56) adds only `FULL_CREDIT_32` / `RELATIVE_VALUE` beside LITE earnings:
+  all nine modules execute, validate, anchor, prove and freeze deterministically.
+  Other pathways remain disabled, including FULL_CREDIT_ASSESSMENT; CP-CF
+  remains disabled. The fixture pack is a compact annual/legal/peer extract,
+  with independently authored owner rows and explicit extract-only limits;
+  this proves contracts and lineage, not full underwriting or live-model
+  quality. CP-3's two binary XLSX references reach the prompt whole as labelled
+  base64 under their original digests; the host does not interpret workbook
+  cells. CP-2G's 42-row vendor driver vocabulary differs from CP-CF's movement
+  vocabulary. *Upgrade:* explicit accepted-owner mapping in 5.2b, and separately
+  authorized exact-route economic/live qualification in Phase 6.
 
 - **A letter-spaced heading cannot be quoted as a word.** (a) ~~The PDF
   extractor's identity no longer predicts its output for positioned text.~~
@@ -225,11 +349,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   inflater; each PDF pays an interpreter's start-up (0.124 s measured on the
   development machine); and plain text stays in-process and cooperative per
   line, which the 20 MiB document ceiling bounds (a line now stops building
-  tokens one past `max_tokens`). Extraction also runs while the caller's
-  transaction is open, before `lock_case`: a pack of fifty documents can hold
-  it idle for their extraction time. *Upgrade:* an address-space limit in the
-  child where the platform enforces one, a worker pool if start-up cost shows,
-  and extraction outside the store transaction with Phase 4's upload worker.
+  tokens one past `max_tokens`). The admission command (§51) extracts through
+  `prepare_pack` with no transaction open and no case lock held, but
+  `admit_pack`, which the qualification harness still calls, extracts while
+  the caller's transaction is open, before `lock_case`: a pack of fifty
+  documents can hold it idle for their extraction time. *Upgrade:* an
+  address-space limit in the child where the platform enforces one, a worker
+  pool if start-up cost shows, and the harness admitting through
+  `prepare_pack`.
 
 - **Three vendor rules have no Python implementation and are not enforced.**
   `server/methodology/handoff.py` calls the vendor's own validators, and the
@@ -247,9 +374,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **The canonical deliverable proves the store at freeze and verification, not
   continuously.** `server/deliverable/canonical.py` re-derives the payload --
   both blobs, identity, projections, rectangles -- when it is built, frozen and
-  verified. It is derived in its own read unit before `freeze`'s governed write,
-  and `artifacts` rows are mutable (the Phase 2 entry below), so a pair moved in
-  that gap freezes and is caught by `verify_frozen`, not by the freeze. Proof is
+  verified. Task 5.3 now stores an immutable host revision and re-derives it inside
+  the freeze governed write under its case lock, closing the old read/write
+  gap. Proof is
   re-derived under the bundle and live sources present now: a bundle upgrade
   (as for the proof, Phase 10) or a withdrawn source makes a filed revision
   refuse verification. The payload needs every pinned node accepted, and the
@@ -264,9 +391,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   too: a document captured under several live members resolves to the lowest
   source id when they share one extraction output and to none when they do
   not.
-  *Upgrade:* derive inside the freeze's lock once artifact rows are immutable,
-  and a Markdown renderer with a closed element set when committee layout needs
-  one.
+  *Upgrade:* a Markdown renderer with a closed element set when committee
+  layout needs one.
 - **A LITE route runs through `run_route`, but only the runtime reads its
   records.** Slice c-5b: `_run_node` replays the executor's outcome with its
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
@@ -320,9 +446,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   that projects a stored `qa_status` is tested directly instead. Since f-1c
   the adapter is one constant: every reader refuses a row without its record
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
-  `RUN_INPUT_INVALID`, and every route with a module outside CP-0, CP-L10 and
-  CP-5 -- FULL, DEEP and every other catalog pathway -- and every pathway of
-  those modules but LITE earnings (`ADAPTER_ROUTES`: LITE portfolio decision,
+  `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
+  modules; every route outside that pathway and LITE earnings remains
+  disabled (`ADAPTER_ROUTES`: LITE portfolio decision,
   CP-0 -> CP-L10, has no contract test) pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
@@ -490,8 +616,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   acceptance (interleaving I6: no lock is held across transport). A response
   that trickles past the 300 s lease (the provider timeout bounds each socket
   operation, not the call) costs at most one extra paid call. `run_work` is
-  enqueued only by the store function today; the governed start command is
-  Task 4.2. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
+  written only by the start, retry and cancel commands (§51), each in its own
+  audited unit that rechecks authority but never calls a provider. `stop` refuses a non-`RefusalCode` with `CALL_OUTCOME_INVALID`,
   a borrowed code. `artifacts` rows are also not UPDATE/DELETE-immutable, so a
   privileged edit could move ownership; a refusal trigger like 0007's is the
   upgrade. *Upgrade:* none planned for I6 while one worker runs; per-node
@@ -731,49 +857,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   day a WebKit build can be run against it — the sandbox this was diagnosed in
   cannot fetch one, and a change to that arm checked only by CI would be a
   guess.
-- **The real workspace reads the v1 section routes, but events, evidence pages
-  and commands are not wired yet.** Phase 4 Task 4.1 (§50) closed the reads:
-  Directory, Upload, Run and Analysis are served at `/api/v1/…`, validated whole
-  in the browser and bound to their case and run, with one `{code, clears}`
-  refusal body; the other five sections are unavailable. What follows is the
-  entry as it stood, kept for the parts still open — the event vocabulary
-  (Task 4.4), evidence pages (4.4) and governed writes (4.2):
-  **The real workspace is not yet wired to backend section routes.**
-  `frontend/src/app/transport.ts` asks `/api/sections/<section>` for every
-  section document and `sse.ts` tails `/api/events` for six lower-case event
-  names, while `server/api/app.py` serves `/api/runs/{id}` and its
-  `/events`, whose stream carries `RunEvent` names (`ROUTE_PINNED` …
-  `RUN_FAILED`). The refusal bodies differ as well: the client reads
-  `{code, clears}` and the server sends `{refusal}`, so a real server refusal
-  is classed `RESPONSE_INVALID`. Ordinary development and production preview
-  now use the real API path and fail visibly; only the explicitly labelled
-  read-only demo serves fixtures. No governed write — commit,
-  withdraw, pin, approve, accept, sign, freeze, file — has a route. A control
-  refused for want of one now says so (`READ_ONLY_API`) instead of naming a
-  build phase that had already exited; a control refused for a domain reason —
-  `APPROVER_NOT_INDEPENDENT`, `RUN_NOT_TERMINAL` — still gives that reason,
-  which is the one its route will owe, although meeting it opens no route
-  today. The fixtures are the contract those routes owe, including two fields
-  the workspace now reads: `withdrawn_at` on a citation of a withdrawn source,
-  and `tab` on a ribbon action that opens one of the section's own tabs. This
-  entry was missing — the gap was found by driving every user story
-  (`docs/feature-status.csv`), not by the ledger.
-  *Upgrade:* a named model per section document behind `/api/sections/<s>`,
-  one event vocabulary chosen for both halves, and a refusal body that carries
-  what clears it; then a write route per governed action over the store call
-  that already exists.
+- ~~**The real workspace reads the v1 section routes, but events, evidence
+  pages and commands are not wired yet.**~~ Closed by Phase 4: Task 4.1 (§50)
+  served Directory, Upload, Run and Analysis at `/api/v1/…` with one `{code,
+  clears}` refusal body; Task 4.2 (§51) the governed writes the journey needs;
+  Task 4.4 (§52) one name-only case stream whose names the browser refetches
+  by, and an authorized evidence page. Withdraw, sign, freeze, file and
+  membership grants still have no route, and Book, Model, Report, Committee
+  and Admin stay unavailable.
 
 **Phase 8.**
 
-- **The analyst narrative reaches the page as one escaped paragraph.**
-  `_narrative` takes a `str` and emits a single `<p>`, so a narrative with two
-  paragraphs, a list or an emphasised clause arrives as one run of text. That is
-  the safe direction while the render must stay pure and the narrative is
-  analyst-authored text reaching a governed page — escaping everything is the
-  only reading that cannot surprise — but a committee paper whose narrative
-  cannot have two paragraphs is a real limit on the deliverable. *Upgrade:* a
-  bounded structured narrative, the day an analyst's revision needs shape rather
-  than prose.
+- **Narrative is now structured, but its figure screen is syntactic.** Task
+  5.3 stores bounded paragraphs of text and anchored citation references.
+  ASCII digits in text refuse; numbers spelled in words and misleading prose
+  still require independent human review. Historical string payloads remain
+  renderable, but cannot enter the new save API. *Upgrade:* a separately
+  specified semantic review if those claims must be machine-checked.
 - **A citation renders without its page when the payload omits one.**
   `_citation` reads `str(citation.get("page", ""))`, while `matched_text` and
   `document_sha256` beside it are refused when absent — so a payload with no
@@ -781,7 +881,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `AnchoredCitation` (`server/evidence/citations.py`) declares `page` a
   required `int` with no default, and `record_bytes`
   (`server/methodology/handoff.py`) serialises it into every stored record, so
-  only a payload hand-built for `freeze` can carry a citation without one. The
+  only an external hand-built render payload can carry a citation without one. The
   cost is a cosmetic line on the page rather than a false assurance, which is
   why it is recorded and not fixed. *Upgrade:* refuse it here too, for
   consistency with the two fields beside it, the day a payload
@@ -789,29 +889,165 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 7.**
 
-- **`_ratio` divides at the process-global `Decimal` context.** Nothing under
-  `server/` sets a context, so the precision and rounding of every ratio come
-  from `decimal.getcontext()` — 28 significant digits by default, and mutable by
-  anything else in the process. The module's own promise is "same inputs,
-  byte-identical output", and it holds only while nothing else touches that
-  context; a library that set it on import would change these numbers without
-  changing this file. *Upgrade:* a `localcontext()` around the division with a
-  stated precision and rounding, which turns the output's shape into a decision
-  rather than an inheritance.
-- **The residual tolerance is absolute, not relative.** `residual >
-  inputs.tolerance` compares against a default of `0.001` while the host never
-  learns what units the model's balances are in. On figures stated in millions
-  that is effectively exact; on figures stated in units it is a cent, and the
-  same set of drivers reconciles or does not depending on a scale nobody
-  declared. The caller can pass a tolerance, which is what makes this a limit
-  rather than a defect. *Upgrade:* a tolerance stated relative to the balance it
-  is judging, the day a forecast request carries its own scale.
+- ~~**`_ratio` divides at the process-global `Decimal` context.**~~ Closed by
+  repair Task 5.1 (§54): the entire forecast runs in one local precision-38,
+  half-even context, with bounded string numerics and fixed output scales.
+  `test_same_request_is_byte_identical_under_changed_ambient_context` changes
+  precision, rounding, exponent limits and traps without changing output bytes.
+- **The residual tolerance is absolute, in declared units.** Repair Task 5.1
+  requires currency and scale and carries them with the perimeter. The default
+  `0.001` therefore means 0.001 units, thousands, millions or billions as
+  explicitly requested, and equality passes. Each signed debt/cash residual
+  remains visible and either magnitude above tolerance makes the row unavailable.
+  *Upgrade:* relative tolerance if a real model requires scale-independent
+  materiality. Accessible cash currently equals closing cash; policy, restricted
+  cash and liquidity runway require a later declared contract (§54).
 
 **Phase 6.**
 
+- **`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**
+  `cp-0-source-readiness/SKILL.md` defines it only as "emit `DO NOT RUN`", and
+  nothing there says the condition must be a *source* condition — while line
+  359 of the same file says source readiness must not assert whether upstream
+  analytical handoffs exist. Run `62698a60…`'s CP-0 marked CP-5 `CONDITIONAL`
+  on "CP-L10 must first produce the selected-route analytical handoff", which
+  is the sequencing claim that line forbids, and the route ended BLOCKED with
+  two modules paid for. Nothing discharges the status inside a run: the
+  vendor's own `prepare_invocation.py` and `handoffs.py` refuse a conditional
+  module exactly as `server/engine/route.py` does, so the host is faithful and
+  the misuse is terminal either way. *Upgrade:* the bundle's, in a new build —
+  define the condition as source-only, name its discharge, and say that an
+  upstream-handoff dependency is never a readiness ground. What the host may do
+  without editing upstream is quote line 359 verbatim in `_GATE_INSTRUCTION`,
+  which restates the bundle rather than adding to it. The set now measures the
+  failure directly through `expects_ready`.
+- **The bundle gates per consumer; the owner's statement of intent does not.**
+  Told on 16 September 2026 that CP-0 "only classifies the documents to assess
+  which pathways are available", the audit found the vendored methodology says
+  otherwise: `SKILL.md` §331 requires readiness "against the evidence demand of
+  each proposed downstream module", §349 a verdict per consumer, §357 `DO NOT
+  RUN` for CONDITIONAL and BLOCKED, and `CANON_SHARED.md` §632 "CP-0 determines
+  readiness". The vendor's own scripts refuse a non-ready module. So the host
+  enforcing it is invariant 4 working, and a host that stopped would be
+  dropping a constraint the bundle states. *Upgrade:* a dated decision entry
+  saying which governs. If the intent is policy, it is a bundle change and a
+  new build, not a host change — this entry exists so nobody closes the gap by
+  quietly weakening `route.py`.
+
+- **The borrowing-capacity key names a subordinate clause, not the fact.** One
+  block per line (§5's group is unbuilt), so the sentence on Q4 page 4 is three
+  blocks, and the key is the first: "When compliance reporting requirements
+  have been completed and assuming no change from 31". The credit content is
+  the *next* line. Seven v3 handoffs have cited 13 distinct lines between them
+  and none has cited this one, while Terra's CP-L10 twice paraphrased the whole
+  sentence correctly in prose. The key is satisfiable -- all three lines are
+  candidates -- but it asks a module to quote the clause that carries no fact.
+  Moving it from CP-0 to CP-5 earlier today moved the wrong thing. *Upgrade:*
+  name the fact-carrying line, or the sentence as a block range once §5's
+  bounded line group exists, and note that the AFCF key's text appears in both
+  releases, so a module citing the Q3 copy misses a key aimed at Q4.
+- **A citation key measures neither the conclusion nor its soundness.** Terra
+  stated the borrowing condition correctly and scored a miss; DeepSeek's CP-0
+  claimed `Committee Ready` at 93 over a self-declared MATERIAL source gap and
+  was accepted. The Phase 10 entry conceded the first half of this; the second
+  is worse, because the apparatus is silent where the answer is wrong rather
+  than merely differently evidenced. The host already projects the fields that
+  would say so -- `qa_status`, `committee_status`, `confidence_score`,
+  `limitation_flags`, CP-0's T8 readiness rows -- and the bundle ships a
+  register parser. *Upgrade:* keys of the form
+  `(module, register_id, row, column, expected)` over those projections, the
+  pattern `ExpectedForecast` already uses.
+- **The host accepts a handoff the vendor's own rule contradicts.**
+  `validate_text` checks `Restricted -> <=59` and `Blocked -> <=39` and nothing
+  the other way, and `completeness_check.load_contract` reads only cell
+  disqualifiers, never the `frontmatter_*` ones. So a module may declare a
+  MATERIAL source gap and still call itself `Passed` / `Committee Ready` at 93,
+  which DeepSeek's accepted CP-0 did minutes before the same model's CP-L10 was
+  refused for breaking the same rule in the direction the validator does check.
+  Invariant 4 says the bundle is the authority and the host adds nothing, so
+  this is the bundle's gap to close -- but a reviewer reading an accepted
+  artifact should know the host asserted nothing about it. *Upgrade:* none the
+  host may take alone; record it against the bundle.
+- **`expected_refusal` cannot be met by any run this system can produce.**
+  `complete` requires every run `COMPLETE`, and a validated Blocked gate ends a
+  run BLOCKED, so a case declaring the refusal it expects -- the "deliberately
+  restricted case" `docs/REPAIR_PLAN.md` Phase 6 names -- is unsignable however
+  it turns out. `test_a_case_that_met_the_refusal_it_declared_is_complete`
+  passes on a hand-built state, which is exactly the vacuous kind of pass the
+  gate scripts exist to catch. *Upgrade:* decide whether `expected_refusal_met`
+  is fed from `Performed.stopped` and the run's own status rather than from the
+  proof, and give it a test built from a run rather than from a dataclass.
+
+- **The VMO2 set measures two of its three modules by key.** CP-0's expectation
+  asked `SourceReadiness` for the issuer's current borrowing-capacity
+  statement, which is a credit fact and belongs to CP-5's reading; it was moved
+  there on 16 September 2026 and the set digest moved with it
+  (`ec84bf8b…` → `ae70850d…`), so the two runs performed are not comparable to
+  anything after. CP-0 is still measured by its proof — artifact accepted, host
+  record valid, every citation anchored — but not by evidence selection, which
+  is the half a key adds. *Upgrade:* a CP-0 expectation authored the way the
+  original was, from the Q4 release and CP-0's own contract. It must not be
+  taken from what either run cited: their output is on the record now, and a
+  key chosen from it would measure the model against itself.
+
+- ~~**A billed call whose diagnostic body cannot be stored is billed again.**~~
+  Closed the same day it was raised. `_diagnostic` returning no body still commits the charge with
+  `diagnostic_sha256` NULL, and `replay_billed` excludes exactly those rows, so
+  the next pass over the node starts a fresh attempt, reserves again and calls
+  the provider again. Nothing between `replay_billed` and `start_attempt` asks
+  whether the node already holds a charged, unexplained, body-less outcome. The
+  run ceiling bounds it, so this is two charges for one node rather than an
+  unbounded spend, but it happens with no operator decision in between — and
+  `docs/DECISIONS.md` and the handoff both say every typed store fault releases
+  the attempt for safe replay, which is not true of this one. *Upgrade:* one
+  query beside `replay_billed` in `_drive` for a ready node with a ledger charge,
+  no artifact, no refusal row and a NULL diagnostic, raising a code that is not
+  in `_NOT_AN_EXPLANATION` so the second charge is an explained, requeued
+  decision. That is what `canonical.unexplained_charge` now is: `_drive` asks it
+  for a ready node with a ledger charge, no artifact, no refusal row and a NULL
+  diagnostic, and refuses `CALL_OUTCOME_UNEXPLAINED` before reserving anything.
+  The run parks with the code, which is the operator's decision this entry said
+  nobody was making. Paying again is still allowed -- it is just chosen now.
+- **The post-bill original recheck is a fault point, and it stays.** Recorded
+  because the Phase 6 adversarial audit asked for its removal and that
+  recommendation was not taken; a contested finding is worth a ledger entry
+  either way.
+  `_answer` re-reads every original PDF after the money is spent, but the
+  answer's validity does not depend on those bytes: evidence comes from
+  `source_blocks` and `source_tokens`, the record embeds no original, and
+  `assert_orchestration_proof` never opens one. What the recheck adds is a
+  fault point between the charge and acceptance, where a transient `OSError` on
+  a multi-megabyte read leaves a billed, unexplained node. The pre-call check in
+  `_source_preparation` is the one with a consumer, and replay runs it again
+  before any new spend. The audit is right that the recheck guards no reader.
+  It is wrong about the price: v3 also made `BLOB_*` faults re-raise out of
+  `replay_billed` rather than become a verdict, so the billed node this recheck
+  can strand is replayed from its stored body once the original is restored --
+  `test_a_lost_original_after_billing_replays_after_it_is_restored` is that
+  path. A recoverable fault point that re-verifies a pinned digest against the
+  store is the direction invariant 3 asks for, so it is kept.
+  *Upgrade:* none planned. Revisit if a real run is ever stranded here, which
+  would mean the recovery does not work as that test claims.
+- ~~**A filename an admitter chose is rendered under a host-attributed marker.**~~
+  Closed the same day it was raised.
+  `invocation.py` writes `member.filename` inside `HOST SOURCE PREPARATION`,
+  which the prompt labels host-owned, and `_TAGGED` warns the model only about
+  untagged *markers*. `BoundaryText` accepts U+FEFF, U+2028 and U+2029 that
+  `handoff._INVISIBLE` refuses, so a document admitted under such a filename,
+  copied into CP-0's inventory exactly as the instruction demands, is refused
+  `HANDOFF_MALFORMED` — a host defect recorded as the model's answer. Cannot
+  fire on a frozen ASCII corpus, which is why it is recorded rather than fixed
+  under an authorized run. `invocation._printable` now drops those characters
+  from the rendered filename, and `handoff.INVISIBLE` is public so the prompt
+  builder and the reader that refuses them cannot drift apart. The document
+  keeps its real name everywhere the host owns the comparison. *Upgrade:* the
+  section's own label still says "host-owned preparation metadata" without
+  saying that its string values are not instructions; worth adding the day a
+  document is admitted by anyone but this repository's operator.
+
 - **Identity before the store rests on parameter order.** Every section read
   (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
-  `read_run_events` declare `actor: Caller` ahead of `conn: Store`, and that is
+  `read_case_events` declare `actor: Caller` ahead of `conn: Store`, and that is
   the whole of what refuses an anonymous request before a connection is opened:
   FastAPI builds a route's dependency list in signature order (`get_dependant`)
   and solves it sequentially (`solve_dependencies`), so the ordering is a
@@ -822,34 +1058,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
   inserts at the front of the list whatever the parameters say; worth taking the
   day a third route arrives and the order has to be remembered three times.
-- **A run tail polls.** `server/api/app.py` re-reads `run_events` every
-  `POLL_INTERVAL` until the run is terminal, standing is lost, or
-  `TAIL_DEADLINE` passes. Every §9 rule holds and events are timely, but an idle
-  watcher still costs `EVENTS_IO_BUDGET` queries every half second — six a
-  second, per open connection. *Upgrade:* `LISTEN`/`NOTIFY` on the event append,
-  making the poll a fallback rather than the mechanism; worth doing when there
-  are enough concurrent watchers to measure it, not before.
-- **The role an actor carries is global, and nothing reads it.**
-  `server/api/identity.py` derives a `GlobalRole` from the groups the proxy
-  asserts, which is what the actor matrix is about; but every authority decision
-  that matters is per case and is taken at commit time against `case_members`
-  (`SYSTEM_SPEC.md` §8), so no code path consults the global role today. It is
-  derived rather than deferred because deriving it later, once routes exist that
-  assume a role is present, is how a role header gets trusted "just for now".
-  *Upgrade:* the first authority that is genuinely account-wide rather than
-  case-scoped. This entry used to name administration in Phase 10; Phase 10 came
-  and went without it, and `docs/REBUILD_PLAN.md` lists an admin UI under what is
-  deliberately not in the plan — so there is no scheduled upgrade, and saying so
-  is better than pointing at a phase that has closed.
-- **`GET /api/health` is specified and not served.** `SYSTEM_SPEC.md` §11 wants
-  liveness and readiness on one strict model — store, bundle, blob store, 200
-  when all hold and 503 otherwise, probed on a shared background task — and the
-  route answers FastAPI's own 404. The Admin section's document said
-  `HEALTH · 200` and listed a worker the one-process deployment does not have;
-  it now names the route as not served. Until the route exists a drifted schema
-  stops the process at boot, and every other store fault surfaces only on the
-  request that meets it. *Upgrade:* the route and its three probes, the day a
-  proxy or an operator has to ask whether the process can serve.
+- **A case stream polls.** `server/api/stream.py`'s `case_tail` re-reads the
+  case's audit actions, the run's events and the caller's standing every
+  `POLL_INTERVAL` (0.5 s) until `TAIL_DEADLINE` (300 s) or standing is lost,
+  on one store connection held for the stream's life. Every §9 rule holds and
+  events are timely, but an idle watcher costs three queries a poll -- six a
+  second -- while its run is open, and two a poll once the run's terminal is
+  delivered, per open connection, with one more standing check per named
+  frame. *Upgrade:* `LISTEN`/`NOTIFY` on the event and audit appends, making
+  the poll a fallback rather than the mechanism; worth doing when there are
+  enough concurrent watchers to measure it, not before.
+- ~~**The role an actor carries is global, and nothing reads it.**~~ Closed
+  by Phase 4 Task 4.2 (§51.2): every command reads the global role -- create
+  case and every case-scoped write refuse a global READER `NOT_AUTHORISED`
+  whatever its case standing -- and the section reads' availability does the
+  same. Case standing is still the authority checked at commit.
+
+- ~~**`GET /api/health` is specified and not served.**~~ Closed by Phase 4
+  Task 4.5b (§53.8): `server/api/health.py` serves a closed `HealthDocument`
+  from probes of store, bundle and blob root run every 10 s on one lifespan
+  task, 503 unless all three are `OK` and fresh, with no identity, token or
+  I/O on the request. The worker still serves none (Repair Phase 4 above).
 
 **Phase 5.**
 
@@ -1008,8 +1237,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 2.**
 
-- **A quote matches whole tokens exactly.** `matched_text` is split on
-  whitespace and each word must equal a token, punctuation included. A module
+- **A quote matches whole tokens exactly, typography at its edges aside.**
+  `matched_text` is split on whitespace and each word must equal a token,
+  punctuation included -- except that the first and last tokens of the body's
+  window may carry quotation marks (`_QUOTATION`). That exception was paid for:
+  a module writes its Evidence Trace as prose, prose puts quotation marks
+  around a quotation, and the CP-L10 attempt of the second paid Terra run was
+  refused `HANDOFF_MALFORMED` for `“The preliminary` where the quote said
+  `The preliminary`. It is the body check only -- `verify_citations` still
+  anchors against the document's own tokens exactly, so nothing about what may
+  be cited moved. A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
   `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
   costs its claim under the retired claims adapter's per-claim refusal (§26,
@@ -1022,7 +1259,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   not exist.
 - **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
   blob store inside the caller's transaction, and the blob store is a filesystem
-  that transaction cannot roll back. The orphans are harmless — content-
+  that transaction cannot roll back. The admission command (§51) extracts
+  before any transaction but still puts each document's bytes inside its
+  governed unit (`admit_prepared`), so a unit that fails after a put -- a
+  store fault on a later insert, the audit link or the commit -- leaves them
+  too.
+  The orphans are harmless — content-
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.
@@ -1097,3 +1339,48 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   lifted from CAOS-Final at `cf8c3a9` cite its §18–§48; `docs/DECISIONS.md`
   §12 maps each to the entry here or to the phase that adopts it. *Upgrade:*
   each phase re-numbers the citations in the pages it corrects.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **caos-v2** (8993 symbols, 22700 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/caos-v2/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/caos-v2/clusters` | All functional areas |
+| `gitnexus://repo/caos-v2/processes` | All execution flows |
+| `gitnexus://repo/caos-v2/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

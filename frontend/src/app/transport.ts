@@ -13,12 +13,17 @@ import {
   WireShapeError,
   parseAnalysisDocument,
   parseDirectoryDocument,
+  parseModelDocument,
   parsePageDocument,
+  parseCommitteeDocument,
+  parseReportDocument,
   parseRefusalBody,
+  parseQualificationRead,
   parseRunSectionDocument,
   parseUploadDocument,
   requireIdentity,
   type PageDocument,
+  type QualificationRead,
   type SectionDocument as V1Document,
 } from "@/wire/v1";
 
@@ -46,6 +51,7 @@ export const OFFLINE_WORDING = "The request did not reach the server.";
 export interface SectionQuery {
   case?: string | null;
   run?: string | null;
+  revision?: string | null;
   fixture?: string | null;
 }
 
@@ -54,6 +60,9 @@ const V1_PARSERS: Record<EnabledSection, (value: unknown) => V1Document> = {
   upload: parseUploadDocument,
   run: parseRunSectionDocument,
   analysis: parseAnalysisDocument,
+  model: parseModelDocument,
+  report: parseReportDocument,
+  committee: parseCommitteeDocument,
 };
 
 /** The section's document URL, or null when no request may be sent: a
@@ -61,13 +70,28 @@ const V1_PARSERS: Record<EnabledSection, (value: unknown) => V1Document> = {
 export function sectionUrl(section: Section, query: SectionQuery): string | null {
   if (!isEnabledSection(section)) return null;
   const params = new URLSearchParams();
-  if ((section === "run" || section === "analysis") && query.run) params.set("run", query.run);
+  if (
+    (section === "run" ||
+      section === "analysis" ||
+      section === "model" ||
+      section === "report" ||
+      section === "committee") &&
+    query.run
+  ) {
+    params.set("run", query.run);
+  }
+  if ((section === "report" || section === "committee") && query.revision) {
+    params.set("revision", query.revision);
+  }
   // Only the demo build names a fixture; production folds this branch away.
   if (import.meta.env.MODE === "demo" && query.fixture) params.set("fixture", query.fixture);
   const search = params.toString();
   const suffix = search ? `?${search}` : "";
   if (section === "directory") return `/api/v1/directory${suffix}`;
   if (!query.case) return null;
+  if ((section === "report" || section === "committee") && (!query.run || !query.revision)) {
+    return null;
+  }
   return `/api/v1/cases/${encodeURIComponent(query.case)}/${section}${suffix}`;
 }
 
@@ -99,10 +123,20 @@ function classifyV1(section: EnabledSection, body: unknown, query: SectionQuery)
   let document: V1Document;
   try {
     document = V1_PARSERS[section](body);
-    const runId = section === "run" || section === "analysis" ? query.run : null;
+    const runId =
+      section === "run" ||
+      section === "analysis" ||
+      section === "model" ||
+      section === "report" ||
+      section === "committee"
+        ? query.run
+        : null;
     requireIdentity(document, {
       caseId: section === "directory" ? null : (query.case ?? null),
       ...(runId ? { runId } : {}),
+      ...((section === "report" || section === "committee") && query.revision
+        ? { revisionId: query.revision }
+        : {}),
     });
   } catch (error) {
     if (error instanceof WireShapeError) {
@@ -149,6 +183,52 @@ export async function fetchSection(
   if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
   const body = await bodyOf(response);
   return classifyV1(section, body, query);
+}
+
+export type QualificationStatus =
+  | { kind: "ready"; document: QualificationRead }
+  | { kind: "error"; refusal: Refusal }
+  | { kind: "unavailable" }
+  | { kind: "offline" };
+
+/** Qualification is global evidence, so its immutable identity travels as a hash. */
+export function qualificationUrl(evidenceSha256: string): string {
+  return `/api/v1/qualification/${encodeURIComponent(evidenceSha256)}`;
+}
+
+/** Read one exact qualification result and reject a substituted response. */
+export async function fetchQualification(
+  evidenceSha256: string,
+  signal?: AbortSignal,
+): Promise<QualificationStatus> {
+  let response: Response;
+  try {
+    response = await fetch(qualificationUrl(evidenceSha256), {
+      signal,
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    return { kind: "offline" };
+  }
+  if (response.status === 404) return { kind: "unavailable" };
+  if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
+  try {
+    const document = parseQualificationRead(await bodyOf(response));
+    if (!same(document.evidence_sha256, evidenceSha256)) throw new WireIdentityError();
+    return { kind: "ready", document };
+  } catch (error) {
+    if (error instanceof WireShapeError || error instanceof WireIdentityError) {
+      return {
+        kind: "error",
+        refusal: {
+          code:
+            error instanceof WireIdentityError ? "WIRE_IDENTITY_MISMATCH" : "WIRE_SHAPE_INVALID",
+          clears: "the qualification result is bound to the requested evidence",
+        },
+      };
+    }
+    throw error;
+  }
 }
 
 // Evidence pages (brief 4.4, decision 7). Not a section document: no chrome,

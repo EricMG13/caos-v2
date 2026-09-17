@@ -13,7 +13,6 @@ import os
 import secrets
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -26,13 +25,14 @@ PROJECT = "caos-workbench-smoke"
 API_ORIGIN = "http://127.0.0.1:18000"
 EDGE_HOST, EDGE_PORT = "127.0.0.1", 18080
 REFUSED = 2
+BROWSER_PROJECTS = ("chromium", "firefox", "webkit")
 
 
 def _compose(*args: str) -> list[str]:
     return ["docker", "compose", "-p", PROJECT, "-f", str(REPO / COMPOSE_FILE), *args]
 
 
-def _environment(state_dir: str) -> dict[str, str]:
+def _environment() -> dict[str, str]:
     """A per-run edge token and the journey's switches; no provider credential."""
     env = {
         key: value
@@ -44,7 +44,6 @@ def _environment(state_dir: str) -> dict[str, str]:
         CAOS_PUBLIC_ORIGIN=f"http://{EDGE_HOST}:{EDGE_PORT}",
         JOURNEY_UPSTREAM=API_ORIGIN,
         JOURNEY_EXIT_AFTER_FIRST_ACCEPT="1",
-        JOURNEY_STATE_DIR=state_dir,
     )
     return env
 
@@ -61,8 +60,17 @@ def compose_down(env: dict[str, str]) -> None:
     subprocess.run(
         _compose("--profile", "journey", "down", "--volumes"),
         env=env,
-        check=False,
+        check=True,
     )
+
+
+def stop_edge(edge: subprocess.Popen[bytes]) -> None:
+    edge.terminate()
+    try:
+        edge.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        edge.kill()
+        edge.wait(timeout=10)
 
 
 def start_edge(env: dict[str, str]) -> subprocess.Popen[bytes]:
@@ -83,25 +91,49 @@ def start_edge(env: dict[str, str]) -> subprocess.Popen[bytes]:
         ],
         env=env,
     )
+    ready_url = f"http://{EDGE_HOST}:{EDGE_PORT}/"
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
-            urllib.request.urlopen(f"http://{EDGE_HOST}:{EDGE_PORT}/", timeout=1)
+            with urllib.request.urlopen(ready_url, timeout=1):
+                return edge
         except urllib.error.HTTPError:
             return edge  # the edge answered (401 without a session)
         except OSError:
             time.sleep(0.25)
-    edge.terminate()
+    stop_edge(edge)
     raise TimeoutError
 
 
-def run_playwright(env: dict[str, str]) -> int:
+def run_playwright(env: dict[str, str], project: str) -> int:
+    cmd = ["npx", "playwright", "test", "-c", PLAYWRIGHT_CONFIG, "--project", project]
     return subprocess.run(
-        ["npx", "playwright", "test", "-c", PLAYWRIGHT_CONFIG],
+        cmd,
         cwd=REPO / "frontend",
         env=env,
         check=False,
     ).returncode
+
+
+def browser_projects() -> tuple[str, ...]:
+    """Each browser gets its own crash-once worker and disposable stack."""
+    selected = os.environ.get("JOURNEY_PLAYWRIGHT_PROJECT")
+    return (selected,) if selected else BROWSER_PROJECTS
+
+
+def run_project(project: str) -> int:
+    env = _environment()
+    edge: subprocess.Popen[bytes] | None = None
+    try:
+        compose_up(env)
+        edge = start_edge(env)
+        return run_playwright(env, project)
+    finally:
+        try:
+            if edge is not None:
+                stop_edge(edge)
+        finally:
+            compose_down(env)
 
 
 def main() -> int:
@@ -114,18 +146,10 @@ def main() -> int:
         names = ", ".join(str(path.relative_to(REPO)) for path in missing)
         print(f"journey refused: missing stack files: {names}", file=sys.stderr)
         return REFUSED
-    with tempfile.TemporaryDirectory(prefix="caos-journey-") as state_dir:
-        env = _environment(state_dir)
-        edge: subprocess.Popen[bytes] | None = None
-        try:
-            compose_up(env)
-            edge = start_edge(env)
-            return run_playwright(env)
-        finally:
-            if edge is not None:
-                edge.terminate()
-                edge.wait(timeout=10)
-            compose_down(env)
+    for project in browser_projects():
+        if status := run_project(project):
+            return status
+    return 0
 
 
 if __name__ == "__main__":

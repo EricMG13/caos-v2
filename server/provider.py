@@ -38,7 +38,10 @@ TIMEOUT_SECONDS = 120.0
 # Oversized requests/responses refuse; no prefix is accepted as a whole answer.
 MAX_REQUEST_BYTES = 1_048_576
 MAX_RESPONSE_BYTES = 4_194_304
-MAX_COMPLETION_TOKENS = 32_768
+MAX_COMPLETION_TOKENS = 65_536
+REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
 
 # A call that cannot succeed by being repeated. Retrying one of these spends a
 # second reservation on the same certain failure.
@@ -203,8 +206,28 @@ class CompletionProvider(Protocol):
         ...
 
 
-def encode_request(model: str, prompt: str, *, json_object: bool = False) -> bytes:
+def encode_request(
+    model: str,
+    prompt: str,
+    *,
+    json_object: bool = False,
+    upstream_provider: str | None = None,
+    reasoning_effort: str | None = None,
+) -> bytes:
     """The chat-completions body for one prompt, exactly as `OpenRouter` sends it."""
+    if upstream_provider is not None and (
+        producer_identifier(upstream_provider, limit=128) is None
+        or upstream_provider != upstream_provider.casefold()
+    ):
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    preferences: dict[str, Any] = {
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    }
+    if upstream_provider is not None:
+        preferences["order"] = [upstream_provider]
     request: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -212,8 +235,10 @@ def encode_request(model: str, prompt: str, *, json_object: bool = False) -> byt
         "max_completion_tokens": MAX_COMPLETION_TOKENS,
         # One run, one provider identity. A fallback would move the run
         # to a model its charges were never priced against.
-        "provider": {"allow_fallbacks": False, "require_parameters": True},
+        "provider": preferences,
     }
+    if reasoning_effort is not None:
+        request["reasoning"] = {"effort": reasoning_effort, "exclude": True}
     if json_object:
         request["response_format"] = {"type": "json_object"}
     return json.dumps(request).encode("utf-8")
@@ -228,13 +253,36 @@ class OpenRouter:
     api_key: str = field(repr=False)
     model: str
     base_url: str = DEFAULT_BASE_URL
+    upstream_provider: str | None = None
+    reasoning_effort: str | None = None
     transport: Transport = field(default_factory=UrllibTransport)
+
+    @property
+    def qualification_identity(self) -> str:
+        """The OpenRouter execution profile a qualification verdict binds."""
+        # Request construction is the single validator for these settings.
+        encode_request(
+            self.model,
+            "",
+            upstream_provider=self.upstream_provider,
+            reasoning_effort=self.reasoning_effort,
+        )
+        if self.upstream_provider is None and self.reasoning_effort is None:
+            return "openrouter"
+        return "/".join(
+            (
+                "openrouter",
+                self.upstream_provider or "auto",
+                self.reasoning_effort or "default",
+                str(MAX_COMPLETION_TOKENS),
+            )
+        )
 
     @classmethod
     def from_environment(cls) -> OpenRouter:
         """The provider the environment configures, or `PROVIDER_NOT_CONFIGURED`.
 
-        §16's three names and nothing else: no dotenv library, no profile on
+        §16's five names and nothing else: no dotenv library, no profile on
         disk. Read at the call rather than at import, so a process started
         before the key was set picks it up once it is. A missing key is refused
         here rather than left to the provider's 401, which costs a round trip to
@@ -244,11 +292,15 @@ class OpenRouter:
         model = os.environ.get("OPENROUTER_MODEL", "")
         if not key or not model:
             raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
-        return cls(
+        provider = cls(
             api_key=key,
             model=model,
             base_url=os.environ.get("OPENROUTER_BASE_URL") or DEFAULT_BASE_URL,
+            upstream_provider=os.environ.get("OPENROUTER_PROVIDER") or None,
+            reasoning_effort=os.environ.get("OPENROUTER_REASONING_EFFORT") or None,
         )
+        _ = provider.qualification_identity
+        return provider
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         """Ask once. Never twice: a retry is the caller's decision and its own
@@ -261,6 +313,7 @@ class OpenRouter:
         """
         if producer_identifier(self.model, limit=256) is None:
             raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+        _ = self.qualification_identity
 
         try:
             status, body = self._post(prompt, json_object=json_object)
@@ -287,7 +340,13 @@ class OpenRouter:
 
     def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
         """The body `_post` sends, built without sending it."""
-        return encode_request(self.model, prompt, json_object=json_object)
+        return encode_request(
+            self.model,
+            prompt,
+            json_object=json_object,
+            upstream_provider=self.upstream_provider,
+            reasoning_effort=self.reasoning_effort,
+        )
 
     def _post(self, prompt: str, *, json_object: bool = False) -> tuple[int, bytes]:
         if not isinstance(prompt, str) or len(prompt) > MAX_REQUEST_BYTES:

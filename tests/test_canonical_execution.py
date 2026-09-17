@@ -48,7 +48,9 @@ from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserve
+from server.store.run_inputs import load_run_input
 from server.store.runs import Accepted, accept_attempt, start_attempt
+from server.store.source_sets import load_source_set
 
 __all__ = ["harness"]
 
@@ -212,6 +214,73 @@ def test_provider_claimed_identity_never_survives(harness: _Harness) -> None:
     )
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
     assert _diagnostic(harness) == _body(tampered.bodies[0])
+
+
+def test_cp0_receives_the_verified_source_preparation_snapshot(
+    harness: _Harness,
+) -> None:
+    completions = CanonicalCompletions(harness.source_id)
+    _run(harness, "CP-0", completions)
+    pin = load_run_input(harness.conn, harness.run_id)
+    assert pin is not None
+    source_set = load_source_set(harness.conn, pin.case_id, pin.source_version)
+    assert source_set is not None
+    [prompt] = completions.prompts
+    assert "HOST SOURCE PREPARATION" in prompt
+    for member in source_set.members:
+        assert f"blob://sha256/{member.document_sha256}" in prompt
+        assert member.extraction_sha256 in prompt
+
+
+def test_cp0_refuses_before_the_provider_when_an_original_blob_is_missing(
+    harness: _Harness,
+) -> None:
+    pin = load_run_input(harness.conn, harness.run_id)
+    assert pin is not None
+    source_set = load_source_set(harness.conn, pin.case_id, pin.source_version)
+    assert source_set is not None
+    harness.blobs.path_of(source_set.members[0].document_sha256).unlink()
+    completions = CanonicalCompletions(harness.source_id)
+    assert _refused(harness, "CP-0", completions) is RefusalCode.BLOB_NOT_FOUND
+    assert completions.prompts == []
+
+
+def test_cp0_maps_original_store_io_failure_before_the_provider(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pin = load_run_input(harness.conn, harness.run_id)
+    assert pin is not None
+    source_set = load_source_set(harness.conn, pin.case_id, pin.source_version)
+    assert source_set is not None
+    original_get = BlobStore.get
+
+    def unavailable(self: BlobStore, digest: str) -> bytes:
+        if digest == source_set.members[0].document_sha256:
+            raise OSError
+        return original_get(self, digest)
+
+    monkeypatch.setattr(BlobStore, "get", unavailable)
+    completions = CanonicalCompletions(harness.source_id)
+    assert _refused(harness, "CP-0", completions) is RefusalCode.STORE_UNAVAILABLE
+    assert completions.prompts == []
+
+
+def test_cp0_refuses_a_billed_answer_when_an_original_moves_during_transport(
+    harness: _Harness,
+) -> None:
+    pin = load_run_input(harness.conn, harness.run_id)
+    assert pin is not None
+    source_set = load_source_set(harness.conn, pin.case_id, pin.source_version)
+    assert source_set is not None
+    completions = CanonicalCompletions(
+        harness.source_id,
+        during=lambda: harness.blobs.path_of(
+            source_set.members[0].document_sha256
+        ).unlink(),
+    )
+    assert _refused(harness, "CP-0", completions) is RefusalCode.BLOB_NOT_FOUND
+    assert len(completions.prompts) == 1
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
 
 
 @dataclass

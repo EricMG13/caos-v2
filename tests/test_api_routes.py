@@ -35,17 +35,17 @@ from test_execution_freshness import _Harness
 
 from server.api import app as app_module
 from server.api.app import (
-    TAIL_DEADLINE,
     app,
     blob_store,
     methodology_bundle,
     read_case_events,
-    read_run_events,
     store_connection,
 )
 from server.api.deps import actor_from_request
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
+from server.api.reads import model as model_read
+from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
 from server.api.reads.run import _node_view, node_readiness, read_run_section
@@ -62,9 +62,9 @@ from server.methodology.bundle import Bundle
 from server.methodology.handoff import _decoded_record, record_bytes
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.members import Standing, grant, revoke, standing_of
+from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route, pinned_route
-from server.store.runs import block_run, start_attempt, start_run
+from server.store.runs import block_run, start_run
 
 __all__ = ["harness", "route"]
 
@@ -288,7 +288,7 @@ def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
     else:
         monkeypatch.setenv(app_module.DATABASE_URL, database_url)
 
-    for path in (f"/api/v1/cases/{uuid4()}/run", f"/api/runs/{uuid4()}/events"):
+    for path in (f"/api/v1/cases/{uuid4()}/run", f"/api/v1/cases/{uuid4()}/events"):
         response = client.get(path)
 
         assert (response.status_code, response.json()) == (
@@ -325,7 +325,10 @@ def test_an_anonymous_request_opens_no_store_connection(
     app.dependency_overrides[store_connection] = counted
     app.dependency_overrides[methodology_bundle] = counted_bundle
 
-    for path in (f"/api/v1/cases/{case_id}/run", f"/api/runs/{run_id}/events"):
+    for path in (
+        f"/api/v1/cases/{case_id}/run",
+        f"/api/v1/cases/{case_id}/events?run={run_id}",
+    ):
         assert client.get(path).status_code == 401, path
     del app.dependency_overrides[methodology_bundle]
     assert opened == [], (
@@ -424,7 +427,7 @@ def test_a_store_that_does_not_answer_is_a_server_fault(
             "postgresql://caos@127.0.0.1:1/caos?connect_timeout=2",
         )
         document = _section(opened, uuid4(), None, uuid4())
-        tail = opened.get(f"/api/runs/{uuid4()}/events", headers=_as(uuid4()))
+        tail = opened.get(f"/api/v1/cases/{uuid4()}/events", headers=_as(uuid4()))
 
     for response in (document, tail):
         assert (response.status_code, response.json()) == (
@@ -478,30 +481,6 @@ def test_the_malformed_id_handler_derives_identity_of_its_own() -> None:
     response = TestClient(other).get("/api/runs/not-a-run")
 
     assert (response.status_code, response.json()) == (
-        401,
-        _refused("NOT_AUTHENTICATED"),
-    )
-
-
-def test_a_malformed_run_id_is_answered_like_any_unknown_run(
-    client: TestClient, run: tuple[UUID, UUID]
-) -> None:
-    """A path that cannot name a run names no run. FastAPI's own 422 answered
-    it instead -- before identity, in a body that is not the declared refusal
-    and that quotes the input back.
-
-    The anonymous arm is now answered by `actor_from_request`, which resolves
-    before FastAPI validates the path; the handler's own answer to it is the
-    same, and is asserted directly in
-    `test_the_malformed_id_handler_derives_identity_of_its_own`."""
-    _run_id, viewer = run
-    unknown = client.get(f"/api/runs/{uuid4()}/events", headers=_as(viewer))
-
-    named = client.get("/api/runs/not-a-run/events", headers=_as(viewer))
-    anonymous = client.get("/api/runs/not-a-run/events")
-
-    assert (named.status_code, named.json()) == (404, unknown.json())
-    assert (anonymous.status_code, anonymous.json()) == (
         401,
         _refused("NOT_AUTHENTICATED"),
     )
@@ -633,9 +612,12 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
 def test_node_readiness_is_the_shared_computation_node_view_builds_on(
     catalog: dict[str, Any],
 ) -> None:
-    """`node_readiness` is what `_node_view` (this module) and the legacy run
-    document's own `_node_view` (`server/api/app.py`) both call, so the two
-    wires cannot compute a node's unmet edges differently by drifting apart."""
+    """`node_readiness` is the one computation of a node's unmet edges, its
+    awaiting-gate flag and its readiness. It was extracted when two wires each
+    had a `_node_view` and could drift apart; the legacy one in
+    `server/api/app.py` has since been retired with the run tail, so this is
+    now what keeps the computation named and covered on its own rather than
+    only through whichever caller happens to exercise it."""
     full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
     accepted: dict[str, NodeResult] = {}
     states = node_states(full, accepted)
@@ -748,7 +730,7 @@ def test_every_refusal_body_is_code_and_clears_and_nothing_else(
     from the request, whichever answer the route gave."""
     answers = {
         RefusalCode.RUN_NOT_FOUND: client.get(
-            f"/api/runs/{uuid4()}/events", headers=_as(uuid4())
+            f"/api/v1/cases/{uuid4()}/events?run=not-a-run", headers=_as(uuid4())
         ),
         RefusalCode.CASE_NOT_FOUND: _section(client, uuid4(), None, uuid4()),
         RefusalCode.NOT_AUTHENTICATED: _section(client, uuid4(), None, None),
@@ -821,11 +803,14 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/upload": "read_upload",
         "/api/v1/cases/{case_id}/run": read_run_section.__name__,
         "/api/v1/cases/{case_id}/analysis": "read_analysis",
+        "/api/v1/cases/{case_id}/model": "read_model",
+        "/api/v1/cases/{case_id}/report": "read_report",
+        "/api/v1/cases/{case_id}/committee": "read_committee",
+        "/api/v1/qualification/{evidence_sha256}": "read_qualification",
         "/api/v1/cases/{case_id}/runs/{run_id}/sources/{source_id}/pages/{page}": (
             "read_evidence_page"
         ),
         "/api/v1/cases/{case_id}/events": read_case_events.__name__,
-        "/api/runs/{run_id}/events": read_run_events.__name__,
         "/api/health": "read_health",
         "/api/v1/cases/{case_id}/runs/{run_id}/start": "start_run",
         "/api/v1/cases/{case_id}/runs/{run_id}/retry": "retry_run",
@@ -852,7 +837,14 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
     """
     routes = {
         route.path: route
-        for router in (directory_read, upload_read, run_read, analysis_read)
+        for router in (
+            directory_read,
+            upload_read,
+            run_read,
+            analysis_read,
+            model_read,
+            reports_read,
+        )
         for route in router.router.routes
         if isinstance(route, APIRoute)
     }
@@ -892,6 +884,21 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         blob_store,
         methodology_bundle,
     ]
+    assert (
+        calls["/api/v1/cases/{case_id}/model"]
+        == calls["/api/v1/cases/{case_id}/analysis"]
+    )
+    report_dependencies = [
+        actor_from_request,
+        upload_read.case_path,
+        analysis_read.run_query,
+        reports_read.revision_query,
+        store_connection,
+        blob_store,
+        methodology_bundle,
+    ]
+    assert calls["/api/v1/cases/{case_id}/report"] == report_dependencies
+    assert calls["/api/v1/cases/{case_id}/committee"] == report_dependencies
 
 
 def test_the_reported_digest_is_the_one_that_was_pinned(
@@ -954,175 +961,6 @@ def test_each_request_path_declares_what_it_costs_the_store(
     )
 
 
-def test_the_tail_is_served_as_an_event_stream(
-    client: TestClient,
-    lite: tuple[_Harness, UUID],
-) -> None:
-    """The transport half of `server/api/stream.py`: the same contract, now over
-    a socket."""
-    harness, viewer = lite
-    run_id = _finish(harness)
-
-    response = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer))
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.headers["cache-control"] == "no-store"
-    assert [name for _, name in _sse(response.text)] == [
-        "ROUTE_PINNED",
-        "INPUT_PINNED",
-        "ATTEMPT_STARTED",
-        "CALL_OUTCOME_RECORDED",
-        "ATTEMPT_ACCEPTED",
-        "RUN_BLOCKED",
-    ]
-
-
-def test_every_frame_carries_an_id_and_a_name_and_no_state(
-    client: TestClient,
-    lite: tuple[_Harness, UUID],
-) -> None:
-    """The client never reads a payload -- a name triggers a refetch. A payload
-    on the wire would be a second copy of state the client is about to fetch
-    properly, and the first thing to go stale."""
-    harness, viewer = lite
-    run_id = _finish(harness)
-
-    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
-
-    assert [line for line in text.splitlines() if line.startswith("data:")] == [
-        "data: {}"
-    ] * 6
-    assert [event_id for event_id, _ in _sse(text)] == ["1", "2", "3", "4", "5", "6"]
-
-
-def test_last_event_id_resumes_after_the_marker(
-    client: TestClient,
-    lite: tuple[_Harness, UUID],
-) -> None:
-    """`Last-Event-ID` is the last event the client actually received, so
-    delivery starts strictly after it. Re-delivering it would make a client that
-    refetches on every name do the work twice."""
-    harness, viewer = lite
-    run_id = _finish(harness)
-
-    text = client.get(
-        f"/api/runs/{run_id}/events", headers={**_as(viewer), "last-event-id": "5"}
-    ).text
-
-    assert [name for _, name in _sse(text)] == ["RUN_BLOCKED"]
-
-
-def test_a_last_event_id_that_is_not_a_number_starts_from_the_beginning(
-    client: TestClient,
-    lite: tuple[_Harness, UUID],
-) -> None:
-    """A resume marker is a browser-supplied string. Refusing the connection
-    would strand a client that can only fix it by clearing storage; starting
-    over re-delivers, which is what the contract already tolerates."""
-    harness, viewer = lite
-    run_id = _finish(harness)
-
-    text = client.get(
-        f"/api/runs/{run_id}/events",
-        headers={**_as(viewer), "last-event-id": "; DROP TABLE runs"},
-    ).text
-
-    assert len(_sse(text)) == 6
-
-
-def test_an_unauthorised_tail_is_the_same_private_404(
-    client: TestClient, run: tuple[UUID, UUID]
-) -> None:
-    """The stream cannot be the one surface that answers differently. An empty
-    200 would still say the id is a well-formed run somebody could watch."""
-    run_id, _viewer = run
-
-    response = client.get(f"/api/runs/{run_id}/events", headers=_as(uuid4()))
-
-    assert response.status_code == 404
-    assert response.json() == _refused("RUN_NOT_FOUND")
-
-
-def test_the_tail_closes_at_its_deadline(
-    client: TestClient,
-    case: tuple[StoreConnection, UUID],
-    run: tuple[UUID, UUID],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """§9 wants a tail that closes so the edge can reauthenticate. This run never
-    goes terminal, so the deadline is the only thing that ends the stream --
-    without it this test does not fail, it hangs."""
-    conn, _case_id = case
-    run_id, viewer = run
-    start_attempt(conn, run_id, "CP-1")
-    conn.commit()
-    monkeypatch.setattr(app_module, "TAIL_DEADLINE", 0.0)
-
-    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
-
-    assert [name for _, name in _sse(text)] == ["ATTEMPT_STARTED"]
-    assert TAIL_DEADLINE == 300.0, "five minutes is the shipped value"
-
-
-def test_a_watcher_revoked_mid_stream_closes_rather_than_idling(
-    client: TestClient,
-    case: tuple[StoreConnection, UUID],
-    run: tuple[UUID, UUID],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An SSE connection is exactly the thing that stays open across a
-    revocation. The tail goes quiet for a revoked reader and for a caught-up one
-    alike, so the loop asks directly -- otherwise a revoked reader's socket stays
-    alive until the deadline.
-
-    Standing is taken away by making the route's own read say so from the second
-    call on: the first is the request's own check, the second is the poll.
-    """
-    conn, _case_id = case
-    run_id, viewer = run
-    start_attempt(conn, run_id, "CP-1")
-    conn.commit()
-    answers = iter([True])
-
-    def revoked_after_the_request(
-        conn: StoreConnection, *, case_id: UUID, user_id: UUID
-    ) -> Standing | None:
-        if next(answers, False):
-            return standing_of(conn, case_id=case_id, user_id=user_id)
-        return None
-
-    monkeypatch.setattr(app_module, "standing_of", revoked_after_the_request)
-
-    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
-
-    assert [name for _, name in _sse(text)] == ["ATTEMPT_STARTED"]
-
-
-def test_the_idle_loop_actually_waits_between_polls(
-    client: TestClient,
-    case: tuple[StoreConnection, UUID],
-    run: tuple[UUID, UUID],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The genuinely idle pass: no new event, standing still holds, the
-    deadline has not yet passed. `test_the_tail_closes_at_its_deadline` and
-    `test_a_watcher_revoked_mid_stream_closes_rather_than_idling` each engineer
-    an exit on the very first pass and never reach the wait between them --
-    without it, an idle connection would ask again as fast as the loop could
-    spin rather than once per `POLL_INTERVAL`."""
-    conn, _case_id = case
-    run_id, viewer = run
-    start_attempt(conn, run_id, "CP-1")
-    conn.commit()
-    monkeypatch.setattr(app_module, "POLL_INTERVAL", 0.01)
-    monkeypatch.setattr(app_module, "TAIL_DEADLINE", 0.03)
-
-    text = client.get(f"/api/runs/{run_id}/events", headers=_as(viewer)).text
-
-    assert [name for _, name in _sse(text)] == ["ATTEMPT_STARTED"]
-
-
 def test_a_process_with_no_database_refuses_to_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1157,26 +995,6 @@ def test_startup_applies_the_declared_schema(
         ).fetchone()
     assert applied is not None
     assert applied[0] == 4
-
-
-def _finish(harness: _Harness) -> UUID:
-    """Six events: two pins, started, outcome recorded, accepted, blocked -- on
-    a canonical LITE run whose CP-0 is accepted with its record. Blocked, not
-    complete: the store refuses COMPLETE while pinned nodes are unaccepted."""
-    _answer(harness, "CP-0")
-    block_run(harness.conn, harness.run_id)
-    return harness.run_id
-
-
-def _sse(text: str) -> list[tuple[str, str]]:
-    """Each frame's id and event name, in order."""
-    frames = []
-    for block in text.strip().split("\n\n"):
-        fields = dict(
-            line.split(": ", 1) for line in block.splitlines() if ": " in line
-        )
-        frames.append((fields["id"], fields["event"]))
-    return frames
 
 
 class _CountingConnection:

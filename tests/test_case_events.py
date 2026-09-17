@@ -105,6 +105,8 @@ def _frames(response: httpx.Response) -> Iterator[Frame]:
                 yield fields
             fields = {}
             continue
+        if line.startswith(":"):  # an SSE comment: the keepalive, not a field
+            continue
         key, _, value = line.partition(": ")
         fields[key] = value
     if fields:
@@ -242,6 +244,24 @@ def test_a_run_of_another_case_is_run_not_found_on_the_event_stream(
     assert _frames_of(served, _path(case_id, own), _as(reader)) == [{"id": "0.0"}]
 
 
+def test_the_retired_run_event_route_is_absent(
+    served: str, case: tuple[StoreConnection, UUID]
+) -> None:
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    run_id = start_run(conn, case_id)
+    conn.commit()
+
+    answer = _stream(served, f"/api/runs/{run_id}/events", _as(reader))
+
+    assert isinstance(answer, httpx.Response)
+    assert (answer.status_code, answer.json()) == (
+        404,
+        _refused(RefusalCode.ENDPOINT_NOT_FOUND),
+    )
+    assert not hasattr(app_module, "read_run_events")
+
+
 def test_the_first_frame_is_a_cursor_at_the_current_heads(
     served: str, case: tuple[StoreConnection, UUID]
 ) -> None:
@@ -280,6 +300,7 @@ def test_frames_carry_only_a_cursor_a_name_and_empty_data(
     assert frames == [
         {"id": "0.0"},
         {"id": "1.0", "event": "sources_changed", "data": "{}"},
+        {"id": "2.0", "event": "filing_changed", "data": "{}"},
         {"id": "2.1", "event": "run_progress", "data": "{}"},
     ]
 
@@ -307,6 +328,24 @@ def test_resume_delivers_strictly_after_the_composite_marker(
     assert resumed("2.1") == [("2.2", "run_progress")]
     assert resumed("0.2") == [("1.2", "sources_changed"), ("2.2", "runs_changed")]
     assert resumed("2.2") == []
+
+
+def test_a_marker_that_cannot_be_used_resumes_from_the_heads_over_http(
+    served: str, case: tuple[StoreConnection, UUID]
+) -> None:
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    run_id = start_run(conn, case_id)
+    _audit(conn, case_id, "SOURCE_WITHDRAWN")
+    start_attempt(conn, run_id, "CP-1")
+    conn.commit()
+
+    for marker in (b"0.9", b"9.0", "\u00b9.0".encode(), b"; DROP TABLE runs"):
+        headers = httpx.Headers(
+            [(b"x-caos-user", str(reader).encode()), (b"last-event-id", marker)]
+        )
+        frames = _frames_of(served, _path(case_id, run_id), headers)
+        assert frames == [{"id": "1.1"}], marker
 
 
 def _open(
@@ -414,6 +453,51 @@ def test_an_idle_stream_closes_when_standing_is_revoked(
     finally:
         response.close()
         http.close()
+
+
+def test_an_idle_stream_hands_back_control_every_poll(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """An idle tail yields a keepalive after each poll, so the server notices a
+    disconnected browser within one poll instead of holding a worker thread,
+    a connection and a concurrency slot until the deadline."""
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    conn.commit()
+    stream = case_tail(
+        conn,
+        case_id=case_id,
+        run_id=None,
+        actor_id=reader,
+        after=None,
+        deadline=60.0,
+        poll=0.01,
+        heartbeat=True,
+    )
+    started = time.monotonic()
+    first = next(stream)
+    assert first is not None and first.name is None
+    assert next(stream) is None
+    assert next(stream) is None
+    del stream
+    assert time.monotonic() - started < 2
+
+
+def test_the_http_stream_writes_the_keepalive_as_a_comment(
+    served: str, case: tuple[StoreConnection, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn, case_id = case
+    reader = _reader(conn, case_id, Standing.READER)
+    conn.commit()
+    _held(monkeypatch)
+    with (
+        httpx.Client(base_url=served, timeout=10) as http,
+        http.stream("GET", _path(case_id), headers=_as(reader)) as response,
+    ):
+        lines = response.iter_lines()
+        assert next(lines) == "id: 0.0"
+        assert next(lines) == ""
+        assert next(lines) == ":"
 
 
 class _Recording:

@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from server.boundary_text import BoundaryText
-from server.deliverable.render import PENDING, render
+from server.deliverable.host import render_payload as render
+from server.deliverable.render import PENDING, RenderRefused
 from server.refusals import Refusal, RefusalCode
 from server.store import apply_schema, connect
 from server.store.runs import create_case
@@ -97,6 +98,24 @@ def test_the_deliverable_renders_from_the_frozen_payload_alone(
     assert PENDING.encode() in first, "approved bytes always read PENDING APPROVAL"
     assert b"Total debt at 31 December 2026" in first, "the figure carries its quote"
     assert b"Module provenance" in first
+
+
+def test_cp_cf_render_discloses_its_host_performed_projection() -> None:
+    payload = {
+        **PAYLOAD_DATA,
+        "artifacts": [
+            _artifact(
+                projections={
+                    "module_id": "CP-CF",
+                    "qa_status": "Passed",
+                    "committee_status": "Committee Ready",
+                    "decision_scope": "COMMITTEE",
+                    "limitation_flags": [],
+                }
+            )
+        ],
+    }
+    assert b"CP-CF forecast projection performed by the host" in render(payload)
 
 
 def test_the_render_reaches_no_network_and_no_clock() -> None:
@@ -188,3 +207,15 @@ def test_a_narrative_that_is_not_a_string_is_refused() -> None:
         render(payload)
 
     assert caught.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+
+
+def test_the_portable_render_refusal_maps_to_the_host_code() -> None:
+    from server.deliverable.render import render as portable_render
+
+    with pytest.raises(RenderRefused, match="DELIVERABLE_PAYLOAD_INVALID") as portable:
+        portable_render({})
+    assert portable.value.code == "DELIVERABLE_PAYLOAD_INVALID"
+    with pytest.raises(Refusal) as host:
+        render({})
+    assert host.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+    assert host.value.__cause__ is None and host.value.__context__ is None
