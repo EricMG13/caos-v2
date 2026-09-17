@@ -46,6 +46,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_handoff
 from server.methodology.handoff import CanonicalRecord
 from server.methodology.invocation import named_objects
+from server.methodology.verification import AcceptedRow
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.members import satisfies, standing_of
@@ -206,11 +207,13 @@ def _handoffs(
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=node.route_node_id,
-            attempt_id=attempt,
-            artifact_sha256=artifact,
-            record_sha256=str(record_sha),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=artifact,
+                record_sha256=str(record_sha),
+            ),
             accepted=pairs,
         )
         read.append((node.route_node_id, str(record_sha), record, markdown, created))

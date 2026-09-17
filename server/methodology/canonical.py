@@ -689,17 +689,13 @@ def _replayed_answer(
     )
 
 
-def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
+def accepted_projections(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> Projections:
     """An accepted canonical artifact's projections, re-derived and compared.
@@ -719,26 +715,18 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
         blobs,
         bundle,
         route,
-        run_id=run_id,
-        route_node_id=route_node_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
         accepted=accepted,
     ).projections
 
 
-def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
+def accepted_handoff(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> tuple[bytes, CanonicalRecord]:
     """An accepted canonical artifact's exact Markdown and its verified record.
@@ -754,11 +742,7 @@ def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
         blobs,
         bundle,
         route,
-        run_id=run_id,
-        route_node_id=route_node_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
         accepted=accepted,
     )
     return verified.markdown, verified.record
@@ -775,17 +759,13 @@ def _refuse(step: Step) -> RefusalCode | None:
     }.get(step)
 
 
-def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
+def _verified_accepted(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None,
 ) -> Verified:
     """`accepted_projections` with the verified record and bytes it read.
@@ -803,22 +783,16 @@ def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
         blobs,
         bundle,
         route,
-        AcceptedRow(
-            run_id=run_id,
-            route_node_id=route_node_id,
-            attempt_id=attempt_id,
-            artifact_sha256=artifact_sha256,
-            record_sha256=record_sha256,
-        ),
+        row,
         vendor=VendorAuthority(_contract(bundle), _catalog(bundle)),
         accepted=accepted,
         verify_authority=False,
         reanchor=None,
         refuse=_refuse,
     )
-    node = next(n for n in route.nodes if n.route_node_id == route_node_id)
+    node = next(n for n in route.nodes if n.route_node_id == row.route_node_id)
     if node.module_id == MODEL_MODULE:
-        assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
+        assignment = Assignment(node.module_id, row.run_id, node, route, row.attempt_id)
         _forecast_inputs(
             bundle,
             node.module_id,
@@ -899,11 +873,13 @@ def _upstream_records(
             blobs,
             bundle,
             assignment.route,
-            run_id=assignment.run_id,
-            route_node_id=ref.route_node_id,
-            attempt_id=attempt,
-            artifact_sha256=digest,
-            record_sha256=record_sha256,
+            AcceptedRow(
+                run_id=assignment.run_id,
+                route_node_id=ref.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=digest,
+                record_sha256=record_sha256,
+            ),
             accepted=accepted,
         ).record
         verified[record_sha256] = by_node[ref.route_node_id] = record

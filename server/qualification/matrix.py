@@ -59,6 +59,7 @@ from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
 from server.methodology.handoff import Projections
 from server.methodology.vendor import load_vendor_contract
+from server.methodology.verification import AcceptedRow
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
@@ -582,11 +583,13 @@ def _projections_met(
                 blobs,
                 bundle,
                 route,
-                run_id=run_id,
-                route_node_id=node.route_node_id,
-                attempt_id=UUID(str(attempt_id)),
-                artifact_sha256=str(artifact_sha256),
-                record_sha256=str(record_sha256),
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node.route_node_id,
+                    attempt_id=UUID(str(attempt_id)),
+                    artifact_sha256=str(artifact_sha256),
+                    record_sha256=str(record_sha256),
+                ),
                 accepted=accepted,
             )
         except Refusal:
@@ -708,11 +711,13 @@ def _registers_met(
                 blobs,
                 bundle,
                 route,
-                run_id=run_id,
-                route_node_id=node.route_node_id,
-                attempt_id=UUID(str(attempt_id)),
-                artifact_sha256=str(artifact_sha256),
-                record_sha256=str(record_sha256),
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node.route_node_id,
+                    attempt_id=UUID(str(attempt_id)),
+                    artifact_sha256=str(artifact_sha256),
+                    record_sha256=str(record_sha256),
+                ),
                 accepted=accepted,
             )
             registers = find_registers(
@@ -776,11 +781,13 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=node.route_node_id,
-            attempt_id=UUID(str(attempt_id)),
-            artifact_sha256=str(artifact_sha256),
-            record_sha256=str(record_sha256),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=UUID(str(attempt_id)),
+                artifact_sha256=str(artifact_sha256),
+                record_sha256=str(record_sha256),
+            ),
             accepted=accepted,
         )
         result = forecast_projection(markdown)
@@ -850,11 +857,13 @@ def _readiness(
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=gate.route_node_id,
-            attempt_id=UUID(str(row[2])),
-            artifact_sha256=str(row[0]),
-            record_sha256=str(row[1]),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=gate.route_node_id,
+                attempt_id=UUID(str(row[2])),
+                artifact_sha256=str(row[0]),
+                record_sha256=str(row[1]),
+            ),
         )
     except (Refusal, ValueError, TypeError):
         return ()
