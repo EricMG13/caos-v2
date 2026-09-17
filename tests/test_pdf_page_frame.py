@@ -143,8 +143,9 @@ def test_an_answer_the_child_did_not_promise_is_never_a_frame(
     """Only a code the child is allowed to raise crosses back as itself; every
     other answer, malformed or not, is one unreadable document."""
     with pytest.raises(Refusal, match=rf"^{code}$"):
-        pdf._frame_answer(out)
+        pdf._frame_answer(out, 0)
 
 
 def test_a_finite_frame_the_child_named_crosses_back_as_itself() -> None:
-    assert pdf._frame_answer(b'{"frame": [0, 0, 612, 792]}') == (0.0, 0.0, 612.0, 792.0)
+    frame = pdf._frame_answer(b'{"frame": [0, 0, 612, 792]}', 0)
+    assert frame == (0.0, 0.0, 612.0, 792.0)
