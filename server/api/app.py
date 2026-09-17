@@ -98,10 +98,34 @@ TAIL_DEADLINE = 300.0
 # second (CLAUDE.md known gaps -- `LISTEN`/`NOTIFY` is the upgrade).
 POLL_INTERVAL = 0.5
 
+# The owner's D3 decision (17 September 2026). One status had been carrying
+# two claims: "this is not your request's fault" and "come back later". Only
+# the second is what 503 means on the wire, so a proxy read every server
+# fault as worth retrying, including the ones no amount of retrying reaches.
+# The split asks one question per code -- would the identical request, later,
+# with nobody doing anything in between, plausibly succeed? -- and a fault
+# only an operator can repair answers no, because the client's waiting is not
+# what repairs it.
+#
+# The store not answering is the whole of the yes side. Everything else here
+# is stored bytes failing verification against what this server itself
+# wrote, or a pinned input the run cannot change.
+#
+# This split covers the codes this route table already names; the wider
+# reconciliation of every other refusal code (most still default to 400
+# below) is its own, separately owned pass -- CLAUDE.md's known-gaps ledger,
+# "The wire says 'come back later' honestly at 5xx and not at 400".
+TRANSIENT = frozenset({RefusalCode.STORE_UNAVAILABLE})
+# What a transient answer promises, in seconds. A constant rather than a
+# forecast: the host knows nothing about when its store returns, so this is a
+# floor on how often a client may ask again, not a prediction that it will work.
+RETRY_AFTER_SECONDS = 5
+
 # The status for each refusal that can leave a route here. Unauthorised is
 # absent on purpose: it is answered as RUN_NOT_FOUND before it can be raised.
-# The store's own faults are 503: the server cannot answer, whoever asks, and a
-# 400 would tell the caller their request was the problem.
+# The server's own faults are 5xx: it cannot answer, whoever asks, and a 400
+# would tell the caller their request was the problem. Which 5xx is
+# `TRANSIENT` above and its absence below; the numbers here only carry it.
 _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
     RefusalCode.RUN_NOT_FOUND: 404,
@@ -109,35 +133,35 @@ _STATUS = {
     RefusalCode.DELIVERABLE_NOT_FOUND: 404,
     # Every unavailable evidence page is one private answer (decision 7).
     RefusalCode.PAGE_NOT_AVAILABLE: 404,
-    RefusalCode.STORE_NOT_CONFIGURED: 503,
+    RefusalCode.STORE_NOT_CONFIGURED: 500,
     RefusalCode.STORE_UNAVAILABLE: 503,
-    RefusalCode.STORE_NOT_TRANSACTIONAL: 503,
-    RefusalCode.STORE_SCHEMA_DRIFT: 503,
-    RefusalCode.BLOB_NOT_FOUND: 503,
-    RefusalCode.BLOB_DIGEST_MISMATCH: 503,
-    RefusalCode.BLOB_ADDRESS_INVALID: 503,
+    RefusalCode.STORE_NOT_TRANSACTIONAL: 500,
+    RefusalCode.STORE_SCHEMA_DRIFT: 500,
+    RefusalCode.BLOB_NOT_FOUND: 500,
+    RefusalCode.BLOB_DIGEST_MISMATCH: 500,
+    RefusalCode.BLOB_ADDRESS_INVALID: 500,
     # The gate's map is read out of a stored artifact, so a map the host cannot
-    # bound is bytes this server wrote -- a store fault like the three above it,
-    # and nothing the caller holds could be corrected to avoid it.
-    RefusalCode.READINESS_INVALID: 503,
-    RefusalCode.ROUTE_IDENTITY_INVALID: 503,
-    RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
+    # bound is bytes this server wrote. Not a store fault: the store answers,
+    # and answers the same bytes to the next reader, so waiting does not fix it.
+    RefusalCode.READINESS_INVALID: 500,
+    RefusalCode.ROUTE_IDENTITY_INVALID: 500,
+    RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 500,
     # A canonical record that no longer binds its Markdown, pin or bundle is
     # likewise the server's own bytes failing verification.
-    RefusalCode.ARTIFACT_RECORD_MISMATCH: 503,
-    RefusalCode.RUN_INPUT_INVALID: 503,
-    RefusalCode.SOURCE_IDENTITY_INVALID: 503,
-    RefusalCode.AUTHORITY_BYTES_MISMATCH: 503,
+    RefusalCode.ARTIFACT_RECORD_MISMATCH: 500,
+    RefusalCode.RUN_INPUT_INVALID: 500,
+    RefusalCode.SOURCE_IDENTITY_INVALID: 500,
+    RefusalCode.AUTHORITY_BYTES_MISMATCH: 500,
     # Re-validating an accepted handoff: it passed these under the same pin,
     # so failing now is stored bytes or authority moving, never the request.
-    RefusalCode.HANDOFF_MALFORMED: 503,
-    RefusalCode.HANDOFF_BLOCKED: 503,
-    RefusalCode.HANDOFF_IDENTITY_MISMATCH: 503,
-    RefusalCode.HANDOFF_INCOMPLETE: 503,
-    RefusalCode.HANDOFF_UNDECLARED_FIELD: 503,
-    RefusalCode.HANDOFF_MODULE_UNSUPPORTED: 503,
-    RefusalCode.ATTEMPT_NOT_FOUND: 503,
-    RefusalCode.AUTHORITY_MODULE_UNKNOWN: 503,
+    RefusalCode.HANDOFF_MALFORMED: 500,
+    RefusalCode.HANDOFF_BLOCKED: 500,
+    RefusalCode.HANDOFF_IDENTITY_MISMATCH: 500,
+    RefusalCode.HANDOFF_INCOMPLETE: 500,
+    RefusalCode.HANDOFF_UNDECLARED_FIELD: 500,
+    RefusalCode.HANDOFF_MODULE_UNSUPPORTED: 500,
+    RefusalCode.ATTEMPT_NOT_FOUND: 500,
+    RefusalCode.AUTHORITY_MODULE_UNKNOWN: 500,
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,
@@ -217,9 +241,15 @@ for _commands in (cases_command, runs_command, execution_command):
 
 
 def _body(code: RefusalCode, status: int) -> Response:
+    """The refusal on the wire, and -- for a transient fault only -- when to
+    ask again. The header is keyed on the code rather than the status so the
+    promise and the classification cannot come apart."""
     return JSONResponse(
         status_code=status,
         content=RefusalBody(code=code, clears=CLEARS[code]).model_dump(mode="json"),
+        headers=(
+            {"retry-after": str(RETRY_AFTER_SECONDS)} if code in TRANSIENT else None
+        ),
     )
 
 
