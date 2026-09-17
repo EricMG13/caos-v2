@@ -593,3 +593,28 @@ def test_lock_run_leaves_no_lock_behind_on_a_missing_run(
     with connect(empty_database) as probe:
         probe.execute("LOCK TABLE runs IN ACCESS EXCLUSIVE MODE NOWAIT")
         probe.rollback()
+
+
+def test_lock_run_also_ends_its_transaction_when_the_row_is_gone_under_for_update(
+    run: tuple[StoreConnection, UUID, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner lookup and the `FOR UPDATE` row lock are two statements. This
+    run exists at the first and is gone -- deleted here right after it, standing
+    in for a concurrent writer -- by the second, which is the other branch that
+    used to leave `runs` locked behind a `RUN_NOT_FOUND` it raised."""
+    conn, _case_id, run_id = run
+    real_execute = conn.execute
+
+    def vanish(query: object, *args: object, **kwargs: object) -> object:
+        result = real_execute(query, *args, **kwargs)  # type: ignore[arg-type]
+        if isinstance(query, str) and "case_id FROM runs" in query:
+            real_execute("DELETE FROM runs WHERE run_id = %s", (run_id,))
+        return result
+
+    monkeypatch.setattr(conn, "execute", vanish)
+
+    with pytest.raises(Refusal) as caught:
+        lock_run(conn, run_id)
+
+    assert caught.value.code is RefusalCode.RUN_NOT_FOUND
+    assert conn.info.transaction_status is TransactionStatus.IDLE
