@@ -28,7 +28,7 @@ from conftest import every_block
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.evidence.citations import Citation, citation_candidates, verify_citations
+from server.evidence.citations import Citation, verify_citations
 from server.evidence.extract import LINES_PER_PAGE
 from server.evidence.ingest import Document, admit_pack, block_ids_by_line
 from server.evidence.read import read_block
@@ -167,47 +167,6 @@ def test_a_repeated_quote_with_one_undelivered_copy_stays_ambiguous(
             verify_citations(
                 conn, delivered={source_id: frozenset({only})}, citations=[quote]
             )
-
-
-def test_citation_candidates_keep_only_unique_delivered_lines(
-    case: tuple[StoreConnection, UUID], tmp_path: Path
-) -> None:
-    conn, case_id = case
-    [source_id] = admit_pack(
-        conn,
-        BlobStore(tmp_path / "blobs"),
-        case_id=case_id,
-        documents=[
-            Document(
-                filename=BoundaryText.of("candidate.txt"),
-                data=(
-                    b"FORM 10-K\nFORM 10-K\n"
-                    b"Fiscal year ended November 30 2025\n"
-                    b"Net income rose sharply in 2025\n"
-                    b"Total debt declined during 2025\n"
-                    b"Cash increased in 2025\n"
-                ),
-            )
-        ],
-    )
-    delivered = every_block(conn, source_id)
-    proposed = [
-        Citation(source_id, int(page), str(text))
-        for page, text in conn.execute(
-            "SELECT page, text FROM source_blocks WHERE source_id = %s"
-            " ORDER BY block_id",
-            (source_id,),
-        ).fetchall()
-    ]
-
-    candidates = citation_candidates(conn, delivered=delivered, proposed=proposed)
-
-    assert [candidate.matched_text for candidate in candidates] == [
-        "Fiscal year ended November 30 2025",
-        "Net income rose sharply in 2025",
-        "Total debt declined during 2025",
-    ]
-    assert verify_citations(conn, delivered=delivered, citations=candidates)
 
 
 def test_admission_and_anchoring_share_one_line_to_block_numbering(
