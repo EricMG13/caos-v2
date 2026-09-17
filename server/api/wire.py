@@ -146,6 +146,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.HANDOFF_INCOMPLETE: "An operator must verify the stored handoff.",
     _C.HANDOFF_UNDECLARED_FIELD: "An operator must verify the stored handoff.",
     _C.HANDOFF_MODULE_UNSUPPORTED: "Select a route the adapter executes.",
+    _C.CALL_OUTCOME_UNEXPLAINED: "An operator must decide whether to pay again.",
     _C.ARTIFACT_RECORD_MISMATCH: "An operator must verify the stored record.",
     _C.READINESS_INVALID: "An operator must verify the gate artifact.",
     _C.READINESS_INCOMPLETE: "Retry the gate attempt.",
