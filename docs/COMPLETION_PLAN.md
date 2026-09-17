@@ -78,7 +78,7 @@ changed by it.
 | Complete snapshot | run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, evidence `bb09d8d0…`, performed `d758a253…`, database `caos_qualify_5a47243d96774e088f1bfebb6271f2d1` |
 | Verdicts | `qualification_verdicts` empty in every database |
 | Live spend recorded | `$7.75` across eleven VMO2 runs; one CCL run (`$0.18`-class, refused at CP-0) |
-| GitHub `main` | `4f4f431` (PR #258); local branch 351 commits ahead; PRs #279, #280, #282–#288, #290, #291 open |
+| GitHub `main` | `01c3724` (PR #283), 17 September 2026. Ruleset 22701406 "main gates" is **active**. The local branch is 353 commits ahead, but the undelivered work under the size gate's own exclusions is **13,036 counted lines over 173 files**, not the 75,566 the Phase 6 checkpoint recorded or the 123,065 the split plan names: most of the branch has landed. Nine PRs are open |
 | Migrations | `0001_legacy` … `0021_blocking_verdicts` |
 | Enabled routes | `ADAPTER_ROUTES` = {`LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `FULL_CREDIT_32/RELATIVE_VALUE`}; `ADAPTER_MODULES` = 12 (`server/methodology/handoff.py:36-55`) |
 | GitNexus | indexed as `caos-v2` (8,993 symbols, 22,700 relationships, 300 flows) at an earlier commit; refresh at Phase 7 entry |
@@ -213,19 +213,25 @@ still asserts the exact enabled set. `tests/test_phase_exits.py` excuses one
 test (`NOT_YET_REACHED`, CP-1 canonical) that comes due with
 `FULL_CREDIT_ASSESSMENT`.
 
-**O03 — Three LITE pathways depend on producers the vendor does not ship
-[P1, bundle-side, Phase 8 request].** `CP_DEPLOY_V_EXECUTION_PROFILES_v1.json`
-`retained_lite_capabilities` declares the LITE objects CP-2A, CP-2H, CP-3C and
-CP-4C accept; the bundle ships their payload schemas
-(`CP-OS_MIRROR_CP-L20__lite_fundamental_credit_screen…`, `CP-L23`, `CP-L30`,
-`CP-L40`) but no skill for CP-L20, CP-L23, CP-L30 or CP-L40, and no catalog
-edge carries those objects. `invocation.named_objects` therefore holds those
-consumers BLOCKED on any route that offers no owner, and the ledger records
-that the host must not invent one. `LITE_COVENANT_REFINANCING`,
-`LITE_DISTRESSED_RESTRUCTURING` and `LITE_FULL_CREDIT_SCREEN` cannot be
-enabled until an upstream build ships the producers or an authorized §61-style
-edit carries the objects on the edges. Repair: the request document, and the
-three pathway tasks held in Phase 9 as blocked with their template ready.
+**O03 — Two LITE objects reach their consumer on no edge [P1 for one pathway,
+bundle-side, Phase 8 request].** This item was overstated when first written and
+Task 8.5 corrected it against the bundle. What is true:
+`CP_DEPLOY_V_EXECUTION_PROFILES_v1.json` `retained_lite_capabilities` declares
+the LITE objects CP-2A, CP-2H, CP-3C and CP-4C accept, and the catalog **does**
+carry two of them on edges -- `lite_liquidity_sensitivity_screen` to CP-2H and
+`lite_legal_structure_capacity_screen` to CP-4C. Only
+`lite_fundamental_credit_screen` (CP-2A) and
+`lite_market_recovery_opportunity_screen` reach no consumer on any edge. The
+producers are not missing either: `superseded_module_ids` absorbs CP-L20,
+CP-L23, CP-L30 and CP-L40 into CP-L10, whose `SKILL.md` carries each as an
+absorbed phase with its own owned object, while the catalog names CP-L10 just
+one `owned_object`. And `invocation.named_objects` does not hold a consumer
+forever: it drops a boundary no route input can meet. So what actually holds
+the three pathways is `ADAPTER_ROUTES` plus the ledger's policy that a vendor
+owner must exist before a route is enabled. Repair: the request asks the vendor
+to declare `accepted_object_id` on the two uncarried edges and to key CP-3C's
+prose block so the host reads it; the three pathway tasks stay held in Phase 9
+with their template ready.
 
 **O04 — CP-DR cannot be invoked [P1, Phase 9].** `RunInput.research_json` is
 pinned and validated to 64 KiB and read by nothing in `server/methodology/`;
@@ -311,15 +317,27 @@ disqualifier list conflates fixture markers with thin-evidence markers (§66);
 CP-0 gates per consumer while the owner's stated intent is classification
 only; `semantic_rules`, `document_substrings_casefold` and the LITE
 `required_payload_fields` ship without code; the LITE `decision_scope` maps to
-no `committee_status`. With O03 that is five requests, each a §61-style
-authorization or an upstream pull; the host closes none alone.
+no `committee_status` — and run `ff71c457…` on `LITE_EARNINGS_UPDATE` accepted
+a CP-0 declaring `Committee Ready` at 93 on a `SCREENING_ONLY` pathway, which is
+that gap observed rather than predicted (`decision_scope` appears 19 times in
+the catalog; `committee_status` never, and in no vendor script). With O03 that
+is five requests, each a §61-style authorization or an upstream pull; the host
+closes none alone.
 
 ### Record and delivery
 
-**O12 — The branch has not landed [P1, Phase 7].** 351 commits ahead;
-fourteen commits over the 800-line ceiling; eleven PRs open; hosted checks
-never verified against a Phase 5–6 candidate. Owned by the delivery session;
-Phase 7 verifies read-only.
+**O12 — The branch has not landed [P1, Phase 7].** Measured by Task 7.2:
+`main` is `01c3724` and the undelivered remainder is 13,036 counted lines over
+173 files. Phase 7's last merged PR on `main` is #283; Phase 6 delivery is
+incomplete, with nine PRs open and #296 failing `size` at 879. Two PRs recorded
+as merged, #281 and #285, merged into sibling PR branches rather than `main`,
+one of them with `test` and `security` red; their content reaches `main` only if
+#284's stack merges. The one over-cap merge since #258, #275 at 1,965 lines,
+carries no split proof in its body, which the standing authorization requires.
+`scripts/check_pr_size.py` hardcodes `HEAD`, so it cannot measure an arbitrary
+PR without a checkout; the hosted `size` job's own log is the authority, and a
+local three-dot diff systematically overcounts once a predecessor was
+squash-merged. Owned by the delivery session; Phase 7 verifies read-only.
 
 **O13 — The record disagrees with itself [P2, Phase 7].** The handoff's
 "Next task" still says CP-5 is deferred (§62) after §63 and §69; three ledger
