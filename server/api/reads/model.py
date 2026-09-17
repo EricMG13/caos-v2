@@ -20,11 +20,13 @@ from server.store.source_sets import pinned_live_sources
 
 # Analysis' ten-node forecast route, including CP-CF's four owner proofs,
 # plus the live source pin. Measured by test_model_http_actor_matrix_and_declared_io.
-# Raised from 193 by `citation_candidates` (server/evidence/citations.py,
-# "fix: supply anchorable citation candidates"), which verifies each proposed
-# citation against the delivered token index before offering it as a
-# candidate -- real per-citation work, not query growth left unaccounted for.
-IO_BUDGET = 196
+# `citation_candidates` (server/evidence/citations.py, "fix: supply
+# anchorable citation candidates") had raised this to 196, but
+# "fix: bind qualification execution profiles" made that verification
+# conditional on `include_candidates` -- true only for a provider call's own
+# prompt build, not for a read. A read's `_context` call passes the default
+# (`include_candidates=False`), so this path no longer pays for it.
+IO_BUDGET = 193
 router = APIRouter()
 
 
