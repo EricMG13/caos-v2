@@ -252,10 +252,39 @@ remediate, accept. Phase 8 is at step five.
   a whole set unsignable, and it is the deliberately restricted case
   `docs/REPAIR_PLAN.md` Phase 6 asks for. Reported as a wrong binding, which is
   the one thing the same task's other half exists to stop.
-- **Adversarial audit:** dispatched at `0f49891` on the same pinned routing,
-  aimed at the remediation itself rather than at what the review already covered.
-- **Not yet:** its remediation, and acceptance. Phase 8 is **not accepted**, and
-  its complete gate has the same Trivy limit as Phase 7's.
+- **Adversarial audit:** run at `0f49891` on the same pinned routing, aimed at
+  the remediation itself rather than at what the review had already covered. It
+  returned **BLOCK**: one critical, five warnings, and it built the critical
+  rather than reasoning about it.
+- **The critical is the one this phase most needed found.** The host asked the
+  bundle's register locator with a narrowed id list where the bundle's own
+  `check()` asks with none, and that list decides which table answers. The
+  module being measured is required to write five registers with identical
+  columns and is instructed to write appendix prose naming them, so the audit
+  constructed a handoff that passes the vendor's completeness check with zero
+  violations in which the one shipped answer key scores `met` from a sibling
+  register while the honest one says `MISSING` -- and the mirror case, reachable
+  with no adversarial intent, where an honest handoff's key misses and the set
+  becomes unsignable. An answer key steerable by prose the measured module wrote
+  is measuring the module's choice of where to put a sentence. The confidence
+  review had read the same code and recorded it as safe, which is the case for
+  running two gates rather than one.
+- **Remediation:** `0fd6841`. The locator is asked exactly as the bundle asks it;
+  the ledger entry that said this could not happen is struck, naming the test.
+  Four more: a bundle integrity failure reported as a model miss, a caching claim
+  measured false at 33 ms and twelve reads per call, a register-file test blind
+  to a row added by hand, and a fixture building a matrix row the matrix cannot
+  produce.
+- **Not yet:** acceptance. Phase 8 is **not accepted**, and its complete gate has
+  the same Trivy limit as Phase 7's.
+- **One retest failure that was not a defect.** Two vendor tests failed on
+  bytecode under the vendored tree. Diagnosed wrong twice -- first as the
+  auditor's doing, which it disproved by timestamp, then as a loader defect, for
+  which a fix and a test were written and then reverted when the test passed
+  with and without it. The cause is that this checkout is shared with other
+  sessions and any ordinary import of a vendor script leaves bytecode there. It
+  is a ledger entry with both wrong diagnoses recorded, because both were the
+  plausible ones.
 
 **Routing note.** These two gates ran on Opus 5 `max` with `ultrathink`, the
 owner's routing of 17 September 2026. Phase 7's two gates ran earlier the same day
