@@ -414,7 +414,7 @@ def test_the_store_dependency_opens_the_apps_store_connection(
     for path in (DIRECTORY, _upload(uuid4())):
         response = client.get(path, headers=_as(uuid4()))
         assert (response.status_code, response.json()) == (
-            503,
+            500,
             _refused(RefusalCode.STORE_NOT_CONFIGURED),
         ), path
 
