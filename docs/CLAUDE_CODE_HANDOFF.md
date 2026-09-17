@@ -271,6 +271,31 @@ still refuses three LITE nodes against the default ceiling, and a gate record
 stored before `blockers` existed refuses at every reader if its T8 named a
 condition.
 
+**The task-acceptance gate, and what it can and cannot attest.** The review of
+Task 10.3's successor link and the earlier review's remediation was dispatched
+through `.claude/agents/task-acceptance-reviewer.md`, which pins `model: fable`
+and `effort: xhigh`. It returned one P2 and five P3s, each reproduced with a
+probe, and all are answered in `c81bab5`.
+
+One honest limit on the gate itself. The completion plan's rule is "actual
+`xhigh`, read back from the session record before the review turn and written
+into the review report", and a subagent **cannot** read its own effort back: the
+reviewer said so plainly rather than asserting a number. So what is attested is
+the launch path, not the setting — the agent definition pins the effort and the
+dispatch named that definition. The plan's read-back clause is unsatisfiable as
+written for a subagent, and the honest options are to attest the pin (what is
+done here) or to move acceptance reviews to a session whose own effort is
+readable. Recorded rather than quietly treated as met, since the same clause is
+what the two whole-phase reviews rest on.
+
+The P2 is worth naming: `docs/DECISIONS.md` §72 said the successor link "is
+offered for the readiness case alone", which the code has never done. It offers
+the link on a run's status. Two scopes were conflated — the withdrawal of resume
+is scoped to a readiness verdict, the link is not — and both records now separate
+them. The sentence predated the link and survived the rewrite that put the rest
+of its paragraph into the present tense, which is the same failure mode as the
+earlier past-tense narration, caught the other way round.
+
 **Integration gate for this wave**, re-measured at `652229d` — the tree carrying
 the remediation stream's second wave (`b194943`), all four completion tasks and
 the acceptance review's remediation: the offline suite `make test` at exit 0,
