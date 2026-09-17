@@ -239,7 +239,7 @@ satisfy its contract.
 |---|---|---|
 | 7.1, 7.2 | in the branch, reviewed, remediated | — |
 | 8.1 register keys | in the branch (`d88061e`, `da475c7`) | — |
-| 8.2 price with the reservation | in flight | — |
+| 8.2 price with the reservation | in the branch (`0d31a67`) | — |
 | 8.3 verdict hygiene | in the branch (`cf3d805`) | — |
 | 8.4 document register | in the branch (`2b5103e`) | the owner's sourcing of eight document sets; nothing is fetched by the system |
 | 8.5 bundle requests | in the branch (`729e2cf`) | the vendor, or a dated §61-style authorization per request |
@@ -249,9 +249,22 @@ satisfy its contract.
 | 9.4 `LITE_DEEP_RESEARCH` | not started | an owner-authored research brief and its evidence (8.4 item 7) |
 | 9.5–9.7 | held by design | the LITE producers request (O03) |
 | 10.1 per-node evidence selection | not started | remediation T7, T8, T11 and T14, which are waves 2–4 and have no branch. Its seam is exactly the readers those tasks rewrite |
-| 10.2 conditional-edge guard | in flight | — |
-| 10.3 successor runs | in flight | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
+| 10.2 conditional-edge guard | in the branch (`8b806d0`, `42e44aa`) | — |
+| 10.3 successor runs | **half** in the branch (`cabb3d4`): the blocker projection, `NodeView.gate_reason` and the record format. The store column, `start_run`'s parameter, the command, the read and their five tests are owed, with migration ordinal `0025` held | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
 | 11–13 | not started | 11 needs 8.4's documents and authorized runs; 13.4 needs an identity-provider setting and TLS material; 13.6 needs an authorized nightly |
+
+**Two implementers were stopped mid-task by a session rate limit**, on 17
+September 2026, and the coordinator finished both by hand rather than
+re-dispatching them. Neither had committed. What that cost is recorded here
+because it is the same class of defect this phase's audit found: in both cases
+the work was substantially right and the *claims about it* were wrong. Task 8.2
+shipped `_within_reservation`, the guard that stops a rebuilt prompt going out
+under too small a reservation, with a comment asserting it and no test driving
+it -- `check_tested` passed only because the name appears in that comment, which
+is the ledger's own recorded weakness in that gate. Task 10.3's decision entry
+described its unbuilt store half in the past tense and listed three tests it had
+not written. Both were corrected before their commits, each verified against the
+code rather than the report.
 
 **Three things only the owner can unblock, in the order they gate the most
 work.** First, the documents in `qualification/DOCUMENTS.md`'s sourcing list:
