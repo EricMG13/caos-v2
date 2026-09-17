@@ -5,7 +5,7 @@
 // by the component that calls it, not by its own name. `actionOf` is
 // imported directly below and given its own small, direct test.
 import { readFileSync } from "node:fs";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { actionOf } from "@/sections/run/controls";
 import { RunSection } from "@/sections/run/RunSection";
@@ -450,6 +450,52 @@ describe("Run", () => {
       resolveRefetch(jsonResponse(refreshed));
       await waitFor(() => expect(container.querySelector("[data-run-empty]")).toBeNull());
       expect(container.querySelector(`[data-run="${newRunId}"]`)).not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // A refetch a command started is always older than a document the workspace
+  // has since served: the slower one must be dropped, not applied.
+  test("test_a_slower_command_refetch_cannot_resurrect_an_older_run_document", async () => {
+    const older = withActions(frames[0]!, [{ action: "CANCEL_RUN", refusal: null }]);
+    const newer = frames[2]!;
+    const receipt = {
+      run_id: older.body.run!.run_id,
+      run_status: "RUNNING",
+      work: { state: "STOPPED", stop_code: null, cancel_requested: false },
+    };
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(receipt))
+      .mockImplementationOnce(() => refetchResponse);
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container, rerender } = mount(older);
+      const cp6 = () => container.querySelector('button.node[data-node="CP-6"]');
+      expect(cp6()).toHaveAttribute("data-state", "RUNNABLE");
+      fireEvent.click(container.querySelector('[data-action="CANCEL_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+
+      // The workspace's own read lands while the command's refetch is still
+      // open: it is the newer document, so it is the one that stands.
+      rerender(
+        <MemoryRouter>
+          <RunSection document={newer} tab={null} />
+        </MemoryRouter>,
+      );
+      expect(cp6()).toHaveAttribute("data-state", "COMPLETE");
+
+      await act(async () => {
+        resolveRefetch(jsonResponse(older));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(cp6()).toHaveAttribute("data-state", "COMPLETE");
+      expect(container.querySelector("[data-refetch-failed]")).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

@@ -6,7 +6,8 @@
 // commit, so an advisory `null` refusal here is never trusted as the last
 // word. A success is shown, and the caller is handed one refetch to run
 // (`onRefetch`); the control never claims a write took effect on its own say.
-import { useCallback, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
+import { useSearchParams } from "react-router";
 import {
   approveGate,
   cancelRun,
@@ -71,9 +72,21 @@ export function useRunRefetch(initial: RunSectionDocument, caseId: string) {
     setSeenInitial(initial);
     setLive(initial);
   }
+  // One sequence over both sources of a document: a refetch applies only while
+  // it is still the latest. An earlier refetch that answers late, or one still
+  // in flight when the workspace serves a fresher document, is dropped rather
+  // than putting an older run back on screen. Bumped in a layout effect, not
+  // in the render above it: a passive effect is scheduled after the commit, so
+  // a refetch resolving in between would still read the superseded sequence.
+  const sequence = useRef(0);
+  useLayoutEffect(() => {
+    sequence.current += 1;
+  }, [initial]);
   const refetch = useCallback(
     (runId: string | null) => {
+      const mine = (sequence.current += 1);
       void fetchSection("run", { case: caseId, run: runId }).then((status) => {
+        if (mine !== sequence.current) return;
         if ("document" in status && isRunSectionDocument(status.document)) {
           setLive(status.document);
           setFailed(false);
@@ -178,9 +191,11 @@ export function CommandOutcome({
 
 /** A run with no route is useless (brief 4.2, decision 1): select and pin one
     in the same command that creates the run. Available with no displayed
-    run, and again afterwards to start a fresh one. A success refetches the
-    section by the new run id, so the view moves off this form at once and a
-    second press is a plainly new run, never a silent duplicate. */
+    run, and again afterwards to start a fresh one. A success puts the new run
+    id in the URL and refetches the section by it, so the view moves off this
+    form at once, a second press is a plainly new run rather than a silent
+    duplicate, and a reload shows the run the analyst is looking at instead of
+    whatever the old address named. */
 export function CreateRunControl({
   caseId,
   action,
@@ -193,6 +208,7 @@ export function CreateRunControl({
   onRefetch: (runId: string | null) => void;
 }) {
   const [pick, setPick] = useState(0);
+  const [, setParams] = useSearchParams();
   const { pending, result, run } = useCommand<RunCreated>();
   const chosen = choices[pick] ?? null;
   return (
@@ -228,7 +244,28 @@ export function CreateRunControl({
                   ? () => {
                       void run(chosen, (intent) => createRun(caseId, chosen, intent)).then(
                         (outcome) => {
-                          if (outcome.kind === "ok") onRefetch(outcome.receipt.run_id);
+                          if (outcome.kind !== "ok") return;
+                          const created = outcome.receipt.run_id;
+                          // The address is corrected, not navigated: the
+                          // analyst did not move, the run they are on gained
+                          // a name. `replace` keeps Back at where they came
+                          // from rather than at a case with no run.
+                          setParams(
+                            (current) => {
+                              const next = new URLSearchParams(current);
+                              next.set("run", created);
+                              return next;
+                            },
+                            { replace: true },
+                          );
+                          // ponytail: the workspace reads the new address and
+                          // serves the run itself, so this refetch is the
+                          // second read of the same document. It is kept
+                          // because a `RunSection` composed outside the
+                          // workspace has nothing else to move it off this
+                          // form; drop it the day the section is only ever
+                          // mounted under the workspace.
+                          onRefetch(created);
                         },
                       );
                     }
