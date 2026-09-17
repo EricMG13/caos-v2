@@ -57,44 +57,36 @@ def test_run_read_keeps_captured_membership_after_later_admission(
     later = snapshot_source_set(conn, sources.case_id)
     assert later.version != sources.version
     counter = _CountingConnection(conn)
-    block = read.read_run_block(
-        cast(StoreConnection, counter), run_id=run, source_id=source, block_id="b000000"
-    )
-    assert block == read.Block(page=1, text=BoundaryText.of("one"))
-    assert counter.executed == read.IO_BUDGET == 1
+    rows = read.read_run_blocks(cast(StoreConnection, counter), run_id=run)
+    assert rows == [(source, "b000000", 1, BoundaryText.of("one"))]
+    assert counter.executed == 1
     assert load_run_input(conn, run) == pin
 
 
 @pytest.mark.parametrize(
-    "fault",
-    ["missing-run", "missing-input", "wrong-case", "withdrawn", "missing-block"],
+    "fault", ["missing-run", "missing-input", "wrong-case", "withdrawn"]
 )
 def test_run_read_refuses_unavailable_membership(
     pinned: Prepared, tmp_path: Path, fault: str
 ) -> None:
+    """A run that captured nothing is the shortest short delivery there is:
+    an empty list would be a delivery, so all four refuse."""
     conn, run, sources, _, _ = pinned
-    source, block_id = sources.members[0].source_id, "b000000"
+    source = sources.members[0].source_id
     if fault == "missing-run":
         run = uuid4()
     elif fault == "missing-input":
         run = start_run(conn, sources.case_id)
     elif fault == "wrong-case":
         other = create_case(conn, BoundaryText.of("other"))
-        source = _admit(conn, other, tmp_path)
-    elif fault == "withdrawn":
+        run = start_run(conn, other)
+    else:
         conn.execute(
             "UPDATE sources SET withdrawn_at = now() WHERE source_id = %s", (source,)
         )
-    else:
-        block_id = "b999999"
     counter = _CountingConnection(conn)
     with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$") as caught:
-        read.read_run_block(
-            cast(StoreConnection, counter),
-            run_id=run,
-            source_id=source,
-            block_id=block_id,
-        )
+        read.read_run_blocks(cast(StoreConnection, counter), run_id=run)
     assert caught.value.__cause__ is None
     assert counter.executed == 1
 
@@ -117,8 +109,10 @@ def test_equal_bytes_do_not_admit_a_post_pin_source(
     assert conn.execute(
         "SELECT document_sha256 FROM sources WHERE source_id = %s", (added,)
     ).fetchone() == (sources.members[0].document_sha256,)
-    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
-        read.read_run_block(conn, run_id=run, source_id=added, block_id="b000000")
+    # The run delivers its pinned member and never the equal bytes beside it.
+    assert [source for source, *_ in read.read_run_blocks(conn, run_id=run)] == [
+        sources.members[0].source_id
+    ]
 
 
 @pytest.mark.parametrize(
@@ -150,24 +144,17 @@ def test_run_read_compares_each_captured_current_identity(
                 "ALTER TABLE source_extractions ENABLE TRIGGER extraction_is_immutable"
             )
     with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
-        read.read_run_block(conn, run_id=run, source_id=source, block_id="b000000")
+        read.read_run_blocks(conn, run_id=run)
 
 
-@pytest.mark.parametrize("field", ["run_id", "source_id", "block_id"])
 @pytest.mark.parametrize("invalid", [None, 0, "invalid"])
 def test_run_read_validates_arguments_before_sql(
-    pinned: Prepared, field: str, invalid: object
+    pinned: Prepared, invalid: object
 ) -> None:
-    conn, run, sources, _, _ = pinned
-    args = {
-        "run_id": run,
-        "source_id": sources.members[0].source_id,
-        "block_id": "b000000",
-    }
-    args[field] = invalid
+    conn, *_ = pinned
     counter = _CountingConnection(conn)
     with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
-        read.read_run_block(cast(StoreConnection, counter), **args)  # type: ignore[arg-type]
+        read.read_run_blocks(cast(StoreConnection, counter), run_id=invalid)  # type: ignore[arg-type]
     assert counter.executed == 0
 
 
@@ -176,7 +163,6 @@ def test_run_read_owned_cleanup_never_adopts_pending_work(
     pinned: Prepared, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
     conn, run, sources, _, _ = pinned
-    source = sources.members[0].source_id
     execute = psycopg.Connection.execute
 
     def fail(c: StoreConnection, query: str, *args: object, **kwargs: object) -> object:
@@ -196,16 +182,10 @@ def test_run_read_owned_cleanup_never_adopts_pending_work(
         patch.setattr(psycopg.Connection, "execute", fail)
         if fault == "cleanup":
             patch.setattr(psycopg.Connection, "rollback", broken)
-        code = (
-            "STORE_NOT_TRANSACTIONAL"
-            if fault == "pending"
-            else "EVIDENCE_NOT_AVAILABLE"
-        )
+        code = "STORE_NOT_TRANSACTIONAL" if fault == "pending" else "STORE_UNAVAILABLE"
         with pytest.raises(Refusal, match=f"^{code}$") as caught:
             with execution_reads(conn):
-                read.read_run_block(
-                    conn, run_id=run, source_id=source, block_id="b000000"
-                )
+                read.read_run_blocks(conn, run_id=run)
         assert caught.value.__cause__ is None
     if fault == "pending":
         assert conn.info.transaction_status is TransactionStatus.INTRANS

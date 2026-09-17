@@ -34,34 +34,15 @@ _BLOCK_QUERY = (
     " JOIN live_sources USING (source_id)"
     " WHERE blocks.source_id = %s AND blocks.block_id = %s"
 )
-_RUN_BLOCK_QUERY = (
-    "SELECT blocks.page, blocks.text FROM runs AS run"
-    " JOIN run_inputs AS inputs ON (inputs.run_id,inputs.case_id)"
-    " = (run.run_id,run.case_id)"
-    " JOIN source_set_versions AS versions"
-    " ON (versions.case_id,versions.version,versions.fingerprint)"
-    " = (inputs.case_id,inputs.source_version,inputs.source_fingerprint)"
-    " JOIN source_set_members AS members ON (members.case_id,members.version)"
-    " = (versions.case_id,versions.version)"
-    " JOIN live_sources AS sources ON (sources.case_id,sources.source_id)"
-    " = (members.case_id,members.source_id)"
-    " JOIN source_extractions AS extraction ON extraction.source_id = sources.source_id"
-    " JOIN source_blocks AS blocks ON blocks.source_id = sources.source_id"
-    " WHERE run.run_id = %s AND sources.source_id = %s AND blocks.block_id = %s"
-    " AND members.document_sha256 = sources.document_sha256"
-    " AND members.extractor_identity = extraction.extractor_identity"
-    " AND members.output_sha256 = extraction.output_sha256"
-    " AND members.extraction_sha256 = extraction.extraction_sha256"
-)
 
 
-# `_RUN_BLOCK_QUERY` for every captured block at once: the same chain, with the
-# block predicate dropped and an order added. The run's captured membership is
-# the CTE, and the live chain is joined onto it, so the count of what the pin
-# captured and the rows that survived withdrawal and identity come back in one
-# statement -- a short list is a refusal, never a delivery (invariant 2). The
-# totals row is what carries that count when nothing survived: LEFT JOIN keeps
-# one row whose block columns are NULL rather than returning nothing to read.
+# Every captured block of one run, in one statement. The run's captured
+# membership is the CTE, and the live chain -- pinned version, live source,
+# stored extraction identity -- is joined onto it, so what the pin captured and
+# what survived come back under one snapshot: a short list is a refusal, never
+# a delivery (invariant 2). The totals row is what carries the captured count
+# when nothing survived, since LEFT JOIN keeps one row whose block columns are
+# NULL rather than returning nothing to read.
 _RUN_BLOCKS_QUERY = (
     "WITH captured AS ("
     "SELECT inputs.case_id, inputs.source_version, inputs.source_fingerprint,"
@@ -124,20 +105,6 @@ def read_block(conn: StoreConnection, *, source_id: UUID, block_id: str) -> Bloc
     return _fetch_block(conn, _BLOCK_QUERY, (source_id,), block_id)
 
 
-def read_run_block(
-    conn: StoreConnection, *, run_id: UUID, source_id: UUID, block_id: str
-) -> Block:
-    """One live block with its run's exact captured membership and identity.
-
-    This does not verify the complete pin hash, gates, actor or execution context.
-    Later caller integration must use approved_run_input/execution_input first.
-    Native immutable foreign keys bind stored run/case/route/version ownership.
-    Both readers retain caller transactions, including on failure, and preserve
-    historical BOUNDARY_TEXT_INVALID/TOO_LONG refusals for stored text.
-    """
-    return _fetch_block(conn, _RUN_BLOCK_QUERY, (run_id, source_id), block_id)
-
-
 def read_run_blocks(
     conn: StoreConnection, *, run_id: UUID
 ) -> list[tuple[UUID, str, int, BoundaryText]]:
@@ -145,16 +112,17 @@ def read_run_blocks(
 
     One statement where the per-block reader was one statement per block: a pack
     of twenty thousand lines cost twenty thousand round trips under the case
-    lock every time a prompt was built. The join is `read_run_block`'s, so the
-    same things are proven -- the block belongs to a source this run pinned, at
+    lock every time a prompt was built. The join proves what the per-block
+    reader it replaces proved -- the block belongs to a source this run pinned, at
     the document and extraction identity it was pinned at, and the source is
     live now.
 
     Fail closed: a count short of what the pin captured is a withdrawn or
     altered source, and refuses `EVIDENCE_NOT_AVAILABLE` rather than delivering
     the blocks that did survive. No text reaches the refusal (invariant 2).
-    A run with nothing pinned captures nothing and delivers nothing, which is
-    what the per-block reader's caller did too.
+    A run that captured nothing -- no pin, no such run, another case's run --
+    refuses too: an empty delivery is still a delivery, and this reader exists
+    to refuse deliveries short of the pin.
 
     A database fault is `STORE_UNAVAILABLE`, not a verdict about the evidence:
     this statement stands where the caller's own unwrapped pins query stood,
@@ -168,11 +136,12 @@ def read_run_blocks(
         rows = conn.execute(_RUN_BLOCKS_QUERY, (run_id,)).fetchall()
     except psycopg.Error:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    if not rows:
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE) from None
-    captured = int(rows[0][4])
+    # `totals` is one row whatever the run is, so `rows` is never empty and the
+    # captured count is always readable -- including the zero a run with no pin
+    # captures, which is the shortest short delivery there is.
+    captured = int(rows[0][4]) if rows else 0
     live = [row for row in rows if row[0] is not None]
-    if len(live) != captured:
+    if captured == 0 or len(live) != captured:
         raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE) from None
     try:
         return [

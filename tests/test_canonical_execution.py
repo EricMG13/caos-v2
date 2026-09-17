@@ -38,7 +38,7 @@ from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode, resolve_route
 from server.engine.runtime import ProviderResult
 from server.evidence import read as evidence_read
-from server.methodology import runner
+from server.methodology import executor, runner
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import HandoffOutcome, execute_handoff
 from server.methodology.executor import Assignment, captured_blocks
@@ -188,7 +188,8 @@ def test_the_executor_produces_a_validated_handoff_and_its_record(
     # the anchoring after it uses the very deliveries the prompt was built from,
     # and no block costs a round trip of its own.
     assert statements.count(evidence_read._RUN_BLOCKS_QUERY) == 1
-    assert evidence_read._RUN_BLOCK_QUERY not in statements
+    # And the captured pins are no longer a read of their own beside it.
+    assert statements.count(executor._CAPTURED) == 0
     # The runner stores exactly the executor's two blobs.
     assert harness.blobs.get(gate.artifact_sha256) == outcomes[0].markdown
     assert gate.record_sha256 == hashlib.sha256(outcomes[0].record).hexdigest()
