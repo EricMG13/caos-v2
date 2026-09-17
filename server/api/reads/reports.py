@@ -11,7 +11,7 @@ from server.api.deps import Blobs, Caller, Methodology, Store
 from server.api.reads.analysis import RunQuery
 from server.api.reads.upload import READ_REQUIRES, CasePath
 from server.api.wire import CommitteeDocument, ReportDocument
-from server.deliverable.filing import _signatures
+from server.deliverable.filing import revision_signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
@@ -150,7 +150,7 @@ def _publication(
     if row is None:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
     frozen_digest, freezer, filer, filed_at, filing_evidence = row
-    signatures = _signatures(conn, case_id, revision)
+    signatures = revision_signatures(conn, case_id, revision)
     signers = [who for who, _ in signatures]
     if (
         frozen_digest != digest

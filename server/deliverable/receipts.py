@@ -7,8 +7,8 @@ from server.blobs import BlobStore
 from server.deliverable.filing import (
     Receipt,
     _filing_payload,
-    _signatures,
     receipt_bytes,
+    revision_signatures,
 )
 from server.deliverable.revisions import prove_revision
 from server.methodology.bundle import Bundle
@@ -47,7 +47,7 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
     digest, frozen_digest, freezer, filer, filed_at, receipt_digest, renderer, event = (
         row
     )
-    signatures = _signatures(conn, case_id, revision_id)
+    signatures = revision_signatures(conn, case_id, revision_id)
     signers = {who for who, _ in signatures}
     if (
         digest != frozen_digest

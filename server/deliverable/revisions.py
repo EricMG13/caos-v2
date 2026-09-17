@@ -157,7 +157,12 @@ def prove_revision(
     case_id: UUID,
     revision_id: UUID,
 ) -> bytes:
-    """Re-prove the exact saved bytes in the caller's locked write transaction."""
+    """Re-prove the exact saved bytes in the caller's own unit.
+
+    The caller owns the transaction: a write caller holds the case lock, a
+    section read holds none, so its digest comparison refuses a governed write
+    that commits mid-read rather than serving bytes this did not prove.
+    """
     payload = read_revision(conn, blobs, case_id=case_id, revision_id=revision_id)
     narrative = [
         [

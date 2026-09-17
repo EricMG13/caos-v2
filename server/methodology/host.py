@@ -5,16 +5,13 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from server.engine.route import MODEL_MODULE, ResolvedRoute
 from server.methodology.host_pin import HOST_MANIFEST_SHA256
 from server.refusals import Refusal, RefusalCode
 
-if TYPE_CHECKING:
-    from server.engine.route import ResolvedRoute
-
 HOST_ROOT = Path(__file__).resolve().parents[2] / "methodology/skills"
-HOST_MODULE = "CP-CF"
 HOST_NAME = "CashFlowForecast"
 _CODE = Path(__file__).resolve().parents[1] / "calculators/cash_flow.py"
 
@@ -50,7 +47,7 @@ def verified_host_bytes(name: str, *, root: Path = HOST_ROOT) -> bytes:
 
 def verify_extension(route: ResolvedRoute) -> None:
     """A model node needs the supported pathway, pinned host and current code."""
-    if not any(n.module_id == HOST_MODULE for n in route.nodes):
+    if not any(n.module_id == MODEL_MODULE for n in route.nodes):
         return
     if (route.profile_id, route.selection_id) != (
         "FULL_CREDIT_32",
