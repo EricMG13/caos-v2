@@ -142,6 +142,7 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
     action: GovernedAction,
     write: Callable[[StoreConnection], tuple[int, BaseModel]],
     prepare: Callable[[StoreConnection], None] | None = None,
+    after_event: Callable[[StoreConnection, str], None] | None = None,
 ) -> CommandResult:
     """Replay, refuse, or commit `write` with its audit event and receipt.
 
@@ -153,6 +154,11 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
     and receipt; the receipt is inserted after it and the audit link after
     that, in one commit. A `NOT_AUTHORISED` from the unit (standing lost by
     commit time) answers `CASE_NOT_FOUND`, as every unseen case does.
+
+    `after_event` is `governed_write`'s, passed through for the one command
+    that must store an object naming its own audit link -- a filing's detached
+    receipt. It runs last, after the receipt row, so what it writes is read
+    back from the store and never replayed from a receipt.
     """
     if scope not in (action.case_id, NIL_SCOPE):
         raise _Misuse
@@ -168,7 +174,9 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
     try:
         if prepare is not None:
             _prepare(conn, prepare)
-        governed_write(conn, governed, _unit(row, write, answered))
+        governed_write(
+            conn, governed, _unit(row, write, answered), after_event=after_event
+        )
     except _Twin:
         stored = _lookup(conn, row)
         if stored is None:

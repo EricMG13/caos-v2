@@ -170,13 +170,15 @@ def governed(  # noqa: PLR0913 -- one command's identity and unit, keyword-only
     write: Callable[[StoreConnection], tuple[int, BaseModel]],
     model: type[BaseModel],
     prepare: Callable[[StoreConnection], None] | None = None,
+    after_event: Callable[[StoreConnection, str], None] | None = None,
 ) -> Response:
     """The governed envelope: digest the request, replay or commit it under
     `key`, and answer the receipt validated against `model`.
 
     The actor is `action.actor_id`; `scope` is the case, or `NIL_SCOPE` for
     the command that creates one. `write` runs under the case lock and live
-    standing; `prepare` (create case) runs first, before the lock.
+    standing; `prepare` (create case) runs first, before the lock; `after_event`
+    (file a deliverable) runs last, once the audit link it names exists.
     """
     result = run_command(
         conn,
@@ -187,5 +189,6 @@ def governed(  # noqa: PLR0913 -- one command's identity and unit, keyword-only
         action=action,
         write=write,
         prepare=prepare,
+        after_event=after_event,
     )
     return command_response(result, model)
