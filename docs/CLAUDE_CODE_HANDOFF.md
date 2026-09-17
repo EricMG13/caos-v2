@@ -250,8 +250,26 @@ satisfy its contract.
 | 9.5–9.7 | held by design | the LITE producers request (O03) |
 | 10.1 per-node evidence selection | not started | remediation T7, T8, T11 and T14, which are waves 2–4 and have no branch. Its seam is exactly the readers those tasks rewrite |
 | 10.2 conditional-edge guard | in the branch (`8b806d0`, `42e44aa`) | — |
-| 10.3 successor runs | **half** in the branch (`cabb3d4`): the blocker projection, `NodeView.gate_reason` and the record format. The store column, `start_run`'s parameter, the command, the read and their five tests are owed, with migration ordinal `0025` held | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
+| 10.3 successor runs | whole: `cabb3d4` (projection, `gate_reason`, record format), `167d800` (column, migration `0025`, command, read, page), `7e6c330` (§72) | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
 | 11–13 | not started | 11 needs 8.4's documents and authorized runs; 13.4 needs an identity-provider setting and TLS material; 13.6 needs an authorized nightly |
+
+**Acceptance review of the three landed tasks**, run on Fable 5.1 and reported
+at effort `15` rather than `xhigh`, which it stated itself — so it is a review
+that ran and not the satisfied gate. The completion plan now pins that gate in
+`.claude/agents/task-acceptance-reviewer.md`, where effort is a setting; agent
+definitions load at session start, so it governs the next session.
+
+Its verdicts were ACCEPT WITH FINDINGS on all three, with one P1 and two P2s,
+each reproduced with a scratch probe rather than argued. All are answered in
+`9c7f161`. The P1 is worth naming here because it is the kind only a reviewer
+finds: pricing reservations on the request made "remaining below one worst case"
+and "ceiling below one worst case" different questions, and the admission check
+still asked the first, so a run that finished when it ran continuously was
+refused on resume with money left. A guard for invariant 8 was breaking
+invariant 6. The two P2s are recorded rather than fixed: the qualification driver
+still refuses three LITE nodes against the default ceiling, and a gate record
+stored before `blockers` existed refuses at every reader if its T8 named a
+condition.
 
 **Integration gate for this wave**, at `d7158f8` — the tree carrying the
 remediation stream's second wave (`b194943`) and the three completion tasks

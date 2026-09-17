@@ -366,6 +366,9 @@ at the pin [P3, Phase 10].** `EdgeType.CONDITIONAL` is in `BLOCKING`
 (`route.py:59`); the catalog declares none. Repair: a guard test on the
 catalog's typed-edge counts and `ROUTE_EDGE_UNSUPPORTED` at resolution; no
 evaluator until an upstream build introduces such an edge and the guard fails.
+**Closed** by Task 10.2 (`8b806d0`, ledger entry `42e44aa`), with the scope the
+code actually has: the guard fires for a conditional edge *on a resolved route*,
+not for one declared anywhere in the catalog.
 
 **O17 — A discharged CONDITIONAL verdict has no path back [P2, Phase 10].**
 §61: the verdict names a source the effective set lacks, discharged by
@@ -374,7 +377,14 @@ supplying it and re-running CP-0 — under the pins, a new run. The host keeps
 that names the source. Repair: project that cell (bounded), a
 `supersedes_run_id` on `runs` set by `CREATE_RUN`, both documents naming the
 link. The ledger's "governed resume" is withdrawn: a CAS back to RUNNING would
-reopen a run whose pins cannot change.
+reopen a run whose pins cannot change. **Closed** by Task 10.3 in two commits,
+`cabb3d4` (the bounded projection and `NodeView.gate_reason`) and `167d800` (the
+column, migration `0025`, the command, the read and the page), with `7e6c330`
+recording §72. The withdrawal is scoped to a readiness verdict: a run whose
+frontier empties against an unmet QA_GATE is the Repair Phase 2 entry's case and
+keeps its own discharge. What the closure cost is a new ledger entry -- a gate
+record stored before `blockers` existed refuses at every reader if its T8 named a
+condition, discharged by a new run.
 
 **O18 — Upstream identity ignores readiness; the anchor is derived; the
 boundary is read from prose [P2, Phase 10].** Repair: readiness joins the

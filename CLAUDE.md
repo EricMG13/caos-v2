@@ -1381,7 +1381,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   sent against the price its reservation was taken under and refuses
   `CONTEXT_OVER_CEILING` before the provider is reached
   (`tests/test_loop_charges.py::test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call`,
-  which was watched failing with the guard removed). What is left is the first
+  which was watched failing with the guard removed). That guard borrows
+  `CONTEXT_OVER_CEILING`, whose clearance text reads "Deliver less context to the
+  module" -- true of the ceiling check it was written for and misleading here,
+  where the context is unchanged and the reservation no longer covers it. The
+  code is right and the sentence a reader gets is not. *Upgrade:* a refusal code
+  of its own, with its own clearance, the day an operator meets this on a real
+  run; noted by the Task 8.2 acceptance review. What is left is the first
   thing the entry asked for and the only one this repository cannot take:
   nothing in the tree says what the live model costs, so `tests/test_live_run.py`
   still prices it from a flat estimate. *Upgrade:* a user-confirmed dated price
