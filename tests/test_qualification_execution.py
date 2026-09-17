@@ -44,6 +44,9 @@ __all__ = ["ready"]
 
 _MEMBERS = "SELECT m.filename,m.document_sha256 FROM source_set_members m"
 _BLOCKS = "SELECT b.source_id, b.block_id FROM run_inputs i"
+# The run's captured pins, still read on their own by the proof and the
+# deliverable; a module's delivery is now the one batched read beside it.
+_DELIVERED = "WITH captured AS (SELECT inputs.case_id"
 _PROOF = "SELECT a.artifact_sha256, t.route_node_id, (a.model, a.generation_id)"
 
 
@@ -576,7 +579,11 @@ def test_execution_reads_share_native_transactions_and_reports_own_theirs(
 
     def sql(c: StoreConnection, query: str, *args: object, **kwargs: object) -> object:
         if c is conn and isinstance(query, str):
-            for prefix, name in ((_MEMBERS, "members"), (_BLOCKS, "blocks")):
+            for prefix, name in (
+                (_MEMBERS, "members"),
+                (_BLOCKS, "blocks"),
+                (_DELIVERED, "blocks"),
+            ):
                 if query.startswith(prefix):
                     observed.append((name, transaction(c)))
         return execute(c, query, *args, **kwargs)  # type: ignore[arg-type]
@@ -637,10 +644,10 @@ def test_native_execution_read_failures_clean_owned_work_and_retain_purchases(
     prefix, occurrence, paid = {
         "initial_members": (_MEMBERS, 2, 0),
         "members": (_MEMBERS, 3, 0),
-        "blocks": (_BLOCKS, 1, 0),
+        "blocks": (_DELIVERED, 1, 0),
         "report": (_PROOF, 1, 3),
         "matrix": (_PROOF, 3, 6),
-        "rollback": (_BLOCKS, 1, 0),
+        "rollback": (_DELIVERED, 1, 0),
     }[fault]
     execute, rollback = psycopg.Connection.execute, psycopg.Connection.rollback
     hits = 0
