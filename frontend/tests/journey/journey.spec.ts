@@ -18,7 +18,14 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIResponse,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "@playwright/test";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,6 +35,26 @@ const PROJECT = "caos-workbench-smoke";
 const PYTHON = path.join(REPO_ROOT, ".venv", "bin", "python");
 
 const ANALYST_USER_ID = "6a0e1c2d-0000-4000-8000-00000000a001";
+// The other three identities `tests/journey/edge.py` can assert, and which of
+// them each governed act of Task 12.5's half of the journey is made by: the
+// analyst signs (it created the case, so it holds ADMIN), the approver freezes
+// and the filer files, because `APPROVER_NOT_INDEPENDENT` demands three
+// different people. The reader is granted and then revoked.
+const APPROVER_USER_ID = "6a0e1c2d-0000-4000-8000-00000000a002";
+const READER_USER_ID = "6a0e1c2d-0000-4000-8000-00000000a004";
+const FILER_USER_ID = "6a0e1c2d-0000-4000-8000-00000000a005";
+const TEXT_NAME = "journey-earnings-update.txt";
+const PDF_NAME = "journey-covenant-certificate.pdf";
+// A draft this surface can actually compose: one paragraph per line, prose
+// only, and not one ASCII digit anywhere in it. `revisions.py::_span` refuses
+// a digit `NARRATIVE_FIGURE_UNREFERENCED` and tells the author to insert the
+// figure through a validated reference, which the Report surface offers no
+// picker for -- so a draft written here is a draft written around that.
+const DRAFT = [
+  "The covenant certificate states headroom rather than leaving it to be inferred.",
+  "The earnings update and the certificate disagree, and the disagreement is recorded here rather than resolved.",
+].join("\n");
+const DIGIT_DRAFT = "Net leverage was 4 times, within the covenant level.";
 const QUOTE = "Total debt at 31 December 2026";
 const ISSUER_ID = "JOURNEY-HOLDINGS";
 const ISSUER_NAME = "Journey Holdings";
@@ -83,12 +110,30 @@ const insufficientPack = () => packFrom("insufficient_pack");
     project and compose file `tests/journey/run.py` brought the stack up
     with; the environment it needs (`CAOS_EDGE_TOKEN`, `JOURNEY_STATE_DIR`,
     …) is already this process's own, inherited from that same script. */
-async function restartService(service: string): Promise<void> {
+async function composeService(...args: string[]): Promise<void> {
   await execFileAsync(
     "docker",
-    ["compose", "-p", PROJECT, "-f", COMPOSE_FILE, "--profile", "journey", "restart", service],
+    ["compose", "-p", PROJECT, "-f", COMPOSE_FILE, "--profile", "journey", ...args],
     { cwd: REPO_ROOT },
   );
+}
+
+function restartService(service: string): Promise<void> {
+  return composeService("restart", service);
+}
+
+/** Take the worker away, and give it back. Used by Task 12.5's withdrawal
+    test to hold a started run genuinely mid-run: the run is RUNNING and
+    queued, its route is pinned and its gates are released, and nothing has
+    claimed it -- which is the only state in which "a withdrawal prevents
+    *fresh* acceptance" can be asserted rather than raced against a
+    deterministic worker that finishes a three-node LITE route in seconds. */
+function stopJourneyWorker(): Promise<void> {
+  return composeService("stop", "journey-worker");
+}
+
+function startJourneyWorker(): Promise<void> {
+  return composeService("start", "journey-worker");
 }
 
 /** `JOURNEY_EXIT_AFTER_FIRST_ACCEPT` (Task 4.5 decision 12) has already made
@@ -98,9 +143,43 @@ function restartJourneyWorker(): Promise<void> {
   return restartService("journey-worker");
 }
 
-async function loginAs(page: Page, persona: "analyst" | "reader" | "intruder"): Promise<void> {
+type PersonaName = "analyst" | "approver" | "filer" | "reader" | "intruder";
+
+async function loginAs(page: Page, persona: PersonaName): Promise<void> {
   const response = await page.request.get(`/_edge/login?persona=${persona}`);
   expect(response.status()).toBe(200);
+}
+
+/** A second browser context logged in as `persona`, because the edge's session
+    cookie is one name per context: a persona opened on the shared page's own
+    context would clobber the analyst session the rest of this file depends on.
+    The caller closes the context it is handed. */
+async function contextAs(
+  browser: Browser,
+  persona: PersonaName,
+): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ baseURL: EDGE_ORIGIN });
+  const page = await context.newPage();
+  await loginAs(page, persona);
+  return { context, page };
+}
+
+/** One governed POST from a logged-in page's own session, carrying exactly
+    what the workspace's own `fetch` carries: the intent key, and the
+    same-origin markers the edge guard demands of an unsafe method (decision
+    5). Used where the workspace has no control to press -- the membership
+    commands, which `ActionName` deliberately does not carry, and the *first*
+    save, which no path in the workspace can reach (see that test's comment). */
+function postAs(page: Page, url: string, data: object) {
+  return page.request.post(url, {
+    data,
+    headers: {
+      "Idempotency-Key": randomUUID(),
+      Origin: EDGE_ORIGIN,
+      "Sec-Fetch-Site": "same-origin",
+      accept: "application/json",
+    },
+  });
 }
 
 function nodeLocator(page: Page, moduleId: string) {
@@ -123,7 +202,11 @@ function nodeLocator(page: Page, moduleId: string) {
     at the end to sync the DOM for the assertions that follow. */
 interface RunRead {
   status: string;
-  nodes: { module_id: string; state: string }[];
+  nodes: { route_node_id: string; module_id: string; state: string }[];
+  /** The `run_work` row, absent until the run is enqueued. No section renders
+      it, which is why Task 12.5 reads it from the document the browser itself
+      holds rather than from a selector -- see that test's own comment. */
+  work: { state: string; stop_code: string | null } | null;
 }
 
 /** One short-lived read of the run document's `run`, or `undefined` when
@@ -201,6 +284,92 @@ async function waitForRunStatus(
   }).toPass({ timeout: 30_000 });
 }
 
+/** The receipt of a command that must have been accepted, and the typed
+    refusal in the failure when it was not: a bare status comparison says 400
+    and not which rule refused, which is the whole of what a reader of a red
+    journey needs. The body is the host's `{code, clears}`, never anything a
+    document supplied. */
+async function receipt<R>(response: APIResponse, status: number): Promise<R> {
+  const body = (await response.json()) as R;
+  if (response.status() !== status) {
+    throw new Error(`refused ${response.status()}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+/** Create a case through the case register and return its id, exactly as the
+    two tests that predate this helper do it. */
+async function createCase(page: Page, title: string): Promise<string> {
+  await page.goto("/directory/");
+  await page.getByLabel("New case title").fill(title);
+  await page.locator("[data-new-case] [aria-label='Create case']").click();
+  const success = page.locator("[data-new-case-success]");
+  await expect(success).toBeVisible();
+  const text = (await success.textContent()) ?? "";
+  const found = text.match(/Case ([0-9a-f-]{36}) created\./);
+  if (!found) throw new Error(`case id not found in: ${text}`);
+  const caseId = found[1] ?? "";
+  expect(caseId).not.toBe("");
+  return caseId;
+}
+
+/** Admit `pack` on the open Upload section and expect all of it in. */
+async function admit(page: Page, caseId: string, pack: PackFile[]): Promise<void> {
+  await page.goto(`/upload/?case=${caseId}`);
+  await page
+    .locator("[data-admit-sources] input[type=file]")
+    .setInputFiles(
+      pack.map((file) => ({ name: file.name, mimeType: file.mimeType, buffer: file.buffer })),
+    );
+  await page.locator("[data-admit-sources] [aria-label='Admit sources']").click();
+  await expect(page.locator("[data-admit-sources-success]")).toContainText(
+    `${pack.length} source(s) admitted.`,
+  );
+}
+
+/** A run of the case, up to the point where only Start is left: the LITE
+    route selected and pinned, the subject pinned, both gates previewed and
+    released. The same sequence tests 2 and 3 make, so a third case does not
+    write it out a third time. Returns the new run's id. */
+async function prepareRun(page: Page, caseId: string): Promise<string> {
+  await page.goto(`/run/?case=${caseId}`);
+  await page.locator("[data-route-select]").selectOption({
+    label: "LITE_CREDIT_22 · LITE_EARNINGS_UPDATE",
+  });
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/api/v1/cases/${caseId}/runs` &&
+        response.status() === 201,
+    ),
+    page.locator("[data-create-run] [data-action='CREATE_RUN']").click(),
+  ]);
+  await expect(page.locator("[data-run]")).toBeVisible({ timeout: 15_000 });
+  const runId = (await page.locator("[data-run]").getAttribute("data-run")) ?? "";
+  expect(runId).not.toBe("");
+  await page.locator("[data-pin-input] input[data-field='issuer_id']").fill(ISSUER_ID);
+  await page.locator("[data-pin-input] input[data-field='issuer_name']").fill(ISSUER_NAME);
+  await page
+    .locator("[data-pin-input] input[data-field='reporting_period']")
+    .fill(REPORTING_PERIOD);
+  await page.locator("[data-pin-input] input[data-field='analysis_date']").fill(ANALYSIS_DATE);
+  await page.locator("[data-pin-input] [data-action='PIN_RUN_INPUT']").click();
+  await expect(page.locator("[data-pin-input] [data-command-success]")).toContainText(
+    "Subject pinned.",
+  );
+  for (const gate of ["SOURCE_SET", "RESEARCH_PLAN"] as const) {
+    const panel = page.locator(`[data-gate-panel='${gate}']`);
+    await panel.locator(`[data-preview-gate='${gate}']`).click();
+    await expect(panel.locator("[data-gate-preview-content]")).not.toBeEmpty();
+    await panel
+      .locator(`[data-action='APPROVE_SOURCE_SET'], [data-action='APPROVE_RESEARCH_PLAN']`)
+      .click();
+    await expect(panel).toContainText("RELEASED", { timeout: 15_000 });
+  }
+  return runId;
+}
+
 /** A tiny HTTP server on its own ephemeral port -- a different origin from
     the edge on any browser's same-site rules -- serving one page that fires
     a cross-site, no-preflight ("simple request") POST at `target` the moment
@@ -235,6 +404,13 @@ test.describe.serial("journey", () => {
   let page: Page;
   let caseId = "";
   let runId = "";
+  // Task 12.5's own state: the withdrawal case and the run of it that was
+  // started and then had its evidence taken away, and the head revision of
+  // the first case the filing chain acts on.
+  let withdrawalCase = "";
+  let withdrawalRun = "";
+  let revisionId = "";
+  let payloadSha256 = "";
 
   test.beforeAll(async ({ browser }) => {
     page = await browser.newPage();
@@ -792,5 +968,449 @@ test.describe.serial("journey", () => {
     // The refused script left no visible trace on the workspace itself: CSP
     // is the browser's own enforcement, and nothing here logs or renders it.
     await expect(page.locator("[data-command-error], [role='alert']")).toHaveCount(0);
+  });
+
+  test("journey: withdrawing a live source mid-run prevents fresh acceptance and updates an open drawer", async ({
+    browser,
+  }) => {
+    // Invariant 1's second half, end to end on one case. Two runs of it are
+    // needed, because the two halves of the claim are about different things:
+    // the drawer can only be open on a citation, which needs an accepted
+    // artifact, and "prevents *fresh* acceptance" can only be said of a run
+    // that has started and accepted nothing. So run 1 is driven to COMPLETE
+    // for its citation, and run 2 is prepared and started with the journey
+    // worker stopped -- RUNNING, its own snapshot pinned, its gates released,
+    // unclaimed. Stopping the worker is not a convenience: the deterministic
+    // provider finishes a three-node LITE route in seconds, so a withdrawal
+    // fired after Start would be racing it, and a race is not evidence.
+    withdrawalCase = await createCase(page, `Journey withdrawal ${randomUUID()}`);
+    await admit(page, withdrawalCase, await journeyPack());
+    const completed = await prepareRun(page, withdrawalCase);
+    await page.locator("[data-work-controls] [data-action='START_RUN']").click();
+    await expect(page.locator("[data-work-controls] [data-command-success]")).toContainText(
+      "Run enqueued.",
+    );
+    // The worker has already exited once (decision 12) and holds no lease on
+    // this run, so this is seconds rather than the 300 s of test 4.
+    await waitForNode(page, withdrawalCase, completed, "CP-5", "COMPLETE", 180_000);
+
+    withdrawalRun = await prepareRun(page, withdrawalCase);
+    await stopJourneyWorker();
+    await page.locator("[data-work-controls] [data-action='START_RUN']").click();
+    await expect(page.locator("[data-work-controls] [data-command-success]")).toContainText(
+      "Run enqueued.",
+    );
+
+    // The drawer, open on run 1's own citation of the PDF, and left open for
+    // the rest of this test: everything below happens in a second tab, so
+    // what the drawer does is what it does without being reloaded.
+    await page.goto(`/analysis/?case=${withdrawalCase}&run=${completed}`);
+    await page.locator("[data-handoff='CP-0'] [data-citation] [data-fact-chip]").first().click();
+    const drawer = page.locator("[data-evidence-drawer]");
+    await expect(drawer).toContainText(PDF_NAME);
+    await expect(drawer.locator("[data-page-layer]")).toBeVisible();
+    await expect(drawer.locator("[data-withdrawn]")).toHaveCount(0);
+
+    // A second context rather than a second tab on this one: the edge's
+    // session cookie is one name per context, and this journey's analyst
+    // session on `page` must survive. Same persona, so this is one person
+    // with two tabs open, which is the situation the claim is about.
+    const other = await contextAs(browser, "analyst");
+    try {
+      await other.page.goto(`/upload/?case=${withdrawalCase}`);
+      // The text report first, not the PDF the drawer is open on. Two
+      // reasons: it is what makes run 2's pinned set incomplete without
+      // taking the deterministic provider's own cited document away (the
+      // journey worker refuses `ORCHESTRATION_SOURCE_NOT_PINNED` when the PDF
+      // is not pinned, which would answer a different question), and it lets
+      // the assertion below say that the drawer tracks *its own* source
+      // rather than reacting to any withdrawal on the case.
+      const text = other.page.locator("[data-source-pack] tbody tr", { hasText: TEXT_NAME });
+      const control = text.locator("[data-action='WITHDRAW_SOURCE']");
+      await expect(control).toBeVisible();
+      // A live source offers its withdrawal: the control is available, not
+      // refused. `RefusedControl` renders `data-refusal` only when it is.
+      expect(await control.getAttribute("data-refusal")).toBeNull();
+      // Registered before the press: the tail's refetch can land while the
+      // assertions below run, and a waiter armed afterwards would wait for a
+      // response that had already arrived.
+      const refetched = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/v1/cases/${withdrawalCase}/analysis` &&
+          response.status() === 200,
+        { timeout: 60_000 },
+      );
+      await control.click();
+      await expect(text).toContainText("Withdrawn");
+      // And nothing is left to withdraw on that row: the column is empty
+      // rather than carrying a refusal the pack would have had to invent.
+      await expect(
+        text.locator("[data-withdraw-control] [data-action='WITHDRAW_SOURCE']"),
+      ).toHaveCount(0);
+
+      // `sources_changed` reaches the open tail on `page` and it refetches;
+      // the drawer is unmoved, because the source it is open on is still
+      // live. Waited for rather than assumed, so this is not vacuous.
+      await refetched;
+      await expect(drawer.locator("[data-withdrawn]")).toHaveCount(0);
+      await expect(drawer.locator("[data-page-layer]")).toBeVisible();
+
+      // Now the worker may have the run. It claims it, asks `execution_input`
+      // for the pinned input, and is refused before any attempt, reservation
+      // or provider call, so it parks the run STOPPED with that code.
+      await startJourneyWorker();
+      await expect
+        .poll(
+          async () => (await readRun(other.page, withdrawalCase, withdrawalRun))?.work?.stop_code,
+          { timeout: 180_000, intervals: [2_000] },
+        )
+        .toBe("EVIDENCE_NOT_AVAILABLE");
+      // No section renders `work.stop_code` -- it is on the wire and on no
+      // surface -- so the line above reads the run document this browser
+      // session is served, through the real edge. What the surface *does* say
+      // is that nothing more can happen here: start and retry carry the same
+      // code the command answers, and no node of this run was ever accepted.
+      const parked = await readRun(other.page, withdrawalCase, withdrawalRun);
+      expect(parked?.status).toBe("RUNNING");
+      expect(parked?.nodes.map((node) => node.state)).not.toContain("COMPLETE");
+      await other.page.goto(`/run/?case=${withdrawalCase}&run=${withdrawalRun}`);
+      for (const action of ["START_RUN", "RETRY_RUN"] as const) {
+        await expect(
+          other.page.locator(`[data-work-controls] [data-action='${action}']`),
+        ).toHaveAttribute("data-refusal", "EVIDENCE_NOT_AVAILABLE");
+      }
+      for (const moduleId of ROUTE_NODES) {
+        await expect(nodeLocator(other.page, moduleId)).not.toHaveAttribute(
+          "data-state",
+          "COMPLETE",
+        );
+      }
+
+      // And the source the drawer is open on, withdrawn last so the run above
+      // was parked on evidence rather than on the journey worker's own
+      // refusal to answer a pack it cannot see.
+      await other.page.goto(`/upload/?case=${withdrawalCase}`);
+      const pdf = other.page.locator("[data-source-pack] tbody tr", { hasText: PDF_NAME });
+      await pdf.locator("[data-action='WITHDRAW_SOURCE']").click();
+      await expect(pdf).toContainText("Withdrawn");
+    } finally {
+      await other.context.close();
+    }
+
+    // The open drawer, never reloaded, now says its source is withdrawn and
+    // reads no page. The citation stays: the conclusion resting on it has to
+    // remain explicable.
+    await expect(drawer.locator("[data-withdrawn]")).toBeVisible({ timeout: 60_000 });
+    await expect(drawer.locator("[data-page-layer]")).toHaveCount(0);
+    await expect(drawer.locator("blockquote.matched")).toContainText(QUOTE);
+  });
+
+  test("journey: standing is granted, and a revoked member's read is answered 404", async ({
+    browser,
+  }) => {
+    // The two membership commands have no control anywhere in the workspace
+    // and no entry in `ActionName` -- deliberately, because no section serves
+    // an Admin panel to offer them from -- so they are driven here as
+    // authenticated requests from the analyst's own browser session, through
+    // the real edge. What that proves is the route, the edge's identity, the
+    // ADMIN floor and what the grant and the revocation do to a reader's
+    // reads; what it cannot prove is a control, because there is none.
+    await receipt(
+      await postAs(page, `/api/v1/cases/${caseId}/members`, {
+        user_id: READER_USER_ID,
+        standing: "READER",
+      }),
+      201,
+    );
+
+    const reader = await contextAs(browser, "reader");
+    try {
+      const read = await reader.page.request.get(`/api/v1/cases/${caseId}/analysis?run=${runId}`, {
+        headers: { accept: "application/json" },
+      });
+      expect(read.status()).toBe(200);
+      await reader.page.goto(`/analysis/?case=${caseId}&run=${runId}`);
+      await expect(reader.page.locator("main#body [data-surface-state='unavailable']")).toHaveCount(
+        0,
+      );
+      await expect(reader.page.getByText(QUOTE).first()).toBeVisible();
+
+      await receipt(
+        await postAs(page, `/api/v1/cases/${caseId}/members/${READER_USER_ID}/revocation`, {}),
+        200,
+      );
+
+      // A revoked member is answered exactly as a stranger is (CLAUDE.md
+      // "Auth edge": unknown and unauthorized both 404), and the section they
+      // were looking at is unavailable on the next read -- with none of the
+      // evidence it had shown them.
+      const after = await reader.page.request.get(`/api/v1/cases/${caseId}/analysis?run=${runId}`, {
+        headers: { accept: "application/json" },
+      });
+      expect(after.status()).toBe(404);
+      await reader.page.reload();
+      await expect(reader.page.locator("main#body [data-surface-state='unavailable']")).toHaveCount(
+        1,
+      );
+      await expect(reader.page.getByText(QUOTE)).toHaveCount(0);
+    } finally {
+      await reader.context.close();
+    }
+  });
+
+  test("journey: a revision is saved from the run's accepted artifacts and a draft narrative", async () => {
+    // **The workspace has no path to the first save, and this is where that
+    // shows.** `sectionUrl` answers null for report without `?revision`,
+    // `read_report` refuses `DELIVERABLE_NOT_FOUND` without the row, and the
+    // only thing in the workspace that ever sets `?revision` is
+    // `FilingControls`' own post-save `setParams` -- which lives on the
+    // section that cannot be reached. So Report is unavailable here,
+    await page.goto(`/report/?case=${caseId}&run=${runId}`);
+    await expect(page.locator("main#body [data-surface-state='unavailable']")).toHaveCount(1);
+    // and the first revision is made as an authenticated request from this
+    // same browser session, through the real edge, because there is no press
+    // that would make it. Everything after this one call is pressed on the
+    // surface.
+    // The route's own node id, read from the run document rather than spelled
+    // out here: a figure names a *route node*, not a module, and CP-0 on this
+    // pathway is `RN-LITE_CREDIT_22-LITE_EARNINGS_UPDATE-01-CP-0`.
+    const gate = (await readRun(page, caseId, runId))?.nodes.find(
+      (node) => node.module_id === "CP-0",
+    );
+    if (!gate) throw new Error("the run document names no CP-0 node");
+    const first = await postAs(page, `/api/v1/cases/${caseId}/runs/${runId}/revisions`, {
+      expected_revision_id: null,
+      narrative: [
+        [{ text: "The covenant certificate is the register this opinion rests on.", figure: null }],
+        // A figure span: the wire accepts one and the Report surface cannot
+        // compose one, since a figure names a citation of a verified record
+        // and that needs a picker the surface does not have. The host fills
+        // the document, the page and the quote from the record itself.
+        [{ text: null, figure: { route_node_id: gate.route_node_id, citation_index: 0 } }],
+      ],
+    });
+    const firstRevision = (await receipt<{ revision_id: string }>(first, 201)).revision_id;
+
+    await page.goto(`/report/?case=${caseId}&run=${runId}&revision=${firstRevision}`);
+    const report = page.locator("[data-report-v1]");
+    await expect(report).toHaveAttribute("data-revision", firstRevision);
+    // Derived from the run's accepted artifacts, not from the request: all
+    // three of the route's handoffs are in the payload.
+    await expect(page.locator("[data-report-artifact]")).toHaveCount(3);
+    // And the figure reads back as the host resolved it.
+    const figure = page.locator("[data-report-paragraph='1']");
+    await expect(figure).toContainText(gate.route_node_id);
+    await expect(figure).toContainText(QUOTE);
+
+    // A draft carrying an ASCII digit is refused, and the clearance a reader
+    // is given names an act this surface offers no way to perform.
+    await page.locator("#narrative-draft").fill(DIGIT_DRAFT);
+    await page.locator("[data-filing-controls] [data-action='SAVE_REVISION']").click();
+    const refused = page.locator(
+      "[data-filing-controls] [role='alert'] [data-refusal='NARRATIVE_FIGURE_UNREFERENCED']",
+    );
+    await expect(refused).toBeVisible();
+    await expect(refused).toContainText("validated reference");
+
+    // The draft this surface can compose, saved by pressing Save. The
+    // response is waited for rather than the success note asserted: a
+    // successful save corrects the address, and a new `?revision` remounts
+    // the section (`Workspace`'s `mountKey`), so the note is genuinely
+    // transient and asserting it would be a race.
+    await page.locator("#narrative-draft").fill(DRAFT);
+    const [saved] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `/api/v1/cases/${caseId}/runs/${runId}/revisions`,
+      ),
+      page.locator("[data-filing-controls] [data-action='SAVE_REVISION']").click(),
+    ]);
+    expect(saved.status()).toBe(201);
+    revisionId = ((await saved.json()) as { revision_id: string }).revision_id;
+    expect(revisionId).not.toBe(firstRevision);
+    // The address is corrected, not navigated, and the document the section
+    // then reads is the revision just saved.
+    await expect.poll(() => new URL(page.url()).searchParams.get("revision")).toBe(revisionId);
+    await expect(report).toHaveAttribute("data-revision", revisionId);
+    await expect(page.locator("[data-report-narrative]")).toContainText(
+      "The covenant certificate states headroom",
+    );
+    payloadSha256 = (await report.getAttribute("data-payload")) ?? "";
+    expect(payloadSha256).toHaveLength(64);
+  });
+
+  test("journey: the opinion is signed on the bytes on screen, and a signer cannot freeze", async () => {
+    const [signed] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname ===
+            `/api/v1/cases/${caseId}/revisions/${revisionId}/signature`,
+      ),
+      page.locator("[data-filing-controls] [data-action='SIGN_OPINION']").click(),
+    ]);
+    expect(signed.status()).toBe(200);
+    // Signed on exactly the bytes this page was showing: the digest the
+    // control sent is the one the section rendered, and the receipt names it.
+    expect(((await signed.json()) as { payload_sha256: string }).payload_sha256).toBe(
+      payloadSha256,
+    );
+    await expect(
+      page.locator("[data-filing-controls] [data-command-success]", {
+        hasText: "Sign opinion: done.",
+      }),
+    ).toBeVisible();
+
+    // The three-actor rule. The surface stops offering Freeze to the person
+    // who just signed, with the code the command would answer --
+    const freeze = page.locator("[data-filing-controls] [data-action='FREEZE_DELIVERABLE']");
+    await expect(freeze).toHaveAttribute("data-refusal", "APPROVER_NOT_INDEPENDENT", {
+      timeout: 30_000,
+    });
+    // -- and the rule is the store's, not the surface's: the same request the
+    // control would have made, made anyway from this session, is refused at
+    // commit under the case lock. Persona is not authority.
+    const forced = await postAs(page, `/api/v1/cases/${caseId}/revisions/${revisionId}/freeze`, {
+      payload_sha256: payloadSha256,
+    });
+    expect(forced.status()).toBe(400);
+    expect(((await forced.json()) as { code: string }).code).toBe("APPROVER_NOT_INDEPENDENT");
+  });
+
+  test("journey: a second approver freezes, the Committee reads the act back, and a freezer cannot file", async ({
+    browser,
+  }) => {
+    // Both remaining approvers are given standing before either navigates:
+    // without it the Report section is not readable by them at all.
+    for (const member of [APPROVER_USER_ID, FILER_USER_ID]) {
+      await receipt(
+        await postAs(page, `/api/v1/cases/${caseId}/members`, {
+          user_id: member,
+          standing: "APPROVER",
+        }),
+        201,
+      );
+    }
+
+    const approver = await contextAs(browser, "approver");
+    try {
+      await approver.page.goto(`/report/?case=${caseId}&run=${runId}&revision=${revisionId}`);
+      const freeze = approver.page.locator(
+        "[data-filing-controls] [data-action='FREEZE_DELIVERABLE']",
+      );
+      // Offered to this actor, refused to the signer: the same document, read
+      // by two different people.
+      expect(await freeze.getAttribute("data-refusal")).toBeNull();
+      const [frozen] = await Promise.all([
+        approver.page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname ===
+              `/api/v1/cases/${caseId}/revisions/${revisionId}/freeze`,
+        ),
+        freeze.click(),
+      ]);
+      expect(frozen.status()).toBe(200);
+
+      // The Committee section, which refuses a revision that is not frozen,
+      // now serves this one and names the two actors behind it. This is the
+      // read-back the plan asks for: an act made through a control, proved by
+      // a section that rebuilds the audit event from its own receipt.
+      await approver.page.goto(`/committee/?case=${caseId}&run=${runId}&revision=${revisionId}`);
+      const filing = approver.page.locator("[data-committee-filing]");
+      await expect(filing).toHaveAttribute("data-state", "frozen");
+      await expect(filing).toContainText(ANALYST_USER_ID);
+      await expect(filing).toContainText(APPROVER_USER_ID);
+
+      // A freezer cannot file, on the surface and at commit.
+      await approver.page.goto(`/report/?case=${caseId}&run=${runId}&revision=${revisionId}`);
+      await expect(
+        approver.page.locator("[data-filing-controls] [data-action='FILE_DELIVERABLE']"),
+      ).toHaveAttribute("data-refusal", "APPROVER_NOT_INDEPENDENT");
+      const forced = await postAs(
+        approver.page,
+        `/api/v1/cases/${caseId}/revisions/${revisionId}/filing`,
+        { payload_sha256: payloadSha256 },
+      );
+      expect(forced.status()).toBe(400);
+      expect(((await forced.json()) as { code: string }).code).toBe("APPROVER_NOT_INDEPENDENT");
+    } finally {
+      await approver.context.close();
+    }
+  });
+
+  test("journey: a third approver files, and the Committee serves the receipt", async ({
+    browser,
+  }) => {
+    const filer = await contextAs(browser, "filer");
+    try {
+      await filer.page.goto(`/report/?case=${caseId}&run=${runId}&revision=${revisionId}`);
+      const file = filer.page.locator("[data-filing-controls] [data-action='FILE_DELIVERABLE']");
+      expect(await file.getAttribute("data-refusal")).toBeNull();
+      const [filed] = await Promise.all([
+        filer.page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname ===
+              `/api/v1/cases/${caseId}/revisions/${revisionId}/filing`,
+        ),
+        file.click(),
+      ]);
+      expect(filed.status()).toBe(200);
+
+      await filer.page.goto(`/committee/?case=${caseId}&run=${runId}&revision=${revisionId}`);
+      const filing = filer.page.locator("[data-committee-filing]");
+      await expect(filing).toHaveAttribute("data-state", "filed");
+      await expect(filing).toContainText(FILER_USER_ID);
+      // The detached receipt the filing command persists after its audit
+      // event, served by the section: the three actors, the payload and the
+      // event it names.
+      const receipt = filer.page.locator("[data-committee-receipt]");
+      await expect(receipt).toBeVisible();
+      await expect(receipt).toContainText(ANALYST_USER_ID);
+      await expect(receipt).toContainText(APPROVER_USER_ID);
+      await expect(receipt).toContainText(FILER_USER_ID);
+      await expect(receipt).toContainText(payloadSha256);
+      // Filing once: the act is no longer offered to anyone.
+      await filer.page.goto(`/report/?case=${caseId}&run=${runId}&revision=${revisionId}`);
+      await expect(
+        filer.page.locator("[data-filing-controls] [data-action='FILE_DELIVERABLE']"),
+      ).toHaveAttribute("data-refusal", "DELIVERABLE_ALREADY_FILED");
+    } finally {
+      await filer.context.close();
+    }
+  });
+
+  test("journey: the Book names every credit of the portfolio on one stated basis", async () => {
+    // What the Book can be driven to on this stack, and what it cannot.
+    // `read_book` fills a credit's cells from the accepted CP-CF projection,
+    // and CP-CF is not a node of the LITE route -- the only route the
+    // canonical adapter executes. So every credit here is
+    // `NO_ACCEPTED_FORECAST`, no period is served, no comparison table is
+    // drawn and no cell exists to open a passport from. The ten-field
+    // passport is therefore not reachable through the production stack at
+    // all, and this test proves the reachable part rather than asserting an
+    // unreachable step as passing: the credits the analyst holds, side by
+    // side, on one basis the page states, each saying in the document's own
+    // typed words why it carries no figure.
+    await page.goto("/book/");
+    await expect(page.locator("[data-book-v1]")).toBeVisible();
+    await expect(page.locator("[data-basis-period]")).toHaveText("EVERY_ACCEPTED_PERIOD");
+    const credits = page.locator("[data-book-credits] li");
+    // The three cases this journey made, all of them the analyst's own, which
+    // is two to four credits side by side (`BOOK_CASES_MAX`).
+    await expect(credits).toHaveCount(3);
+    for (const credit of [caseId, withdrawalCase]) {
+      const row = page.locator(`[data-book-credits] li[data-case='${credit}']`);
+      await expect(row).toBeVisible();
+      await expect(row).toContainText("NO_ACCEPTED_FORECAST");
+    }
+    // No table, no cell, no passport -- said as an absence rather than left
+    // unasserted, so the day CP-CF runs here this test fails and is rewritten
+    // to open the passport instead of recording that it cannot.
+    await expect(page.locator("table.tbl")).toHaveCount(0);
+    await expect(page.locator("[data-cell]")).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
