@@ -174,10 +174,18 @@ def _refused(conn: StoreConnection, lease: Lease, refused: Refusal) -> None:
         try:
             cancel_run(conn, lease.run_id, lease=lease)  # commits its own unit
         except Refusal as lost:
-            # Not only a lost lease: `cancel_run` refuses a stale terminal too
-            # (§49.4), and raising here would leave `work_once` with the claim
-            # held and the run at the head of the queue for every later poll.
+            # A store fault here heals itself: released, the lease expires,
+            # the run is reclaimed and the cancel is retried -- so it takes the
+            # same back-off the branch below gives that class, and parking it
+            # would turn a transient fault into a stop an operator must requeue
+            # by hand. Anything else -- `RUN_NOT_RUNNING` for a run already
+            # terminal, and the codes `cancel_run`'s own writes carry -- has no
+            # such recovery, and raising it would leave `work_once` holding the
+            # claim, with the run at the head of every later poll.
             unmet = lost.code
+            if unmet in STORE_FAULTS:
+                _settle(conn, lambda: release(conn, lease))
+                raise Refusal(unmet) from None
             if unmet is not RefusalCode.LEASE_NOT_HELD:
                 print(unmet.value, file=sys.stderr)
                 _settle(conn, lambda: stop(conn, lease, unmet))

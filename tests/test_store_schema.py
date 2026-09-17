@@ -749,6 +749,11 @@ def known_prefix(
         "UPDATE source_extractions SET extractor_identity = '{'",
         "UPDATE source_extractions SET extractor_identity ="
         " replace(extractor_identity, 'caos.plain-text', 'retired.writer')",
+        # `canonical()` refuses this one itself, with a code of its own that
+        # `_verify_extractions_v1` does not catch: a malformed row a migration's
+        # verification finds is still a drift finding at the boot boundary.
+        "UPDATE source_extractions SET extractor_identity ="
+        ' \'{"name": "", "version": "1", "config": {}}\'',
     ],
 )
 def test_corrupt_known_upgrade_refuses_without_any_change(
@@ -1133,18 +1138,33 @@ def test_command_requests_are_keyed_bounded_and_immutable(
     conn.rollback()
 
 
-def test_apply_schema_keeps_an_inner_typed_code(
-    empty_database: str, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "raised,expected",
+    [
+        (RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_UNAVAILABLE),
+        (RefusalCode.STORE_NOT_TRANSACTIONAL, RefusalCode.STORE_NOT_TRANSACTIONAL),
+        (RefusalCode.SOURCE_IDENTITY_INVALID, RefusalCode.STORE_SCHEMA_DRIFT),
+        (RefusalCode.BOUNDARY_TEXT_INVALID, RefusalCode.STORE_SCHEMA_DRIFT),
+    ],
+)
+def test_apply_schema_keeps_a_store_fault_and_flattens_every_other_refusal(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    raised: RefusalCode,
+    expected: RefusalCode,
 ) -> None:
-    """W6: a migration's own refusal is its own. Flattening every inner code
-    into drift tells an operator the declared history disagrees with the applied
-    one when what actually happened was that the store went away."""
+    """W6: a store that could not answer is not a database built from another
+    schema, and saying `STORE_SCHEMA_DRIFT` sends an operator to the migration
+    history for a fault that is not there. Everything else a migration refuses
+    -- including a malformed row its own verification finds, which raises codes
+    from outside this module -- is a drift finding and keeps saying so
+    (`docs/DECISIONS.md` §20a)."""
 
     def refusing(conn: StoreConnection, sql: str) -> None:
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+        raise Refusal(raised)
 
     monkeypatch.setattr(store, "_migrate", refusing)
     with connect(empty_database) as conn, pytest.raises(Refusal) as caught:
         apply_schema(conn)
 
-    assert caught.value.code is RefusalCode.STORE_UNAVAILABLE
+    assert caught.value.code is expected

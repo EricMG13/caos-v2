@@ -411,7 +411,7 @@ def test_the_widest_jitter_stays_within_twenty_percent(
     assert worker.pause_seconds(config, 2) >= 2.0 * 0.8
 
 
-def test_a_stale_terminal_on_cancel_parks_the_run_and_never_escapes(  # noqa: PLR0913 -- the loop's own fixtures, plus the patch and the capture
+def test_a_store_fault_on_cancel_backs_off_instead_of_parking(  # noqa: PLR0913 -- the loop's own fixtures, plus the patch and the capture
     case: tuple[StoreConnection, UUID],
     route: ResolvedRoute,
     bundle: Bundle,
@@ -419,22 +419,23 @@ def test_a_stale_terminal_on_cancel_parks_the_run_and_never_escapes(  # noqa: PL
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """W4: `cancel_run` refuses more than a lost lease -- `RUN_TERMINAL_STALE`
-    when the accepted set moved under it (§49.4). Re-raising it inside the
-    mapper leaves `work_once` with the claim still held, so the run is reclaimed
-    first after every lease expiry and the queue stops. It parks with its code
-    instead, the way every other refusal does."""
+    """W4: `cancel_run` refuses `STORE_UNAVAILABLE` when the store cannot take
+    its unit, and that heals on its own -- released, the lease expires, the run
+    is reclaimed and the cancel is retried. Parking it would turn a transient
+    fault into a stop an operator has to requeue by hand; re-raising it without
+    releasing would leave `work_once` holding the claim. It does both: the
+    claim is released and the code reaches the loop's back-off."""
     run = queued_run(case, route, bundle, blobs)
 
     def cancelling(conn: StoreConnection, run_id: UUID, lease: object) -> object:
         raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
 
-    def stale(*args: object, **kwargs: object) -> None:
-        raise Refusal(RefusalCode.RUN_TERMINAL_STALE)
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
 
-    monkeypatch.setattr(worker, "cancel_run", stale)
+    monkeypatch.setattr(worker, "cancel_run", unavailable)
 
-    assert (
+    with pytest.raises(Refusal) as caught:
         work_once(
             run.conn,
             run.blobs,
@@ -442,13 +443,8 @@ def test_a_stale_terminal_on_cancel_parks_the_run_and_never_escapes(  # noqa: PL
             config=CONFIG,
             stopping=Event(),
         )
-        == run.run_id
-    )
 
-    assert work_row(run.conn, run.run_id) == (
-        "STOPPED",
-        RefusalCode.RUN_TERMINAL_STALE.value,
-        None,
-        True,
-    )
-    assert capsys.readouterr().err.strip().splitlines()[-1] == "RUN_TERMINAL_STALE"
+    assert caught.value.code is RefusalCode.STORE_UNAVAILABLE
+    # Released, not stopped: the next claim retries the cancel.
+    assert work_row(run.conn, run.run_id) == ("QUEUED", None, None, True)
+    assert capsys.readouterr().err == ""
