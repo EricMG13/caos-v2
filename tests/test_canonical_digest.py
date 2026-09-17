@@ -109,6 +109,7 @@ def _record() -> CanonicalRecord:
             validation_warnings=(),
             downstream_consumers=("CP-5",),
             readiness=(("CP-5", "READY"),),
+            blockers=(),
             decision_scope="SCREENING_ONLY",
         ),
         citations=(

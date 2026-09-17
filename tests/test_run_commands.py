@@ -25,7 +25,7 @@ from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document, admit_pack
 from server.refusals import RefusalCode
 from server.store import StoreConnection
-from server.store.audit import _digest_of, audit_trail
+from server.store.audit import audit_trail, digest_of
 from server.store.commands import request_digest
 from server.store.events import events_of
 from server.store.gates import (
@@ -232,7 +232,7 @@ def test_a_successor_run_links_a_blocked_run_of_its_case(
     [entry] = audit_trail(conn, case_id)
     conn.rollback()
     assert entry.action == "RUN_CREATED"
-    assert entry.payload_sha256 == _digest_of(
+    assert entry.payload_sha256 == digest_of(
         {
             **body,
             "route_digest": pinned_route(conn, successor),
