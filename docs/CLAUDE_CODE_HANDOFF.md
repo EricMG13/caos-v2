@@ -253,6 +253,14 @@ satisfy its contract.
 | 10.3 successor runs | **half** in the branch (`cabb3d4`): the blocker projection, `NodeView.gate_reason` and the record format. The store column, `start_run`'s parameter, the command, the read and their five tests are owed, with migration ordinal `0025` held | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
 | 11–13 | not started | 11 needs 8.4's documents and authorized runs; 13.4 needs an identity-provider setting and TLS material; 13.6 needs an authorized nightly |
 
+**Integration gate for this wave**, at `d7158f8` — the tree carrying the
+remediation stream's second wave (`b194943`) and the three completion tasks
+above: the offline suite `make test` at exit 0, **3,036 passed**, 94 % branch
+coverage, coverage floors and `io_budget --assert` clean. Ruff, ruff format and
+mypy over 234 source files clean; `check_tested`, `check_vocabulary` clean; the
+frontend lint, format, vocabulary and tested gates clean with 238 unit tests.
+`make check` still has not run, for the Trivy reason above.
+
 **Two implementers were stopped mid-task by a session rate limit**, on 17
 September 2026, and the coordinator finished both by hand rather than
 re-dispatching them. Neither had committed. What that cost is recorded here
