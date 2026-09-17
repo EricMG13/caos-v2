@@ -7,7 +7,7 @@ import { sectionPath } from "@/app/sections";
 import { OFFLINE_WORDING, UNAVAILABLE_WORDING } from "@/app/transport";
 import { toneOf } from "@/chrome/SeverityMark";
 import { fallbackChrome } from "@/chrome/fallback";
-import { ACTION_UNPLACED, READ_ONLY_API, refusalText } from "@/controls/RefusedControl";
+import { ACTION_UNPLACED, refusalText } from "@/controls/RefusedControl";
 import { scrollArtifact } from "@/controls/scroll";
 import { shortDigest, stamp } from "@/ds/format";
 import { SEV_COLOR, sevSurface, sevVar } from "@/ds/sev";
@@ -114,8 +114,13 @@ describe("the wire contract and the states around it", () => {
   test("an action nothing performs is refused with a reason that is true today", () => {
     expect(ACTION_UNPLACED.code).toBe("ACTION_UNPLACED");
     expect(ACTION_UNPLACED.clears).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
-    // The store calls exist; what is missing is the route to them.
-    expect(ACTION_UNPLACED.clears).toContain(READ_ONLY_API);
+    // Task 12.1 served the last v1 command route, so "the API serves a route
+    // that performs it" and "only the run document and its event stream" are
+    // both false now. What leaves a control unplaced is a section whose own
+    // read judges no such action, and `chrome.actions` is where that
+    // judgement arrives.
+    expect(ACTION_UNPLACED.clears).toContain("chrome.actions");
+    expect(ACTION_UNPLACED.clears).not.toMatch(/serves only|event stream|serves a route/);
   });
 });
 

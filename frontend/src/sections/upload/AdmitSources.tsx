@@ -26,7 +26,7 @@ import {
     12). Reuses `sectionUrl` and the v1 parser rather than the section-status
     classifier in `@/app/transport`, whose union of the v1 documents this
     control has no reason to narrow. */
-async function refetchUpload(caseId: string): Promise<UploadDocument | null> {
+export async function refetchUpload(caseId: string): Promise<UploadDocument | null> {
   const url = sectionUrl("upload", { case: caseId });
   if (!url) return null;
   let response: Response;

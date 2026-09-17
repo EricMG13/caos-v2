@@ -10,6 +10,11 @@
 // narrowed by its matching v1 parser.
 import type {
   ApproveGate,
+  DeliverableFiled,
+  DeliverableFrozen,
+  OpinionSigned,
+  RevisionSaved,
+  SaveRevision,
   CancelRun,
   CaseCreated,
   CreateCase,
@@ -31,8 +36,14 @@ import {
   parseRunCreated,
   parseRunInputPinned,
   parseRunWork,
+  parseDeliverableFiled,
+  parseDeliverableFrozen,
+  parseOpinionSigned,
+  parseRevisionSaved,
+  parseSourceWithdrawn,
   parseSourcesAdmitted,
   type RefusalBody,
+  type SourceWithdrawn,
   type SourcesAdmitted,
   type V1_SHAPES,
 } from "@/wire/v1";
@@ -228,4 +239,66 @@ export function cancelRun(
 ): Promise<CommandResult<RunWork>> {
   const request: CancelRun = {};
   return jsonCommand(intent, `${runPath(caseId, runId)}/cancel`, request, parseRunWork);
+}
+
+/** Invariant 1's second half: a pinned source is withdrawn, never deleted, and
+    the body is empty because the source is named in the path (Task 12.1). */
+export function withdrawSource(
+  caseId: string,
+  sourceId: string,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<SourceWithdrawn>> {
+  const url = `${casePath(caseId)}/sources/${encodeURIComponent(sourceId)}/withdrawal`;
+  return jsonCommand(intent, url, {}, parseSourceWithdrawn);
+}
+
+function revisionPath(caseId: string, revisionId: string): string {
+  return `${casePath(caseId)}/revisions/${encodeURIComponent(revisionId)}`;
+}
+
+/** A draft is the only thing of the payload that comes from the request; the
+    revision is derived from the run's accepted artifacts. `expected_revision_id`
+    is the head the draft was composed against, so a save that raced another
+    save is refused rather than becoming a second head nobody chose. */
+export function saveRevision(
+  caseId: string,
+  runId: string,
+  request: SaveRevision,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<RevisionSaved>> {
+  return jsonCommand(intent, `${runPath(caseId, runId)}/revisions`, request, parseRevisionSaved);
+}
+
+/** The three acts on one stored revision. Each carries the `payload_sha256`
+    its actor reviewed (invariant 5): the server compares it before writing,
+    so an approver acting on bytes other than the ones in front of them is
+    refused rather than binding a signature to something unread. */
+export function signOpinion(
+  caseId: string,
+  revisionId: string,
+  payloadSha256: string,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<OpinionSigned>> {
+  const url = `${revisionPath(caseId, revisionId)}/signature`;
+  return jsonCommand(intent, url, { payload_sha256: payloadSha256 }, parseOpinionSigned);
+}
+
+export function freezeDeliverable(
+  caseId: string,
+  revisionId: string,
+  payloadSha256: string,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<DeliverableFrozen>> {
+  const url = `${revisionPath(caseId, revisionId)}/freeze`;
+  return jsonCommand(intent, url, { payload_sha256: payloadSha256 }, parseDeliverableFrozen);
+}
+
+export function fileDeliverable(
+  caseId: string,
+  revisionId: string,
+  payloadSha256: string,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<DeliverableFiled>> {
+  const url = `${revisionPath(caseId, revisionId)}/filing`;
+  return jsonCommand(intent, url, { payload_sha256: payloadSha256 }, parseDeliverableFiled);
 }
