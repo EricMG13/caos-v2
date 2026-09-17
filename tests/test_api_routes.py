@@ -902,6 +902,10 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         "/api/v1/cases/{case_id}/members": "grant_standing",
         "/api/v1/cases/{case_id}/members/{user_id}/revocation": "revoke_standing",
         "/api/v1/cases/{case_id}/sources/{source_id}/withdrawal": "withdraw",
+        "/api/v1/cases/{case_id}/runs/{run_id}/revisions": "save",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/signature": "sign",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/freeze": "freeze",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/filing": "file",
     }
 
 
