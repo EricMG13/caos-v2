@@ -12,7 +12,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit, rollback_or_close
 from server.store.budget import reserved_for, validate_spend
 from server.store.events import RunEvent, append, lock_run
 
@@ -181,15 +181,8 @@ def record_outcome(
     Owns the caller transaction. Exact replay is a no-op; conflicts and legacy
     rows refuse. Unknown outcomes remain immutable, with no backfill.
     """
-    try:
+    with committed_unit(conn):
         inserted = _record(conn, attempt_id, outcome)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return inserted
 
 
@@ -281,7 +274,7 @@ def record_refusal(
     if code in _NOT_AN_EXPLANATION:
         return False
     require_idle(conn)
-    try:
+    with committed_unit(conn):
         run, _case, _status = _locked_attempt(conn, attempt_id)
         # Imported here: `work` imports this module at its top.
         from server.store.work import require_lease
@@ -293,13 +286,6 @@ def record_refusal(
             " ON CONFLICT (attempt_id) DO NOTHING",
             (code.value, attempt_id),
         ).rowcount
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return bool(inserted)
 
 
@@ -347,13 +333,19 @@ def _locked_attempt(
 ) -> tuple[UUID, UUID, RunStatus]:
     run, case = _attempt_owner(conn, attempt_id)
     status = lock_run(conn, run)
+    _require_attempt(conn, attempt_id, run)
+    return run, case, status
+
+
+def _require_attempt(conn: StoreConnection, attempt_id: UUID, run_id: UUID) -> None:
+    """Revalidate after waiting on the run lock, then retain the native owner
+    key through commit: a moved attempt must never write under its former run."""
     if (
         conn.execute(
             "SELECT 1 FROM run_attempts WHERE attempt_id = %s AND run_id = %s"
             " FOR KEY SHARE",
-            (attempt_id, run),
+            (attempt_id, run_id),
         ).fetchone()
         is None
     ):
         raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
-    return run, case, status

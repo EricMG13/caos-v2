@@ -586,6 +586,44 @@ def test_apply_schema_closed_connection_is_sanitized(empty_database: str) -> Non
     assert caught.value.code is RefusalCode.STORE_SCHEMA_DRIFT
 
 
+def test_committed_unit_commits_the_body_on_a_clean_exit(empty_database: str) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        with store.committed_unit(conn):
+            conn.execute("CREATE TABLE t_committed_unit_ok (id int)")
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+        with connect(empty_database) as probe:
+            assert probe.execute(
+                "SELECT to_regclass('t_committed_unit_ok')"
+            ).fetchone() == ("t_committed_unit_ok",)
+
+
+def test_committed_unit_answers_a_store_fault_with_no_text(
+    empty_database: str,
+) -> None:
+    conn = connect(empty_database)
+    apply_schema(conn)
+    conn.close()
+    with pytest.raises(Refusal) as caught:
+        with store.committed_unit(conn):
+            pass
+    assert caught.value.code is RefusalCode.STORE_UNAVAILABLE
+
+
+def test_committed_unit_rolls_back_and_reraises_any_other_failure(
+    empty_database: str,
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        with pytest.raises(ValueError), store.committed_unit(conn):
+            conn.execute("CREATE TABLE t_committed_unit_reraise (id int)")
+            raise ValueError("boom")
+        assert conn.info.transaction_status is psycopg.pq.TransactionStatus.IDLE
+        assert conn.execute(
+            "SELECT to_regclass('t_committed_unit_reraise')"
+        ).fetchone() == (None,)
+
+
 def test_apply_schema_cleanup_preserves_cancellation(
     empty_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
@@ -165,6 +167,25 @@ def rollback_or_close(conn: StoreConnection) -> None:
         conn.rollback()
     except psycopg.Error:
         conn.close()
+
+
+@contextmanager
+def committed_unit(conn: StoreConnection) -> Iterator[None]:
+    """Own the caller transaction: commit on exit, roll back or close on any
+    failure, and answer a store fault with STORE_UNAVAILABLE and no text."""
+    try:
+        yield
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        # Any failure at all, cancellation included: letting it propagate with
+        # the unit open leaves state the body made sitting there, ready to be
+        # committed by whatever the caller does next -- state without the event
+        # that transactional pairing exists to bind to it.
+        rollback_or_close(conn)
+        raise
 
 
 def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
