@@ -3185,3 +3185,257 @@ the successor's extra statement. The workspace's
 condition on the node, `test_the_run_panel_names_the_run_a_successor_replaces`
 names both ends of the link in the run panel, and
 `test_a_blocked_run_not_yet_answered_offers_supersedes_prefilled` is the offer.
+
+## 2026-09-17 §73 — The audit remediation's third wave: one commit, one check, one parse, one serialiser, and 1,216 fewer lines of unreachable workspace
+
+Wave 3 of `docs/superpowers/plans/2026-09-17-audit-remediation.md`, answering
+six warnings of
+`docs/reviews/2026-09-17-gemini-audit-adversarial-review.md`. Every task in
+this wave removes a second copy of something rather than adding a mechanism,
+and each entry below says what the single copy gave up.
+
+### 73.1 Only the store package root commits a transaction
+
+Eleven functions under `server/store/` each spelled the same four-arm block:
+call the body, `conn.commit()`, convert `psycopg.Error` to `STORE_UNAVAILABLE`
+with no text, and roll back on any other exception including cancellation.
+Eleven copies of the rule that makes transactional pairing hold is eleven
+chances for one of them to drift. They now call `committed_unit`, one context
+manager in `server/store/__init__.py` with those same four arms.
+
+Eleven and not the seventeen the plan asked for. The other six roll back
+without committing: the same refusal shape wearing a different unit, and
+folding them in would have made the manager mean two things. **After the
+change no module under `server/store/` outside `__init__.py` calls `commit()`
+at all**, which is what makes the claim mechanical rather than a count —
+`test_only_the_store_package_root_commits_a_transaction` asserts it
+recursively against a fourteen-file floor, and names the three legitimate
+callers outside the package in its docstring so nobody widens the scope by
+accident.
+
+**Two arms were unpinned and now are not.** Nothing asserted that the commit
+sits inside the `try`, so moving it below the guard passed every test while
+making a failed commit raise raw driver text out of eleven money and audit
+paths; and the rollback arm was asserted by transaction status rather than by
+effect, so replacing it with a commit also passed. One test each, asserting by
+effect. They could not be one test: at a commit-time fault PostgreSQL has
+already aborted the transaction, so the rollback mutation is unobservable
+there.
+
+`server/store/work.py` gained `require_running`, which folds the run lock and
+the spend fence together. That also changed `start_attempt`'s `RUN_NOT_FOUND`
+path, which previously propagated with the transaction left open.
+
+### 73.2 One ten-step check of an accepted artifact, and the sibling check stays
+
+Three readers verified an accepted canonical artifact independently: the
+orchestration proof, the deliverable payload, and the runtime's accepted read.
+Ten steps each, in the same order, with the same refusal codes — and three
+places for one of them to fall behind. `server/methodology/verification.py`
+now holds `verify_accepted`, and the three are its call sites. Their genuine
+differences survive as parameters rather than being normalised away: whether
+citations are re-anchored against pinned evidence, which vendor authority is
+consulted, and which step the caller stops at.
+
+The refactor moved no assertion in any of the three readers' suites, which is
+the strongest available evidence that behaviour did not move: the only test
+file that changed is the new module's own.
+
+**One reachable code movement, kept and recorded.** A dual fault — a blob that
+will not read together with an attempt the store cannot rebuild — now answers
+the record-mismatch code rather than the older one. Both are refusals, the
+proof already ordered it that way, and nothing in the tree names the old order.
+
+**One defence was dropped in the first draft and restored.** The runtime's
+accepted read reached `SKILL.md` through `assemble_authority`, which as a side
+effect verifies every manifest file of that module; the shared step reads the
+one file. A reference file beside `SKILL.md`, tampered on disk under an
+unchanged manifest with a warm digest cache, would then have gone unrefused on
+the read that serves the frontier, the Run and Analysis documents and the
+matrix — not for the module about to run, whose every delivered byte the prompt
+still reads, but for an **upstream** module's siblings. It is not a hole in
+invariant 4, because a consumer's call does not use an upstream module's
+reference files. It was restored anyway, for a reason worth stating: with
+`verify_authority=False` the digests come from the cache, so the call costs
+exactly what the parent paid. The cheaper read was not cheaper.
+
+The restored call sits after the shared steps rather than at its old position
+before validation, so the record checks keep their precedence. The corner that
+gives up: a tampered sibling together with a Markdown that no longer validates
+answers the validator's code rather than `AUTHORITY_BYTES_MISMATCH`. A dual
+fault, both arms fail-closed.
+
+### 73.3 The readers take a row, not five fields
+
+Six functions across those readers took `run_id`, `route_node_id`,
+`attempt_id`, `artifact_sha256` and `record_sha256` as five positional
+neighbours of the same type. `AcceptedRow` — frozen, slotted — is one
+argument. Eight call sites pass every field by keyword, so the transposition
+risk this shape carried is now structurally absent rather than absent on
+inspection.
+
+The suppression budget did not reach the plan's number and could not:
+ruff's `max-args` ceiling here is five, keyword-only parameters count toward
+it, and raising the ceiling is forbidden. Four `noqa: PLR0913` markers remain
+on functions that carry a unit's handles, its row and its pairs.
+
+The floor moved from `> 100` against exactly 101 files to `>= 80`, because
+this same plan deletes files and an unrelated deletion would otherwise turn the
+budget red. What the budget *counts* changed too, at integration; §73.8.
+
+### 73.4 Identity is declared before the store, in one place
+
+Nine route modules hand-parsed a path id, six enforced case visibility with
+their own spelling of one rule, and five spelled the governed envelope — the
+digest, the governed write, the receipt — inline. `server/api/deps.py` now holds one parse and
+one visibility dependency; the six sites enforce one rule — live standing at or
+above READER, refused `CASE_NOT_FOUND`, before any byte is served — and two
+keep a folded query for I/O reasons.
+
+**The known-gaps entry this looks like it closes is not closed.** "Identity
+before the store rests on parameter order" asks for
+`dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
+puts at the front of the list whatever the parameters say. This task did not do
+that. It regularised the order and added a store-touching dependency that
+cannot be ahead of the actor even if a route declared it first, because its own
+signature resolves the actor before the connection — which makes the property
+hold more robustly while still resting on signature order. All twenty-one
+routes were enumerated individually against that claim. The upgrade clause
+stands.
+
+Four of the nine old parsers leaked the client's input onto the exception's
+`__context__`. The single parse raises outside the `except`, so none does.
+
+**One behaviour change.** `server/api/reads/run.py`'s ordering was irregular,
+so regularising it means a malformed run id is now refused before standing on
+that route. The answer carries no bit about whether the case exists, so it
+discloses nothing; it is recorded because it is a change.
+
+Every `GovernedAction` literal is byte-for-byte unchanged, so stored receipts
+still replay.
+
+### 73.5 One canonical JSON serialiser, and one file that must never use it
+
+Fifteen sites serialised JSON for hashing. Seven now call `server/digest.py`'s
+one helper with the four flags they already shared — `sort_keys`, compact
+separators, `ensure_ascii=False`, `allow_nan=False`. The other seven differ for
+reasons, and are left alone.
+
+The eighth is the reason this entry names the file. `server/calculators/
+cash_flow.py` is a **byte-pinned host extension**: `HOST_INTEGRITY_v1.json`
+pins it at 13,785 bytes under a digest, and any edit refuses
+`AUTHORITY_BYTES_MISMATCH`. Converting it broke the forecast extension, and the
+repair was to revert the file, **not** to regenerate the manifest — the
+manifest's own digest is pinned in `server/methodology/host_pin.py`, and
+`server/engine/route.py` writes it into a frozen route predicate covered by
+`route_digest`, so re-pinning would move every stored route pin carrying CP-CF.
+A host extension is not refactorable in place. That is the cost of pinning it,
+and it is the correct cost.
+
+Thirteen golden digests were computed before any edit and did not move; nine
+were reproduced from scratch in a bare interpreter holding no repository code.
+Three of the pins are blind to the flag they guard because their fixtures are
+all-ASCII; the forecast one matters, because a facility name can carry
+non-ASCII into those bytes.
+
+Four private cross-package imports were made public in passing, `_digest_of`
+and `_reported_charge` among them.
+
+### 73.6 The workspace loses 1,216 lines nothing could reach
+
+A reachability walk from `src/main.tsx` over the static import graph found 76
+reachable files and eight unreachable components — 992 lines — plus a helper
+module and three wire modules reachable only through a barrel export no live
+section imported from. All are deleted, with the test cases that existed only
+to name them. `shortDigest` moved to its intended home in the design system.
+
+`frontend/tests/unit/reachability.test.ts` is what stops the next orphan: it
+walks the same graph and fails on a file under `src/` nothing reaches. It walks
+`.tsx` only while the lint rule beside it walks `.ts` too.
+
+Nine rows of `docs/feature-status.csv` still cite deleted files.
+
+### 73.7 What the integration found that six green branches did not
+
+Recorded because it is the argument for the gate rather than a defect in any
+task. All six branches were independently green and all six overlapped work
+committed on the shared branch while they ran. Git reported four conflicts. It
+also merged **four breakages silently**, with no marker, each caught by lint or
+types over the combination and by nothing else:
+
+one module lost the driver import that another commit's new `except` clause
+needed; two test files named a symbol that a rename had made public; and one
+called a function with the five fields another task had replaced by a row. A
+branch cannot see either of these, because each is a disagreement between two
+commits that were never in the same tree until this merge.
+
+### 73.8 The suppression budget counts positional width, by the owner's decision
+
+Integrating the wave failed the argument-count budget, 53 markers against a
+ceiling of 52 whose own docstring said never to raise it. The rise was real and
+perverse. Two of the wave's suppressions sit on functions that each replaced
+several copies of themselves — the shared verification reader of §73.2, and
+the one governed envelope of §73.4, which five routes had been spelling inline
+while a module-local helper served the rest. The copies were never suppressed,
+so the budget never counted them: about 346 lines of duplication left the tree
+and the number went up by one.
+
+Raising it to 53 would have been a threshold moved to obtain a pass, which the
+engineering contract forbids, so the decision went to the owner. What was
+checked first, because a stale measurement is the rationalisation this rule
+exists to refuse: every one of the 53 markers was parsed and none was stale,
+and `governed` takes a connection plus seven keyword-only arguments against a
+ceiling of five, so no permitted move clears it.
+
+**The owner's decision was to change the unit.** Two candidates were measured
+and rejected before the one adopted. Charging only suppressions that are *not*
+shared — a suppressed function called from three or more other modules counting
+as consolidation rather than width — **rises** here, 47 to 49, because
+consolidating callers drains other helpers' caller counts and pushes three
+pre-existing shared functions across the threshold; it is unstable under the
+refactor it was meant to reward. And any unit defined over raw marker counts
+rises by construction, for the reason above.
+
+What is charged now is a function taking more than five **positional**
+parameters. That is the defect the rule exists for: a caller can transpose two
+same-typed neighbours silently, and cannot when the surplus is keyword-only —
+the exact property §73.3's narrowing established about its eight call sites.
+Clearing a charge by making parameters keyword-only is the fix rather than an
+evasion, which is the property worth having: gaming this metric means repairing
+the hazard.
+
+Positional width is **22 at the wave's base and 22 after it**. The wave added
+no new way to call anything wrongly.
+
+**The criterion that chose between the three is worth more than the unit it
+chose.** Two of the three were gameable in the direction of making the code
+*worse*: the caller-count unit rewarded the consolidation it was built to
+reward the opposite of, and a count of named parameters would have let a
+six-argument function go from charged to clear by becoming `(a, b, *rest)`.
+The surviving unit is the one where gaming it is the fix. A gate should be
+chosen by asking what its cheapest evasion does to the code, and kept only if
+the answer is "improves it".
+
+Every suppression is still parsed, and a marker ruff would no longer raise
+fails its own assertion, so the keyword rule cannot become a hiding place for a
+stale one. Both arms were mutation-checked. The test's docstring carries the
+old unit, its 52, and both rejected alternatives with their numbers, so the
+next reader does not have to reconstruct any of this.
+
+Two leaks of the counter were closed after the peer session named them, and
+neither moves the number today. A method's receiver is not an argument its
+caller passes, so `self` and `cls` are dropped as ruff drops them; the two
+constructors carrying a marker were each over-charged by one and stay charged
+either way. And `*args` is unbounded positional width that a count of named
+parameters reads as none, so it is charged outright — latent today, and the
+worse of the two, because it would have let a six-argument function go from
+charged to clear by getting strictly worse.
+
+**What the number hides is a finding of its own.** The 22 are not scattered:
+eighteen are under `server/api/` — the command handlers and the section reads
+— at six to nine positional parameters, and twenty-one of the twenty-two
+declare no keyword-only parameter at all. The other four are the proof and
+deliverable constructors, `store/runs.py`'s `_transition` and
+`evidence/page.py`'s `_frame`. The layer has not partially adopted the fix and
+run out of road; the pattern was never reached for. No task in this plan owns
+that layer, so nothing here changes it — it is recorded for the phase audit.

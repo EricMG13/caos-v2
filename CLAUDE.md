@@ -1432,10 +1432,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   property of a pinned dependency rather than something the code says out loud.
   `test_an_anonymous_request_opens_no_store_connection` counts the dependency's
   calls, so a reorder and a FastAPI that stopped doing this both fail there --
-  which is what makes this a limit rather than a defect. *Upgrade:*
+  which is what makes this a limit rather than a defect. Since §73.4 the order
+  is remembered in one place rather than per route: all twenty-one routes reach
+  the store through shared dependencies in `server/api/deps.py`, and the
+  store-touching one resolves the actor before the connection in its own
+  signature, so it cannot be ahead of identity even where a route declares it
+  first. That makes the property hold more robustly and does **not** discharge
+  this entry, because it still holds by signature order. *Upgrade:* unchanged --
   `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
-  inserts at the front of the list whatever the parameters say; worth taking the
-  day a third route arrives and the order has to be remembered three times.
+  inserts at the front of the list whatever the parameters say. What has gone
+  is the reason to defer it: the order no longer has to be remembered per
+  route, so the change is now one edit per decorator over one known set.
 - **A case stream polls.** `server/api/stream.py`'s `case_tail` re-reads the
   case's audit actions, the run's events and the caller's standing every
   `POLL_INTERVAL` (0.5 s) until `TAIL_DEADLINE` (300 s) or standing is lost,
