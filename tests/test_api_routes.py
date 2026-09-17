@@ -898,6 +898,14 @@ def test_the_surface_is_exactly_the_routes_it_declares(
         ),
         "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval": "approve",
         "/api/v1/qualification/{evidence_sha256}/verdict": "sign_verdict",
+        # Task 12.1: the seven governed writes that had no request path.
+        "/api/v1/cases/{case_id}/members": "grant_standing",
+        "/api/v1/cases/{case_id}/members/{user_id}/revocation": "revoke_standing",
+        "/api/v1/cases/{case_id}/sources/{source_id}/withdrawal": "withdraw",
+        "/api/v1/cases/{case_id}/runs/{run_id}/revisions": "save",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/signature": "sign",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/freeze": "freeze",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/filing": "file",
     }
 
 

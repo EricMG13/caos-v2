@@ -24,7 +24,7 @@ replay before the lookup is reached.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
@@ -36,10 +36,14 @@ from pydantic import BaseModel
 from server.digest import canonical_digest
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, rollback_or_close
-from server.store.audit import GovernedAction, governed_write
+from server.store.audit import GovernedAction, digest_of, governed_write
 
 # The scope of a command that has no case yet: create case.
 NIL_SCOPE = UUID(int=0)
+# The one key the envelope adds to every command's audit payload, binding the
+# event to the request that made it. A reader that rebuilds a payload to compare
+# its digest must account for it: `payload_digests` is how.
+REQUEST_KEY = "request_sha256"
 _SUCCESS = frozenset({200, 201, 202})
 
 
@@ -142,6 +146,7 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
     action: GovernedAction,
     write: Callable[[StoreConnection], tuple[int, BaseModel]],
     prepare: Callable[[StoreConnection], None] | None = None,
+    after_event: Callable[[StoreConnection, str], None] | None = None,
 ) -> CommandResult:
     """Replay, refuse, or commit `write` with its audit event and receipt.
 
@@ -153,6 +158,11 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
     and receipt; the receipt is inserted after it and the audit link after
     that, in one commit. A `NOT_AUTHORISED` from the unit (standing lost by
     commit time) answers `CASE_NOT_FOUND`, as every unseen case does.
+
+    `after_event` is `governed_write`'s, passed through for the one command
+    that must store an object naming its own audit link -- a filing's detached
+    receipt. It runs last, after the receipt row, so what it writes is read
+    back from the store and never replayed from a receipt.
     """
     if scope not in (action.case_id, NIL_SCOPE):
         raise _Misuse
@@ -162,13 +172,13 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
         return _replay(conn, stored, request_sha256)
 
     answered: list[tuple[int, dict[str, Any]]] = []
-    governed = replace(
-        action, payload={**action.payload, "request_sha256": request_sha256}
-    )
+    governed = replace(action, payload=_WithRequest(action.payload, request_sha256))
     try:
         if prepare is not None:
             _prepare(conn, prepare)
-        governed_write(conn, governed, _unit(row, write, answered))
+        governed_write(
+            conn, governed, _unit(row, write, answered), after_event=after_event
+        )
     except _Twin:
         stored = _lookup(conn, row)
         if stored is None:
@@ -181,6 +191,46 @@ def run_command(  # noqa: PLR0913 -- one command's identity and unit, keyword-on
         raise
     [(status, body)] = answered
     return CommandResult(status, body, replayed=False)
+
+
+class _WithRequest(Mapping[str, Any]):
+    """The action's payload and the request digest, as a view rather than a copy.
+
+    `governed_write` digests the payload *after* the unit's write has run, and a
+    write that completes its own payload -- a filing naming the receipt it just
+    made -- fills the caller's mapping in place inside the unit. A copy taken
+    here would be taken before that, so the event would bind a payload the
+    command never finished writing, and every reader that rebuilds it would
+    refuse. Found by driving a filing over HTTP and reading it back
+    (`tests/test_governed_write_routes.py::test_a_deliverable_filed_over_http_reads_back_from_the_committee_section`).
+
+    A payload of its own carrying `request_sha256` would be shadowed by the
+    envelope's: `__getitem__` would answer the envelope's value while `__iter__`
+    and `__len__` counted the payload's one key, so the view would disagree with
+    itself. No `GovernedAction` in the tree carries that key, and this is the one
+    place that would hide it, so it is refused rather than left to be found.
+    """
+
+    __slots__ = ("_payload", "_request_sha256")
+
+    def __init__(self, payload: Mapping[str, Any], request_sha256: str) -> None:
+        if REQUEST_KEY in payload:
+            raise Refusal(RefusalCode.INTERNAL_FAULT)
+        self._payload = payload
+        self._request_sha256 = request_sha256
+
+    def __getitem__(self, key: str) -> object:
+        if key == REQUEST_KEY:
+            return self._request_sha256
+        return self._payload[key]
+
+    def __iter__(self) -> Iterator[str]:
+        yield from self._payload
+        if REQUEST_KEY not in self._payload:
+            yield REQUEST_KEY
+
+    def __len__(self) -> int:
+        return len(self._payload) + (REQUEST_KEY not in self._payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,3 +310,38 @@ def _replay(
     if stored.request_sha256 != request_sha256:
         raise Refusal(RefusalCode.IDEMPOTENCY_KEY_REUSED)
     return CommandResult(stored.status, stored.receipt, replayed=True)
+
+
+def payload_digests(
+    conn: StoreConnection, *, scope: UUID, actor_id: UUID, payload: Mapping[str, Any]
+) -> frozenset[str]:
+    """Every digest an audit event for `payload` may legitimately carry.
+
+    A payload is digested and never stored (`digest_of`), so a reader that
+    wants to prove an event bound exactly these fields has to rebuild what the
+    writer built. There are two writers: a store function called directly,
+    whose event binds the payload as given, and a command, whose envelope adds
+    `request_sha256`. The second is not recomputable from the payload -- it is
+    a digest of the whole request -- so it is read back from the receipts this
+    actor committed on this scope, which is the join
+    `docs/DECISIONS.md`'s Repair Phase 4 ledger entry says no column makes.
+
+    `scope` is the **receipt's** scope, which is the case for every command but
+    one: `CREATE_CASE` records its receipt under `NIL_SCOPE` while its audit
+    event sits on the case it made, so a caller passing that case id could never
+    rebuild a `CASE_CREATED` payload. It would refuse fail-closed with nothing
+    saying why, which is why it is said here. No reader asks for that today.
+
+    Bounded by one actor's committed commands on one case. The comparison stays
+    exact in both directions: an event whose payload had any other field, or a
+    different value in one of these, matches neither digest.
+    """
+    exact = dict(payload)
+    digests = {digest_of(exact)}
+    rows = conn.execute(
+        "SELECT request_sha256 FROM command_requests"
+        " WHERE scope = %s AND actor_id = %s",
+        (scope, actor_id),
+    ).fetchall()
+    digests |= {digest_of({**exact, REQUEST_KEY: str(row[0])}) for row in rows}
+    return frozenset(digests)

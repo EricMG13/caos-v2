@@ -61,6 +61,10 @@ PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
 PAGE_LINES_MAX = 2000  # beyond it a page is partial, `LIST_TRUNCATED`
 PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `PAGE_NOT_AVAILABLE`
 MOMENT_CHARS = 64  # an ISO-8601 instant with its offset, as `read_verdict` reads it
+# `server/deliverable/revisions.py`'s own bounds, restated where the wire is
+# what refuses a draft past them.
+NARRATIVE_CHARS = 2000
+NARRATIVE_SPANS = 64
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
@@ -288,6 +292,14 @@ class ActionName(StrEnum):
     START_RUN = "START_RUN"
     RETRY_RUN = "RETRY_RUN"
     CANCEL_RUN = "CANCEL_RUN"
+    # Task 12.1. Membership is not here: no section serves an Admin panel to
+    # offer it from, and an action no read judges is one this enum would only
+    # claim. Its routes exist and are proven against the commands themselves.
+    WITHDRAW_SOURCE = "WITHDRAW_SOURCE"
+    SAVE_REVISION = "SAVE_REVISION"
+    SIGN_OPINION = "SIGN_OPINION"
+    FREEZE_DELIVERABLE = "FREEZE_DELIVERABLE"
+    FILE_DELIVERABLE = "FILE_DELIVERABLE"
 
 
 class ActionView(BaseModel):
@@ -665,8 +677,18 @@ class NarrativeFigure(BaseModel):
 class NarrativeSpan(BaseModel):
     model_config = _CLOSED
 
-    text: Annotated[str, Field(max_length=2000)] | None
+    text: Annotated[str, Field(max_length=NARRATIVE_CHARS)] | None
     figure: NarrativeFigure | None
+
+
+class NarrativeFigureRef(BaseModel):
+    """What a draft may say about a figure: which citation of which node. The
+    quote and its coordinates are the host's, read from the accepted record."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    citation_index: Annotated[int, Field(ge=0)]
 
 
 class ReportArtifact(BaseModel):
@@ -1011,6 +1033,143 @@ class VerdictRecorded(BaseModel):
     expires_at: AwareDatetime
 
 
+class GrantStanding(BaseModel):
+    """Give or replace one member's standing. The member is named; the actor
+    granting it is derived, and holds ADMIN on the case."""
+
+    model_config = _CLOSED
+
+    user_id: UUID
+    standing: Standing
+
+
+class StandingGranted(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    user_id: UUID
+    standing: Standing
+
+
+class RevokeStanding(BaseModel):
+    """The member is in the path; there is nothing else to say."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class StandingRevoked(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    user_id: UUID
+
+
+class WithdrawSource(BaseModel):
+    """Invariant 1's second half. The source is in the path."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class SourceWithdrawn(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    source_id: UUID
+
+
+class NarrativeDraft(BaseModel):
+    """One span a draft offers: prose, or a reference to a citation the host
+    resolves. Exactly one of the two, and a figure names only which citation --
+    the document, page and quote are the host's to fill from the record."""
+
+    model_config = _CLOSED
+
+    text: Annotated[str, Field(max_length=NARRATIVE_CHARS)] | None
+    figure: NarrativeFigureRef | None
+
+
+class SaveRevision(BaseModel):
+    """A draft over one run's accepted artifacts.
+
+    `expected_revision_id` is the latest revision of that run the client had
+    when it composed this draft, null when it saw none: a save that raced
+    another save is refused rather than quietly making a second head.
+    """
+
+    model_config = _CLOSED
+
+    expected_revision_id: UUID | None
+    narrative: Annotated[
+        list[Annotated[list[NarrativeDraft], Field(max_length=NARRATIVE_SPANS)]],
+        Field(max_length=NARRATIVE_SPANS),
+    ]
+
+
+class RevisionSaved(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+
+
+class SignOpinion(BaseModel):
+    """Invariant 5: the signature binds the exact bytes the signer reviewed."""
+
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class OpinionSigned(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    signed_by: UUID
+
+
+class FreezeDeliverable(BaseModel):
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class DeliverableFrozen(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    frozen_by: UUID
+
+
+class FileDeliverable(BaseModel):
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class DeliverableFiled(BaseModel):
+    """The filing's own receipt. The detached one -- renderer and filing link --
+    is derived from the audit event this unit writes, so it is read from the
+    Committee section rather than answered here."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    filed_by: UUID
+
+
 V1_COMMANDS: tuple[type[BaseModel], ...] = (
     CreateCase,
     CaseCreated,
@@ -1028,6 +1187,20 @@ V1_COMMANDS: tuple[type[BaseModel], ...] = (
     RunWork,
     SignVerdict,
     VerdictRecorded,
+    GrantStanding,
+    StandingGranted,
+    RevokeStanding,
+    StandingRevoked,
+    WithdrawSource,
+    SourceWithdrawn,
+    SaveRevision,
+    RevisionSaved,
+    SignOpinion,
+    OpinionSigned,
+    FreezeDeliverable,
+    DeliverableFrozen,
+    FileDeliverable,
+    DeliverableFiled,
 )
 
 

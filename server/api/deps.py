@@ -164,6 +164,22 @@ def run_path(run_id: str) -> UUID:
     return parse_uuid(run_id, RefusalCode.RUN_NOT_FOUND)
 
 
+def source_path(source_id: str) -> UUID:
+    """The path's source id, or the one answer a source nobody may use gets."""
+    return parse_uuid(source_id, RefusalCode.EVIDENCE_NOT_AVAILABLE)
+
+
+def revision_path(revision_id: str) -> UUID:
+    """The path's revision id, or `DELIVERABLE_NOT_FOUND`."""
+    return parse_uuid(revision_id, RefusalCode.DELIVERABLE_NOT_FOUND)
+
+
+def member_path(user_id: str) -> UUID:
+    """The path's member. A subject that is not an identifier is a malformed
+    request, not a missing case: the caller already reads this case."""
+    return parse_uuid(user_id, RefusalCode.REQUEST_INVALID)
+
+
 def run_query(run: str | None = None) -> UUID | None:
     """The `run` query, or `RUN_NOT_FOUND` for one that names no run."""
     return None if run is None else parse_uuid(run, RefusalCode.RUN_NOT_FOUND)
@@ -197,6 +213,9 @@ def visible_case(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
 
 CasePath = Annotated[UUID, Depends(case_path)]
 RunPath = Annotated[UUID, Depends(run_path)]
+SourcePath = Annotated[UUID, Depends(source_path)]
+RevisionPath = Annotated[UUID, Depends(revision_path)]
+MemberPath = Annotated[UUID, Depends(member_path)]
 RunQuery = Annotated[UUID | None, Depends(run_query)]
 RevisionQuery = Annotated[UUID, Depends(revision_query)]
 VisibleCase = Annotated[Standing, Depends(visible_case)]

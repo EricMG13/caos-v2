@@ -263,6 +263,28 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   already works that way, which is the whole of §55's design -- or re-render
   and re-file on a renderer change, which is a governed write and a decision.
 
+- **The committee read's declared I/O is stated for one signer, and a second is
+  reachable.** Task 12.1's filing controls are judged by rebuilding each act's
+  audit payload, and an event a command wrote binds a request digest that is not
+  recomputable from the payload, so `payload_digests` reads back the receipts
+  that actor committed on the case -- one round trip **per actor the section
+  looks for**. `deliverable_opinions` is keyed `(case_id, revision_id,
+  signed_by, signed_at)` and `sign_opinion_in` refuses only a *frozen* revision,
+  so a second approver may sign before the freeze and the frozen committee read
+  then costs 53 where `IO_BUDGET["frozen"]` declares 52 -- asserted with `==`,
+  against fixtures that all carry one signer. Nothing fails today and nothing is
+  wrong on the wire; what is wrong is that a declaration meant to bound a request
+  path is true of one shape of that path. The number is deliberately not raised:
+  `io_budget.py --assert` and the equality test exist to make an unnoticed read
+  fail loudly, and a budget fitted to the widest shape stops measuring the common
+  one -- which is the same move as changing a gate to get a pass, one step
+  removed. Found by the scoped re-review of the C1 fix, which measured both
+  shapes rather than reading the comment. *Upgrade:* declare the budget as a
+  function of the signers the read found, so the assertion measures the shape it
+  ran against, the day a case has a second approver -- or, if the reads are the
+  problem rather than the declaration, one `command_requests` read for every
+  actor at once, which the join already permits.
+
 - **The wire says "come back later" honestly at 5xx and not at 400.** §75 split
   the twenty-four permanently-failing codes off 503: 500 for a fault no retry
   clears, 503 with `Retry-After` for the one that a retry does. What it did not

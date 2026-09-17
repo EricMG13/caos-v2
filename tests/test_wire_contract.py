@@ -36,15 +36,23 @@ from server.api.wire import (
     CitationView,
     CreateCase,
     CreateRun,
+    DeliverableFiled,
+    DeliverableFrozen,
     DirectoryBody,
     DirectoryDocument,
     EdgeView,
+    FileDeliverable,
     FrameView,
+    FreezeDeliverable,
     GateApproved,
     GatePreviewDocument,
     GateView,
+    GrantStanding,
     HandoffView,
+    NarrativeDraft,
+    NarrativeFigureRef,
     NodeView,
+    OpinionSigned,
     PageBody,
     PageDocument,
     PageLine,
@@ -53,6 +61,8 @@ from server.api.wire import (
     RectView,
     RefusalBody,
     RetryRun,
+    RevisionSaved,
+    RevokeStanding,
     RouteChoice,
     RunBody,
     RunCreated,
@@ -62,17 +72,23 @@ from server.api.wire import (
     RunSummary,
     RunView,
     RunWork,
+    SaveRevision,
     SectionNote,
     ServedRole,
     SetVersion,
+    SignOpinion,
     SignVerdict,
     SourceRow,
     SourcesAdmitted,
+    SourceWithdrawn,
+    StandingGranted,
+    StandingRevoked,
     StartRun,
     Subject,
     UploadBody,
     UploadDocument,
     VerdictRecorded,
+    WithdrawSource,
     WorkView,
     wire_schema,
 )
@@ -321,6 +337,28 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     VerdictRecorded: frozenset(
         {"evidence_sha256", "reviewer_id", "decided_at", "expires_at"}
     ),
+    # The seven governed writes Task 12.1 routes: membership, withdrawal and
+    # the filing chain. Requests first, then their receipts.
+    GrantStanding: frozenset({"user_id", "standing"}),
+    StandingGranted: frozenset({"case_id", "user_id", "standing"}),
+    RevokeStanding: frozenset(),
+    StandingRevoked: frozenset({"case_id", "user_id"}),
+    WithdrawSource: frozenset(),
+    SourceWithdrawn: frozenset({"case_id", "source_id"}),
+    NarrativeFigureRef: frozenset({"route_node_id", "citation_index"}),
+    NarrativeDraft: frozenset({"text", "figure"}),
+    SaveRevision: frozenset({"expected_revision_id", "narrative"}),
+    RevisionSaved: frozenset({"case_id", "run_id", "revision_id", "payload_sha256"}),
+    SignOpinion: frozenset({"payload_sha256"}),
+    OpinionSigned: frozenset({"case_id", "revision_id", "payload_sha256", "signed_by"}),
+    FreezeDeliverable: frozenset({"payload_sha256"}),
+    DeliverableFrozen: frozenset(
+        {"case_id", "revision_id", "payload_sha256", "frozen_by"}
+    ),
+    FileDeliverable: frozenset({"payload_sha256"}),
+    DeliverableFiled: frozenset(
+        {"case_id", "run_id", "revision_id", "payload_sha256", "filed_by"}
+    ),
 }
 
 REQUESTS: tuple[type[BaseModel], ...] = (
@@ -332,6 +370,13 @@ REQUESTS: tuple[type[BaseModel], ...] = (
     RetryRun,
     CancelRun,
     SignVerdict,
+    GrantStanding,
+    RevokeStanding,
+    WithdrawSource,
+    SaveRevision,
+    SignOpinion,
+    FreezeDeliverable,
+    FileDeliverable,
 )
 
 # What `frontend/src/wire/v1/shape.ts` can express. `title` and `description`
@@ -460,6 +505,11 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "START_RUN",
         "RETRY_RUN",
         "CANCEL_RUN",
+        "WITHDRAW_SOURCE",
+        "SAVE_REVISION",
+        "SIGN_OPINION",
+        "FREEZE_DELIVERABLE",
+        "FILE_DELIVERABLE",
     }
     assert [model.__name__ for model in V1_DOCUMENTS] == [
         "DirectoryDocument",
@@ -573,7 +623,7 @@ def test_every_section_router_declares_its_store_budget() -> None:
 
 def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> None:
     assert set(REQUESTS) <= set(V1_COMMANDS)
-    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 16
+    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 30
     defs = json.loads(COMMITTED.read_text(encoding="utf-8"))["$defs"]
     for model in V1_COMMANDS:
         assert model.__name__ in defs, model.__name__
