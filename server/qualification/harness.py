@@ -492,9 +492,14 @@ def _affordable(
         harness.ceiling
     ):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
-    # Every node of a case's route reserves one worst case against that run's
-    # ceiling; a route that cannot fit would pay for calls it cannot finish.
-    # A floor, not a bound: a refused analysis reserves again.
+    # Every node reserves *at most* one worst case against that run's ceiling, so
+    # a route that cannot fit one per node would pay for calls it cannot finish.
+    # Since Task 8.2 a node reserves the priced request instead, which is well
+    # under a worst case, so this floor is conservative rather than exact and
+    # refuses sets the loop would in fact finish -- the Phase 5 ledger entry
+    # records that and owes the upgrade. The comment said "reserves one worst
+    # case" until the Completion Phase 8 adversarial audit read it against the
+    # runtime. A floor, not a bound: a refused analysis reserves again.
     call = Fraction(worst_case(harness.price))
     if any(call * len(route.nodes) > Fraction(harness.run_ceiling) for route in routes):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)

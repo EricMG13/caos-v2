@@ -33,6 +33,9 @@ names. Two rows are inferred; the note says from what.
 
 ## The register
 
+<!-- emitted: register table. Everything between these markers is what
+`scripts/document_register.py --report` prints; a test holds them equal, so
+a row typed here is a row that fails. -->
 | id | issuer | document | status | modules | pathways | bytes | fits ceiling | sha256 |
 |---|---|---|---|---|---|---|---|---|
 | `vmo2-q3-2025-earnings` | VMO2 | Virgin Media O2 Q3 2025 earnings release | in_hand | CP-0, CP-L10, CP-5, CP-1, CP-1B, CP-2, CP-8 | LITE_EARNINGS_UPDATE, LITE_PORTFOLIO_DECISION, EARNINGS_UPDATE | 144538 | yes | `505bf1a0f4181c9c…` |
@@ -52,6 +55,7 @@ names. Two rows are inferred; the note says from what.
 | `cp-dr-research-brief` | — | A CP-DR research brief and the supplied evidence its questions need | to_author | CP-DR | LITE_DEEP_RESEARCH, DEEP_RESEARCH | — | — | — |
 | `distressed-disclosure-statement` | — | A distressed issuer's disclosure statement, plan or restructuring support agreement | not_available | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
 | `answer-key-3issuer` | CCL, BA, F | ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer | **key source, never admitted** | — | — | — | — | — |
+<!-- /emitted -->
 
 Sixteen documents: six `in_hand`, seven `to_source`, two `to_author`, one
 `not_available`; plus one key source. Three of the six in hand are the

@@ -118,7 +118,13 @@ def qualification_performed(*, blocked_label: str | None = None) -> PerformedEvi
                     *matrix.rows,
                     MatrixRow(
                         case_label=blocked_label,
-                        proven=False,
+                        # `matrix._row` sets `proven = refusal is None`, so
+                        # `proven=False` with no refusal is a row the matrix
+                        # cannot produce. The Completion Phase 8 adversarial
+                        # audit found the fixture asserting a shape the code
+                        # forbids, which is how a suite starts proving something
+                        # other than what it claims.
+                        proven=True,
                         refusal=None,
                         met=(),
                         missed=(),

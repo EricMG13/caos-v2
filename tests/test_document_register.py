@@ -204,9 +204,19 @@ def test_the_committed_table_is_the_one_the_script_emits() -> None:
     emitted = document_register.report(register, REPO).rstrip("\n")
     committed = (REPO / "qualification" / "DOCUMENTS.md").read_text(encoding="utf-8")
 
-    assert emitted in committed, (
-        "qualification/DOCUMENTS.md does not carry the emitted table; re-run"
-        " `scripts/document_register.py --report` and paste it in"
+    # Equality inside a delimiter, not containment. Containment catches a row
+    # deleted or altered and is blind to one *added*, which is the likeliest hand
+    # edit and the one this test exists for: the file already carries a second,
+    # hand-written table, so a reader cannot tell emitted rows from typed ones by
+    # eye either. Found by the Completion Phase 8 adversarial audit, which typed
+    # a seventeenth row after the table and watched the test pass.
+    opened = committed.index("<!-- emitted: register table.")
+    start = committed.index("-->", opened) + len("-->\n")
+    end = committed.index("<!-- /emitted -->", start)
+    assert committed[start:end].strip("\n") == emitted, (
+        "the delimited table in qualification/DOCUMENTS.md is not what"
+        " `scripts/document_register.py --report` emits; re-run it and paste it"
+        " between the markers"
     )
     # And the prose's own counts, which no emission covers because a person
     # writes them: a row count that disagrees with the table is the same defect

@@ -424,6 +424,17 @@ def _row(
             raise
         refusal = unattributed.code
         cited = set()
+    try:
+        registers_met = _registers_met(conn, blobs, bundle, case=case, run_id=run_id)
+    except Refusal as unreadable:
+        if unreadable.code not in _ROW_REFUSALS:
+            raise
+        # The bundle failing its own integrity check is this row's uncertainty,
+        # not the module's miss. Scoring it `False` said the module wrote the
+        # wrong cell, and a reviewer went hunting the model for a vendored-bytes
+        # fault; `None` says the comparison was not made, which is the truth.
+        refusal = unreadable.code
+        registers_met = None
     met = tuple(expect for expect in case.expects if _matches(expect, cited))
     return MatrixRow(
         case_label=case.label,
@@ -441,7 +452,7 @@ def _row(
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
         projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
-        registers_met=_registers_met(conn, blobs, bundle, case=case, run_id=run_id),
+        registers_met=registers_met,
     )
 
 
@@ -712,6 +723,17 @@ def _registers_met(
     if route is None:
         return False
     accepted = _accepted_rows(conn, run_id)
+    # One load for the whole row, not one per module: `load_vendor_contract` has
+    # no cache (`canonical._contract` is the cached reader, and this is not it),
+    # so asking per module recompiled and re-hashed twelve vendor files each
+    # time -- measured at 33 ms and 148 KB per call. And its own refusal is
+    # raised here rather than inside the per-module guard below, because an
+    # `AUTHORITY_BYTES_MISMATCH` is the bundle failing its integrity check, not
+    # the module writing the wrong cell: swallowing it as a miss pointed a
+    # reviewer at the model for a vendored-bytes fault. `build_matrix` turns it
+    # into the row's own refusal. Both found by the Completion Phase 8
+    # adversarial audit, which measured the cache claim and found it false.
+    find_registers = load_vendor_contract(bundle).completeness_check.find_registers
     wanted: dict[str, list[ExpectedRegister]] = {}
     for expect in case.expects_register:
         wanted.setdefault(expect.module_id, []).append(expect)
@@ -741,19 +763,23 @@ def _registers_met(
                 record_sha256=str(record_sha256),
                 accepted=accepted,
             )
-            # Resolved inside this guard rather than before the loop: an
-            # `AUTHORITY_BYTES_MISMATCH` from the bundle used to propagate out of
-            # `build_matrix` and turn a scorable set into an exception, where
-            # every other refusal here is a miss. The contract is cached per
-            # manifest digest, so asking once per module costs nothing. Found by
-            # the Completion Phase 8 confidence review.
-            find_registers = load_vendor_contract(
-                bundle
-            ).completeness_check.find_registers
-            registers = find_registers(
-                markdown.decode("utf-8"),
-                [expect.register_id for expect in expects],
-            )
+            # Asked exactly as the bundle asks it: no `register_ids`, so the
+            # locator uses its own pattern, which is what the vendor's `check()`
+            # effectively reads against. Narrowing the list changed the answer.
+            # The locator walks the few lines above each table nearest-first and
+            # breaks on the first line naming *any* id it was given, keeping the
+            # first table it finds -- so a handoff carrying several registers with
+            # identical columns (CP-L10 writes five, all required, all six-row)
+            # answered a narrowed `TL10.2` from whichever of them the module's own
+            # appendix prose happened to sit above. The host and the bundle then
+            # disagreed about which table the register is, in both directions: a
+            # key met from a sibling table while the honest one said MISSING, and
+            # an honest handoff's key missed because the prose named a different
+            # sibling first. Found by the Completion Phase 8 adversarial audit,
+            # which built a handoff passing the vendor's own completeness check
+            # with zero violations in which the shipped key was met from the
+            # wrong register.
+            registers = find_registers(markdown.decode("utf-8"))
             if not isinstance(registers, dict):
                 return False
             met = all(_matches_register(registers, expect) for expect in expects)
@@ -904,9 +930,17 @@ def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool
 
 
 # A row's own uncertainty, not a reason to end the matrix: a pin that no longer
-# reads, or a proven source withdrawn before its quotes were scored.
+# reads, a proven source withdrawn before its quotes were scored, or vendored
+# bytes that no longer match the manifest. The last one is here because the
+# register reader verifies the bundle where the cached validator does not, so it
+# is the one place a tampered vendor script surfaces during scoring -- and it
+# belongs in the row's refusal rather than in its comparison.
 _ROW_REFUSALS = frozenset(
-    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED}
+    {
+        RefusalCode.ROUTE_IDENTITY_INVALID,
+        RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED,
+        RefusalCode.AUTHORITY_BYTES_MISMATCH,
+    }
 )
 
 

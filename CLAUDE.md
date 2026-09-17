@@ -181,26 +181,30 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 8.**
 
-- **A register is located by vendor prose, and a key trusts that location.**
-  `server/qualification/matrix.py` asks the bundle's own
-  `completeness_check.find_registers` where a register is, because invariant 4
-  says the host adds no table parser. That locator finds a register by looking
-  for its id in the few non-empty lines above a pipe table and keeps the first
-  match, so a handoff whose prose names `TL10.2` above an earlier table makes
-  that table answer as `TL10.2` -- and the module writes the prose. The host also
-  calls the locator with a **narrowed** id list where the vendor calls it with
-  all of them, which can attribute an intervening register's table to the one
-  asked for. Neither is a divergence from the authority: the vendor's own
-  `check()` reads the same table, so the host and the bundle agree about what
-  the register is, and a key measures what the bundle would measure. Reachability
-  is thin -- a required register absent from its declared place is refused at
-  validation, and `TL10.2` carries six minimum rows and critical columns -- but
-  a reader of Task 8.1's "located by the vendor's own `find_registers`" could
-  take the location for a fact the host established, and it is not.
-  *Upgrade:* the day a register key is authored for a module whose registers are
-  optional, pass the full id list as the vendor does and compare, which turns a
-  misattribution into a disagreement the host can refuse. Found by the
-  Completion Phase 8 confidence review, which built both tables.
+- ~~**A register is located by vendor prose, and a key trusts that location.**~~
+  Struck in the commit that closed it, and worth reading as an example of an
+  entry being wrong in the direction that matters. It said the narrowing was
+  "not a divergence from the authority: the vendor's own `check()` reads the
+  same table, so the host and the bundle agree". Both halves were false. The
+  host asked the vendor's locator with a **narrowed** register-id list where
+  the bundle's own `check()` asks with none, and the locator walks the lines
+  above each table nearest-first, breaking on the first line naming any id it
+  was given and keeping the first table it binds -- so the id list decides which
+  table answers. CP-L10 is required to write five registers with identical
+  columns and the same six-row minimum, and its own `SKILL.md` asks it for
+  appendix prose naming the TL10 family, so a handoff could be scored `met` from
+  a sibling register while the honest one said `MISSING`, and an honest handoff's
+  key could miss because the prose named a different sibling first. The entry's
+  reachability claim was wrong for the same reason, and its upgrade deferred the
+  fix to a module "whose registers are optional" when CP-L10's are all required
+  and the divergence was live on the only register key that ships. Closed by
+  asking the locator exactly as the bundle asks it -- no id list --
+  which `tests/test_qualification_matrix.py::test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it`
+  holds by building both readings of one handoff. Found by the Completion Phase 8
+  adversarial audit, which constructed a handoff passing the vendor's own
+  completeness check with zero violations in which the shipped key was met from
+  the wrong register. The confidence review had looked at the same code and
+  recorded it as safe; this is what a second, adversarial gate is for.
 - **A key over a duplicated column answers nothing, and that is now true rather
   than only written down.** The vendor's reader builds a register row as
   `dict(zip(header, cells))`, so a header naming one column twice collapses to
