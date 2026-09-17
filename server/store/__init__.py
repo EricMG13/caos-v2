@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
@@ -142,6 +143,13 @@ _HISTORY = (
 )
 
 
+# The two codes that mean the store itself could not answer, rather than that
+# what it holds disagrees with the declared history.
+_STORE_SILENT = frozenset(
+    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
+)
+
+
 class RunStatus(StrEnum):
     """A run's own state. Node states are the bundle's four and are not these."""
 
@@ -184,8 +192,20 @@ def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
     try:
         _migrate(conn, sql)
         conn.commit()
-    except (Refusal, psycopg.Error):
+    except Refusal as refused:
+        # Only "the store could not answer" keeps its own code. Everything else
+        # a migration refuses -- including a malformed row its own verification
+        # finds, which may be raised from outside this module -- is a drift
+        # finding and says so (`docs/DECISIONS.md` §20a).
         rollback_or_close(conn)
+        if refused.code in _STORE_SILENT:
+            raise
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
+    except psycopg.Error as fault:
+        rollback_or_close(conn)
+        # SQLSTATE is the standard's five-character class code, never text --
+        # but the field is the server's, so the length is this module's.
+        print(f"schema: sqlstate {(fault.sqlstate or '?????')[:5]}", file=sys.stderr)
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
     except BaseException:
         rollback_or_close(conn)

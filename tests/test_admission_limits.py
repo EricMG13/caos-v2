@@ -340,7 +340,7 @@ def test_an_ordinary_flate_page_still_extracts_in_the_child() -> None:
 
     assert [token.text for token in tokens] == ["Inflated", "line"]
     with pytest.raises(Refusal) as caught:
-        pdf_module._answer(b'{"refused": "STORE_UNAVAILABLE"}')
+        pdf_module._answer(b'{"refused": "STORE_UNAVAILABLE"}', 0)
     assert caught.value.code is RefusalCode.SOURCE_NOT_READABLE
 
 
