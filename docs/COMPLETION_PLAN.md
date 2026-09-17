@@ -387,9 +387,18 @@ record stored before `blockers` existed refuses at every reader if its T8 named 
 condition, discharged by a new run.
 
 **O18 — Upstream identity ignores readiness; the anchor is derived; the
-boundary is read from prose [P2, Phase 10].** Repair: readiness joins the
-refs from the T8 reader; a stored anchor; the structured LITE boundary read
-beside the prose block with disagreement refused.
+boundary is read from prose [P2, Phase 10].** Repair: a stored anchor; the
+structured LITE boundary read beside the prose block with disagreement refused.
+**The first repair clause is withdrawn.** It said readiness joins the refs from
+the T8 reader, and Task 10.4 found that neither side can do that: where a soft
+input is unaccepted and its source READY, the vendor *raises* rather than naming
+the input, so there is no accepted artifact and no digest for a ref to carry.
+The rule itself is enforced once, in the engine's `_state_for`, and the two
+agree in every state a run can reach -- measured over 9,888 frontier memberships
+of a three-module route with no disagreement. What was actually owed is a
+comment at each rule naming the other, and a property test the day per-node
+evidence selection changes `node_states`. No code was written, which is the
+right outcome for a clause that described an unreachable state.
 
 **O19 — Quotes match whole tokens exactly [P2, Phase 10].** Letter-spaced
 headings, trailing punctuation and crop-edge glyph boxes refuse. Repair:
@@ -775,7 +784,18 @@ run; no fabricated owner rows; no spend without its authorization line.
 
 **Fixes:** O20–O22.
 
-**Work:** five commands over the governed-write pattern (12.1); controls and
+**Work:** five commands over the governed-write pattern (12.1), which is also
+where the API surface's positional-argument width should be taken: the
+remediation stream's redefined suppression gate counts functions callable with
+more than five positional arguments, and **eighteen of its twenty-two charges
+are under `server/api/`** -- the command handlers and the section reads, at six
+to nine positional parameters, twenty-one of the twenty-two declaring no
+keyword-only parameter at all. The hazard is a caller transposing two
+same-typed neighbours silently, and the fix is making the surplus keyword-only,
+so clearing the charge repairs the hazard rather than hiding it. Not a
+refactor for its own sake: 12.1 rewrites these handlers anyway, and a layer that
+never reached for keyword-only is one to correct while it is open rather than
+in a pass of its own; controls and
 availability, the clearance corrected, one available demo action (12.2);
 Book over accepted snapshots from the shell D2 leaves (12.3); `blocked_by` on
 `AnalysisBody`, a Markdown renderer with a closed element set, a citation

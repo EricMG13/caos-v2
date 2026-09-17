@@ -647,20 +647,44 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   holds only for the bundle and sources present now. *Upgrade:* the proof and
   scoring in one REPEATABLE READ unit, the day a reviewer relies on the matrix
   as one consistent snapshot.
-- **Canonical upstream refs ignore readiness and predicates.**
-  `server/methodology/invocation.py` names every accepted direct input and
-  refuses a blocking one that is missing, as the vendor's
-  `expected_upstream_digests` does, but omits two of its inputs: a CONDITIONAL
-  edge always blocks (no predicate is evaluated, the Phase 3 gap below), and a
-  soft edge whose unaccepted source CP-0 reported READY is omitted where the
-  vendor refuses. The route engine already BLOCKS such a node, so the runtime
-  never asks for its identity. `module_name` is read from the verified catalog
-  at call time rather than pinned. Since slice 3.3c a non-gate node whose
-  upstream carries no direct CP-0 ref refuses `ROUTE_IDENTITY_INVALID` in
-  `host_identity` (§45.5), so before any attempt via `check_context`; the
-  anchor is still derived from that ref, not stored. *Upgrade:* readiness joins
-  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2),
-  and a stored anchor field with Phase 5.
+- **Canonical upstream refs do not read readiness, because the engine already
+  did.** `server/methodology/invocation.py`'s `_upstream` names every accepted
+  direct input and refuses a missing blocking one; the vendor's
+  `expected_upstream_digests` does the same and adds one clause the host does
+  not repeat — it also refuses when a **soft** input is unaccepted and CP-0
+  reported its source READY or READY_WITH_LIMITATIONS. Note what the vendor does
+  there: it raises, and it does not name the input. There is no accepted
+  artifact, so there is no digest for a ref to carry, and "readiness joins the
+  refs" — the upgrade this entry used to state, and O18's first repair clause in
+  `docs/COMPLETION_PLAN.md` — describes something neither side can do. The rule
+  itself is enforced, once, in `server/engine/route.py`'s `_state_for`, which
+  BLOCKS a node with an unmet soft edge whose source is READY on the same
+  predicate the vendor's own `node_states` uses. So the two agree in every state
+  a run can reach: a node reaches `host_identity` only through `frontier`, and
+  `frontier` excludes every node the vendor's clause would refuse. Measured
+  rather than read — over every edge-type assignment, accepted subset, QA status
+  and readiness assignment of a three-module route, 9,888 frontier memberships
+  produced no disagreement; and on the real LITE route with CP-0 accepted
+  declaring CP-L10 READY, the engine puts CP-L10 in the frontier and holds CP-5
+  BLOCKED. `test_the_lite_upstream_follows_the_pinned_edges` builds CP-5's
+  identity in that exact state, and can do so only because it calls
+  `host_identity` directly, past the frontier. What is left is that the
+  agreement rests on nothing written down: `_upstream` does not say it relies on
+  `_state_for`, and `_state_for` does not say anything depends on it. Nor can
+  `_upstream` cheaply re-check: readiness reaches the host through
+  `accepted_artifacts`, which builds each `NodeResult` by calling
+  `accepted_projections` and so `host_identity`, so an identity builder that
+  asked for readiness would be asking the reader that calls it; `host_identity`
+  also takes no `BlobStore`, and each gate row's readiness costs a record blob
+  read and a vendor validator run. *Upgrade:* not a second reading of readiness
+  — that would be a second authority over the rule, which invariant 3 refuses.
+  What closes this is a comment at each of the two rules naming the other, and,
+  the day per-node evidence selection changes `node_states`, a test that the
+  frontier admits no node the vendor's clause refuses — written as the property
+  it is rather than as a case the engine can reach. `module_name` is still read
+  from the verified catalog at call time rather than pinned, and the CP-0 anchor
+  is still derived from the direct CP-0 ref `host_identity` requires (§45.5)
+  rather than stored; both keep their own upgrade with Phase 5.
 - **A record's lineage is re-checked against the accepted rows, not re-proven
   ancestor by ancestor.** Record format v2 (slice 3.3c, §45.4) adds
   `delivered_authority_digest` -- over exactly the `DeliveredAuthority` the
