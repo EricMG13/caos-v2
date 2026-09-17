@@ -168,6 +168,12 @@ _STATUS = {
     # to the next reader, so waiting is not what fixes it. Its clearance says
     # an operator must verify the artifact, and that is the discharge.
     RefusalCode.READINESS_INVALID: 500,
+    # The neighbour below was filed at 503 by copying this one, and this one was
+    # wrong too: a route pin whose identity the host cannot rebuild is stored
+    # bytes, and the next read rebuilds the same identity from the same pin. The
+    # two are not distinguishable on the time axis, which is why they now carry
+    # the same status -- the history is here because the copying is how both got
+    # their old one.
     RefusalCode.ROUTE_IDENTITY_INVALID: 500,
     # A pinned build whose catalog declares an edge type this engine cannot
     # evaluate: the vendored bytes, not the request. No profile or pathway the
