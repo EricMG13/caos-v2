@@ -140,9 +140,17 @@ def test_a_case_with_no_run_is_observed_empty(
         "displayed_run_id": None,
         "runs": [],
         "run": None,
+        # Every enabled pathway, spelled out rather than derived from
+        # `ADAPTER_ROUTES`: deriving it from the constant the reader already
+        # uses would assert nothing, and enabling a pathway should cost a
+        # deliberate edit here.
         "route_choices": [
             {"profile_id": "FULL_CREDIT_32", "selection_id": "RELATIVE_VALUE"},
             {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"},
+            {
+                "profile_id": "LITE_CREDIT_22",
+                "selection_id": "LITE_PORTFOLIO_DECISION",
+            },
         ],
     }
     actions = {str(view.action): view.refusal for view in document.chrome.actions}

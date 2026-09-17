@@ -62,7 +62,10 @@ LITE = (LITE_PROFILE, LITE_SELECTION)
 FULL = ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
 DEEP = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 # Adapter modules only, but no contract test proves this pathway (work item 6).
-PORTFOLIO = (LITE_PROFILE, "LITE_PORTFOLIO_DECISION")
+# It was LITE_PORTFOLIO_DECISION until that pathway gained its contract test
+# (`tests/test_lite_portfolio_route.py`) and was enabled; LITE_RELATIVE_VALUE is
+# the same shape -- CP-0, CP-1C, CP-L10, every one of them an adapter module.
+ALL_ADAPTER = (LITE_PROFILE, "LITE_RELATIVE_VALUE")
 _WORK = ("run_attempts", "budget_reservations", "call_outcomes", "artifacts")
 
 
@@ -102,7 +105,7 @@ def _no_work(harness: _Harness) -> None:
         assert _count(harness, table) == 0, table
 
 
-@pytest.mark.parametrize("route", [FULL, DEEP, PORTFOLIO], indirect=True)
+@pytest.mark.parametrize("route", [FULL, DEEP, ALL_ADAPTER], indirect=True)
 def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
     harness: _Harness,
 ) -> None:
@@ -135,7 +138,7 @@ def _authority(harness: _Harness) -> tuple[RunInput, ResolvedRoute]:
     return pin, stored
 
 
-@pytest.mark.parametrize("route", [FULL, DEEP, PORTFOLIO], indirect=True)
+@pytest.mark.parametrize("route", [FULL, DEEP, ALL_ADAPTER], indirect=True)
 def test_acceptance_refuses_a_disabled_route(harness: _Harness) -> None:
     attempt = _billed(harness)
     accepted = Accepted(

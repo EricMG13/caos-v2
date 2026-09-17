@@ -475,9 +475,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the adapter is one constant: every reader refuses a row without its record
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
   `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
-  modules; every route outside that pathway and LITE earnings remains
-  disabled (`ADAPTER_ROUTES`: LITE portfolio decision,
-  CP-0 -> CP-L10, has no contract test) pins and passes its
+  modules; Phase 9 Task 9.1 adds LITE portfolio decision (CP-0 -> CP-L10,
+  `tests/test_lite_portfolio_route.py`); every route outside those three
+  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
@@ -682,8 +682,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **`check_tested.py` sees module-level definitions only.** A method is covered
   through the class that holds it. *Upgrade:* descend into classes when a
   governed path first puts logic on a method.
-- **`check_vocabulary.py` enforces 9 of the 33 synonyms `CONTEXT.md` lists.**
-  The other 24 carry an ordinary technical meaning here — `file`, `state`,
+- **`check_vocabulary.py` enforces 11 of the 34 synonyms `CONTEXT.md` lists.**
+  The other 23 carry an ordinary technical meaning here — `file`, `state`,
   `version`, `response` — and each is exempt with a stated reason in
   `NOT_ENFORCED`. The check refuses to run if `CONTEXT.md` and that list drift
   apart. *Upgrade:* enforce an exempt synonym the day it is actually misused.
@@ -1504,12 +1504,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   migrates it. *Upgrade:* apply the declared schema into a scratch namespace and
   diff `information_schema` against the live one, the day a database is edited by
   anything but this function.
-- **`budget_ledger` records a charge and enforces no ceiling.** One charge per
-  attempt is a database fact, but nothing refuses the charge that takes a run
-  past a budget, because invariant 8's reservation belongs to the provider call
-  and there is no provider call yet. *Upgrade:* Phase 4 reserves before the call
-  and reconciles after, and its three named tests
-  (`docs/REBUILD_PLAN.md` Phase 4) are what make the ceiling bite.
+- ~~**`budget_ledger` records a charge and enforces no ceiling.**~~ Closed by the
+  phase its own upgrade path named. `server/store/budget.py::_reserve` refuses
+  `BUDGET_CEILING_REACHED` under the run row lock before any call, and
+  `_remaining` subtracts `greatest(reservations.amount, ledger.amount)` per
+  attempt, so a charge that came in above its reservation consumes the capacity
+  the next reservation is measured against.
+  `tests/test_budget.py::test_a_reservation_past_the_ceiling_is_refused_before_it_is_taken`
+  and `test_concurrent_reservations_at_the_ceiling_refuse` hold it. What cannot
+  be refused is a bill already incurred, which is not this entry's claim and is
+  covered by the Repair Phase 2 entries on indeterminate exposure. Found by the
+  Completion Phase 7 confidence review, which is the reason the entry above this
+  one says the gate cannot read prose.
 - **A blob is read whole into memory and has no size ceiling of its own.**
   `BlobStore.get` still returns `bytes`, with nothing bounding a read but the
   process. What has changed since this entry was written: `admit_pack` now
