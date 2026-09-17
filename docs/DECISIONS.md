@@ -1743,7 +1743,9 @@ coordinate space citations were anchored in (invariant 11).
    downstream runs.
 3. **Identity switch rule.** `actor_from_headers` believes `x-caos-role` only
    when the switch is `1` and no edge token is set; otherwise the role comes
-   from groups.
+   from groups. **Superseded by §70.2:** the "otherwise" covered the case with
+   neither set, in which a request's own groups header chose its global role.
+   With no edge token and no switch the role is now READER.
 4. **Header hygiene, both modes.** A repeated identity header, or a name that
    differs from one only by case or `_` for `-`, is 401 `NOT_AUTHENTICATED`.
 5. **Origin, the second half of §51.10.** Under `/api`: an `Origin` outside
@@ -2701,3 +2703,183 @@ programme, not a run, and no amount of spending shortens it.
 **The signature block is recorded, not derived.** The host vouches for nothing
 in it: the identity is the owner's configured git identity, written down on
 their instruction, and theirs to correct.
+
+## 2026-09-17 §70 — The audit remediation's first wave: a read takes no lock, a tokenless API grants no role, and four boundaries answer in their own words
+
+`docs/reviews/2026-09-17-gemini-audit-adversarial-review.md` re-verified a
+third-party audit against this tree and promoted three findings to critical.
+This entry records the six changes that answer them, and what each one gave up.
+The plan is `docs/superpowers/plans/2026-09-17-audit-remediation.md`.
+
+### 70.1 Section reads never take the case lock
+
+`server/api/reads/reports.py::_read` took `lock_case` — `SELECT … FOR UPDATE`
+on the case row — for the whole of a Report or Committee read, so every
+governed write and every worker transition on that case waited behind a `GET`
+for the length of its live proof: both blobs, the identity rebuild, the vendor
+validator per node, and the re-anchoring of every recorded citation. A read is
+not a governed write. It commits nothing, it appends no audit event, and no
+reader of the store can tell the lock was ever held. It is removed, with the
+second `standing_of` that existed only to re-read standing after waiting on it.
+
+**What replaces it, stated precisely, because the first draft of this entry
+overclaimed.** The served payload is digest-bound on *both* paths, by two
+different comparisons in two modules: `reports.py` compares
+`sha256(prove_revision(...))` against the revision row's `payload_sha256` for a
+frozen revision, and `server/deliverable/receipts.py` makes the same comparison
+for a filed one, which the frozen path never reaches. A mixed-snapshot
+derivation can only produce bytes that *differ*, so the failure direction is
+refusal, never a wrong document. The Committee publication envelope — state,
+signers, freezer, filer — is covered by no digest at all; it is protected
+instead by single-statement reads and fail-closed cross-checks, and no ordering
+serves an internally inconsistent envelope. A filing landing after the
+publication read serves `frozen` for a now-filed revision, which is stale by at
+most the read's length and identical to the read having returned a moment
+earlier.
+
+**Accepted cost.** The audit-head comparison now spans snapshots, so *any*
+governed write on the case committing mid-read — not only a freeze or a filing,
+because `governed_write` appends to the chain unconditionally — makes the read
+refuse `DELIVERABLE_PAYLOAD_INVALID` where it previously waited. The same
+construct exists a second time on the filed path in `receipts.py`. This is
+fail-closed and recoverable: the workspace offers an explicit reload, and a
+re-read succeeds. A revocation can also now commit mid-read, so a caller whose
+membership is revoked during the live proof is still served — which makes this
+read consistent with `analysis.py`, `upload.py` and `run.py`, all of which read
+standing once without a lock and always did.
+
+`IO_BUDGET` falls by three round trips per served path, not two: `lock_case`
+costs its isolation assertion as well as its `FOR UPDATE`, and the duplicate
+standing read is the third. `{"report": 52, "committee": 63, "frozen": 57}`
+becomes `{"report": 49, "committee": 60, "frozen": 54}`, measured against the
+declared-I/O test rather than fitted to it.
+`tests/test_postgres_races.py::test_a_report_read_never_blocks_a_governed_write_on_its_case`
+proves it on two connections: while the read is inside its unit, a second
+connection's `FOR UPDATE NOWAIT` on the case row succeeds. It failed
+`[False] == [True]` against the code this entry replaces.
+
+`read_filed_receipt`'s and `prove_revision`'s docstrings said the caller holds
+the case lock. They now say the caller owns its own unit, that a write caller
+holds the lock and a section read holds none, and that the head comparison is
+therefore a check across snapshots. The first of those docstrings was
+load-bearing: it was the only place saying what made that comparison sound.
+
+### 70.2 A tokenless API believes no groups header — superseding §53.3
+
+§53.3 said `actor_from_headers` believes `x-caos-role` only when the switch is
+`1` and no edge token is set, *"otherwise the role comes from groups"*. That
+"otherwise" included the case with no edge token and no switch, so a process
+started without `CAOS_EDGE_TOKEN` derived a caller's global role from an
+`x-forwarded-groups` request header with no opt-in at all. Any peer that passed
+the loopback and Host checks could assert `caos-admins` and be ADMIN, and
+`x-caos-user` is trusted verbatim in that mode, so the subject came free with
+it. The documented deployment is an authenticating edge that sets both and a
+private listener, and a remote peer is refused before identity — but the switch
+that exists to be the opt-in protected only the third header, which is the
+narrower one.
+
+**The rule now.** With an edge token set, the role comes from groups, as it
+always did, and the switch is never believed whatever it says. With no token,
+the role comes from `x-caos-role` when the switch is `1`, and is READER
+otherwise — never from groups. The token branch is first, so the switch cannot
+win in edge mode. The local developer loop is unaffected: the dev proxy sets
+the subject and role headers and never groups, and `.env.example` already
+carried the switch.
+
+**What this is not.** No test in the tree asserts the new rule over HTTP. The
+HTTP escalation test reads as though it does, and does not: under the switch it
+passed identically before this change. Exactly one test fails if this change is
+reverted, and it is a unit test on `actor_from_headers`. That is acceptable
+because that function is the single funnel — it is the only producer of an
+`Actor`, and the groups header is read for authority nowhere else — but the
+guarantee rests on that structural fact, not on coverage.
+
+Nine existing tests were rewritten, and a tenth in a second round. Four of them
+had been hollowed out rather than broken: they still passed, for reasons their
+names no longer described. Three suites' `caos-admins` row was the only
+remaining proof that a global ADMIN without case standing still gets the
+private 404 on the event stream, the analysis section and evidence pages; under
+the new rule that row became a duplicate of the plain-stranger row, and each
+was restored to assert its property again.
+
+### 70.3 One outcome record per accepted node
+
+Every accepted node recorded its provider call's outcome three times: in the
+executor immediately after the call, again in the frontier loop, and again
+inside acceptance. The second was a knowing no-op that still cost a `COMMIT`
+and took `cases` and `runs` row-exclusive — twice per accepted node, against
+the lock every governed write on that case needs. It is deleted.
+
+Nothing about recovery moves. The bill, the diagnostic and the single
+`CALL_OUTCOME_RECORDED` event are committed by the executor before the loop
+resumes; `replay_billed` reads exactly those rows; the lease is fenced inside
+`_accept_artifact`; and `CALL_OUTCOME_LEGACY` reaches `_legacy_replay` more
+readily than before, since the deleted call let that refusal escape ahead of
+acceptance. The strongest statement is one of ordering: `_accept` commits the
+bill before `_accept_artifact` is entered, so an unbilled accepted artifact is
+impossible by construction rather than by a provider's good behaviour.
+
+**What is given up.** The loop no longer enforces that a returned call was
+billed; each `Provider` owes it, and that obligation is now a docstring plus
+its tests. For every implementation that ships it holds structurally, because
+`check_call` refuses a second recorder. The cost of a future implementation
+forgetting is not a refusal: a provider that returns without billing and then
+crashes before acceptance leaves no `call_outcomes` row, so neither
+`replay_billed` nor `unexplained_charge` matches, and the node is re-attempted
+and paid for a second time with nobody deciding to. The only upgrade that
+closes that window is a record adjacent to the call; nothing inside the
+acceptance unit can reach it.
+
+### 70.4 A store fault is not drift, and not a parked run
+
+Four boundaries let a raw error or an untyped exception past the typed-refusal
+edge, or gave a distinct failure the wrong name.
+
+`start_attempt` gains the `psycopg.Error` / `BaseException` pair every sibling
+in its file already had. `apply_schema` stops labelling an inner store fault as
+schema drift — but only for the two codes that mean the store could not answer.
+Everything else a migration refuses, including a malformed row that its own
+verification finds and raises from another module, is a drift finding and says
+so, because §20a says schema and PostgreSQL failures carry only that code. The
+worker prints an exception's class and its last frame's file and line instead
+of the class alone, and the PDF child's exit status now reaches the refusal
+path, so an interpreter that died on import is reported to the operator as such
+rather than as a corrupt document. The extraction deadline is computed before
+the child is spawned, so an already-expired deadline costs no interpreter
+start.
+
+The worker does **not** park a cancel that refuses a store fault. That was
+prescribed in the plan and was wrong: `cancel_run` cannot raise a stale
+terminal at all, so the reachable refusal was the transient one, and parking it
+would turn a run that heals itself — released, the lease left to expire, the
+run reclaimed, the cancel retried — into a stop an operator must requeue by
+hand. It takes the back-off the worker already gives that class. `cancel_run`
+refuses three classes and no others: a store fault, `LEASE_NOT_HELD` from its
+lease fence, and `RUN_NOT_FOUND` for a run row that is not there.
+
+Nothing any of these prints can carry document-derived text: a SQLSTATE class,
+a refusal code, an exit status, a file and a line. The frame's filename is a
+host path even for vendored code, which is compiled under a fixed map rather
+than under any name a document or an admitter chose.
+
+### 70.5 Every refusal code has a status
+
+`server/api/app.py` looked up a refusal's HTTP status with a `400` default, so
+75 of the 122 declared codes answered 400 by falling through rather than by
+decision, and the next code added would have joined them silently. The table is
+now total and the lookup is unguarded; a test compares its keys against the
+live enum in both directions. No status moved: the 47 codes that had an entry
+keep it, and the 75 added are 400, which is what they already answered.
+
+This encodes today's behaviour rather than judging it. Several of the added
+codes are store or bundle faults by nature, and whether they should answer 503
+or 500 is a separate decision — one the table now makes answerable in one
+place, with a test that fails the day the set drifts. Twenty-two of the 23
+codes served 503 today are permanent rather than transient, and no
+`Retry-After` is emitted anywhere.
+
+A store outage while a reviewer signs a qualification verdict no longer answers
+400. The duplicate-signature case keeps `VERDICT_BINDING_INVALID`; every other
+driver error on that route is `STORE_UNAVAILABLE`, and the three reads that ran
+outside the handler — the clock, the evidence lookup and the evidence record —
+are inside it.
