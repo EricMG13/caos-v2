@@ -39,19 +39,37 @@ POSITIONAL_LIMIT = 5
 
 
 def _suppressed(path: Path) -> list[tuple[str, int, int]]:
-    """Each `PLR0913`-suppressed function in `path`: name, positional, total."""
+    """Each `PLR0913`-suppressed function in `path`: name, positional, total.
+
+    A method's receiver is not an argument its caller passes, and ruff does not
+    count it either, so `self` and `cls` are dropped. `*args` is unbounded
+    positional width, which a count of named parameters would read as none, so
+    it is charged outright.
+    """
     source = path.read_text(encoding="utf-8")
     if MARKER not in source:
         return []
     lines = source.splitlines()
+    tree = ast.parse(source)
+    receivers = {
+        body
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        for body in node.body
+        if isinstance(body, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
     found = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         if MARKER not in lines[node.lineno - 1]:
             continue
         arguments = node.args
-        positional = len(arguments.posonlyargs) + len(arguments.args)
+        named = arguments.posonlyargs + arguments.args
+        bound = node in receivers and bool(named) and named[0].arg in ("self", "cls")
+        positional = len(named) - (1 if bound else 0)
+        if arguments.vararg is not None:
+            positional = max(positional, POSITIONAL_LIMIT + 1)
         found.append((node.name, positional, positional + len(arguments.kwonlyargs)))
     return found
 
@@ -65,6 +83,15 @@ def test_positional_argument_suppressions_only_fall() -> None:
     Making the surplus keyword-only clears the charge, which is not an evasion:
     that is the fix. Every suppression is still read, so a marker on a function
     that no longer needs one cannot hide behind the keyword rule.
+
+    The 22 are not scattered, and that is the finding the number hides:
+    eighteen are under `server/api/` -- the command handlers and the section
+    reads -- at six to nine positional parameters, and twenty-one of the
+    twenty-two declare no keyword-only parameter at all. The other four are
+    the proof and deliverable constructors, `store/runs.py`'s `_transition`
+    and `evidence/page.py`'s `_frame`. So the charge points at one
+    architectural layer that takes its arguments positionally, and at a fix
+    that layer could take.
 
     The file floor is 80 against 102 scanned today: enough that a scan of the
     wrong directory or an empty one still fails, and enough headroom that
