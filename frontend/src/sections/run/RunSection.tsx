@@ -301,9 +301,7 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           caseId={body.case_id}
           action={actionOf(actions, "CREATE_RUN")}
           choices={body.route_choices}
-          supersedes={
-            run.status === "BLOCKED" && run.superseded_by === null ? run.run_id : null
-          }
+          supersedes={run.status === "BLOCKED" && run.superseded_by === null ? run.run_id : null}
         />
       </div>
     </div>

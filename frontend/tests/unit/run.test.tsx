@@ -921,17 +921,18 @@ describe("Run", () => {
       [{ action: "CREATE_RUN", refusal: null }],
     );
     const second = mount(answered);
-    const answeredField = second.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+    const answeredField =
+      second.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
     expect(answeredField.value).toBe("");
     second.unmount();
 
     const third = mount(
-      withActions(
-        { ...running, body: { ...running.body, route_choices: choices } },
-        [{ action: "CREATE_RUN", refusal: null }],
-      ),
+      withActions({ ...running, body: { ...running.body, route_choices: choices } }, [
+        { action: "CREATE_RUN", refusal: null },
+      ]),
     );
-    const runningField = third.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+    const runningField =
+      third.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
     expect(runningField.value).toBe("");
     third.unmount();
   });
