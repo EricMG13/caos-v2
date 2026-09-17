@@ -108,8 +108,16 @@ def _functions(path: Path) -> list[tuple[str, int, int, bool]]:
 
 
 def test_positional_argument_suppressions_only_fall() -> None:
-    """22 measured on 2026-09-17 over the integrated wave 3, unmoved from the
-    wave's base. Lower this number when you narrow one; never raise it.
+    """24 measured on 2026-09-17 at `1b1ffcd` and at Completion Phase 12's
+    integrated head, so the phase added none. Lower this number when you narrow
+    a function; never raise it.
+
+    The 24 is over **positional width**, marked or not -- the widening the
+    module docstring records. The older 22 counted marked functions only and is
+    a different set; the analysis below was written for it and is kept because
+    the concentration it describes is still the finding, but the eighteen and
+    the twenty-two are that older census, taken before this phase made
+    `members.py`'s three handlers keyword-only.
 
     A suppression is charged when the function takes more than five positional
     parameters -- ruff's own ceiling, counted the way a caller meets them.

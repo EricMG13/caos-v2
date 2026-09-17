@@ -181,6 +181,43 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 12.**
 
+- **Two filing digest checks cannot fire, and one refusal's clearance cannot
+  discharge its newest cause.** `server/deliverable/filing.py`'s
+  `signatures[0][1] != digest` (`DELIVERABLE_MOVED_SINCE_SIGNING`) and its
+  `any(signed_digest != digest ...)` (`DELIVERABLE_NOT_SIGNED`) compare a
+  signature's `payload_sha256` against the revision's -- but `sign_opinion_in`
+  writes the digest it has just read from the immutable
+  `deliverable_revisions` row, so every signature's digest equals the
+  revision's by construction and neither branch is reachable. What does the
+  work is `_reviewed` in the route, against the digest the *client* sent, which
+  is a different and real check. Two named refusals with no reachable cause
+  read as protection that is not there. Separately,
+  `citations._line_blocks` now raises `EVIDENCE_NOT_AVAILABLE` when the host's
+  own `GROUP_WIDTH` no longer reproduces a stored block count, and that code's
+  clearance is "Pin a live source for the evidence." -- an act the caller can
+  perform and that cannot possibly help, because the fault is the host's
+  packing rule. Same shape as the borrowed `CONTEXT_OVER_CEILING` clearance
+  already recorded, one code over. Both found by the Completion Phase 12
+  adversarial audit. *Upgrade:* delete the two unreachable branches with the
+  commit that gives them a cause, or state in each that the route's check is
+  the live one; and a clearance of its own for the repacking refusal, which is
+  the operator's "re-admit the source under this build" rather than anything a
+  caller can do.
+- **`SAVE_REVISION` is judged on its floor alone, so the surface can offer a
+  save the commit refuses.** `availability.report_actions` judges the other
+  three filing acts against the revision's state and `SAVE_REVISION` against
+  the WRITER floor only, while `FilingControls` posts
+  `expected_revision_id: body.revision_id`. So opening Report at
+  `?revision=<any revision that is not the run's head>` -- an ordinary thing to
+  do, since the Save control sets `?revision` on every save -- renders Save
+  available and answers `COMMAND_EXPECTATION_STALE` on the press. The read
+  already holds the run's head and could say so; every other run-scoped action
+  in that module does the equivalent. It is also the one filing control
+  `tests/test_governed_write_routes.py`'s availability walk skips, which
+  iterates `_FILING[1:]` under a docstring saying it covers every state the
+  chain distinguishes. *Upgrade:* judge `SAVE_REVISION` against the head the
+  read already has, and walk all four.
+
 - **The filing commands' I/O budget is a ceiling, where every other section
   asserts equality.** `server/api/commands/deliverable.py` declares
   `IO_BUDGET = 60` and `tests/test_governed_write_routes.py` asserts
@@ -200,12 +237,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   only a *frozen* revision, while `useCommand` mints a fresh idempotency key
   for a press following a successful one -- so two presses of Sign are two
   commands and two rows for one signer. Nothing false is written: the
-  revision's `signed_by` carries the same actor twice, the three-actor rule
-  still counts distinct actors, and the committee read pays one more
-  `payload_digests` round trip, which is the shape the signer-count entry above
-  already owns arrived at by another route. `file_deliverable_in` builds its
-  `Receipt` from `signatures[0]`, so a detached receipt names the first signer
-  where several signed -- it under-claims rather than misstates. Reachable
+  revision's `signed_by` carries the same actor twice and the three-actor rule
+  still counts distinct actors. Two clauses this entry first carried were
+  wrong, and are corrected here rather than quietly: it said the committee read
+  pays one more `payload_digests` round trip, which it does not -- `required`
+  is a set of `(action, actor)` and the lookup is keyed by actor, so a doubled
+  *same* signer costs nothing and only two distinct signers do, which is what
+  the `IO_BUDGET` comment beside it says and what this entry borrowed for a
+  case it does not cover. And it said `file_deliverable_in`'s `Receipt` names
+  the **first** signer: `revision_signatures` orders `signed_at DESC`, so
+  `signatures[0]` is the most **recent** one. The receipt still under-claims
+  rather than misstates, but it under-claims the other way round. Both found by
+  the phase adversarial audit reading the code against the entry. Reachable
   since the sign route shipped. *Upgrade:* a unique index on
   `(case_id, revision_id, signed_by)` and a receipt carrying every signature,
   the day a second signature on one revision is something a reader must see.
