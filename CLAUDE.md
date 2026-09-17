@@ -205,6 +205,29 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   completeness check with zero violations in which the shipped key was met from
   the wrong register. The confidence review had looked at the same code and
   recorded it as safe; this is what a second, adversarial gate is for.
+- **Two vendor tests fail on bytecode any concurrent process can write.**
+  `tests/test_vendor_contract.py::test_vendor_loader_leaves_sys_path_untouched`
+  asserts no `__pycache__` under `vendor/deploy-v`, and
+  `tests/test_bundle_pin.py::test_the_bundle_verifies_with_its_own_tool` runs the
+  bundle's own `verify_package.py`, which refuses a tree carrying any. Both are
+  right to: the vendored tree is read-only and `docs/DECISIONS.md` §13 pins its
+  bytes. Neither is isolated from the rest of the machine. This checkout is
+  shared -- a peer session, review agents and the coordinator all run in it -- and
+  any Python process that imports a vendor script through the ordinary machinery
+  leaves bytecode beside the source, after which both tests fail for a cause
+  neither names. It happened twice while retesting Completion Phase 8, and cost
+  an hour: the first diagnosis blamed an agent that had used `-B` throughout and
+  proved it by timestamp, and the second blamed `load_vendor_contract`, which was
+  then shown to write nothing when nothing else is running. The real cause is
+  concurrency, and the evidence for it is that the failure does not reproduce in
+  an otherwise idle checkout. What is *not* in question: nothing in `server/` or
+  `scripts/` reaches a vendor module except through `load_vendor_contract`, which
+  uses `compile`/`exec` and writes no bytecode, and the one place that runs a
+  vendor script as a subprocess already passes `-B`. The seam holds; its test is
+  what is fragile. *Upgrade:* have the two tests clear `__pycache__` under
+  `vendor/` before asserting, so they measure this repository's own behaviour
+  rather than the machine's -- or give each agent its own checkout, which is the
+  standing worktree rule these sessions have been bending by working in one tree.
 - **A key over a duplicated column answers nothing, and that is now true rather
   than only written down.** The vendor's reader builds a register row as
   `dict(zip(header, cells))`, so a header naming one column twice collapses to
