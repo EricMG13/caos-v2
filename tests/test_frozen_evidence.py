@@ -368,3 +368,36 @@ def test_a_bulk_insert_does_not_wait_on_the_foreign_key_lock_of_another_writer(
     assert conn.execute(
         "SELECT count(*) FROM source_tokens WHERE source_id = %s", (source,)
     ).fetchone() == (1,)
+
+
+@pytest.mark.parametrize("table", ["source_blocks", "source_tokens"])
+def test_an_uncommitted_evidence_write_blocks_a_withdrawal_of_its_source(
+    prepared: Prepared, empty_database: str, table: str
+) -> None:
+    """The exclusion half of the lock claim, which the permissive test cannot
+    make: a weaker mode passes that one a fortiori.
+
+    `FOR NO KEY UPDATE` gives up exactly one exclusion against `FOR UPDATE` --
+    `FOR KEY SHARE`, which a referencing insert's own foreign-key check takes.
+    Everything that writes a `sources` row must still queue behind an evidence
+    statement in flight. Withdrawal is the reachable one: it updates a non-key
+    column, so it takes an implicit `FOR NO KEY UPDATE` and must wait.
+
+    Replacing the trigger's lock with `FOR KEY SHARE` leaves every other
+    assertion in this file standing and fails here, which is why this test
+    exists rather than a comment.
+    """
+    conn, _, _, _, _ = prepared
+    source = _parent(conn)
+    conn.commit()
+    _insert(conn, table, source)  # in flight: the trigger holds the parent
+
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '800ms'")
+        with pytest.raises(psycopg.errors.LockNotAvailable):
+            other.execute(
+                "UPDATE sources SET withdrawn_at = now() WHERE source_id = %s",
+                (source,),
+            )
+        other.rollback()
+    conn.rollback()
