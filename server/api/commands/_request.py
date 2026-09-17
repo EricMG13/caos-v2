@@ -17,11 +17,17 @@ solves them in declaration order:
    FastAPI's 422 that quotes the input.
 
 Advisory: the governed write rechecks standing under the case lock at commit.
+
+`governed` is the envelope every case-scoped command ends in: the request's
+canonical digest, `run_command`'s replay-or-commit, and the receipt on the
+wire. Promoted from `execution.py`, where it was private, once `runs.py` had
+written it out three more times.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
@@ -29,11 +35,12 @@ from fastapi import Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from server.api.deps import Caller, Store
+from server.api.deps import Caller, CasePath, Store, parse_uuid
 from server.api.identity import Actor, GlobalRole
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.commands import CommandResult
+from server.store.audit import GovernedAction
+from server.store.commands import CommandResult, request_digest, run_command
 from server.store.members import Standing, satisfies, standing_of
 
 IO_BUDGET = 1  # the caller's standing on the case
@@ -49,10 +56,7 @@ def idempotency_key(request: Request) -> UUID:
     value = request.headers.get(IDEMPOTENCY_HEADER)
     if value is None or len(value) != _CANONICAL_UUID_CHARS:
         raise Refusal(RefusalCode.IDEMPOTENCY_KEY_REQUIRED)
-    try:
-        return UUID(value)
-    except ValueError:
-        raise Refusal(RefusalCode.IDEMPOTENCY_KEY_REQUIRED) from None
+    return parse_uuid(value, RefusalCode.IDEMPOTENCY_KEY_REQUIRED)
 
 
 Key = Annotated[UUID, Depends(idempotency_key)]
@@ -109,29 +113,19 @@ def case_standing(
     return standing
 
 
-def _path_case(request: Request) -> UUID:
-    """The path's case id, read here so a malformed one refuses in order."""
-    try:
-        return UUID(str(request.path_params["case_id"]))
-    except (KeyError, ValueError):
-        raise Refusal(RefusalCode.CASE_NOT_FOUND) from None
-
-
-def require_case_reader(request: Request, actor: Caller, conn: Store) -> Standing:
+def require_case_reader(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
     """Any live standing: reads and previews."""
-    return case_standing(conn, actor, _path_case(request), Standing.READER, write=False)
+    return case_standing(conn, actor, case_id, Standing.READER, write=False)
 
 
-def require_case_writer(request: Request, actor: Caller, conn: Store) -> Standing:
+def require_case_writer(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
     """WRITER standing and a global role that may write."""
-    return case_standing(conn, actor, _path_case(request), Standing.WRITER, write=True)
+    return case_standing(conn, actor, case_id, Standing.WRITER, write=True)
 
 
-def require_case_approver(request: Request, actor: Caller, conn: Store) -> Standing:
+def require_case_approver(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
     """APPROVER standing and a global role that may write."""
-    return case_standing(
-        conn, actor, _path_case(request), Standing.APPROVER, write=True
-    )
+    return case_standing(conn, actor, case_id, Standing.APPROVER, write=True)
 
 
 def command_response(result: CommandResult, model: type[BaseModel]) -> Response:
@@ -139,3 +133,59 @@ def command_response(result: CommandResult, model: type[BaseModel]) -> Response:
     body = model.model_validate(result.receipt).model_dump(mode="json")
     headers = {REPLAYED_HEADER: "true"} if result.replayed else None
     return JSONResponse(status_code=result.status, content=body, headers=headers)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandRequest:
+    """What one command asked for, in the slots `request_digest` canonicalises.
+
+    `body` is the validated request in JSON mode; `gate` is the gate's slug, or
+    the one string slot a command with no gate may bind something else into
+    (a verdict binds its evidence digest there).
+    """
+
+    command: str
+    case_id: UUID | None
+    run_id: UUID | None
+    gate: str | None
+    body: object
+
+    def digest(self) -> str:
+        return request_digest(
+            self.command,
+            case_id=self.case_id,
+            run_id=self.run_id,
+            gate=self.gate,
+            body=self.body,
+        )
+
+
+def governed(  # noqa: PLR0913 -- one command's identity and unit, keyword-only
+    conn: StoreConnection,
+    *,
+    scope: UUID,
+    key: UUID,
+    request: CommandRequest,
+    action: GovernedAction,
+    write: Callable[[StoreConnection], tuple[int, BaseModel]],
+    model: type[BaseModel],
+    prepare: Callable[[StoreConnection], None] | None = None,
+) -> Response:
+    """The governed envelope: digest the request, replay or commit it under
+    `key`, and answer the receipt validated against `model`.
+
+    The actor is `action.actor_id`; `scope` is the case, or `NIL_SCOPE` for
+    the command that creates one. `write` runs under the case lock and live
+    standing; `prepare` (create case) runs first, before the lock.
+    """
+    result = run_command(
+        conn,
+        scope=scope,
+        key=key,
+        command=request.command,
+        request_sha256=request.digest(),
+        action=action,
+        write=write,
+        prepare=prepare,
+    )
+    return command_response(result, model)

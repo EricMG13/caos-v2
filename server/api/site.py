@@ -33,7 +33,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.api.app import app
-from server.api.edge import EdgeGuard
+from server.api.edge import EdgeGuard, is_api_path, startup_failed
 from server.refusals import Refusal, RefusalCode
 
 # The dispatcher reads the environment and the export's files, never the store.
@@ -100,19 +100,12 @@ async def dispatch(scope: Scope, receive: Receive, send: Send) -> None:
     if scope["type"] == "lifespan":
         root = _site_root()
         if root is not None and not _exported(root):
-            message = await receive()
-            if message["type"] == "lifespan.startup":
-                await send(
-                    {
-                        "type": "lifespan.startup.failed",
-                        "message": RefusalCode.EDGE_CONFIG_INVALID.value,
-                    }
-                )
+            await startup_failed(receive, send)
             raise Refusal(RefusalCode.EDGE_CONFIG_INVALID)
         await app(scope, receive, send)
         return
     path = scope.get("path", "")
-    if path == "/api" or path.startswith("/api/"):
+    if is_api_path(path):
         await app(scope, receive, send)
         return
     if scope["type"] == "http":

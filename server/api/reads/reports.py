@@ -2,21 +2,28 @@
 
 import json
 from hashlib import sha256
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
-from server.api.reads.analysis import RunQuery
-from server.api.reads.upload import READ_REQUIRES, CasePath
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RevisionQuery,
+    RunQuery,
+    Store,
+    readable,
+)
 from server.api.wire import CommitteeDocument, ReportDocument
 from server.deliverable.filing import _signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
 from server.store.audit import _digest_of, audit_head, audit_trail, verify_chain
-from server.store.members import satisfies, standing_of
+from server.store.members import standing_of
 from server.store.outcomes import execution_reads
 
 # Three-node LITE: isolation/standing/selection (3), live proof (40). No lock:
@@ -25,16 +32,6 @@ from server.store.outcomes import execution_reads
 # Filed Committee also adds receipt/audit (5) and saved payload (1).
 IO_BUDGET = {"report": 43, "committee": 54, "frozen": 48}
 router = APIRouter()
-
-
-def revision_query(revision: str | None = None) -> UUID:
-    try:
-        return UUID(revision or "")
-    except ValueError:
-        raise Refusal(RefusalCode.DELIVERABLE_NOT_FOUND) from None
-
-
-RevisionQuery = Annotated[UUID, Depends(revision_query)]
 
 
 @router.get("/api/v1/cases/{case_id}/report", response_model=ReportDocument)
@@ -81,9 +78,10 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
     if run is None:
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     with execution_reads(conn):
-        standing = standing_of(conn, case_id=case_id, user_id=actor.user_id)
-        if not satisfies(standing, READ_REQUIRES):
-            raise Refusal(RefusalCode.CASE_NOT_FOUND)
+        # Read inside the unit rather than as `VisibleCase`: `execution_reads`
+        # adopts no transaction already open, and a standing read before it
+        # would be one.
+        standing = readable(standing_of(conn, case_id=case_id, user_id=actor.user_id))
         row = conn.execute(
             "SELECT payload_sha256,now() FROM deliverable_revisions"
             " WHERE case_id=%s AND run_id=%s AND revision_id=%s",

@@ -4,9 +4,16 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
-from server.api.reads.analysis import RunQuery, read_analysis
-from server.api.reads.upload import CasePath
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RunQuery,
+    Store,
+    VisibleCase,
+)
+from server.api.reads.analysis import read_analysis
 from server.api.wire import (
     ModelBody,
     ModelDocument,
@@ -32,11 +39,12 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
     actor: Caller,
     case_id: CasePath,
     run: RunQuery,
+    standing: VisibleCase,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
 ) -> ModelDocument:
-    analysis = read_analysis(actor, case_id, run, conn, blobs, bundle)
+    analysis = read_analysis(actor, case_id, run, standing, conn, blobs, bundle)
     body = analysis.body
     accepted = next((h for h in body.handoffs if h.module_id == "CP-CF"), None)
     forecast = None
