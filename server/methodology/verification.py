@@ -93,9 +93,17 @@ class Step(StrEnum):
 type Refuse = Callable[[Step], RefusalCode | None]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AcceptedRow:
-    """One accepted artifact, as the `artifacts` table names it."""
+    """One accepted artifact, as the `artifacts` table names it.
+
+    Keyword-only, which is the whole point of the type: it replaced five
+    positional neighbours of two repeated shapes -- two `UUID`s and two
+    64-character digests -- where a caller could transpose either pair and be
+    type-checked all the way to a wrong refusal. Every call site already passed
+    by keyword; `kw_only` is what makes that a property of the type rather than
+    a convention every future caller has to repeat.
+    """
 
     run_id: UUID
     route_node_id: str

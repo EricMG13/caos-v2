@@ -6,7 +6,7 @@
 // here it is asserted where the `typescript` it imports is installed.
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { importGraph, unreachableSections } from "../../scripts/check-tested.mjs";
 
 const SRC = resolve(process.cwd(), "src");
@@ -84,6 +84,40 @@ function typescriptSources(directory: string): string[] {
     return /\.tsx?$/.test(entry.name) ? [full] : [];
   });
 }
+
+// `RETIRED` above is a list, and a list only sees what somebody wrote into it.
+// The three wire modules this wave deleted were reachable from nothing, and
+// neither the section walk above (scoped to `src/sections/`) nor the lint rule
+// beside it would have said so -- a wire module is not a component. This is the
+// rule rather than the list: a module under `src/wire/` that no other file
+// under `src/` names is orphaned, whether or not anyone remembered to add it.
+//
+// Text, not the import graph, because a wire module is mostly types and a
+// type-only import is erased before the graph can see it. A barrel is named by
+// its directory (`@/wire/v1`), so an `index` file answers to that too.
+function wireSpecifiers(file: string): string[] {
+  const path = relative(SRC, file).replace(/\.tsx?$/, "");
+  const spellings = [`@/${path}`];
+  if (basename(path) === "index") spellings.push(`@/${dirname(path)}`);
+  return spellings;
+}
+
+test("test_every_module_under_wire_is_named_by_something_under_src", () => {
+  const files = typescriptSources(SRC);
+  const orphans = files
+    .filter((file) => relative(SRC, file).startsWith(`wire${sep}`))
+    .filter((file) => {
+      const own = basename(file).replace(/\.tsx?$/, "");
+      return !files.some((other) => {
+        if (other === file) return false;
+        const source = readFileSync(other, "utf8");
+        if (wireSpecifiers(file).some((s) => source.includes(`"${s}"`))) return true;
+        return dirname(other) === dirname(file) && source.includes(`"./${own}"`);
+      });
+    })
+    .map((file) => relative(SRC, file));
+  expect(orphans).toEqual([]);
+});
 
 test("nothing under src/ imports the retired Book and Admin modules", () => {
   const importers = typescriptSources(SRC).flatMap((file) => {
