@@ -146,10 +146,17 @@ def main() -> int:
         names = ", ".join(str(path.relative_to(REPO)) for path in missing)
         print(f"journey refused: missing stack files: {names}", file=sys.stderr)
         return REFUSED
-    for project in browser_projects():
-        if status := run_project(project):
-            return status
-    return 0
+    # Every engine runs, whatever an earlier one did. Returning on the first
+    # failure discarded the other two engines' evidence, so one flake in one
+    # browser cost the whole three-engine gate and left nobody able to say
+    # whether the other two would have passed -- which is what happened once
+    # while Task 12.5's gate was being run. This weakens nothing: any engine
+    # failing still fails the gate, by the first non-zero status. It only stops
+    # throwing away the runs that were already paid for.
+    statuses = {project: run_project(project) for project in browser_projects()}
+    for project, status in statuses.items():
+        print(f"journey {project}: {'ok' if status == 0 else f'exit {status}'}")
+    return next((status for status in statuses.values() if status), 0)
 
 
 if __name__ == "__main__":

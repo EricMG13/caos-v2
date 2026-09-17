@@ -61,6 +61,13 @@ PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
 PAGE_LINES_MAX = 2000  # beyond it a page is partial, `LIST_TRUNCATED`
 PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `PAGE_NOT_AVAILABLE`
 MOMENT_CHARS = 64  # an ISO-8601 instant with its offset, as `read_verdict` reads it
+# `server/deliverable/revisions.py`'s own bounds, restated where the wire is
+# what refuses a draft past them.
+NARRATIVE_CHARS = 2000
+NARRATIVE_SPANS = 64
+BOOK_CASES_MAX = 4  # "Two to four credits side by side" (IA_SPEC.md 4.4)
+BOOK_COLUMNS_MAX = 16  # the host-declared columns of the CP-CF projection
+BOOK_PERIODS_MAX = 8  # beyond it a row is partial, `LIST_TRUNCATED`
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
@@ -140,6 +147,9 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.PROVIDER_NOT_CONFIGURED: "An operator must configure the provider.",
     _C.PROVIDER_CALL_INVALID: "Correct the provider call parameters.",
     _C.CONTEXT_OVER_CEILING: "Deliver less context to the module.",
+    _C.UPSTREAM_SECTION_OVER_CEILING: (
+        "Start a new run; an accepted handoff is never shortened."
+    ),
     _C.PROVIDER_UNAVAILABLE: "Retry when the provider answers.",
     _C.PROVIDER_OUTPUT_TRUNCATED: "Retry the attempt.",
     _C.PROVIDER_REFUSED: "Retry the attempt or revise the evidence.",
@@ -288,6 +298,14 @@ class ActionName(StrEnum):
     START_RUN = "START_RUN"
     RETRY_RUN = "RETRY_RUN"
     CANCEL_RUN = "CANCEL_RUN"
+    # Task 12.1. Membership is not here: no section serves an Admin panel to
+    # offer it from, and an action no read judges is one this enum would only
+    # claim. Its routes exist and are proven against the commands themselves.
+    WITHDRAW_SOURCE = "WITHDRAW_SOURCE"
+    SAVE_REVISION = "SAVE_REVISION"
+    SIGN_OPINION = "SIGN_OPINION"
+    FREEZE_DELIVERABLE = "FREEZE_DELIVERABLE"
+    FILE_DELIVERABLE = "FILE_DELIVERABLE"
 
 
 class ActionView(BaseModel):
@@ -652,6 +670,116 @@ class ModelBody(BaseModel):
     unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
 
 
+class BookColumn(BaseModel):
+    """One column of the book: a value the accepted projection already carries."""
+
+    model_config = _CLOSED
+
+    key: Id
+    label: Text
+
+
+class BookResearch(BaseModel):
+    """An accepted module artifact of the row's displayed run."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    qa_status: Id
+
+
+class BookPassport(BaseModel):
+    """The ten fields IA_SPEC.md 4.4 says a passport always carries, in its
+    order. Every one is read from the accepted record, the pinned run subject
+    or the host's declaration of its own calculator; none is a judgement about
+    the run. `scenario` is the accepted projection's own `case` -- the name
+    `caos-forecast-v1` gives a scenario, and the one
+    `server/qualification/matrix.py` already reads as `ExpectedForecast.scenario`
+    -- so a base case and a downside are told apart in the field whose only job
+    is to tell them apart."""
+
+    model_config = _CLOSED
+
+    definition: Text
+    period: Text
+    scenario: Text
+    evidence_date: Text
+    computed_at: AwareDatetime
+    snapshot: Sha256
+    method: Text
+    derivation: Text
+    citations: Annotated[list[CitationView], Field(max_length=CITATIONS_MAX)]
+    supporting_research: Annotated[
+        list[BookResearch], Field(max_length=ROUTE_NODES_MAX)
+    ]
+
+
+class BookCell(BaseModel):
+    model_config = _CLOSED
+
+    column: Id
+    value: Annotated[str, Field(max_length=64, pattern=r"^-?[0-9]+(\.[0-9]+)?$")] | None
+    unavailable_reason: Literal["ZERO_OR_NEGATIVE_DENOMINATOR"] | None
+    passport: BookPassport
+
+
+class BookPeriod(BaseModel):
+    model_config = _CLOSED
+
+    case: Text
+    period_id: Text
+    fiscal_year: Text
+    days: Annotated[str, Field(max_length=3, pattern=r"^[0-9]+$")]
+    unavailable_reason: Text | None
+    cells: Annotated[list[BookCell], Field(max_length=BOOK_COLUMNS_MAX)]
+
+
+class BookRow(BaseModel):
+    """One credit, and why it carries no cells when it carries none.
+
+    `unavailable_reason` says no forecast is accepted; `refusal` is the typed
+    refusal this credit's own projection read raised. A refusal on one credit
+    never decides the others, so the book states it here rather than declining
+    the whole portfolio.
+    """
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    title: Text
+    standing: Standing
+    subject: RunSubjectView | None
+    displayed_run_id: UUID | None
+    displayed_run_status: RunStatus | None
+    snapshot: Sha256 | None
+    # The projection's own units. A portfolio that compared credits without
+    # them would put two currencies in one column and say nothing.
+    currency: Annotated[str, Field(max_length=3, pattern="^[A-Z]{3}$")] | None
+    scale: Literal["units", "thousands", "millions", "billions"] | None
+    periods: Annotated[list[BookPeriod], Field(max_length=BOOK_PERIODS_MAX)]
+    unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
+    refusal: RefusalBody | None
+
+
+class BookBasis(BaseModel):
+    """The one basis the comparison is stated on (IA_SPEC.md 4.4)."""
+
+    model_config = _CLOSED
+
+    period: Literal["EVERY_ACCEPTED_PERIOD"]
+    scenario: Literal["EVERY_ACCEPTED_CASE"]
+    accepted_only: Literal[True]
+
+
+class BookBody(BaseModel):
+    model_config = _CLOSED
+
+    basis: BookBasis
+    columns: Annotated[list[BookColumn], Field(max_length=BOOK_COLUMNS_MAX)]
+    rows: Annotated[list[BookRow], Field(max_length=BOOK_CASES_MAX)]
+
+
 class NarrativeFigure(BaseModel):
     model_config = _CLOSED
 
@@ -665,8 +793,18 @@ class NarrativeFigure(BaseModel):
 class NarrativeSpan(BaseModel):
     model_config = _CLOSED
 
-    text: Annotated[str, Field(max_length=2000)] | None
+    text: Annotated[str, Field(max_length=NARRATIVE_CHARS)] | None
     figure: NarrativeFigure | None
+
+
+class NarrativeFigureRef(BaseModel):
+    """What a draft may say about a figure: which citation of which node. The
+    quote and its coordinates are the host's, read from the accepted record."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    citation_index: Annotated[int, Field(ge=0)]
 
 
 class ReportArtifact(BaseModel):
@@ -779,6 +917,19 @@ class ModelDocument(BaseModel):
     notes: Notes
 
 
+class BookDocument(BaseModel):
+    """Portfolio-scoped: no case in its path, so `chrome.subject` is null."""
+
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: BookBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
 class ReportDocument(BaseModel):
     model_config = _CLOSED
 
@@ -800,6 +951,7 @@ V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
     RunSectionDocument,
     AnalysisDocument,
     ModelDocument,
+    BookDocument,
     ReportDocument,
     CommitteeDocument,
 )
@@ -1011,6 +1163,143 @@ class VerdictRecorded(BaseModel):
     expires_at: AwareDatetime
 
 
+class GrantStanding(BaseModel):
+    """Give or replace one member's standing. The member is named; the actor
+    granting it is derived, and holds ADMIN on the case."""
+
+    model_config = _CLOSED
+
+    user_id: UUID
+    standing: Standing
+
+
+class StandingGranted(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    user_id: UUID
+    standing: Standing
+
+
+class RevokeStanding(BaseModel):
+    """The member is in the path; there is nothing else to say."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class StandingRevoked(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    user_id: UUID
+
+
+class WithdrawSource(BaseModel):
+    """Invariant 1's second half. The source is in the path."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class SourceWithdrawn(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    source_id: UUID
+
+
+class NarrativeDraft(BaseModel):
+    """One span a draft offers: prose, or a reference to a citation the host
+    resolves. Exactly one of the two, and a figure names only which citation --
+    the document, page and quote are the host's to fill from the record."""
+
+    model_config = _CLOSED
+
+    text: Annotated[str, Field(max_length=NARRATIVE_CHARS)] | None
+    figure: NarrativeFigureRef | None
+
+
+class SaveRevision(BaseModel):
+    """A draft over one run's accepted artifacts.
+
+    `expected_revision_id` is the latest revision of that run the client had
+    when it composed this draft, null when it saw none: a save that raced
+    another save is refused rather than quietly making a second head.
+    """
+
+    model_config = _CLOSED
+
+    expected_revision_id: UUID | None
+    narrative: Annotated[
+        list[Annotated[list[NarrativeDraft], Field(max_length=NARRATIVE_SPANS)]],
+        Field(max_length=NARRATIVE_SPANS),
+    ]
+
+
+class RevisionSaved(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+
+
+class SignOpinion(BaseModel):
+    """Invariant 5: the signature binds the exact bytes the signer reviewed."""
+
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class OpinionSigned(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    signed_by: UUID
+
+
+class FreezeDeliverable(BaseModel):
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class DeliverableFrozen(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    frozen_by: UUID
+
+
+class FileDeliverable(BaseModel):
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class DeliverableFiled(BaseModel):
+    """The filing's own receipt. The detached one -- renderer and filing link --
+    is derived from the audit event this unit writes, so it is read from the
+    Committee section rather than answered here."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    filed_by: UUID
+
+
 V1_COMMANDS: tuple[type[BaseModel], ...] = (
     CreateCase,
     CaseCreated,
@@ -1028,6 +1317,20 @@ V1_COMMANDS: tuple[type[BaseModel], ...] = (
     RunWork,
     SignVerdict,
     VerdictRecorded,
+    GrantStanding,
+    StandingGranted,
+    RevokeStanding,
+    StandingRevoked,
+    WithdrawSource,
+    SourceWithdrawn,
+    SaveRevision,
+    RevisionSaved,
+    SignOpinion,
+    OpinionSigned,
+    FreezeDeliverable,
+    DeliverableFrozen,
+    FileDeliverable,
+    DeliverableFiled,
 )
 
 

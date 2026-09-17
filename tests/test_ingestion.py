@@ -245,9 +245,9 @@ def test_a_pack_for_a_case_that_does_not_exist_is_refused(
     ("body", "code"),
     [
         pytest.param(
-            ("word " * 1200).strip(),
+            "word" * 1250,
             RefusalCode.BOUNDARY_TEXT_TOO_LONG,
-            id="a line longer than the boundary's limit",
+            id="a word longer than the boundary's limit",
         ),
         pytest.param(
             "Total debt \N{RIGHT-TO-LEFT OVERRIDE} was USD 1,240.0m",
@@ -262,10 +262,12 @@ def test_a_document_the_boundary_refuses_never_reaches_the_pinned_set(
     """`source_blocks.text` is pinned state, so the boundary belongs at the door.
 
     It was applied on the way out instead: `read_evidence` calls
-    `BoundaryText.of` and admission wrote a bare `str`. So a line over the
+    `BoundaryText.of` and admission wrote a bare `str`. So text over the
     boundary's limit, and a line carrying the override control the boundary
     exists to refuse, were both admitted -- into the set a SOURCE_SET gate can
-    then be approved over -- and refused at every later read. That is
+    then be approved over -- and refused at every later read. A *line* over the
+    limit is now split at `GROUP_WIDTH` instead (`test_line_groups.py`); a
+    single word over it has nowhere to be split and still refuses here. That is
     `admit_pack`'s own argument against admitting a document with no text, one
     run and one provider bill later than here.
     """

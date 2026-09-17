@@ -4,7 +4,7 @@
 import { NavLink } from "react-router";
 import { ServedRole } from "./ServedRole";
 import { SECTION_ABBREVIATIONS, SECTION_LABELS, sectionPath } from "@/app/sections";
-import { READ_ONLY_API, RefusedControl } from "@/controls/RefusedControl";
+import { RefusedControl } from "@/controls/RefusedControl";
 import {
   SECTIONS,
   type RailEntry,
@@ -83,7 +83,10 @@ export function Rail({
           reasonDisplay="hidden"
           refusal={{
             code: "ASK_UNPLACED",
-            clears: `the API serves an Ask route scoped to ${section ? ASK_SCOPE[section] : "the workspace"} — ${READ_ONLY_API}`,
+            // Its own reason, no longer borrowed from `ACTION_UNPLACED`'s:
+            // there is no Ask route at all, which is a different thing from a
+            // control the section's read cannot judge.
+            clears: `the API serves an Ask route scoped to ${section ? ASK_SCOPE[section] : "the workspace"}`,
           }}
           aria-label={`Ask about ${section ? ASK_SCOPE[section] : "the workspace"}`}
         >

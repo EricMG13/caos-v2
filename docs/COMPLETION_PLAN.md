@@ -278,13 +278,23 @@ Repair: the corpus register (Phase 8), sourced pathway by pathway, each
 document admitted under its own digest and named in the set manifest.
 
 **O07 — Two of the three 10-K texts cannot run whole [P1 for BA and F, Phase
-10].** Boeing (1.1 MB) and Ford (1.8 MB) exceed `MAX_REQUEST_BYTES` alone;
-every module is handed every block (`captured_blocks`); the bounded line group
-is unbuilt; `CONTEXT_OVER_CEILING` refuses with no narrowing. CCL (304 KB)
-fits. Repair: per-node evidence selection from CP-0's `evidence_demand` and
+10].** Boeing (1.1 MB) and Ford (1.8 MB) do not **admit**: each holds a single
+token — 71,243 and 105,966 characters — and `ingest._prepare` calls
+`BoundaryText.of` on every token before any line is packed, so both refuse
+`BOUNDARY_TEXT_TOO_LONG` at the door. That is the first obstacle, and this
+entry named the second: they would *also* exceed `MAX_REQUEST_BYTES`, because
+every module is handed every block (`captured_blocks`) and
+`CONTEXT_OVER_CEILING` refuses with no narrowing. Corrected after the
+line-group review measured both texts on base and on the line-group branch and
+found neither admits — so neither reaches a prompt for the request ceiling to
+refuse. CCL (304 KB) fits. Repair, in the order the obstacles arrive: a
+declared maximum token length in the extractor that produced them, since a
+token that long is an extraction finding no whitespace where a reader sees
+words; then per-node evidence selection from CP-0's `evidence_demand` and
 `active_representation_ids`, recorded on the attempt and enforced by every
-reader; the line group; a per-section bound and one recorded narrowing step.
-Until then the FULL pathways run on CCL and on curated extracts.
+reader; a per-section bound and one recorded narrowing step. The line group's
+splitting half is built and moves neither document (CLAUDE.md, Phase 2). Until
+then the FULL pathways run on CCL and on curated extracts.
 
 **O08 — Keys measure citations, readiness and seven projected scalars, not
 registers [P1, Phase 8].** `ExpectedCitation`, `expects_ready`,
@@ -832,6 +842,55 @@ cannot freeze and a freezer cannot file; withdrawal mid-run prevents fresh
 acceptance and updates an open drawer; Book compares on one stated basis with
 a ten-field passport per cell; the analysis page names the blocking node; nine
 sections honest.
+
+**How each was met, recorded on 17 September 2026 at the phase's exit rather
+than left to be read off the plan.** Five of the six are met. The fourth is
+met in one half and **unmeetable in the other**, and is written out here so
+nobody reads the clause as satisfied:
+
+1. *Seven-identity matrix* — **met.** `tests/test_actor_matrix.py` carries two
+   tables over the same nine actors: `MATRIX` for the nine earlier commands and
+   the three Task 12.1 added (`members`, `revocation`, `withdrawal`), and
+   `DELIVERABLE` for the four filing commands, which needs a different fixture
+   because a revision can only be derived from a run whose artifacts are
+   accepted. Both include `anonymous → 401`, `nonmember → 404`,
+   `revoked → 404` and a global READER with case standing → 403.
+2. *A signer cannot freeze and a freezer cannot file* — **met**, twice over: at
+   the surface by `report_actions`, at commit by `server/deliverable/filing.py`,
+   and now in the browser on three engines, with a control that distinguishes
+   `APPROVER_NOT_INDEPENDENT` from `DELIVERABLE_NOT_SIGNED` so the assertion
+   names which rule refused.
+3. *Withdrawal mid-run prevents fresh acceptance and updates an open drawer* —
+   **met**, in one journey test with a real control on each half: the drawer is
+   unchanged when a *different* source is withdrawn, and marked when its own is.
+4. *Book on one stated basis with a ten-field passport per cell* — **the basis
+   is met; the per-cell passport cannot be met end to end and is met by unit
+   test only.** No run made through the API can carry CP-CF, so no cell exists
+   to open a passport from: `create_run` resolves the route with no
+   `RouteExtensions` and `CreateRun` carries no field to ask for one, while the
+   only caller that requests the model extension is the qualification harness.
+   The ten fields are held by three assertions, and **not** by
+   `test_passport_contract`, which this entry first cited: that test lives in
+   `frontend/tests/unit/evidence.test.tsx`, renders `MetricPassport` over a
+   hand-built passport, says nothing about a Book cell, and is pinned by name
+   in `tests/test_phase_exits.py` as *not* defined in the Python suite -- so
+   the citation sent a reader to a file that does not hold it and would have
+   broken the gate if anyone had "corrected" it by moving the test. What holds
+   the claim is `PINNED[wire.BookPassport]` in `tests/test_wire_contract.py`
+   (checked by `test_the_v1_wire_key_sets_are_pinned`),
+   `frontend/tests/unit/book.test.tsx`'s "selecting a cell opens the passport
+   with its ten fields", and `tests/test_book_section.py`. The journey asserts the
+   *absence* of a table and a cell, so the day the extension becomes
+   requestable that test fails and is rewritten to open the passport. See
+   `CLAUDE.md`'s Completion Phase 12 entry, whose upgrade is a
+   `model_extension` field on `CreateRun`, pinned in the route digest.
+5. *The analysis page names the blocking node* — **met**, through the
+   production stack on three engines (Task 12.4's field, Task 12.5's proof).
+6. *Nine sections honest* — **met with two recorded dishonesties, both
+   entered in the ledger rather than fixed**: Report is served but unreachable
+   from the workspace, because nothing there can make a case's first revision;
+   and `work.stop_code` is on the wire and on no surface, so an operator
+   meeting a parked run is told only that Start and Retry are refused.
 
 ### Phase 13 — Concurrency, durability, the trusted edge, the release pack
 

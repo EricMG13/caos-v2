@@ -106,26 +106,56 @@ def save_revision(  # noqa: PLR0913 -- authority, owner and narrative boundary
     action = GovernedAction(case_id, actor_id, "REVISION_SAVED", Standing.WRITER, audit)
 
     def write(unit: StoreConnection) -> None:
-        data = _derive(
+        audit["payload_sha256"] = save_revision_in(
             unit,
             blobs,
             bundle,
             case_id=case_id,
             run_id=run_id,
-            revision_id=revision,
+            actor_id=actor_id,
             narrative=narrative,
-        )
-        digest = blobs.put(data)
-        audit["payload_sha256"] = digest
-        unit.execute(
-            "INSERT INTO deliverable_revisions"
-            " (revision_id,case_id,run_id,payload_sha256,saved_by)"
-            " VALUES (%s,%s,%s,%s,%s)",
-            (revision, case_id, run_id, digest, actor_id),
+            revision_id=revision,
         )
 
     governed_write(conn, action, write)
     return revision
+
+
+def save_revision_in(  # noqa: PLR0913 -- authority, owner and narrative boundary
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case_id: UUID,
+    run_id: UUID,
+    actor_id: UUID,
+    narrative: object,
+    revision_id: UUID,
+) -> str:
+    """Derive, store and insert one revision in the caller's governed
+    transaction; never commits. Returns the payload digest the audit event and
+    the command's receipt both bind.
+
+    The id is the caller's because the receipt has to name it: a command that
+    minted one inside its unit could not answer a replay with the same body.
+    """
+    data = _derive(
+        conn,
+        blobs,
+        bundle,
+        case_id=case_id,
+        run_id=run_id,
+        revision_id=revision_id,
+        narrative=narrative,
+    )
+    digest = blobs.put(data)
+    conn.execute(
+        "INSERT INTO deliverable_revisions"
+        " (revision_id,case_id,run_id,payload_sha256,saved_by)"
+        " VALUES (%s,%s,%s,%s,%s)",
+        (revision_id, case_id, run_id, digest, actor_id),
+    )
+    return digest
 
 
 def read_revision(

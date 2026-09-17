@@ -5,7 +5,7 @@
       "global_role": "ANALYST",
       "standing": "APPROVER"
     },
-    "actions": []
+    "actions": [{ "action": "CREATE_CASE", "refusal": null }]
   },
   "body": {
     "cases": [

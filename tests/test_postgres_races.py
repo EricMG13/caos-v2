@@ -1067,3 +1067,96 @@ def test_a_report_read_never_blocks_a_governed_write_on_its_case(
             app.dependency_overrides.clear()
     assert body["revision_id"] == str(revision)
     assert probed == [True]
+
+
+def test_two_saves_against_one_head_commit_one_revision(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """Task 12.1, invariant 5. Both drafts name the head they were composed
+    against; the case lock orders them, and the second sees the first's commit.
+
+    The route functions are called directly, on two connections of their own:
+    what is under test is the unit the command builds, not FastAPI's resolution
+    of its dependencies, which `tests/test_actor_matrix.py` drives.
+    """
+    import inspect
+    from typing import cast
+    from uuid import uuid4
+
+    from test_deliverable_canonical import LITE, _accept
+    from test_execution_freshness import _Harness, harness
+
+    from server.api.commands.deliverable import save as save_command
+    from server.api.commands.members import withdraw as withdraw_command
+    from server.api.identity import Actor, GlobalRole
+    from server.api.wire import SaveRevision, WithdrawSource
+    from server.store.members import Standing, grant
+
+    make_harness = cast(
+        Callable[[tuple[StoreConnection, UUID], Path, ResolvedRoute], _Harness],
+        inspect.unwrap(harness),
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Issuer"))
+        conn.commit()
+        held = make_harness((conn, case_id), tmp_path, LITE)
+        for module in ("CP-0", "CP-L10", "CP-5"):
+            _accept(held, module)
+        writer = uuid4()
+        grant(conn, case_id=case_id, user_id=writer, standing=Standing.WRITER)
+        conn.commit()
+        actor = Actor(user_id=writer, role=GlobalRole.ANALYST)
+        draft = SaveRevision(expected_revision_id=None, narrative=[])
+
+        for stage in ("save", "withdraw"):
+            barrier = Barrier(2)
+
+            def race(_index: int, stage: str = stage, bar: Barrier = barrier) -> str:
+                with connect(empty_database) as other:
+                    bar.wait(10)
+                    try:
+                        if stage == "save":
+                            save_command(
+                                actor=actor,
+                                key=uuid4(),
+                                _standing=Standing.WRITER,
+                                run_id=held.run_id,
+                                body=draft,
+                                case_id=case_id,
+                                conn=other,
+                                blobs=held.blobs,
+                                bundle=held.bundle,
+                            )
+                        else:
+                            withdraw_command(
+                                actor=actor,
+                                key=uuid4(),
+                                _standing=Standing.WRITER,
+                                source_id=held.source_id,
+                                _body=WithdrawSource(),
+                                case_id=case_id,
+                                conn=other,
+                            )
+                    except Refusal as refused:
+                        return refused.code.value
+                    return "OK"
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = sorted(pool.map(race, range(2)))
+            assert outcomes == sorted(
+                {
+                    "save": ["OK", "COMMAND_EXPECTATION_STALE"],
+                    "withdraw": ["OK", "EVIDENCE_NOT_AVAILABLE"],
+                }[stage]
+            ), stage
+
+        saved = conn.execute(
+            "SELECT count(*) FROM deliverable_revisions WHERE run_id=%s",
+            (held.run_id,),
+        ).fetchone()
+        withdrawn = conn.execute(
+            "SELECT count(*) FROM audit_events WHERE action='SOURCE_WITHDRAWN'"
+        ).fetchone()
+        conn.rollback()
+        assert (saved, withdrawn) == ((1,), (1,))

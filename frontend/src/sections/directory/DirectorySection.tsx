@@ -45,10 +45,10 @@ export function DirectorySection({
       </section>
       <p className="note">
         <b>One action per row, and it is the same action.</b> A row opens its case; everything else
-        a case can do belongs to the section that owns it — pinning a set to Upload, approving a
-        plan or accepting a run to Run, filing to Committee. There is no batch state and no second
-        selection model, so nothing on this page can act on four cases at once without a person
-        having read four cases.
+        a case can do belongs to the section that owns it — admitting and withdrawing sources to
+        Upload, approving a plan or accepting a run to Run, saving, signing, freezing and filing a
+        revision to Report. There is no batch state and no second selection model, so nothing on
+        this page can act on four cases at once without a person having read four cases.
       </p>
     </div>
   );

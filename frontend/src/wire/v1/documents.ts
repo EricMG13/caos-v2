@@ -52,6 +52,11 @@ const ActionName = enumOf([
   "START_RUN",
   "RETRY_RUN",
   "CANCEL_RUN",
+  "WITHDRAW_SOURCE",
+  "SAVE_REVISION",
+  "SIGN_OPINION",
+  "FREEZE_DELIVERABLE",
+  "FILE_DELIVERABLE",
 ]);
 
 const Subject = object({ case_id: uuid, title: text });
@@ -65,7 +70,7 @@ const ActionView = object({
 const Chrome = object({
   subject: nullable(Subject),
   served_role: ServedRole,
-  actions: array(ActionView, 9),
+  actions: array(ActionView, 14),
 });
 
 function sectionDocument<B extends ReturnType<typeof object>>(body: B) {
@@ -262,6 +267,64 @@ const ModelBody = object({
 });
 const ModelDocument = sectionDocument(ModelBody);
 
+// Book, `/api/v1/book` (IA_SPEC.md 4.4): the credit across the portfolio. No
+// case in its body, so it is the one section document beside Directory's that
+// answers for no single case.
+const BookColumn = object({ key: short, label: text });
+const BookResearch = object({ route_node_id: short, module_id: short, qa_status: short });
+/** The ten fields of IA_SPEC.md 4.4, in its order and closed to them. */
+const BookPassport = object({
+  definition: text,
+  period: text,
+  scenario: text,
+  evidence_date: text,
+  computed_at: datetime,
+  snapshot: hash,
+  method: text,
+  derivation: text,
+  citations: array(CitationView, 1024),
+  supporting_research: array(BookResearch, 256),
+});
+const BookCell = object({
+  column: short,
+  value: nullable(string({ max: 64, pattern: "^-?[0-9]+(\\.[0-9]+)?$" })),
+  unavailable_reason: nullable(literal("ZERO_OR_NEGATIVE_DENOMINATOR")),
+  passport: BookPassport,
+});
+const BookPeriod = object({
+  case: text,
+  period_id: text,
+  fiscal_year: text,
+  days: string({ max: 3, pattern: "^[0-9]+$" }),
+  unavailable_reason: nullable(text),
+  cells: array(BookCell, 16),
+});
+const BookRow = object({
+  case_id: uuid,
+  title: text,
+  standing: Standing,
+  subject: nullable(RunSubjectView),
+  displayed_run_id: nullable(uuid),
+  displayed_run_status: nullable(enumOf(RUN_STATUSES)),
+  snapshot: nullable(hash),
+  currency: nullable(string({ max: 3, pattern: "^[A-Z]{3}$" })),
+  scale: nullable(enumOf(["units", "thousands", "millions", "billions"])),
+  periods: array(BookPeriod, 8),
+  unavailable_reason: nullable(literal("NO_ACCEPTED_FORECAST")),
+  refusal: nullable(later(() => RefusalBody)),
+});
+const BookBasis = object({
+  period: literal("EVERY_ACCEPTED_PERIOD"),
+  scenario: literal("EVERY_ACCEPTED_CASE"),
+  accepted_only: literal(true),
+});
+const BookBody = object({
+  basis: BookBasis,
+  columns: array(BookColumn, 16),
+  rows: array(BookRow, 4),
+});
+const BookDocument = sectionDocument(BookBody);
+
 const NarrativeFigure = object({
   route_node_id: short,
   citation_index: int({ min: 0 }),
@@ -388,6 +451,7 @@ const RefusalCode = enumOf([
   "PROVIDER_NOT_CONFIGURED",
   "PROVIDER_CALL_INVALID",
   "CONTEXT_OVER_CEILING",
+  "UPSTREAM_SECTION_OVER_CEILING",
   "PROVIDER_UNAVAILABLE",
   "PROVIDER_OUTPUT_TRUNCATED",
   "PROVIDER_REFUSED",
@@ -520,6 +584,15 @@ export const V1_SHAPES = {
   ModelForecast,
   ModelBody,
   ModelDocument,
+  BookColumn,
+  BookResearch,
+  BookPassport,
+  BookCell,
+  BookPeriod,
+  BookRow,
+  BookBasis,
+  BookBody,
+  BookDocument,
   ActionName,
   ActionView,
   AnalysisBody,
@@ -573,6 +646,12 @@ export type UploadDocument = Infer<typeof UploadDocument>;
 export type RunSectionDocument = Infer<typeof RunSectionDocument>;
 export type AnalysisDocument = Infer<typeof AnalysisDocument>;
 export type ModelDocument = Infer<typeof ModelDocument>;
+export type BookDocument = Infer<typeof BookDocument>;
+export type BookRow = Infer<typeof BookRow>;
+export type BookCell = Infer<typeof BookCell>;
+export type BookPassport = Infer<typeof BookPassport>;
+export type BookColumn = Infer<typeof BookColumn>;
+export type BookPeriod = Infer<typeof BookPeriod>;
 export type ReportDocument = Infer<typeof ReportDocument>;
 export type CommitteeDocument = Infer<typeof CommitteeDocument>;
 export type RefusalBody = Infer<typeof RefusalBody>;
@@ -600,6 +679,7 @@ export type SectionDocument =
   | RunSectionDocument
   | AnalysisDocument
   | ModelDocument
+  | BookDocument
   | ReportDocument
   | CommitteeDocument;
 
@@ -611,6 +691,7 @@ export const parseRunSectionDocument = (value: unknown): RunSectionDocument =>
 export const parseAnalysisDocument = (value: unknown): AnalysisDocument =>
   parse(AnalysisDocument, value);
 export const parseModelDocument = (value: unknown): ModelDocument => parse(ModelDocument, value);
+export const parseBookDocument = (value: unknown): BookDocument => parse(BookDocument, value);
 export const parseReportDocument = (value: unknown): ReportDocument => parse(ReportDocument, value);
 export const parseCommitteeDocument = (value: unknown): CommitteeDocument =>
   parse(CommitteeDocument, value);

@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from server.evidence.ingest import block_ids_by_line
+from server.evidence.ingest import GROUP_WIDTH, block_ids_by_line
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -119,7 +119,7 @@ class TokenIndex:
 
     pages: dict[tuple[UUID, int], list[_Token]] = field(default_factory=dict)
     digests: dict[UUID, str] = field(default_factory=dict)
-    line_blocks: dict[UUID, dict[int, str]] = field(default_factory=dict)
+    line_blocks: dict[UUID, dict[int, tuple[str, ...]]] = field(default_factory=dict)
 
 
 def verify_citations(
@@ -169,7 +169,7 @@ def verify_citations(
         if citation.source_id not in ordinals:
             ordinals[citation.source_id] = _line_blocks(conn, citation.source_id)
         lines = ordinals[citation.source_id]
-        if any(lines.get(token.line_id) not in blocks for token in run):
+        if any(not _delivered(lines.get(token.line_id), blocks) for token in run):
             raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
         boxes = _rectangles(run, citation.page)
         anchored.append(
@@ -197,14 +197,87 @@ def _page_tokens(conn: StoreConnection, source_id: UUID, page: int) -> list[_Tok
     return [_Token(*row) for row in rows]
 
 
-def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, str]:
-    """Line id to the block admission wrote for it, once per source: admission's
-    own numbering (`block_ids_by_line`) over the token index's line ids."""
+def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str, ...]]:
+    """Line id to the blocks admission wrote for it, once per source: admission's
+    own numbering (`block_ids_by_line`) over the token index's line ids.
+
+    A line past `GROUP_WIDTH` was split, so a line may own more than one block.
+    Which lines were split is not guessed, and the direction of the count is
+    what says whether to ask. Splitting only ever writes **more** blocks than
+    lines, so a source with more stored blocks than lines carries a split and
+    its packing is recomputed from the text. A source with as many blocks as
+    lines had none -- every source admitted before there was any splitting, and
+    every source whose lines fit. A source with *fewer* blocks than lines is
+    neither: no packing this rule states produces one, and the only way to reach
+    it is to remove a stored block, which migration 0027 seals against and which
+    the suite does deliberately to narrow a delivery. There the one-block-a-line
+    reading is right and the missing block is simply not among the delivered,
+    which is `CITATION_NOT_DELIVERED` and not this function's to answer.
+    """
     rows = conn.execute(
-        "SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s",
+        "SELECT lines.line_id, blocks.stored FROM"
+        " (SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s) AS lines,"
+        " (SELECT count(*) AS stored FROM source_blocks WHERE source_id = %s)"
+        " AS blocks",
+        (source_id, source_id),
+    ).fetchall()
+    line_ids = [int(row[0]) for row in rows]
+    stored = int(rows[0][1]) if rows else 0
+    if stored <= len(line_ids):
+        return block_ids_by_line(dict.fromkeys(line_ids, 1))
+    counts = _group_counts(conn, source_id)
+    if sum(counts.values()) != stored:
+        # The recomputation is a derivation of what admission wrote, and here it
+        # does not agree with it. The store cannot have drifted upward -- 0027
+        # seals extracted evidence -- so the rule has: this source was packed
+        # under a different `GROUP_WIDTH`. Every id past the disagreement names
+        # a row no source carries, and asking whether such a block was delivered
+        # answers about the citation when the fault is the host's own reading.
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+    return block_ids_by_line(counts)
+
+
+def _group_counts(conn: StoreConnection, source_id: UUID) -> dict[int, int]:
+    """How many blocks each line needs, by admission's own rule.
+
+    The rule chunks a line by *length*, so the length is what is read --
+    computed in the database rather than by shipping the document. It used to
+    `fetchall` every token's text and rebuild each line in Python: with
+    `AdmissionLimits.max_tokens` at 500,000 that is an unbounded read, and it
+    runs inside `save_revision_in`'s and `freeze_in`'s governed transaction,
+    under the case lock, on any source carrying one line past `GROUP_WIDTH` --
+    an ordinary un-wrapped paragraph in a text export. `IO_BUDGET` could not
+    see it: one round trip either way, while the work behind it was the whole
+    token table. Found by the Completion Phase 12 adversarial audit.
+
+    `line_groups` normalises to NFC before it measures, and this counts the
+    stored characters instead. Where the two disagree the totals disagree, and
+    `_line_blocks`'s `sum(counts) != stored` guard refuses `EVIDENCE_NOT_AVAILABLE`
+    rather than handing out an id no row carries -- so a normalisation that
+    changes a length is loud, not silent.
+    """
+    rows = conn.execute(
+        "SELECT line_id, sum(length(text)) + count(*) - 1 AS width"
+        " FROM source_tokens WHERE source_id = %s GROUP BY line_id",
         (source_id,),
     ).fetchall()
-    return block_ids_by_line(int(row[0]) for row in rows)
+    return {
+        int(line_id): max(1, -(-int(width) // GROUP_WIDTH)) for line_id, width in rows
+    }
+
+
+def _delivered(ids: tuple[str, ...] | None, blocks: frozenset[str]) -> bool:
+    """A line is delivered when every block it was split into was.
+
+    Fail closed, and deliberately line-granular: a quote crossing a group
+    boundary needs both sides, and a delivery carrying half a split line
+    carries none of it. Nothing narrows a delivery below a whole source today,
+    so this is the rule per-node evidence selection will meet rather than one
+    any run can meet now.
+    """
+    if not ids:
+        return False
+    return all(block in blocks for block in ids)
 
 
 def _match_at(tokens: list[_Token], start: int, words: Sequence[str]) -> list[_Token]:

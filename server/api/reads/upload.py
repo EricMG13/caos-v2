@@ -52,7 +52,11 @@ def read_upload(
         chrome=Chrome(
             subject=Subject(case_id=case_id, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
-            actions=upload_actions(actor.role, standing),
+            actions=upload_actions(
+                actor.role,
+                standing,
+                sum(1 for source in listed.sources if source.withdrawn_at is None),
+            ),
         ),
         body=UploadBody(
             case_id=case_id,

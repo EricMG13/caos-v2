@@ -45,8 +45,83 @@ def directory_actions(role: GlobalRole) -> list[ActionView]:
     return [_view(_A.CREATE_CASE, [(role is GlobalRole.READER, _C.NOT_AUTHORISED)])]
 
 
-def upload_actions(role: GlobalRole, standing: Standing) -> list[ActionView]:
-    return [_view(_A.ADMIT_SOURCES, _floor(role, standing, Standing.WRITER))]
+def upload_actions(
+    role: GlobalRole, standing: Standing, live_sources: int
+) -> list[ActionView]:
+    """Admission, and the withdrawal that is invariant 1's second half.
+
+    A case with nothing live has nothing to withdraw; which source is named is
+    the command's to refuse, with the same code, from the path. `live_sources`
+    is counted from what the section listed, which `SOURCES_MAX` bounds, so a
+    truncated listing can under-claim -- the control is then shown refused on a
+    case that does have live sources, which is the fail-closed direction and is
+    the command's to correct at commit."""
+    writer = _floor(role, standing, Standing.WRITER)
+    return [
+        _view(_A.ADMIT_SOURCES, writer),
+        _view(
+            _A.WITHDRAW_SOURCE,
+            [*writer, (live_sources == 0, _C.EVIDENCE_NOT_AVAILABLE)],
+        ),
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class FilingFacts:
+    """One saved revision's filing state, as the Report section read it.
+
+    `actor_signed` and `actor_froze` are about the caller being shown the
+    controls: the three-actor rule is checked at commit under the case lock,
+    and saying so here only keeps a control from being offered to someone it
+    would refuse.
+    """
+
+    signed: bool
+    frozen: bool
+    filed: bool
+    actor_signed: bool
+    actor_froze: bool
+
+
+def report_actions(
+    role: GlobalRole, standing: Standing, filing: FilingFacts
+) -> list[ActionView]:
+    """The Report section's four, in each command's own order (decision 7).
+
+    They sit on Report rather than Committee because Committee refuses a
+    revision that is not frozen, so it can never offer the sign or the freeze
+    that would make it one.
+    """
+    approver = _floor(role, standing, Standing.APPROVER)
+    return [
+        _view(_A.SAVE_REVISION, _floor(role, standing, Standing.WRITER)),
+        _view(
+            _A.SIGN_OPINION,
+            [*approver, (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN)],
+        ),
+        _view(
+            _A.FREEZE_DELIVERABLE,
+            [
+                *approver,
+                (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN),
+                (not filing.signed, _C.DELIVERABLE_NOT_SIGNED),
+                (filing.actor_signed, _C.APPROVER_NOT_INDEPENDENT),
+            ],
+        ),
+        _view(
+            _A.FILE_DELIVERABLE,
+            [
+                *approver,
+                (not filing.frozen, _C.DELIVERABLE_NOT_FROZEN),
+                (not filing.signed, _C.DELIVERABLE_NOT_SIGNED),
+                (
+                    filing.actor_signed or filing.actor_froze,
+                    _C.APPROVER_NOT_INDEPENDENT,
+                ),
+                (filing.filed, _C.DELIVERABLE_ALREADY_FILED),
+            ],
+        ),
+    ]
 
 
 def run_actions(

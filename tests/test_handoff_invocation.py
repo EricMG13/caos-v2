@@ -58,8 +58,12 @@ from server.methodology.handoff import (
     validate_markdown,
 )
 from server.methodology.invocation import (
+    _FINAL_CHECK,
     _FORECAST_EXTENSION,
+    _HOST_STEPS,
+    _INSTRUCTION,
     HOST_PERFORMED_SCRIPTS,
+    MAX_UPSTREAM_HANDOFF_BYTES,
     MODULE_AUTHORED_SCRIPTS,
     allowed_uses,
     build_handoff_prompt,
@@ -73,7 +77,7 @@ from server.methodology.invocation import (
     within_request_ceiling,
 )
 from server.methodology.vendor import VENDOR_MODULE, authority_bundle_sha256
-from server.provider import MAX_REQUEST_BYTES, OpenRouter
+from server.provider import MAX_REQUEST_BYTES, OpenRouter, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.routes import pin_route
@@ -963,6 +967,86 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
         within_request_ceiling(provider, over)
     assert refused.value.code is RefusalCode.CONTEXT_OVER_CEILING
     assert refused.value.__context__ is None
+
+
+def test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt() -> None:
+    """The per-section bound the request ceiling never gave: one accepted
+    upstream handoff of exactly `MAX_UPSTREAM_HANDOFF_BYTES` is carried whole,
+    and one byte more refuses `UPSTREAM_SECTION_OVER_CEILING` -- naming the
+    section rather than the whole request, which is still far inside
+    `MAX_REQUEST_BYTES`, and cutting nothing out of it."""
+    gate = handoff_markdown(identity("CP-0"))
+    exact = gate.ljust(MAX_UPSTREAM_HANDOFF_BYTES, b" ")
+    assert len(exact) == MAX_UPSTREAM_HANDOFF_BYTES
+    provider = OpenRouter(api_key="never-sent", model=MODEL, transport=_NoTransport())
+
+    ref = upstream_ref(identity("CP-0"), exact)
+    prompt = _prompt(identity("CP-L10", (ref,)), upstream=((ref, exact),))
+    assert exact.decode() in prompt
+    whole = len(provider.request_bytes(prompt, json_object=True))
+
+    over = exact + b" "
+    ahead = upstream_ref(identity("CP-0"), over)
+    with pytest.raises(Refusal) as refused:
+        _prompt(identity("CP-L10", (ahead,)), upstream=((ahead, over),))
+    assert refused.value.code is RefusalCode.UPSTREAM_SECTION_OVER_CEILING
+    assert refused.value.__context__ is None
+    # The section, not the request: one more byte would have been sent.
+    assert whole + 1 < MAX_REQUEST_BYTES
+
+
+def test_the_declared_section_bound_leaves_the_widest_node_its_authority() -> None:
+    """Why the declared number is the number: a node's own delivered authority
+    beside its direct upstreams at the bound must still leave the request
+    ceiling room for evidence. A bundle that widens a node or grows an
+    authority set fails here rather than at the first FULL run.
+
+    Maximised over every node of every profile, not over one pair. The review
+    that asked for this found the single-pair form would pass a bundle whose
+    third profile carried a wider node, or whose CP-3 authority grew past the
+    quarter, while the arithmetic the declared number rests on no longer held.
+    **CP-3** is the true maximum on this bundle at 711,482 encoded bytes
+    against a 1,048,576 ceiling, 32% of it left -- and the assertion does not
+    depend on that staying true. The raw-byte version of this test named CP-5,
+    which was an artefact of its unit: CP-5 carries the most upstreams, CP-3
+    the heavier authority once JSON escaping is paid.
+
+    **Measured through `encode_request`, not by summing raw lengths.** The
+    Completion Phase 12 adversarial audit found this test's arithmetic was in
+    the wrong unit: `MAX_REQUEST_BYTES` bounds
+    `len(json.dumps(request).encode())` with `ensure_ascii=True`, so every
+    non-ASCII character costs six bytes and every quote and newline two --
+    and the vendored authority is full of em-dashes, section signs and curly
+    quotes. A sum of raw lengths cannot see any of it, so the test could pass
+    while the real encoded request was over the ceiling. The authority files
+    are used as their real bytes for the same reason.
+
+    What it still does not carry is the citation register, which is explicitly
+    unbounded, and the evidence section, which is the room this assertion
+    exists to prove is left. The fixed host sections are included.
+    """
+    filler = "x" * MAX_UPSTREAM_HANDOFF_BYTES
+    worst = 0
+    worst_node = ""
+    for profile in CATALOG["profiles"].values():
+        edges = profile["edges"]
+        for node in {edge["target"] for edge in edges}:
+            upstreams = sum(1 for edge in edges if edge["target"] == node)
+            files = delivered_authority(BUNDLE, node).files
+            prompt = "\n".join(
+                [
+                    *(data.decode("utf-8", "replace") for _name, data in files),
+                    *(filler for _ in range(upstreams)),
+                    _HOST_STEPS,
+                    _INSTRUCTION,
+                    _FINAL_CHECK,
+                ]
+            )
+            cost = len(encode_request("a-model/for-the-test", prompt))
+            if cost > worst:
+                worst, worst_node = cost, node
+    assert worst < MAX_REQUEST_BYTES, (worst_node, worst)
+    assert MAX_REQUEST_BYTES - worst > MAX_REQUEST_BYTES // 4, (worst_node, worst)
 
 
 class _NoTransport:

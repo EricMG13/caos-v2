@@ -15,6 +15,7 @@ from server.api.deps import (
 )
 from server.api.reads.analysis import read_analysis
 from server.api.wire import (
+    AnalysisBody,
     ModelBody,
     ModelDocument,
     ModelForecast,
@@ -24,6 +25,7 @@ from server.api.wire import (
 from server.engine.route import MODEL_MODULE
 from server.methodology.forecast import forecast_projection
 from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection
 from server.store.source_sets import pinned_live_sources
 
 # Analysis' ten-node forecast route, including CP-CF's four owner proofs,
@@ -47,31 +49,7 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
 ) -> ModelDocument:
     analysis = read_analysis(actor, case_id, run, standing, conn, blobs, bundle)
     body = analysis.body
-    accepted = next((h for h in body.handoffs if h.module_id == MODEL_MODULE), None)
-    forecast = None
-    if accepted is not None and body.displayed_run_id is not None:
-        live = pinned_live_sources(conn, body.displayed_run_id)
-        if any(
-            c.document_sha256 not in live for h in body.handoffs for c in h.source_facts
-        ):
-            raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        result = forecast_projection(accepted.model_analysis.encode("utf-8"))
-        forecast = ModelForecast(
-            **accepted.model_dump(
-                include={
-                    "route_node_id",
-                    "artifact_sha256",
-                    "record_sha256",
-                    "accepted_at",
-                    "qa_status",
-                    "limitation_flags",
-                    "validation_warnings",
-                }
-            ),
-            **result["units"],
-            perimeter=result["perimeter"],
-            periods=[_period(row) for row in result["rows"]],
-        )
+    forecast = accepted_forecast(conn, body)
     return ModelDocument(
         **analysis.model_dump(exclude={"body", "status", "observed_empty"}),
         body=ModelBody(
@@ -85,6 +63,40 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
         ),
         observed_empty=forecast is None,
         status="partial" if forecast is None else "complete",
+    )
+
+
+def accepted_forecast(
+    conn: StoreConnection, body: AnalysisBody
+) -> ModelForecast | None:
+    """The run's accepted CP-CF projection, re-derived, or None when there is
+    none. Shared with the Book, which reads the same accepted pair across
+    several credits and must read it the one way this section does.
+    """
+    accepted = next((h for h in body.handoffs if h.module_id == MODEL_MODULE), None)
+    if accepted is None or body.displayed_run_id is None:
+        return None
+    live = pinned_live_sources(conn, body.displayed_run_id)
+    if any(
+        c.document_sha256 not in live for h in body.handoffs for c in h.source_facts
+    ):
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    result = forecast_projection(accepted.model_analysis.encode("utf-8"))
+    return ModelForecast(
+        **accepted.model_dump(
+            include={
+                "route_node_id",
+                "artifact_sha256",
+                "record_sha256",
+                "accepted_at",
+                "qa_status",
+                "limitation_flags",
+                "validation_warnings",
+            }
+        ),
+        **result["units"],
+        perimeter=result["perimeter"],
+        periods=[_period(row) for row in result["rows"]],
     )
 
 

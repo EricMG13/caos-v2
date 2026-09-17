@@ -66,6 +66,18 @@ def forecast_projection(markdown: bytes) -> dict[str, Any]:
     return result
 
 
+def forecast_inputs(markdown: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The accepted request and its owner bindings, for a reader that must name
+    the driver behind a projected figure and the quote it was bound to.
+
+    Pure, like `forecast_projection` beside it: it confers no provenance. A
+    caller states the figure's lineage only after that function has re-derived
+    the projection from these same bytes.
+    """
+    document = _document(markdown)
+    return document["request"], document["bindings"]
+
+
 def _leaves(value: object, path: str = "") -> dict[str, object]:
     if isinstance(value, dict) and value:
         return {

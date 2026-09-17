@@ -16,13 +16,19 @@ from server.deliverable.canonical import payload_bytes
 from server.deliverable.filing import (
     Receipt,
     file_deliverable,
+    file_deliverable_in,
     freeze,
+    freeze_in,
+    persist_receipt,
     receipt_bytes,
     sign_opinion,
+    sign_opinion_in,
 )
+from server.deliverable.revisions import save_revision_in
 from server.refusals import Refusal
+from server.store import connect
 from server.store.audit import audit_trail
-from server.store.gates import withdraw_source
+from server.store.gates import withdraw_source, withdraw_source_in
 from server.store.members import Standing, grant
 from server.store.runs import create_case
 
@@ -328,3 +334,63 @@ def test_audit_package_verifies_with_stdlib_alone(
         timeout=10,
     )
     assert json.loads(result.stdout) == {"verified": True, "reason": None}
+
+
+def test_the_in_unit_writes_commit_nothing_of_their_own(
+    lite: _Harness, empty_database: str
+) -> None:
+    """Each governed write here is a whole `governed_write` call, so a caller
+    that needs the domain write in a unit of its own -- one that also carries a
+    command's receipt -- cannot use it. `save_revision_in`, `sign_opinion_in`,
+    `freeze_in`, `file_deliverable_in`, `persist_receipt` and
+    `withdraw_source_in` are that unit's half, and the property that makes them
+    worth having is that none of them commits: run outside a governed write and
+    rolled back, they leave nothing behind.
+    """
+    conn, case_id = lite.conn, lite.case_id
+    signer, freezer, filer = (uuid4() for _ in range(3))
+    revision = uuid4()
+
+    digest = save_revision_in(
+        conn,
+        lite.blobs,
+        lite.bundle,
+        case_id=case_id,
+        run_id=lite.run_id,
+        actor_id=signer,
+        narrative=[],
+        revision_id=revision,
+    )
+    assert (
+        sign_opinion_in(conn, case_id=case_id, actor_id=signer, revision_id=revision)
+        == digest
+    )
+    assert (
+        freeze_in(
+            conn,
+            lite.blobs,
+            lite.bundle,
+            case_id=case_id,
+            actor_id=freezer,
+            revision_id=revision,
+        )
+        == digest
+    )
+    receipt = file_deliverable_in(
+        conn, case_id=case_id, actor_id=filer, revision_id=revision
+    )
+    assert persist_receipt(conn, lite.blobs, receipt, "e" * 64).filed_event_sha256 == (
+        "e" * 64
+    )
+    withdraw_source_in(conn, case_id=case_id, source_id=lite.source_id)
+    conn.rollback()
+
+    with connect(empty_database) as observer:
+        counts = observer.execute(
+            "SELECT (SELECT count(*) FROM deliverable_revisions),"
+            " (SELECT count(*) FROM deliverable_opinions),"
+            " (SELECT count(*) FROM deliverable_publications),"
+            " (SELECT count(*) FROM deliverable_receipts),"
+            " (SELECT count(*) FROM sources WHERE withdrawn_at IS NOT NULL)"
+        ).fetchone()
+    assert counts == (0, 0, 0, 0, 0)

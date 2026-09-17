@@ -179,6 +179,259 @@ test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
 define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Completion Phase 12.**
+
+- **Two filing digest checks cannot fire, and one refusal's clearance cannot
+  discharge its newest cause.** `server/deliverable/filing.py`'s
+  `signatures[0][1] != digest` (`DELIVERABLE_MOVED_SINCE_SIGNING`) and its
+  `any(signed_digest != digest ...)` (`DELIVERABLE_NOT_SIGNED`) compare a
+  signature's `payload_sha256` against the revision's -- but `sign_opinion_in`
+  writes the digest it has just read from the immutable
+  `deliverable_revisions` row, so every signature's digest equals the
+  revision's by construction and neither branch is reachable. What does the
+  work is `_reviewed` in the route, against the digest the *client* sent, which
+  is a different and real check. Two named refusals with no reachable cause
+  read as protection that is not there. Separately,
+  `citations._line_blocks` now raises `EVIDENCE_NOT_AVAILABLE` when the host's
+  own `GROUP_WIDTH` no longer reproduces a stored block count, and that code's
+  clearance is "Pin a live source for the evidence." -- an act the caller can
+  perform and that cannot possibly help, because the fault is the host's
+  packing rule. Same shape as the borrowed `CONTEXT_OVER_CEILING` clearance
+  already recorded, one code over. Both found by the Completion Phase 12
+  adversarial audit. *Upgrade:* delete the two unreachable branches with the
+  commit that gives them a cause, or state in each that the route's check is
+  the live one; and a clearance of its own for the repacking refusal, which is
+  the operator's "re-admit the source under this build" rather than anything a
+  caller can do.
+- **`SAVE_REVISION` is judged on its floor alone, so the surface can offer a
+  save the commit refuses.** `availability.report_actions` judges the other
+  three filing acts against the revision's state and `SAVE_REVISION` against
+  the WRITER floor only, while `FilingControls` posts
+  `expected_revision_id: body.revision_id`. So opening Report at
+  `?revision=<any revision that is not the run's head>` -- an ordinary thing to
+  do, since the Save control sets `?revision` on every save -- renders Save
+  available and answers `COMMAND_EXPECTATION_STALE` on the press. The read
+  already holds the run's head and could say so; every other run-scoped action
+  in that module does the equivalent. It is also the one filing control
+  `tests/test_governed_write_routes.py`'s availability walk skips, which
+  iterates `_FILING[1:]` under a docstring saying it covers every state the
+  chain distinguishes. *Upgrade:* judge `SAVE_REVISION` against the head the
+  read already has, and walk all four.
+
+- **The filing commands' I/O budget is a ceiling, where every other section
+  asserts equality.** `server/api/commands/deliverable.py` declares
+  `IO_BUDGET = 60` and `tests/test_governed_write_routes.py` asserts
+  `0 < counted.executed <= budget`, over measured costs of freeze 55, save 52,
+  filing 16 and signature 14. So the signature command may grow from fourteen
+  round trips to sixty with nothing failing, and two of the four run at a
+  quarter of their declared bound. The four share one envelope and one
+  declaration, which is why a single number covers them; what it costs is the
+  property every section read has, that an unnoticed read fails loudly. This is
+  the same argument the audit-remediation entry makes one screen above about
+  not fitting a budget to the widest shape, applied to a ceiling instead of a
+  raised number. *Upgrade:* a declared budget per command with `==`, the day
+  one of the four grows a read nobody meant to add.
+- **A signer can sign twice, and the detached receipt names one of them.**
+  `deliverable_opinions`' primary key is
+  `(case_id, revision_id, signed_by, signed_at)` and `sign_opinion_in` refuses
+  only a *frozen* revision, while `useCommand` mints a fresh idempotency key
+  for a press following a successful one -- so two presses of Sign are two
+  commands and two rows for one signer. Nothing false is written: the
+  revision's `signed_by` carries the same actor twice and the three-actor rule
+  still counts distinct actors. Two clauses this entry first carried were
+  wrong, and are corrected here rather than quietly: it said the committee read
+  pays one more `payload_digests` round trip, which it does not -- `required`
+  is a set of `(action, actor)` and the lookup is keyed by actor, so a doubled
+  *same* signer costs nothing and only two distinct signers do, which is what
+  the `IO_BUDGET` comment beside it says and what this entry borrowed for a
+  case it does not cover. And it said `file_deliverable_in`'s `Receipt` names
+  the **first** signer: `revision_signatures` orders `signed_at DESC`, so
+  `signatures[0]` is the most **recent** one. The receipt still under-claims
+  rather than misstates, but it under-claims the other way round. Both found by
+  the phase adversarial audit reading the code against the entry. Reachable
+  since the sign route shipped. *Upgrade:* a unique index on
+  `(case_id, revision_id, signed_by)` and a receipt carrying every signature,
+  the day a second signature on one revision is something a reader must see.
+- **A Book passport's evidence date is the analyst's declared reporting
+  period.** `server/api/reads/book.py` fills `evidence_date` from the pinned
+  run subject's `reporting_period`, which a person typed when the run was
+  created -- not a date the host derived from any admitted document. The code
+  says so; the field's name does not, and in a ten-field passport beside
+  `computed_at`, `snapshot` and a host-anchored citation it reads as one more
+  host fact. *Upgrade:* rename it to what it is, or derive it from the
+  documents the projection's operands cite, the day a reader relies on it to
+  date the evidence rather than the case.
+- **The demonstration Book is fully populated for a feature the real system
+  cannot reach.** `frontend/fixtures/book.json` carries two credits with cells,
+  chips and ten-field passports, and `make dev-ui-demo` renders them -- while
+  no run made through the API can carry CP-CF, so the real Book draws a credit
+  list and no table. The fixture is the shape the wire declares and the section
+  will serve; the workbench is explicitly never integration evidence
+  (`docs/DECISIONS.md` §14's rule, restated on every demo surface). But the
+  entries above say the Book's limits "are not things a reader meets now", and
+  a reader of the demonstration meets the opposite: a working portfolio.
+  *Upgrade:* the demo fixture says on the page that no pathway it can be served
+  from produces a forecast, or the model extension becomes requestable and the
+  fixture stops being ahead of the product.
+
+- **No run made through the API can carry CP-CF, so no Book cell and no
+  passport is reachable.** `create_run` resolves the route with no
+  `RouteExtensions` (`server/api/commands/runs.py`) and `CreateRun` carries no
+  field to ask for one (`server/api/wire.py`, `extra="forbid"`), while CP-CF is
+  a host extension appended only by
+  `resolve_route(..., extensions=RouteExtensions(model_extension=True))`
+  (`server/engine/route.py`'s `_model_node`), whose one caller anywhere is the
+  qualification harness. `accepted_forecast` returns `None` without a CP-CF
+  handoff, so every credit is `NO_ACCEPTED_FORECAST`, `periodsOf(rows)` is
+  empty, `BookSection` draws its credit list instead of a comparison table, and
+  there is no `[data-cell]` to open a passport from. **This is not a property of
+  the LITE pathway**: `ADAPTER_ROUTES` enables three pathways and
+  `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's `MODEL_OWNERS`,
+  so it would append CP-CF if anything asked. Completion Phase 12's exit clause
+  "a ten-field passport per cell" therefore rests on `PINNED[wire.BookPassport]`
+  in `tests/test_wire_contract.py`, on `frontend/tests/unit/book.test.tsx` and
+  on `tests/test_book_section.py`, not on the production stack; the journey records the
+  absence deliberately, so the day a cell exists
+  `journey: the Book names every credit of the portfolio on one stated basis`
+  fails and is rewritten to open the passport. Found by the Task 12.5
+  acceptance review, which read the route resolver where the task's own
+  reasoning had stopped one step short and recorded a false reason -- that
+  CP-CF "is not a node of the only route the canonical adapter executes" --
+  which was wrong twice over. *Upgrade:* a declared way for a run to request
+  the model extension, a `model_extension` field on `CreateRun` pinned in the
+  route digest like everything else; or a Book that says in its own document
+  that no pathway it can be served from produces a forecast.
+- **The filing chain cannot be reached from the workspace.** `sectionUrl`
+  answers `null` for **both** `report` and `committee` without a `revision`
+  (`frontend/src/app/transport.ts`), `read_report` refuses
+  `DELIVERABLE_NOT_FOUND` without the row, and the only thing that ever sets
+  `?revision` is `FilingControls`' own post-save `setParams` -- on the section
+  that needs it to load. So a case can never produce its *first* revision
+  through the UI, and with no revision there is nothing to sign, freeze or
+  file: the four governed writes Task 12.1 built and Task 12.2 placed are
+  unreachable by a person using the workspace, and Committee shares the
+  precondition. Every one of them works, proved through the production stack on
+  three engines by `frontend/tests/journey/journey.spec.ts`, which reaches the
+  first save as an authenticated request and asserts the surface is
+  `unavailable` without one -- because there is no press that would make it.
+  The journey citation is worth nothing to a gate: every journey test is titled
+  `journey: ...`, which neither `scripts/ledger_state.py` nor
+  `tests/test_phase_exits.py` can read, so the code paths above are the
+  citation that can be checked. *Upgrade:* a `SAVE_REVISION` control that does
+  not need a revision to exist -- composed from Analysis or Run, its success
+  the thing that first sets `?revision` -- or `report` served without
+  `revision`, answering the run's latest. Either is a task; neither is a change
+  a test may make.
+- **A digit in a draft is refused with a clearance the surface cannot
+  discharge.** `server/deliverable/revisions.py`'s `_span` refuses any ASCII
+  digit in narrative text `NARRATIVE_FIGURE_UNREFERENCED`, whose clearance
+  reads "Insert every financial figure through a validated reference" -- a
+  figure span naming a citation of a verified record, which `FilingControls`
+  cannot compose, as its own comment says. So an author who types a number is
+  told to perform an act the page offers no way to perform. The wire and the
+  store do support it, which the journey shows by saving one figure span over
+  the API and reading it back on the Report surface with the host's own
+  document, page and quote; the refusal itself is rendered in the browser.
+  *Upgrade:* a citation picker on the Report surface; failing that, a clearance
+  that names an act this surface can perform.
+- **Nothing renders a parked run's stop code.** `work.stop_code` is parsed at
+  `frontend/src/wire/v1/documents.ts` and rendered nowhere under
+  `frontend/src`, so an operator meeting a run parked `STOPPED` learns only
+  that Start and Retry are refused, and not that the store said
+  `EVIDENCE_NOT_AVAILABLE` because a captured source was withdrawn. The code is
+  on the wire, typed, and one line from being on screen. Journey-observed
+  rather than read: Task 12.5 polls that field to prove the park happened, from
+  a page that does not show it. Grant and revoke are the same shape one step
+  further on -- both commands have no control anywhere and no entry in
+  `ActionName`, deliberately, because no section serves an Admin panel to offer
+  them from, so the journey drives them as authenticated requests. *Upgrade:*
+  the stop code on the Run section's work panel beside the refused controls,
+  and the membership commands with Completion Phase 13's Admin work.
+- **A worktree outside `/Users` cannot run `make smoke-production`.**
+  `compose.smoke.yaml` bind-mounts `./tests:/app/tests:ro` into
+  `journey-worker`, and Docker Desktop on the development machine shares
+  `/Users` and not `/private/tmp`, so the mount comes up empty and the worker
+  exits `ModuleNotFoundError: No module named 'journey'` -- a failure that
+  names neither the mount nor the path. **Every standing worktree of this build
+  is under `/private/tmp`**, so this recurs for anyone who tries. Task 12.5's
+  assigned worktree was one of them; its three-engine gate was run from a
+  detached mirror worktree under `/Users`, and **the gate evidence is therefore
+  not reproducible from the branch's own worktree**: the mirror is deleted, it
+  used the same fixed ports and the same compose project name as any other
+  agent's smoke stack, and the only link between it and what landed is the
+  sha256 of the two committed files. *Upgrade:* `tests/journey/run.py` refuses
+  a repository root Docker cannot mount, with a code that says so, before it
+  builds anything -- which is also what would stop the next agent losing an
+  hour to it.
+
+- **The Book compares on earnings, not on leverage, and on four credits it did
+  not let you choose.** Read this entry and the two after it against the one
+  above: no run made through the API carries CP-CF, so the cells, chips and
+  passports they describe are what the Book serves **when a forecast exists**,
+  which no API-created run produces today. The limits below are real and will
+  be met the day the model extension is requestable; they are not things a
+  reader meets now. Task 12.3 declares six columns, the five whose operands
+  are the period's own accepted driver row and the EBITDA margin over two of
+  them, because a cell can then name the driver behind it and that driver's
+  evidence. The debt and cash roll-forward and the leverage metrics over them
+  are not declared: `server/calculators/cash_flow.py` chains each period's
+  opening to the previous period's closing, so a passport naming only the local
+  drivers would understate the lineage -- and `metrics.net_leverage` is the
+  figure `docs/IA_SPEC.md` 4.4 names as a facet, so the section ships without
+  the number it is most likely to be opened for. The rows are the caller's
+  newest four credits by `created_at`, `LIST_TRUNCATED` past that, with no way
+  to say which four: a member of thirty compares the four most recently
+  created. Nothing filters, groups or saves a view either; three of IA_SPEC's
+  five grouping keys (sector, rating, vintage, sponsor) and two of its four
+  facets have no source in the store, while `pathway` and `status` do -- they
+  are `profile_id`/`selection_id` and `displayed_run_status`, both already
+  served -- and with four rows the rest buy nothing. *Upgrade:* a declared
+  transitive operand set over the roll-forward, computable from
+  `forecast_inputs` and the same change that lets a leverage cell carry an
+  honest passport; and an explicit selection of which credits are compared, the
+  day a reader asks the Book for leverage or for two credits it did not choose
+  for them. `tests/test_book_section.py` holds the six columns and their
+  passports.
+- **A Book passport names its evidence and draws none of it.**
+  `server/api/reads/book.py` serves each operand's citation from the accepted
+  owner binding, and `CitationView` carries the host's own rectangles -- but
+  `frontend/src/sections/book/passport.ts` adapts it to the passport overlay's
+  older `Citation`, which has no page frame to place a rectangle against, so
+  `bboxes` is `[]` and the drawer names the document, the page and the quote
+  over a blank silhouette. The v1 `SourceDrawer` is the one that fetches a
+  frame, and it resolves a fact against a document carrying `handoffs`, which
+  the Book's does not. Nothing is fabricated and invariant 11 is untouched --
+  the host anchored the quote and still serves the rectangle -- but a reader who
+  opens a chip from the Book sees the quote and not where on the page it sits,
+  where the same quote opened from Analysis shows both. For the same reason
+  every Book cell is a projection and none carries the `PROJECTED` marker:
+  `passport.ts` sets `driver: null`, and the ten-field passport
+  `tests/test_wire_contract.py` pins has no eleventh field for one. The
+  information is there under `derivation` and `citations`; the marker is not.
+  `deviation` is null for a different reason: one calculator owns every column,
+  so two spellings sharing a column cannot arise here rather than being left
+  unchecked. *Upgrade:* open the v1 source drawer from the Book by carrying each
+  citation's `case_id` on its row, the day a reader needs the rectangle from the
+  portfolio rather than from the credit.
+- **The Book's declared I/O is one route shape multiplied by four.**
+  `PER_ROW_IO` is `MODEL_IO - 1`, measured on the ten-node LITE forecast route,
+  and `IO_BUDGET` is `2 + 4 x that` = 598. `read_analysis` costs
+  `7 + 10 x handoffs`, so a `FULL_CREDIT_32` credit costs about 327 and four of
+  them about 1,310 against the declared 598 -- arithmetic rather than a
+  measurement, and unreachable by any request while no pinned route carries
+  CP-CF. The convention is Model's and
+  Analysis' -- both declare the shape they were measured on -- but the Book is
+  the first reader to multiply it, so the gap between the declaration and the
+  widest real request is four times anyone else's. The payload has the same
+  shape of cost: `supporting_research` and each full `matched_text` repeat in
+  every one of up to 192 cells, where every other section carries a citation
+  once; the committed fixture is about 2.4 KB a cell, so a full book is roughly
+  0.5 MB at that density and more with real quotes. Neither figure is measured
+  against a wide route, because no wide route runs today. *Upgrade:* declare the
+  budget from the routes the read actually walked, and carry each citation and
+  each research link once with the cells referring to it, the day a
+  `FULL_CREDIT_32` credit reaches the Book.
+
 **Completion Phase 8.**
 
 - ~~**A register is located by vendor prose, and a key trusts that location.**~~
@@ -262,6 +515,28 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   receipt names rather than the one this build holds -- the archived verifier
   already works that way, which is the whole of §55's design -- or re-render
   and re-file on a renderer change, which is a governed write and a decision.
+
+- **The committee read's declared I/O is stated for one signer, and a second is
+  reachable.** Task 12.1's filing controls are judged by rebuilding each act's
+  audit payload, and an event a command wrote binds a request digest that is not
+  recomputable from the payload, so `payload_digests` reads back the receipts
+  that actor committed on the case -- one round trip **per actor the section
+  looks for**. `deliverable_opinions` is keyed `(case_id, revision_id,
+  signed_by, signed_at)` and `sign_opinion_in` refuses only a *frozen* revision,
+  so a second approver may sign before the freeze and the frozen committee read
+  then costs 53 where `IO_BUDGET["frozen"]` declares 52 -- asserted with `==`,
+  against fixtures that all carry one signer. Nothing fails today and nothing is
+  wrong on the wire; what is wrong is that a declaration meant to bound a request
+  path is true of one shape of that path. The number is deliberately not raised:
+  `io_budget.py --assert` and the equality test exist to make an unnoticed read
+  fail loudly, and a budget fitted to the widest shape stops measuring the common
+  one -- which is the same move as changing a gate to get a pass, one step
+  removed. Found by the scoped re-review of the C1 fix, which measured both
+  shapes rather than reading the comment. *Upgrade:* declare the budget as a
+  function of the signers the read found, so the assertion measures the shape it
+  ran against, the day a case has a second approver -- or, if the reads are the
+  problem rather than the declaration, one `command_requests` read for every
+  actor at once, which the join already permits.
 
 - **The wire says "come back later" honestly at 5xx and not at 400.** §75 split
   the twenty-four permanently-failing codes off 503: 500 for a fault no retry
@@ -357,17 +632,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* a declared `work_mem` floor for the admission path, the day a
   document large enough to spill is admitted; none for the refusal ordering,
   which is the price of checking once.
-- **Two tested islands have no production caller, and deleting them is a gate
-  edit.** §74.4: reducing Book and Admin to their unavailable shells left
-  `bind`/`release` in `frontend/src/app/authority.ts` and
-  `EvidenceContext.openPassport` with the metric-passport overlay behind it
-  reachable from no section. Both are the subject of a test pinned by name in
-  `tests/test_phase_exits.py`
-  (`test_book_binds_one_snapshot_per_compared_case`, `test_passport_contract`),
-  whose own assertion exists to stop the names being re-excused to green it. So
-  neither may be deleted as cleanup, and both sites now carry a comment saying
-  so. *Upgrade:* delete each with the gate entry that pins it, in one commit, on
-  the day its section is served or its exit is formally withdrawn.
+- ~~**Two tested islands have no production caller, and deleting them is a gate
+  edit.**~~ Closed by Completion Phase 12 Task 12.3 (§76), which took the
+  upgrade's first arm rather than its second: the section is served, so neither
+  island is deleted and both have their caller back. `BookSection` binds each
+  compared credit through `bind`/`release`, and a Book cell opens the
+  metric-passport overlay through `EvidenceContext.openPassport`. The two tests
+  `tests/test_phase_exits.py` pins by name are untouched and still hold what
+  their names say
+  (`test_book_binds_one_snapshot_per_compared_case`,
+  `test_passport_contract`), which is the point of having pinned them: the
+  names could not be excused to green a tree, so they were still there to be
+  satisfied. The original entry, §74.4: reducing Book and Admin to their
+  unavailable shells left `bind`/`release` in `frontend/src/app/authority.ts`
+  and `EvidenceContext.openPassport` with the metric-passport overlay behind it
+  reachable from no section, so neither could be deleted as cleanup and both
+  sites carried a comment saying so.
 
 **Completion Phase 10.**
 
@@ -493,16 +773,37 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   receipts stay; their replay is answered 404 by the visibility check before
   the lookup. *Upgrade:* a dated retention decision and a governed sweep, the
   day the table's size is measured.
-- **The demonstration workbench shows no available command.** The v1
-  fixtures carry `"actions": []`, so every command control in `make
-  dev-ui-demo` renders refused `ACTION_UNPLACED`, and the fixture middleware
-  answers any non-GET under `/api/` 405 `READ_ONLY_DEMO`. `ACTION_UNPLACED`'s
-  clearance (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still
-  says the API serves only the run document and its event stream, which has
-  not been true since §50. Availability is proven against the real API
+- **The demonstration workbench offers one available command, and its answer
+  is one the wire refuses.** ~~The v1 fixtures carry `"actions": []`, so every
+  command control in `make dev-ui-demo` renders refused `ACTION_UNPLACED`~~ --
+  `frontend/fixtures/directory.json` now carries `CREATE_CASE` available, and
+  `test_the_demonstration_directory_offers_one_available_command` drives the
+  published fixture. ~~`ACTION_UNPLACED`'s clearance
+  (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still says the
+  API serves only the run document and its event stream, which has not been
+  true since §50.~~ Closed by Task 12.2: `READ_ONLY_API` is deleted, the Ask
+  rail carries its own reason, and the clearance now names what is actually
+  missing -- a section whose read judges the action and names it in
+  `chrome.actions` -- held by
+  `an action nothing performs is refused with a reason that is true today`.
+  What stays open is the other half and a consequence of closing the first.
+  The other six enabled sections' fixtures still carry `"actions": []`, so
+  Upload's withdrawal and Report's four filing controls are demonstrated
+  refused and never available; availability against a real answer is still
+  proven against the real API
   (`test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code`)
-  and in unit tests, not in the workbench. *Upgrade:* correct the clearance
-  text, and fixture actions when a workbench spec needs an available control.
+  and in unit tests. And the fixture middleware answers any non-GET under
+  `/api/` 405 `READ_ONLY_DEMO`, a code `frontend/src/wire/v1/documents.ts`'s
+  closed `RefusalCode` does not declare, so pressing the one available control
+  renders `RESPONSE_INVALID` rather than the demo's own word. That is the wire
+  strictness rule working -- an undeclared answer is refused whoever sent it --
+  but it is not what a reader expects to be shown, so `NewCase` states it in
+  demo mode before the press rather than after. *Upgrade:* a demonstration API
+  that answers a declared refusal, which means either a `READ_ONLY_DEMO` the
+  server also knows (a wire change, and a code no production path would ever
+  send) or fixture actions refused with a real code; and fixture actions for
+  the remaining sections when a workbench spec needs an available control
+  there.
 
 - **An evidence page holds a read transaction while its frame is extracted.**
   `read_evidence_page` reads standing and the page's lines, then
@@ -558,13 +859,40 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
   TLS material, which this task was not authorized to create.
 - **The production image and journey are proven locally, not in CI.**
-  `make smoke-production` is the last step of `make check`, and no CI
-  job runs it. The journey (slice 4.5e2) runs 13 tests on each of chromium,
-  firefox and webkit, but only the first engine meets the worker's real
-  exit-after-first-accept and the 300 s lease wait: the exit-once marker lives
-  in the shared blob volume, so the later engines restart the worker against
-  a run that has already finished. *Upgrade:* a CI job over the smoke stack
-  (Phase 6), and a per-engine marker if the recovery must be proven per engine.
+  `make smoke-production` is the last step of `make check`, and no CI job runs
+  it. The journey runs 22 tests on each of chromium, firefox and webkit.
+  **This entry used to say only the first engine met the worker's real
+  exit-after-first-accept and the 300 s lease wait, because "the exit-once
+  marker lives in the shared blob volume" -- and that understated the gate.**
+  `tests/journey/run.py`'s `run_project` brings up a stack per engine and its
+  `finally` always runs `compose_down(env)`, which is `down --volumes` and
+  removes the named `smoke-blobs` volume the marker lives in
+  (`JOURNEY_STATE_DIR: /blobs`), so each engine gets a fresh marker and its own
+  crash-once worker -- which the function's own docstring says. Task 12.5's
+  three per-engine durations, 5.7, 5.9 and 6.3 minutes against a 300 s lease
+  wait, are the measurement. Corrected at the Task 12.5 acceptance review,
+  which read the runner; an entry that understates a gate is the same defect as
+  one that overstates it, read the other way round. What remains true is the CI
+  half. *Upgrade:* a CI job over the smoke stack (Phase 6).
+- **A flake in one engine used to cost the other two engines' evidence.**
+  `tests/journey/run.py`'s `main` returned on the first engine's non-zero
+  status, so a single flaky test in chromium ended the gate with firefox and
+  webkit unrun and nobody able to say whether they would have passed. It
+  happened once while Task 12.5's gate was being run, and the re-run of the
+  same commit unchanged was green on all three. Every engine now runs and each
+  reports its own status, with the gate's exit still the first non-zero -- so
+  no failing run passes, and a flake costs one engine's evidence instead of
+  three. What is **not** fixed is the flakiness: two pre-existing tests each
+  flaked once in nine runs -- test 7's page fetch never leaving the browser
+  after the lease wait, and test 1's Create press firing no request -- and
+  `playwright.journey.config.ts` sets `retries: 0`, deliberately, because a
+  retried journey hides exactly this. The new Task 12.5 tests also add about
+  twenty navigations after test 15, each leaving an SSE tail held to
+  `TAIL_DEADLINE` against the API's `--limit-concurrency 32` (the "idle case
+  stream" entry above), and unlike `waitForNode` they carry no `toPass`
+  wrapper. *Upgrade:* diagnose the two flakes from a recorded trace rather than
+  by lengthening a wait, and a stream cap below the concurrency limit, which
+  the entry above already owes.
 
 **Repair Phase 3.**
 
@@ -877,10 +1205,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   what re-anchor it. Citations still anchor only in the consumer's own
   delivered blocks, so a quote found only in upstream text or the register
   refuses `CITATION_NOT_LOCATED`; the register rides inside the request
-  ceiling like every other section and has no bound of its own. *Upgrade:*
-  re-anchoring in the pre-call unit if a consumer ever relies on the register
-  for more than orientation, and a per-section bound with the one "An upstream
-  section is unbounded" owes.
+  ceiling like every other section and has no bound of its own -- which the
+  upstream handoff beside it no longer is: `MAX_UPSTREAM_HANDOFF_BYTES` bounds
+  the handoff and says nothing about the register, and the register is derived
+  from the same record, so a bounded handoff can still carry an unbounded list
+  of its citations. *Upgrade:* re-anchoring in the pre-call unit if a consumer
+  ever relies on the register for more than orientation, and a bound of the
+  register's own -- the struck "An upstream section is unbounded" entry below
+  is what bounded the handoff, and it does not carry this one.
 - **The named-LITE-object boundary is read from `SKILL.md` prose headings, and
   only where a block is keyed to its module.** Slice 3.4b (§46.1): each
   upstream section names its source's catalog
@@ -1814,38 +2146,59 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from
   the engine rather than from the run document.
-- **An upstream section is unbounded, but the whole context is refused.** A
-  node's prompt carries every direct predecessor's accepted Markdown whole
-  (`docs/DECISIONS.md` §28), with no per-section cap. Since Task 3.3b the whole
-  prompt -- authority, upstream, evidence -- is built by
-  `canonical.check_context` under `prospective_identity` before
+- ~~**An upstream section is unbounded, but the whole context is refused.**~~
+  Bounded by `invocation.MAX_UPSTREAM_HANDOFF_BYTES` (32,768); the citation
+  register and the evidence section still are not. A node's prompt carries
+  every direct predecessor's accepted Markdown whole (`docs/DECISIONS.md`
+  §28). Since Task 3.3b the whole prompt -- authority, upstream, evidence --
+  is built by `canonical.check_context` under `prospective_identity` before
   `start_attempt`, and one whose whole encoded request
   (`CompletionProvider.request_bytes`: model, parameters and prompt, as the
   provider sends it) exceeds `MAX_REQUEST_BYTES` refuses
   `CONTEXT_OVER_CEILING` with no attempt, reservation or call and nothing
-  truncated (§45.3). The executor rebuilds and re-bounds it under the
-  attempt's own identity, so each call reads its context twice (the pre-call
-  reads, the case lock hold included). That second check runs after the
-  attempt and its reservation exist: in the one sequential loop only a bundle
-  file changed on disk between the two can make it refuse, but with Phase 4's
-  concurrent workers an upstream accepted in between can make the pre-check
-  pass and the re-check refuse with a reservation held (no call is made).
-  **That day is measurable and close.** On the catalog's widest
-  pathway, `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
-  upstreams**, and its own delivered authority is 165,548 bytes. At a modest
-  20 KB per upstream handoff the authority and upstream sections alone come to
-  493,228 bytes -- 47 % of `MAX_REQUEST_BYTES` -- before a single byte of
-  evidence, and the evidence section carries every block of every pinned source.
-  The only route ever measured is LITE's, three nodes and at most two upstreams,
-  whose prompts run about 210 KB. So the first FULL pathway to run is a
-  plausible `CONTEXT_OVER_CEILING`, which refuses the whole request rather than
-  truncating it: the run does not proceed at all, and a pathway that cannot run
-  cannot be qualified. Measured on 17 September 2026 from the vendored catalog
-  and the bundle's own authority bytes, because nobody had taken the number this
-  deferral rested on.
-  *Upgrade:* a declared per-section bound, owed with Phase 11's first wide
-  pathway rather than on a future measurement, and Phase 4's lease fencing the
-  node's inputs between the two checks.
+  truncated (§45.3). What that bound could never say is *which* part was
+  large. It now does for the one this entry named: an accepted upstream
+  handoff past the declared bound refuses `UPSTREAM_SECTION_OVER_CEILING` in
+  the prompt builder, so before any attempt, reservation or call, and it
+  refuses rather than trims -- a silently shortened prompt is a module
+  answering a question nobody asked
+  (`tests/test_handoff_invocation.py::test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt`,
+  and the runtime half, which leaves no attempt, reservation, call or charge
+  for the node it could not prompt,
+  `tests/test_canonical_runtime.py::test_an_over_bound_upstream_section_refuses_before_its_attempt`).
+  The number is declared rather than derived from the ceiling so that a reader
+  can see it, and it is chosen against the measurement this deferral rested
+  on: on the catalog's widest pathway,
+  `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
+  upstreams**, and its own delivered authority is 165,548 bytes, so 16
+  sections at the bound beside that authority still leave `MAX_REQUEST_BYTES`
+  more than a quarter of itself for evidence -- asserted from the vendored
+  catalog and the bundle's own bytes, so a build that widens a node or grows
+  an authority set fails there rather than at the first FULL run
+  (`test_the_declared_section_bound_leaves_the_widest_node_its_authority`).
+  **What it does not buy.** It does not make a wide route fit: the evidence
+  section carries every block of every pinned source, so a FULL CP-5 whose
+  upstreams are each inside the bound can still refuse
+  `CONTEXT_OVER_CEILING`, and what first delivers less is per-node evidence
+  selection (the Phase 5 entry "The gate's evidence demands are dropped"). And
+  the 20 KB-per-handoff figure the 47 % estimate used is an assumption, not a
+  measurement: no FULL module has produced a handoff, and the only real number
+  the tree holds is the 448,826-byte two-document CP-0 request of the VMO2 run
+  (`qualification/vmo2-fy2025/RESULT.md`), which carries no upstream at all.
+  Three sections remain unbounded in their own right -- the upstream citation
+  register (its own entry owes it), the evidence section, and the delivered
+  authority set, which is the bundle's bytes rather than the host's to refuse
+  (invariant 4) and which `tests/test_delivered_authority.py` measures instead.
+  The executor rebuilds and re-bounds the prompt under the attempt's own
+  identity, so each call reads its context twice (the pre-call reads, the case
+  lock hold included). That second check runs after the attempt and its
+  reservation exist: in the one sequential loop only a bundle file changed on
+  disk between the two can make it refuse, but with Phase 4's concurrent
+  workers an upstream accepted in between can make the pre-check pass and the
+  re-check refuse with a reservation held (no call is made).
+  *Upgrade:* Phase 4's lease fencing the node's inputs between the two checks,
+  and a declared bound for the citation register and for the evidence section
+  the day per-node evidence selection has something to select.
 
 **Phase 4.**
 
@@ -1939,13 +2292,83 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.
-- **One block per line; the bounded line group is not built.**
-  `SYSTEM_SPEC.md` §5 wants one block per line "while small" and bounded line
-  groups once not. This build always packs a line per block, so a large document
-  produces more blocks than it should. *Upgrade:* the group arrives with the
-  first document big enough to need it, splitting a line at the group width
-  rather than giving it a block of its own. Block ids are zero-padded to six
-  digits, so reading order and `block_id` order agree up to 999,999 lines.
+- **A line is split at the group width; several lines in one block is not
+  built.** `SYSTEM_SPEC.md` §5 wants one block per line "while small", bounded
+  line groups once not, and a line past the group width split at it rather than
+  given a block of its own. The splitting half is built: `GROUP_WIDTH` is
+  `BoundaryText`'s own limit, `ingest.line_groups` cuts a line at it, and
+  `verify_citations` requires every block a line was split into to have been
+  delivered, so a quote crossing the cut needs both sides and a delivery
+  carrying half a split line carries none of it
+  (`test_a_line_wider_than_the_group_is_split_rather_than_refusing_the_pack`,
+  `test_a_quote_crossing_a_group_boundary_needs_every_block_of_its_line`).
+  Before it, a line past 4,096 characters refused the whole pack, so one wide
+  table row in a text export meant no document carrying it could be admitted at
+  all; the CCL 10-K fixture's widest line is 2,502 characters, which is how far
+  that was from a real document. **What it does not buy is the documents it was
+  written for:** the entry below this one records the token ceiling that refuses
+  Boeing's and Ford's 10-K texts before any line is packed, and this change
+  moves neither of them. The width is not a choice: any narrower would
+  re-number documents already admitted under this one, whose `source_blocks`
+  rows are immutable and whose stored citations name the ids they were given
+  (`test_a_document_whose_lines_fit_the_group_is_numbered_one_block_a_line`).
+  A cut falls wherever the width falls, inside a word if that is where it falls,
+  because cutting at a token boundary would make the block count depend on the
+  tokens and force anchoring to read every token's text back to learn it;
+  nothing reads a quote out of a block, so what it costs is a word shown in two
+  pieces. A single word past the width has nowhere to be cut and still refuses
+  `BOUNDARY_TEXT_TOO_LONG` at the door
+  (`test_a_document_the_boundary_refuses_never_reaches_the_pinned_set`). What is
+  **not** built is the other half -- several lines packed into one block -- so a
+  large document still produces more blocks than it should. It is deferred
+  because nothing in reach needs it: the widest document this tree holds is the
+  CCL 10-K at 1,726 lines over 30 pages, and the two VMO2 releases are 1,347 and
+  1,019, against a 500,000 token admission ceiling. It is **not** deferred
+  because it would re-number already-admitted documents, which is what this
+  entry first said and what its own implementation contradicts:
+  `citations._line_blocks` compares a source's stored block count against its
+  line count and recomputes the packing only when they differ, so a source
+  admitted one block a line reads back one block a line under any later rule,
+  without a version column and without a backfill. That discriminator is a
+  derivation rather than a record, so it is checked -- a recomputed total that
+  does not equal the stored count refuses `EVIDENCE_NOT_AVAILABLE`
+  (`test_a_packing_that_disagrees_with_the_stored_blocks_refuses`), because
+  every id past the disagreement would name a row no source carries. It is
+  checked in one direction only: splitting writes **more** blocks than lines,
+  so only a source with more is repacked, and one with fewer -- which no
+  packing produces, and which is reached only by removing a stored block --
+  keeps the one-block-a-line reading
+  (`test_a_source_missing_a_block_still_reads_one_block_a_line`). That
+  asymmetry is not tidiness: the two tests that demonstrate
+  `CITATION_NOT_DELIVERED` at all narrow a delivery by deleting a block with
+  the seal disabled, and reading that as a disagreement about the rule would
+  answer about the host's derivation where the honest answer is about the
+  citation, making the refusal unreachable in the tree. Block ids
+  are zero-padded to six digits, so reading order and `block_id` order agree up
+  to 999,999 **blocks**, which is no longer the same as 999,999 lines.
+  *Upgrade:* the grouping half, the day a document arrives whose block count can
+  be measured to cost something; a stored `source_extractions.format_version`
+  past its `CHECK (format_version = 1)` is owed with it only if the count ever
+  stops distinguishing the two rules.
+- **A single token past the boundary limit refuses the whole pack, and that is
+  what stops the large 10-K texts.** `ingest._prepare` calls
+  `BoundaryText.of(token.text)` on every token before `_blocks` runs, so a
+  4,097-character token refuses `BOUNDARY_TEXT_TOO_LONG` at the door -- before
+  any line is packed, and with nothing the line group can do about it, because a
+  cut inside a token is a cut the token index cannot describe. The line-group
+  review measured both texts this repository was trying to admit: Boeing's holds
+  one token of 71,243 characters and Ford's one of 105,966, so **neither admits
+  on base or on this branch**, and `docs/COMPLETION_PLAN.md`'s O07 is corrected
+  in the same commit for naming `MAX_REQUEST_BYTES` as their first obstacle when
+  they never reach a prompt. The refusal is the fail-closed direction and the
+  extractor's, not the packer's: a "token" that long is an extraction that found
+  no whitespace where a reader sees words, and admitting it would put a
+  megabyte-long unquotable string in the token index under invariant 11's
+  promise that a quote can be re-located. *Upgrade:* the extractor that produced
+  it, which is where a token's boundaries are decided -- a declared maximum token
+  length in the extractor identity, refusing or re-splitting there, the day one
+  of these texts is needed whole rather than as the curated extract the FULL
+  pathways run on today.
 - **The plain-text extractor's rectangles are a fixed-pitch rendering.** A `.txt`
   document has no typography, so `PlainTextExtractor` states its cell size and
   derives rectangles from character positions. It is a real, reproducible

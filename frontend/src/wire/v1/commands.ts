@@ -72,10 +72,77 @@ const VerdictRecorded = object({
   expires_at: datetime,
 });
 
+// Task 12.1's seven governed writes. A membership command names the member it
+// is about; every other actor on the wire is derived from the caller and the
+// path. A draft names only which citation a figure is, never its coordinates.
+const GrantStanding = object({ user_id: uuid, standing: V1_SHAPES.Standing });
+const StandingGranted = object({
+  case_id: uuid,
+  user_id: uuid,
+  standing: V1_SHAPES.Standing,
+});
+const RevokeStanding = object({});
+const StandingRevoked = object({ case_id: uuid, user_id: uuid });
+const WithdrawSource = object({});
+const SourceWithdrawn = object({ case_id: uuid, source_id: uuid });
+const NarrativeFigureRef = object({ route_node_id: short, citation_index: int({ min: 0 }) });
+const NarrativeDraft = object({
+  text: nullable(string({ max: 2000 })),
+  figure: nullable(NarrativeFigureRef),
+});
+const SaveRevision = object({
+  expected_revision_id: nullable(uuid),
+  narrative: array(array(NarrativeDraft, 64), 64),
+});
+const RevisionSaved = object({
+  case_id: uuid,
+  run_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+});
+const SignOpinion = object({ payload_sha256: hash });
+const OpinionSigned = object({
+  case_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  signed_by: uuid,
+});
+const FreezeDeliverable = object({ payload_sha256: hash });
+const DeliverableFrozen = object({
+  case_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  frozen_by: uuid,
+});
+const FileDeliverable = object({ payload_sha256: hash });
+const DeliverableFiled = object({
+  case_id: uuid,
+  run_id: uuid,
+  revision_id: uuid,
+  payload_sha256: hash,
+  filed_by: uuid,
+});
+
 /** Every command model `schema.json` declares, under its backend name. */
 export const V1_COMMAND_SHAPES = {
   ApproveGate,
   CancelRun,
+  DeliverableFiled,
+  DeliverableFrozen,
+  FileDeliverable,
+  FreezeDeliverable,
+  GrantStanding,
+  NarrativeDraft,
+  NarrativeFigureRef,
+  OpinionSigned,
+  RevisionSaved,
+  RevokeStanding,
+  SaveRevision,
+  SignOpinion,
+  SourceWithdrawn,
+  StandingGranted,
+  StandingRevoked,
+  WithdrawSource,
   CaseCreated,
   CreateCase,
   CreateRun,
@@ -108,6 +175,22 @@ export type CancelRun = Infer<typeof CancelRun>;
 export type RunWork = Infer<typeof RunWork>;
 export type SignVerdict = Infer<typeof SignVerdict>;
 export type VerdictRecorded = Infer<typeof VerdictRecorded>;
+export type GrantStanding = Infer<typeof GrantStanding>;
+export type StandingGranted = Infer<typeof StandingGranted>;
+export type RevokeStanding = Infer<typeof RevokeStanding>;
+export type StandingRevoked = Infer<typeof StandingRevoked>;
+export type WithdrawSource = Infer<typeof WithdrawSource>;
+export type SourceWithdrawn = Infer<typeof SourceWithdrawn>;
+export type NarrativeFigureRef = Infer<typeof NarrativeFigureRef>;
+export type NarrativeDraft = Infer<typeof NarrativeDraft>;
+export type SaveRevision = Infer<typeof SaveRevision>;
+export type RevisionSaved = Infer<typeof RevisionSaved>;
+export type SignOpinion = Infer<typeof SignOpinion>;
+export type OpinionSigned = Infer<typeof OpinionSigned>;
+export type FreezeDeliverable = Infer<typeof FreezeDeliverable>;
+export type DeliverableFrozen = Infer<typeof DeliverableFrozen>;
+export type FileDeliverable = Infer<typeof FileDeliverable>;
+export type DeliverableFiled = Infer<typeof DeliverableFiled>;
 
 export const parseCaseCreated = (value: unknown): CaseCreated => parse(CaseCreated, value);
 export const parseSourcesAdmitted = (value: unknown): SourcesAdmitted =>
@@ -118,6 +201,17 @@ export const parseGatePreviewDocument = (value: unknown): GatePreviewDocument =>
   parse(GatePreviewDocument, value);
 export const parseGateApproved = (value: unknown): GateApproved => parse(GateApproved, value);
 export const parseRunWork = (value: unknown): RunWork => parse(RunWork, value);
-// No `parseVerdictRecorded`: the workspace has no sign control yet, and a
-// validator nothing calls is coverage without a caller. The shape is pinned
-// above so the day one arrives it is validated, not cast.
+// Task 12.2 places the controls for Task 12.1's routes; each receipt a placed
+// control reads back is validated here.
+export const parseSourceWithdrawn = (value: unknown): SourceWithdrawn =>
+  parse(SourceWithdrawn, value);
+export const parseRevisionSaved = (value: unknown): RevisionSaved => parse(RevisionSaved, value);
+export const parseOpinionSigned = (value: unknown): OpinionSigned => parse(OpinionSigned, value);
+export const parseDeliverableFrozen = (value: unknown): DeliverableFrozen =>
+  parse(DeliverableFrozen, value);
+export const parseDeliverableFiled = (value: unknown): DeliverableFiled =>
+  parse(DeliverableFiled, value);
+// No `parseVerdictRecorded`, `parseStandingGranted` or `parseStandingRevoked`:
+// the workspace has no control for any of the three, and a validator nothing
+// calls is coverage without a caller. Their shapes are pinned above so the day
+// one arrives it is validated, not cast.

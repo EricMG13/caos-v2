@@ -302,6 +302,46 @@ describe("Directory", () => {
     vi.unstubAllGlobals();
   });
 
+  test("test_the_demonstration_directory_offers_one_available_command", async () => {
+    // The published fixture, not a document this test composed: the ledger
+    // entry this closes said every command control in `make dev-ui-demo`
+    // renders refused, so what has to be available is the shipped bytes.
+    const create = fixture.chrome.actions.find((action) => action.action === "CREATE_CASE");
+    expect(create).toEqual({ action: "CREATE_CASE", refusal: null });
+
+    // Available means the command would answer, never that it will succeed.
+    // The demonstration API refuses every command with READ_ONLY_DEMO, which
+    // the v1 wire does not declare, so what a press proves is the workspace
+    // refusing an undeclared answer. The control says so before it is
+    // pressed rather than after -- these unit tests run in demo mode, which
+    // is what puts that note on screen here.
+    // Stubbed rather than taken from the runner: `npm test` runs in demo mode,
+    // and a test that silently passes under one mode and fails under another
+    // is a worse thing to leave behind than an explicit stub.
+    vi.stubEnv("MODE", "demo");
+    mount(fixture);
+    expect(document.querySelector("[data-demo-command-note]")).toHaveTextContent(
+      "Available means the command would answer",
+    );
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: "READ_ONLY_DEMO", clears: "a real API handles commands" }, 405),
+      );
+    vi.stubGlobal("fetch", fetchSpy);
+    const control = screen.getByRole("button", { name: "Create case" });
+    expect(control).not.toHaveAttribute("aria-disabled");
+    fireEvent.change(screen.getByLabelText("New case title"), {
+      target: { value: "Acme Credit" },
+    });
+    fireEvent.click(control);
+    await settle();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("RESPONSE_INVALID");
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   test("test_every_enabled_demo_fixture_is_a_valid_v1_document", () => {
     const directoryFixtures = [
       "../../fixtures/directory.json",

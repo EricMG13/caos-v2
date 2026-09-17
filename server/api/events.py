@@ -51,6 +51,11 @@ STREAM_NAMES: Mapping[str, EventName | None] = MappingProxyType(
         "OPINION_SIGNED": "filing_changed",
         "DELIVERABLE_FROZEN": "filing_changed",
         "DELIVERABLE_FILED": "filing_changed",
+        # Standing changes what a member may do, not what any section shows:
+        # the browser learns its own standing by refetching, and a revoked
+        # member's stream closes on the standing check rather than on a frame.
+        "STANDING_GRANTED": None,
+        "STANDING_REVOKED": None,
     }
 )
 

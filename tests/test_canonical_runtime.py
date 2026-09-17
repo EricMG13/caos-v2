@@ -776,6 +776,24 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call(
     _still_running(harness)
 
 
+def test_an_over_bound_upstream_section_refuses_before_its_attempt(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-section bound through the runtime: a node whose direct upstream
+    handoff is past `MAX_UPSTREAM_HANDOFF_BYTES` refuses before `start_attempt`,
+    so the node that could not be prompted leaves no attempt, reservation, call
+    or charge -- and the upstream that ran before it keeps everything it paid
+    for. The bound is moved rather than the handoff, because an accepted
+    handoff's bytes are immutable."""
+    answers = _answers(harness)
+    provider = _module_provider(harness, answers)
+    monkeypatch.setattr(invocation, "MAX_UPSTREAM_HANDOFF_BYTES", 1)
+    assert _run_route(harness, provider) is RefusalCode.UPSTREAM_SECTION_OVER_CEILING
+    assert answers.calls == 1
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    _still_running(harness)
+
+
 @dataclass
 class _Sized:
     """Records each prompt whose request is bounded; `after_check` runs once,

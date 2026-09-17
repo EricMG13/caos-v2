@@ -44,7 +44,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api import health
 from server.api.commands import cases as cases_command
+from server.api.commands import deliverable as deliverable_command
 from server.api.commands import execution as execution_command
+from server.api.commands import members as members_command
 from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
@@ -66,6 +68,7 @@ from server.api.deps import store_connection as store_connection
 from server.api.edge import EdgeGuard, is_api_path, refusal_body
 from server.api.identity import actor_from_headers
 from server.api.reads import analysis as analysis_read
+from server.api.reads import book as book_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
 from server.api.reads import model as model_read
@@ -248,6 +251,7 @@ _STATUS = {
     RefusalCode.PROVIDER_NOT_CONFIGURED: 400,
     RefusalCode.PROVIDER_CALL_INVALID: 400,
     RefusalCode.CONTEXT_OVER_CEILING: 400,
+    RefusalCode.UPSTREAM_SECTION_OVER_CEILING: 400,
     RefusalCode.PROVIDER_UNAVAILABLE: 400,
     RefusalCode.PROVIDER_OUTPUT_TRUNCATED: 400,
     RefusalCode.PROVIDER_REFUSED: 400,
@@ -352,6 +356,7 @@ for _section in (
     run_read,
     analysis_read,
     model_read,
+    book_read,
     qualification_read,
     reports_read,
     evidence_read,
@@ -363,6 +368,8 @@ for _commands in (
     runs_command,
     execution_command,
     qualification_command,
+    members_command,
+    deliverable_command,
 ):
     app.include_router(_commands.router)
 

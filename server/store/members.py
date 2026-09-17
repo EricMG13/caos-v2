@@ -55,14 +55,21 @@ def grant(
     )
 
 
-def revoke(conn: StoreConnection, *, case_id: UUID, user_id: UUID) -> None:
-    """End a membership. The row stays: a run that already cited this actor's
-    approval has to remain explicable."""
+def revoke(conn: StoreConnection, *, case_id: UUID, user_id: UUID) -> bool:
+    """End a membership; whether one was live to end. The row stays: a run that
+    already cited this actor's approval has to remain explicable.
+
+    The answer is the rowcount rather than None so a command can refuse a
+    request that revoked nothing, instead of recording that something happened.
+    """
     lock_case(conn, case_id)
-    conn.execute(
-        "UPDATE case_members SET revoked_at = now()"
-        " WHERE case_id = %s AND user_id = %s AND revoked_at IS NULL",
-        (case_id, user_id),
+    return (
+        conn.execute(
+            "UPDATE case_members SET revoked_at = now()"
+            " WHERE case_id = %s AND user_id = %s AND revoked_at IS NULL",
+            (case_id, user_id),
+        ).rowcount
+        == 1
     )
 
 

@@ -12,6 +12,7 @@ import {
   WireIdentityError,
   WireShapeError,
   parseAnalysisDocument,
+  parseBookDocument,
   parseDirectoryDocument,
   parseModelDocument,
   parsePageDocument,
@@ -58,6 +59,7 @@ export interface SectionQuery {
 
 const V1_PARSERS: Record<EnabledSection, (value: unknown) => V1Document> = {
   directory: parseDirectoryDocument,
+  book: parseBookDocument,
   upload: parseUploadDocument,
   run: parseRunSectionDocument,
   analysis: parseAnalysisDocument,
@@ -89,6 +91,9 @@ export function sectionUrl(section: Section, query: SectionQuery): string | null
   const search = params.toString();
   const suffix = search ? `?${search}` : "";
   if (section === "directory") return `/api/v1/directory${suffix}`;
+  // Book is the portfolio, so it names no case and is served whether or not
+  // one is selected.
+  if (section === "book") return `/api/v1/book${suffix}`;
   if (!query.case) return null;
   if ((section === "report" || section === "committee") && (!query.run || !query.revision)) {
     return null;
@@ -135,7 +140,7 @@ function classifyV1(section: EnabledSection, body: unknown, query: SectionQuery)
         ? query.run
         : null;
     requireIdentity(document, {
-      caseId: section === "directory" ? null : (query.case ?? null),
+      caseId: section === "directory" || section === "book" ? null : (query.case ?? null),
       ...(runId ? { runId } : {}),
       ...((section === "report" || section === "committee") && query.revision
         ? { revisionId: query.revision }

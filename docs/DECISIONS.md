@@ -3756,3 +3756,159 @@ wire now reads inconsistently. `STORE_UNAVAILABLE` genuinely spans both classes,
 because `committed_unit` maps every `psycopg.Error` to it including constraint
 violations; it is kept transient on asymmetric cost, and the retry it invites is
 answered from the idempotency receipt on a command that already committed.
+
+## 2026-09-17 §76 — Book is served over accepted CP-CF projections; D2's Book half is superseded
+
+§74.4 reduced Book and Admin to unavailable shells because neither had a
+document to render. Completion Phase 12 Task 12.3 gives Book one.
+
+`GET /api/v1/book` is portfolio-scoped — no case in its path — and its rows are
+the credits the caller holds live standing on, read through `cases_for_member`
+exactly as Directory reads them and bounded at four, which is `docs/IA_SPEC.md`
+4.4's "two to four credits side by side". Each row's cells are values the
+accepted CP-CF projection already carries, re-derived by the Model section's own
+reader rather than by a second one: `accepted_forecast` is extracted from
+`read_model`, live-source check included, because two readers of one accepted
+pair are two answers to a question invariant 3 says the host owns once. The
+host computes no figure and reaches no verdict here.
+
+**The columns are declared in host code** — six of them, the five whose operands
+are the period's own accepted driver row and the EBITDA margin
+`cash_flow_forecast` derives from two of those. That is not a second authority
+beside the bundle: `caos-forecast-v1` is this host's calculator and its shape is
+the host's to state, so invariant 4 is untouched. The debt and cash roll-forward
+and the leverage metrics over it are **not** declared, because their lineage
+reaches every earlier period and a passport naming only the local drivers would
+understate it — which is the failure that matters on a leverage figure. The
+cost is that Book ships without `metrics.net_leverage`, the figure IA_SPEC names
+as a facet, and the honest-ledger entry records it as a gap rather than an
+omission.
+
+**The passport is closed at exactly ten fields**, IA_SPEC 4.4's, pinned in
+`tests/test_wire_contract.py`; an eleventh would be this host asserting
+something the accepted record does not say. That closure has a cost of its own,
+also recorded: every Book cell is a projection and none carries the `PROJECTED`
+marker, because there is no field for one.
+
+**The scenario is the record's own `case`.** The first implementation served the
+literal `NOT_DECLARED` on the stated ground that `caos-forecast-v1` declares no
+scenario. It declares one, under that name: `server/qualification/matrix.py`
+already matches `ExpectedForecast.scenario` against `item["case"]`,
+`MAX_FORECAST_CASES` caps it, and the same document renders it as
+`BookPeriod.case` and as each table's heading. So a credit carrying BASE and
+DOWNSIDE produced two tables whose every cell opened a passport saying neither —
+the one field whose whole job is telling them apart. The section names it, and
+`BookBasis.scenario` says `EVERY_ACCEPTED_CASE`, which is what the comparison
+spans. Found by the Task 12.3 acceptance review, which read the calculator
+rather than the comment above the constant.
+
+Admin stays at its shell and D2's Admin half stands. Book's `bind`/`release`
+and the metric-passport overlay, which §74.4's ledger entry kept because
+deleting a pinned gate's subject is a gate edit, now have their production
+caller back; that entry is struck by the commit that gives them one.
+
+## 2026-09-17 §77 — A per-section bound on an upstream handoff, the line group, and the closed element set
+
+Three behaviour changes landed in Completion Phase 12's wave with no entry of
+their own. The Phase 12 confidence review asked for them, and it is right that
+a new refusal code and a new host policy bound over an accepted, immutable
+artifact belong in the binding record rather than only in a code comment and a
+struck ledger entry.
+
+### 77.1 An upstream handoff is bounded at 32,768 bytes, and the bound answers after identity
+
+`server/methodology/invocation.py` declares `MAX_UPSTREAM_HANDOFF_BYTES` and
+refuses `UPSTREAM_SECTION_OVER_CEILING` when an accepted upstream's Markdown
+exceeds it, in the prompt builder — so before any attempt, reservation or call.
+Until now `MAX_REQUEST_BYTES` refused the whole request and could never say
+*which* part was large.
+
+The number is arithmetic, not a measurement of any handoff, and the arithmetic
+has been corrected once. As first written it summed **raw** lengths and
+compared them against `MAX_REQUEST_BYTES` — which bounds
+`len(json.dumps(request).encode())` with `ensure_ascii=True`, so every
+non-ASCII character costs six bytes and every quote and newline two, and the
+vendored authority is full of em-dashes, section signs and curly quotes. The
+test could therefore have passed while the real encoded request was over the
+ceiling. Found by the Completion Phase 12 adversarial audit.
+
+Measured through `provider.encode_request` instead, over every node of every
+profile with the authority files' real bytes and the fixed host sections
+included, the worst case is **CP-3 at 711,482 encoded bytes against the
+1,048,576 ceiling — 32% of it left** for evidence. The raw-byte version named
+CP-5, which was an artefact of the unit: CP-5 carries the most upstreams, CP-3
+the heavier authority once escaping is paid. What the figure still excludes is
+the citation register, which is explicitly unbounded, and the evidence section
+itself, which is the room the assertion exists to prove is left.
+
+It is a ceiling chosen so that a wide route cannot be refused wholesale for a
+reason nobody can locate, not a figure any real handoff has approached — no
+FULL module has ever produced one, and the only measurement in the tree is a
+448,826-byte CP-0 *request* carrying no upstream at all. Against that, the host
+asks for, accepts, validates, bills and stores a handoff up to `MAX_FILE_BYTES`
+(26,214,400) and refuses to *use* one over 32,768, which is the asymmetry the
+costs below describe.
+
+**The bound answers after the digest comparison, not before it.** The size
+check sits below `sha256(data) != ref.sha256` in `_utf8`'s caller, because the
+host owns identity (invariant 3) and a host policy bound does not get to answer
+ahead of it: bytes that are not the artifact they claim to be are refused as
+that, not as too large.
+
+**Three costs, recorded here because the ledger entry the bound closed did not
+state them.** Nothing bounds a handoff at *acceptance* — `MAX_FILE_BYTES` is
+26,214,400 — so the host will accept a 40 KiB handoff, bill it, and discover at
+the *consumer's* prompt that it cannot use it, which lands the refusal on the
+innocent node. The discharge is a new run, which calls the same model with the
+same prompt and may reproduce the same size. And the operator meets a run
+parked `STOPPED` whose stop code no surface renders, so the two entries compose
+into "the run stopped and nothing says why".
+
+### 77.2 A line past the group width is split, and the packing is re-derived in one direction
+
+`SYSTEM_SPEC.md` §5 asks for one block per line while small and a bounded line
+group once not. The splitting half is built: `GROUP_WIDTH` is `BoundaryText`'s
+own `DEFAULT_LIMIT`, `ingest.line_groups` cuts a line at it, and
+`verify_citations` requires every block a line was split into to have been
+delivered. Before it, a line past 4,096 characters refused the whole pack, so
+one wide table row in a text export meant no document carrying it could be
+admitted.
+
+The width is not a free parameter: anything narrower would re-number documents
+already admitted under this one, whose `source_blocks` rows are immutable and
+whose stored citations name the ids they were given. A cut falls wherever the
+width falls, inside a word if that is where it falls, because cutting at a
+token boundary would make the block count depend on the tokens and force
+anchoring to read every token's text back to learn it.
+
+`citations._line_blocks` re-derives the packing rather than storing a version,
+and does so **in one direction only**: splitting writes more blocks than lines,
+so only a source with more is repacked and checked against its stored count,
+while one with fewer keeps the one-block-a-line reading it was admitted under.
+That asymmetry is load-bearing, not tidiness — the two tests that demonstrate
+`CITATION_NOT_DELIVERED` at all narrow a delivery by deleting a stored block
+with the seal disabled, and reading that state as a disagreement about the rule
+would answer about the host's own derivation where the honest answer is about
+the citation, making the refusal unreachable in the tree.
+
+### 77.3 The deliverable renders a closed element set, and everything else reaches the page as itself
+
+Task 12.4 replaced `<pre>{escape(markdown)}</pre>` with a renderer over the
+twelve prose constructs `ELEMENTS` names, so a register reads as a table. The
+contract is that a construct outside the set has exactly two outcomes: it
+reaches the page as the characters the model wrote, or the block refuses
+`DELIVERABLE_MARKDOWN_UNSUPPORTED` because no faithful rendering of it exists.
+
+**There is no third outcome, and there briefly was.** A line-leading HTML
+comment was consumed and emitted nothing, and code-span contents and
+out-of-order emphasis each dropped characters. A signer's `payload_sha256`
+binds the record's bytes and this render is the only reading of them a
+committee sees, so a construct that vanishes is text bound and unseen — the
+invariant 5 shape read from the other side. Corrected at the Phase 12
+confidence review, together with the gate that could not see it: a tag census
+measures what the page *emits*, and a deleted construct emits no tag.
+
+Consequence recorded when the renderer moved: `renderer_sha256` is stored on a
+filing and compared against the renderer of the day a package is built, so a
+revision filed before a renderer change cannot be packaged verifiably again.
+Unreachable while no route serves a package, and owned by its own ledger entry.
