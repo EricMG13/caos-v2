@@ -15,7 +15,7 @@ from server.deliverable.filing import revision_signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
-from server.store.audit import _digest_of, audit_head, audit_trail, verify_chain
+from server.store.audit import audit_head, audit_trail, digest_of, verify_chain
 from server.store.cases import lock_case
 from server.store.members import satisfies, standing_of
 from server.store.outcomes import execution_reads
@@ -161,7 +161,7 @@ def _publication(
         or (filer is None and filing_evidence)
     ):
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-    bound = _digest_of({"revision_id": str(revision), "payload_sha256": digest})
+    bound = digest_of({"revision_id": str(revision), "payload_sha256": digest})
     trail = audit_trail(conn, case_id)
     events = {(e.action, e.actor_id) for e in trail if e.payload_sha256 == bound}
     required = {("OPINION_SIGNED", who) for who in signers}

@@ -14,7 +14,7 @@ from server.deliverable.revisions import prove_revision
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.audit import _digest_of, audit_head, audit_trail, verify_chain
+from server.store.audit import audit_head, audit_trail, digest_of, verify_chain
 
 
 def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
@@ -79,7 +79,7 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
         filed is None
         or filed.action != "DELIVERABLE_FILED"
         or filed.actor_id != filer
-        or filed.payload_sha256 != _digest_of(_filing_payload(receipt))
+        or filed.payload_sha256 != digest_of(_filing_payload(receipt))
         or not verify_chain(conn, case_id)
         or trail[-1].entry_sha256 != audit_head(conn, case_id)
     ):

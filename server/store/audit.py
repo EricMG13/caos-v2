@@ -28,10 +28,8 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
-import psycopg
-
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, rollback_or_close
+from server.store import StoreConnection, committed_unit
 from server.store.cases import lock_case
 from server.store.members import Standing, satisfies, standing_of
 
@@ -79,12 +77,12 @@ def governed_write(
     that its state and this function's audit event are one commit or none.
     `after_event` can persist an object naming this exact link before commit.
     """
-    try:
+    with committed_unit(conn):
         lock_case(conn, action.case_id, missing=RefusalCode.NOT_AUTHORISED)
         previous, seq = _lock_head(conn, action.case_id)
         _require_standing(conn, action)
         write(conn)
-        payload_sha256 = _digest_of(action.payload)
+        payload_sha256 = digest_of(action.payload)
         entry_sha256 = _link(action, seq, previous, payload_sha256)
         conn.execute(
             "INSERT INTO audit_events (case_id, seq, actor_id, action, payload_sha256,"
@@ -107,18 +105,6 @@ def governed_write(
         )
         if after_event is not None:
             after_event(conn, entry_sha256)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        # Any failure at all, cancellation included. Letting this propagate with
-        # the transaction still open leaves the state `write` managed to make
-        # sitting in it, ready to be committed by whatever the caller does next
-        # -- state that landed without the event recording it, which is the one
-        # thing transactional pairing exists to prevent.
-        rollback_or_close(conn)
-        raise
     return entry_sha256
 
 
@@ -211,10 +197,12 @@ def _lock_head(conn: StoreConnection, case_id: UUID) -> tuple[str, int]:
     return str(row[0]), int(row[1]) + 1
 
 
-def _digest_of(payload: Mapping[str, Any]) -> str:
+def digest_of(payload: Mapping[str, Any]) -> str:
     """The payload's digest, never the payload. An audit event records that a
     decision was made and what it bound to -- not the document behind it."""
-    canonical = json.dumps(dict(payload), sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        dict(payload), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
