@@ -322,6 +322,23 @@ def test_an_unset_price_says_unset_not_misconfigured(
     printed = capsys.readouterr().err.strip()
     assert printed == "PROVIDER_NOT_CONFIGURED CAOS_MODEL_PRICE unset"
 
+    # Set-but-empty reads as unset, here and in the doctor and the store
+    # configuration. The case the earlier test carried before this one replaced
+    # it: without this, only the deleted-variable path is covered.
+    monkeypatch.setenv("CAOS_MODEL_PRICE", "")
+
+    assert worker.main() == 2
+    assert capsys.readouterr().err.strip() == (
+        "PROVIDER_NOT_CONFIGURED CAOS_MODEL_PRICE unset"
+    )
+
+    # A malformed price is misconfiguration, not absence: the code alone, with
+    # no name and nothing of the value.
+    monkeypatch.setenv("CAOS_MODEL_PRICE", "a-model/for-the-test,not-a-number")
+
+    assert worker.main() == 2
+    assert capsys.readouterr().err.strip() == "PROVIDER_NOT_CONFIGURED"
+
 
 def test_price_from_environment_reads_one_dated_price() -> None:
     price = worker.price_from_environment("m/x", "m/x,0.000001,0.000004,2026-09-13")

@@ -27,8 +27,10 @@ LIVE_CONFIGURATION = frozenset(
         "OPENROUTER_PROVIDER",
         "OPENROUTER_REASONING_EFFORT",
         "CAOS_REQUIRE_PROVIDER",
-        # `make dev-worker` and `scripts/qualify.py` read these two; absent, the
-        # worker refuses PROVIDER_NOT_CONFIGURED before it claims anything.
+        # `make dev-worker` and `scripts/qualify.py` read the price; absent, the
+        # worker refuses PROVIDER_NOT_CONFIGURED before it claims anything. The
+        # ceiling is read by the live suite alone, not by anything under
+        # `scripts/` or `server/`.
         "CAOS_MODEL_PRICE",
         "CAOS_LIVE_BUDGET_CEILING",
     }
