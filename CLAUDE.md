@@ -243,6 +243,43 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* the bundle's, and it belongs with the other vendor requests -- a
   duplicate header is a malformed register and the validator should refuse it.
 
+**Audit remediation (2026-09-17).**
+
+- **The evidence seal is checked once per statement, and two costs come with
+  that.** §74.2: migration `0027` makes `0008`'s immutability check an
+  `AFTER INSERT ... FOR EACH STATEMENT` trigger with a transition table, and
+  both evidence writers use `COPY`, so admitting a 100,000-token document runs
+  the check twice instead of 30,001 times and its store write fell from 12.1 s
+  to 4.4 s (`scripts/measure_admission.py`, warm, one machine). First: the
+  statement's rows are materialised into a transition tuplestore that can spill
+  past `work_mem`, a memory and temp-file cost the row trigger did not have --
+  inside the noise on this workload and bounded per document by
+  `AdmissionLimits.max_tokens`. Second: a refusal now arrives *after* the
+  statement's rows are written rather than before the first, so a sealed
+  source's bulk insert writes its rows and discards them where it used to
+  refuse at row one. Nothing on the admission path meets that, because
+  `_admit_one` seals in the transaction that writes. The trigger takes
+  `FOR NO KEY UPDATE` where `0008` took `FOR UPDATE`, because an `AFTER` trigger
+  runs after its own statement's foreign-key check has taken `FOR KEY SHARE` on
+  the same row and two writers upgrading that would deadlock; every writer
+  `0008` excluded, the seal included, is still excluded, and
+  `tests/test_frozen_evidence.py::test_an_uncommitted_evidence_write_blocks_a_withdrawal_of_its_source`
+  holds the exclusion direction that the permissive tests cannot.
+  *Upgrade:* a declared `work_mem` floor for the admission path, the day a
+  document large enough to spill is admitted; none for the refusal ordering,
+  which is the price of checking once.
+- **Two tested islands have no production caller, and deleting them is a gate
+  edit.** §74.4: reducing Book and Admin to their unavailable shells left
+  `bind`/`release` in `frontend/src/app/authority.ts` and
+  `EvidenceContext.openPassport` with the metric-passport overlay behind it
+  reachable from no section. Both are the subject of a test pinned by name in
+  `tests/test_phase_exits.py`
+  (`test_book_binds_one_snapshot_per_compared_case`, `test_passport_contract`),
+  whose own assertion exists to stop the names being re-excused to green it. So
+  neither may be deleted as cleanup, and both sites now carry a comment saying
+  so. *Upgrade:* delete each with the gate entry that pins it, in one commit, on
+  the day its section is served or its exit is formally withdrawn.
+
 **Completion Phase 10.**
 
 - **A run that cannot afford its next node writes an attempt row before it is
@@ -326,7 +363,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   archived predecessor rather than the live answer.
 - **The demonstration Admin panel says the health route is not served.**
   `frontend/fixtures/admin.json` carries `HEALTH` and `GET /api/health` marked
-  not served, and the admin unit test's comment repeats it;
+  not served;
   `server/api/health.py` has served that route since §53.8. The fixture
   under-claims, so its assertion still holds and no gate is weakened, but an
   operator reading the demonstration panel is told a control does not exist when

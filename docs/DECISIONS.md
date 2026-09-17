@@ -1951,7 +1951,9 @@ signatures or proof that an entire receipt/audit chain was never replaced.
    same Python/zlib build produce identical archive bytes.
 2. **Portable render.** `render.py` imports only standard-library modules and
    raises local `RenderRefused(ValueError)` with its existing code as a string.
-   `host.render_payload` maps this to the existing host `RefusalCode`/`Refusal`,
+   `host.render_payload` (**deleted as dead in §74.5**; nothing in `server/`
+   catches `RenderRefused`, so the guarantee below has no subject left to
+   violate) maps this to the existing host `RefusalCode`/`Refusal`,
    with no exception chain. Its HTML output is unchanged.
 3. **Portable verifier version 1.** `verify(archive: bytes)` returns
    `(bool, str | None)`; malformed input is a fixed failure reason, never an
@@ -3452,3 +3454,177 @@ deliverable constructors, `store/runs.py`'s `_transition` and
 `evidence/page.py`'s `_frame`. The layer has not partially adopted the fix and
 run out of road; the pattern was never reached for. No task in this plan owns
 that layer, so nothing here changes it — it is recorded for the phase audit.
+
+## 2026-09-17 §74 — The audit remediation's fourth wave: an index, a seal checked once, an operator told the name, two shells and the residue
+
+Wave 4 of `docs/superpowers/plans/2026-09-17-audit-remediation.md`, answering
+the plan's remaining notes and one owner decision. Five tasks, each small; two
+of them changed something load-bearing and are the reason this entry is longer
+than its diff deserves.
+
+### 74.1 The directory's membership join has an index (migration 0026)
+
+`case_members`'s primary key leads with `case_id`, so the directory's join on
+the caller's `user_id` was served by scanning every membership row in the
+store. `0026_case_members_by_user` indexes `user_id`, partial on
+`revoked_at IS NULL` because a revoked membership lists nothing, so the index
+holds exactly the rows the directory reads.
+
+**The number this migration does not carry is `0022`.** The plan reserved that
+ordinal for this task, and the concurrent session landed `0024` and `0025` while
+the wave was in flight. `0022` and `0023` are now permanent gaps: `apply_schema`
+verifies an ordered immutable prefix, so a migration inserted below the applied
+head would not verify on any database already past `0025`. They stay gaps rather
+than being recycled, and a reader who notices should find the reason here rather
+than a number that means something different from what its position implies.
+
+The test asserts the plan reaches the index **and** that the condition is on
+`user_id`, because the index name alone would hold for an index of that name on
+any column. What it does not assert is a latency, and it asserts over a proxy
+query rather than the real statement, which carries a subquery, a lateral join
+and an `ORDER BY … LIMIT` under which the planner may legitimately drive from
+`cases` instead. The index is right for the shape this read has at scale; that
+the statement it was added for reaches it is not proven.
+
+### 74.2 The evidence seal is checked once per statement, not once per row (migration 0027)
+
+Admitting a document fired the immutability check of migration `0008` once for
+every row inserted. Measured before deciding, which the task was allowed to stop
+on: the store write for a 100,000-token document took **12.1 s**, six times the
+threshold at which the work was worth doing. `0027` makes the check an
+`AFTER INSERT … FOR EACH STATEMENT` trigger with a transition table, and both
+evidence writers use `COPY`.
+
+| | before | after |
+|---|---|---|
+| store write, 100k tokens | 12.1 s | 4.4 s |
+| seal checks, 10k lines | 30,001 | 2 |
+
+The call count was read from PostgreSQL's own function statistics rather than
+inferred from elapsed time.
+
+**The lock mode changed, and that is the part worth reading twice.** The trigger
+takes `FOR NO KEY UPDATE` where `0008` took `FOR UPDATE`. An `AFTER` trigger runs
+after its own statement's foreign-key check has already taken `FOR KEY SHARE` on
+the same `sources` row, so asking for `FOR UPDATE` is a lock upgrade, and two
+writers of one unsealed source deadlock instead of queueing — observed, before
+the mode was changed, not predicted after.
+
+The claim that nothing is let through was checked by enumerating every writer
+and every lock on a `sources` row from the live schema, and measuring the
+exclusion matrix rather than reading the documentation. Exactly four foreign
+keys reference `sources`. The seal is excluded by **lock order** rather than by
+mode: its own trigger is `BEFORE`, so its `FOR UPDATE` lands first. Withdrawal
+updates a non-key column and so takes an implicit `FOR NO KEY UPDATE`, which
+conflicts. The one exclusion given up is against a bare `FOR KEY SHARE`, which
+only a referencing insert's own check takes, and the one path that could reach
+it needs a committed seal that commits in the same transaction as the evidence.
+
+**That property was guarded in one direction only, and now is not.** The new
+concurrency tests prove the permissive direction, which any weaker lock passes
+automatically; replacing the mode with `FOR KEY SHARE` left every other
+assertion in the file standing. A test now holds an evidence statement open and
+requires a withdrawal of that source to block. It fails under exactly that
+weakening.
+
+**Two costs, recorded rather than fixed.** The statement's rows are materialised
+into a transition tuplestore that can spill past `work_mem`, a cost the row
+trigger did not have, bounded per document by the admission token ceiling. And a
+refusal now arrives after the statement's rows are written rather than before the
+first, so a sealed source's bulk insert writes its rows and discards them where
+it used to refuse at row one. Nothing on the admission path meets that, because
+a document's seal commits in the transaction that writes its evidence.
+
+*Upgrade:* a declared `work_mem` floor for the admission path, the day a document
+large enough to spill is admitted; and nothing for the refusal ordering, which is
+the price of checking once.
+
+### 74.3 An operator is told which variable is missing
+
+Three surfaces under-reported. The development doctor and `.env.example` did not
+name every variable the worker and the edge read, so an operator learned a
+variable existed by meeting its failure. The package verifier exited without
+usage when run with no argument. And the worker reported an unset price as a
+misconfiguration.
+
+The worker now prints the typed code with the **name** of the variable nobody
+set beside it, and never a value — `unset` can only ever hold the empty string or
+the module's own constant. The verifier gained a standard-library argument
+parser; it must stay standard-library only, which an AST test asserts and which
+was confirmed by watching that test fail with a third-party import inserted.
+
+Packages built from here archive the new verifier while older packages keep their
+own. Neither direction changes a verdict: the verifier's own bytes are never read
+into one, only its presence and its size bound, and both directions were measured
+— an old archived verifier over a new package, and a base-era verifier against the
+new host reader, both verifying.
+
+**What the completeness test is not.** It names five variables and would not
+catch a sixth. That is the shape the plan asked for and it should not be read as
+a gate. What does hold structurally is the neighbouring assertion that no
+variable's *value* is ever printed, which iterates the configuration sets
+dynamically and so covers every name added to them, including a real secret.
+
+### 74.4 Book and Admin are the shells the chrome suite already asserted
+
+The owner's decision D2. Both sections are specified and neither ever mounted:
+the section gate excludes them, so the surface never requests a document and the
+unavailable branch returns without invoking its children. 1,216 lines of
+components, helpers and wire modules are deleted, with the tests that existed
+only to name them, and the ledger provider stops wrapping every section. The
+implementation returns from git history the day either section is served.
+
+**Two things were deliberately not deleted, and the reason is a rule about
+gates.** `bind`/`release` in the authority machine, and the metric-passport
+overlay, both lost their only production caller. Both are the subject of a test
+pinned **by name** in the phase-exit gate, whose own docstring says the cheapest
+way to green that assertion would be to re-excuse the name — a gate turned off
+to make a gate pass. Deleting either is therefore a gate edit rather than a
+cleanup, and both sites now say so in a comment, because the next reader is as
+likely to delete them wrongly as to read the Book as served.
+
+An accepted Phase 4 exit-evidence record cites one of the deleted tests under a
+sentence claiming the dormant sections carry their fixes. It is **not** corrected,
+on the precedent this repository already holds for `docs/feature-status.csv`: a
+dated record whose evidence is edited later stops being a record of that date.
+It is carried into the handoff instead.
+
+### 74.5 Residue, and one duplication that is not one
+
+Five small things: a catalog loader spelled twice, a dead wrapper module, a route
+digest recomputed on a read that had already derived it, a lock that raised
+without ending its transaction, and one route serialiser apparently written
+twice.
+
+**The last is not a duplication, and finding that out was the task.** There are
+two byte forms — the digest's and the stored pin's — and they differ
+deliberately in row shape, edge order and predicate handling. **Both are pinned**,
+the stored one by every existing route row that must still read back. So only a
+field list is shared; unifying the forms would be a record-format version with no
+backfill, and was not taken unasked. Both forms were held unchanged by goldens
+computed at the base commit before any edit, and re-verified independently across
+every route the vendored catalog can resolve.
+
+Coercing predicates in the shared helper turned two malformed shapes the stored
+pin refuses into shapes it accepts. Two store-integrity tests named it, and it
+was fixed before the commit rather than after the review.
+
+The plan's instruction to import the catalog loader into a command module was
+**unimplementable**: a test bans that module for every command module. The loader
+lives beside the other vendor readers instead, which narrows the command module's
+import graph rather than widening it.
+
+`lock_run` now ends its transaction before raising, a change to a primitive with
+a dozen callers. Every caller was walked: the refusal propagates from all of
+them, the one that catches it re-raises, and the one that catches and continues
+rolls back first regardless.
+
+### 74.6 What the wave got wrong, and where
+
+Three of the five briefs were wrong, and all three were mine. One named a
+migration ordinal the tree had moved past. One prescribed an import a gate
+forbids. One described two pinned byte forms as one serialiser. None reached the
+tree: each was caught by an implementer doing the instruction as written and
+letting the suite answer, which is the right order and worth saying plainly,
+because the alternative — an implementer silently correcting a brief — leaves
+nobody knowing the plan was wrong.

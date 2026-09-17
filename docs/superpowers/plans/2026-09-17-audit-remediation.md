@@ -50,7 +50,7 @@ Per-task lines say `Model/effort:`. A mixed task takes the stricter row. The coo
 | 1 — correctness and security | T1, T2, T3, T4, T5, T6 | full `make check` once |
 | 2 — prompt and evidence | T7, T8, T9 | full `make check` once |
 | 3 — consolidation | T10, T11, T12, T13, T14, T15 | **landed** `b7c33f1`; offline gate green, `make check` owed |
-| 4 — store, operator surface, residue | T16 (decision), T17, T18, T19, T20 | full `make check` + `make smoke-production` |
+| 4 — store, operator surface, residue | T16 (decision), T17, T18, T19, T20 | **landed** `18171e3`; offline gate green, `make smoke-production` owed |
 | close | confidence-review → remediation → adversarial audit (Opus 5 `max` + `ultrathink`) → handoff update | — |
 
 Owner decisions this plan needs (D1–D3) are stated at the end; tasks that depend on one say so.

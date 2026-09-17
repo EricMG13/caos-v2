@@ -77,6 +77,7 @@ NOT_A_CITATION = {
 # deliberate edit here, which is what the count floor alone could not see.
 EXPECTED_PHASES = frozenset(
     {
+        "Audit remediation (2026-09-17)",
         "Completion Phase 10",
         "Completion Phase 8",
         "Completion Phase 7",
