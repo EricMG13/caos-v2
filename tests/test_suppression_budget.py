@@ -12,12 +12,13 @@ charged.
 one is stated here so nobody has to reconstruct it.** The budget used to count
 raw markers, capped at 52. Integrating wave 3 of the audit remediation took
 that count to 53: one marker left `server/methodology/canonical.py`, and two
-arrived with functions that each replaced several hand-rolled copies of
-themselves -- the shared verification reader, and the one governed envelope
-that nine command-module copies collapsed into. So the raw count rose by one
-while the tree lost about 346 lines of duplication, because the copies it
-removed were never suppressed and so had never been counted. A ceiling that
-punishes concentrating a suppression into one shared helper is measuring the
+arrived with functions that each replaced several copies of themselves -- the
+shared verification reader, and the one governed envelope that five routes had
+been spelling inline while a module-local helper served the rest. So the raw
+count rose by one while the tree lost about 346 lines of duplication, because
+the copies it removed were never suppressed and so had never been counted.
+A ceiling that punishes concentrating a suppression into one shared helper is
+measuring the
 wrong thing, and raising it to 53 would have been a threshold moved to obtain
 a pass. Two other units were measured and rejected before this one: counting
 markers outside the shared helpers rose 47 -> 49, because consolidating
