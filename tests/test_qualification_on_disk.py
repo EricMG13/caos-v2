@@ -364,6 +364,68 @@ def test_a_manifest_that_is_not_json_is_refused(tmp_path: Path) -> None:
     assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
 
 
+def test_a_manifest_larger_than_its_bound_is_refused_before_reading(
+    tmp_path: Path,
+) -> None:
+    """A manifest names cases; it never needs to carry a document's worth of bytes.
+
+    Refused by size, before `json.loads` ever sees the bytes -- the same
+    fail-closed shape `admit_pack` gives a document, applied to the file that
+    names them.
+    """
+    from server.qualification.on_disk import MAX_MANIFEST_BYTES
+
+    root = _write(tmp_path / "set", _manifest())
+    oversized = "{" + " " * MAX_MANIFEST_BYTES + "}"
+    (root / MANIFEST).write_text(oversized, encoding="utf-8")
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_document_larger_than_admit_packs_own_limit_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A document too large for `admit_pack` is refused at load, not read first.
+
+    `_document` shares the exact ceiling `admit_pack` applies at admission, so a
+    set that would be refused there does not pay to read an oversized file into
+    memory here only to have it refused a moment later.
+    """
+    from server.evidence.extract import DEFAULT_LIMITS
+
+    root = _write(tmp_path / "set", _manifest())
+    big_document = root / "documents" / "acme-2026" / "report.txt"
+    with big_document.open("wb") as handle:
+        handle.seek(DEFAULT_LIMITS.max_document_bytes)
+        handle.write(b"\0")
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_document_path_naming_a_directory_is_refused(tmp_path: Path) -> None:
+    """A declared document that is not a regular file reads no bytes at all.
+
+    A directory is not a FIFO, but it is the one non-regular case this suite
+    can create without an actual named pipe -- both fail `Path.is_file()` the
+    same way, before `read_bytes` would ever block or fail differently.
+    """
+    root = _write(tmp_path / "set", _manifest())
+    document = root / "documents" / "acme-2026" / "report.txt"
+    document.unlink()
+    document.mkdir()
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
 # `_in_memory()`'s digest before a case could carry a subject. A set whose cases
 # carry none must keep binding exactly this, or every earlier verdict is orphaned.
 GOLDEN = "64bc178c0010b0fe104e01f4f7fac2bce35d1dc09f21fea86ff996aa99233373"

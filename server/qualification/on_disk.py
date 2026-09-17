@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from server.boundary_text import BoundaryText
+from server.evidence.extract import DEFAULT_LIMITS
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
@@ -62,6 +63,9 @@ from server.store.run_inputs import RunSubject, valid_subject
 # The manifest's name inside the set's directory. Named, because "the JSON file
 # in there" is not a declared form.
 MANIFEST = "qualification.json"
+
+# A manifest names cases; it never carries a document's bytes.
+MAX_MANIFEST_BYTES = 1024 * 1024
 
 # The keys each declared object carries, and nothing else. Closed both ways for
 # the reason every wire model here is (`CLAUDE.md`, wire strictness): a key this
@@ -123,10 +127,29 @@ def load_qualification_set(root: Path) -> QualificationSet:
     )
 
 
+def _bounded_bytes(path: Path, limit: int) -> bytes:
+    """A regular file's bytes, refused before reading if it is too large.
+
+    `read_bytes` on a path nobody bounded is the whole defect: a declared
+    document of several gigabytes is read into memory before `admit_pack`'s own
+    ceilings ever see it, and a FIFO at the declared path blocks the loader for
+    as long as nothing writes to it. `is_file()` answers the second -- it is
+    false for a FIFO, a socket and a directory -- and `st_size` answers the
+    first without reading anything.
+
+    The document limit is `admit_pack`'s own, so a set that would be refused at
+    admission is refused at load instead of being read first.
+    """
+    status = path.stat()  # OSError here is the caller's refusal
+    if not path.is_file() or status.st_size > limit:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return path.read_bytes()
+
+
 def _manifest(root: Path) -> Mapping[str, Any]:
     """The manifest, parsed. Absent or unparseable says nothing about a set."""
     try:
-        parsed = json.loads((root / MANIFEST).read_bytes())
+        parsed = json.loads(_bounded_bytes(root / MANIFEST, MAX_MANIFEST_BYTES))
     except (OSError, ValueError):
         raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID) from None
     if not isinstance(parsed, dict):
@@ -194,7 +217,7 @@ def _document(root: Path, declared: object) -> Document:
         raise Refusal(RefusalCode.QUALIFICATION_SET_PATH_ESCAPES)
 
     try:
-        data = target.read_bytes()
+        data = _bounded_bytes(target, DEFAULT_LIMITS.max_document_bytes)
     except OSError:
         # Named and not there. A set is its bytes; one document short is not a
         # smaller set, it is a set nobody can measure the same way twice.
