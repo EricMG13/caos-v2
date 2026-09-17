@@ -8,8 +8,9 @@ The committing wrappers themselves (audit remediation Task 10): eleven of them
 owned their transaction with the same eight lines -- commit on success, roll
 back or close on a store fault and answer it `STORE_UNAVAILABLE` with no driver
 text, roll back or close on anything else and let it through. `committed_unit`
-is those lines, beside `rollback_or_close`, and the last test here is what
-keeps a twelfth copy from growing back.
+is those lines, beside `rollback_or_close`. Three tests keep it that way: one
+per arm of the manager, commit-time fault included, and one that keeps a
+twelfth copy from growing back anywhere under the package.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ from server.store.gates import (
 from server.store.outcomes import _require_attempt
 from server.store.routes import pin_route, pin_route_in
 from server.store.run_inputs import RunSubject, pin_run_input_in
-from server.store.runs import fail_run, start_attempt, start_run
+from server.store.runs import create_case, fail_run, start_attempt, start_run
 from server.store.source_sets import snapshot_in, snapshot_source_set
 from server.store.work import require_running
 
@@ -58,14 +59,6 @@ __all__ = ["gated"]  # the fixture is used by name
 
 TEXT = b"Total debt at 31 December 2026 was USD 1,240.0m\n"
 STORE = Path(__file__).resolve().parents[1] / "server" / "store"
-# The commit block exactly: `execution_reads` ends in a rollback and
-# `apply_schema` refuses under its own code, so neither is this shape.
-COMMIT_BLOCK = (
-    "        conn.commit()\n"
-    "    except psycopg.Error:\n"
-    "        rollback_or_close(conn)\n"
-    "        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None"
-)
 
 
 def _count(conn: StoreConnection, table: str) -> int:
@@ -251,14 +244,84 @@ def test_committed_unit_rolls_back_and_lets_any_other_failure_through(
         assert refused.value is refusal
 
 
-def test_no_store_module_spells_the_commit_block_by_hand() -> None:
+def test_a_failing_commit_is_refused_typed_and_publishes_nothing(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """The commit is inside the guard, and the fault it raises is typed.
+
+    Every other test here raises from the body, so a commit moved below the
+    `try/except` -- the tidy-up the `yield` invites, since the yield is the
+    only line that visibly needs guarding -- passes them all while a full disk
+    or a dropped connection raises the driver's own error, with driver text,
+    out of the audit write, attempt acceptance and budget reservation, leaving
+    the connection aborted for the next caller. `source_set_complete` is a
+    deferred constraint trigger, so the header below inserts cleanly and the
+    store refuses it only at COMMIT: the fault arrives where nothing else in
+    this suite puts one.
+    """
+    conn, case_id = case
+    with pytest.raises(Refusal) as refused, committed_unit(conn):
+        create_case(conn, BoundaryText.of("Lost with the failed commit"))
+        conn.execute(
+            "INSERT INTO source_set_versions"
+            " (case_id, version, format_version, fingerprint, member_count)"
+            " VALUES (%s, 1, 1, %s, 1)",
+            (case_id, "0" * 64),
+        )
+    assert refused.value.code is RefusalCode.STORE_UNAVAILABLE
+    # No driver text on it, and no chain to carry any.
+    assert str(refused.value) == RefusalCode.STORE_UNAVAILABLE.value
+    assert refused.value.__cause__ is None
+    assert refused.value.__suppress_context__
+    # And the connection is left usable rather than aborted.
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    conn.commit()
+    assert (_count(conn, "cases"), _count(conn, "source_set_versions")) == (1, 0)
+    assert conn.execute("SELECT 1").fetchone() == (1,)
+
+
+def test_a_cancelled_unit_leaves_no_write_for_the_next_caller_to_commit(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """The rollback arm asserted by effect, not by transaction status.
+
+    An idle connection is what both a rollback and a commit leave behind, so
+    `rollback_or_close` replaced by `conn.commit()` passes a status assertion
+    -- while publishing exactly the state the arm's own comment argues must
+    never survive: the body's writes without the events bound to them.
+    """
+    conn, case_id = case
+    with pytest.raises(KeyboardInterrupt), committed_unit(conn):
+        create_case(conn, BoundaryText.of("Cancelled mid-unit"))
+        start_run(conn, case_id)
+        raise KeyboardInterrupt
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    # Whatever the caller does next must not be able to publish the body.
+    conn.commit()
+    assert (_count(conn, "cases"), _count(conn, "runs")) == (1, 0)
+
+
+def test_only_the_store_package_root_commits_a_transaction() -> None:
+    """The regression gate, said the strongest way the tree allows.
+
+    Pinning the old block's exact spelling missed a copy at another indent,
+    under another connection name, or in a module this glob did not reach.
+    Every committing wrapper under `server/store` now goes through
+    `committed_unit`, so the whole package below its root commits nothing --
+    which is one assertion, and true of a twelfth copy however it is spelled.
+    Callers outside the package (`server/api/commands/qualification.py`,
+    `server/engine/worker.py`, the harness) own their own transactions and are
+    not in scope here.
+    """
+    scanned = [path for path in STORE.rglob("*.py") if path.name != "__init__.py"]
     offenders = sorted(
-        path.name
-        for path in STORE.glob("*.py")
-        if path.name != "__init__.py"
-        and COMMIT_BLOCK in path.read_text(encoding="utf-8")
+        str(path.relative_to(STORE))
+        for path in scanned
+        if ".commit()" in path.read_text(encoding="utf-8")
     )
     assert offenders == [], offenders
+    # A scanner that scanned nothing is a failure, not a pass.
+    assert len(scanned) >= 14
 
 
 def test_the_spend_fence_refuses_an_ended_run_before_it_asks_for_a_lease(
