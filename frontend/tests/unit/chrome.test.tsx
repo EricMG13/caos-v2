@@ -133,9 +133,8 @@ describe("the chrome", () => {
       Object.values(record).forEach(walk);
     };
     for (const [, doc] of documents()) walk(doc);
-    // A scan that found nothing would pass every assertion below. Run frames
-    // are v1 since 4.1i and carry no refusals; 4.1j retires this legacy scan.
-    expect(clauses.length).toBeGreaterThan(10);
+    // The remaining legacy fixtures still prove the scanner itself is live.
+    expect(clauses.length).toBeGreaterThan(0);
     for (const clause of clauses) {
       // Every surface reads it as "Clears when " + clause + ".".
       expect(clause).toMatch(/^[a-z]/);

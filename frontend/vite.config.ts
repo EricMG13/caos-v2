@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Connect, type Plugin, type ProxyOptions } from "vite";
 
 // Explicit demo dev and preview serve fixtures at the v1 wire's routes, for the
-// five enabled sections only (brief 4.1, decision 9). Ordinary dev proxies to
+// six enabled sections only (brief 4.1, decision 9). Ordinary dev proxies to
 // the real local API, and production carries none of this.
 // `?fixture=<state>` selects
 // fixtures/states/<section>.<state>.json, or drives a transport state.
@@ -62,7 +62,9 @@ export function devProxy(env: Record<string, string | undefined>): Record<string
 /** The enabled section a v1 path names, or null. A disabled section is not served. */
 function sectionOf(pathname: string): string | null {
   if (pathname === "/api/v1/directory") return "directory";
-  return /^\/api\/v1\/cases\/[^/]+\/(upload|run|analysis|model)$/.exec(pathname)?.[1] ?? null;
+  return (
+    /^\/api\/v1\/cases\/[^/]+\/(upload|run|analysis|model|report)$/.exec(pathname)?.[1] ?? null
+  );
 }
 
 // The frame a run's stream has advanced to; the next fetch of /run reads it.
@@ -109,7 +111,7 @@ async function serveSection(section: string, fixture: string | null, res: Server
       JSON.stringify({ code: "STORE_UNAVAILABLE", clears: "the store answers again" }),
     );
   }
-  let path = `${section}.json`;
+  let path = section === "report" ? "report-v1.json" : `${section}.json`;
   if (fixture && !STREAM_FIXTURES.has(fixture)) path = `states/${section}.${fixture}.json`;
   else if (section === "run" && runFrame > 0) path = `run/frames/${runFrame}.json`;
   const body = await readJson(path);

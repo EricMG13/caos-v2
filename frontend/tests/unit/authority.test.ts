@@ -14,7 +14,12 @@ import {
   withWithdrawals,
   withdrawalsOf,
 } from "@/app/authority";
-import { parseAnalysisDocument, parseModelDocument, parseRunSectionDocument } from "@/wire/v1";
+import {
+  parseAnalysisDocument,
+  parseModelDocument,
+  parseReportDocument,
+  parseRunSectionDocument,
+} from "@/wire/v1";
 
 const load = (path: string): unknown =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -92,13 +97,33 @@ describe("what a name refetches and what a view is", () => {
     status: "complete",
     notes: [],
   });
+  const report = parseReportDocument({
+    chrome: {
+      subject: { case_id: "00000000-0000-4000-8000-000000000001", title: "Issuer" },
+      served_role: { global_role: "READER", standing: "READER" },
+      actions: [],
+    },
+    body: {
+      case_id: "00000000-0000-4000-8000-000000000001",
+      displayed_run_id: "00000000-0000-4000-8000-0000000000a1",
+      revision_id: "00000000-0000-4000-8000-0000000000b2",
+      payload_sha256: "a".repeat(64),
+      case_title: "Issuer",
+      artifacts: [],
+      narrative: [],
+    },
+    observed_at: "2026-09-14T10:00:00Z",
+    observed_empty: false,
+    status: "complete",
+    notes: [],
+  });
 
   test("each event name refetches exactly the sections decision 2 names", () => {
     expect(REFETCHES).toEqual({
       run_progress: ["run"],
       handoff_accepted: ["run", "analysis", "model"],
       run_terminal: ["run", "analysis", "model"],
-      sources_changed: ["upload", "run", "analysis", "model"],
+      sources_changed: ["upload", "run", "analysis", "model", "report"],
       runs_changed: ["run", "analysis", "model"],
     });
     expect(refetches("run_progress", "analysis")).toBe(false);
@@ -124,8 +149,12 @@ describe("what a name refetches and what a view is", () => {
     expect(displayedRunIdOf("run", run)).toBe(run.body.run!.run_id);
     expect(displayedRunIdOf("analysis", analysis)).toBe(analysis.body.displayed_run_id);
     expect(displayedRunIdOf("model", model)).toBe(model.body.displayed_run_id);
+    expect(displayedRunIdOf("report", report)).toBe(report.body.displayed_run_id);
     expect(analyticalIdentity("model", model)).toBe(
       `${model.body.displayed_run_id}|NO_ACCEPTED_FORECAST`,
+    );
+    expect(analyticalIdentity("report", report)).toBe(
+      `${report.body.revision_id}|${report.body.payload_sha256}`,
     );
   });
 
