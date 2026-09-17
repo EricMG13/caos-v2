@@ -877,10 +877,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   what re-anchor it. Citations still anchor only in the consumer's own
   delivered blocks, so a quote found only in upstream text or the register
   refuses `CITATION_NOT_LOCATED`; the register rides inside the request
-  ceiling like every other section and has no bound of its own. *Upgrade:*
-  re-anchoring in the pre-call unit if a consumer ever relies on the register
-  for more than orientation, and a per-section bound with the one "An upstream
-  section is unbounded" owes.
+  ceiling like every other section and has no bound of its own -- which the
+  upstream handoff beside it no longer is: `MAX_UPSTREAM_HANDOFF_BYTES` bounds
+  the handoff and says nothing about the register, and the register is derived
+  from the same record, so a bounded handoff can still carry an unbounded list
+  of its citations. *Upgrade:* re-anchoring in the pre-call unit if a consumer
+  ever relies on the register for more than orientation, and a bound of the
+  register's own -- the struck "An upstream section is unbounded" entry below
+  is what bounded the handoff, and it does not carry this one.
 - **The named-LITE-object boundary is read from `SKILL.md` prose headings, and
   only where a block is keyed to its module.** Slice 3.4b (§46.1): each
   upstream section names its source's catalog
