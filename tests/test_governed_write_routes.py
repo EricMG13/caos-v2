@@ -391,6 +391,87 @@ def test_every_new_command_replays_its_receipt_and_commits_nothing_twice(
         assert after == events, path
 
 
+_FILING = ("SAVE_REVISION", "SIGN_OPINION", "FREEZE_DELIVERABLE", "FILE_DELIVERABLE")
+_PATH = {
+    "SIGN_OPINION": "signature",
+    "FREEZE_DELIVERABLE": "freeze",
+    "FILE_DELIVERABLE": "filing",
+}
+
+
+def _shown(
+    client: TestClient, lite: _Harness, revision: UUID, actor: UUID
+) -> dict[str, str | None]:
+    """The Report section's judgement of its four controls, for this actor."""
+    answer = client.get(
+        f"{_case(lite)}/report?run={lite.run_id}&revision={revision}",
+        headers=command_headers(actor),
+    )
+    assert answer.status_code == 200, answer.text
+    return {
+        view["action"]: view["refusal"] and view["refusal"]["code"]
+        for view in answer.json()["chrome"]["actions"]
+    }
+
+
+def _send(
+    client: TestClient, lite: _Harness, revision: UUID, actor: UUID, action: str
+) -> Response:
+    digest = _digest(lite, revision)
+    if action == "SAVE_REVISION":
+        return _post(
+            client,
+            f"{_case(lite)}/runs/{lite.run_id}/revisions",
+            actor,
+            {"expected_revision_id": str(revision), "narrative": []},
+        )
+    return _post(
+        client,
+        f"{_case(lite)}/revisions/{revision}/{_PATH[action]}",
+        actor,
+        {"payload_sha256": digest},
+    )
+
+
+def test_every_filing_control_the_report_shows_answers_as_it_was_shown(
+    filing_client: TestClient, lite: _Harness
+) -> None:
+    """Step 5's gate for this section: a control shown available succeeds and a
+    control shown refused refuses with exactly the code shown -- walked over
+    every state the chain distinguishes, judged by the document read
+    immediately before each command is sent."""
+    signer, freezer, filer = (_approver(lite) for _ in range(3))
+    revision = _save(lite)
+
+    def walk(actor: UUID, action: str) -> None:
+        shown = _shown(filing_client, lite, revision, actor)[action]
+        answer = _send(filing_client, lite, revision, actor, action)
+        if shown is None:
+            assert answer.status_code in (200, 201), (action, answer.text)
+        else:
+            assert answer.json()["code"] == shown, (action, answer.text)
+
+    # Unsigned: freeze and file are refused, the sign is not.
+    for action in _FILING[1:]:
+        walk(freezer, action)
+    walk(signer, "SIGN_OPINION")
+    # Signed: the signer is offered neither the freeze nor the filing.
+    for action in _FILING[1:]:
+        walk(signer, action)
+    walk(freezer, "FREEZE_DELIVERABLE")
+    # Frozen: the signer and the freezer are refused the filing; a third is not.
+    for actor in (signer, freezer, filer):
+        walk(actor, "FILE_DELIVERABLE")
+    # Filed: every one of the three is refused, each with its own code.
+    for action in _FILING[1:]:
+        walk(filer, action)
+    # And a member below the floor is refused every one of them.
+    reader = member(lite.conn, lite.case_id, Standing.READER)
+    assert set(_shown(filing_client, lite, revision, reader).values()) == {
+        "NOT_AUTHORISED"
+    }
+
+
 def test_each_new_command_meets_its_declared_store_budget(
     filing_client: TestClient, lite: _Harness
 ) -> None:

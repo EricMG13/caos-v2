@@ -62,6 +62,64 @@ def upload_actions(
     ]
 
 
+@dataclass(frozen=True, slots=True)
+class FilingFacts:
+    """One saved revision's filing state, as the Report section read it.
+
+    `actor_signed` and `actor_froze` are about the caller being shown the
+    controls: the three-actor rule is checked at commit under the case lock,
+    and saying so here only keeps a control from being offered to someone it
+    would refuse.
+    """
+
+    signed: bool
+    frozen: bool
+    filed: bool
+    actor_signed: bool
+    actor_froze: bool
+
+
+def report_actions(
+    role: GlobalRole, standing: Standing, filing: FilingFacts
+) -> list[ActionView]:
+    """The Report section's four, in each command's own order (decision 7).
+
+    They sit on Report rather than Committee because Committee refuses a
+    revision that is not frozen, so it can never offer the sign or the freeze
+    that would make it one.
+    """
+    approver = _floor(role, standing, Standing.APPROVER)
+    return [
+        _view(_A.SAVE_REVISION, _floor(role, standing, Standing.WRITER)),
+        _view(
+            _A.SIGN_OPINION,
+            [*approver, (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN)],
+        ),
+        _view(
+            _A.FREEZE_DELIVERABLE,
+            [
+                *approver,
+                (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN),
+                (not filing.signed, _C.DELIVERABLE_NOT_SIGNED),
+                (filing.actor_signed, _C.APPROVER_NOT_INDEPENDENT),
+            ],
+        ),
+        _view(
+            _A.FILE_DELIVERABLE,
+            [
+                *approver,
+                (not filing.frozen, _C.DELIVERABLE_NOT_FROZEN),
+                (not filing.signed, _C.DELIVERABLE_NOT_SIGNED),
+                (
+                    filing.actor_signed or filing.actor_froze,
+                    _C.APPROVER_NOT_INDEPENDENT,
+                ),
+                (filing.filed, _C.DELIVERABLE_ALREADY_FILED),
+            ],
+        ),
+    ]
+
+
 def run_actions(
     role: GlobalRole, standing: Standing, run: RunFacts | None, live_sources: int
 ) -> list[ActionView]:

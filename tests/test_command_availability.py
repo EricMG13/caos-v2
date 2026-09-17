@@ -19,8 +19,10 @@ from httpx import Response
 
 from server import methodology
 from server.api.commands.availability import (
+    FilingFacts,
     RunFacts,
     directory_actions,
+    report_actions,
     run_actions,
     upload_actions,
 )
@@ -353,3 +355,49 @@ def test_the_pure_judgements_follow_each_command_order() -> None:
     assert withdraw.refusal is not None and withdraw.refusal.code == "NOT_AUTHORISED"
     [_admit, empty] = upload_actions(GlobalRole.ADMIN, Standing.WRITER, 0)
     assert empty.refusal is not None and empty.refusal.code == "EVIDENCE_NOT_AVAILABLE"
+
+
+def test_the_filing_controls_follow_each_command_order() -> None:
+    """Task 12.1: the four Report actions, judged as their commands judge."""
+    unsigned = FilingFacts(
+        signed=False, frozen=False, filed=False, actor_signed=False, actor_froze=False
+    )
+    judged = {
+        view.action: view.refusal and view.refusal.code
+        for view in report_actions(GlobalRole.ANALYST, Standing.APPROVER, unsigned)
+    }
+    assert judged == {
+        A.SAVE_REVISION: None,
+        A.SIGN_OPINION: None,
+        A.FREEZE_DELIVERABLE: "DELIVERABLE_NOT_SIGNED",
+        A.FILE_DELIVERABLE: "DELIVERABLE_NOT_FROZEN",
+    }
+
+    # The signer is shown neither the freeze nor the filing their own commit
+    # would refuse; a third approver is shown the filing.
+    signer = FilingFacts(
+        signed=True, frozen=True, filed=False, actor_signed=True, actor_froze=False
+    )
+    third = FilingFacts(
+        signed=True, frozen=True, filed=False, actor_signed=False, actor_froze=False
+    )
+    filed = FilingFacts(
+        signed=True, frozen=True, filed=True, actor_signed=False, actor_froze=False
+    )
+    for facts, expected in (
+        (signer, ["DELIVERABLE_ALREADY_FROZEN", "APPROVER_NOT_INDEPENDENT"]),
+        (third, ["DELIVERABLE_ALREADY_FROZEN", None]),
+        (filed, ["DELIVERABLE_ALREADY_FROZEN", "DELIVERABLE_ALREADY_FILED"]),
+    ):
+        views = {
+            view.action: view.refusal and view.refusal.code
+            for view in report_actions(GlobalRole.ANALYST, Standing.APPROVER, facts)
+        }
+        assert [views[A.FREEZE_DELIVERABLE], views[A.FILE_DELIVERABLE]] == expected
+
+    # Below the floor every one of them is the floor's refusal.
+    reader = {
+        view.refusal and view.refusal.code
+        for view in report_actions(GlobalRole.ANALYST, Standing.READER, third)
+    }
+    assert reader == {"NOT_AUTHORISED"}

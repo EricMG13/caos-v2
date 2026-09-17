@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 
+from server.api.commands.availability import FilingFacts, report_actions
 from server.api.deps import (
     Blobs,
     Caller,
@@ -30,7 +31,9 @@ from server.store.outcomes import execution_reads
 # a read takes none, and the payload digest below is the consistency check.
 # Committee adds publication/signatures (2) and three actor/audit proof reads.
 # Filed Committee also adds receipt/audit (5) and saved payload (1).
-IO_BUDGET = {"report": 43, "committee": 54, "frozen": 48}
+# Task 12.1 adds two to each: the publication row and the signatures the
+# section's four filing actions are judged from.
+IO_BUDGET = {"report": 45, "committee": 56, "frozen": 50}
 router = APIRouter()
 
 
@@ -114,7 +117,9 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
             chrome=dict(
                 subject=dict(case_id=case_id, title=payload["case_title"]),
                 served_role=dict(global_role=actor.role, standing=standing),
-                actions=[],
+                actions=report_actions(
+                    actor.role, standing, _filing_facts(conn, case_id, revision, actor)
+                ),
             ),
             body={**_body(payload, digest), **publication},
             observed_at=observed_at,
@@ -122,6 +127,32 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
             status="complete",
             notes=[],
         )
+
+
+def _filing_facts(
+    conn: Store, case_id: UUID, revision: UUID, actor: Caller
+) -> FilingFacts:
+    """What the section can say about this revision's filing, and no more.
+
+    Deliberately not `_publication`: that one proves the chain and refuses a
+    revision that is not frozen, which is the state the sign and freeze
+    controls exist for. Availability grants nothing, so it reads the two rows
+    and judges from them.
+    """
+    row = conn.execute(
+        "SELECT frozen_by,filed_by FROM deliverable_publications"
+        " WHERE case_id=%s AND revision_id=%s",
+        (case_id, str(revision)),
+    ).fetchone()
+    signers = {who for who, _ in revision_signatures(conn, case_id, revision)}
+    frozen_by = None if row is None else UUID(str(row[0]))
+    return FilingFacts(
+        signed=bool(signers),
+        frozen=row is not None,
+        filed=row is not None and row[1] is not None,
+        actor_signed=actor.user_id in signers,
+        actor_froze=actor.user_id == frozen_by,
+    )
 
 
 def _publication(

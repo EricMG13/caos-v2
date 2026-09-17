@@ -24,8 +24,11 @@ from uuid import UUID, uuid4
 import pytest
 from command_fixtures import command_client, command_headers, member
 from fastapi.testclient import TestClient
+from test_deliverable_canonical import harness, lite, route
 from test_execution_commands import ROUTE, _ready, _Run
+from test_execution_freshness import _Harness
 
+from server.api.app import app, methodology_bundle
 from server.api.identity import (
     EDGE_TOKEN_ENV,
     TRUST_SWITCH,
@@ -34,6 +37,8 @@ from server.api.identity import (
 )
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.deliverable.filing import freeze, sign_opinion
+from server.deliverable.revisions import save_revision
 from server.evidence.ingest import Document, admit_pack
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -42,7 +47,7 @@ from server.store.gates import Gate, gate_preview
 from server.store.members import Standing, revoke
 from server.store.routes import pin_route
 
-__all__ = ["command_client"]
+__all__ = ["command_client", "harness", "lite", "route"]
 
 USER = uuid4()
 
@@ -446,3 +451,111 @@ def test_in_edge_mode_groups_still_decide_the_role(
     monkeypatch.setenv("CAOS_EDGE_TOKEN", "x" * 32)
     actor = actor_from_headers(_headers(**{"x-forwarded-groups": "caos-analysts"}))
     assert actor.role is GlobalRole.ANALYST
+
+
+# Task 12.1's other four commands, in the same table but not the same fixture:
+# a revision can only be derived from a run whose artifacts are accepted, which
+# the `case` fixture above has none of. The identities and their expectations
+# are `ACTORS` and `MATRIX`'s, so a floor that moved would show in both.
+DELIVERABLE: dict[str, tuple[int | None, ...]] = {
+    "save": (401, 404, 403, 201, 201, 404, 404, 403, 201),
+    "signature": (401, 404, 403, 403, 200, 404, 404, 403, 200),
+    "freeze": (401, 404, 403, 403, 200, 404, 404, 403, 200),
+    "filing": (401, 404, 403, 403, 200, 404, 404, 403, 200),
+}
+
+
+def _prepared(lite: _Harness, endpoint: str) -> tuple[str, dict[str, object]]:
+    """A path and body on which `endpoint` succeeds for an independent approver.
+
+    Each actor gets its own revision: signing a frozen one, freezing a frozen
+    one and filing a filed one are all refused, so a shared target would make
+    the second actor's answer depend on the first's.
+    """
+    case = f"/api/v1/cases/{lite.case_id}"
+    if endpoint == "save":
+        latest = _latest_revision(lite)
+        return f"{case}/runs/{lite.run_id}/revisions", {
+            "expected_revision_id": latest,
+            "narrative": [],
+        }
+    revision = save_revision(
+        lite.conn,
+        lite.blobs,
+        lite.bundle,
+        case_id=lite.case_id,
+        run_id=lite.run_id,
+        actor_id=lite.approver,
+        narrative=[],
+    )
+    lite.conn.commit()
+    digest = _revision_digest(lite, revision)
+    if endpoint != "signature":
+        signer = member(lite.conn, lite.case_id, Standing.APPROVER)
+        sign_opinion(
+            lite.conn,
+            case_id=lite.case_id,
+            actor_id=signer,
+            revision_id=revision,
+        )
+        lite.conn.commit()
+    if endpoint == "filing":
+        freezer = member(lite.conn, lite.case_id, Standing.APPROVER)
+        freeze(
+            lite.conn,
+            lite.blobs,
+            lite.bundle,
+            case_id=lite.case_id,
+            actor_id=freezer,
+            revision_id=revision,
+        )
+        lite.conn.commit()
+    return f"{case}/revisions/{revision}/{endpoint}", {"payload_sha256": digest}
+
+
+def _latest_revision(lite: _Harness) -> str | None:
+    row = lite.conn.execute(
+        "SELECT revision_id FROM deliverable_revisions WHERE case_id=%s AND run_id=%s"
+        " ORDER BY saved_at DESC, revision_id DESC LIMIT 1",
+        (lite.case_id, lite.run_id),
+    ).fetchone()
+    lite.conn.rollback()
+    return None if row is None else str(row[0])
+
+
+def _revision_digest(lite: _Harness, revision: UUID) -> str:
+    row = lite.conn.execute(
+        "SELECT payload_sha256 FROM deliverable_revisions WHERE revision_id=%s",
+        (revision,),
+    ).fetchone()
+    lite.conn.rollback()
+    assert row is not None
+    return str(row[0])
+
+
+@pytest.mark.parametrize("endpoint", sorted(DELIVERABLE))
+def test_the_filing_chain_across_the_same_actors(
+    command_client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    lite: _Harness,
+    endpoint: str,
+) -> None:
+    conn, case_id = case
+    app.dependency_overrides[methodology_bundle] = lambda: lite.bundle
+    actors = _actors(conn, case_id)
+
+    observed = {}
+    for name, (user, role), expected in zip(
+        ACTORS.split(), actors, DELIVERABLE[endpoint], strict=True
+    ):
+        if expected is None:
+            continue
+        # Prepared one actor at a time: a save that succeeds moves the head the
+        # next body has to name, and each chain target is one revision's only use.
+        path, body = _prepared(lite, endpoint)
+        headers = {} if user is None else command_headers(user, role=role)
+        observed[name] = command_client.post(
+            path, headers=headers, json=body
+        ).status_code
+
+    assert observed == dict(zip(ACTORS.split(), DELIVERABLE[endpoint], strict=True))
