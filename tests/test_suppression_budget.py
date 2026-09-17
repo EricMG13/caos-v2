@@ -16,12 +16,18 @@ def test_argument_count_suppressions_only_fall() -> None:
     """52 measured on 2026-09-17 (Task 12, `sdd/t12`). Lower this number when
     you remove one; never raise it. The repo's ceiling is ruff's default of
     five, so a six-parameter reader still carries one -- narrowing a signature
-    is not the same as clearing it, and this count says which happened."""
+    is not the same as clearing it, and this count says which happened.
+
+    The file floor is 80 against 101 scanned today: enough that a scan of the
+    wrong directory or an empty one still fails, and enough headroom that
+    deleting a handful of modules -- which other tasks in this plan do --
+    cannot turn a suppression budget red for a reason unrelated to
+    suppressions."""
     files = [
         *(REPO / "server").rglob("*.py"),
         *(REPO / "scripts").rglob("*.py"),
     ]
     # A scanner that scanned nothing is a failure, not a pass.
-    assert len(files) > 100, len(files)
+    assert len(files) >= 80, len(files)
     hits = sum(path.read_text(encoding="utf-8").count(MARKER) for path in files)
     assert hits <= 52, hits
