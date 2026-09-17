@@ -4,7 +4,7 @@
 // untested-definition gate cannot tell that case from a covered one. This is
 // the rule `frontend/scripts/check-tested.mjs` enforces in `npm run lint`;
 // here it is asserted where the `typescript` it imports is installed.
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { importGraph, unreachableSections } from "../../scripts/check-tested.mjs";
@@ -56,4 +56,41 @@ test("a type-only import does not reach: the bundler erases it, so the file ship
   const files = ["Live.tsx", "Planted.tsx", "types.ts"].map((name) => join(root, "sections", name));
   expect(unreachableSections(files, root)).toEqual([join(root, "sections", "Planted.tsx")]);
   rmSync(root, { recursive: true, force: true });
+});
+
+// Book and Admin are unavailable in every mode (`src/app/sections.ts`), and on
+// 17 September 2026 the owner decided to reduce both to the shell
+// `tests/workbench/chrome.spec.ts` asserts rather than keep implementations
+// nothing mounts. Their wire types and the Book's snapshot ledger went with
+// them; git keeps the code for the day either section is served. The walk
+// above cannot see this on its own: a `import type` is erased, so a retired
+// wire module is unreachable and still shipped as a file, and a reduction that
+// left one importer behind would compile clean. This is what says the deletion
+// was complete rather than merely compiling.
+// Both spellings of each: `src/wire/index.ts` reached its two by a relative
+// specifier and `src/app/Workspace.tsx` reached the ledger by one, so a list
+// of `@/` paths alone would have read clean over three live importers. No
+// other `ledger`, `book` or `admin` module exists under `src/`.
+const RETIRED = [
+  ["@/app/ledger", "./ledger"],
+  ["@/wire/book", "./book"],
+  ["@/wire/admin", "./admin"],
+];
+
+function typescriptSources(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = resolve(directory, entry.name);
+    if (entry.isDirectory()) return typescriptSources(full);
+    return /\.tsx?$/.test(entry.name) ? [full] : [];
+  });
+}
+
+test("nothing under src/ imports the retired Book and Admin modules", () => {
+  const importers = typescriptSources(SRC).flatMap((file) => {
+    const source = readFileSync(file, "utf8");
+    return RETIRED.filter((spellings) =>
+      spellings.some((spelling) => source.includes(`"${spelling}"`)),
+    ).map(([module]) => `${relative(SRC, file)} imports ${module}`);
+  });
+  expect(importers).toEqual([]);
 });

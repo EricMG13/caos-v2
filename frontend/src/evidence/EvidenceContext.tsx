@@ -23,6 +23,12 @@ export interface FactIdentity {
 
 interface Evidence {
   openCitation(citation: Citation, opener: HTMLElement): void;
+  /** Open the metric passport overlay. No production caller since the Book
+      was reduced to its unavailable shell, and no test calls it either --
+      `test_passport_contract`, pinned by name in `tests/test_phase_exits.py`,
+      renders `MetricPassport` directly. Kept deliberately: see the note in
+      `app/authority.ts` for why deleting a pinned gate's subject is a gate
+      edit rather than a cleanup. */
   openPassport(passport: Passport, opener: HTMLElement): void;
   openFact(identity: FactIdentity, opener: HTMLElement): void;
   activeChip: string | null;
