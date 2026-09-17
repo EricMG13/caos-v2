@@ -2007,13 +2007,73 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.
-- **One block per line; the bounded line group is not built.**
-  `SYSTEM_SPEC.md` §5 wants one block per line "while small" and bounded line
-  groups once not. This build always packs a line per block, so a large document
-  produces more blocks than it should. *Upgrade:* the group arrives with the
-  first document big enough to need it, splitting a line at the group width
-  rather than giving it a block of its own. Block ids are zero-padded to six
-  digits, so reading order and `block_id` order agree up to 999,999 lines.
+- **A line is split at the group width; several lines in one block is not
+  built.** `SYSTEM_SPEC.md` §5 wants one block per line "while small", bounded
+  line groups once not, and a line past the group width split at it rather than
+  given a block of its own. The splitting half is built: `GROUP_WIDTH` is
+  `BoundaryText`'s own limit, `ingest.line_groups` cuts a line at it, and
+  `verify_citations` requires every block a line was split into to have been
+  delivered, so a quote crossing the cut needs both sides and a delivery
+  carrying half a split line carries none of it
+  (`test_a_line_wider_than_the_group_is_split_rather_than_refusing_the_pack`,
+  `test_a_quote_crossing_a_group_boundary_needs_every_block_of_its_line`).
+  Before it, a line past 4,096 characters refused the whole pack, so one wide
+  table row in a text export meant no document carrying it could be admitted at
+  all; the CCL 10-K fixture's widest line is 2,502 characters, which is how far
+  that was from a real document. **What it does not buy is the documents it was
+  written for:** the entry below this one records the token ceiling that refuses
+  Boeing's and Ford's 10-K texts before any line is packed, and this change
+  moves neither of them. The width is not a choice: any narrower would
+  re-number documents already admitted under this one, whose `source_blocks`
+  rows are immutable and whose stored citations name the ids they were given
+  (`test_a_document_whose_lines_fit_the_group_is_numbered_one_block_a_line`).
+  A cut falls wherever the width falls, inside a word if that is where it falls,
+  because cutting at a token boundary would make the block count depend on the
+  tokens and force anchoring to read every token's text back to learn it;
+  nothing reads a quote out of a block, so what it costs is a word shown in two
+  pieces. A single word past the width has nowhere to be cut and still refuses
+  `BOUNDARY_TEXT_TOO_LONG` at the door
+  (`test_a_document_the_boundary_refuses_never_reaches_the_pinned_set`). What is
+  **not** built is the other half -- several lines packed into one block -- so a
+  large document still produces more blocks than it should. It is deferred
+  because nothing in reach needs it: the widest document this tree holds is the
+  CCL 10-K at 1,726 lines over 30 pages, and the two VMO2 releases are 1,347 and
+  1,019, against a 500,000 token admission ceiling. It is **not** deferred
+  because it would re-number already-admitted documents, which is what this
+  entry first said and what its own implementation contradicts:
+  `citations._line_blocks` compares a source's stored block count against its
+  line count and recomputes the packing only when they differ, so a source
+  admitted one block a line reads back one block a line under any later rule,
+  without a version column and without a backfill. That discriminator is a
+  derivation rather than a record, so it is checked -- a recomputed total that
+  does not equal the stored count refuses `EVIDENCE_NOT_AVAILABLE`
+  (`test_a_packing_that_disagrees_with_the_stored_blocks_refuses`), because
+  every id past the disagreement would name a row no source carries. Block ids
+  are zero-padded to six digits, so reading order and `block_id` order agree up
+  to 999,999 **blocks**, which is no longer the same as 999,999 lines.
+  *Upgrade:* the grouping half, the day a document arrives whose block count can
+  be measured to cost something; a stored `source_extractions.format_version`
+  past its `CHECK (format_version = 1)` is owed with it only if the count ever
+  stops distinguishing the two rules.
+- **A single token past the boundary limit refuses the whole pack, and that is
+  what stops the large 10-K texts.** `ingest._prepare` calls
+  `BoundaryText.of(token.text)` on every token before `_blocks` runs, so a
+  4,097-character token refuses `BOUNDARY_TEXT_TOO_LONG` at the door -- before
+  any line is packed, and with nothing the line group can do about it, because a
+  cut inside a token is a cut the token index cannot describe. The line-group
+  review measured both texts this repository was trying to admit: Boeing's holds
+  one token of 71,243 characters and Ford's one of 105,966, so **neither admits
+  on base or on this branch**, and `docs/COMPLETION_PLAN.md`'s O07 is corrected
+  in the same commit for naming `MAX_REQUEST_BYTES` as their first obstacle when
+  they never reach a prompt. The refusal is the fail-closed direction and the
+  extractor's, not the packer's: a "token" that long is an extraction that found
+  no whitespace where a reader sees words, and admitting it would put a
+  megabyte-long unquotable string in the token index under invariant 11's
+  promise that a quote can be re-located. *Upgrade:* the extractor that produced
+  it, which is where a token's boundaries are decided -- a declared maximum token
+  length in the extractor identity, refusing or re-splitting there, the day one
+  of these texts is needed whole rather than as the curated extract the FULL
+  pathways run on today.
 - **The plain-text extractor's rectangles are a fixed-pitch rendering.** A `.txt`
   document has no typography, so `PlainTextExtractor` states its cell size and
   derives rectangles from character positions. It is a real, reproducible

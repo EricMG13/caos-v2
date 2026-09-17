@@ -278,13 +278,23 @@ Repair: the corpus register (Phase 8), sourced pathway by pathway, each
 document admitted under its own digest and named in the set manifest.
 
 **O07 — Two of the three 10-K texts cannot run whole [P1 for BA and F, Phase
-10].** Boeing (1.1 MB) and Ford (1.8 MB) exceed `MAX_REQUEST_BYTES` alone;
-every module is handed every block (`captured_blocks`); the bounded line group
-is unbuilt; `CONTEXT_OVER_CEILING` refuses with no narrowing. CCL (304 KB)
-fits. Repair: per-node evidence selection from CP-0's `evidence_demand` and
+10].** Boeing (1.1 MB) and Ford (1.8 MB) do not **admit**: each holds a single
+token — 71,243 and 105,966 characters — and `ingest._prepare` calls
+`BoundaryText.of` on every token before any line is packed, so both refuse
+`BOUNDARY_TEXT_TOO_LONG` at the door. That is the first obstacle, and this
+entry named the second: they would *also* exceed `MAX_REQUEST_BYTES`, because
+every module is handed every block (`captured_blocks`) and
+`CONTEXT_OVER_CEILING` refuses with no narrowing. Corrected after the
+line-group review measured both texts on base and on the line-group branch and
+found neither admits — so neither reaches a prompt for the request ceiling to
+refuse. CCL (304 KB) fits. Repair, in the order the obstacles arrive: a
+declared maximum token length in the extractor that produced them, since a
+token that long is an extraction finding no whitespace where a reader sees
+words; then per-node evidence selection from CP-0's `evidence_demand` and
 `active_representation_ids`, recorded on the attempt and enforced by every
-reader; the line group; a per-section bound and one recorded narrowing step.
-Until then the FULL pathways run on CCL and on curated extracts.
+reader; a per-section bound and one recorded narrowing step. The line group's
+splitting half is built and moves neither document (CLAUDE.md, Phase 2). Until
+then the FULL pathways run on CCL and on curated extracts.
 
 **O08 — Keys measure citations, readiness and seven projected scalars, not
 registers [P1, Phase 8].** `ExpectedCitation`, `expects_ready`,
