@@ -49,14 +49,16 @@ describe("Report v1", () => {
     expect(root).toHaveAttribute("data-revision", document.body.revision_id);
     expect(root).toHaveAttribute("data-payload", document.body.payload_sha256);
     expect(root).toHaveTextContent(hostile);
-    // The payload's own regions carry nothing interactive: an artifact and a
-    // narrative are rendered text, whatever the bytes say. The governed
-    // controls beside them are this section's own, composed from
-    // `chrome.actions` and never from the payload.
-    for (const region of root.querySelectorAll("[data-report-artifact], [data-report-narrative]")) {
-      expect(
-        region.querySelector("img, script, a, button, input, textarea, [contenteditable]"),
-      ).toBeNull();
+    // Nothing the payload reaches is interactive -- the artifacts, the
+    // narrative and the case title alike, whatever the bytes say. The only
+    // interactive nodes in the section are the governed controls, composed
+    // from `chrome.actions` and never from the payload; asserting over the
+    // whole root rather than over the payload's regions is what keeps a field
+    // rendered outside them from escaping this check.
+    for (const node of root.querySelectorAll(
+      "img, script, a, button, input, textarea, [contenteditable]",
+    )) {
+      expect(node.closest("[data-filing-controls]")).not.toBeNull();
     }
     expect(root).toHaveTextContent(document.body.artifacts[0]!.record);
     expect(root.querySelector("[data-report-limitations]")).toHaveTextContent(

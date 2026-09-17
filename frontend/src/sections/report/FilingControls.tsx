@@ -2,9 +2,12 @@
 // Task 12.2): save a revision from the run's accepted artifacts and this
 // draft, sign the exact bytes on screen, freeze them, file them.
 //
-// They sit on Report rather than Committee because `read_committee` refuses a
-// revision that is not frozen, so the Committee section can never offer the
-// sign or the freeze that would make it one.
+// Sign and freeze sit on Report rather than Committee because `read_committee`
+// refuses a revision that is not frozen, so the Committee section can never
+// offer the two acts that would make it one. Save is there for the same
+// reason. Filing acts on an already-frozen revision, which is exactly what
+// Committee serves; it sits here to keep the chain on one surface, not
+// because Committee could not offer it.
 //
 // Every control renders from the document's own `chrome.actions` -- present
 // and refused, never hidden -- and grants nothing: the three-actor rule, the
@@ -36,7 +39,7 @@ import {
     surface does not have yet, so a draft written here carries prose only --
     and a revision saved from it says so by carrying no figure, rather than by
     this file guessing at one. */
-export function paragraphs(draft: string): NarrativeDraft[][] {
+function paragraphs(draft: string): NarrativeDraft[][] {
   return draft
     .split("\n")
     .map((line) => line.trim())
