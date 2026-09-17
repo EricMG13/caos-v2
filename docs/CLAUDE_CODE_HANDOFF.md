@@ -1,27 +1,75 @@
-# Claude Code handoff — current repair checkpoint
+# Claude Code handoff — current checkpoint
 
 This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/DECISIONS.md` §39 resolves document precedence and repair semantics.
-`docs/REPAIR_PLAN.md` owns phase outcomes. Historical rebuild phases and
-ignored reports cannot override those contracts.
+`docs/REPAIR_PLAN.md` owns the outcomes of Phases 0–6 and is accepted;
+[`COMPLETION_PLAN.md`](COMPLETION_PLAN.md) owns Phases 7–13 and does not edit
+it. Historical rebuild phases and ignored reports cannot override those
+contracts.
 
-## Current checkpoint — observed 15 September 2026
+## Current checkpoint — observed 17 September 2026
 
 | Item | Recorded state |
 |---|---|
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Phase 6 accepted by the owner on 16 September 2026 with its gaps stated (`docs/DECISIONS.md` §62). Seven live runs, a complete green `make check`, two authorised bundle edits (§61), and one `complete` snapshot — pinned to the build §61 retired. No verdict exists and nothing is qualified.** |
-| Next task | Deploy the remaining modules. CP-5's refusal on this corpus — the honest answer in a column its contract called critical — was deferred by §62 and resolved by §63, which exempts T5B.5's two status columns and moves the build to `30222a49`; the three refused bodies replay clean, and no live run has yet been made on that build. Then a run on `30222a49`, then the verdict. No result may be represented as qualified without an authenticated verdict over a `complete` snapshot, and none exists. |
-| Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
-| Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
+| Latest accepted phase | **Phase 6 signed off at `e59ad7b`** (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
+| Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
+| Enabled routes | Two of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE` and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
+| Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
+| Current task | **Completion Phase 7** (reconcile the record, land the branch). Task 7.1 implemented at the commit this table lands in; Task 7.2's delivery record follows. Phase 7 is **not accepted** until the complete gate and both `xhigh` reviews run |
+| Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) runs concurrently in `sdd/t1`–`sdd/t6` and is **not** a task of the completion plan. Its landed waves and the completion tasks each unblocks are recorded under Phase 7 Task 7.2 below |
+| Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
 Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
+
+## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
+
+Brief: [task 7.1](superpowers/plans/2026-09-17-phase-7-task-7.1-brief.md).
+Implemented, **not accepted**: Phase 7 acceptance needs Task 7.2, the complete
+gate, and one `confidence-review` then one separate adversarial audit, both on
+Fable 5.1 at actual `xhigh`.
+
+- **The ledger has a gate.** `scripts/ledger_state.py` reads `CLAUDE.md`'s
+  known-gap ledger into typed entries and `tests/test_ledger.py` judges it: an
+  entry citing a test the suite does not define is refused, an open entry
+  stating no `*Upgrade:*` clause is refused, and a reader that matched too
+  little fails rather than passing vacuously. Six tests. Running it found two
+  citations that needed an explicit, self-cleaning exemption — a test deleted
+  with the claims executor and owed again, and a placeholder inside the
+  ledger's own description of a regex.
+- **Two entries were struck because the tree closed them.** "A verdict is read
+  and not stored" (migration `0018`, `record_verdict`, §65's route) and "A proof
+  is held and not stored" (migration `0020`: `_performed_document` serialises
+  each case's proof into `qualification_performed.performed_json`, which
+  `record_performed` reads back for equality before `performed_sha256` binds
+  it). Both were verified in source before striking, not inferred from a plan.
+- **Two upgrade paths were withdrawn as wrong.** The predicates entry asked for
+  an evaluator; the vendored catalog declares 60 REQUIRED, 26 OPTIONAL, 29
+  ADVISORY and one QA_GATE typed edge and **no** CONDITIONAL edge, so what is
+  owed is a guard, not a grammar. The BLOCKED entry asked for a governed
+  resume; §61's CONDITIONAL verdict is discharged by a new run, and a CAS back
+  to RUNNING would reopen a run whose pins cannot change, so what is owed is a
+  successor link.
+- **Four rebuild headings were relabelled** "Rebuild Phase N (historical)",
+  being the four that collide with completion phase numbers.
+- **Two new ledger entries** under "Completion Phase 7": what the ledger gate
+  cannot catch, and the demonstration Admin panel still claiming `/api/health`
+  is not served.
+- **Six stale `feature-status.csv` rows** regenerated to name the tests that now
+  prove them (ADM-01, API-09, INT-01, INT-02, ERR-16, ERR-17); 248 rows parse,
+  only those six changed and only in two fields.
+- **The two untracked audits are filed** under
+  [`reviews/supplemental/`](reviews/supplemental/) with a header on each naming
+  the adversarial review that re-verified their claims, and a README recording
+  where each verdict lives.
+- **Known stale line elsewhere:** that review's claim-ledger row 12.3.2 says
+  those two audits are untracked at the repository root, which this task made
+  false. It belongs to the remediation stream and is not edited here.
 
 ## Phase 5 acceptance record — 15 September 2026
 

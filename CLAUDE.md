@@ -170,10 +170,38 @@ path, in the same breath as the code that creates it. An empty ledger on a
 system this size means nobody looked.
 
 The phase labels below are historical **rebuild** labels, not current repair
-phase numbers. Entries are not evidence of completion; the handoff and repair
-plan govern present work. Correct a stale entry when its owning task proves
-the replacement behavior. The legacy hook claims are currently unverified
+or completion phase numbers; the four that collide with the phases of
+`docs/COMPLETION_PLAN.md` say "Rebuild Phase N (historical)" outright. Entries
+are not evidence of completion; the handoff and the repair and completion plans
+govern present work. Correct a stale entry when its owning task proves the
+replacement behavior, and strike it in the commit that closes it, naming the
+test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
+define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
+
+**Completion Phase 7.**
+
+- **The ledger's own gate reads citations and conventions, not claims.**
+  `tests/test_ledger.py` refuses an entry that cites a test the suite does not
+  define, and an open entry that states no `*Upgrade:*` clause: the two failures
+  here that are mechanical. It cannot read an entry's prose and decide whether
+  the tree still behaves that way, which is the failure that actually happened.
+  Two entries below claimed there was no `qualification_verdicts` table and that
+  a proof was never stored, and both were fluent, cited nothing, and kept their
+  upgrade clause while becoming false. Phrase-based rules were measured against
+  this file and rejected: the best of them flagged three entries, of which one
+  was the real defect and two were correct entries using the same words.
+  *Upgrade:* none that is mechanical. What closes this class is the discipline
+  `docs/COMPLETION_PLAN.md` states in its definition of done, that the entry a
+  task closes is struck in the commit that closes it, naming the test.
+- **The demonstration Admin panel says the health route is not served.**
+  `frontend/fixtures/admin.json` carries `HEALTH` and `GET /api/health` marked
+  not served, and the admin unit test's comment repeats it;
+  `server/api/health.py` has served that route since §53.8. The fixture
+  under-claims, so its assertion still holds and no gate is weakened, but an
+  operator reading the demonstration panel is told a control does not exist when
+  it does. *Upgrade:* correct the fixture and the comment with Completion
+  Phase 12's Admin work, which is the task that owns that panel.
 
 **Repair Phase 5.**
 
@@ -597,10 +625,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   such a run `BLOCKED` with one `RUN_BLOCKED` (migration 0010). Nothing moves a
   BLOCKED run back to RUNNING: every spend guard refuses it and its stream
   closes. "Recoverable" means nothing failed and the reason is re-derived from
-  the pins and accepted artifacts, not stored. *Upgrade:* a governed resume --
-  a CAS back to RUNNING with its own event, taken by an authorized actor when
-  an input that could release the node has changed -- arrives with Phase 4's
-  commands and worker.
+  the pins and accepted artifacts, not stored. *Upgrade:* not a resume. §61 defines the
+  CONDITIONAL verdict as naming a source the effective-source set does not
+  carry, discharged only when that source is supplied and CP-0 is re-run, and
+  under invariants 1 and 10 a run's source set and route are pinned, so that
+  discharge is a new run. A CAS back to RUNNING would reopen a run whose pins
+  cannot change. Completion Phase 10 records the link instead: the T8 blocker
+  cell projected so a reader sees which source the verdict asked for, and
+  `runs.supersedes_run_id` naming the run a successor replaces.
 - ~~**The terminal decision reads outside the run lock, and the store does not
   check it.**~~ Closed by Phase 4 Task 4.3c (§49.4): `complete_run` refuses
   `RUN_NODES_UNACCEPTED` while a pinned node is unaccepted and `complete_run`/
@@ -690,7 +722,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   has no request path. `test_io_budget_read_evidence` is the per-path
   assertion the entry asked for and predates this.
 
-**Phase 10.**
+**Rebuild Phase 10 (historical).**
 
 - **An answer key names citations, not figures.** `ExpectedCitation` is
   `(module_id, document_sha256, matched_text)`, because that is the strongest
@@ -770,16 +802,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   spend), whether a known charge was billed (a recorded call without one is
   unknown exposure), and the recorded model and generation, read from the store
   and `None` when the call recorded none.
-- **A proof is held and not stored.** `perform` now holds each case's
-  `OrchestrationProof` beside the run id it covers — and only for as long as the
-  caller does. There is no table and no route that serves one, so a proof still
-  cannot be handed to anyone who was not there when the set was performed. That
-  is the right shape while it is re-derived on every ask — a stored proof is a
-  claim about a store that has since moved — and the wrong one as soon as a
-  verdict has to cite the proofs behind it. *Upgrade:* a declared form for the
-  proof beside the set's own (§24), which has landed — so what blocked this is
-  gone and what remains is the work itself: somewhere to put a proof, and a
-  reader that can be handed one.
+- ~~**A proof is held and not stored.**~~ Closed by migration `0020`: each
+  case's proof is serialised into `qualification_performed.performed_json` by
+  `server/qualification/store.py::_performed_document` (`run_id`,
+  `route_digest`, `build_id`, `artifacts`, `citations` and the `anchored` set),
+  and `record_performed` reads the row back for equality before
+  `performed_sha256` binds it, on a table immutable by trigger. A reviewer signs
+  that snapshot, so a proof can now be handed to somebody who was not there when
+  the set was performed. What it is not is a replayable proof: verification is
+  still re-derived against the store and the bundle present now, which the entry
+  "A bundle upgrade invalidates every earlier run's proof" below owns.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
   re-deriving the proof (a run is scored from its proof, not by re-reading
@@ -802,16 +834,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *now*, not a certificate with a shelf life. *Upgrade:* none while one build is
   vendored at a time; the day two are, the proof takes the build the run was
   pinned to and verifies against that tree.
-- **A verdict is read and not stored.** `read_verdict` refuses a document
-  missing any of the six bindings or past its expiry, and returns a `Verdict`
-  the caller holds; there is no `qualification_verdicts` table and no query that
-  answers "is this build qualified". Nothing consumes a verdict yet, so nothing
-  can read a stale one. The harness is now the caller with a reason to look one
-  up — it holds the matrix and the proofs a verdict would be measured over — and
-  deliberately does not: a signature bound to a `PerformedSet` that lives no
-  longer than the process that built it is a binding nobody can re-check.
-  *Upgrade:* the set's on-disk form has landed (§24), so the verdict stored
-  beside the performed set it names is now the whole of what is left here.
+- ~~**A verdict is read and not stored.**~~ Closed by migration `0018`, which
+  creates `qualification_verdicts` immutable by trigger, and
+  `server/qualification/store.py::record_verdict`, which binds one reviewer
+  decision to the exact evidence row and refuses a mismatched set digest,
+  provider, build or an incomplete snapshot. §65 added the route the assertion is
+  made through, `POST /api/v1/qualification/{evidence_sha256}/verdict`, with
+  `reviewer_id` derived from the authenticated actor;
+  `server/api/reads/qualification.py` serves the consumer. The table is empty in
+  every database because nobody has signed, which is a fact about people rather
+  than about the software; `docs/FINAL_CHECK.md` records it as such.
 - **The provider identity in a verdict is the reviewer's word, not the host's.**
   Invariant 3 says the host owns identity, and here it does not: `provider` is a
   string in a document this repository did not write, and nothing compares it
@@ -829,7 +861,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   which is a change to `read_verdict`'s callers rather than to `read_verdict`,
   since the document is still the reviewer's to write.
 
-**Phase 9.**
+**Rebuild Phase 9 (historical).**
 
 - **The phase-exit gate reads a workspace test by its literal title.**
   `tests/test_phase_exits.py` now reads `frontend/tests/` as well as `tests/`,
@@ -914,7 +946,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   supply. Both are wire changes, so a model change and an updated pinned key set
   each.
 
-**Phase 8.**
+**Rebuild Phase 8 (historical).**
 
 - **Narrative is now structured, but its figure screen is syntactic.** Task
   5.3 stores bounded paragraphs of text and anchored citation references.
@@ -935,7 +967,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   consistency with the two fields beside it, the day a payload
   has any author but this repository.
 
-**Phase 7.**
+**Rebuild Phase 7 (historical).**
 
 - ~~**`_ratio` divides at the process-global `Decimal` context.**~~ Closed by
   repair Task 5.1 (§54): the entire forecast runs in one local precision-38,
@@ -1390,10 +1422,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and the predecessor's failure was the opposite — edges that did not enforce
   what they claimed. But invariant 10's "frozen predicates" are, for now, frozen
   without yet being predicates, and a reader of the pin could take the presence
-  of a predicate for its enforcement. *Upgrade:* the phase that gives a predicate
-  a grammar and an evaluator, which is the same thing that would make
-  `CONDITIONAL` behave differently from `REQUIRED`.
-
+  of a predicate for its enforcement. *Upgrade:* not an evaluator. The vendored
+  catalog declares 60 REQUIRED, 26 OPTIONAL, 29 ADVISORY and one QA_GATE typed
+  edge, and **no** CONDITIONAL edge, so the blocking branch is unreachable on
+  this bundle and a grammar written for it would be code for a route that does
+  not exist. Completion Phase 10 pins the fact instead: a test over the catalog's
+  typed-edge counts, and `_edges_among` refusing `ROUTE_EDGE_UNSUPPORTED` rather
+  than pinning a route whose target would block whatever the evidence said. The
+  evaluator is owed the day that guard fails, which is also the first day a real
+  predicate exists to parse.
 **Phase 2.**
 
 - **A quote matches whole tokens exactly, typography at its edges aside.**
