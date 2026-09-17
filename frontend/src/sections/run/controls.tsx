@@ -191,21 +191,23 @@ export function CommandOutcome({
 
 /** A run with no route is useless (brief 4.2, decision 1): select and pin one
     in the same command that creates the run. Available with no displayed
-    run, and again afterwards to start a fresh one. A success puts the new run
-    id in the URL and refetches the section by it, so the view moves off this
-    form at once, a second press is a plainly new run rather than a silent
-    duplicate, and a reload shows the run the analyst is looking at instead of
-    whatever the old address named. */
+    run, and again afterwards to start a fresh one. A success names the new run
+    in the address, and the workspace reads it from there — so the view moves
+    off this form at once, a second press is a plainly new run rather than a
+    silent duplicate, and a reload shows the run the analyst is looking at
+    instead of whatever the old address named. This is the one control that
+    does not hand its caller a refetch: the run it created is not the run the
+    section was mounted for, so re-reading the old address would be the wrong
+    document and re-reading the new one duplicates the read the address change
+    already causes. */
 export function CreateRunControl({
   caseId,
   action,
   choices,
-  onRefetch,
 }: {
   caseId: string;
   action: ActionView | undefined;
   choices: readonly RouteChoice[];
-  onRefetch: (runId: string | null) => void;
 }) {
   const [pick, setPick] = useState(0);
   const [, setParams] = useSearchParams();
@@ -245,27 +247,19 @@ export function CreateRunControl({
                       void run(chosen, (intent) => createRun(caseId, chosen, intent)).then(
                         (outcome) => {
                           if (outcome.kind !== "ok") return;
-                          const created = outcome.receipt.run_id;
                           // The address is corrected, not navigated: the
                           // analyst did not move, the run they are on gained
                           // a name. `replace` keeps Back at where they came
-                          // from rather than at a case with no run.
+                          // from rather than at a case with no run, and every
+                          // other parameter the address carries survives.
                           setParams(
                             (current) => {
                               const next = new URLSearchParams(current);
-                              next.set("run", created);
+                              next.set("run", outcome.receipt.run_id);
                               return next;
                             },
                             { replace: true },
                           );
-                          // ponytail: the workspace reads the new address and
-                          // serves the run itself, so this refetch is the
-                          // second read of the same document. It is kept
-                          // because a `RunSection` composed outside the
-                          // workspace has nothing else to move it off this
-                          // form; drop it the day the section is only ever
-                          // mounted under the workspace.
-                          onRefetch(created);
                         },
                       );
                     }

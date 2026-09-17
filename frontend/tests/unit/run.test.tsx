@@ -5,8 +5,9 @@
 // by the component that calls it, not by its own name. `actionOf` is
 // imported directly below and given its own small, direct test.
 import { readFileSync } from "node:fs";
+import { useEffect } from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { actionOf } from "@/sections/run/controls";
 import { RunSection } from "@/sections/run/RunSection";
 import { COL_GAP, NODE_H, NODE_W, ROW_H, edgesOf, layoutRoute } from "@/sections/run/RouteGraph";
@@ -47,6 +48,47 @@ function withActions(
 ): RunSectionDocument {
   return { ...document, chrome: { ...document.chrome, actions } };
 }
+
+/** The address the section is composed under. `CreateRunControl` writes the
+    new run into it and the workspace reads the run from there, so under a bare
+    router a probe is what stands in for the workspace's own read. */
+let seenAddress = "";
+const address = () => seenAddress;
+
+function Address() {
+  const { search } = useLocation();
+  useEffect(() => {
+    seenAddress = search;
+  }, [search]);
+  return null;
+}
+
+function mountAt(document: RunSectionDocument, path: string) {
+  seenAddress = "";
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <RunSection document={document} tab={null} />
+      <Address />
+    </MemoryRouter>,
+  );
+}
+
+/** A case whose run has yet to be created: the one state that serves the
+    create form on its own. */
+const EMPTY_RUN: RunSectionDocument = withActions(
+  {
+    ...routeNotPinned,
+    body: {
+      case_id: routeNotPinned.body.case_id,
+      latest_run_id: null,
+      displayed_run_id: null,
+      runs: [],
+      run: null,
+      route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
+    },
+  },
+  [{ action: "CREATE_RUN", refusal: null }],
+);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -364,64 +406,16 @@ describe("Run", () => {
     }
   });
 
-  test("test_create_run_shows_a_success_note_and_refetches_so_a_second_click_is_never_a_silent_duplicate", async () => {
+  test("test_create_run_shows_a_success_note_and_names_the_new_run_in_the_address", async () => {
     const caseId = routeNotPinned.body.case_id;
     const newRunId = "11111111-1111-4111-8111-111111111111";
     const created = { case_id: caseId, run_id: newRunId, route_digest: "f".repeat(64) };
-    const refreshed: RunSectionDocument = {
-      ...routeNotPinned,
-      chrome: { ...routeNotPinned.chrome, actions: [] },
-      body: {
-        case_id: caseId,
-        latest_run_id: newRunId,
-        displayed_run_id: newRunId,
-        runs: [
-          {
-            run_id: newRunId,
-            status: "RUNNING",
-            created_at: "2026-09-14T10:00:00Z",
-            profile_id: "FULL_CREDIT_ASSESSMENT",
-            selection_id: "default",
-          },
-        ],
-        run: { ...routeNotPinned.body.run!, run_id: newRunId },
-        route_choices: [],
-      },
-    };
-    // The refetch is held open deliberately: real network latency separates
-    // the command's own answer from the read that follows it, and asserting
-    // the transient success note is only deterministic if this test controls
-    // that gap itself rather than racing the mock's own resolution.
-    let resolveRefetch!: (response: Response) => void;
-    const refetchResponse = new Promise<Response>((resolve) => {
-      resolveRefetch = resolve;
-    });
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(created, 201))
-      .mockImplementationOnce(() => refetchResponse);
+    const fetchSpy = vi.fn().mockResolvedValueOnce(jsonResponse(created, 201));
     vi.stubGlobal("fetch", fetchSpy);
     try {
-      const empty: RunSectionDocument = withActions(
-        {
-          ...routeNotPinned,
-          body: {
-            case_id: caseId,
-            latest_run_id: null,
-            displayed_run_id: null,
-            runs: [],
-            run: null,
-            route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
-          },
-        },
-        [{ action: "CREATE_RUN", refusal: null }],
-      );
-      const { container } = mount(empty);
+      const { container } = mountAt(EMPTY_RUN, `/run/?case=${caseId}`);
       fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
 
-      // The success note is transient — the refetch it also triggers may
-      // replace this whole branch as soon as it lands — so both checks are
-      // made together, not across a second `await`.
       await waitFor(() => {
         const note = container.querySelector("[data-command-success]");
         expect(note).not.toBeNull();
@@ -441,15 +435,35 @@ describe("Run", () => {
         ),
       ).toBe(true);
 
-      // One refetch, by the id the server just handed back — the analyst
-      // never has to guess whether the click landed.
-      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
-      const [refetchUrl] = fetchSpy.mock.calls[1]!;
-      expect(refetchUrl).toBe(`/api/v1/cases/${caseId}/run?run=${newRunId}`);
+      // The new run is named in the address, and nothing else reads it back:
+      // the workspace serves the run the address now names, so a GET from here
+      // would either read the wrong run or duplicate that one.
+      await waitFor(() => expect(new URLSearchParams(address()).get("run")).toBe(newRunId));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-      resolveRefetch(jsonResponse(refreshed));
-      await waitFor(() => expect(container.querySelector("[data-run-empty]")).toBeNull());
-      expect(container.querySelector(`[data-run="${newRunId}"]`)).not.toBeNull();
+  // The address is what a reload, a copied link and the workspace's own read
+  // all work from, so creating a run must add the run to it without dropping
+  // anything already there.
+  test("test_creating_a_run_names_it_in_the_address_and_keeps_the_other_parameters", async () => {
+    const caseId = routeNotPinned.body.case_id;
+    const newRunId = "22222222-2222-4222-8222-222222222222";
+    const created = { case_id: caseId, run_id: newRunId, route_digest: "f".repeat(64) };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(created, 201)));
+    try {
+      const { container } = mountAt(
+        EMPTY_RUN,
+        `/run/?case=${caseId}&run=00000000-0000-4000-8000-0000000000aa&tab=route`,
+      );
+      expect(new URLSearchParams(address()).get("run")).not.toBe(newRunId);
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+      await waitFor(() => expect(new URLSearchParams(address()).get("run")).toBe(newRunId));
+      const params = new URLSearchParams(address());
+      expect(params.get("case")).toBe(caseId);
+      expect(params.get("tab")).toBe("route");
     } finally {
       vi.unstubAllGlobals();
     }

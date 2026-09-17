@@ -72,6 +72,9 @@ describe("the section render boundary", () => {
     );
     expect(container.querySelector("[data-surface-state='error']")).toBeNull();
     expect(container.querySelector("[data-ok]")).not.toBeNull();
+    // Recovering re-renders the failure once more, so the leak the boundary
+    // exists to stop is asserted on the retry too, not only on the first throw.
+    expect(container).not.toHaveTextContent("document-derived text");
   });
 
   test("a boundary renders its children when nothing throws", () => {
