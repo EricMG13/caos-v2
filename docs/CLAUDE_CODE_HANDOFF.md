@@ -378,7 +378,7 @@ something this session cannot supply.
 | 10 | 10.2 and 10.3 done; 10.4 answered as a finding; **10.1 dispatched and stopped** | the vendor, or a dated decision. Its remediation dependencies all landed; what blocks it is invariant 4, not effort. `docs/requests/2026-09-17-t8-source-files-column.md` |
 | 11 | not started | Phase 9's documents, and the per-section bound below |
 | 12 | not started | **nothing external** -- the only remaining phase that waits on no owner input, no vendor answer and no authorized run |
-| 13 | not started | an identity-provider setting, TLS material, an authorized nightly |
+| 13 | not started | **13.4 and 13.6 only**: an identity-provider setting, TLS material, an authorized nightly. **13.1–3 and 13.5 are host-only** and buildable after Phase 12 -- async store and `gather`, the second worker in the race suite, `LISTEN`/`NOTIFY` and worker readiness, store hygiene |
 
 **The three blockers, in the order they free the most work.**
 
@@ -391,9 +391,15 @@ something this session cannot supply.
    no verdict exists over any snapshot: `qualification_verdicts` is empty in
    every database. **Nothing in this tree is qualified**, and nothing describes
    itself that way.
-3. **Trivy `0.70.0`** for `make image`, which is the only component of the
-   complete gate that has not run. It holds the acceptance of two finished
-   phases.
+3. ~~**Trivy `0.70.0`** for `make image`.~~ **Closed 17 September 2026**: the
+   owner authorized the download, the binary was verified against the published
+   checksums, and `make image` passed -- two targets examined, no fixable HIGH
+   or CRITICAL. Phases 7 and 8 were accepted under the complete gate it
+   unblocked, and the audit remediation's final gate ran the same chain green.
+   **The third blocker is now the two dated decisions this plan leaves to the
+   owner**: host ownership of a register's shape, which is Task 10.1's
+   alternative to the vendor request, and part (b) of Task 10.3's decision,
+   whether a QA `Restricted` releases CP-6 as RESTRICTED.
 
 **One thing the plan itself now owes, found by measuring rather than by
 review.** The per-section prompt bound was deferred to "the day a wide route
@@ -486,7 +492,7 @@ satisfy its contract.
 | 9.3 `LITE_DECISION_LEDGER` | not started | an owner-authored decision record (8.4 item 6) |
 | 9.4 `LITE_DEEP_RESEARCH` | not started | an owner-authored research brief and its evidence (8.4 item 7) |
 | 9.5–9.7 | held by design | the LITE producers request (O03) |
-| 10.1 per-node evidence selection | not started | remediation T7, T8, T11 and T14, which are waves 2–4 and have no branch. Its seam is exactly the readers those tasks rewrite |
+| 10.1 per-node evidence selection | **dispatched and stopped** | the vendor, or a dated decision. Its remediation dependencies all landed (§71–§74); what blocks it is invariant 4, not effort. CP-0's schema declares the per-module statement in `runtime_output` and `_FINAL_CHECK` tells the model not to author it, while T8's `Source files to attach` column is validated by the vendor and dropped by its own parser. `docs/requests/2026-09-17-t8-source-files-column.md` is the smallest unblock; the alternative is a dated decision taking host ownership of a register's shape |
 | 10.2 conditional-edge guard | in the branch (`8b806d0`, `42e44aa`) | — |
 | 10.3 successor runs | whole: `cabb3d4` (projection, `gate_reason`, record format), `167d800` (column, migration `0025`, command, read, page), `7e6c330` (§72) | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
 | 11–13 | not started | 11 needs 8.4's documents and authorized runs; 13.4 needs an identity-provider setting and TLS material; 13.6 needs an authorized nightly |
