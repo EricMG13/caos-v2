@@ -325,12 +325,22 @@ def _admit_one(
 
 
 def _store_tokens(conn: StoreConnection, source_id: UUID, tokens: list[Token]) -> None:
-    with conn.cursor() as cursor:
-        cursor.executemany(
-            "INSERT INTO source_tokens"
+    """One COPY, so one statement carries the document.
+
+    A row at a time cost a round trip and a seal check each: 100,000 tokens took
+    13 s of a 14 s admission. `COPY` makes it one of each, which is also what
+    the statement-level seal trigger (migration 0027) is counted by.
+    """
+    with (
+        conn.cursor() as cursor,
+        cursor.copy(
+            "COPY source_tokens"
             " (source_id, token_id, page, region_id, line_id, text, x0, y0, x1, y1)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            [
+            " FROM STDIN"
+        ) as copy,
+    ):
+        for token_id, token in enumerate(tokens):
+            copy.write_row(
                 (
                     source_id,
                     token_id,
@@ -343,9 +353,7 @@ def _store_tokens(conn: StoreConnection, source_id: UUID, tokens: list[Token]) -
                     token.x1,
                     token.y1,
                 )
-                for token_id, token in enumerate(tokens)
-            ],
-        )
+            )
 
 
 def _blocks(tokens: list[Token]) -> list[_Block]:
@@ -389,12 +397,13 @@ def block_ids_by_line(line_ids: Iterable[int]) -> dict[int, str]:
 
 
 def _store_blocks(conn: StoreConnection, source_id: UUID, blocks: list[_Block]) -> None:
-    with conn.cursor() as cursor:
-        cursor.executemany(
-            "INSERT INTO source_blocks (source_id, block_id, page, text)"
-            " VALUES (%s, %s, %s, %s)",
-            [
-                (source_id, block.block_id, block.page, block.text.value)
-                for block in blocks
-            ],
-        )
+    """By `COPY` for the same reason `_store_tokens` is: one statement, one seal
+    check. A block per line means a tenth of the rows, not a different shape."""
+    with (
+        conn.cursor() as cursor,
+        cursor.copy(
+            "COPY source_blocks (source_id, block_id, page, text) FROM STDIN"
+        ) as copy,
+    ):
+        for block in blocks:
+            copy.write_row((source_id, block.block_id, block.page, block.text.value))

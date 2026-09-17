@@ -17,7 +17,6 @@ import {
 import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { VisibleSnapshotContext, type VisibleSnapshot } from "./snapshot";
 import { eventsUrl, openTail } from "./sse";
-import { LedgerProvider } from "./ledger";
 import {
   OFFLINE_WORDING,
   fetchSection,
@@ -251,18 +250,16 @@ export function Workspace({ section }: { section: Section }) {
           {status.kind === "offline" ? <PageAlert sentence={OFFLINE_WORDING} /> : null}
           <VisibleSnapshotContext.Provider value={snapshot}>
             <EvidenceProvider>
-              <LedgerProvider>
-                <RegionState status={status} onReload={reload}>
-                  {(doc) => (
-                    // A render failure is about the document that caused it:
-                    // the next one served clears it, without waiting for a
-                    // navigation to unmount the boundary.
-                    <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
-                      <View key={mountKey} document={doc} tab={activeTab} />
-                    </SectionBoundary>
-                  )}
-                </RegionState>
-              </LedgerProvider>
+              <RegionState status={status} onReload={reload}>
+                {(doc) => (
+                  // A render failure is about the document that caused it:
+                  // the next one served clears it, without waiting for a
+                  // navigation to unmount the boundary.
+                  <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
+                    <View key={mountKey} document={doc} tab={activeTab} />
+                  </SectionBoundary>
+                )}
+              </RegionState>
             </EvidenceProvider>
           </VisibleSnapshotContext.Provider>
         </main>

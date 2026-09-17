@@ -17,11 +17,19 @@ from uuid import UUID
 import pytest
 from psycopg.pq import TransactionStatus
 
-from server.engine.route import ResolvedRoute, resolve_route, route_digest
+from server.engine.route import (
+    Edge,
+    EdgeType,
+    ResolvedRoute,
+    RouteNode,
+    resolve_route,
+    route_digest,
+    route_json,
+)
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, routes
 from server.store.events import RunEvent, events_of
-from server.store.routes import pin_route, pinned_route, resolved_route
+from server.store.routes import pin_route, pinned_route, resolved_route, route_pin
 from server.store.runs import start_run
 
 CATALOG_PATH = (
@@ -58,6 +66,8 @@ def test_a_pinned_route_is_what_execution_reads(
 
     assert digest == route_digest(resolved)
     assert pinned_route(conn, run_id) == digest
+    # The route and its digest come out of one read and one hash.
+    assert route_pin(conn, run_id) == (resolved, digest)
     assert [event.name for event in events_of(conn, run_id)] == [
         RunEvent.ROUTE_PINNED.value
     ]
@@ -132,3 +142,60 @@ def test_a_refused_pin_does_not_keep_the_run_row_locked(
 
     assert caught.value.code is RefusalCode.ROUTE_ALREADY_PINNED
     assert conn.info.transaction_status is TransactionStatus.IDLE
+
+
+# Taken from ab80314, before the two serialisers were given one spelling. A
+# golden computed after the change would only say the change agrees with itself.
+GOLDEN_ROUTE = ResolvedRoute(
+    "FULL_CREDIT_32",
+    "RELATIVE_VALUE",
+    (
+        RouteNode("n-1", "CP-0", 1),
+        RouteNode("n-2", "CP-5", 2),
+        RouteNode("n-3", "CP-6", 3),
+    ),
+    (
+        Edge("CP-5", "CP-6", EdgeType.QA_GATE),
+        Edge("CP-0", "CP-5", EdgeType.REQUIRED),
+        Edge("CP-0", "CP-6", EdgeType.ADVISORY),
+    ),
+    (("CP-6", "a predicate the host does not evaluate"),),
+)
+GOLDEN_DIGEST = "2eac150719617521ea164a8067d8abb1b5044d80a63e37dfd6257d64ff1e6dd6"
+GOLDEN_STORED = (
+    '{"edges":[{"source":"CP-5","target":"CP-6","type":"QA_GATE"},'
+    '{"source":"CP-0","target":"CP-5","type":"REQUIRED"},'
+    '{"source":"CP-0","target":"CP-6","type":"ADVISORY"}],'
+    '"nodes":[{"module_id":"CP-0","route_node_id":"n-1","stage":1},'
+    '{"module_id":"CP-5","route_node_id":"n-2","stage":2},'
+    '{"module_id":"CP-6","route_node_id":"n-3","stage":3}],'
+    '"predicates":[["CP-6","a predicate the host does not evaluate"]],'
+    '"profile_id":"FULL_CREDIT_32","selection_id":"RELATIVE_VALUE"}'
+)
+GOLDEN_CATALOG_DIGEST = (
+    "a25846cbb12eaa68aa1265cdf84ad0b17806717e3020ab7c55e2541ac6936168"
+)
+
+
+def test_route_digest_bytes_are_unchanged_by_the_shared_serialiser(
+    catalog: dict[str, Any],
+) -> None:
+    """Two byte forms, one field list, and neither form may move.
+
+    `route_digest` hashes rows with its edges sorted; the stored `resolved`
+    column keys each row by its field name and keeps the route's own edge
+    order. Both are pinned -- the digest by invariant 10 and by every
+    `run_routes.route_digest` already written, the stored shape by every row
+    `_decode` must still read back. `route_json` is the one spelling of what
+    they carry, so this asserts the bytes each still produces against goldens
+    taken before it existed: the synthetic route pins the edge sort and a
+    predicate, and the catalog's own RELATIVE_VALUE route pins a real one.
+    """
+    assert route_digest(GOLDEN_ROUTE) == GOLDEN_DIGEST
+    assert routes._canonical(GOLDEN_ROUTE) == GOLDEN_STORED
+    assert route_digest(_route(catalog, "RELATIVE_VALUE")) == GOLDEN_CATALOG_DIGEST
+    assert route_json(GOLDEN_ROUTE)["edges"] == [
+        ["CP-5", "CP-6", "QA_GATE"],
+        ["CP-0", "CP-5", "REQUIRED"],
+        ["CP-0", "CP-6", "ADVISORY"],
+    ]

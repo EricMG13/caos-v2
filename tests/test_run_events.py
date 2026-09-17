@@ -22,6 +22,7 @@ import psycopg
 import pytest
 from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
 from conftest import approve_run
+from psycopg.pq import TransactionStatus
 from test_loop_charges import VENDORED
 
 from server.blobs import BlobStore
@@ -593,3 +594,27 @@ def test_start_attempt_turns_a_store_fault_into_a_typed_refusal(
 
     assert caught.value.code is RefusalCode.STORE_UNAVAILABLE
     assert caught.value.__cause__ is None
+
+
+def test_lock_run_leaves_no_lock_behind_on_a_missing_run(
+    case: tuple[StoreConnection, UUID], empty_database: str
+) -> None:
+    """`RUN_NOT_FOUND` raised with the unit open holds `runs` open with it.
+
+    The first statement opens the caller's transaction and takes an
+    `ACCESS SHARE` on `runs`, and the refusal is raised before anything ends
+    it -- so a caller that answered the 404 and went on serving kept that lock
+    for the rest of its request, and a migration or any other exclusive writer
+    on `runs` waited behind a run that does not exist. The probe is what such a
+    writer would meet: `NOWAIT` turns the wait into an error this test can see.
+    """
+    conn, _case_id = case
+
+    with pytest.raises(Refusal) as caught:
+        lock_run(conn, uuid4())
+
+    assert caught.value.code is RefusalCode.RUN_NOT_FOUND
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    with connect(empty_database) as probe:
+        probe.execute("LOCK TABLE runs IN ACCESS EXCLUSIVE MODE NOWAIT")
+        probe.rollback()

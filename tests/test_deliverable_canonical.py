@@ -31,9 +31,8 @@ from server.deliverable.canonical import (
     verify_frozen,
 )
 from server.deliverable.filing import sign_opinion
-from server.deliverable.host import render_payload as render
 from server.deliverable.package import build_package, verify_package
-from server.deliverable.render import canonical_bound
+from server.deliverable.render import RenderRefused, canonical_bound, render
 from server.deliverable.revisions import read_revision, save_revision
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
@@ -431,9 +430,9 @@ def test_the_page_keeps_limitations_labels_screens_and_escapes_model_text(
     }
     assert canonical_bound(artifacts[0]) and not canonical_bound(screened)
     unbound = {**payload, "artifacts": [screened]}
-    with pytest.raises(Refusal) as refused:
+    with pytest.raises(RenderRefused) as refused:
         render(unbound)
-    assert refused.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+    assert refused.value.code == "DELIVERABLE_PAYLOAD_INVALID"
 
 
 def test_the_deliverable_labels_source_fact_analysis_and_no_host_calculation(

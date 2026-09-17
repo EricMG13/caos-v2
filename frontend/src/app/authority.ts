@@ -1,7 +1,16 @@
 // The one authority machine (IA_SPEC.md 5, "Route replay"). A forwarded slug,
 // a back navigation and a cross-case race are all resolved here against stale
-// responses: a late response for a case the user has left is discarded, and
-// the Book binds one accepted snapshot per compared case. Pure; no I/O.
+// responses: a late response for a case the user has left is discarded. Pure;
+// no I/O.
+//
+// `bind`, `release`, `Binding` and `Authority.bound` have no production caller
+// since the Book was reduced to its unavailable shell: they were the Book's
+// one-snapshot-per-compared-case rule. They are kept, not orphaned by
+// oversight -- `test_book_binds_one_snapshot_per_compared_case` is pinned by
+// name in `tests/test_phase_exits.py`, whose own docstring says the cheapest
+// way to green that gate would be to re-excuse the name. Deleting these means
+// editing a gate to make a gate pass. Restore the Book's caller, or change the
+// gate deliberately; do not quietly delete either half.
 import type { EnabledSection } from "./sections";
 import type { Refusal, Section } from "@/wire";
 import type { EventName, SectionDocument } from "@/wire/v1";

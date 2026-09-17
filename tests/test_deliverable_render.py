@@ -21,16 +21,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from server.boundary_text import BoundaryText
-from server.deliverable.host import render_payload as render
-from server.deliverable.render import PENDING, RenderRefused
-from server.refusals import Refusal, RefusalCode
+from server.deliverable.render import PENDING, RenderRefused, render
+from server.refusals import RefusalCode
 from server.store import apply_schema, connect
 from server.store.runs import create_case
+
+RENDER_SOURCE = (
+    Path(__file__).resolve().parents[1] / "server/deliverable/render.py"
+).read_text(encoding="utf-8")
 
 REVISION = "rev-001"
 
@@ -145,10 +150,10 @@ def test_an_uncited_figure_is_refused_at_the_render() -> None:
     payload = json.loads(json.dumps(PAYLOAD_DATA))
     payload["artifacts"][0] = _artifact(citations=[])
 
-    with pytest.raises(Refusal) as caught:
+    with pytest.raises(RenderRefused) as caught:
         render(payload)
 
-    assert caught.value.code is RefusalCode.DELIVERABLE_UNCITED_FIGURE
+    assert caught.value.code == "DELIVERABLE_UNCITED_FIGURE"
 
 
 @pytest.mark.parametrize(
@@ -192,10 +197,10 @@ def test_a_malformed_payload_is_refused_not_crashed(mutate: object) -> None:
     payload = json.loads(json.dumps(PAYLOAD_DATA))
     mutate(payload)  # type: ignore[operator]
 
-    with pytest.raises(Refusal) as caught:
+    with pytest.raises(RenderRefused) as caught:
         render(payload)
 
-    assert caught.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+    assert caught.value.code == "DELIVERABLE_PAYLOAD_INVALID"
 
 
 def test_no_narrative_omits_the_section_rather_than_refusing() -> None:
@@ -212,19 +217,25 @@ def test_a_narrative_that_is_not_a_string_is_refused() -> None:
     payload = json.loads(json.dumps(PAYLOAD_DATA))
     payload["narrative"] = 123
 
-    with pytest.raises(Refusal) as caught:
+    with pytest.raises(RenderRefused) as caught:
         render(payload)
 
-    assert caught.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+    assert caught.value.code == "DELIVERABLE_PAYLOAD_INVALID"
 
 
-def test_the_portable_render_refusal_maps_to_the_host_code() -> None:
-    from server.deliverable.render import render as portable_render
-
+def test_every_portable_render_refusal_names_a_closed_host_code() -> None:
+    """The render is portable -- it ships inside an audit package and runs with
+    no host beside it -- so it refuses with its own `RenderRefused` and a string
+    code. The wrapper that turned that string into a `Refusal` had no caller:
+    the host never renders here, and every name the render can raise is one the
+    host's closed set already carries, which is what this holds."""
     with pytest.raises(RenderRefused, match="DELIVERABLE_PAYLOAD_INVALID") as portable:
-        portable_render({})
-    assert portable.value.code == "DELIVERABLE_PAYLOAD_INVALID"
-    with pytest.raises(Refusal) as host:
         render({})
-    assert host.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
-    assert host.value.__cause__ is None and host.value.__context__ is None
+
+    assert portable.value.code == "DELIVERABLE_PAYLOAD_INVALID"
+    raised = {
+        name.strip('"')
+        for name in re.findall(r"RenderRefused\((\"[A-Z_]+\")\)", RENDER_SOURCE)
+    }
+    assert raised == {"DELIVERABLE_PAYLOAD_INVALID", "DELIVERABLE_UNCITED_FIGURE"}
+    assert raised <= {code.value for code in RefusalCode}

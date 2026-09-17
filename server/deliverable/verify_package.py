@@ -6,10 +6,10 @@ can lie: this package has no external authenticity or signature trust anchor.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import struct
-import sys
 import zipfile
 import zlib
 from io import BytesIO
@@ -166,9 +166,19 @@ def verify(archive: bytes) -> tuple[bool, str | None]:
 
 
 def main() -> int:
-    """Read at most one byte beyond the archive ceiling and print a JSON verdict."""
+    """Read at most one byte beyond the archive ceiling and print a JSON verdict.
+
+    argparse states the one argument and exits 2 with a usage line when it is
+    absent, so a reader who runs the archived verifier bare is told what it
+    wants instead of meeting an IndexError answered as an unreadable package.
+    """
+    parser = argparse.ArgumentParser(
+        prog="verify_package.py",
+        description="Check a deliverable package for internal consistency.",
+    )
+    parser.add_argument("archive", help="path to the package to verify")
     try:
-        with Path(sys.argv[1]).open("rb") as source:
+        with Path(parser.parse_args().archive).open("rb") as source:
             result = verify(source.read(MAX_ARCHIVE_BYTES + 1))
     except Exception:  # noqa: BLE001 -- CLI failures use the same safe verdict.
         result = (False, UNREADABLE)
