@@ -35,6 +35,7 @@ from server.engine.route import (
     ResolvedRoute,
     RouteExtensions,
     RouteNode,
+    blockers_from,
     dependency_order,
     frontier,
     limitations_of,
@@ -280,6 +281,29 @@ def test_readiness_is_read_only_from_the_cp0_artifact(catalog: dict[str, Any]) -
 
     honest = _accept(route, "CP-0", cp0=_cp0_artifact(**{"CP-1A": "READY"}))
     assert readiness_from(route, honest) == {"CP-1A": "READY"}
+
+
+def test_blockers_are_read_only_from_the_cp0_artifact(catalog: dict[str, Any]) -> None:
+    """`blockers_from` is keyed exactly like `readiness_from` and read from the
+    same place: a blocker text inside another module's artifact is not the gate's
+    condition, and a route with no accepted CP-0 states none.
+
+    Absence is not "no reason given": the gate holds a row only for a module it
+    did not clear, so a cleared module is simply absent here.
+    """
+    route = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    gate = NodeResult(
+        readiness=(("CP-1A", "CONDITIONAL"), ("CP-1C", "READY")),
+        blockers=(("CP-1A", asked),),
+    )
+
+    assert blockers_from(route, {_node_id(route, "CP-1"): gate}) == {}
+
+    honest = _accept(route, "CP-0", cp0=gate)
+    assert blockers_from(route, honest) == {"CP-1A": asked}
+    assert blockers_from(route, {}) == {}
+    assert readiness_from(route, honest) == {"CP-1A": "CONDITIONAL", "CP-1C": "READY"}
 
 
 def test_readiness_from_skips_nodes_before_the_cp0_one(catalog: dict[str, Any]) -> None:

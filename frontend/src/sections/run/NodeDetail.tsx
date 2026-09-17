@@ -55,6 +55,19 @@ export function NodeDetail({
                 <dd data-gate-verdict>{node.gate_verdict}</dd>
               </>
             ) : null}
+            {/* The gate's own words for a verdict it did not clear: under §61 a
+                CONDITIONAL one names a source the pinned set does not carry,
+                and supplying that source is what a successor run is for. The
+                module wrote it, so it is labelled as the gate's statement and
+                not as the workspace's. */}
+            {node.gate_reason ? (
+              <>
+                <dt>Gate condition</dt>
+                <dd className="wrap" data-gate-reason>
+                  {node.gate_reason}
+                </dd>
+              </>
+            ) : null}
           </dl>
         </div>
       </section>

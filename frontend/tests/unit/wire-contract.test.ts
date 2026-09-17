@@ -329,6 +329,7 @@ function runSection(): { [key: string]: Json } {
             waiting_on: [{ source: "CP-0", type: "REQUIRED" }],
             awaiting_gate: false,
             gate_verdict: null,
+            gate_reason: null,
           },
         ],
         attempts: [

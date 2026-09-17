@@ -110,6 +110,12 @@ class NodeResult:
 
     readiness: tuple[tuple[str, str], ...] = ()
     qa_status: str | None = None
+    # `(module_id, why_now_or_blocker)` for each gate row that is CONDITIONAL or
+    # BLOCKED, read from the CP-0 node like `readiness`. No state turns on it:
+    # the readiness status alone decides whether a node may run, and this is the
+    # reason the gate wrote beside that status, carried so a reader can be told
+    # which source the verdict asked for (§61) rather than only that it refused.
+    blockers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +401,23 @@ def readiness_from(
             continue
         result = accepted.get(node.route_node_id)
         return {} if result is None else dict(result.readiness)
+    return {}
+
+
+def blockers_from(
+    route: ResolvedRoute, accepted: Mapping[str, NodeResult]
+) -> dict[str, str]:
+    """Per-module blocker text, from the accepted gate artifact and nowhere else.
+
+    Keyed exactly like `readiness_from`, and holding a module only where the
+    gate did not clear it: a module absent here either was cleared or was never
+    ruled on, and a reader must not read absence as "no reason given".
+    """
+    for node in route.nodes:
+        if node.module_id != GATE_MODULE:
+            continue
+        result = accepted.get(node.route_node_id)
+        return {} if result is None else dict(result.blockers)
     return {}
 
 

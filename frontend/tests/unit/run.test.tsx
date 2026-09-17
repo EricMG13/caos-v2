@@ -133,6 +133,39 @@ describe("Run", () => {
     expect(detail.querySelector("[data-gate-verdict]")).toHaveTextContent("READY_WITH_LIMITATIONS");
   });
 
+  test("test_a_gate_condition_is_shown_beside_the_verdict_it_qualifies", () => {
+    // The fixtures are a run whose gate cleared every module, so every node
+    // carries `gate_reason: null` — which is the case that must render nothing
+    // at all rather than an empty row. The other case is built from the same
+    // document so the two are one comparison.
+    const asked = "The FY2025 audited consolidated statements are not in the pinned set.";
+    const blocked = running.body.run!.nodes.find((node) => node.state === "BLOCKED")!;
+    const conditional: RunSectionDocument = {
+      ...running,
+      body: {
+        ...running.body,
+        run: {
+          ...running.body.run!,
+          nodes: running.body.run!.nodes.map((node) =>
+            node.route_node_id === blocked.route_node_id
+              ? { ...node, gate_verdict: "CONDITIONAL", gate_reason: asked }
+              : node,
+          ),
+        },
+      },
+    };
+
+    const cleared = mount(running);
+    fireEvent.click(cleared.container.querySelector(`button.node[data-node="CP-1C"]`)!);
+    expect(cleared.container.querySelector("[data-gate-reason]")).toBeNull();
+
+    const { container } = mount(conditional);
+    fireEvent.click(container.querySelector(`button.node[data-node="${blocked.module_id}"]`)!);
+    const detail = container.querySelector(`[data-node-detail="${blocked.module_id}"]`)!;
+    expect(detail.querySelector("[data-gate-verdict]")).toHaveTextContent("CONDITIONAL");
+    expect(detail.querySelector("[data-gate-reason]")).toHaveTextContent(asked);
+  });
+
   test("test_the_one_qa_gate_reads_as_a_gate", () => {
     const { container } = mount(running);
     const gates = container.querySelectorAll("[data-gate]");

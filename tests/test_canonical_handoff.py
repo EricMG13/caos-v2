@@ -349,3 +349,46 @@ def test_only_the_gate_module_may_return_a_readiness_map() -> None:
     CP-0's T8 alone; any other module's handoff carries none."""
     assert _validate(CP0, CP0_MD).readiness
     assert _validate(L10, L10_MD).readiness == ()
+
+
+def test_a_conditional_row_projects_its_blocker_text_bounded() -> None:
+    """The cell that names the source a CONDITIONAL verdict asked for (§61).
+
+    `_readiness` kept `(module_id, readiness)` and dropped `why_now_or_blocker`,
+    which the schema requires and which is the only place the named source is
+    written -- so a run ended BLOCKED by a readiness verdict could not say
+    which source would discharge it. `blockers` carries that cell for every
+    CONDITIONAL or BLOCKED row and for no other: a READY row's cell is
+    orientation, not a condition, and projecting it would put model prose on
+    the wire for every node of every run.
+    """
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    markdown = _markdown(
+        CP0,
+        readiness={"CP-5": "CONDITIONAL", "CP-L10": "READY"},
+        blockers={"CP-5": asked, "CP-L10": "Runs now."},
+    )
+
+    gate = _validate(CP0, markdown)
+
+    assert gate.readiness == (("CP-5", "CONDITIONAL"), ("CP-L10", "READY"))
+    assert gate.blockers == (("CP-5", asked),)
+
+
+def test_a_blocker_cell_past_its_bound_refuses_with_no_document_text() -> None:
+    """512 characters, `BoundaryText`-normalised, and the vendor's own cell
+    text never rides out on the refusal (invariant 2)."""
+    at_bound = "S" * 512
+    kept = _validate(
+        CP0,
+        _markdown(CP0, readiness={"CP-5": "BLOCKED"}, blockers={"CP-5": at_bound}),
+    )
+    assert kept.blockers == (("CP-5", at_bound),)
+
+    refused = _refused(
+        CP0,
+        _markdown(CP0, readiness={"CP-5": "BLOCKED"}, blockers={"CP-5": "S" * 513}),
+    )
+
+    assert refused.code is RefusalCode.HANDOFF_MALFORMED
+    assert refused.__context__ is None and refused.__cause__ is None

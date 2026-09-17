@@ -201,6 +201,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "waiting_on",
             "awaiting_gate",
             "gate_verdict",
+            "gate_reason",
         }
     ),
     BlockedByView: frozenset({"route_node_id", "module_id", "attempt_id"}),

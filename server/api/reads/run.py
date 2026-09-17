@@ -51,6 +51,7 @@ from server.engine.route import (
     NodeState,
     ResolvedRoute,
     RouteNode,
+    blockers_from,
     lite_object_unmet,
     node_states,
     readiness_from,
@@ -392,8 +393,10 @@ def _node_views(
     # `accepted` already carries CP-0's readiness, so the verdict costs no
     # further round trip.
     readiness = readiness_from(route, accepted)
+    # From the same accepted gate artifact as `readiness`, so no further read.
+    reasons = blockers_from(route, accepted)
     views = (
-        _node_view(route, accepted, node, states, readiness, named)
+        _node_view(route, accepted, node, states, readiness, reasons, named)
         for node in route.nodes
     )
     # Nothing is awaited on a run that is no longer running.
@@ -411,6 +414,7 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
     node: RouteNode,
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
+    reasons: Mapping[str, str],
     named: NamedObjects | None = None,
 ) -> NodeView:
     done = states[node.route_node_id] is NodeState.COMPLETE
@@ -437,4 +441,7 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
         # `.get`, not `[]`: a module the gate has not ruled on has no verdict
         # rather than a false one, and None is that absence on the wire.
         gate_verdict=readiness.get(node.module_id),
+        # `.get` again: the gate holds a reason only for a module it did not
+        # clear, so absence is "no condition stated" and never an empty one.
+        gate_reason=reasons.get(node.module_id),
     )

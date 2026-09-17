@@ -485,3 +485,39 @@ def test_the_run_section_request_path_declares_its_store_budget(
     read = run_read.SECTION_READ_IO + run_read.CANONICAL_READINESS_IO
     assert counter.executed == read
     assert counter.executed <= run_read.IO_BUDGET
+
+
+def test_a_blocked_run_names_the_source_its_conditional_row_asked_for(
+    client: TestClient, lite: tuple[_Harness, UUID]
+) -> None:
+    """Task 10.3: a run the gate blocked says which source would discharge it.
+
+    CP-0 marks CP-5 CONDITIONAL, which under §61 names a source the effective
+    set does not carry. `node_states` BLOCKS CP-5 on the verdict alone, the
+    frontier empties with required work unfinished, and the run ends BLOCKED
+    with no node's verdict to name (`blocked_by` is null, §39). Before this the
+    document carried the verdict word and nothing else, so a reader was told
+    CP-5 was conditional and never on what -- and the discharge is a new run
+    against a supplied source, which nobody can supply without being told which.
+    `gate_reason` is that cell, on the node it was written about and on no
+    other.
+    """
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    harness, viewer = lite
+    answers = CanonicalCompletions(
+        harness.source_id,
+        readiness={"CP-5": "CONDITIONAL"},
+        blockers={"CP-5": asked},
+    )
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+
+    view = _document(_section(client, harness.case_id, harness.run_id, viewer)).body.run
+
+    assert view is not None and (view.status, view.blocked_by) == ("BLOCKED", None)
+    reasons = {
+        node.module_id: (node.gate_verdict, node.gate_reason) for node in view.nodes
+    }
+    assert reasons["CP-5"] == ("CONDITIONAL", asked)
+    assert reasons["CP-L10"] == ("READY", None)
+    # The gate rules on its consumers, never on itself, so it has neither.
+    assert reasons["CP-0"] == (None, None)

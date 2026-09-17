@@ -130,6 +130,11 @@ const NodeView = object({
   waiting_on: array(EdgeView, 256),
   awaiting_gate: bool,
   gate_verdict: nullable(short),
+  // What the gate wrote beside a verdict it did not clear — the T8 blocker cell
+  // of a CONDITIONAL or BLOCKED readiness row, where CP-0 names the source the
+  // pinned set does not carry (§61). Null for a node it cleared or never ruled
+  // on, so nothing here ever renders an empty reason as a stated one.
+  gate_reason: nullable(string({ max: 512 })),
 });
 const AttemptView = object({
   attempt_id: uuid,

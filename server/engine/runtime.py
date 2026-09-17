@@ -376,6 +376,7 @@ def accepted_artifacts(
             accepted[node_id] = NodeResult(
                 readiness=tuple(projections.readiness),
                 qa_status=projections.qa_status,
+                blockers=tuple(projections.blockers),
             )
     return accepted
 

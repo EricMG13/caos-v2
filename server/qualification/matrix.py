@@ -129,7 +129,11 @@ class ExpectedProjection:
     `value` is compared as a string against a scalar field, and as membership
     against a list one — one rule for both, because "the screen was Restricted"
     and "it flagged the missing audited statements" are the same kind of
-    question asked of differently shaped fields.
+    question asked of differently shaped fields. `blockers` is a list of
+    `(module, text)` pairs, and membership there is over the texts: a key asks
+    which condition the gate stated, and `module_id` already says whose handoff
+    is being read (the gate's), so it cannot also say which module the condition
+    was about.
     """
 
     module_id: str
@@ -146,6 +150,9 @@ PROJECTION_FIELDS = frozenset(
         "limitation_flags",
         "validation_warnings",
         "downstream_consumers",
+        # The gate's `(module, why_now_or_blocker)` rows for every module it did
+        # not clear (§61): what the run would need before a successor could run.
+        "blockers",
     }
 )
 
@@ -534,7 +541,11 @@ def _matches_projection(projections: Projections, expect: ExpectedProjection) ->
         return False
     found = getattr(projections, expect.field)
     if isinstance(found, tuple):
-        return expect.value in found
+        # A pair-shaped field (`blockers`) is matched on the text it carries,
+        # never on `str(pair)`: a key must not have to spell a tuple's repr.
+        return expect.value in tuple(
+            pair[-1] if isinstance(pair, tuple) else pair for pair in found
+        )
     return str(found) == expect.value
 
 

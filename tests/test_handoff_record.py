@@ -578,3 +578,74 @@ def test_a_verifying_reader_refuses_a_file_tampered_after_a_cache_hit(
     with pytest.raises(Refusal) as refused:
         record_authority_matches(record, bundle=bundle, module_id="CP-0", verify=True)
     assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+def test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty(
+    tmp_path: Path,
+) -> None:
+    """Task 10.3: `Projections.blockers` did not move the v2 record's bytes.
+
+    A gate that cleared every module -- and every module but the gate, which
+    projects no readiness at all -- writes no `blockers` key, which is the shape
+    every record stored before the field existed has. Reading one back supplies
+    the empty tuple, and re-serialising it gives those same bytes, so the
+    `record_bytes(record) != data` check every reader makes still holds for a
+    record this build did not write.
+    """
+    record = _record()
+    assert record.projections.blockers == ()
+    data = record_bytes(record)
+    assert "blockers" not in json.loads(data)["projections"]
+
+    blobs, artifact, sha = _stored(tmp_path, record)
+    read = read_record(blobs, artifact_sha256=artifact, record_sha256=sha, expected=CP0)
+
+    assert read.projections.blockers == ()
+    assert record_bytes(read) == data
+
+
+def test_a_record_carrying_blockers_writes_them_and_reads_them_back(
+    tmp_path: Path,
+) -> None:
+    """The other spelling: rows present are written, sorted, and round-trip."""
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    conditional = _markdown(
+        CP0,
+        readiness={"CP-5": "CONDITIONAL", "CP-L10": "READY"},
+        blockers={"CP-5": asked},
+    )
+    projections = validate_markdown(
+        CONTRACT, CATALOG, skill("CP-0"), conditional, identity=CP0, gate_expects=PINNED
+    )
+    record = _record(
+        artifact_sha256=hashlib.sha256(conditional).hexdigest(),
+        projections=projections,
+    )
+    data = record_bytes(record)
+    assert json.loads(data)["projections"]["blockers"] == [["CP-5", asked]]
+
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(conditional)
+    read = read_record(
+        blobs, artifact_sha256=artifact, record_sha256=blobs.put(data), expected=CP0
+    )
+
+    assert read.projections.blockers == (("CP-5", asked),)
+    assert record_bytes(read) == data
+
+
+def test_an_explicitly_empty_blocker_list_is_not_the_canonical_form(
+    tmp_path: Path,
+) -> None:
+    """`blockers: []` written out is a second spelling of one value, and the
+    canonical form is the absent key: a record carrying it refuses rather than
+    giving two byte strings for one record."""
+    document = json.loads(record_bytes(_record()))
+    document["projections"]["blockers"] = []
+    data = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(CP0_MD)
+
+    _mismatch(blobs, artifact, blobs.put(data), CP0)

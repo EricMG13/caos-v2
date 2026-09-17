@@ -61,7 +61,8 @@
           "state": "COMPLETE",
           "waiting_on": [],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-1",
@@ -75,7 +76,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-1c",
@@ -89,7 +91,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": "READY_WITH_LIMITATIONS"
+          "gate_verdict": "READY_WITH_LIMITATIONS",
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-2",
@@ -107,7 +110,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-4",
@@ -121,7 +125,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-5",
@@ -139,7 +144,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-6",
@@ -157,7 +163,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-6a",
@@ -171,7 +178,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-7",
@@ -189,7 +197,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         },
         {
           "route_node_id": "rn-cp-cf",
@@ -203,7 +212,8 @@
             }
           ],
           "awaiting_gate": false,
-          "gate_verdict": null
+          "gate_verdict": null,
+          "gate_reason": null
         }
       ],
       "attempts": [

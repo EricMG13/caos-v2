@@ -55,6 +55,7 @@ from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
     NodeResult,
+    blockers_from,
     node_states,
     readiness_from,
     resolve_route,
@@ -597,9 +598,10 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     accepted = {cp5: NodeResult(qa_status=qa_status)}
     states = node_states(full, accepted)
     readiness = readiness_from(full, accepted)
+    reasons = blockers_from(full, accepted)
 
     by_module = {
-        node.module_id: _node_view(full, accepted, node, states, readiness)
+        node.module_id: _node_view(full, accepted, node, states, readiness, reasons)
         for node in full.nodes
     }
 
@@ -692,6 +694,7 @@ def test_the_wire_key_sets_are_pinned() -> None:
         "waiting_on",
         "awaiting_gate",
         "gate_verdict",
+        "gate_reason",
     }
     assert set(EdgeView.model_fields) == {"source", "type"}
     assert set(RefusalBody.model_fields) == {"code", "clears"}

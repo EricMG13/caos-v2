@@ -27,7 +27,11 @@ from pydantic.json_schema import models_json_schema
 
 from server.api.identity import GlobalRole
 from server.engine.route import EdgeType, NodeState
-from server.methodology.handoff import MAX_FILE_BYTES, MAX_LINE_BYTES
+from server.methodology.handoff import (
+    MAX_BLOCKER_CHARS,
+    MAX_FILE_BYTES,
+    MAX_LINE_BYTES,
+)
 from server.refusals import RefusalCode
 from server.store.gates import Gate, GateState
 from server.store.members import Standing
@@ -62,6 +66,7 @@ Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
 Sha256 = Annotated[str, Field(max_length=64, pattern="^[0-9a-f]{64}$")]
 Moment = Annotated[str, Field(max_length=MOMENT_CHARS)]
+Blocker = Annotated[str, Field(max_length=MAX_BLOCKER_CHARS)]
 RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"]
 WorkState = Literal["QUEUED", "CLAIMED", "STOPPED", "DONE"]  # `run_work.state`
 
@@ -410,6 +415,15 @@ class NodeView(BaseModel):
     waiting_on: Annotated[list[EdgeView], Field(max_length=ROUTE_NODES_MAX)]
     awaiting_gate: bool
     gate_verdict: Id | None
+    # What the gate wrote beside a verdict it did not clear: the T8 blocker cell
+    # of a CONDITIONAL or BLOCKED readiness row, which is where CP-0 names the
+    # source the effective set does not carry (§61). `None` for every node the
+    # gate cleared, every node it never ruled on, and every run with no accepted
+    # gate artifact -- so the wire says "no condition was stated" by carrying
+    # nothing rather than by carrying an empty string. Model-authored prose,
+    # bounded by the host at `MAX_BLOCKER_CHARS`; it is the reason a reader may
+    # read, never a fact the host asserts.
+    gate_reason: Blocker | None
 
 
 class WorkView(BaseModel):

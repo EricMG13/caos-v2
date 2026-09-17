@@ -65,6 +65,10 @@ ZERO_SHA256 = "0" * 64
 MAX_FILE_BYTES = 26_214_400
 MAX_FRONTMATTER_BYTES = 262_144
 MAX_LINE_BYTES = 65_536
+# One T8 `Why now / blocker` cell, which the vendor's own contract asks a module
+# to state "briefly". Bounded here because the cell reaches a pinned record and
+# the wire, and nothing upstream bounds it.
+MAX_BLOCKER_CHARS = 512
 # Characters BoundaryText keeps that still make one text read as two. Public
 # because the prompt builder must drop what this refuses, so that a filename
 # the host renders can always be quoted back (invocation._printable).
@@ -125,6 +129,15 @@ class Projections:
     validation_warnings: tuple[str, ...]
     downstream_consumers: tuple[str, ...]
     readiness: tuple[tuple[str, str], ...]
+    # `(module_id, why_now_or_blocker)` for every T8 row the gate did not clear --
+    # CONDITIONAL or BLOCKED. That cell is where CP-0 names the source the
+    # effective set does not carry (§61), and so the only thing that tells a
+    # reader of a run ended BLOCKED by readiness which source would discharge it.
+    # Model-authored and vendor-required: bounded at `MAX_BLOCKER_CHARS` through
+    # `BoundaryText`, never logged, empty for every row the gate cleared and for
+    # every module but the gate. Absent from a serialised record when empty, so
+    # that adding it moved no record's bytes (`record_bytes`).
+    blockers: tuple[tuple[str, str], ...]
     # The pathway's catalog scope; `SCREENING_ONLY` is never committee clearance,
     # whatever `committee_status` the model wrote.
     decision_scope: str
@@ -261,12 +274,34 @@ def _declared_keys(contract: VendorContract) -> frozenset[str]:
     )
 
 
+# The two T8 verdicts that stop a module running, and so the two whose
+# `why_now_or_blocker` cell states a condition rather than orientation. The words
+# are the vendor's (`navigation.RUNNABLE`'s complement over CP-0's four statuses);
+# the host reads them and invents none.
+UNCLEARED_READINESS = frozenset({"CONDITIONAL", "BLOCKED"})
+
+
+def _blocker(cell: str) -> str:
+    """One T8 blocker cell across the boundary: bounded, NFC, no controls.
+
+    `HANDOFF_MALFORMED` past the bound, raised outside the handler so neither
+    the chain nor the refusal carries the cell's text (invariant 2).
+    """
+    return _or_refuse(
+        RefusalCode.HANDOFF_MALFORMED,
+        lambda: BoundaryText.of(cell, limit=MAX_BLOCKER_CHARS).value,
+    )
+
+
 def _readiness(
     contract: VendorContract,
     catalog: Mapping[str, Any],
     text: str,
     gate_expects: frozenset[str],
-) -> tuple[tuple[str, str], ...]:
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """The gate's `(module, readiness)` rows, and the blocker cell of each row it
+    did not clear. Both sorted by module; the second is a subset of the first's
+    modules and is empty when every one of them may run."""
     nav = contract.navigation
     rows = _or_refuse(
         RefusalCode.HANDOFF_INCOMPLETE,
@@ -275,7 +310,14 @@ def _readiness(
     readiness = tuple(sorted((row.module_id, row.readiness) for row in rows))
     if frozenset(module for module, _ in readiness) != gate_expects:
         raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
-    return readiness
+    blockers = tuple(
+        sorted(
+            (row.module_id, _blocker(row.why_now_or_blocker))
+            for row in rows
+            if row.readiness in UNCLEARED_READINESS
+        )
+    )
+    return readiness, blockers
 
 
 def _decision_scope(catalog: Mapping[str, Any], identity: HostIdentity) -> str:
@@ -348,10 +390,10 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
         forecast_projection(markdown)
         if fields["committee_status"] not in {"Draft Only", "Restricted"}:
             raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
-    readiness = (
+    readiness, blockers = (
         _readiness(contract, catalog, text, gate_expects)
         if identity.module_id == GATE_MODULE
-        else ()
+        else ((), ())
     )
     if fields["qa_status"] == "Blocked":
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
@@ -365,6 +407,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
         validation_warnings=tuple(fields["validation_warnings"]),
         downstream_consumers=tuple(fields["downstream_consumers"]),
         readiness=readiness,
+        blockers=blockers,
         decision_scope=_decision_scope(catalog, identity),
     )
 
@@ -529,8 +572,19 @@ def parse_response(
 
 
 def record_bytes(record: CanonicalRecord) -> bytes:
-    """The record's one canonical serialisation; its SHA-256 is `record_sha256`."""
+    """The record's one canonical serialisation; its SHA-256 is `record_sha256`.
+
+    `projections.blockers` is written only when it has rows. That keeps the v2
+    format the same shape it has always had for every record whose gate cleared
+    every module -- every non-gate record, and every gate record of a run that
+    ran -- so a field added for the CONDITIONAL case did not invalidate records
+    already stored. The mapping is still one-to-one: absent means no row, and
+    `_decoded_record` reads it back as the empty tuple, so `record_bytes` of a
+    decoded record is the bytes it was decoded from.
+    """
     document: dict[str, Any] = {"format": RECORD_FORMAT, **asdict(record)}
+    if not document["projections"]["blockers"]:
+        del document["projections"]["blockers"]
     for citation in document["citations"]:
         for box in citation["bboxes"]:
             box.update({key: float(box[key]) for key in ("x0", "y0", "x1", "y1")})
@@ -575,6 +629,14 @@ def _pair(value: object) -> tuple[str, str]:
     return module_id, readiness
 
 
+def _with_blockers(value: object) -> dict[str, Any]:
+    """Supply the empty `blockers` a record omits, so `_typed`'s closed key set
+    holds for both spellings and no record that predates the field refuses."""
+    if not isinstance(value, dict) or "blockers" in value:
+        return value if isinstance(value, dict) else {}
+    return {**value, "blockers": []}
+
+
 _int, _strs = _exact(int), _each(_exact(str))
 _rect = _each(
     lambda box: _typed(
@@ -604,12 +666,13 @@ def _decoded_record(data: bytes) -> CanonicalRecord:
         lineage=_each(lambda ref: _typed(LineageRef, ref)),
         projections=lambda item: _typed(
             Projections,
-            item,
+            _with_blockers(item),
             confidence_score=_int,
             limitation_flags=_strs,
             validation_warnings=_strs,
             downstream_consumers=_strs,
             readiness=_each(_pair),
+            blockers=_each(_pair),
         ),
         citations=lambda _: citations,
     )

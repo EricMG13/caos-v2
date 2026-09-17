@@ -3026,3 +3026,99 @@ lock through a governed write, so the governed path is serialised against
 withdrawal; and these reads write nothing, so the worst case is one read
 serving a payload whose source was withdrawn mid-read, with the next read
 refusing. The net is a more consistent snapshot, not a weaker check.
+## 2026-09-17 §72 — A BLOCKED run is answered by a successor, not by a resume
+
+**Context.** §39 called an empty frontier with unfinished required work
+*recoverably* blocked, and `CLAUDE.md`'s ledger carried the upgrade "not a
+resume" beside it without saying what the recovery then was. Two readings were
+possible, and the Completion Phase 7 adversarial audit got both: that a BLOCKED
+run would one day be moved back to RUNNING, and that it never would. §61 settles
+the first half for the case it covers -- a `CONDITIONAL` readiness verdict names
+a source, or the prepared representation of one, that the effective-source set
+does not carry, and is discharged only when that named source is supplied and
+CP-0 is re-run. A run's source set is pinned (`run_inputs.source_version`,
+invariant 1) and its route is pinned and digested (invariant 10). Supplying a
+source makes a new source-set version. So the discharge cannot happen inside the
+run that asked for it: a CAS back to RUNNING would reopen a run under pins that
+cannot change, and the run would then either execute against evidence its own
+pin does not name or refuse for the same reason it refused before.
+
+**Decision (a) -- resume is withdrawn in favour of a link.** Nothing moves a
+BLOCKED run to RUNNING, and nothing is planned to. That withdrawal is decided
+here and holds from here. What will record the link instead is
+`runs.supersedes_run_id`: nullable, write-once by trigger, at most one successor
+per predecessor by a partial unique index, never a run's own id; `start_run`
+taking `supersedes` and, inside the caller's unit, selecting the target
+`FOR SHARE` and refusing `RUN_NOT_FOUND` for a run of another case -- the same
+code an unknown run gets, so neither answer tells a caller the other exists --
+`RUN_NOT_BLOCKED` for any status but BLOCKED, and `RUN_ALREADY_SUPERSEDED` for
+the second successor of one predecessor; with `POST
+/api/v1/cases/{case_id}/runs` carrying it, the audit payload binding it, and
+`RunView.supersedes` and `RunView.superseded_by` serving both ends.
+
+**None of that link is built yet, and this entry says so rather than reading as
+though it were.** The session that implemented Task 10.3 was stopped by a rate
+limit having finished the first of its two concerns. What exists is the half
+below: the blocker projection, `NodeView.gate_reason`, the record format and the
+page. The store column, the command, the read and their five tests are owed, and
+the migration ordinal `0025` is held for them. A decision may be taken before the
+code that serves it; what it may not do is describe that code in the past tense.
+
+The other half of what a reader needs is *which* source the verdict asked for,
+and that was being dropped: `parse_t8` returns `why_now_or_blocker` for every
+readiness row and `_readiness` kept only `(module_id, readiness)`.
+`Projections.blockers` now carries that cell for each row the gate did not clear
+-- CONDITIONAL or BLOCKED, the vendor's own two non-runnable statuses -- each
+through `BoundaryText` at `MAX_BLOCKER_CHARS` (512) and refused
+`HANDOFF_MALFORMED` past it, with no document text on the refusal (invariant 2).
+`NodeView.gate_reason` is that cell on the node it was written about, null for
+every node the gate cleared or never ruled on, and the node detail shows it as
+the gate's own statement. `matrix.PROJECTION_FIELDS` gains `blockers`, so a
+qualification key can assert which condition a gate stated.
+
+The record format does not move. `Projections` is serialised into the canonical
+record, so adding a field would ordinarily invalidate every stored record the way
+§45.4's v2 invalidated v1 -- and this field is empty for every non-gate record
+and for every gate record of a run that ran. `record_bytes` therefore omits
+`blockers` when it has no rows and `_decoded_record` reads its absence back as
+the empty tuple: one value, one spelling, so `record_bytes(decoded) == data`
+still holds, and `blockers: []` written out explicitly is refused as the
+non-canonical form rather than accepted as a second spelling.
+
+**Decision (b) is not taken here.** Whether a QA `Restricted` may release CP-6 as
+RESTRICTED is the owner's to decide and is recorded as owed. It is a different
+question with a different discharge: the QA_GATE case ends a run BLOCKED with the
+frontier emptied, no source is named and nothing a successor supplies changes the
+verdict -- the discharge there is a human decision under unchanged pins. The
+Repair Phase 2 ledger entry "Only a QA `Passed` releases CP-6" owns that case;
+this entry's withdrawal covers a readiness verdict and nothing else, and the
+successor link is offered for the readiness case alone.
+
+**What this does not do.** A successor is an ordinary new run: it resolves and
+pins its own route, pins its own input over the case's sources as they are then,
+and pays for every node again. Nothing carries an accepted artifact across the
+link, and nothing checks that the successor's source set actually contains the
+source the predecessor's verdict named -- the host cannot read a model's prose as
+a source identifier, and inventing a match would be the host asserting a
+readiness ground of its own (invariant 4). The link says which run a run answers;
+whether it answers it is the reader's judgement. `AnalysisBody` carries neither
+field, as it carries no `blocked_by` (Phase 9's ledger entry owns that).
+
+**Tests.** `test_a_conditional_row_projects_its_blocker_text_bounded` and
+`test_a_blocker_cell_past_its_bound_refuses_with_no_document_text` are the
+projection and its bound; `test_blockers_are_read_only_from_the_cp0_artifact` is
+that it is read from the gate and nowhere else;
+`test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty`,
+`test_a_record_carrying_blockers_writes_them_and_reads_them_back` and
+`test_an_explicitly_empty_blocker_list_is_not_the_canonical_form` are the record
+format; `test_a_blocked_run_names_the_source_its_conditional_row_asked_for` is
+the document over a real blocked LITE run;
+the three the link owes --
+`test_a_successor_run_links_a_blocked_run_of_its_case`,
+`test_a_successor_for_a_running_run_or_another_case_is_refused` and
+`test_two_successors_for_one_blocked_run_commit_one`, the command, the private
+404 and the race on two connections -- are **not written** and are owed with the
+store half; and the workspace's
+`test_a_gate_condition_is_shown_beside_the_verdict_it_qualifies` names the gate
+condition on the node. `test_the_run_panel_names_the_run_a_successor_replaces`
+is owed with the link it would read.
