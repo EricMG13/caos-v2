@@ -1,0 +1,815 @@
+# CAOS v2 — completion review and plan
+
+Reviewed 17 September 2026. Target: `/Users/ericguei/Documents/caos-workbench`
+on `codex/execute-repair-plan` at `e59ad7b`.
+
+> **Standing.** This plan follows [`REPAIR_PLAN.md`](REPAIR_PLAN.md), whose
+> Phases 0–6 are accepted (`docs/DECISIONS.md` §62, §69) and whose file is
+> not edited by this review. It inventories what the repair left outstanding
+> and sequences the remaining work as Phases 7–13, with the deployment of the
+> remaining modules and pathways — their corpus and their answer keys — at the
+> centre, because that is the handoff's stated next task. The numbers continue
+> the repair plan's; they are **not** the historical rebuild labels
+> (`CLAUDE.md`'s "Phase 7–10" ledger headings). A ledger entry written under
+> this plan says "Completion Phase N". `docs/CLAUDE_CODE_HANDOFF.md` stays the
+> sole task/checkpoint record; the complementary task breakdown and the
+> Opus 5 / Fable 5.1 routing are in
+> [`superpowers/plans/2026-09-17-completion-complementary-plan.md`](superpowers/plans/2026-09-17-completion-complementary-plan.md);
+> the launch text is [`PHASE_7_ONWARDS_GOAL_PROMPT.md`](PHASE_7_ONWARDS_GOAL_PROMPT.md).
+>
+> **Concurrent stream.** The audit remediation
+> ([`superpowers/plans/2026-09-17-audit-remediation.md`](superpowers/plans/2026-09-17-audit-remediation.md),
+> Tasks T1–T20, decisions D1–D3) is already underway in its own SDD worktrees
+> and is **not** a task of this plan. This plan records its state where
+> observed, names the tasks here that depend on its outputs, and keeps its
+> phase close separate.
+
+## Recommendation
+
+Deploy the remaining modules and pathways, and build only what that needs.
+
+The repair delivered one governed credit journey end to end and a
+qualification apparatus that produced one `complete` snapshot on the current
+build. Of the catalog's eighteen pathways, two execute (`LITE_EARNINGS_UPDATE`
+and `RELATIVE_VALUE`), one has a complete live snapshot, none has a signed
+verdict, and sixteen refuse `HANDOFF_MODULE_UNSUPPORTED` before any attempt.
+Twelve of the twenty-three catalog modules the pathways use are proven to the
+Phase 3 standard; eleven are not. That is the work: for each pathway, prove
+its unproven modules' canonical contracts deterministically, assemble the
+documents its modules demand, author its answer keys from those documents
+before any run, enable the route, and — when the owner authorizes the spend —
+run it live and sign the verdict.
+
+Around that programme, five smaller groups, in the order the programme needs
+them:
+
+1. **The record and the delivery** (Phase 7). The branch is 351 commits ahead
+   of GitHub `main` and the ledger carries entries later decisions closed.
+2. **The qualification instrument** (Phase 8). Keys that measure what a module
+   concluded, not which quotes it drew; a price recorded with the reservation;
+   a verdict that must name a model the runs used; the corpus register; and
+   the four bundle-side change requests the programme cannot proceed without.
+3. **The LITE pathways** (Phase 9): four can be deployed on the current bundle;
+   three wait on LITE producer modules the vendor specifies but does not ship.
+4. **Route semantics for large evidence** (Phase 10). Two of the three public
+   10-K texts in hand exceed the request ceiling whole; the FULL pathways need
+   per-node evidence selection before they can run on real filings.
+5. **The FULL pathways** (Phase 11), then **the workbench's missing writes and
+   Book** (Phase 12), then **concurrency, durability, the trusted edge and the
+   release pack** (Phase 13).
+
+Live spend, bundle edits, dependency additions, pushes and deploys remain
+individually authorized. This document is a review and plan, not a claim that
+any item is done. No source, dependency, branch, remote or database was
+changed by it.
+
+## 1. Baseline and verification
+
+### Exact baseline
+
+| Identity | Value |
+|---|---|
+| Branch / commit | `codex/execute-repair-plan` @ `e59ad7b` (docs: Phase 6 signed off, §69) |
+| Working tree | clean except untracked `AGENTS.md`, `gemini-audit.md`, `PATHFINDER-2026-09-15/`, `.claude/skills/`, and the two remediation documents below |
+| Bundle build | `30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18` (§63) |
+| Verified manifest (`DEPLOY_V_INTEGRITY_v1.json`) | `8ccc8ed035745b5fb3a18d1176f0bfbbbc2c7e337357bbf25828c3611f3d110e` |
+| Bundle overrides | §61 (two edits), §63 (one edit); upstream `EricMG13/Deploy-V@c4d2e356` carries none |
+| Qualification sets | `qualification/vmo2-fy2025` (`0863964b…`, two earnings releases, one complete snapshot); `qualification/ccl-fy2025` (`f5555753…`, one 10-K extract, one refused run under an unapproved model) |
+| Complete snapshot | run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, evidence `bb09d8d0…`, performed `d758a253…`, database `caos_qualify_5a47243d96774e088f1bfebb6271f2d1` |
+| Verdicts | `qualification_verdicts` empty in every database |
+| Live spend recorded | `$7.75` across eleven VMO2 runs; one CCL run (`$0.18`-class, refused at CP-0) |
+| GitHub `main` | `4f4f431` (PR #258); local branch 351 commits ahead; PRs #279, #280, #282–#288, #290, #291 open |
+| Migrations | `0001_legacy` … `0021_blocking_verdicts` |
+| Enabled routes | `ADAPTER_ROUTES` = {`LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `FULL_CREDIT_32/RELATIVE_VALUE`}; `ADAPTER_MODULES` = 12 (`server/methodology/handoff.py:36-55`) |
+| GitNexus | indexed as `caos-v2` (8,993 symbols, 22,700 relationships, 300 flows) at an earlier commit; refresh at Phase 7 entry |
+| Remediation stream (observed 17 September) | `docs/reviews/2026-09-17-gemini-audit-adversarial-review.md` and `docs/superpowers/plans/2026-09-17-audit-remediation.md` untracked; SDD worktrees `sdd/t1`–`sdd/t6` at `/private/tmp/caos-sdd-t{1..6}`; `sdd/t1` carries `4103121` (T1, the report read holds no case lock) and `sdd/t6` carries `65f9d10` (T6, the workspace remount); `sdd/t2`–`t5` at base; plan checkboxes unticked; execution ledger `.superpowers/sdd/2026-09-17-audit-remediation/` |
+
+### What actually ran
+
+This review read; it did not execute a gate. The gate evidence it relies on is
+the acceptance record's: a complete green `make check` at `dbb2e44` per
+[`FINAL_CHECK.md`](FINAL_CHECK.md). Claims that the plan acts on were verified
+in source; where the concurrent adversarial review reached the same claim, its
+verdict is cited rather than repeated.
+
+| Claim | Where | Verdict |
+|---|---|---|
+| A GET read takes the case write lock | `server/api/reads/reports.py:88` | **Confirmed**; the review's C1; fixed on `sdd/t1` |
+| Outcome recording has three call sites | `canonical.py:212`, `runtime.py:438`, `runs.py:215` | **Confirmed as sites.** Idempotent by design; the review's W1 promotes the two extra transactions under the case lock; its T3 |
+| Canonical JSON diverges on Unicode | 21 `sort_keys=True` sites, 6 with `ensure_ascii=False` | **Divergence confirmed, hazard absent** (the review's W12: every digest is produced and verified by one function); only `allow_nan` is a defect; its T14 |
+| Migration 17 keys on `applied_count == 16` | `server/store/__init__.py:258` | **Refuted as a defect** by both; pinned by `tests/test_filed_receipts.py` |
+| `/api/health` is "not built" | `docs/feature-status.csv` | **Stale**; served since §53.8 |
+| The catalog carries CONDITIONAL edges | `CREDIT_OS_V_MODULE_CATALOG_v2.json` profile edges | **No.** 60 REQUIRED, 26 OPTIONAL, 29 ADVISORY, 1 QA_GATE, 0 CONDITIONAL |
+| The pinned research brief reaches CP-DR | `server/` | **No.** `RunInput.research_json` is pinned and validated (`run_inputs.py:195`); nothing under `server/methodology/` reads it; `RouteExtensions(research_brief=…)` is built only by tests |
+| The 10-K texts in hand fit the request ceiling | `MAX_REQUEST_BYTES = 1_048_576` | CCL 304,600 bytes fits; BA 1,105,000 and F 1,830,000 do not, whole |
+
+Not performed: live qualification, a fresh vulnerability scan, hosted check
+inspection, production boot.
+
+## 2. Where the system stands
+
+### Served and enabled
+
+`server/api/`: one health document; section reads for Directory, Upload, Run,
+Analysis, Model, Report and Committee; the case event stream; an authorized
+evidence page; nine governed commands (`CREATE_CASE`, `ADMIT_SOURCES`,
+`CREATE_RUN`, `PIN_RUN_INPUT`, `APPROVE_SOURCE_SET`, `APPROVE_RESEARCH_PLAN`,
+`START_RUN`, `RETRY_RUN`, `CANCEL_RUN`); and one account-wide command, the
+qualification verdict (§65). Seven of nine sections enabled; Book and Admin
+unavailable. Every arrow below is real; the gaps are in "every block" (nothing
+selects less) and "(verdict)" (a route nobody has called).
+
+```text
+Browser ↔ edge (token) ↔ API ↔ PostgreSQL + blobs ↔ one leased worker
+                                     ↓
+                verified bundle bytes + exact upstream records + every block
+                                     ↓
+                    canonical Markdown → vendor validators → host record
+                                     ↓
+        accepted artifact → proof → matrix → performed snapshot → (verdict)
+```
+
+### The module and pathway inventory
+
+The catalog's two profiles define eighteen pathways over twenty-three modules
+plus the host's CP-CF extension; 101 module calls in total. Proven means: a
+deterministic fixture handoff validates through the vendor validators, carries
+host identity with every direct upstream ref, projects, anchors every
+citation, keeps limitations when Restricted, and refuses a missing register, a
+wrong upstream digest and an unanchored quote (`tests/test_owner_contracts.py`,
+the Task 5.2a standard).
+
+| Module | Name | Proven | Where |
+|---|---|---|---|
+| CP-0 | SourceReadiness | yes | LITE earnings, RELATIVE_VALUE |
+| CP-L10 | LiteFinancialChangeScreen | yes | LITE earnings |
+| CP-5 | EvidenceTraceValidator | yes | LITE earnings |
+| CP-1, CP-1C, CP-2, CP-2A, CP-2G, CP-3, CP-3D, CP-4 | the RELATIVE_VALUE owners | yes | `tests/test_owner_contracts.py`, `test_relative_value_route.py` |
+| CP-CF | host forecast extension | yes | `tests/test_forecast_*.py` |
+| CP-1A | BusinessTransactionFactPack (22 registers) | **no** | — |
+| CP-1B | EarningsDelta (15) | **no** | — |
+| CP-1D | EarningsQuality (13) | **no** | — |
+| CP-2D | LiquidityCashFlowBridge (8) | **no** | — |
+| CP-2E | MacroFXHedgingSensitivity (17) | **no** | — |
+| CP-2H | RatingTransitionCase (10) | **no** | — |
+| CP-3C | RefinancingLMERisk (11) | **no** | — |
+| CP-4C | RestructuringScenario (10) | **no** | — |
+| CP-6 | ICDebateChallenge (8); the only QA_GATE consumer | **no** | — |
+| CP-8 | DecisionLedgerPostMortem (8) | **no** | — |
+| CP-DR | DeepResearch (3); needs a run-linked brief | **no** | — |
+
+| Pathway | Nodes | Unproven modules | Bundle dependency | Corpus in hand | Cost at `$0.27`/call |
+|---|---|---|---|---|---|
+| LITE_EARNINGS_UPDATE | CP-0, CP-L10, CP-5 | none | — | VMO2 (complete snapshot), CCL (refused under DeepSeek) | `$0.81` |
+| LITE_PORTFOLIO_DECISION | CP-0, CP-L10 | none | — | VMO2, CCL | `$0.54` |
+| LITE_RELATIVE_VALUE | CP-0, CP-L10, CP-1C | none (CP-1C's LITE block accepts `lite_financial_change_screen`, which CP-L10 owns) | — | needs a peer table | `$0.81` |
+| LITE_DECISION_LEDGER | CP-0, CP-8 | CP-8 | — | needs a decision record and a later outcome period | `$0.54` |
+| LITE_DEEP_RESEARCH | CP-0, CP-DR | CP-DR + host brief delivery | — | needs a brief; supplied evidence only | `$0.54` |
+| LITE_COVENANT_REFINANCING | CP-0, CP-L10, CP-3C, CP-5 | CP-3C | **CP-3C under LITE accepts only `lite_liquidity_sensitivity_screen`, `lite_market_recovery_opportunity_screen`, `lite_legal_structure_capacity_screen`; no vendored module produces them** | — | `$1.08` |
+| LITE_DISTRESSED_RESTRUCTURING | CP-0, CP-L10, CP-2A, CP-2H, CP-4C | CP-2H, CP-4C | **CP-2A/CP-2H accept `lite_fundamental_credit_screen`/`lite_liquidity_sensitivity_screen`; CP-4C `lite_legal_structure_capacity_screen`; none produced** | — | `$1.35` |
+| LITE_FULL_CREDIT_SCREEN | CP-0, CP-L10, CP-1A, CP-1C, CP-2A, CP-2H, CP-3C, CP-4C, CP-5 | CP-1A, CP-2H, CP-3C, CP-4C | **as above, four consumers** | — | `$2.43` |
+| RELATIVE_VALUE | 9 | none | — | fixture only; needs a real issuer with facility terms and a peer/market table | `$2.43` |
+| MARKET_DISLOCATION | CP-0, CP-3D | none | — | needs a dated market-data extract | `$0.54` |
+| LIQUIDITY_REVIEW | CP-0, CP-1, CP-2, CP-2D | CP-2D | — | CCL 10-K | `$1.08` |
+| EARNINGS_UPDATE | CP-0, CP-1, CP-1B, CP-2, CP-5 | CP-1B | — | two periods: VMO2 Q3/Q4 or CCL FY2024/FY2025 | `$1.35` |
+| DECISION_LEDGER | CP-0, CP-8 | CP-8 | — | as LITE_DECISION_LEDGER | `$0.54` |
+| DEEP_RESEARCH | CP-0, CP-DR | CP-DR | — | as LITE_DEEP_RESEARCH | `$0.54` |
+| COVENANT_REFINANCING | CP-0, CP-1, CP-4, CP-2, CP-2D, CP-3C, CP-5 | CP-2D, CP-3C | — | CCL 10-K + its indentures (public EDGAR exhibits, not in hand) | `$1.89` |
+| PORTFOLIO_DECISION | CP-0, CP-1, CP-2, CP-4, CP-3D, CP-3, CP-5, CP-6 | CP-6 (QA_GATE CP-5 → CP-6) | — | CCL 10-K + indentures + market extract | `$2.16` |
+| FULL_CREDIT_ASSESSMENT | 19 | CP-1A, CP-1B, CP-1D, CP-2D, CP-2E, CP-2H, CP-3C, CP-4C, CP-6 | — | CCL pack + rating reports + hedging note; needs per-node selection | `$5.13` |
+| DISTRESSED_RESTRUCTURING | 13 | CP-2D, CP-2H, CP-3C, CP-4C, CP-6 | — | **a distressed issuer, not in hand** | `$3.51` |
+
+Corpus in hand: `qualification/vmo2-fy2025/documents/` (two Virgin Media O2
+earnings releases, PDF); `qualification/ccl-fy2025/documents/CCL_FY2025_10K.txt`;
+and, outside the tree, the owner's three-issuer assessment corpus at
+`/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/`
+— CCL, Boeing (`BA`) and Ford (`F`) FY2025 10-K texts with raw HTML and XBRL
+company facts, and a human-authored answer key (`ANSWER_KEY_3ISSUER.md`: core
+facts, derived values and 24 traps per issuer). That key is a source for
+host keys; it is never an admitted document.
+
+## 3. Outstanding items
+
+P1 means it blocks a pathway from being deployed or a release label. P2 means
+a limit accepted under a stated condition that the plan removes. P3 means
+hygiene the ledger records. Each item names its phase.
+
+### Modules and pathways
+
+**O01 — Eleven modules have no canonical contract [P1, Phases 9 and 11].**
+CP-1A, CP-1B, CP-1D, CP-2D, CP-2E, CP-2H, CP-3C, CP-4C, CP-6, CP-8 and CP-DR
+are outside `ADAPTER_MODULES`; every pathway carrying one refuses before any
+attempt. Each needs the Task 5.2a treatment: a realistic fixture handoff built
+from the vendor's `load_contract` registers (`tests/canonical_route_fixtures.py`),
+the five contract tests, and the module added to the constant in the slice
+that proves it.
+
+**O02 — Sixteen pathways are not enabled [P1, Phases 9 and 11].** Enabling a
+route means every module on it proven, a deterministic whole-route run that
+completes, proves and freezes (`test_relative_value_route_completes_proves_and_freezes`'s
+shape), every request under the ceiling, the pair added to `ADAPTER_ROUTES`,
+and the `DISABLED` guard in `tests/test_relative_value_route.py` updated so it
+still asserts the exact enabled set. `tests/test_phase_exits.py` excuses one
+test (`NOT_YET_REACHED`, CP-1 canonical) that comes due with
+`FULL_CREDIT_ASSESSMENT`.
+
+**O03 — Three LITE pathways depend on producers the vendor does not ship
+[P1, bundle-side, Phase 8 request].** `CP_DEPLOY_V_EXECUTION_PROFILES_v1.json`
+`retained_lite_capabilities` declares the LITE objects CP-2A, CP-2H, CP-3C and
+CP-4C accept; the bundle ships their payload schemas
+(`CP-OS_MIRROR_CP-L20__lite_fundamental_credit_screen…`, `CP-L23`, `CP-L30`,
+`CP-L40`) but no skill for CP-L20, CP-L23, CP-L30 or CP-L40, and no catalog
+edge carries those objects. `invocation.named_objects` therefore holds those
+consumers BLOCKED on any route that offers no owner, and the ledger records
+that the host must not invent one. `LITE_COVENANT_REFINANCING`,
+`LITE_DISTRESSED_RESTRUCTURING` and `LITE_FULL_CREDIT_SCREEN` cannot be
+enabled until an upstream build ships the producers or an authorized §61-style
+edit carries the objects on the edges. Repair: the request document, and the
+three pathway tasks held in Phase 9 as blocked with their template ready.
+
+**O04 — CP-DR cannot be invoked [P1, Phase 9].** `RunInput.research_json` is
+pinned and validated to 64 KiB and read by nothing in `server/methodology/`;
+`CP_DR_RESEARCH_BRIEF_V1.md` requires the run-linked brief (`mode`, `run_id`,
+`cp0_sha256`, `authority_sha256`, scope, questions with
+`consumer_module_id`/`after_module_id`) as a sidecar and `prepare_invocation`
+to emit `research_mode`. Repair: the host renders the pinned brief as a
+host-owned tagged section for CP-DR only, with `source_mode` fixed to supplied
+evidence (invariant 1: web discovery is structurally absent), `cp0_sha256`
+bound to the accepted CP-0 record, and the CP-DR contract proven.
+
+**O05 — CP-8 needs a decision record the system has never produced [P1,
+Phase 9].** `DecisionLedgerPostMortem` records a completed decision's
+rationale, assumptions, dissent and realised outcomes (T7.1–T7.8: expected
+versus realised by metric, attribution, lessons). Its only required upstream
+is CP-0, so the decision record and the later outcome period are *documents*.
+Repair: a corpus pair — a decision memo at T0 (a filed CAOS deliverable is the
+natural one, or an owner-supplied memo) and the issuer's later filing at T1 —
+with keys authored from both.
+
+**O06 — The corpus in hand covers screening, not the FULL demands [P1,
+Phase 8].** Two earnings releases and three 10-K texts cover CP-0, CP-L10,
+CP-1, CP-1B, CP-1D, CP-2, CP-2D, CP-2E and CP-5. Not in hand: executed debt
+documents (CP-4, CP-3C, CP-4C — public EDGAR exhibits for CCL, BA and F);
+rating-agency reports and outlooks (CP-2H — public press releases); a dated
+market-data extract (CP-3D, CP-3 — must be supplied as a document); a peer
+pack (CP-1C — sector peers' filings); a distressed issuer with a documented
+distress gate (CP-4C, `DISTRESSED_RESTRUCTURING`); a decision record (CP-8).
+Repair: the corpus register (Phase 8), sourced pathway by pathway, each
+document admitted under its own digest and named in the set manifest.
+
+**O07 — Two of the three 10-K texts cannot run whole [P1 for BA and F, Phase
+10].** Boeing (1.1 MB) and Ford (1.8 MB) exceed `MAX_REQUEST_BYTES` alone;
+every module is handed every block (`captured_blocks`); the bounded line group
+is unbuilt; `CONTEXT_OVER_CEILING` refuses with no narrowing. CCL (304 KB)
+fits. Repair: per-node evidence selection from CP-0's `evidence_demand` and
+`active_representation_ids`, recorded on the attempt and enforced by every
+reader; the line group; a per-section bound and one recorded narrowing step.
+Until then the FULL pathways run on CCL and on curated extracts.
+
+**O08 — Keys measure citations, readiness and seven projected scalars, not
+registers [P1, Phase 8].** `ExpectedCitation`, `expects_ready`,
+`ExpectedProjection` over `PROJECTION_FIELDS` (`qa_status`,
+`committee_status`, `confidence_band`, `decision_scope`, `limitation_flags`,
+`validation_warnings`, `downstream_consumers`) and `ExpectedForecast` (CP-CF
+only). A CP-2D liquidity bridge or a CP-4 covenant term cannot be keyed. The
+vendor ships the reader: `completeness_check.find_registers(handoff_text,
+register_ids) -> {register_id: (header, rows)}`, loaded through
+`VendorContract`. Repair: `ExpectedRegister(module_id, register_id, row_key,
+column, expected)` where `row_key` is `{column: value}` selecting exactly one
+row (ambiguity refuses the key), compared on the NFC, whitespace-collapsed
+cell; authored from documents, never from a run.
+
+**O09 — The price is the caller's number [P2, Phase 8].** `ModelPrice` comes
+from `CAOS_MODEL_PRICE` (`worker.py:249`) and is not stored with the
+reservation; the worst-case byte bound reserves about `$3.64` per call at
+Terra's rates, so a nineteen-node route needs a `$70` ceiling before it can
+start. Repair: the dated price recorded on the reservation row and the
+encoded request priced before reserving.
+
+**O10 — A verdict's provider is the reviewer's word [P2, Phase 8].** Nothing
+refuses a verdict naming a model no run used; a second signature is
+`VERDICT_BINDING_INVALID` rather than `VERDICT_ALREADY_RECORDED`; the write
+has no receipt. Repair: the comparison in `read_verdict`'s callers, the code,
+and a global-scope receipt.
+
+**O11 — Four bundle-side decisions are owed [P2, Phase 8 request].** The
+disqualifier list conflates fixture markers with thin-evidence markers (§66);
+CP-0 gates per consumer while the owner's stated intent is classification
+only; `semantic_rules`, `document_substrings_casefold` and the LITE
+`required_payload_fields` ship without code; the LITE `decision_scope` maps to
+no `committee_status`. With O03 that is five requests, each a §61-style
+authorization or an upstream pull; the host closes none alone.
+
+### Record and delivery
+
+**O12 — The branch has not landed [P1, Phase 7].** 351 commits ahead;
+fourteen commits over the 800-line ceiling; eleven PRs open; hosted checks
+never verified against a Phase 5–6 candidate. Owned by the delivery session;
+Phase 7 verifies read-only.
+
+**O13 — The record disagrees with itself [P2, Phase 7].** The handoff's
+"Next task" still says CP-5 is deferred (§62) after §63 and §69; three ledger
+entries describe states `0018`–`0020` and §65 closed; the ledger's "predicates
+frozen and never evaluated" and "BLOCKED ends the run; recovery is a new run"
+carry upgrade paths this review withdraws (O16, O17); "Phase 7–10" headings
+are rebuild labels; `feature-status.csv` records the health route as unbuilt;
+`gemini-audit.md` and `PATHFINDER-2026-09-15/` are untracked.
+
+**O14 — The remediation stream's outputs are inputs here [dependency].** T7
+retires citation candidates and moves the prompt identity: every snapshot
+before it is not comparable, so the programme's live runs start after T7
+lands. T8 (`read_run_blocks`) and T11 (one verification reader) are what the
+evidence-selection task builds on. T2 closes the tokenless dev-mode role hole.
+D2 decides where Book starts. T3 removes two transactions per node while
+keeping the replay binding.
+
+### Route semantics
+
+**O15 — Every module is handed every block** — see O07 [P1, Phase 10].
+
+**O16 — A conditional edge would block unconditionally, and nothing says so
+at the pin [P3, Phase 10].** `EdgeType.CONDITIONAL` is in `BLOCKING`
+(`route.py:59`); the catalog declares none. Repair: a guard test on the
+catalog's typed-edge counts and `ROUTE_EDGE_UNSUPPORTED` at resolution; no
+evaluator until an upstream build introduces such an edge and the guard fails.
+
+**O17 — A discharged CONDITIONAL verdict has no path back [P2, Phase 10].**
+§61: the verdict names a source the effective set lacks, discharged by
+supplying it and re-running CP-0 — under the pins, a new run. The host keeps
+`(module_id, readiness)` per T8 row and drops `why_now_or_blocker`, the cell
+that names the source. Repair: project that cell (bounded), a
+`supersedes_run_id` on `runs` set by `CREATE_RUN`, both documents naming the
+link. The ledger's "governed resume" is withdrawn: a CAS back to RUNNING would
+reopen a run whose pins cannot change.
+
+**O18 — Upstream identity ignores readiness; the anchor is derived; the
+boundary is read from prose [P2, Phase 10].** Repair: readiness joins the
+refs from the T8 reader; a stored anchor; the structured LITE boundary read
+beside the prose block with disagreement refused.
+
+**O19 — Quotes match whole tokens exactly [P2, Phase 10].** Letter-spaced
+headings, trailing punctuation and crop-edge glyph boxes refuse. Repair:
+declared normalisations versioned in the extractor identity.
+
+### Workbench
+
+**O20 — Five governed writes have store functions and no route [P1, Phase
+12].** `members.grant`/`revoke`, source withdrawal, `save_revision`,
+`sign_opinion`/`freeze`/`file_deliverable`. `ACTION_UNPLACED`'s clearance is
+stale. Repair: five commands, controls, availability, the journey.
+
+**O21 — Book and Admin are unavailable [P2, Phase 12].** Book from the shell
+D2 leaves, over accepted CP-CF projections; Admin stays unavailable
+(`IA_SPEC.md` §4.9); membership surfaces in Directory.
+
+**O22 — The analysis page cannot name what blocked the run; Markdown renders
+as text; a citation without a page prints "page " [P2, Phase 12].**
+
+### Concurrency, durability, trust
+
+**O23 — One node at a time, one connection; a second worker is not safe
+[P2, Phase 13].** Sequential frontier and harness; `call_time_identity` by
+clock; lineage read once per unit; acceptance does not recompare upstream; I6
+can pay twice; `artifacts` mutable; proof and matrix not one snapshot.
+
+**O24 — Streams poll; the evidence page holds a transaction; no worker
+readiness; orphan blobs; unbounded blob reads; no schema-drift check; no
+`request_sha256` on audit events; receipts forever; non-atomic package
+publish [P3, Phase 13].**
+
+**O25 — The edge is one static shared secret; test-edge cookie without
+`Secure`; smoke not in CI; package verification has no signature anchor;
+gate scripts recognise names [P2/P3, Phase 13].**
+
+**O26 — Release evidence is a signed check, not a pack; the nightly live job
+has never been authorized [P2, Phase 13].**
+
+## 4. Completion gaps, not defects
+
+1. **Three LITE pathways and one FULL pathway need what the tree cannot
+   supply.** CP-L20/L23/L30/L40 are upstream's to ship (O03);
+   `DISTRESSED_RESTRUCTURING` needs a distressed issuer's documents and a
+   documented distress gate (O06). Each is recorded as *blocked on corpus or
+   bundle*, not as unqualified by the host's fault.
+2. **CP-DR researches supplied evidence only.** Invariant 1 makes web
+   discovery structurally absent; a CP-DR question whose evidence is not in
+   the pack is answered UNRESOLVED, and the key expects that.
+3. **A key is authored, not measured.** A key taken from what a run cited
+   measures the model against itself (§69's warning). Keys come from the
+   documents and the owner's answer key; where a figure is derived, the key
+   carries the derivation the vendor labels `[Calculated]`.
+4. **The trusted edge and authenticity end outside the tree** (O25).
+5. **Excluded on purpose, still:** no Excel/Word, no LibreOffice, no automatic
+   web research, no graph framework, no broker, no UI redesign, no dashboard,
+   no role switcher.
+
+## 5. Phased implementation plan
+
+Each phase is completed and demonstrated before its dependent phase starts;
+Phase 9's tasks are independent of each other and of Phase 10's, so the
+coordinator may run Phase 9 pathway tasks in parallel with Phase 10 engine
+tasks in disjoint worktrees, but accepts them as separate phases. Small
+single-concern PRs; the hosted 800-counted-line ceiling per actual PR base,
+with the standing over-cap exception for proven-indivisible commits.
+
+### Indexing, review and model policy
+
+Ordinary exact-range review per task; one `confidence-review` and one
+separate adversarial code audit per whole phase, with remediation and
+reverification between them; no rewrite tournaments; no per-task specialist
+review. The model axis follows the owner's Opus 5 / Fable 5.1 matrix (16
+September 2026); Sonnet is not used.
+
+| Activity | Model and effort | Notes |
+|---|---|---|
+| GitNexus refresh and caller verification | any, `low` | `analyze --force --index-only`, `status`; verify callers in source |
+| Phase brief, spec, ADR, request document to the vendor | **Fable 5.1 `high`** | one brief per phase; one code-ready brief per task at phase entry |
+| Plan or trade-off stress test | **Opus 5 `max` with `ultrathink`** | one targeted prompt per brief; never `ultrathink` on Fable |
+| Long-horizon multi-file implementation | **Fable 5.1 `medium`** | evidence selection (10.1), CP-DR brief delivery (9.4), the command chain (12.1), async store and second worker (13.1, 13.2), signed assertion (13.4) |
+| Per-module fixture and contract tests; route enablement slices | **Opus 5 `medium`** | the Task 5.2a precedent; one implementer per module, one per route |
+| Answer-key authoring from documents | **Opus 5 `medium`**, documents only | the key file and its derivations; the owner confirms every material figure; nothing read from a run |
+| Ordinary implementation: endpoints, wire, UI, unit and integration tests | **Opus 5 `medium`** | 8.1–8.3, 10.2–10.5, 12.2–12.4, 13.3, 13.5, 13.6 |
+| Scaffolding, fixtures, regenerated ledgers, docstrings, status | **Opus 5 `low`** | 7.1, corpus admission manifests, schema regeneration |
+| Targeted invariant audit | **Opus 5 `max` with `ultrathink`** | each module's register semantics before its fixture is trusted (the 5.2a precedent); money path (8.2); three-actor independence (12.1); interleavings (13.2); trust trace (13.4) |
+| Ordinary per-task review | **Opus 5 `medium`** | the exact base…candidate range |
+| Whole-phase `confidence-review` and adversarial audit | **Fable 5.1 `xhigh`** | actual `xhigh`, read back from the session record before the review turn |
+
+A mixed slice takes the stricter row. Record the actual model, version and
+effort at every formal checkpoint. Up to five implementers in isolated
+worktrees with disjoint owned files, migrations and UUID-owned test databases
+and blob roots; the coordinator alone integrates, gates and accepts, and fixes
+an implementer's failure directly rather than re-dispatching.
+
+**Coordination with the remediation stream.** Programme slices that edit
+`server/methodology/handoff.py` (`ADAPTER_MODULES`, `ADAPTER_ROUTES`) or
+`server/methodology/invocation.py` rebase onto the remediation's wave-3
+integration (T10–T15 touch both); until it lands they own only test files,
+fixtures and the two constants' lines. The programme's live runs begin only
+after T7 (D1) has moved the prompt identity.
+
+**High-risk sections** are the repair plan's list plus: per-node delivery;
+the successor link; the five new writes; the second worker; the signed
+assertion; the price recorded with the reservation; **and every register key
+and its derivation** — a wrong key qualifies a wrong conclusion.
+
+Phase-close order: implementation → normal tests → `confidence-review`
+(Fable 5.1 `xhigh`) → remediate and rerun → refresh GitNexus → adversarial code
+audit (Fable 5.1 `xhigh`) → remediate and reverify → phase accepted, recorded in
+the handoff with both review records and the actual settings.
+
+### The pathway task template
+
+Every pathway task in Phases 9 and 11 has the same shape; each brief
+instantiates it against the current interfaces. Numbers in brackets are the
+step's model row.
+
+1. **Contract stress test** [Opus 5 `max`, `ultrathink`]: for each unproven
+   module, read its `SKILL.md`, `load_contract` registers and payload schema;
+   name the register rows whose semantics a fixture could fake and the cells
+   a key must pin.
+2. **Fixture pack and handoffs** [Opus 5 `medium`]: extend
+   `tests/canonical_route_fixtures.py` with one realistic issuer pack for the
+   pathway (quotes whole tokens; independently authored figures) and one
+   fixture handoff per module from `load_contract`'s registers and minimum
+   rows; module-specific cells in one small function each.
+3. **Contract tests** [Opus 5 `medium`]: the five per module
+   (`test_<module>_contract_validates_identifies_projects_and_anchors`,
+   `…_refuses_a_missing_register`, `…_refuses_a_wrong_upstream`,
+   `…_refuses_an_unanchored_quote`, `test_each_restricted_owner_retains_its_limitations`),
+   parametrised in `tests/test_owner_contracts.py`; the module joins
+   `ADAPTER_MODULES` in the same slice.
+4. **Whole-route deterministic run** [Opus 5 `medium`]: completes, proves,
+   freezes; every request under `MAX_REQUEST_BYTES`; a blocked required
+   owner holds every dependent and calls nothing after; a restricted owner
+   keeps its limitations downstream; where the route has a QA_GATE, `Blocked`
+   holds CP-6 and `Passed` releases it; the pair joins `ADAPTER_ROUTES`; the
+   `DISABLED` guard updated.
+5. **Corpus** [Opus 5 `low` for admission manifests; the owner for sourcing]:
+   the documents each module demands, admitted under their digests into a
+   named set under `qualification/<set>/documents/`, each with provenance
+   (URL, accession, date) in the set's `RESULT.md` header; documents not in
+   hand recorded as *blocked on corpus*.
+6. **Keys** [Opus 5 `medium`, documents only]: per module at least one
+   `ExpectedRegister`, one `ExpectedProjection` and, where the module cites,
+   one `ExpectedCitation` naming the fact-carrying line; `expects_ready` for
+   every module the route runs; a refusal expectation where the corpus
+   cannot support a module. Authored before any run; the owner confirms
+   material figures; the set digest recorded.
+7. **Live run** [authorization required]: provider, model, endpoint tag,
+   reasoning effort, ceiling and window authorized per set;
+   `scripts/qualify.py <set> --expect-identity <profile> --ceiling <n>`;
+   database and blob root retained; the capture committed under
+   `qualification/<set>/`; the verdict signed by an `ADMIN` through
+   `POST /api/v1/qualification/{evidence_sha256}/verdict` — or the set
+   recorded as not qualified with the reason.
+
+### Phase 7 — Reconcile the record and land the branch
+
+**Fixes:** O12, O13; records O14.
+
+**Work**
+
+1. Make the record true (Task 7.1): strike the closed ledger entries with
+   their commits; rewrite the two withdrawn upgrade paths (O16, O17); relabel
+   the rebuild headings; add a "Completion Phase 7" heading; rewrite the
+   handoff's checkpoint table to §69's state and this plan; regenerate the
+   stale `feature-status.csv` rows; a `tests/test_ledger.py` gate that fails
+   when a struck entry cites a test the suite lacks or an open entry cites
+   the test that proves its closure. Move `gemini-audit.md` and
+   `PATHFINDER-2026-09-15/` under `docs/reviews/supplemental/` with a header
+   naming the concurrent review, or delete them.
+2. Land and verify (Task 7.2): for each PR the delivery session merges, the
+   head, base, counted size and the nine hosted check results read from
+   GitHub; over-cap merges with their split proof; the `main` commit at which
+   the branch is fully landed; GitNexus refreshed there.
+3. Record the remediation stream's landed commits per wave in the handoff
+   as they integrate; do not run its tasks, reviews or phase close from here.
+
+**Exit checks**
+
+- `tests/test_ledger.py` passes; no entry names a state a later decision
+  closed; the handoff names this plan and the remediation stream's state.
+- Every merged PR since #258 has a row with hosted results read from GitHub;
+  no hosted status is described from a local run.
+- Nothing under the repository root is untracked except `.claude/`.
+
+**Guardrails:** no edit to `docs/REPAIR_PLAN.md`; no remediation task run
+from this plan; no push, PR or ruleset change without authorization.
+
+### Phase 8 — The qualification instrument
+
+**Fixes:** O03 (request), O06 (register), O08, O09, O10, O11 (requests).
+
+**Work**
+
+1. Register keys (Task 8.1): `ExpectedRegister` in
+   `server/qualification/matrix.py`, read through
+   `VendorContract.completeness_check.find_registers` on the accepted
+   Markdown; `expects_register` in the on-disk manifest; the borrowing-capacity
+   key re-cast to the fact-carrying line; a key whose `row_key` matches no
+   row or more than one refuses `QUALIFICATION_KEY_AMBIGUOUS` at set load.
+2. The price with the reservation (Task 8.2): `budget_reservations` gains the
+   dated price (name, input, output, `as_of`) in a migration; the encoded
+   request is priced after the prompt is built and before the reservation;
+   the worst-case byte bound remains the ceiling check, not the reservation.
+3. Verdict hygiene (Task 8.3): the provider comparison against the models the
+   runs recorded; `VERDICT_ALREADY_RECORDED`; a global-scope receipt.
+4. The corpus register (Task 8.4): `qualification/CORPUS.md` — one row per
+   document in hand or needed: pathway, module demand, source (URL,
+   accession), digest once admitted, status (in hand / to source / not
+   available); the sourcing list for the owner (EDGAR exhibits for CCL, BA and
+   F debt documents; rating press releases; a dated market extract; peer
+   filings; a decision record; a distressed issuer). Nothing is fetched
+   automatically.
+5. Bundle change requests (Task 8.5): five request documents under
+   `docs/requests/`, each stating the change, the evidence, and what it
+   unblocks: the LITE producers (O03); the marker split (§66); CP-0's gating
+   versus classification; the three unshipped rules; the LITE scope-to-status
+   mapping. Each awaits its own §61-style authorization or an upstream pull.
+
+**Exit checks**
+
+- A key naming a wrong cell fails a run whose citations are all located; an
+  ambiguous `row_key` refuses at load; the VMO2 set gains one register key
+  per module and still loads with an unchanged citation key.
+- A reservation row says which dated price produced it; a small prompt
+  reserves its priced cost, not the byte ceiling.
+- A verdict naming an unused model is refused; a second signature is
+  `VERDICT_ALREADY_RECORDED`.
+- `CORPUS.md` names every document Phase 9 and Phase 11 tasks will admit, with
+  status; the five requests exist and the handoff records them as pending.
+
+**Guardrails:** no key authored from a run's output; no document fetched by
+the system; no vendor file edited by a request.
+
+### Phase 9 — The LITE pathways
+
+**Fixes:** O01 (CP-8, CP-DR), O02 (four pathways), O04, O05; holds three
+pathways on O03.
+
+**Work** — one task per pathway on the template, in this order:
+
+1. `LITE_PORTFOLIO_DECISION` (Task 9.1): CP-0 → CP-L10, both proven; the
+   route's contract test, the ledger entry that says it has none retired; keys
+   on VMO2 and CCL; live run and verdict when authorized.
+2. `LITE_RELATIVE_VALUE` (Task 9.2): CP-1C under its LITE compatibility block
+   (accepts `lite_financial_change_screen`); a peer table document sourced for
+   the corpus; keys; run.
+3. `LITE_DECISION_LEDGER` (Task 9.3): CP-8's contract; the decision-record
+   corpus pair (O05); keys; run.
+4. `LITE_DEEP_RESEARCH` (Task 9.4): the host delivers the pinned brief to
+   CP-DR as a tagged host-owned section, `source_mode` supplied-only,
+   `cp0_sha256` bound to the accepted CP-0 record, refused for any other
+   module; CP-DR's contract; a brief and its evidence in the corpus; keys
+   that expect UNRESOLVED where the pack cannot answer; run.
+5. `LITE_COVENANT_REFINANCING`, `LITE_DISTRESSED_RESTRUCTURING`,
+   `LITE_FULL_CREDIT_SCREEN` (Tasks 9.5–9.7): **blocked on O03.** The briefs
+   are written to the template and held; the day the producers arrive each
+   runs as written.
+
+**Exit checks**
+
+- Four LITE pathways in `ADAPTER_ROUTES`, each with a deterministic
+  whole-route test, a set with keys, and either a live snapshot with a signed
+  verdict or a recorded reason.
+- CP-DR receives exactly the pinned brief and nothing else new; a run whose
+  pin carries no brief cannot reach CP-DR; a brief naming a consumer the route
+  does not carry refuses at pin.
+- CP-8's expected-versus-realised registers key against the outcome document.
+- The three held pathways refuse `HANDOFF_MODULE_UNSUPPORTED` before any
+  attempt and the handoff names the request they wait on.
+
+**Guardrails:** no host-invented LITE producer; no CP-DR web access; no
+route enabled before its whole-route test; no key from a run.
+
+### Phase 10 — Route semantics for large evidence
+
+**Fixes:** O07/O15, O16–O19.
+
+**Work**
+
+1. Per-node evidence selection (Task 10.1), on the prompt T7 leaves, the
+   batched `read_run_blocks` T8 adds and the one verification reader T11
+   leaves: delivery derived from the accepted CP-0 verdict's
+   `evidence_demand`/`active_representation_ids` against the pinned set;
+   written as an immutable `attempt_deliveries` row in the attempt's
+   transaction; `verify_citations`, the proof and the deliverable anchor
+   against the row; the bounded line group; a per-section bound and one
+   recorded narrowing step; never truncation.
+2. The conditional-edge guard (Task 10.2).
+3. Successor runs (Task 10.3): the projected blocker cell; `supersedes_run_id`;
+   both documents; the Restricted-clearance decision recorded.
+4. Readiness-joined refs, a stored anchor, the structured boundary (Task 10.4).
+5. Declared quote normalisations (Task 10.5).
+
+**Exit checks**
+
+- A node is handed only what its verdict demanded; a quote on an undelivered
+  page of a delivered source is refused on a real run.
+- Boeing's and Ford's 10-K texts admit, group into bounded blocks, and a node
+  demanding their statements runs under the ceiling.
+- The catalog guard passes; a profile with a CONDITIONAL edge refuses at
+  resolution.
+- A BLOCKED run's document names the source its CONDITIONAL row asked for; a
+  successor names its predecessor and is refused for a run that is not
+  BLOCKED or not of its case.
+- A letter-spaced heading and a quote ending in a full stop anchor to the
+  rectangle a reader sees.
+
+**Guardrails:** no evaluator for an edge type the catalog does not carry; no
+delivery chosen by the model; no truncation; no run reopened after it ended.
+
+### Phase 11 — The FULL pathways
+
+**Fixes:** O01 (nine modules), O02 (nine pathways + RELATIVE_VALUE live).
+
+**Work** — one task per pathway on the template, ordered by new modules and
+corpus:
+
+1. `MARKET_DISLOCATION` (11.1): CP-0, CP-3D, both proven; a dated market
+   extract; keys; run.
+2. `LIQUIDITY_REVIEW` (11.2): CP-2D; CCL 10-K; keys from the cash-flow
+   statement and liquidity note (the answer key's CFO 6,218, capex 3,611,
+   cash 1,928 are the anchors); run.
+3. `EARNINGS_UPDATE` (11.3): CP-1B; two periods (VMO2 Q3/Q4 or CCL
+   FY2024/FY2025); keys on the delta; run.
+4. `DECISION_LEDGER` and `DEEP_RESEARCH` (11.4): CP-8 and CP-DR contracts
+   shared with Phase 9; FULL-profile identity; keys; runs.
+5. `RELATIVE_VALUE` live (11.5): the enabled route has only a fixture; a
+   real issuer pack (annual report, facility terms from an EDGAR exhibit, a
+   peer/market table); keys; run.
+6. `COVENANT_REFINANCING` (11.6): CP-3C; CCL indentures sourced; keys on
+   maturities and covenant terms; run.
+7. `PORTFOLIO_DECISION` (11.7): CP-6 and the QA_GATE; the HTTP test over a
+   canonical `read_run` with a QA verdict other than `Passed` (the ledger's
+   owed test); keys; run.
+8. `FULL_CREDIT_ASSESSMENT` (11.8): CP-1A, CP-1D, CP-2E, CP-2H, CP-4C; the
+   CCL pack plus rating reports and the hedging note; needs Phase 10; retires
+   `NOT_YET_REACHED`; keys; run.
+9. `DISTRESSED_RESTRUCTURING` (11.9): CP-4C's distress gate; **blocked on
+   corpus** until a distressed issuer's documents are sourced; brief held.
+
+**Exit checks**
+
+- Every FULL pathway except the one blocked on corpus is in `ADAPTER_ROUTES`
+  with a whole-route test, a set with keys, and a signed verdict or a
+  recorded reason; `tests/test_phase_exits.py` lists nothing under
+  `NOT_YET_REACHED`.
+- A `Blocked` CP-5 holds CP-6 on the production API and the run document
+  says so.
+- No pathway is advertised whose corpus could not support a module; the
+  refusal expectation in its set says which.
+
+**Guardrails:** no route enabled before its whole-route test; no key from a
+run; no fabricated owner rows; no spend without its authorization line.
+
+### Phase 12 — Complete the governed workbench
+
+**Fixes:** O20–O22.
+
+**Work:** five commands over the governed-write pattern (12.1); controls and
+availability, the clearance corrected, one available demo action (12.2);
+Book over accepted snapshots from the shell D2 leaves (12.3); `blocked_by` on
+`AnalysisBody`, a Markdown renderer with a closed element set, a citation
+without a page refused (12.4); the journey extended through withdraw, save,
+sign, freeze, file, grant, revoke and Book compare on three engines (12.5).
+
+**Exit checks:** every new command passes the seven-identity matrix; a signer
+cannot freeze and a freezer cannot file; withdrawal mid-run prevents fresh
+acceptance and updates an open drawer; Book compares on one stated basis with
+a ten-field passport per cell; the analysis page names the blocking node; nine
+sections honest.
+
+### Phase 13 — Concurrency, durability, the trusted edge, the release pack
+
+**Fixes:** O23–O26.
+
+**Work:** async store and the frontier's `gather` (13.1); second-worker
+safety in the race suite (13.2); `LISTEN`/`NOTIFY`, a stream cap, worker
+readiness, the frame outside the transaction (13.3); the signed identity
+assertion or mTLS, TLS in the smoke stack, the smoke stack in CI (13.4); store
+hygiene and gate scripts (13.5); the release pack generated from the suite and
+the store, the first authorized nightly, hosted checks verified against the
+candidate on `main` (13.6).
+
+**Exit checks:** two workers on one queue yield one accepted result per node
+generation; a wide frontier finishes in the longest node's time; a forged
+group header is refused whatever the proxy forwarded; the smoke stack runs in
+CI; the release pack reproduces without editing a checksum; every advertised
+pathway has a current verdict or is disabled and says so.
+
+## 6. Development environment
+
+Unchanged from the README and [`CI_GATE_CONTRACT.md`](CI_GATE_CONTRACT.md).
+Additions arrive only with their tasks and decisions: a confirmed price
+recorded with reservations (8.2); an identity-provider setting for the signed
+assertion (13.4). Every shell command still starts by unsetting
+`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`,
+`OPENROUTER_PROVIDER`, `OPENROUTER_REASONING_EFFORT` and
+`CAOS_REQUIRE_PROVIDER`.
+
+## 7. Gate rules
+
+The repair plan's §7 tables apply unchanged. Four rows are sharpened:
+
+| Gate | Addition |
+|---|---|
+| Review/diff | Ordinary review on Opus 5 `medium`; model, version and effort recorded in the task's acceptance note |
+| Phase-completion reviews | Both whole-phase reviews on Fable 5.1 at its actual top effort, read back from the session record; no `ultrathink` in a Fable prompt |
+| Release qualification | A verdict must name a model the runs recorded; a pathway is advertised only with a current verdict over a complete snapshot on the current build and the current prompt identity |
+| Answer keys | A key is authored from documents before the run and its material figures are confirmed by the owner; a key changed after a run invalidates that run's comparability, and the set digest says so |
+
+### Definition of done for each completion item
+
+The repair plan's §7C, plus: the ledger entry that recorded the limit is
+struck in the commit that closes it, naming the test; a pathway is done when
+its route is enabled, its set has keys, and its live result — qualified or
+not — is recorded with its authorization.
+
+## 8. Smallest useful delivery order
+
+1. **Record and delivery:** the tree on `main`, the ledger true.
+2. **Instrument:** register keys, the price, verdict hygiene, the corpus
+   register, the five requests.
+3. **LITE pathways:** four deployed; three held on the vendor.
+4. **Large evidence:** selection, guard, successor runs.
+5. **FULL pathways:** eight deployed; one held on corpus.
+6. **The whole workbench**, then **two workers, a real edge, the pack.**
+
+Skipped deliberately: another architecture pass, a generic agent platform, a
+second orchestration layer, workbook or Word output, automatic research, a
+redesign.
+
+## 9. Confidence review — this plan
+
+Least confident about, ranked by consequence:
+
+1. **Whether every module's evidence demand is what its skill says.** Read
+   each unproven module's `Dependencies` line, entry stages, purpose and
+   register list from the catalog and `SKILL.md`; did not read every register
+   definition. Verdict: the corpus register (8.4) is where each demand is
+   pinned document by document, and step 1 of the template re-reads the skill
+   before any fixture is trusted.
+2. **Ordering the LITE pathways before evidence selection.** VMO2 and CCL fit
+   the ceiling (452,993 bytes measured with the candidate headers T7 removes);
+   BA and F do not. Verdict: Phase 9 runs on what fits; Phase 11's larger
+   packs wait for Phase 10.
+3. **The three held LITE pathways.** Verified the schemas exist and the skills
+   do not, and that no profile edge carries an object. Verdict: bundle-side;
+   the request is the deliverable, not a host workaround.
+4. **CP-8's corpus.** Its only required upstream is CP-0; the decision record
+   is a document. Verdict: a filed CAOS deliverable is the natural T0 record
+   once Phase 12 lands the filing commands; until then an owner-supplied memo.
+5. **Cost figures.** `$0.27` per call is `$0.80` over three calls on the
+   current build (`RESULT.md`); totals are that rate times node counts.
+6. **The remediation stream's state.** Observed from worktrees and branches
+   at review time; it moves. Recorded as observed on 17 September.
+7. **Treating audit claims as findings.** Five verified in source; the
+   concurrent review re-verified all and more. Verdict: adopted as the source
+   of truth for those findings; this plan does not own their fixes.
+
+Fixed in this deliverable: nothing in source. Verified fine: the served route
+list, the enabled sections and routes, the migration list, the catalog's
+pathway node lists and typed edges, the execution profiles' LITE object rows,
+the key dataclasses, the qualification driver's interface. By design: §4.
+Still open: everything in §3.
