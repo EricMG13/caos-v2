@@ -107,7 +107,11 @@ describe("the command transport", () => {
     expect(fetchSpy.mock.calls[1]![0]).toBe(`/api/v1/cases/${CASE}/runs`);
     expect(fetchSpy.mock.calls[1]![1].method).toBe("POST");
     expect(fetchSpy.mock.calls[1]![1].body).toBe(
-      JSON.stringify({ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "S1", supersedes: null }),
+      JSON.stringify({
+        profile_id: "FULL_CREDIT_ASSESSMENT",
+        selection_id: "S1",
+        supersedes: null,
+      }),
     );
 
     const subject = {
