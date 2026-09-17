@@ -642,6 +642,22 @@ def lite_object_requirement(
     return frozenset(ids)
 
 
+def _verified_catalog(bundle: Bundle) -> dict[str, Any]:
+    """The vendor catalog, or the code for authority that will not parse.
+
+    Verified bytes that are not a JSON object are the bundle disagreeing with
+    itself, which every reader answers with `AUTHORITY_BYTES_MISMATCH`; a bare
+    `json.loads` here raised `ValueError` past the typed boundary instead.
+    """
+    try:
+        catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
+    except ValueError:
+        catalog = None
+    if not isinstance(catalog, dict):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return catalog
+
+
 def named_objects(bundle: Bundle, route: ResolvedRoute) -> NamedObjects:
     """The pinned route's named-object boundary, from verified bundle bytes.
 
@@ -650,7 +666,7 @@ def named_objects(bundle: Bundle, route: ResolvedRoute) -> NamedObjects:
     `owned_objects`. A module the manifest does not carry (a host extension)
     has no vendor block to retain.
     """
-    catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
+    catalog = _verified_catalog(bundle)
     owned: dict[str, str] = {}
     accepted_ids: dict[str, frozenset[str]] = {}
     for node in route.nodes:
@@ -827,6 +843,18 @@ def _printable(value: str) -> str:
     return "".join(character for character in value if character not in INVISIBLE)
 
 
+def _member_identity(stored: str) -> object:
+    """One pinned extraction identity, as the store holds it.
+
+    These are bytes this host wrote at admission, so text that will not parse
+    is a store fault with a code -- never a `ValueError` out of the builder.
+    """
+    try:
+        return json.loads(stored)
+    except ValueError:
+        raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
+
+
 def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
     """CP-0's verified source provenance, deliberately outside evidence."""
     if source_set is None:
@@ -849,7 +877,7 @@ def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
                 "admitted_at": member.admitted_at,
                 "original_root": f"blob://sha256/{member.document_sha256}",
                 "original_sha256": member.document_sha256,
-                "extractor_identity": json.loads(member.extractor_identity),
+                "extractor_identity": _member_identity(member.extractor_identity),
                 "output_sha256": member.output_sha256,
                 "extraction_sha256": member.extraction_sha256,
             }

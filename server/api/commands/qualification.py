@@ -30,8 +30,10 @@ store holds.
 from __future__ import annotations
 
 from re import fullmatch
-from typing import Annotated
+from typing import Annotated, Any
+from uuid import UUID
 
+import psycopg
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
@@ -40,9 +42,9 @@ from server.api.deps import Caller, Store
 from server.api.identity import Actor, GlobalRole, at_least
 from server.api.wire import SignVerdict, VerdictRecorded
 from server.qualification.store import evidence_at, record_verdict
-from server.qualification.verdict import read_verdict
+from server.qualification.verdict import Verdict, read_verdict
 from server.refusals import Refusal, RefusalCode
-from server.store import rollback_or_close
+from server.store import StoreConnection, rollback_or_close
 
 # The store's clock, the exact evidence lookup, then `record_verdict`: the
 # `complete` read, `record_evidence`'s three statements, and the insert.
@@ -83,6 +85,32 @@ Reviewer = Annotated[Actor, Depends(require_reviewer)]
 EvidencePath = Annotated[str, Depends(evidence_path)]
 
 
+def _signed(
+    conn: StoreConnection,
+    *,
+    evidence_sha256: str,
+    reviewer_id: UUID,
+    document: dict[str, Any],
+) -> Verdict:
+    """Every statement the request sends, so the route can type what fails.
+
+    Its own function because each of these is the store answering: with them
+    inline the route could not tell a driver fault from a refusal without
+    catching `psycopg.Error` around raises of its own.
+    """
+    row = conn.execute("SELECT now()").fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+    [now] = row
+    verdict = read_verdict(document, now=now)
+    evidence = evidence_at(conn, evidence_sha256=evidence_sha256)
+    if evidence is None:
+        raise Refusal(RefusalCode.QUALIFICATION_EVIDENCE_NOT_FOUND)
+    record_verdict(conn, evidence=evidence, reviewer_id=reviewer_id, verdict=verdict)
+    conn.commit()
+    return verdict
+
+
 @router.post("/api/v1/qualification/{evidence_sha256}/verdict")
 def sign_verdict(
     reviewer: Reviewer,
@@ -98,22 +126,22 @@ def sign_verdict(
     refuses. A refusal after the first write rolls the transaction back, so a
     verdict that did not bind leaves no evidence row behind it either.
     """
-    row = conn.execute("SELECT now()").fetchone()
-    if row is None:
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
-    [now] = row
-    verdict = read_verdict(body.model_dump(mode="json"), now=now)
-    evidence = evidence_at(conn, evidence_sha256=evidence_sha256)
-    if evidence is None:
-        raise Refusal(RefusalCode.QUALIFICATION_EVIDENCE_NOT_FOUND)
     try:
-        record_verdict(
-            conn, evidence=evidence, reviewer_id=reviewer.user_id, verdict=verdict
+        verdict = _signed(
+            conn,
+            evidence_sha256=evidence_sha256,
+            reviewer_id=reviewer.user_id,
+            document=body.model_dump(mode="json"),
         )
-        conn.commit()
     except Refusal:
         rollback_or_close(conn)
         raise
+    except psycopg.Error:
+        # The clock, the lookup and the writes are all the store's to fail.
+        # Outside this handler a driver error left the typed boundary as an
+        # untyped 500 carrying the driver's own message into whatever logs it.
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
     receipt = VerdictRecorded(
         evidence_sha256=evidence_sha256,
         reviewer_id=reviewer.user_id,

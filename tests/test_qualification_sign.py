@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -364,4 +365,51 @@ def test_a_request_that_is_not_a_verdict_document_is_request_invalid(
         answer = _sign(http, evidence.sha256, body, uuid4())
         assert answer.status_code == 400, body
         assert answer.json()["code"] == RefusalCode.REQUEST_INVALID, body
+    assert _rows(conn) == ([], 1)
+
+
+class _Faulting:
+    """The request's connection, faulting on one statement the route sends."""
+
+    def __init__(self, conn: StoreConnection, on: str) -> None:
+        self._conn = conn
+        self._on = on
+
+    def execute(self, *args: object, **kwargs: object) -> object:
+        if args and str(args[0]).startswith(self._on):
+            raise psycopg.OperationalError("simulated")
+        return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT now()",
+        "SELECT e.qualification_set_sha256",
+        "SELECT qualification_set_sha256",
+        "INSERT INTO qualification_verdicts",
+    ],
+)
+def test_a_store_fault_while_signing_is_503_and_not_a_binding_error(
+    client: tuple[TestClient, StoreConnection], statement: str
+) -> None:
+    """The clock read, the evidence lookup and the writes underneath
+    `record_verdict` are the store answering, not the reviewer's document.
+
+    A driver fault on any of them said `VERDICT_BINDING_INVALID` -- a 400
+    telling a reviewer whose bindings were correct to correct them -- or left
+    the typed boundary entirely as an untyped 500. Both are 503 now.
+    """
+    http, conn = client
+    evidence = qualification_performed().evidence
+    app.dependency_overrides[store_connection] = lambda: _Faulting(conn, statement)
+
+    answer = _sign(http, evidence.sha256, _document(evidence), uuid4())
+
+    assert answer.status_code == 503, answer.text
+    assert answer.json()["code"] == "STORE_UNAVAILABLE"
+    app.dependency_overrides[store_connection] = lambda: conn
     assert _rows(conn) == ([], 1)

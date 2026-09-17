@@ -35,6 +35,7 @@ from test_execution_freshness import _Harness
 
 from server.api import app as app_module
 from server.api.app import (
+    _STATUS,
     app,
     blob_store,
     methodology_bundle,
@@ -734,6 +735,16 @@ def test_every_refusal_code_has_a_constant_clearance() -> None:
         clears = CLEARS[code]
         assert isinstance(clears, str) and clears.strip(), code
         assert "{" not in clears and "}" not in clears and "%" not in clears, code
+
+
+def test_every_refusal_code_has_an_explicit_http_status() -> None:
+    """`_STATUS` is total over `RefusalCode`, the way `CLEARS` beside it is.
+
+    A default would make a code added later answer 400 -- "your request was
+    wrong" -- without anyone choosing that, which is how a store fault came to
+    be served as a binding error. Being total, the table is the choice.
+    """
+    assert set(_STATUS) == set(RefusalCode), set(RefusalCode) - set(_STATUS)
 
 
 def test_an_undeclared_api_path_or_method_answers_endpoint_not_found_in_the_refusal_body(  # noqa: E501 -- the brief's name
