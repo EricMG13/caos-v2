@@ -105,6 +105,9 @@ button.rb{cursor: pointer}
 .pnl > .pb.scroll{overflow: auto;min-height: 0}
 /* A wide table scrolls inside its panel; the page never scrolls sideways. */
 .tscroll{overflow-x: auto;min-width: 0}
+/* Report's saved artifact is a keyboard-focusable scroll region (WCAG 2.5.8);
+   its content is one text line, so nothing else gives it a 24px target. */
+.artifact-scroll{min-height:24px}
 /* Lists are lists; these carry no marker of their own. */
 .plain{list-style: none;margin: 0;padding: 0}
 .pnl.ok{border-color: var(--ok-bd)}
