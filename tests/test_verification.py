@@ -222,11 +222,7 @@ def test_the_runtime_read_still_refuses_a_tampered_sibling_file(
             ran.blobs,
             ran.bundle,
             ran.route,
-            run_id=row.run_id,
-            route_node_id=row.route_node_id,
-            attempt_id=row.attempt_id,
-            artifact_sha256=row.artifact_sha256,
-            record_sha256=row.record_sha256,
+            row,
         )
     ran.conn.rollback()
     assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
