@@ -205,6 +205,12 @@ export const parseRunWork = (value: unknown): RunWork => parse(RunWork, value);
 // control reads back is validated here.
 export const parseSourceWithdrawn = (value: unknown): SourceWithdrawn =>
   parse(SourceWithdrawn, value);
+export const parseRevisionSaved = (value: unknown): RevisionSaved => parse(RevisionSaved, value);
+export const parseOpinionSigned = (value: unknown): OpinionSigned => parse(OpinionSigned, value);
+export const parseDeliverableFrozen = (value: unknown): DeliverableFrozen =>
+  parse(DeliverableFrozen, value);
+export const parseDeliverableFiled = (value: unknown): DeliverableFiled =>
+  parse(DeliverableFiled, value);
 // No `parseVerdictRecorded`, `parseStandingGranted` or `parseStandingRevoked`:
 // the workspace has no control for any of the three, and a validator nothing
 // calls is coverage without a caller. Their shapes are pinned above so the day

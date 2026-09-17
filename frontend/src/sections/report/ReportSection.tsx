@@ -1,5 +1,7 @@
 // The saved Report payload, read only. Text stays text: this surface never
 // interprets markdown, follows evidence, or offers a legacy draft action.
+import { useState } from "react";
+import { FilingControls } from "./FilingControls";
 import { scrollArtifact } from "@/controls/scroll";
 import { NoteList } from "@/ds/atoms";
 import type { ReportDocument } from "@/wire/v1";
@@ -57,7 +59,16 @@ function Artifact({ artifact }: { artifact: ReportDocument["body"]["artifacts"][
 /* eslint-enable jsx-a11y/no-noninteractive-element-interactions */
 
 export function ReportSection({ document }: { document: ReportDocument; tab: string | null }) {
-  const { body } = document;
+  // The filing controls re-read this section's own document after an act, and
+  // a fresh document from the parent always supersedes that local copy --
+  // adjusted during render, React's own pattern, as Directory and Upload do.
+  const [live, setLive] = useState(document);
+  const [seen, setSeen] = useState(document);
+  if (document !== seen) {
+    setSeen(document);
+    setLive(document);
+  }
+  const { body } = live;
   return (
     <div
       className="col"
@@ -86,6 +97,7 @@ export function ReportSection({ document }: { document: ReportDocument; tab: str
       {body.artifacts.map((artifact) => (
         <Artifact key={artifact.route_node_id} artifact={artifact} />
       ))}
+      <FilingControls document={live} onRefreshed={setLive} />
       <section className="pnl" data-report-narrative>
         <header>
           <h2>Narrative</h2>
