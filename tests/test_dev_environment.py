@@ -239,3 +239,22 @@ def test_the_smoke_stack_is_disposable_and_isolated_from_dev_storage() -> None:
     assert "smoke-blobs" in smoke
     # The dev volume this proves isolation from.
     assert "caos-workbench-dev-postgres" in dev
+
+
+def test_doctor_names_every_variable_the_worker_and_edge_read() -> None:
+    """An operator learns a variable exists from the doctor and the example,
+    not from the failure it causes."""
+    doctor = _load_doctor()
+    example = (REPO / ".env.example").read_text(encoding="utf-8")
+
+    for name in (
+        "CAOS_MODEL_PRICE",
+        "CAOS_LIVE_BUDGET_CEILING",
+        "CAOS_SITE_ROOT",
+        "CAOS_EDGE_TOKEN",
+        "CAOS_PUBLIC_ORIGIN",
+    ):
+        assert name in doctor.REQUIRED_CONFIGURATION | doctor.OPTIONAL_CONFIGURATION, (
+            name
+        )
+        assert name in example, name

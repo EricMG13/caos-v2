@@ -295,12 +295,32 @@ def test_main_refuses_without_provider_and_price(
     secret = "synthetic-key-never-printed-4c1d"
     monkeypatch.setenv("OPENROUTER_API_KEY", secret)
     monkeypatch.setenv("OPENROUTER_MODEL", "a-model/for-the-test")
-    for price in ("", "a-model/for-the-test,0,1", "other/model,0,0.1,2026-09-13"):
+    for price in ("a-model/for-the-test,0,1", "other/model,0,0.1,2026-09-13"):
         monkeypatch.setenv("CAOS_MODEL_PRICE", price)
         assert worker.main() == 2
         captured = capsys.readouterr()
         assert captured.err == "PROVIDER_NOT_CONFIGURED\n"
         assert secret not in captured.out + captured.err
+
+
+def test_an_unset_price_says_unset_not_misconfigured(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A price that was never set names its variable; a malformed one does not,
+    because the name is a host fact and the value is not printable."""
+
+    def never(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("no store, bundle or call before configuration")
+
+    monkeypatch.setattr(worker, "connect", never)
+    monkeypatch.setattr(worker, "run_worker", never)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-key-never-printed-4c1d")
+    monkeypatch.setenv("OPENROUTER_MODEL", "a-model/for-the-test")
+    monkeypatch.delenv("CAOS_MODEL_PRICE", raising=False)
+
+    assert worker.main() == 2
+    printed = capsys.readouterr().err.strip()
+    assert printed == "PROVIDER_NOT_CONFIGURED CAOS_MODEL_PRICE unset"
 
 
 def test_price_from_environment_reads_one_dated_price() -> None:
