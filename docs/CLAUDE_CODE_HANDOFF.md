@@ -291,6 +291,59 @@ owner's routing of 17 September 2026. Phase 7's two gates ran earlier the same d
 on Fable 5.1 `xhigh` and keep that record: a review is evidence about a tree at a
 time.
 
+## Where Phases 7–13 stand, and what each waits on — 17 September 2026
+
+Measured at `2c7e97d`, offline suite exit 0, **3,045 passed**, working tree clean.
+This supersedes the per-task table below where the two disagree.
+
+**Every remaining task in the completion plan is blocked, and on three things.**
+That is the state, not a pause: work continued until each open item reached
+something this session cannot supply.
+
+| Phase | State | Waiting on |
+|---|---|---|
+| 7 | complete, both `xhigh` gates run and remediated | `make image` with the pinned Trivy `0.70.0` |
+| 8 | complete, both gates run and remediated, one BLOCK found and fixed | the same Trivy run |
+| 9 | 9.1 done; 9.2–9.4 not started; 9.5–9.7 held by design | eight document sets nobody has sourced, then live-run authorization |
+| 10 | 10.2 and 10.3 done; 10.4 answered as a finding; 10.1 not started | the remediation stream's wave 3 (T11, T14), merged by the peer but not yet on the shared branch |
+| 11 | not started | Phase 9's documents, and the per-section bound below |
+| 12 | not started | Phase 11 |
+| 13 | not started | an identity-provider setting, TLS material, an authorized nightly |
+
+**The three blockers, in the order they free the most work.**
+
+1. **The documents.** `qualification/DOCUMENTS.md` lists eight sets to source or
+   author. They hold Tasks 9.2, 9.3 and 9.4 and the whole of Phase 11. Nothing
+   here fetches a document: invariant 1 makes web discovery structurally absent,
+   so a `to_source` row is a request to a person.
+2. **Live-run authorization**, naming provider, model, endpoint tag, reasoning
+   effort, ceiling and window. Every pathway's exit check ends in a verdict, and
+   no verdict exists over any snapshot: `qualification_verdicts` is empty in
+   every database. **Nothing in this tree is qualified**, and nothing describes
+   itself that way.
+3. **Trivy `0.70.0`** for `make image`, which is the only component of the
+   complete gate that has not run. It holds the acceptance of two finished
+   phases.
+
+**One thing the plan itself now owes, found by measuring rather than by
+review.** The per-section prompt bound was deferred to "the day a wide route
+comes near the ceiling", and nobody had taken that measurement. Taken: the widest
+pathway's CP-5 carries 16 direct upstreams against LITE's two, and its own
+delivered authority is 165,548 bytes, so authority plus upstream sections reach
+47 % of the transport ceiling at 20 KB per handoff, before any evidence. The
+over-ceiling refusal rejects the whole request rather than truncating, so such a
+pathway does not run and cannot be qualified. It is a precondition of Phase 11's
+widest task, recorded there and in the Phase 5 ledger entry.
+
+**What the two phase closes cost, which is the argument for running both gates.**
+Phase 7's audit found a P1 produced by its own two commits. Phase 8's audit
+returned BLOCK on a critical the confidence review had read and called safe: the
+host asked the bundle's register locator a narrower question than the bundle
+asks, so the one shipped answer key could be met from a sibling register while
+the honest one said the evidence was missing. Both were built rather than
+argued. Three commit messages in this plan's history asserted things the code
+contradicted, and every one was caught by a reviewer rather than its author.
+
 ## Goal-prompt discharge record — 17 September 2026
 
 `docs/PHASE_7_ONWARDS_GOAL_PROMPT.md` line by line against the tree, so the goal
