@@ -19,7 +19,7 @@ REQUIRED_CONFIGURATION = frozenset(
         "CAOS_REQUIRE_POSTGRES",
     }
 )
-OPTIONAL_CONFIGURATION = frozenset(
+LIVE_CONFIGURATION = frozenset(
     {
         "OPENROUTER_API_KEY",
         "OPENROUTER_MODEL",
@@ -27,8 +27,18 @@ OPTIONAL_CONFIGURATION = frozenset(
         "OPENROUTER_PROVIDER",
         "OPENROUTER_REASONING_EFFORT",
         "CAOS_REQUIRE_PROVIDER",
+        # `make dev-worker` and `scripts/qualify.py` read the dated price (§49);
+        # absent, the worker refuses PROVIDER_NOT_CONFIGURED before it claims
+        # anything.
+        "CAOS_MODEL_PRICE",
     }
 )
+# Read by the production image, the site dispatcher and the edge guard only
+# (`server/api/site.py`, `server/api/edge.py`); absent in local dev work.
+DEPLOYMENT_CONFIGURATION = frozenset(
+    {"CAOS_SITE_ROOT", "CAOS_EDGE_TOKEN", "CAOS_PUBLIC_ORIGIN"}
+)
+OPTIONAL_CONFIGURATION = LIVE_CONFIGURATION | DEPLOYMENT_CONFIGURATION
 DEV_ROLES = frozenset({"READER", "ANALYST", "ADMIN"})
 # The same canonical form the dev proxy in frontend/vite.config.ts accepts.
 DEV_USER = re.compile(
@@ -130,7 +140,8 @@ def main() -> int:
     healthy &= _dev_actor()
     for name in sorted(OPTIONAL_CONFIGURATION):
         state = "present" if os.environ.get(name) else "absent"
-        print(f"{name}: {state} (optional live mode)")
+        where = "optional live mode" if name in LIVE_CONFIGURATION else "deployment"
+        print(f"{name}: {state} ({where})")
     return 0 if healthy else 1
 
 
