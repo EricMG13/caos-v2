@@ -13,7 +13,9 @@ LIMIT = 800
 EXCLUSIONS = (
     ":!*.lock",
     ":!requirements*.txt",
-    ":!**/vendor/**",
+    # Root-anchored: git's default pathspec matching needs a `/` before the
+    # name, so `**/vendor/**` would not match the bundle at `vendor/deploy-v/`.
+    ":!vendor/**",
     ":!docs/**",
     ":!*package-lock.json",
     ":!frontend/fixtures/**",
