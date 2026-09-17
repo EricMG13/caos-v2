@@ -547,9 +547,14 @@ step's model row.
    their commits; rewrite the two withdrawn upgrade paths (O16, O17); relabel
    the rebuild headings; add a "Completion Phase 7" heading; rewrite the
    handoff's checkpoint table to §69's state and this plan; regenerate the
-   stale `feature-status.csv` rows; a `tests/test_ledger.py` gate that fails
-   when a struck entry cites a test the suite lacks or an open entry cites
-   the test that proves its closure. Move `gemini-audit.md` and
+   stale `feature-status.csv` rows; a `tests/test_ledger.py` gate. Its rules are
+   the ones that proved mechanical: a cited test the suite does not define, an
+   open entry stating no `*Upgrade:*`, a heading with no blank line before it,
+   a foreign list marker, and a floor naming the whole phase set. A sixth was
+   specified here first -- an open entry citing the test that proves its
+   closure -- and was measured against the real ledger and dropped, because the
+   best phrase rule flagged three entries of which two were correct entries
+   using the same words. The gate does not read prose, and the ledger says so. Move `gemini-audit.md` and
    `PATHFINDER-2026-09-15/` under `docs/reviews/supplemental/` with a header
    naming the concurrent review, or delete them.
 2. Land and verify (Task 7.2): for each PR the delivery session merges, the

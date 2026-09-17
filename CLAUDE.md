@@ -194,6 +194,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* none that is mechanical. What closes this class is the discipline
   `docs/COMPLETION_PLAN.md` states in its definition of done, that the entry a
   task closes is struck in the commit that closes it, naming the test.
+- **The feature-status record is dated evidence, so some of its citations name
+  tests the tree deleted.** `docs/feature-status.csv` carries 248 rows of which
+  206 are dated, 198 of them 2026-09-11, and each row says what was true when it
+  was written. Nine test names it cites are defined nowhere in the suite and
+  nowhere on disk -- `test_a_revision_is_frozen_once`,
+  `test_the_receipt_names_the_signer_of_the_frozen_bytes` and seven more of the
+  filing and revision-signing set, across 14 rows -- because `9bf20b2` wrote them
+  and the repair deleted the code they covered. The Completion Phase 7
+  adversarial audit asked for the citations to be made to resolve. They are
+  deliberately not: a dated row whose evidence is edited later is no longer a
+  record of that date, and rewriting 14 of them would make the file agree with
+  the tree by giving up the one property that makes it worth keeping. So the
+  ledger gate reads this file not at all, and a reader must take a row's date as
+  part of its claim. *Upgrade:* a regenerated inventory emitted from the suite,
+  which this file's own "Regenerate, don't hand-maintain" rule already asks for
+  and which belongs with Completion Phase 13 Task 13.6, the task that generates
+  the release pack from the suite and the store; the dated file is then the
+  archived predecessor rather than the live answer.
 - **The demonstration Admin panel says the health route is not served.**
   `frontend/fixtures/admin.json` carries `HEALTH` and `GET /api/health` marked
   not served, and the admin unit test's comment repeats it;
@@ -632,7 +650,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   discharge is a new run. A CAS back to RUNNING would reopen a run whose pins
   cannot change. Completion Phase 10 records the link instead: the T8 blocker
   cell projected so a reader sees which source the verdict asked for, and
-  `runs.supersedes_run_id` naming the run a successor replaces.
+  `runs.supersedes_run_id` naming the run a successor replaces. That withdrawal
+  covers a readiness verdict and nothing else. A run also ends BLOCKED when the
+  frontier empties with required work unfinished -- for a QA_GATE whose source is
+  not `Passed` -- and there the discharge is a human decision under unchanged
+  pins, not a supplied source. The Repair Phase 2 entry "Only a QA `Passed`
+  releases CP-6" owns that case and names its own discharge; this entry does not
+  speak for it. Scoped after the Completion Phase 7 adversarial audit read the
+  two entries side by side and got two incompatible answers.
 - ~~**The terminal decision reads outside the run lock, and the store does not
   check it.**~~ Closed by Phase 4 Task 4.3c (§49.4): `complete_run` refuses
   `RUN_NODES_UNACCEPTED` while a pinned node is unaccepted and `complete_run`/
@@ -1426,11 +1451,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   catalog declares 60 REQUIRED, 26 OPTIONAL, 29 ADVISORY and one QA_GATE typed
   edge, and **no** CONDITIONAL edge, so the blocking branch is unreachable on
   this bundle and a grammar written for it would be code for a route that does
-  not exist. Completion Phase 10 pins the fact instead: a test over the catalog's
-  typed-edge counts, and `_edges_among` refusing `ROUTE_EDGE_UNSUPPORTED` rather
+  not exist. The counts are already pinned:
+  `tests/test_bundle_pin.py::test_the_catalog_declares_no_conditional_edge` has
+  held since `4f06337`, which the first draft of this rewrite did not know and
+  the Completion Phase 7 audit found. What Completion Phase 10 still owes is the
+  refusal -- `_edges_among` `ROUTE_EDGE_UNSUPPORTED` rather
   than pinning a route whose target would block whatever the evidence said. The
   evaluator is owed the day that guard fails, which is also the first day a real
   predicate exists to parse.
+
 **Phase 2.**
 
 - **A quote matches whole tokens exactly, typography at its edges aside.**

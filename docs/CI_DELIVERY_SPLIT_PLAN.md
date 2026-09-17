@@ -88,11 +88,11 @@ every PR and are not among the nine.
 | 278 | `f8be9956` | `c75e0ba4` | 568 | 9/9 | `372a10da` |
 | 279 | `cd3e3086` | `372a10da` | 663 | 9/9 | `a1b284f6` |
 | 280 | `d889d926` | `cd3e3086` | 801 | 8/9 — `size` FAILURE, one line over | closed unmerged |
-| 281 | `6d1b6588` | a PR branch | 0 | 5/9 — `test`, `security` FAILURE; `sonarqube` SKIPPED; `SonarCloud` absent | `6d1b6588` **into #280's branch, not `main`** |
+| 281 | `6d1b6588` | a PR branch | — | not re-readable (head gone from the remote, so `gh pr checks` answers "no commit found"); last observed 5/9 — `test`, `security` FAILURE, `sonarqube` SKIPPED, `SonarCloud` absent, read from the commit's check-runs rather than the PR | `6d1b6588` **into #280's branch, not `main`** |
 | 282 | `6cfc5937` | `a1b284f6` | 700 | 9/9 | `976c0a30` |
 | 283 | `c8906cdd` | `976c0a30` | 645 | 9/9 | `01c37247` (**current `main`**) |
 | 284 | `bee07276` | `c8906cdd` | 754 | 8/9 — `SonarCloud` FAILURE | open |
-| 285 | `4e6433d1` | a PR branch | 0 | 8/9 — `security` FAILURE | `4e6433d1` **into #284's branch, not `main`** |
+| 285 | `4e6433d1` | a PR branch | — | not re-readable (head gone); last observed 8/9 — `security` FAILURE, from the commit's check-runs | `4e6433d1` **into #284's branch, not `main`** |
 | 286 | `a26da048` | `4e6433d1` | 658 | 6/9 — `test` FAILURE; `sonarqube` SKIPPED; `SonarCloud` absent | open |
 | 287 | `0e4fcd10` | `a26da048` | 274 | 6/9 — as #286 | open |
 | 288 | `f7fb26dc` | `0e4fcd10` | 766 | 9/9 | open |
@@ -104,6 +104,13 @@ every PR and are not among the nine.
 | 294 | `ff8f0102` | `8aca244b` | 792 | 8/9 — `SonarCloud` FAILURE | open |
 | 295 | `e0d5a602` | `ff8f0102` | 633 | 8/9 — `SonarCloud` FAILURE | open |
 | 296 | `e2015953` | `01c37247` | **879** | 4/9 — `size` FAILURE; `test`, `frontend` IN_PROGRESS; `sonarqube`, `SonarCloud` absent | open |
+
+A size of `—` means the hosted `size` log is not re-readable, not that the PR
+was empty: #281's and #285's heads are gone from the remote. Three bases are not
+explained by any head or landed commit in this table -- #262 `48ee7b6c`, #267
+`a7467378` and #292 `7315abf1`, where the text above says #292 stacks on #291
+whose head is `ec272cf9`. They are recorded as unexplained rather than corrected,
+because correcting them would need a hosted read this session did not make.
 
 Three things this table says that a summary would hide. #281 and #285 are
 recorded MERGED and are **not on `main`**: each merged into a sibling PR's
