@@ -36,3 +36,51 @@ an accepted canonical handoff:
 Recorded charge: `$0.465377216`. No artifact or matrix was produced, so no
 evidence row or verdict was recorded. A qualification verdict must never turn
 this failed host validation into `QUALIFIED`.
+
+## Canonical compatibility diagnosis
+
+All three stored provider bodies used the required closed JSON transport. The
+canonical Markdown inside them failed for three concrete instruction-following
+reasons: a non-canonical snake-case T8 header, an omitted T8 register, and
+citations whose `matched_text` was not repeated verbatim in the Markdown body.
+The request had placed its response contract before the large evidence section
+and ended on evidence, leaving those constraints far from the generation point.
+
+The host now closes the tagged evidence section and repeats the closed transport,
+six-heading order, register, CP-0 T8-header, and citation checks at the end of the
+prompt. Strict handoff and citation validation is unchanged.
+
+A fresh validation run, `90dc1bb3-6301-4af7-955e-717824672a90`, reached the
+provider twice but stopped both times with `PROVIDER_UNAVAILABLE`. Neither
+attempt returned a body, generation ID, or charge, so live confirmation remains
+pending and the model remains **not qualified**.
+
+## Direct Terra comparison
+
+An isolated `gpt-5.6-terra` probe answered the same generated CP-0 prompt without
+OpenRouter. Its first response passed the closed JSON and base Markdown checks
+but added `owned_object` and `canonical_filename` to front matter; the authority
+mentions payload metadata that the canonical Markdown validator correctly
+forbids there. The prompt now derives and names the exact model-authored
+front-matter fields from that validator.
+
+With that correction, Terra passed structure, identity, completeness, and T8,
+then failed citation anchoring because `FORM 10-K` appears more than once on the
+cited page. After the prompt explicitly required a unique page quote, a fresh
+Terra response repeated the same ambiguous citation. This establishes that the
+remaining incompatibility is neither OpenRouter-only nor DeepSeek-only: strict
+citation selection was unreliable across models.
+
+The host now pre-validates delivered lines with the same anchoring function used
+at acceptance and marks the three longest valid candidates on each source page.
+The final prompt contained 87 marked candidates across 1,726 delivered blocks,
+without duplicating any source text. A fresh Terra response to that exact prompt
+passed structure, identity, completeness, T8, and citation anchoring; its one
+citation was one of the marked candidates. The handoff's `qa_status: Blocked`
+was therefore accepted as a valid domain verdict for the incomplete
+single-document source set, then terminated as `HANDOFF_BLOCKED` by design.
+
+This resolves the canonical-handoff incompatibility in the direct cross-model
+probe. It is not DeepSeek qualification evidence: OpenRouter returned no body on
+the subsequent live attempts, so `deepseek/deepseek-v4-pro-0813` remains **not
+qualified** until a fresh provider run completes the qualification matrix.
