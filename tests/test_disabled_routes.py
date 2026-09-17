@@ -108,7 +108,7 @@ def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
 ) -> None:
     """Approved end to end with a subject, the route still never executes."""
     pin, _route = _authority(harness)
-    assert pin.adapter_version == "canonical-markdown-v1"
+    assert pin.adapter_version == "canonical-markdown-v2"
     with pytest.raises(Refusal) as refused:
         with execution_reads(harness.conn):
             execution_input(harness.conn, harness.run_id, harness.bundle)

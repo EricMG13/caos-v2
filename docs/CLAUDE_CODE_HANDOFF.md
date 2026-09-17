@@ -5,16 +5,16 @@ This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/REPAIR_PLAN.md` owns phase outcomes. Historical rebuild phases and
 ignored reports cannot override those contracts.
 
-## Current checkpoint — observed 14 September 2026
+## Current checkpoint — observed 15 September 2026
 
 | Item | Recorded state |
 |---|---|
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
-| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering checkpoint below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
-| Latest accepted task | **Phase 6 offline Tasks 6.1–6.4 checkpointed at `d4bdde5`; live 6.5 remains unapproved** |
-| Next task | Obtain explicit provider, model, route, call, token, cost, and time-window authorization before attempting Phase 6.5 live qualification; then verify hosted required checks. |
+| Latest accepted phase | **Phase 5 accepted at `ca65ec7`** (Phase 6 engineering and qualification checkpoints below; Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc`) |
+| Latest accepted task | **Phase 6.5 replacement `openrouter/google-ai-studio/high` was authorized and executed; it exhausted the shipped output ceiling at CP-0, so Phase 6 remains release-blocked** |
+| Next task | Decide whether to raise the bound completion ceiling from 32,768 to Gemini's 65,536 maximum, verify the changed build, then obtain fresh authorization. Do not repeat either unchanged failed call. |
 | Phase | Phases 3–6 authorized by the user's goal of 13 September 2026 |
 | Next-phase launch text | [PHASE_3_ONWARDS_GOAL_PROMPT.md](PHASE_3_ONWARDS_GOAL_PROMPT.md) |
 
@@ -91,6 +91,52 @@ this documentation update has not rerun their gates or accepted new code.
 - **CI size gate:** `PR_BASE=eebb1327a5b77ea75775e793b420251595336f29 make check-size` currently fails at 75,566 counted changed lines against `main` (ceiling: 800). This accumulated repair branch must be split into reviewable PRs before it can satisfy the repository CI policy.
 - **Application-wide adversarial audit:** [audit](reviews/application-adversarial-audit.md) refreshed GitNexus at `5054d7c` and reviewed every deployable trust boundary. It found no new confirmed in-repository exploit, but independently confirms the live-qualification, hosted-check, trusted-edge and PR-size blockers above.
 - **Delivery remediation:** [CI delivery split plan](CI_DELIVERY_SPLIT_PLAN.md) records GitHub ruleset 22701406, current `main`, the 14 individually oversized commits and the dependency-safe PR sequence. It does not grant push, PR, ruleset or paid-provider authority.
+
+### Phase 6 qualification checkpoint — 15 September 2026
+
+- **Candidate:** provider-profile and canonical-I/O remediation committed at
+  `f95e8ba`; this handoff update follows as documentation only.
+- **Authorized profile:** DeepSeek V4 Pro 0813 through
+  `openrouter/ionstream/xhigh`, the frozen VMO2 FY2025 public corpus,
+  `canonical-markdown-v2`, and a `$22.00` ceiling.
+- **Result:** run `62307d9b-f2d4-49f3-b015-82fea3b07298` stopped at CP-0 as
+  `CITATION_NOT_DELIVERED`. Generation
+  `gen-1789475926-OwNgVKf0G7QapLweplaL` used 6,286 native reasoning tokens,
+  finished with `stop`, and cost `$0.177133888`. No downstream module,
+  artifact, proof, qualification evidence or verdict exists. See the
+  [result](../qualification/vmo2-fy2025/RESULT.md) and §58.
+- **Compatibility conclusion:** fallback routing, absent reasoning and
+  truncation are ruled out for this run. This profile remains unqualified for
+  the current one-shot canonical handoff contract; the evidence does not show
+  that every DeepSeek deployment is incapable of the workflow.
+- **Remediation:** qualification now binds one lowercase OpenRouter endpoint
+  tag and reasoning effort, refuses an automatic provider pool, and advances
+  the prompt identity to v2. Prompt-only citation-candidate work no longer
+  leaks into accepted-read I/O.
+- **Local verification:** repository-wide Ruff, formatting and mypy passed;
+  the PostgreSQL-backed suite passed 2,844 tests at 95% coverage, all 22 I/O
+  budgets passed, and all 21 race tests passed. Bandit, pip-audit and gitleaks
+  passed; frontend lint/types/build, 230 units, 171 accessibility checks and 90
+  three-engine workbench tests passed. The focused prompt/citation and
+  model-budget set passed 40 tests. Image/production-journey evidence remains
+  the preceding `d4bdde5` checkpoint because this slice changes no image or UI
+  code.
+- **Reviews:** the Phase 6 [confidence](reviews/phase-6-confidence-review.md)
+  and [adversarial](reviews/phase-6-adversarial-audit.md) records include the
+  profile remediation and the accepted-read I/O fix. Their code verdict is
+  clean after remediation; release qualification remains negative.
+- **Hosted delivery:** per the user, GitHub and CI work is owned by the other
+  session and is reported passed there. This local checkpoint did not push or
+  independently re-query hosted status; the historical local size result above
+  is not the status of that separately managed delivery work.
+- **Replacement result:** Gemini 3.8 Flash at
+  `openrouter/google-ai-studio/high` was subsequently run against the same
+  frozen corpus. Run `7c9c8d60-7b42-4f38-9b42-bb4e1d1afb47`, generation
+  `gen-1789477949-PdZ0oPgEZZGQjoUQbTE1`, stopped at CP-0 as
+  `PROVIDER_OUTPUT_TRUNCATED`: 29,454 reasoning and 32,761 completion tokens,
+  `finish_reason=length`, cost `$0.25356225`. The shipped 32,768 ceiling—not
+  citation validation—was the controlling failure. No qualification evidence
+  or verdict exists.
 
 ## Phase 4 acceptance record — 14 September 2026
 
@@ -235,11 +281,11 @@ Run every shell command with provider variables removed. Use the workbench
 as the tool working directory:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER git status --short --branch
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER git rev-parse HEAD
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make doctor
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER gitnexus analyze --force --index-only
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER gitnexus status
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER git status --short --branch
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER git rev-parse HEAD
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make doctor
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER gitnexus analyze --force --index-only
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER gitnexus status
 ```
 
 Use installed GitNexus 1.6.9; the observed executable is under
@@ -352,7 +398,7 @@ intended diff and run the serial backend gate with the isolated URL supplied
 privately to the process and Make:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
 ```
 
 Stage explicit owned paths and run all repository staged/pre-commit checks.
@@ -361,7 +407,7 @@ fix confirmed findings, rerun affected gates and commit remediation. Only then
 run the final size gate, which measures committed `base...HEAD`:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER make check-size PR_BASE="${PR_BASE:?set exact proposed PR base}"
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make check-size PR_BASE="${PR_BASE:?set exact proposed PR base}"
 ```
 
 Record the real target base and candidate hash; if the task base differs,
@@ -378,7 +424,7 @@ At phase freeze run the complete repository gate, including frontend/browser
 and image coverage:
 
 ```sh
-env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER TRIVY="${TRIVY:?set pinned Trivy path}" IMAGE=caos-workbench:check make check
+env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER TRIVY="${TRIVY:?set pinned Trivy path}" IMAGE=caos-workbench:check make check
 ```
 
 Then one `confidence-review` over the whole phase/affected callers at actual

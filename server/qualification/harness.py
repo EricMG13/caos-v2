@@ -371,8 +371,10 @@ def perform(
 
 def _provider_identity(provider: object) -> str:
     """The configured provider, never a response-body claim."""
+    if type(provider) is OpenRouter and provider.upstream_provider is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     value = (
-        "openrouter"
+        provider.qualification_identity
         if type(provider) is OpenRouter
         else getattr(provider, "provider", None)
     )

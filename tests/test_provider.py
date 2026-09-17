@@ -334,10 +334,62 @@ def test_the_call_forbids_provider_fallbacks() -> None:
     _provider(_Recorder()).complete(PROMPT)
 
     assert sent["provider"] == {"allow_fallbacks": False, "require_parameters": True}
-    assert sent["max_completion_tokens"] == 32_768
+    assert sent["max_completion_tokens"] == 65_536
     assert "max_tokens" not in sent
     assert sent["stream"] is False
     assert str(sent["_url"]).endswith("/chat/completions")
+
+
+def test_a_pinned_provider_and_reasoning_profile_are_sent_and_bound() -> None:
+    sent: dict[str, object] = {}
+
+    @dataclass
+    class _Recorder(_Transport):
+        def post(
+            self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
+        ) -> tuple[int, bytes]:
+            sent.update(json.loads(body))
+            return 200, self.payload
+
+    provider = OpenRouter(
+        api_key="not-a-real-key",
+        model="deepseek/deepseek-v4-pro-0813",
+        upstream_provider="deepseek",
+        reasoning_effort="max",
+        transport=_Recorder(),
+    )
+
+    provider.complete(PROMPT)
+
+    assert sent["provider"] == {
+        "allow_fallbacks": False,
+        "require_parameters": True,
+        "order": ["deepseek"],
+    }
+    assert sent["reasoning"] == {"effort": "max", "exclude": True}
+    assert provider.qualification_identity == "openrouter/deepseek/max/65536"
+
+
+@pytest.mark.parametrize(
+    ("upstream_provider", "reasoning_effort"),
+    [("DeepSeek", None), (None, "maximum")],
+)
+def test_an_invalid_execution_profile_refuses_before_transport(
+    upstream_provider: str | None, reasoning_effort: str | None
+) -> None:
+    transport = _Transport()
+    provider = OpenRouter(
+        api_key="not-a-real-key",
+        model="m",
+        upstream_provider=upstream_provider,
+        reasoning_effort=reasoning_effort,
+        transport=transport,
+    )
+
+    with pytest.raises(Refusal, match=r"^PROVIDER_NOT_CONFIGURED$"):
+        provider.complete(PROMPT)
+
+    assert transport.calls == 0
 
 
 def _assert_safe(refusal: Refusal) -> None:
@@ -855,12 +907,17 @@ def test_the_provider_is_configured_from_the_environment(
     monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-real-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
     monkeypatch.setenv("OPENROUTER_BASE_URL", "https://gateway.example/api/v1")
+    monkeypatch.setenv("OPENROUTER_PROVIDER", "deepseek")
+    monkeypatch.setenv("OPENROUTER_REASONING_EFFORT", "max")
 
     provider = OpenRouter.from_environment()
 
     assert provider.api_key == "not-a-real-key"
     assert provider.model == "openai/gpt-4o-mini"
     assert provider.base_url == "https://gateway.example/api/v1"
+    assert provider.upstream_provider == "deepseek"
+    assert provider.reasoning_effort == "max"
+    assert provider.qualification_identity == "openrouter/deepseek/max/65536"
 
 
 def test_the_base_url_defaults_when_the_environment_names_none(

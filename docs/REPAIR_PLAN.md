@@ -520,7 +520,9 @@ Document at least these environment variables, with non-secret examples and clea
 - `CAOS_TEST_POSTGRES_URL`: isolated test instance/account permitted to create and drop UUID-named test databases; never a production/application URL.
 - `CAOS_REQUIRE_POSTGRES=1`: mandatory for the complete gate.
 - `CAOS_BLOB_ROOT`: explicit source/artifact storage root.
-- `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, optional `OPENROUTER_BASE_URL`: live mode only, server-side.
+- `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, optional `OPENROUTER_BASE_URL`,
+  `OPENROUTER_PROVIDER` and `OPENROUTER_REASONING_EFFORT`: live mode only,
+  server-side. Qualification binds the selected endpoint/reasoning profile.
 - `CAOS_REQUIRE_PROVIDER=1`: explicit paid-test mode only; add a live-test marker/selection rather than treating the credential's presence as consent.
 - `CAOS_TRUST_ROLE_HEADER`: existing development-only switch; unset in production. This switch does not replace the requirement to protect all forwarded identity headers at the edge.
 

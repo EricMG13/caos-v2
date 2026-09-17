@@ -28,6 +28,6 @@ Phase 5: prove canonical CP-1/CP-2G/CP-4 and required predecessors on a compatib
 
 Phase 6: prove exact-identity qualification, restore/rollback and final release evidence. Live calls, hosted writes and deployment require explicit authorization and spend bounds.
 
-Prefix shell commands: env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u CAOS_REQUIRE_PROVIDER.
+Prefix shell commands: env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER.
 
 Use TDD and ordinary review per task. After committing and remediation, pass the 800-line gate against the actual PR base. At each phase end run full local/required CI gates, one confidence-review at xhigh, remediate/retest, then one adversarial audit at xhigh. Revalidate changed candidate evidence, including qualification. No rewrite tournaments. Record acceptance in the tracked handoff, then continue directly through the next phase until Phases 3–6 are complete. Pause only for a failed gate, missing explicit authorization (including spend, hosted writes or deployment), or a genuine blocker.

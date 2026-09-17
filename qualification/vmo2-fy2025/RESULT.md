@@ -24,7 +24,7 @@ the final two-document CP-0 request was 448,826 bytes.
 ## Run
 
 - Route: `LITE_CREDIT_22 / LITE_EARNINGS_UPDATE` (`CP-0`, `CP-L10`, `CP-5`)
-- Provider/model: `openrouter / deepseek/deepseek-v4-pro-0813`
+- Provider/model: `openrouter/ionstream/default / deepseek/deepseek-v4-pro-0813`
 - Price configuration: `$0.96` input and `$2.88` output per million tokens,
   dated 2026-09-15
 - Run ceiling: `$22.00`
@@ -69,13 +69,73 @@ must start a fresh prepared run against one frozen adapter revision.
 
 OpenRouter returned well-formed closed JSON bodies, generation identifiers and
 charges on all three attempts. The remaining incompatibility is therefore not
-the provider transport. DeepSeek repeatedly failed the canonical Markdown and
-citation-copying contract even after the final prompt clarified that eligible
-citations are optional, supplied the exact source-ID whitelist, and required
-each selected quote under `## Evidence Trace`.
+the provider transport. OpenRouter reconciliation subsequently established that
+all three attempts were served by Ionstream with zero reasoning tokens. The
+result therefore rejects only the `openrouter/ionstream/default` deployment
+profile; it is not evidence that first-party or reasoning-enabled DeepSeek is
+incapable of the contract.
 
 Strict host validation remains unchanged. The shared prompt now distinguishes
 eligible from required citations, forbids enumerating unquoted candidates,
 names their required Markdown location, and repeats the exact delivered source
 IDs at the generation point. Those clarifications improve the contract but do
 not qualify this model. Use a separately qualified model for this route.
+
+## Controlled profile follow-up — 2026-09-15
+
+The runtime now sends an optional lowercase OpenRouter endpoint tag and
+reasoning effort, and binds both into qualification identity. A fresh adapter
+revision, `canonical-markdown-v2`, prevents the revised prompt from borrowing a
+v1 verdict.
+
+OpenRouter's public endpoint catalog reported the first-party endpoint live
+under tag `deepseek`, with reasoning, reasoning-effort and JSON response-format
+support. Nevertheless, harmless probes and a fresh prepared qualification run
+all returned `404 No endpoints found for deepseek/deepseek-v4-pro-0813` before
+generation. They produced no generation ID and no charge. Since the same model
+remains available through Ionstream, this is an account/workspace routing or
+data-policy restriction, not a demonstrated model or parameter failure.
+
+An `openrouter/ionstream/xhigh` JSON probe succeeded as generation
+`gen-1789472086-Xy5p8onbmebuRtteQRNK`: 15 prompt, 21 completion and 15 native
+reasoning tokens, `finish_reason=stop`, charge `$0.00007488`. This proves that
+the available deployment honors the requested reasoning profile.
+
+The subsequently authorized full-corpus run
+`62307d9b-f2d4-49f3-b015-82fea3b07298` bound
+`openrouter/ionstream/xhigh`, adapter `canonical-markdown-v2`, and the unchanged
+qualification-set digest. CP-0 generation
+`gen-1789475926-OwNgVKf0G7QapLweplaL` used 153,892 prompt, 10,285 completion
+and 6,286 native reasoning tokens, finished normally with `stop`, and charged
+`$0.177133888`. The host rejected it as `CITATION_NOT_DELIVERED`; CP-L10 and
+CP-5 were not called, and no artifact, proof, matrix, evidence row or verdict
+was produced.
+
+This rules out fallback routing, disabled reasoning and truncation as causes of
+the observed contract failure. DeepSeek V4 Pro remains a capable general agent,
+but this deployment is not compatible with the current one-shot canonical
+handoff contract. Repeating the same frozen temperature-zero call would not add
+a new controlled variable and was not purchased.
+
+## Gemini 3.8 Flash follow-up — 2026-09-15
+
+The replacement candidate used model `google/gemini-3.8-flash`, pinned
+OpenRouter endpoint `google-ai-studio`, reasoning effort `high`, the same public
+corpus and qualification-set digest, adapter `canonical-markdown-v2`, and the
+same `$22.00` run ceiling. Current dated pricing was `$0.75` input and `$3.75`
+output per million tokens. Google documents 1,048,576 input and 65,536 output
+tokens for this model, but the unchanged CAOS provider ceiling remained 32,768
+completion tokens.
+
+Fresh run `7c9c8d60-7b42-4f38-9b42-bb4e1d1afb47` stopped at CP-0 as
+`PROVIDER_OUTPUT_TRUNCATED`. Generation
+`gen-1789477949-PdZ0oPgEZZGQjoUQbTE1` reconciled to Google AI Studio, 174,278
+native prompt tokens, 32,761 native completion tokens, 29,454 native reasoning
+tokens, `finish_reason=length`, and `$0.25356225` total cost. CP-L10 and CP-5
+were not called, and no artifact, proof, matrix, evidence row or verdict was
+produced.
+
+This profile is not qualified at the shipped 32,768-token ceiling. A same-cap
+retry changes no controlled variable and must not be purchased. A 65,536-token
+experiment would be materially different, but requires an intentional runtime
+change, fresh build identity and fresh authorization before spend.

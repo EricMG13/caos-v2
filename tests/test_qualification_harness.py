@@ -50,7 +50,7 @@ from server.boundary_text import BoundaryText
 from server.engine.route import NodeState
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.provider import Completion, encode_request
+from server.provider import Completion, OpenRouter, encode_request
 from server.qualification.harness import (
     Attempted,
     Harness,
@@ -58,6 +58,7 @@ from server.qualification.harness import (
     PerformedSet,
     PreparedCase,
     Unrun,
+    _provider_identity,
     perform,
     prepare,
 )
@@ -88,6 +89,20 @@ PROFILE = LITE_PROFILE
 SELECTION = LITE_SELECTION
 SUBJECT = RunSubject("ACME", "Acme Holdings plc", "FY2026", "2026-09-13")
 L10, CP5 = f"RN-{PROFILE}-{SELECTION}-02-CP-L10", f"RN-{PROFILE}-{SELECTION}-03-CP-5"
+
+
+def test_openrouter_qualification_requires_an_upstream_pin() -> None:
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        _provider_identity(OpenRouter(api_key="k", model="m"))
+
+    assert (
+        _provider_identity(
+            OpenRouter(api_key="k", model="m", upstream_provider="ionstream")
+        )
+        == "openrouter/ionstream/default/65536"
+    )
+
+
 ESTIMATE = Decimal("0.50")
 # Enough for any set these tests build: the per-run ceiling times ten.
 SET_CEILING = CEILING * 10
