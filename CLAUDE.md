@@ -970,9 +970,37 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   is the same defect as a missing one, read the other way round.
 - **`check_tested.py` matches a name as a whole word anywhere in the suite's
   bytes,** docstrings and comments included. It catches the definition no test
-  mentions, not the definition whose test asserts nothing. *Upgrade:* resolve
-  references through the AST once the suite is large enough for the false
-  negatives to matter.
+  mentions, not the definition whose test asserts nothing.
+  **It failed exactly that way on 17 September 2026, and the manner is the
+  point.** Task 8.2 shipped `canonical._within_reservation` -- the guard that
+  stops a rebuilt prompt going out under a reservation too small for it, which is
+  invariant 8's whole claim on that path -- with **no test driving it**. The gate
+  passed because the name appears in a *comment* in `server/engine/runtime.py`
+  explaining what the guard does. So a sentence about the code satisfied the
+  check for the code. The Phase 8 confidence review found it; the test now
+  exists and was watched failing with the guard removed.
+  This is one instance of a class worth naming, because three unrelated ones
+  turned up in one day: **a gate measuring an axis correlated with the hazard
+  rather than the hazard itself.** The suppression budget counted annotations
+  where the hazard is positional width. A block of refusal statuses encoded
+  *blame* where the status means *time*. Two ignore rules described the shape
+  they expected -- a directory, an exact filename -- where they meant a path. And
+  this gate counts mentions where the hazard is untested behaviour. The failure
+  mode is **invisibility**: such a gate does not fail loudly, it passes quietly,
+  and what it should have caught is exactly what nobody is looking at -- so the
+  count of known instances is a lower bound, and none of the four was found by
+  looking for it. Each surfaced when something else broke.
+  The test that separates the class: **ask what the cheapest evasion of a gate
+  does to the code, and keep the gate only if the answer is "it improves it".**
+  This one fails immediately -- the cheapest way to satisfy it is to name the
+  symbol in a comment, which makes the tree worse by leaving prose where a test
+  should be, exactly as happened above.
+  *Upgrade:* resolve references through the AST, which moves the axis from
+  "mentioned" to "referenced"; the honest fix is an assertion reaching the
+  definition, which no static check can see, so the AST version is a better
+  proxy rather than the right one. Worth taking now rather than "once the suite
+  is large enough", since the false negative has been paid for once on a money
+  path.
 - **`check_tested.py` sees module-level definitions only.** A method is covered
   through the class that holds it. *Upgrade:* descend into classes when a
   governed path first puts logic on a method.
