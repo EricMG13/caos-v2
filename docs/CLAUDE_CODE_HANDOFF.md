@@ -271,10 +271,12 @@ still refuses three LITE nodes against the default ceiling, and a gate record
 stored before `blockers` existed refuses at every reader if its T8 named a
 condition.
 
-**Integration gate for this wave**, at `d7158f8` — the tree carrying the
-remediation stream's second wave (`b194943`) and the three completion tasks
-above: the offline suite `make test` at exit 0, **3,036 passed**, 94 % branch
-coverage, coverage floors and `io_budget --assert` clean. Ruff, ruff format and
+**Integration gate for this wave**, re-measured at `652229d` — the tree carrying
+the remediation stream's second wave (`b194943`), all four completion tasks and
+the acceptance review's remediation: the offline suite `make test` at exit 0,
+**3,041 passed**, 94 % branch coverage, coverage floors and `io_budget --assert`
+clean. (It read 3,036 at `d7158f8`, before Task 10.3's store half and the
+remediation's two tests.) Ruff, ruff format and
 mypy over 234 source files clean; `check_tested`, `check_vocabulary` clean; the
 frontend lint, format, vocabulary and tested gates clean with 238 unit tests.
 `make check` still has not run, for the Trivy reason above.
