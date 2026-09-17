@@ -1,11 +1,10 @@
-// The three hooks and the two label maps the workspace exports. A hook is
-// reached by rendering something that calls it, so the section suites exercise
-// all three without naming any — which is what left their failure modes
-// untested: `useLedger` outside its provider, `useEvidence` outside its
-// provider, and a tail opened where `EventSource` does not exist.
+// The hooks and the two label maps the workspace exports. A hook is reached by
+// rendering something that calls it, so the section suites exercise them
+// without naming any — which is what left their failure modes untested:
+// `useEvidence` outside its provider, and a tail opened where `EventSource`
+// does not exist. `useLedger`'s two cases went with the Book (decision D2).
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useRef, useState } from "react";
-import { LedgerProvider, useLedger } from "@/app/ledger";
 import { SECTION_ABBREVIATIONS, SECTION_LABELS } from "@/app/sections";
 import { useModalA11y } from "@/ds/use-modal-a11y";
 import { useEvidence } from "@/evidence/EvidenceContext";
@@ -23,26 +22,6 @@ describe("every section has a word and an abbreviation", () => {
 });
 
 describe("a hook outside its provider says so rather than rendering nothing", () => {
-  function Reads() {
-    useLedger();
-    return <span>read</span>;
-  }
-
-  test("useLedger throws outside a LedgerProvider", () => {
-    // The provider is what holds it; silently returning an empty ledger would
-    // draw a section whose figures are missing rather than absent.
-    expect(() => render(<Reads />)).toThrow(/useLedger outside a LedgerProvider/);
-  });
-
-  test("useLedger inside one renders", () => {
-    render(
-      <LedgerProvider>
-        <Reads />
-      </LedgerProvider>,
-    );
-    expect(screen.getByText("read")).toBeInTheDocument();
-  });
-
   test("useEvidence outside a provider opens nothing and holds no chip", () => {
     // Deliberately the other answer: the drawer belongs to the page it was
     // opened on, so a component that asks for it off-page gets a context that
