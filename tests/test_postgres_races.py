@@ -1130,13 +1130,13 @@ def test_two_saves_against_one_head_commit_one_revision(
                             )
                         else:
                             withdraw_command(
-                                actor,
-                                uuid4(),
-                                Standing.WRITER,
-                                held.source_id,
-                                WithdrawSource(),
-                                case_id,
-                                other,
+                                actor=actor,
+                                key=uuid4(),
+                                _standing=Standing.WRITER,
+                                source_id=held.source_id,
+                                _body=WithdrawSource(),
+                                case_id=case_id,
+                                conn=other,
                             )
                     except Refusal as refused:
                         return refused.code.value
