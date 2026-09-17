@@ -33,7 +33,7 @@ from server.api.commands._request import (
     require_case_writer,
 )
 from server.api.deps import Caller, Store, store_connection
-from server.api.identity import TRUST_SWITCH, Actor, GlobalRole
+from server.api.identity import TRUST_SWITCH, TRUSTED, Actor, GlobalRole
 from server.api.wire import CaseCreated, CreateCase
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
@@ -190,9 +190,10 @@ probe.include_router(router)
 
 
 @pytest.fixture(autouse=True)
-def _groups_not_role_header(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Identity comes from groups; a developer's trusted role header stays out."""
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+def _the_role_header_decides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The development deployment: tokenless, so the groups header is not read
+    and the role header is believed only because this switch says so."""
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
 
 
 @pytest.fixture

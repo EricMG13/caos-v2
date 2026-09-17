@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from server.api import app as app_module
 from server.api.app import app, blob_store, store_connection
-from server.api.identity import TRUST_SWITCH
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.api.reads import directory as directory_read
 from server.api.reads import upload as upload_read
 from server.api.wire import CASES_MAX, CLEARS, DirectoryDocument, UploadDocument
@@ -60,7 +60,9 @@ def client(
     conn, _case_id = case
     blobs = BlobStore(tmp_path / "blobs")
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # Tokenless, so no groups header is read: the development switch is how a
+    # test here asserts a global role above the floor.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     app.dependency_overrides[store_connection] = lambda: conn
     app.dependency_overrides[blob_store] = lambda: blobs
     try:
@@ -86,10 +88,10 @@ def _serving(counter: _CountingConnection) -> Callable[[], _CountingConnection]:
     return lambda: counter
 
 
-def _as(user_id: UUID, groups: str | None = None) -> dict[str, str]:
+def _as(user_id: UUID, role: str | None = None) -> dict[str, str]:
     headers = {"x-caos-user": str(user_id)}
-    if groups is not None:
-        headers["x-forwarded-groups"] = groups
+    if role is not None:
+        headers[ROLE_HEADER] = role
     return headers
 
 
@@ -319,14 +321,13 @@ def test_a_section_request_across_anonymous_nonmember_reader_writer_approver_rev
         served = UploadDocument.model_validate(upload.json()).chrome.served_role
         assert (served.global_role.value, served.standing) == ("READER", standing)
 
-    for user, groups in ((uuid4(), None), (revoked, None), (uuid4(), "caos-admins")):
-        directory_response = client.get(DIRECTORY, headers=_as(user, groups))
+    for user, role in ((uuid4(), None), (revoked, None), (uuid4(), "ADMIN")):
+        directory_response = client.get(DIRECTORY, headers=_as(user, role))
         assert directory_response.status_code == 200
         directory = DirectoryDocument.model_validate(directory_response.json())
         assert directory.body.cases == []
-        expected_role = "ADMIN" if groups else "READER"
-        assert directory.chrome.served_role.global_role.value == expected_role
-        upload = client.get(_upload(case_id), headers=_as(user, groups))
+        assert directory.chrome.served_role.global_role.value == (role or "READER")
+        upload = client.get(_upload(case_id), headers=_as(user, role))
         assert (upload.status_code, upload.json()) == (
             404,
             _refused(RefusalCode.CASE_NOT_FOUND),

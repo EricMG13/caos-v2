@@ -13,25 +13,27 @@ from fastapi.testclient import TestClient
 
 from server.api import app as app_module
 from server.api.app import app, blob_store, store_connection
-from server.api.identity import TRUST_SWITCH
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.blobs import BlobStore
 from server.store import StoreConnection
 from server.store.members import Standing, grant
-
-# The identity provider's group for each global role (`server/api/identity.py`).
-GROUPS = {"READER": "caos-readers", "ANALYST": "caos-analysts", "ADMIN": "caos-admins"}
 
 
 def command_headers(
     user: UUID, *, role: str = "ANALYST", key: UUID | str | None = None
 ) -> dict[str, str]:
-    """What the edge forwards for `user` holding global `role`, and the key.
+    """What the development proxy forwards for `user` holding `role`, and the key.
+
+    The role header, not the groups header: a tokenless API reads no groups at
+    all (`server/api/identity.py`), and these suites serve the app without an
+    edge token. `command_client` sets the switch that makes this believed, the
+    way `frontend/vite.config.ts` and `.env.example` do for the developer.
 
     `key=None` mints a fresh one; pass `""` to send the header empty.
     """
     return {
         "x-caos-user": str(user),
-        "x-forwarded-groups": GROUPS[role],
+        ROLE_HEADER: role,
         "idempotency-key": str(uuid4() if key is None else key),
     }
 
@@ -60,8 +62,10 @@ def command_client(
 ) -> Iterator[TestClient]:
     """The real app, booted against the test database, on the case's connection."""
     conn, _case_id = case
-    # Identity comes from groups: a developer's trusted role header must not leak in.
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # The development deployment: no edge token, so the role comes from the
+    # header only because this asks for it. Without the switch the app grants
+    # READER whatever arrives, and an authority matrix would prove nothing.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     app.dependency_overrides[store_connection] = constant(conn)
     app.dependency_overrides[blob_store] = constant(BlobStore(tmp_path / "blobs"))
