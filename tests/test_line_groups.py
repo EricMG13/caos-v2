@@ -146,3 +146,40 @@ def test_a_packing_that_disagrees_with_the_stored_blocks_refuses(
             delivered={source_id: frozenset({"b000000"})},
             citations=[Citation(source_id, 1, "Annual report of the issuer")],
         )
+
+
+def test_a_source_missing_a_block_still_reads_one_block_a_line(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    """Fewer blocks than lines is not a packing, so the packing is not rebuilt.
+
+    Splitting only ever writes more blocks than lines. A source with fewer is
+    one a block was removed from -- which migration 0027 seals against, and
+    which the suite does deliberately to narrow a delivery below a whole
+    source. The missing block is then simply not among the delivered, which is
+    `CITATION_NOT_DELIVERED`: an answer about the citation, and the right one.
+    Reading it as a disagreement about the rule instead would make the only
+    demonstration of that refusal in the tree unreachable.
+    """
+    conn, case_id = case
+    source_id = _admit(conn, case_id, tmp_path, NARROW)
+    blocks = _blocks(conn, source_id)
+    with conn.transaction():
+        conn.execute("ALTER TABLE source_blocks DISABLE TRIGGER evidence_immutable")
+        conn.execute(
+            "DELETE FROM source_blocks WHERE source_id = %s AND block_id = %s",
+            (source_id, blocks[7][0]),
+        )
+        conn.execute("ALTER TABLE source_blocks ENABLE TRIGGER evidence_immutable")
+
+    citation = Citation(source_id, 1, "Section 7 of the annual report")
+    gone = blocks[7][0]
+    delivered = frozenset(block_id for block_id, _ in blocks if block_id != gone)
+    with pytest.raises(Refusal, match=r"^CITATION_NOT_DELIVERED$"):
+        verify_citations(conn, delivered={source_id: delivered}, citations=[citation])
+
+    other = Citation(source_id, 1, "Section 3 of the annual report")
+    [anchored] = verify_citations(
+        conn, delivered={source_id: delivered}, citations=[other]
+    )
+    assert anchored.matched_text == other.matched_text

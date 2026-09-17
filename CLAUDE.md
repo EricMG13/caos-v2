@@ -2111,7 +2111,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   derivation rather than a record, so it is checked -- a recomputed total that
   does not equal the stored count refuses `EVIDENCE_NOT_AVAILABLE`
   (`test_a_packing_that_disagrees_with_the_stored_blocks_refuses`), because
-  every id past the disagreement would name a row no source carries. Block ids
+  every id past the disagreement would name a row no source carries. It is
+  checked in one direction only: splitting writes **more** blocks than lines,
+  so only a source with more is repacked, and one with fewer -- which no
+  packing produces, and which is reached only by removing a stored block --
+  keeps the one-block-a-line reading
+  (`test_a_source_missing_a_block_still_reads_one_block_a_line`). That
+  asymmetry is not tidiness: the two tests that demonstrate
+  `CITATION_NOT_DELIVERED` at all narrow a delivery by deleting a block with
+  the seal disabled, and reading that as a disagreement about the rule would
+  answer about the host's derivation where the honest answer is about the
+  citation, making the refusal unreachable in the tree. Block ids
   are zero-padded to six digits, so reading order and `block_id` order agree up
   to 999,999 **blocks**, which is no longer the same as 999,999 lines.
   *Upgrade:* the grouping half, the day a document arrives whose block count can

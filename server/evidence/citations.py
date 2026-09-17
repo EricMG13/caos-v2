@@ -202,11 +202,17 @@ def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str,
     own numbering (`block_ids_by_line`) over the token index's line ids.
 
     A line past `GROUP_WIDTH` was split, so a line may own more than one block.
-    Which lines were split is not guessed: a source whose stored block count is
-    its line count had none, which is every source admitted before there was any
-    splitting and every source whose lines fit. Only when the counts differ is
-    the packing recomputed from the text, and the count travels with the line
-    ids rather than in a statement of its own.
+    Which lines were split is not guessed, and the direction of the count is
+    what says whether to ask. Splitting only ever writes **more** blocks than
+    lines, so a source with more stored blocks than lines carries a split and
+    its packing is recomputed from the text. A source with as many blocks as
+    lines had none -- every source admitted before there was any splitting, and
+    every source whose lines fit. A source with *fewer* blocks than lines is
+    neither: no packing this rule states produces one, and the only way to reach
+    it is to remove a stored block, which migration 0027 seals against and which
+    the suite does deliberately to narrow a delivery. There the one-block-a-line
+    reading is right and the missing block is simply not among the delivered,
+    which is `CITATION_NOT_DELIVERED` and not this function's to answer.
     """
     rows = conn.execute(
         "SELECT lines.line_id, blocks.stored FROM"
@@ -217,16 +223,16 @@ def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str,
     ).fetchall()
     line_ids = [int(row[0]) for row in rows]
     stored = int(rows[0][1]) if rows else 0
-    if stored == len(line_ids):
+    if stored <= len(line_ids):
         return block_ids_by_line(dict.fromkeys(line_ids, 1))
     counts = _group_counts(conn, source_id)
     if sum(counts.values()) != stored:
-        # The recomputation is a derivation of what admission wrote, and here
-        # it does not agree with it. The store cannot have drifted -- 0027
+        # The recomputation is a derivation of what admission wrote, and here it
+        # does not agree with it. The store cannot have drifted upward -- 0027
         # seals extracted evidence -- so the rule has: this source was packed
-        # under a different `GROUP_WIDTH`. Every id past the disagreement is
-        # then an id no row carries, and asking whether such a block was
-        # delivered answers about the citation when the fault is the host's.
+        # under a different `GROUP_WIDTH`. Every id past the disagreement names
+        # a row no source carries, and asking whether such a block was delivered
+        # answers about the citation when the fault is the host's own reading.
         raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
     return block_ids_by_line(counts)
 
