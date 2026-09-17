@@ -683,11 +683,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   lock.** `_accept_artifact` checks authority and ownership under the lock but
   not the predecessor digests the post-call unit compared; with Phase 2's one
   sequential loop no writer can accept a predecessor in between. The pre-call
-  unit also reads every captured block one query at a time under the case lock,
-  so a large pack holds governed writes on that case for the whole read.
+  unit ~~also reads every captured block one query at a time under the case
+  lock, so a large pack holds governed writes on that case for the whole
+  read~~ -- closed by §71.2: one statement reads them all, and refuses
+  unless it returns exactly the blocks the pin captured.
   *Upgrade:* Phase 4 rechecks upstream digests inside the accept unit (or fences
-  predecessors with the node's lease), and a batched block query when the first
-  large PDF pack measures the hold.
+  predecessors with the node's lease). The batched block query this entry asked
+  for arrived without waiting for a large pack to measure the hold.
 
 **Phase 0.**
 

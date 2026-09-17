@@ -63,7 +63,7 @@ def _register(prompt: str) -> str:
     """The register section's exact text, header included."""
     found = re.search(
         r"\n--- UPSTREAM CITATION REGISTER (?P<tag>[0-9a-f]{16}) .*?"
-        r"(?=\n--- EVIDENCE (?P=tag) ---\n)",
+        r"(?=\n--- END UPSTREAM CITATION REGISTER (?P=tag) ---\n)",
         prompt,
         re.DOTALL,
     )

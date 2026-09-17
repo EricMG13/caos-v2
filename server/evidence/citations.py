@@ -122,42 +122,6 @@ class TokenIndex:
     line_blocks: dict[UUID, dict[int, str]] = field(default_factory=dict)
 
 
-def citation_candidates(
-    conn: StoreConnection,
-    *,
-    delivered: Mapping[UUID, frozenset[str]],
-    proposed: Sequence[Citation],
-) -> tuple[Citation, ...]:
-    """Keep three long, anchorable delivered quotes per source page."""
-    index = TokenIndex()
-    candidates = []
-    by_page: dict[tuple[UUID, int], list[Citation]] = {}
-    for citation in proposed:
-        by_page.setdefault((citation.source_id, citation.page), []).append(citation)
-    for page in by_page.values():
-        kept = 0
-        for citation in sorted(
-            page, key=lambda item: len(item.matched_text.split()), reverse=True
-        ):
-            try:
-                verify_citations(
-                    conn, delivered=delivered, citations=[citation], index=index
-                )
-            except Refusal as refusal:
-                if refusal.code in {
-                    RefusalCode.CITATION_AMBIGUOUS,
-                    RefusalCode.CITATION_NOT_LOCATED,
-                }:
-                    continue
-                raise
-            candidates.append(citation)
-            kept += 1
-            # ponytail: three/page bounds work; raise if coverage proves thin.
-            if kept == 3:
-                break
-    return tuple(candidates)
-
-
 def verify_citations(
     conn: StoreConnection,
     *,

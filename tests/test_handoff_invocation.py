@@ -39,7 +39,7 @@ from server.engine.route import (
     node_states,
     resolve_route,
 )
-from server.evidence.citations import AnchoredCitation, Citation, Rect
+from server.evidence.citations import AnchoredCitation, Rect
 from server.methodology.bundle import (
     MANIFEST_NAME,
     Bundle,
@@ -57,6 +57,7 @@ from server.methodology.handoff import (
     validate_markdown,
 )
 from server.methodology.invocation import (
+    _FORECAST_EXTENSION,
     HOST_PERFORMED_SCRIPTS,
     MODULE_AUTHORED_SCRIPTS,
     allowed_uses,
@@ -99,7 +100,6 @@ def _prompt(
     of: HostIdentity,
     delivered: list[Delivery] | None = None,
     upstream: tuple[tuple[UpstreamRef, bytes], ...] = (),
-    citation_candidates: tuple[Citation, ...] = (),
 ) -> str:
     items = _delivered() if delivered is None else delivered
     return build_handoff_prompt(
@@ -111,7 +111,6 @@ def _prompt(
         upstream=upstream,
         upstream_citations={ref.route_node_id: ANCHORED for ref in of.upstream},
         route=LITE_ROUTE,
-        citation_candidates=citation_candidates,
         source_set=(
             _source_set(*(item.source_id for item in items))
             if of.module_id == "CP-0"
@@ -584,8 +583,9 @@ def test_the_prompt_carries_exact_upstream_bytes_and_every_block(
         )
         assert prompt.index(data.decode(), label) > label
     for item in delivered:
-        assert f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}" in (
-            prompt
+        assert (
+            f"source_id: {item.source_id}\npage: {item.page}\n\n{item.text.value}"
+            in prompt
         )
     assert prompt.index("--- AUTHORITY ") < prompt.index("--- UPSTREAM")
     assert prompt.index("--- UPSTREAM") < prompt.index("--- EVIDENCE ")
@@ -604,12 +604,7 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     upstream = () if module_id == "CP-0" else ((ref, gate),)
     of = identity(module_id, tuple(r for r, _ in upstream))
     delivered = _delivered()
-    candidate = Citation(
-        delivered[0].source_id, delivered[0].page, delivered[0].text.value
-    )
-    prompt = _prompt(
-        of, delivered=delivered, upstream=upstream, citation_candidates=(candidate,)
-    )
+    prompt = _prompt(of, delivered=delivered, upstream=upstream)
     tag = _tag(prompt)
     reminder = prompt.split(f"--- END EVIDENCE {tag} ---\n", 1)[1]
     compact = " ".join(reminder.split())
@@ -622,22 +617,14 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     )
     assert f"Add only these model-authored front-matter fields: {authored}." in compact
     assert "Do not add any other front-matter fields" in compact
-    assert "appears exactly once on its cited evidence page" in compact
-    assert (
-        f"citation_candidate: true\nsource_id: {candidate.source_id}\n"
-        f"page: {candidate.page}\n{candidate.matched_text}" in prompt
-    )
-    assert "Use only evidence whose host header says `citation_candidate: true`" in (
-        compact
-    )
-    assert "eligible, not required" in compact
-    assert "Do not enumerate all eligible candidates" in compact
-    assert "omit every candidate not quoted in the Markdown body" in compact
-    assert "copy its complete `matched_text` under `## Evidence Trace`" in compact
+    assert "that line must appear exactly once on its cited page" in compact
+    assert "is the complete text of one evidence line" in compact
+    assert "Cite only lines that support a claim you wrote" in compact
+    assert "`page` is the page shown in that line's evidence header" in compact
     source_ids = json.dumps(
         sorted({str(item.source_id) for item in delivered}), separators=(",", ":")
     )
-    assert f"Valid `source_id` values are exactly: {source_ids}." in reminder
+    assert f"Valid `source_id` values are exactly: {source_ids}," in compact
     assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
     assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
     t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"
@@ -986,9 +973,9 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     prompt = _prompt(gate, delivered)
     tag = _tag(prompt)
     files = len(delivered_authority(BUNDLE, "CP-0").files)
-    # Instructions, front matter (2), host steps, each file (2), source prep
-    # (2), evidence (2), check.
-    assert prompt.count(tag) == 9 + 2 * files and tag not in forged
+    # The tag rule (2), front matter (2), host steps (2), each file (2), source
+    # prep (2), evidence (2), final check (2), CP-0 final check (2).
+    assert prompt.count(tag) == 14 + 2 * files and tag not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
 
 
@@ -1097,3 +1084,85 @@ def test_an_extractor_identity_that_is_not_json_refuses_source_identity_invalid(
     # `from None`: the decoder's message never travels with the code.
     assert refused.value.__suppress_context__ is True
     assert refused.value.__cause__ is None
+
+
+def _two_pages_three_lines() -> list[Delivery]:
+    """One source, two pages, three lines: two `(source_id, page)` groups."""
+    source = uuid4()
+    return [
+        Delivery(source, "000001", 1, BoundaryText.of("Revenue rose 4% to 1,240.")),
+        Delivery(source, "000002", 1, BoundaryText.of("EBITDA was 310.")),
+        Delivery(source, "000003", 2, BoundaryText.of("Net leverage was 4.2x.")),
+    ]
+
+
+def prompt_for(delivered: list[Delivery] | None = None) -> str:
+    """The gate's prompt: every host section the builder can emit is present."""
+    return _prompt(identity("CP-0"), delivered=delivered)
+
+
+def test_evidence_is_grouped_by_source_page_with_one_header() -> None:
+    prompt = prompt_for(delivered=_two_pages_three_lines())
+    evidence = prompt.split("--- EVIDENCE ")[1].split("--- END EVIDENCE ")[0]
+    assert evidence.count("source_id: ") == 2
+    assert evidence.count("page: ") == 2
+    assert "citation_candidate" not in prompt
+
+
+def _paired_markers(prompt: str) -> tuple[list[str], list[str]]:
+    found = re.search(r"--- HOST-OWNED FRONT MATTER ([0-9a-f]{16}) ", prompt)
+    assert found is not None
+    tag = found.group(1)
+    # An authority marker carries its file name after the tag, so a marker is
+    # matched up to the tag, not to the line's end.
+    opened = re.findall(rf"^--- (?!END )([A-Z0-9 -]+?) {tag}\b", prompt, re.M)
+    closed = re.findall(rf"^--- END ([A-Z0-9 -]+?) {tag}\b", prompt, re.M)
+    return opened, closed
+
+
+@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def test_every_host_section_opens_and_closes_with_a_tagged_marker(
+    module_id: str,
+) -> None:
+    """The gate carries source preparation and its own final check; a
+    consumer carries UPSTREAM and the citation register instead."""
+    gate = handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), gate)
+    upstream = () if module_id == "CP-0" else ((ref, gate),)
+    of = identity(module_id, tuple(r for r, _ in upstream))
+    prompt = _prompt(of, upstream=upstream)
+    opened, closed = _paired_markers(prompt)
+    assert opened, "no tagged section opened"
+    assert sorted(opened) == sorted(closed), (opened, closed)
+    expected = {"UPSTREAM", "UPSTREAM CITATION REGISTER"} if upstream else set()
+    assert expected <= set(closed)
+    assert ("HOST SOURCE PREPARATION" in closed) is (module_id == "CP-0")
+    assert ("CP-0 FINAL CHECK" in closed) is (module_id == "CP-0")
+
+
+def test_the_forecast_extension_opens_and_closes_with_a_tagged_marker() -> None:
+    """No LITE fixture reaches a CP-CF route, so the one section the gate
+    and the LITE consumers never carry is asserted on its text."""
+    tag = "0123456789abcdef"
+    section = _FORECAST_EXTENSION.format(tag=tag)
+    assert section.startswith(f"--- HOST FORECAST EXTENSION {tag} ---\n")
+    assert section.endswith(f"\n--- END HOST FORECAST EXTENSION {tag} ---\n")
+
+
+def test_the_tag_rule_describes_the_markers_the_prompt_emits() -> None:
+    prompt = prompt_for()
+    assert "opens with a marker line of the form" in prompt
+    assert "ending in the tag" not in prompt
+
+
+def test_the_prompt_states_one_citation_rule_and_it_is_the_enforced_one() -> None:
+    # The rule's own line wrap falls inside the phrase; compare it unwrapped.
+    compact = " ".join(prompt_for().split())
+    assert (
+        compact.count("appear exactly once on its cited")
+        + compact.count("appears exactly once on its cited")
+        == 1
+    )
+    prompt = prompt_for()
+    assert "without shortening" not in prompt
+    assert "Evidence Trace` before using" not in prompt

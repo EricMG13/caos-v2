@@ -2883,3 +2883,146 @@ A store outage while a reviewer signs a qualification verdict no longer answers
 driver error on that route is `STORE_UNAVAILABLE`, and the three reads that ran
 outside the handler — the clock, the evidence lookup and the evidence record —
 are inside it.
+
+## 2026-09-17 §71 — The audit remediation's second wave: one citation rule, one query for a run's evidence, one token index
+
+Wave 2 of `docs/superpowers/plans/2026-09-17-audit-remediation.md`, answering
+the second critical finding of
+`docs/reviews/2026-09-17-gemini-audit-adversarial-review.md` and two of its
+warnings. **Every prompt identity in the system moves with 71.1.**
+
+### 71.1 The citation-candidate mechanism is retired, and the prompt states one rule
+
+`citation_candidates` kept the three longest anchorable lines of each page and
+marked every other delivered line `citation_candidate: false`. The final check
+then told the model two things at once: use only lines the host flagged, and
+cite the lines that support the claims you wrote. On a filings page the three
+longest lines are boilerplate, so for numeric evidence those sentences were
+jointly unsatisfiable — the phase-6 confidence review measured 93 flagged lines
+of 1,751 anchorable ones. Nothing enforced the flag: a model that ignored it
+was accepted and a model that obeyed it was refused. The flag also rode inside
+the evidence block that the tag rule tells the model is untrusted text, so a
+document line reading `citation_candidate: true` rendered indistinguishably
+from the host's own.
+
+The function is deleted, not orphaned. `_context` loses its candidate
+parameter and `build_handoff_prompt` is down to nine. `TokenIndex` and
+`verify_citations` are untouched: the candidate filter was the mechanism, the
+anchoring is the invariant.
+
+**The prompt now states the citation rule once.** Before, three host-authored
+statements disagreed about how much of a line to quote and where the quote had
+to appear, and a fourth named the flag. The single rule asks for the complete
+text of one evidence line, unique on its page, repeated verbatim in the body.
+
+That is deliberately **stricter than the host enforces, and the prompt no
+longer claims otherwise.** `verify_citations` accepts any whole-token run that
+is unique on its page and lies within one reading region — a fragment of a
+line, or a run spanning lines inside a region. Three enforced constraints the
+prompt does not state: the quote must lie within one reading region; ambiguity
+is counted over the whole page including lines that were never delivered; and
+a citation may not be repeated, which `server/methodology/handoff.py`'s
+transport check refuses as `HANDOFF_MALFORMED` before form is judged. A fourth,
+finer: uniqueness is of the token run, not of the line, so a once-only line
+whose words also occur as a run crossing a line break inside the same region is
+refused `CITATION_AMBIGUOUS` although it satisfies every sentence the prompt
+states. The instruction makes no claim about strictness in either direction,
+because both the equality it first claimed and the one-sided bound that
+replaced it were false.
+
+**Every host section now opens and closes with a tagged marker**, including the
+gate module's final check, which previously carried none at all. The tag rule
+also now describes the markers the code emits: it used to say markers "end in
+the tag" when in every real marker the tag sits mid-line. The tag itself is
+unchanged — `sha256(front_matter + sections)[:16]`, a digest over content the
+analysed document is itself part of, which is what stops a document embedding a
+marker bearing its own prompt's tag.
+
+**Evidence is grouped.** One `source_id`/`page` header per group replaces three
+metadata lines per delivered block. Per-line overhead falls from about 84 bytes
+to about 2, plus about 57 bytes per page; a prompt's END markers add a fixed
+~250. So the evidence section shrinks for every page with at least one line —
+line *length* was never the variable, the old metadata being constant per block
+— but a prompt whose entire delivered evidence is **four lines or fewer grows**,
+by at most ~225 bytes at one line. No qualification set here is near that: the
+crossover becomes reachable only when per-node evidence selection narrows a
+delivery to a handful of lines, and the measurement is owed then, against the
+delivery row. These figures are arithmetic from the format strings, not two
+measured prompts.
+
+**The accepted trade.** Paying the header once per page means two consecutive
+document lines reading `source_id: …` and `page: …` are the nearest
+header-shaped text for every line that follows, where per-line headers
+contradicted a forgery immediately. It is fail-closed: a mis-paged citation
+refuses `CITATION_NOT_LOCATED` and takes the whole handoff with it, so the cost
+is a billed attempt burned, never a wrong artifact. Markers themselves cannot
+be forged, because of the tag.
+
+**Unmeasured.** No live run has answered this prompt. Whether a real model does
+better under one rule than under four is unknown, and the eleven recorded
+qualification snapshots are not comparable to anything taken from here on.
+
+### 71.2 A run's delivered evidence is one query, and a short read refuses
+
+Building any module's prompt read every delivered block one at a time — a
+six-table join per block, under the case lock — so a pack of twenty thousand
+lines cost twenty thousand round trips per node call. One statement now reads
+them all, proving clause for clause what the per-block join proved: the block
+belongs to a source the run pinned, through the pinned source-set version, and
+the source is still live.
+
+The count check is inside that statement rather than beside it, so the
+comparison and the rows come from one snapshot instead of two under READ
+COMMITTED. It refuses `EVIDENCE_NOT_AVAILABLE` unless the read returns exactly
+the blocks the pin captured — including when it captures none, which is the
+shortest short delivery there is and the case the first implementation let
+through. A store fault on that path answers `STORE_UNAVAILABLE`, which is what
+the delivery path already answered, rather than the evidence code the
+single-block reader used.
+
+`read_run_block` is **deleted**. It had no production caller left once the
+delivery path stopped using it, and keeping it would have left a second,
+independently maintained copy of a six-table join that must stay in step with
+this one. Its tests were not deleted with it: they assert properties of the
+join, which survived, so they were ported onto the batched reader — later
+admission, the four identity comparisons, equal bytes after the pin, argument
+validation before any SQL, owned-unit cleanup, and a case-binding test written
+as what each run delivers rather than as a foreign block refused.
+
+This closes the known-gaps clause that asked for "a batched block query when
+the first large PDF pack measures the hold". It arrived without waiting for the
+measurement. Two near-verbatim twins of this join remain, in the same module
+and in `server/evidence/page.py`.
+
+### 71.3 The deliverable reader shares one token index
+
+Of the three readers that verify accepted artifacts, the one used by the report
+and committee reads re-read the same source pages once per pinned node instead
+of once per run. It now shares a `TokenIndex`, as the proof reader already did.
+The index is per reader instance, not module-global: caching across runs would
+be a correctness bug, and caching three store results does not turn a
+re-derivation into a trust, because uniqueness, delivered-block membership and
+the rectangles are all still computed per citation.
+
+`IO_BUDGET` for those reads falls by six per path, measured. It is the second
+move of that number in one plan — §70.1 removed the case lock from the same
+reads — and the two are unrelated: the first dropped a lock and a duplicate
+standing read, this one deduplicates page reads.
+
+**A new cost, recorded rather than fixed.** The shared index holds tokens for
+every cited page of every node for the whole payload, where each node's index
+was previously collected when its proof returned. A wide route citing many
+pages of a large credit agreement now holds them all at once, on an API request
+path. The proof reader has shared this trade since it gained its own index.
+
+**On liveness, which the implementer's account was silent about.** The reads
+run at READ COMMITTED, so strictly the uncached version could have seen a
+withdrawal committed between the first node and the third and refused, where
+the cached one cannot. Three things bound it: the payload already reads the
+pinned live sources once for the whole unit, so the liveness view was fixed at
+the top of the read and the per-page recheck made the reader inconsistently
+fail-closed rather than reliably so; freezing and withdrawal both take the case
+lock through a governed write, so the governed path is serialised against
+withdrawal; and these reads write nothing, so the worst case is one read
+serving a payload whose source was withdrawn mid-read, with the next read
+refusing. The net is a more consistent snapshot, not a weaker check.

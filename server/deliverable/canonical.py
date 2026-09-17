@@ -27,7 +27,7 @@ from uuid import UUID
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import MODEL_MODULE, ResolvedRoute, RouteNode
-from server.evidence.citations import Citation, verify_citations
+from server.evidence.citations import Citation, TokenIndex, verify_citations
 from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.executor import captured_blocks
 from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
@@ -154,6 +154,9 @@ class _Reader:
         self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
         self.pinned = pinned
         self.pairs: dict[str, tuple[str, str | None]] = {}
+        # One reading of the token index for the whole payload: records cluster
+        # on the same pages of the same sources.
+        self.index = TokenIndex()
         # The captured blocks of the pinned live sources: what any node was handed.
         self.delivered = {
             source: captured.get(source, frozenset()) for source in pinned.values()
@@ -211,6 +214,7 @@ class _Reader:
                 Citation(pinned[c.document_sha256], c.page, c.matched_text)
                 for c in record.citations
             ],
+            index=self.index,
         )
         if tuple(anchored) != record.citations or stored is None:
             raise mismatch

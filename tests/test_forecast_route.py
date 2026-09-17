@@ -1,6 +1,7 @@
 """The actual extended route accepts CP-CF only from anchored owner inputs."""
 
 import json
+import re
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any
@@ -202,6 +203,23 @@ def test_forecast_route_accepts_real_host_calculated_artifact(
     )
     result = forecast_projection(answers.answers[-1])
     assert result["rows"][0]["cash"]["closing"] == "145.000000"
+    # The forecast owners are the only modules handed the extension, and this
+    # is the only route fixture that emits it: prove it opens and closes.
+    owners = {
+        fields_from_prompt(p)["module_id"]: p
+        for p in answers.prompts
+        if fields_from_prompt(p)["module_id"] in OWNER_QUOTES
+    }
+    assert set(owners) == set(OWNER_QUOTES)
+    for prompt in owners.values():
+        tag = re.search(r"--- EVIDENCE ([0-9a-f]{16}) ---", prompt)
+        assert tag is not None
+        opened = re.findall(
+            rf"^--- (?!END )([A-Z0-9 -]+?) {tag.group(1)}\b", prompt, re.M
+        )
+        closed = re.findall(rf"^--- END ([A-Z0-9 -]+?) {tag.group(1)}\b", prompt, re.M)
+        assert "HOST FORECAST EXTENSION" in closed
+        assert sorted(opened) == sorted(closed), (opened, closed)
     revision = save_revision(
         harness.conn,
         harness.blobs,

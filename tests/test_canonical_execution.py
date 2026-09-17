@@ -37,6 +37,7 @@ from test_loop_charges import ESTIMATE, REPORT, REPORTED
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode, resolve_route
 from server.engine.runtime import ProviderResult
+from server.evidence import read as evidence_read
 from server.methodology import executor, runner
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import HandoffOutcome, execute_handoff
@@ -183,9 +184,12 @@ def test_the_executor_produces_a_validated_handoff_and_its_record(
     completions = CanonicalCompletions(harness.source_id)
     with recorded_statements(harness.conn) as statements:
         gate_attempt, gate = _run(harness, "CP-0", completions)
-    # The captured pins are read once, before the call: the anchoring after it
-    # uses the very deliveries the prompt was built from.
-    assert statements.count(executor._CAPTURED) == 1
+    # The delivered blocks are read once, in one statement, before the call:
+    # the anchoring after it uses the very deliveries the prompt was built from,
+    # and no block costs a round trip of its own.
+    assert statements.count(evidence_read._RUN_BLOCKS_QUERY) == 1
+    # And the captured pins are no longer a read of their own beside it.
+    assert statements.count(executor._CAPTURED) == 0
     # The runner stores exactly the executor's two blobs.
     assert harness.blobs.get(gate.artifact_sha256) == outcomes[0].markdown
     assert gate.record_sha256 == hashlib.sha256(outcomes[0].record).hexdigest()

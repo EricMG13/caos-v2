@@ -21,8 +21,9 @@ from server.store.source_sets import pinned_live_sources
 # Analysis' ten-node forecast route, including CP-CF's four owner proofs,
 # plus the live source pin. Moves with Analysis' own budget, which this route
 # pays in full before adding to it. Measured by
-# test_model_http_actor_matrix_and_declared_io.
-IO_BUDGET = 194
+# test_model_http_actor_matrix_and_declared_io; 194 before each proof's
+# delivered blocks became one read instead of one per block.
+IO_BUDGET = 150
 router = APIRouter()
 
 
