@@ -19,11 +19,11 @@ from server.store.audit import _digest_of, audit_head, audit_trail, verify_chain
 from server.store.members import satisfies, standing_of
 from server.store.outcomes import execution_reads
 
-# Three-node LITE: isolation/standing/selection (3), live proof (46). No lock:
+# Three-node LITE: isolation/standing/selection (3), live proof (40). No lock:
 # a read takes none, and the payload digest below is the consistency check.
 # Committee adds publication/signatures (2) and three actor/audit proof reads.
 # Filed Committee also adds receipt/audit (5) and saved payload (1).
-IO_BUDGET = {"report": 49, "committee": 60, "frozen": 54}
+IO_BUDGET = {"report": 43, "committee": 54, "frozen": 48}
 router = APIRouter()
 
 
