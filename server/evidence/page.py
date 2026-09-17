@@ -2,7 +2,7 @@
 
 Phase 4 Task 4.4 decisions 7 and 8. A page is served only from a source that is
 live now and a member of the run's pinned source-set version with the document
-and extraction identity the pin captured -- the `_RUN_BLOCK_QUERY` join of
+and extraction identity the pin captured -- the `_RUN_BLOCKS_QUERY` join of
 `server/evidence/read.py` (invariant 1: withdrawal is checked at every use).
 Its lines are the token index citations were anchored in, grouped by
 `(region_id, line_id)`: the joined words and their union rectangle, in the

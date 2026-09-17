@@ -260,7 +260,7 @@ def test_invalid_or_used_attempt_cannot_reach_completion(
     def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("invalid attempt reached evidence or upstream reads")
 
-    monkeypatch.setattr(executor, "read_run_block", forbidden)
+    monkeypatch.setattr(executor, "read_run_blocks", forbidden)
     monkeypatch.setattr(canonical, "_identity", forbidden)
     node = provider.route.nodes[0]
     attempt = _reserve(provider, node)
@@ -364,7 +364,7 @@ def test_owned_pretransport_read_failure_cleans_up_without_call(
         raise psycopg.OperationalError("private")
 
     owner, name = {
-        "delivery": (executor, "read_run_block"),
+        "delivery": (executor, "read_run_blocks"),
         # The host identity is the store read that derives the upstream refs.
         "upstream": (canonical, "_identity"),
         "frontier": (runtime, "accepted_artifacts"),

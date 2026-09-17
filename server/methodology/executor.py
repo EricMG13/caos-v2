@@ -15,7 +15,7 @@ from uuid import UUID
 
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, RouteNode
-from server.evidence.read import read_run_block
+from server.evidence.read import read_run_blocks
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -86,15 +86,16 @@ def captured_blocks(conn: StoreConnection, run_id: UUID) -> dict[UUID, frozenset
 
 
 def _delivered(conn: StoreConnection, run_id: UUID) -> list[Delivery]:
-    """Every captured block of the run, each through the run-bound reader."""
-    delivered = []
-    for source, block in conn.execute(_CAPTURED, (run_id,)).fetchall():
-        source_id = UUID(str(source))
-        read = read_run_block(
-            conn, run_id=run_id, source_id=source_id, block_id=str(block)
-        )
-        delivered.append(Delivery(source_id, str(block), read.page, read.text))
-    return delivered
+    """Every captured block of the run, in one read through the run-bound join.
+
+    The reader counts the pin's captured blocks in the same statement, so a
+    delivery short of the pin refuses rather than handing a module a prompt
+    built from what a withdrawal left behind.
+    """
+    return [
+        Delivery(source_id, block_id, page, text)
+        for source_id, block_id, page, text in read_run_blocks(conn, run_id=run_id)
+    ]
 
 
 def _stored_identity(
