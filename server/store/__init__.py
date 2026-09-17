@@ -129,6 +129,12 @@ MIGRATIONS = (
         "0025_supersedes",
         Path(__file__).with_name("0025_supersedes.sql").read_text(encoding="utf-8"),
     ),
+    (
+        "0027_evidence_statement_trigger",
+        Path(__file__)
+        .with_name("0027_evidence_statement_trigger.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
