@@ -47,10 +47,11 @@ section. Nothing has been run on this route, so there was nothing to copy from.
 
 ## What is owed
 
-- **Register keys.** A richer `ExpectedRegister` key form is landing separately
-  (`server/qualification/matrix.py`). This manifest deliberately carries no
-  `expects_register`, so it loads against the schema as it is today. Once that
-  form lands, this set owes register keys on CP-L10's `TL10.2` (the
-  debt-extinguishment topic row) and on `TL10.1` (the source row for the
-  filing).
+- **Register keys.** The `ExpectedRegister` form landed with Task 8.1, and this
+  set still carries none, deliberately. The VMO2 set's key asserts CP-L10's
+  `TL10.2` liquidity-maturities evidence status, which was justified by reading
+  both Virgin Media O2 releases; the equivalent conclusion for Carnival has to be
+  read out of its 10-K's liquidity and maturity disclosures, and a key asserted
+  without that reading would measure a guess rather than the module. Owed, with
+  the reading, before this set is run.
 - **The run itself**, and a signed verdict or a recorded reason why not.

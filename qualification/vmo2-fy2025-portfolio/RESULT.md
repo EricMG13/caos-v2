@@ -8,7 +8,8 @@ costs real money and calls a real model.
 ## The set
 
 - Qualification-set digest:
-  `8e53fe3d9c5e68011047cc1a71b9ff6d5eddbf89b4fe0c07479a62eec881a96a`
+  `a46a1b4f597885e8…` (moved from `8e53fe3d…` when the register key below was
+  added; a digest covers the keys, so the two are different sets)
 - Route: `LITE_CREDIT_22 / LITE_PORTFOLIO_DECISION` (`CP-0` → `CP-L10`, one
   REQUIRED edge, `decision_scope: SCREENING_ONLY`, terminal deliverable
   `CP-L10`)
@@ -47,10 +48,13 @@ section. Nothing has been run on this route, so there was nothing to copy from.
 
 ## What is owed
 
-- **Register keys.** A richer `ExpectedRegister` key form is landing separately
-  (`server/qualification/matrix.py`). This manifest deliberately carries no
-  `expects_register`, so it loads against the schema as it is today. Once that
-  form lands, this set owes register keys on CP-L10's `TL10.2` (the Q4 goodwill
-  impairment topic row and its `scope_status`) and on `TL10.1` (the source row
-  for each release).
+- ~~**Register keys.**~~ The `ExpectedRegister` form landed with Task 8.1 and
+  this set now carries one key: CP-L10's `TL10.2`, row
+  `topic_id=LIQUIDITY_MATURITIES`, `evidence_status` must be `PARTIAL`. It is
+  the key Task 8.1 justified from these same two releases -- they give undrawn
+  commitments and covenant leverage, so the topic is not `MISSING`, and neither
+  carries a maturity profile of the third-party debt, so it is not
+  `SUFFICIENT`. Same module, same register, same documents, so the conclusion
+  carries to this pathway unchanged. A `TL10.1` source-row key is still owed and
+  is not guessed here.
 - **The run itself**, and a signed verdict or a recorded reason why not.

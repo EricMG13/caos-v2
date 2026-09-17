@@ -24,14 +24,19 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import lite_route_fixtures
 import pytest
 from canonical_fixtures import CATALOG, fields_from_prompt
 from lite_route_fixtures import RealisticLiteCompletions
 from test_canonical_execution import _node, harness
-from test_canonical_runtime import _blocking_verdict, _run_route, _status
+from test_canonical_runtime import (
+    _attempt_of,
+    _blocking_verdict,
+    _run_route,
+    _status,
+)
 from test_execution_freshness import _counts, _events, _Harness
 from test_lite_route_e2e_positive import _revision
 
@@ -120,16 +125,6 @@ def _attempts_at(harness: _Harness, module_id: str) -> tuple[int, int]:
         ).fetchone()
     assert row is not None
     return int(row[0]), int(row[1])
-
-
-def _attempt_of(harness: _Harness, module_id: str) -> UUID:
-    with connect(harness.url) as observer:
-        row = observer.execute(
-            "SELECT attempt_id FROM run_attempts WHERE route_node_id = %s",
-            (_node(harness, module_id).route_node_id,),
-        ).fetchone()
-    assert row is not None
-    return UUID(str(row[0]))
 
 
 def test_lite_portfolio_route_completes_proves_and_freezes(
