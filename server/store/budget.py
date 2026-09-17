@@ -26,8 +26,7 @@ from uuid import UUID
 import psycopg
 
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, committed_unit
-from server.store.events import lock_run
+from server.store import StoreConnection, committed_unit
 
 if TYPE_CHECKING:
     from server.store.work import Lease
@@ -76,16 +75,13 @@ def _reserve(
     conn: StoreConnection, attempt_id: UUID, amount: Decimal, lease: Lease | None
 ) -> None:
     # `work` imports `outcomes`, which imports this module.
-    from server.store.work import require_lease
+    from server.store.work import require_running
 
     validate_spend(amount)
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     run_id = _run_of(conn, attempt_id)
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
-    if require_lease(conn, run_id, lease):
-        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
+    require_running(conn, run_id, lease)
     # Revalidate after waiting, then retain the native owner key through commit.
     # A moved attempt must never spend under its former run lock.
     if (

@@ -35,7 +35,7 @@ from server.store.outcomes import (
     artifact_digests,
     record_outcome,
 )
-from server.store.work import Lease, mark_work_done, require_lease
+from server.store.work import Lease, mark_work_done, require_lease, require_running
 
 # The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
 MAX_ATTEMPT_ORDINAL = 256
@@ -97,11 +97,8 @@ def start_attempt(
     charged against: a crash after a provider completed still has the attempt it
     completed (`docs/DECISIONS.md` §12, adopting CAOS-Final §21 with Phase 4).
     """
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
     try:
-        _require_uncancelled(conn, run_id, lease)
+        require_running(conn, run_id, lease)
     except BaseException:
         rollback_or_close(conn)
         raise
@@ -142,15 +139,6 @@ def _start(
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
     return attempt_id
-
-
-def _require_uncancelled(
-    conn: StoreConnection, run_id: UUID, lease: Lease | None
-) -> None:
-    """The fence for new spend: the lease is held and no cancel was requested.
-    The caller holds `lock_run`."""
-    if require_lease(conn, run_id, lease):
-        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
 
 
 def attempt_ordinal(conn: StoreConnection, attempt_id: UUID) -> int:

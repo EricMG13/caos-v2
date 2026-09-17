@@ -81,6 +81,15 @@ def claim_run(
     return None if row is None else Lease(UUID(str(row[0])), int(row[1]))
 
 
+def require_running(conn: StoreConnection, run_id: UUID, lease: Lease | None) -> None:
+    """The fence for new spend, under the run row lock it takes: the run is
+    RUNNING, the lease is held and no cancel was requested (brief 4.3 D3)."""
+    if lock_run(conn, run_id) is not RunStatus.RUNNING:
+        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+    if require_lease(conn, run_id, lease):
+        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
+
+
 def require_lease(
     conn: StoreConnection,
     run_id: UUID,

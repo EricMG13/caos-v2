@@ -51,6 +51,7 @@ from server.store.routes import pin_route, pin_route_in
 from server.store.run_inputs import RunSubject, pin_run_input_in
 from server.store.runs import fail_run, start_run
 from server.store.source_sets import snapshot_in, snapshot_source_set
+from server.store.work import require_running
 
 __all__ = ["gated"]  # the fixture is used by name
 
@@ -257,3 +258,19 @@ def test_no_store_module_spells_the_commit_block_by_hand() -> None:
         and COMMIT_BLOCK in path.read_text(encoding="utf-8")
     )
     assert offenders == [], offenders
+
+
+def test_the_spend_fence_refuses_an_ended_run_before_it_asks_for_a_lease(
+    gated: tuple[StoreConnection, UUID, UUID, UUID, UUID],
+) -> None:
+    conn, _case_id, run_id, _source_id, _approver = gated
+    # RUNNING and never enqueued: the direct caller passes the fence.
+    require_running(conn, run_id, None)
+    conn.rollback()
+    assert fail_run(conn, run_id)
+    with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+        require_running(conn, run_id, None)
+    conn.rollback()
+    with pytest.raises(Refusal, match=r"^RUN_NOT_FOUND$"):
+        require_running(conn, uuid4(), None)
+    conn.rollback()
