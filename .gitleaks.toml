@@ -1,4 +1,4 @@
-# gitleaks' default rules, plus one exemption.
+# gitleaks' default rules, plus two exemptions.
 #
 # `generic-api-key` matches the word "key" followed by a high-entropy value,
 # and `sonar.projectKey=EricMG13_caos-v2` scores high enough to trip it. The
@@ -8,7 +8,8 @@
 # It is answered by what the value is: a project key is a public identifier,
 # in the query string of every dashboard URL the check posts, authorising
 # nothing. The credential is SONAR_TOKEN, a repository secret, exempted
-# nowhere in this file.
+# nowhere in this file. The closed provider finish reasons below are public enum
+# values rather than credentials.
 [extend]
 useDefault = true
 
@@ -25,5 +26,5 @@ useDefault = true
 # system gitleaks (8.30.1): omitting it, matching the secret alone, passes
 # on both; setting it to "match" passes only on the newer one.
 [allowlist]
-description = "The Sonar project key is an identifier, not a credential"
-regexes = ['''EricMG13_caos-v2''']
+description = "Public identifiers and closed provider finish-reason enums"
+regexes = ['''EricMG13_caos-v2''', '''^finish_reason=(?:stop|length)$''']
