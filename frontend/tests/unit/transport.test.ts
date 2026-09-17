@@ -55,6 +55,8 @@ function v1Model(runId = RUN) {
       latest_run_id: runId,
       displayed_run_id: runId,
       subject: null,
+      displayed_run_status: "COMPLETE",
+      blocked_by: null,
       forecast: null,
       unavailable_reason: "NO_ACCEPTED_FORECAST",
     },

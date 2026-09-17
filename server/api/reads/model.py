@@ -75,10 +75,11 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
     return ModelDocument(
         **analysis.model_dump(exclude={"body", "status", "observed_empty"}),
         body=ModelBody(
-            #  is the Analysis section's; the Model
-            # section has the same blindness to an ended run and will want
-            # its own field when that is addressed (ledgered).
-            **body.model_dump(exclude={"handoffs", "pending", "displayed_run_status"}),
+            # The run's own status and the node that ended it travel with the
+            # forecast: "no accepted forecast" is a fact about now, and only
+            # those two say whether one is still coming. They are Analysis'
+            # own fields, unchanged -- this section derives, it does not judge.
+            **body.model_dump(exclude={"handoffs", "pending"}),
             forecast=forecast,
             unavailable_reason="NO_ACCEPTED_FORECAST" if forecast is None else None,
         ),

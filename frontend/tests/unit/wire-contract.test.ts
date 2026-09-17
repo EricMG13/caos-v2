@@ -134,6 +134,8 @@ test("Model is closed and binds the displayed run independently of latest", () =
       latest_run_id: OTHER_RUN,
       displayed_run_id: RUN,
       subject: null,
+      displayed_run_status: "COMPLETE",
+      blocked_by: null,
       forecast: null,
       unavailable_reason: "NO_ACCEPTED_FORECAST",
     },
@@ -359,6 +361,7 @@ function analysis(): { [key: string]: Json } {
         analysis_date: "2026-09-14",
       },
       displayed_run_status: "COMPLETE",
+      blocked_by: null,
       handoffs: [
         {
           route_node_id: "CP-0",

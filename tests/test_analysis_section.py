@@ -276,6 +276,51 @@ def test_unaccepted_nodes_make_analysis_partial_with_a_note(
     assert all(state != "COMPLETE" for _module, state in pending)
 
 
+def test_the_analysis_document_names_the_node_whose_verdict_ended_the_run(
+    client: TestClient, harness: _Harness
+) -> None:
+    """A BLOCKED run's pending list holds the node that *did* run.
+
+    `pending` is recomputed from accepted artifacts, and a validated `Blocked`
+    verdict accepts nothing -- so the node that answered and ended the run sits
+    in the same list as the two that never started. The run document has named
+    it since 4.1i; without the same field here a reader of this page is told
+    only that three nodes have no handoff.
+    """
+    _run(harness, qa_by_module={"CP-L10": "Blocked"})
+    blocking = harness.conn.execute(
+        "SELECT v.attempt_id, a.route_node_id FROM run_blocking_verdicts v"
+        " JOIN run_attempts a USING (attempt_id) WHERE v.run_id = %s",
+        (harness.run_id,),
+    ).fetchone()
+    harness.conn.rollback()
+    assert blocking is not None, "the fixture run ended on a validated verdict"
+
+    document = _document(client, harness, _analysis(harness.case_id))
+
+    body = document.body
+    assert body.displayed_run_status == "BLOCKED"
+    assert body.blocked_by is not None
+    assert body.blocked_by.module_id == "CP-L10"
+    assert body.blocked_by.route_node_id == str(blocking[1])
+    assert body.blocked_by.attempt_id == UUID(str(blocking[0]))
+    # The node it names is one of the nodes with no handoff, which is what lets
+    # a reader tell the one that answered from the two that never ran.
+    assert body.blocked_by.route_node_id in {p.route_node_id for p in body.pending}
+
+
+def test_a_run_that_is_not_blocked_names_no_blocking_node(
+    client: TestClient, harness: _Harness
+) -> None:
+    """The wire never claims a blocking node that does not exist."""
+    _run(harness)
+
+    body = _document(client, harness, _analysis(harness.case_id)).body
+
+    assert body.displayed_run_status == "COMPLETE"
+    assert body.blocked_by is None
+
+
 def test_run_and_analysis_name_displayed_and_latest_runs_separately(
     client: TestClient, harness: _Harness
 ) -> None:

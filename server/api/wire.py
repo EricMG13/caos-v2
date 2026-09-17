@@ -187,6 +187,9 @@ CLEARS: Mapping[RefusalCode, str] = {
         "Reference a citation in the accepted revision artifacts."
     ),
     _C.DELIVERABLE_UNCITED_FIGURE: "Cite every figure.",
+    _C.DELIVERABLE_MARKDOWN_UNSUPPORTED: (
+        "Keep the handoff to the elements the deliverable renders."
+    ),
     _C.DELIVERABLE_NOT_SIGNED: "Sign the deliverable first.",
     _C.DELIVERABLE_NOT_FROZEN: "Freeze the deliverable first.",
     _C.DELIVERABLE_MOVED_SINCE_SIGNING: "Review and sign the current revision.",
@@ -583,6 +586,12 @@ class AnalysisBody(BaseModel):
     # artifacts, so a node the run never reached looks exactly like a node whose
     # turn has not come. `None` when no run is displayed.
     displayed_run_status: RunStatus | None
+    # The node whose validated Blocked verdict ended the run, read exactly as
+    # `RunView.blocked_by` is and `None` on the same runs. This page's `pending`
+    # list holds that node, because a Blocked verdict accepts nothing, and
+    # without the name a reader cannot tell the node that answered from the
+    # nodes that never started.
+    blocked_by: BlockedByView | None
     handoffs: Annotated[list[HandoffView], Field(max_length=ROUTE_NODES_MAX)]
     pending: Annotated[list[PendingNode], Field(max_length=ROUTE_NODES_MAX)]
 
@@ -623,12 +632,22 @@ class ModelForecast(BaseModel):
 
 
 class ModelBody(BaseModel):
+    """The accepted forecast, or why there is none.
+
+    `unavailable_reason` says there is no accepted forecast; the two fields
+    beside it say whether one is still coming. A body that carried neither
+    answered "not yet" to a run that had ended, which is the same blindness
+    Analysis carried until `blocked_by` joined it.
+    """
+
     model_config = _CLOSED
 
     case_id: UUID
     latest_run_id: UUID | None
     displayed_run_id: UUID | None
     subject: RunSubjectView | None
+    displayed_run_status: RunStatus | None
+    blocked_by: BlockedByView | None
     forecast: ModelForecast | None
     unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
 

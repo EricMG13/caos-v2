@@ -645,8 +645,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   gap. Proof is
   re-derived under the bundle and live sources present now: a bundle upgrade
   (as for the proof, Phase 10) or a withdrawn source makes a filed revision
-  refuse verification. The payload needs every pinned node accepted, and the
-  Markdown renders as escaped preformatted text, not formatted Markdown. A soft
+  refuse verification. The payload needs every pinned node accepted.
+  ~~The Markdown renders as escaped preformatted text, not formatted
+  Markdown.~~ Closed by Completion Phase 12 Task 12.4: `render.py`'s
+  `_markdown` renders the closed element set `ELEMENTS` names -- front matter,
+  headings, paragraphs, tables, lists, blockquotes, code blocks, thematic
+  breaks, strong, emphasis and code spans -- escaping every authored character
+  inside them, so a register reads as a table and a raw tag still reaches the
+  page as the characters the model wrote
+  (`tests/test_deliverable_render.py::test_a_handoffs_markdown_reaches_the_page_as_headings_tables_and_lists`,
+  `test_markdown_outside_the_element_set_reaches_the_page_as_itself`,
+  `test_an_identifier_and_an_unpaired_asterisk_are_not_emphasis`). A soft
   upstream ref may be absent from a record only if that input's artifact was
   accepted after the attempt started (`call_time_identity`); the comparison is
   `artifacts.created_at > run_attempts.started_at`, both transaction-start
@@ -657,8 +666,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   too: a document captured under several live members resolves to the lowest
   source id when they share one extraction output and to none when they do
   not.
-  *Upgrade:* a Markdown renderer with a closed element set when committee
-  layout needs one.
+  What the renderer added is a refusal of its own: a block with no faithful
+  rendering -- an unterminated fence, a table row that does not fit its header,
+  a list nested past four -- refuses `DELIVERABLE_MARKDOWN_UNSUPPORTED` rather
+  than guessing
+  (`tests/test_deliverable_render.py::test_a_block_with_no_faithful_rendering_is_refused_not_guessed_at`),
+  and a filed revision whose handoff carries one cannot be re-rendered or
+  verified. No stored handoff in this tree carries one, and the direction is
+  the fail-closed one, but the class is new.
+  *Upgrade:* widen `ELEMENTS` for the construct, the day a real handoff meets
+  that refusal; and, for the entry's own title claim, nothing is planned while
+  re-derivation needs the store, the bundle and the live sources the render
+  deliberately does not hold.
 - **A LITE route runs through `run_route`, but only the runtime reads its
   records.** Slice c-5b: `_run_node` replays the executor's outcome with its
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
@@ -1238,16 +1257,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `block_run` in the transaction that ends the run, not re-derived by the
   reader, because the store refuses to judge an ended run's answer again
   (`docs/DECISIONS.md` §68). The run page says it on the node, in its detail
-  and in the run panel, and the journey asserts all three. What remains is the
-  analysis page: `AnalysisBody` carries no `blocked_by`, so its "Nodes that did
-  not run" list still holds CP-5 — the one node of the three that did run — and
-  the Model section, which derives its body from Analysis', has the same
-  blindness; `reads/model.py` excludes the status field rather than guessing at
-  a presentation. *Upgrade:* the same field on `AnalysisBody` (a model change,
-  a pinned key set, the analysis fixtures and `reads/model.py`'s exclusion),
-  after which the pending list names the node as what ended the run rather
-  than as unrun. The original entry:
-- **A BLOCKED run draws the node that blocked it as running.** `node_states`
+  and in the run panel, and the journey asserts all three. The analysis page
+  was the half that remained, and Completion Phase 12 Task 12.4 closed it:
+  `AnalysisBody.blocked_by` is the same `BlockedByView`, read in the same left
+  join as the run's status so the declared budget did not move, and the pending
+  list names that node as what ended the run instead of listing it among the
+  nodes that never started
+  (`tests/test_analysis_section.py::test_the_analysis_document_names_the_node_whose_verdict_ended_the_run`,
+  `test_a_run_that_is_not_blocked_names_no_blocking_node`, and the workspace's
+  `test_the_pending_list_names_the_node_whose_verdict_ended_the_run`). The
+  Model section derives its body from Analysis' and now carries both fields
+  rather than excluding them, so "no accepted forecast" says whether one is
+  still coming
+  (`frontend/tests/unit/model.test.tsx`'s
+  `test_an_absent_forecast_says_whether_the_run_can_still_produce_one`). The
+  original entry, which the same task's change makes historical:
+- ~~**A BLOCKED run draws the node that blocked it as running.**~~ Both wire
+  changes this entry owed have landed -- the analysis document's run status, and
+  the run document's blocking node, which Task 12.4 then gave the analysis
+  document too. Struck with the entry above it and kept verbatim, because it is
+  the record of what the defect looked like before either field existed.
+  `node_states`
   is recomputed from accepted artifacts alone (invariant 10), and a validated
   CP-5 `Blocked` accepts nothing: on a run `_end_blocked` has ended, CP-5 has
   every input met, no artifact and one unaccepted attempt, so the run document
@@ -1276,8 +1306,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   still require independent human review. Historical string payloads remain
   renderable, but cannot enter the new save API. *Upgrade:* a separately
   specified semantic review if those claims must be machine-checked.
-- **A citation renders without its page when the payload omits one.**
-  `_citation` reads `str(citation.get("page", ""))`, while `matched_text` and
+- ~~**A citation renders without its page when the payload omits one.**~~
+  Closed by Completion Phase 12 Task 12.4: `_page` refuses a page that is
+  absent, not an integer, a bool, or below 1, with the same
+  `DELIVERABLE_PAYLOAD_INVALID` the two fields beside it already raised
+  (`tests/test_deliverable_render.py::test_a_citation_without_a_page_is_refused_like_the_fields_beside_it`).
+  The original entry:
+  `_citation` read `str(citation.get("page", ""))`, while `matched_text` and
   `document_sha256` beside it are refused when absent — so a payload with no
   `page` prints "page " rather than refusing. Unreachable from any real run:
   `AnchoredCitation` (`server/evidence/citations.py`) declares `page` a
@@ -1285,9 +1320,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`server/methodology/handoff.py`) serialises it into every stored record, so
   only an external hand-built render payload can carry a citation without one. The
   cost is a cosmetic line on the page rather than a false assurance, which is
-  why it is recorded and not fixed. *Upgrade:* refuse it here too, for
-  consistency with the two fields beside it, the day a payload
-  has any author but this repository.
+  why it was recorded and not fixed until a task owned the renderer beside it.
 
 **Rebuild Phase 7 (historical).**
 

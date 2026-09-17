@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 
 from server.boundary_text import BoundaryText
-from server.deliverable.render import PENDING, RenderRefused, render
+from server.deliverable.render import ELEMENTS, PENDING, RenderRefused, render
 from server.refusals import RefusalCode
 from server.store import apply_schema, connect
 from server.store.runs import create_case
@@ -223,6 +223,160 @@ def test_a_narrative_that_is_not_a_string_is_refused() -> None:
     assert caught.value.code == "DELIVERABLE_PAYLOAD_INVALID"
 
 
+MARKDOWN_HANDOFF = (
+    "---\n"
+    "module_id: CP-1\n"
+    "---\n"
+    "## Audit Summary\n\n"
+    "Total debt at 31 December 2026 was **USD 1,240.0m**.\n\n"
+    "### Registers\n\n"
+    "| Metric | Value |\n"
+    "| --- | --- |\n"
+    "| Net leverage | 4.2x |\n\n"
+    "- One limitation\n"
+    "- Another limitation\n\n"
+    "> The covenant headroom is thin.\n"
+)
+
+
+def test_a_handoffs_markdown_reaches_the_page_as_headings_tables_and_lists() -> None:
+    """A committee page shows the register as a table, not as its source.
+
+    The escaped `<pre>` this replaces printed `| Metric | Value |` and `## Audit
+    Summary` as characters, so a reader of a filed deliverable read the
+    Markdown rather than the document. The element set is closed and named in
+    `render.py`; everything in this handoff is inside it.
+    """
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact(MARKDOWN_HANDOFF)
+
+    page = render(payload).decode()
+
+    assert "<table>" in page and "<th>Metric</th>" in page and "<td>4.2x</td>" in page
+    assert "<li>One limitation</li>" in page
+    assert "<strong>USD 1,240.0m</strong>" in page
+    assert "<blockquote>The covenant headroom is thin.</blockquote>" in page
+    # The authored heading is a heading, and it never collides with the page's
+    # own structure: authored level 1 lands at <h4>, below the <h3> section
+    # headings, and the level the module wrote is kept rather than normalised.
+    assert '<h5 data-level="2">Audit Summary</h5>' in page
+    assert '<h6 data-level="3">Registers</h6>' in page
+    assert "## Audit Summary" not in page
+    assert "| Metric | Value |" not in page
+
+
+def test_markdown_outside_the_element_set_reaches_the_page_as_itself() -> None:
+    """A construct the set does not carry never becomes markup.
+
+    A link, an image and a raw tag are the three a general Markdown library
+    would render; here they are the characters the model wrote, escaped and
+    inert, which is what `test_the_page_keeps_limitations_labels_screens_and`
+    `_escapes_model_text` has required of the deliverable all along.
+    """
+    authored = (
+        "## Audit Summary\n\n"
+        "See [the filing](https://example.com/x) and <b>note</b> ![chart](c.png).\n"
+    )
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact(authored)
+
+    page = render(payload).decode()
+
+    assert "<a " not in page and "<img" not in page and "<b>note</b>" not in page
+    assert "[the filing](https://example.com/x)" in page
+    assert "&lt;b&gt;note&lt;/b&gt;" in page
+
+
+def test_a_block_with_no_faithful_rendering_is_refused_not_guessed_at() -> None:
+    """Where the set cannot render a block *and* printing it as text would
+    misstate the document, the render refuses rather than choosing for the
+    author: an unterminated fence, a row that does not fit its header, and a
+    list nested past the depth the page carries."""
+    for unsupported in (
+        "## Audit Summary\n\n```\nnever closed\n",
+        "| Metric | Value |\n| --- | --- |\n| Net leverage | 4.2x | 3.1x |\n",
+        "- a\n  - b\n    - c\n      - d\n        - e\n",
+    ):
+        payload = json.loads(json.dumps(PAYLOAD_DATA))
+        payload["artifacts"][0] = _artifact(unsupported)
+
+        with pytest.raises(RenderRefused) as caught:
+            render(payload)
+
+        assert caught.value.code == "DELIVERABLE_MARKDOWN_UNSUPPORTED"
+
+
+def test_an_identifier_and_an_unpaired_asterisk_are_not_emphasis() -> None:
+    """The domain writes `net_debt_to_ebitda`, and prose writes a lone `*`.
+    Neither is a delimiter here, so neither silently italicises the words it
+    sits between."""
+    authored = "## Audit Summary\n\nnet_debt_to_ebitda rose 2 * 3 and *held.\n"
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact(authored)
+
+    page = render(payload).decode()
+
+    assert "<em>" not in page
+    assert "net_debt_to_ebitda rose 2 * 3 and *held." in page
+
+
+def test_the_page_carries_no_element_the_set_does_not_name() -> None:
+    """`ELEMENTS` is the claim; the tags in the page are the evidence for it.
+
+    A reader checks the deliverable against a named list rather than against a
+    parser, so the list has to be the whole of what the render can emit.
+    """
+    payload = json.loads(json.dumps(PAYLOAD_DATA))
+    payload["artifacts"][0] = _artifact(MARKDOWN_HANDOFF)
+
+    page = render(payload).decode()
+
+    authored = page.split("<h3>Analysis (model-authored, not host-verified)</h3>")[1]
+    authored = authored.split("<h3>Deterministic calculations</h3>")[0]
+    tags = {name.lower() for name in re.findall(r"<\s*/?\s*([a-zA-Z0-9]+)", authored)}
+    assert tags <= {
+        "pre",
+        "code",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "ul",
+        "ol",
+        "li",
+        "blockquote",
+        "hr",
+        "strong",
+        "em",
+    }
+    assert len(ELEMENTS) == 12 and "heading" in ELEMENTS
+
+
+def test_a_citation_without_a_page_is_refused_like_the_fields_beside_it() -> None:
+    """`matched_text` and `document_sha256` are refused when absent; the page
+    was printed as an empty string, so the deliverable said "page " instead of
+    saying no."""
+    for citation in (
+        {"document_sha256": DOCUMENT_SHA256, "matched_text": QUOTE},
+        {"document_sha256": DOCUMENT_SHA256, "matched_text": QUOTE, "page": "1"},
+        {"document_sha256": DOCUMENT_SHA256, "matched_text": QUOTE, "page": 0},
+        {"document_sha256": DOCUMENT_SHA256, "matched_text": QUOTE, "page": True},
+    ):
+        payload = json.loads(json.dumps(PAYLOAD_DATA))
+        payload["artifacts"][0] = _artifact(citations=[citation])
+
+        with pytest.raises(RenderRefused) as caught:
+            render(payload)
+
+        assert caught.value.code == "DELIVERABLE_PAYLOAD_INVALID"
+
+
 def test_every_portable_render_refusal_names_a_closed_host_code() -> None:
     """The render is portable -- it ships inside an audit package and runs with
     no host beside it -- so it refuses with its own `RenderRefused` and a string
@@ -237,5 +391,9 @@ def test_every_portable_render_refusal_names_a_closed_host_code() -> None:
         name.strip('"')
         for name in re.findall(r"RenderRefused\((\"[A-Z_]+\")\)", RENDER_SOURCE)
     }
-    assert raised == {"DELIVERABLE_PAYLOAD_INVALID", "DELIVERABLE_UNCITED_FIGURE"}
+    assert raised == {
+        "DELIVERABLE_PAYLOAD_INVALID",
+        "DELIVERABLE_UNCITED_FIGURE",
+        "DELIVERABLE_MARKDOWN_UNSUPPORTED",
+    }
     assert raised <= {code.value for code in RefusalCode}
