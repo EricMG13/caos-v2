@@ -81,7 +81,15 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
   // is no longer there, closes it for good rather than hiding it.
   const resolved =
     fact && snapshot && snapshot.key === fact.key ? resolveFact(snapshot, fact.subject) : null;
-  if (fact && !resolved) setFact(null);
+  // Closed on the snapshot that took the citation away, not on every render:
+  // the sentinel is React's own pattern for state derived from a prop, and an
+  // unconditional render-phase write is a re-render loop waiting for a
+  // `resolveFact` that answers differently twice.
+  const [seenSnapshot, setSeenSnapshot] = useState(snapshot);
+  if (snapshot !== seenSnapshot) {
+    setSeenSnapshot(snapshot);
+    if (fact && !resolved) setFact(null);
+  }
   const shown = resolved ? fact : null;
   const value = useMemo(
     () => ({

@@ -75,7 +75,6 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           caseId={body.case_id}
           action={actionOf(actions, "CREATE_RUN")}
           choices={body.route_choices}
-          onRefetch={refetch}
         />
       </>
     );
@@ -281,7 +280,6 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           caseId={body.case_id}
           action={actionOf(actions, "CREATE_RUN")}
           choices={body.route_choices}
-          onRefetch={refetch}
         />
       </div>
     </div>
