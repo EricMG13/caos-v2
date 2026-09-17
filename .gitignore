@@ -5,6 +5,7 @@ __pycache__/
 # A checkout of this repository is not content of it.
 .claude/worktrees/
 node_modules/
+node_modules
 frontend/dist/
 frontend/dist-demo/
 frontend/playwright-report/
