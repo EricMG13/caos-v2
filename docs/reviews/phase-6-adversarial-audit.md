@@ -97,6 +97,49 @@ live call. **Verdict:** CLEAN after remediation.
    large encoded response. It is a separate transport guard, intentionally not
    relaxed by this narrowly scoped output-token change.
 
-No unresolved code or security blocker remains for the single authorized
-Gemini call. Its result can create execution evidence only; it cannot create a
-qualification verdict without external authenticated review.
+No unresolved repository code or security blocker remained for the single
+authorized Gemini call. Its temporary reporter then failed after `perform()`
+returned and erased the disposable record; therefore it created no usable
+execution evidence, and no retry is authorized. Even a successfully captured
+future result cannot create a qualification verdict without external
+authenticated review.
+
+## Adversarial review addendum — durable qualification handoff
+
+Effort: `xhigh`; scope is the uncommitted Phase 6 recovery candidate, excluding
+user-owned working-tree files. **Verdict:** CLEAN after remediation; this is
+not a release qualification verdict.
+
+### Remediated findings
+
+1. **Saboteur — kill the reporter after `perform()` returns (critical).** The
+   old path held the only result in process memory. The shared execution
+   boundary now commits the immutable snapshot and exact evidence identity
+   before control returns; complete and stopped-path regressions assert both.
+2. **New Hire — a new execution caller must remember two obscure store calls
+   (warning).** Snapshot/evidence creation now belongs to `perform()`, the one
+   common execution path, not to a disposable script. The reporter only
+   validates and serializes that state.
+3. **Security Auditor — an attacker could attach an old evidence row to a
+   snapshot with a matching digest but different declared identity (warning).**
+   Snapshot/evidence joins now compare all five identity fields and incomplete
+   snapshots cannot be promoted to current verdicts. Regression covers the
+   substituted legacy record.
+4. **Saboteur — stop the first case of a multi-case set (warning).** Initial
+   prefix validation contradicted its own shorter-record allowance. It now
+   compares the shorter prefix after its explicit upper-bound check; the
+   affected multi-case and injected-read-failure regressions pass.
+
+### Notes
+
+1. The retained local database and blob root are reviewer evidence, not a
+   substitute for the required external six-field authenticated verdict.
+2. The snapshot document deliberately excludes prompts, source text and model
+   response bodies; it contains only the pins, outcomes, hashes and anchors
+   needed to evaluate the execution.
+
+The candidate has no remaining local code finding from these personas. Its
+three-scenario migration restore proof and full CI-equivalent gate passed:
+2,849 backend tests, 21 race tests, security, frontend, accessibility,
+workbench, image, and all three 14-step production journeys. Authorized live
+execution and external review remain release prerequisites.

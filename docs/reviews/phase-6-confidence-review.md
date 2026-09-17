@@ -161,5 +161,60 @@ Verified: provider/pricing regression suite (219 tests), targeted identity
 red/green regression (3 tests), lint, format, vocabulary, mypy, Bandit,
 pip-audit and gitleaks.
 
-Still open: the one authorized live Gemini attempt and an external,
-authenticated qualification verdict. No local check can substitute for either.
+The authorized live Gemini attempt subsequently became indeterminate: the
+temporary result collector failed after `perform()` returned and deleted the
+disposable database before it printed per-generation facts. Its serializer has
+been repaired outside the repository; it does not retrospectively create
+evidence or authorize a repeat. An external authenticated verdict remains open.
+
+## Confidence review addendum — durable qualification handoff
+
+Effort: `xhigh`; scope is the Phase 6 recovery candidate for the failed
+65,536-token Gemini collection, excluding user-owned `CLAUDE.md`,
+`.claude/skills/`, `AGENTS.md`, `gemini-audit.md`, and `PATHFINDER-2026-09-15/`.
+
+Least confident about (ranked):
+
+1. **A collector failure could still erase an otherwise completed execution.**
+   Investigated → `perform()` returned a `PerformedSet` without persisting the
+   full returned structure. Verdict → confirmed. Patch → one shared
+   post-execution boundary canonicalizes and commits the immutable complete or
+   partial snapshot before returning. The complete and stopped harness paths
+   both assert the durable row.
+2. **A different caller could save a snapshot but omit the reviewable evidence
+   identity.** Investigated → evidence insertion existed only as a manual
+   store operation. Verdict → confirmed. Patch → the same shared boundary
+   writes the exact evidence row in its transaction; both harness paths assert
+   one snapshot and one evidence identity.
+3. **A legacy or substituted evidence row could bind a present but different
+   snapshot.** Investigated → readers originally joined only on the performed
+   digest. Verdict → confirmed. Patch → snapshot/evidence joins compare set,
+   build, adapter, provider and model too; a migration regression proves a
+   substituted legacy model cannot read as current.
+4. **A partial execution could be locally promoted.** Investigated → partial
+   records are useful audit evidence, but a verdict must cover a matrix.
+   Verdict → confirmed. Patch → only complete snapshots can record or read a
+   current verdict; stopped records remain non-qualifying.
+5. **The persisted document could leak source or prompt content.**
+   Investigated → it records pins, run outcomes, hashes and citation anchors;
+   it excludes `research_json`, prompt text and provider response bodies.
+   Verdict → fine.
+6. **A stopped first case in a multi-case set could be mistaken for malformed
+   identity.** Investigated → prefix validation used strict zipping after
+   correctly allowing fewer records than prepared cases. Verdict → confirmed
+   regression from this remediation. Patch → preserve the explicit length
+   bound, then compare only the valid prefix. The multi-case stopped, separate
+   approver, and injected execution-read-failure regressions all pass.
+
+Fixed: durable complete/partial snapshots, automatic bound evidence insertion,
+identity-equal reader joins, valid stopped-set prefix validation, and the
+reporter's nested-anchor serialization.
+
+Verified: focused PostgreSQL harness/store/API regressions, reporter bytecode
+compilation, the three-scenario migration restore proof, and `make -j1 check`
+with pinned Trivy 0.70.0: 2,849 backend tests, 21 race tests, security floors,
+230 frontend tests, accessibility/workbench checks, image checks and all three
+14-step production journeys passed.
+
+Still required before Phase 6 can be cleared: one authorized live retry,
+OpenRouter per-generation reconciliation, and an authenticated external verdict.

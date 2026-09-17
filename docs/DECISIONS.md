@@ -2167,3 +2167,34 @@ also raises each run's conservative reservation. The changed ceiling is bound
 in the fresh execution profile identity
 `openrouter/google-ai-studio/high/65536`; it requires verification before the
 one authorized paid retry.
+
+That retry reached the temporary qualification collector, which returned from
+`perform()` but then failed while JSON-encoding a proof's `frozenset` of anchored
+citations. Cleanup dropped its disposable database before it emitted generation
+or charge data. The account cannot use OpenRouter's aggregate activity endpoint
+for reconciliation without a management key (`403`). Its actual route outcome
+is therefore indeterminate and creates no artifact, evidence or verdict. The
+next execution persists its immutable performed snapshot and its bound evidence
+identity in the migrated store before `perform()` returns; the collector only
+confirms and retains that state for external review. Do not repeat this paid
+attempt without fresh authorization.
+
+## 2026-09-15 §60 — Preserve literal quotation at the canonical boundary
+
+The recovery run at profile `openrouter/google-ai-studio/high/65536` completed
+normally and retained its performed snapshot and bound evidence. Its CP-0
+response was valid closed JSON, its four citations were all delivered and
+uniquely anchored, and its canonical Markdown passed the vendor validator. The
+host refused it only because none of those evidence quotations occurred
+character-for-character in the Markdown body. Safe structural comparison found
+case-only variation for three quotations and punctuation-normalized variation
+for all four, including the required Evidence Trace section.
+
+This is a Gemini 3.8 Flash one-shot protocol incompatibility. It is not a
+reason to relax `parse_response`: a citation needs both an exact source anchor
+and an exact occurrence in the model's handoff, so a reviewer can see the same
+words supporting the claim. General punctuation/case normalization would admit
+meaning-changing edits and would weaken the pinned canonical contract. The
+model is therefore unqualified; its performed evidence cannot mint a verdict.
+Any future spend must be a separately authorized, materially different
+candidate or protocol experiment.

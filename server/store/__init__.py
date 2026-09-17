@@ -104,6 +104,12 @@ MIGRATIONS = (
         .with_name("0019_one_qualification_verdict.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0020_qualification_performed",
+        Path(__file__)
+        .with_name("0020_qualification_performed.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

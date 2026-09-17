@@ -139,3 +139,53 @@ This profile is not qualified at the shipped 32,768-token ceiling. A same-cap
 retry changes no controlled variable and must not be purchased. A 65,536-token
 experiment would be materially different, but requires an intentional runtime
 change, fresh build identity and fresh authorization before spend.
+
+## 65,536-token attempt — result collection indeterminate
+
+After the authorized ceiling/profile change at `691637b`, the prepared attempt
+used `openrouter/google-ai-studio/high/65536` with the same frozen corpus and
+`$22.00` set/run ceilings. `perform()` returned to its temporary qualification
+collector, but the collector then raised while JSON-encoding the proof's
+`frozenset` of anchored citations. Its `finally` block dropped the disposable
+database before it printed the run ID, generation IDs, charges, node status or
+matrix.
+
+The OpenRouter activity endpoint is aggregate-only and requires a management
+key for this account; reconciliation therefore returned `403`. The number of
+provider calls, their individual charges and the canonical outcome are
+unrecoverable from the surviving record. No artifact, evidence row or verdict
+may be claimed from this attempt. Future `perform()` calls persist the complete
+or partial immutable snapshot and its bound evidence row before returning; the
+collector serializes its digest and retains the disposable database/blob root
+for external review. This is not permission to repeat the indeterminate paid
+attempt.
+
+## Recovered 65,536-token retry — Gemini protocol incompatibility confirmed
+
+The recovery candidate at `40a13dd` persisted the complete immutable performed
+snapshot and its bound evidence row before its collector returned. The fresh
+run `1590edfc-a747-4c69-ae1a-06455edeb1a7` used the same frozen
+qualification-set digest and profile
+`openrouter/google-ai-studio/high/65536`. CP-0 generation
+`gen-1789486082-I1BG57GiSspM6MntssMu` was served by Google AI Studio, finished
+normally with `stop`, used 177,062 native prompt, 36,606 native completion and
+28,952 native reasoning tokens, and cost `$0.270069`.
+
+The retained diagnostic was a valid closed JSON transport with canonical
+Markdown and four citations. Each citation named delivered evidence and
+uniquely anchored in that evidence. The vendor Markdown validator also passed.
+The host nevertheless correctly refused CP-0 as `HANDOFF_MALFORMED`: none of
+the four evidence quotations occurred character-for-character in the Markdown
+body. Safe replay found case-insensitive matches for three and punctuation-
+normalized matches for all four, including an Evidence Trace section. Gemini
+therefore rewrote the quotations while retaining their meaning, instead of
+copying them verbatim as the pinned canonical protocol requires.
+
+No artifact, orchestration proof, matrix, evidence row for a verdict, or
+qualification verdict exists. The performed snapshot digest is
+`713ba25de76d8edf3dcde577c1ac9cc0d3000fc0079ea009d8d98f04ba26933f` and its
+bound evidence digest is
+`0e5e64d3948bbc149ac313185d1d47343987d10d87e41f11a9c0b33eaedd192c`.
+The retention failure is fixed; Gemini 3.8 Flash is not qualified for this
+one-shot canonical handoff contract. Do not buy another Gemini retry without a
+materially different, explicitly authorized protocol experiment.

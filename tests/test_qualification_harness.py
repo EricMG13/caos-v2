@@ -355,6 +355,11 @@ def test_the_harness_performs_every_case_and_reports_one_row_each(
         assert len(runs) == 2
         for [run_id] in runs:
             assert run_status(conn, UUID(str(run_id))) is RunStatus.COMPLETE
+        assert conn.execute(
+            "SELECT p.complete,count(e.evidence_sha256)"
+            " FROM qualification_performed p LEFT JOIN qualification_evidence e"
+            " USING (performed_sha256) GROUP BY p.complete"
+        ).fetchall() == [(True, 1)]
 
 
 def test_the_harness_runs_through_the_same_loop_as_everything_else(
@@ -620,6 +625,11 @@ def test_a_run_that_stopped_short_is_reported_as_more_than_its_proof(
         # matrix is withheld rather than built over the cases that happened to
         # run first.
         assert performed.matrix is None
+        assert conn.execute(
+            "SELECT p.complete,count(e.evidence_sha256)"
+            " FROM qualification_performed p LEFT JOIN qualification_evidence e"
+            " USING (performed_sha256) GROUP BY p.complete"
+        ).fetchall() == [(False, 1)]
 
 
 def test_a_case_that_stops_ends_the_set_without_discarding_it(
