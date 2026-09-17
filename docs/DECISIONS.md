@@ -3823,14 +3823,31 @@ exceeds it, in the prompt builder — so before any attempt, reservation or call
 Until now `MAX_REQUEST_BYTES` refused the whole request and could never say
 *which* part was large.
 
-The number is arithmetic, not a measurement, and the arithmetic is worth
-keeping: on the catalog's widest pathway CP-5 carries 16 direct upstreams and
-its own delivered authority is 165,548 bytes, so at 32,768 each the authority
-and upstream sections alone reach about 690 KB before a byte of evidence. It is
-a ceiling chosen so that a wide route cannot be refused wholesale for a reason
-nobody can locate, not a figure any real handoff has approached — no FULL
-module has ever produced one, and the only measurement in the tree is a
-448,826-byte CP-0 *request* carrying no upstream at all.
+The number is arithmetic, not a measurement of any handoff, and the arithmetic
+has been corrected once. As first written it summed **raw** lengths and
+compared them against `MAX_REQUEST_BYTES` — which bounds
+`len(json.dumps(request).encode())` with `ensure_ascii=True`, so every
+non-ASCII character costs six bytes and every quote and newline two, and the
+vendored authority is full of em-dashes, section signs and curly quotes. The
+test could therefore have passed while the real encoded request was over the
+ceiling. Found by the Completion Phase 12 adversarial audit.
+
+Measured through `provider.encode_request` instead, over every node of every
+profile with the authority files' real bytes and the fixed host sections
+included, the worst case is **CP-3 at 711,482 encoded bytes against the
+1,048,576 ceiling — 32% of it left** for evidence. The raw-byte version named
+CP-5, which was an artefact of the unit: CP-5 carries the most upstreams, CP-3
+the heavier authority once escaping is paid. What the figure still excludes is
+the citation register, which is explicitly unbounded, and the evidence section
+itself, which is the room the assertion exists to prove is left.
+
+It is a ceiling chosen so that a wide route cannot be refused wholesale for a
+reason nobody can locate, not a figure any real handoff has approached — no
+FULL module has ever produced one, and the only measurement in the tree is a
+448,826-byte CP-0 *request* carrying no upstream at all. Against that, the host
+asks for, accepts, validates, bills and stores a handoff up to `MAX_FILE_BYTES`
+(26,214,400) and refuses to *use* one over 32,768, which is the asymmetry the
+costs below describe.
 
 **The bound answers after the digest comparison, not before it.** The size
 check sits below `sha256(data) != ref.sha256` in `_utf8`'s caller, because the
