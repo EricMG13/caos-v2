@@ -414,8 +414,10 @@ def test_the_store_dependency_opens_the_apps_store_connection(
 
     for path in (DIRECTORY, _upload(uuid4())):
         response = client.get(path, headers=_as(uuid4()))
+        # 500 under D3: an unconfigured store is an operator's repair, and a
+        # 503 would have every proxy retry until they made it.
         assert (response.status_code, response.json()) == (
-            503,
+            500,
             _refused(RefusalCode.STORE_NOT_CONFIGURED),
         ), path
 

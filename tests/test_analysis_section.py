@@ -243,8 +243,10 @@ def test_a_record_that_no_longer_binds_its_markdown_refuses_artifact_record_mism
     response = client.get(_analysis(harness.case_id), headers=_as(_reader(harness)))
     harness.conn.rollback()
 
+    # 500 under the owner's D3 split: a record that no longer binds its
+    # projections binds them no better on the next request.
     assert (response.status_code, response.json()) == (
-        503,
+        500,
         _refused(RefusalCode.ARTIFACT_RECORD_MISMATCH),
     )
 

@@ -39,6 +39,9 @@ from server.api import app as app_module
 from server.api import deps
 from server.api.app import (
     _STATUS,
+    PERMANENT,
+    RETRY_AFTER_SECONDS,
+    TRANSIENT,
     app,
     blob_store,
     methodology_bundle,
@@ -291,8 +294,10 @@ def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
     refusal about the store. Both shapes of that refusal are asked for, because
     they are separate codes and either would do as the wrong answer: the store
     unconfigured is STORE_NOT_CONFIGURED, the store not answering is
-    STORE_UNAVAILABLE, and 503 tells a caller to come back later when no amount
-    of later will help them.
+    STORE_UNAVAILABLE, and either would have told a caller whose problem was
+    their own silence that the server was at fault. The two no longer share a
+    status: D3 sends the unconfigured store to 500, because coming back later
+    is not what configures it.
     """
     app.dependency_overrides.pop(store_connection)
     if database_url is None:
@@ -412,8 +417,9 @@ def test_a_misconfigured_store_is_a_server_fault_not_a_bad_request(
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 503
+    assert response.status_code == 500  # D3: an operator configures it, not time.
     assert response.json() == _refused("STORE_NOT_CONFIGURED")
+    assert "retry-after" not in response.headers
 
 
 def test_a_store_that_does_not_answer_is_a_server_fault(
@@ -552,8 +558,9 @@ def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
 
     response = _section(client, harness.case_id, harness.run_id, viewer)
 
+    # 500 under D3: the record is stored bytes, and a later read reads them.
     assert (response.status_code, response.json()) == (
-        503,
+        500,
         _refused("ARTIFACT_RECORD_MISMATCH"),
     )
 
@@ -657,8 +664,9 @@ def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
 
     response = _section(client, harness.case_id, harness.run_id, viewer)
 
+    # 500 under D3: damaged bytes stay damaged until an operator restores them.
     assert (response.status_code, response.json()) == (
-        503,
+        500,
         _refused("ARTIFACT_RECORD_MISMATCH"),
     )
 
@@ -758,6 +766,73 @@ def test_every_refusal_code_has_an_explicit_http_status() -> None:
     be served as a binding error. Being total, the table is the choice.
     """
     assert set(_STATUS) == set(RefusalCode), set(RefusalCode) - set(_STATUS)
+
+
+def test_every_refusal_is_classed_transient_or_permanent_and_none_is_both() -> None:
+    """The owner's D3 split, stated as a partition rather than as two lists that
+    happen to agree with the table.
+
+    A code in neither set could sit at 503 while nobody had asked whether
+    waiting would help, which is the reading of 503 this split exists to end; a
+    code in both would make the answer depend on which membership was consulted
+    first.
+    """
+    assert TRANSIENT & PERMANENT == frozenset()
+    assert (TRANSIENT | PERMANENT) <= set(RefusalCode)
+    served = {code for code, status in _STATUS.items() if status in (500, 503)}
+    assert TRANSIENT | PERMANENT == served
+    assert {_STATUS[code] for code in TRANSIENT} == {503}
+    assert {_STATUS[code] for code in PERMANENT} == {500}
+
+
+def test_a_permanent_fault_answers_500_and_carries_no_retry_after(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """Read off the response, not off the map: an unconfigured store is a fault
+    only an operator can repair, so nothing about coming back later is true of
+    it and the answer must not say so."""
+    _conn, case_id = case
+    app.dependency_overrides[store_connection] = _refusing(
+        RefusalCode.STORE_NOT_CONFIGURED
+    )
+
+    response = _section(client, case_id, None, uuid4())
+
+    assert (response.status_code, response.json()) == (
+        500,
+        _refused("STORE_NOT_CONFIGURED"),
+    )
+    assert "retry-after" not in response.headers
+
+
+def test_a_transient_fault_answers_503_and_names_when_to_retry(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """A store that is not answering is the one fault here that heals with no
+    one doing anything, so it keeps 503 and now says how soon to ask again --
+    an integer count of seconds, which is the form a proxy can act on."""
+    _conn, case_id = case
+    app.dependency_overrides[store_connection] = _refusing(
+        RefusalCode.STORE_UNAVAILABLE
+    )
+
+    response = _section(client, case_id, None, uuid4())
+
+    assert (response.status_code, response.json()) == (
+        503,
+        _refused("STORE_UNAVAILABLE"),
+    )
+    assert int(response.headers["retry-after"]) == RETRY_AFTER_SECONDS
+
+
+def _refusing(code: RefusalCode) -> Callable[[], StoreConnection]:
+    """A store dependency that refuses `code`, so a status can be read off a
+    real response without arranging the fault that produces it."""
+
+    def dependency() -> StoreConnection:
+        raise Refusal(code)
+
+    return dependency
 
 
 def test_an_undeclared_api_path_or_method_answers_endpoint_not_found_in_the_refusal_body(  # noqa: E501 -- the brief's name
@@ -940,7 +1015,8 @@ def test_corrupt_route_is_a_sanitized_store_failure(
         conn.execute("UPDATE run_routes SET route_digest = 'synthetic-corruption'")
     conn.commit()
     response = _section(client, case_id, run_id, viewer)
-    assert response.status_code == 503
+    # 500 under D3: the pin is immutable, so the next read resolves it the same.
+    assert response.status_code == 500
     assert response.json() == _refused("ROUTE_IDENTITY_INVALID")
 
 
