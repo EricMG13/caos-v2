@@ -292,21 +292,30 @@ def install_stop_handler(stopping: Event) -> None:
 
 
 def main() -> int:
-    """Configure from the environment, or print only the typed code and exit 2
-    having made no call."""
+    """Configure from the environment, or exit 2 having made no call, printing
+    the typed code -- and, where a variable nobody set is the reason, that
+    variable's name beside it. A name is a host fact; a value is never printed.
+
+    The name is attached beside the handler rather than at the check, so it is
+    correct only while nothing between the check and the price call can raise:
+    today `price_from_environment` refuses an empty value on the next line."""
     stopping = Event()
+    # A variable nobody set is an unset variable, not a misconfigured one. Its
+    # *name* is a host fact and is printed; its contents never are.
+    unset = ""
     try:
         completions = OpenRouter.from_environment()
-        price = price_from_environment(
-            completions.model, os.environ.get(MODEL_PRICE, "")
-        )
+        given = os.environ.get(MODEL_PRICE, "")
+        unset = "" if given else MODEL_PRICE
+        price = price_from_environment(completions.model, given)
         url, root = _store_configuration()
         bundle = Bundle(VENDORED_BUNDLE)
         bundle.verify_manifest()
         with connect(url) as conn:
             apply_schema(conn)
     except Refusal as refused:
-        print(refused.code.value, file=sys.stderr)
+        named = f" {unset} unset" if unset else ""
+        print(f"{refused.code.value}{named}", file=sys.stderr)
         return 2
     except psycopg.Error:
         print(RefusalCode.STORE_UNAVAILABLE.value, file=sys.stderr)

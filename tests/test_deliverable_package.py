@@ -386,3 +386,18 @@ def test_a_member_name_containing_a_null_is_not_the_exact_package_name() -> None
         b"payload.jsonXignored", b"payload.json\x00ignored"
     )
     assert not verify_package(data).verified
+
+
+def test_verify_package_without_an_argument_prints_usage_and_exits_2() -> None:
+    """The verifier states its one argument instead of exiting on an IndexError."""
+    verifier = ROOT / "server/deliverable/verify_package.py"
+    done = subprocess.run(
+        [sys.executable, "-I", "-S", str(verifier)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert done.returncode == 2, done.stderr
+    assert "usage:" in done.stderr
