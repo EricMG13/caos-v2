@@ -19,3 +19,7 @@ bandit.json
 coverage.xml
 .coverage
 uv.lock
+# GitNexus writes this from the same index as CLAUDE.md's appended block,
+# so tracking it would mean a diff on every `analyze`. The index itself is
+# excluded in .git/info/exclude; this is the instruction file beside it.
+AGENTS.md
