@@ -125,6 +125,10 @@ _STATUS = {
     # and nothing the caller holds could be corrected to avoid it.
     RefusalCode.READINESS_INVALID: 503,
     RefusalCode.ROUTE_IDENTITY_INVALID: 503,
+    # A pinned build whose catalog declares an edge type this engine cannot
+    # evaluate: the vendored bytes, not the request. No profile or pathway the
+    # caller could name instead would avoid it.
+    RefusalCode.ROUTE_EDGE_UNSUPPORTED: 503,
     RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
     # A recorded blocking verdict at a node the pinned route does not carry:
     # rows this server wrote disagreeing with pins it wrote (§68).

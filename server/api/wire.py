@@ -204,6 +204,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.ROUTE_EXTENSION_OWNER_MISSING: "Include the extension's owning module.",
     _C.ROUTE_HAS_A_CYCLE: "Select a route without a cycle.",
     _C.ROUTE_DUPLICATE_MODULE: "Select a route naming each module once.",
+    _C.ROUTE_EDGE_UNSUPPORTED: "Nothing until the engine evaluates this edge type.",
     _C.ROUTE_ALREADY_PINNED: "Nothing; the route is already pinned.",
     _C.ROUTE_IDENTITY_INVALID: "An operator must verify the pinned route.",
     _C.ROUTE_PIN_TOO_LATE: "Start a new run.",

@@ -510,16 +510,34 @@ def _pathway(profile: Mapping[str, Any], selection_id: str) -> Mapping[str, Any]
 
 def _edges_among(profile: Mapping[str, Any], modules: set[str]) -> tuple[Edge, ...]:
     """`profile["edges"]`, restricted to this route's nodes. Never
-    `navigation.dependencies`, which carries no type at all."""
-    return tuple(
-        Edge(
-            source=str(edge["source"]),
-            target=str(edge["target"]),
-            type=EdgeType(edge["type"]),
+    `navigation.dependencies`, which carries no type at all.
+
+    A CONDITIONAL edge is refused rather than resolved. Invariant 10 freezes a
+    route's predicates and nothing evaluates them, so such an edge would pin a
+    route whose target blocks whatever the evidence says -- and a reader of the
+    pin would take the frozen predicate for an enforced condition. The vendored
+    catalog declares none (`tests/test_bundle_pin.py::test_the_vendored_catalog_
+    carries_no_edge_this_engine_cannot_evaluate`), so this refuses at the first
+    upstream build that introduces one, which is also the first day a real
+    predicate exists for a grammar to parse. `CONDITIONAL` stays in `BLOCKING`
+    and in the bundle's vocabulary (CONTEXT.md): it remains a CP-0 *verdict*,
+    and only an *edge* of that type is refused.
+    """
+    edges: list[Edge] = []
+    for edge in profile["edges"]:
+        if edge["source"] not in modules or edge["target"] not in modules:
+            continue
+        edge_type = EdgeType(edge["type"])
+        if edge_type is EdgeType.CONDITIONAL:
+            raise Refusal(RefusalCode.ROUTE_EDGE_UNSUPPORTED)
+        edges.append(
+            Edge(
+                source=str(edge["source"]),
+                target=str(edge["target"]),
+                type=edge_type,
+            )
         )
-        for edge in profile["edges"]
-        if edge["source"] in modules and edge["target"] in modules
-    )
+    return tuple(edges)
 
 
 def _extension_node(
