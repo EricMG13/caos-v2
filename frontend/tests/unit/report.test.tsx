@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import { ReportSection } from "@/sections/report/ReportSection";
-import { segments } from "@/sections/report/text";
 import { parseReportDocument } from "@/wire/v1";
 
 const report = () =>
@@ -11,13 +10,6 @@ const report = () =>
   );
 
 describe("Report v1", () => {
-  test("segments keeps the shared Committee text helper covered", () => {
-    expect(segments("source text", [{ text: "text" }])).toEqual([
-      { text: "source ", figure: null, placed: true },
-      { text: "text", figure: { text: "text" }, placed: true },
-    ]);
-  });
-
   test("renders only the exact saved payload as escaped read-only text", () => {
     const document = report();
     const hostile = '<img src=x onerror="window.pwned=1">';

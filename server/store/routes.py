@@ -30,7 +30,7 @@ from server.engine.route import (
     route_digest,
 )
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import RunEvent, append, lock_run
 
 
@@ -38,15 +38,8 @@ def pin_route(conn: StoreConnection, run_id: UUID, resolved: ResolvedRoute) -> s
     """Own the atomic pin/event transaction, including replay and refusal."""
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
-    try:
+    with committed_unit(conn):
         digest = pin_route_in(conn, run_id, resolved)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return digest
 
 

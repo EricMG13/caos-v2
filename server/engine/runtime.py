@@ -45,6 +45,7 @@ from server.methodology.canonical import (
     unexplained_charge,
 )
 from server.methodology.invocation import named_objects
+from server.methodology.verification import AcceptedRow
 from server.pricing import ModelPrice, priced_request, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -374,11 +375,13 @@ def accepted_artifacts(
                 blobs,
                 bundle,
                 route,
-                run_id=run_id,
-                route_node_id=node_id,
-                attempt_id=attempt,
-                artifact_sha256=digest,
-                record_sha256=record,
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node_id,
+                    attempt_id=attempt,
+                    artifact_sha256=digest,
+                    record_sha256=record,
+                ),
                 accepted=pairs,
             )
             accepted[node_id] = NodeResult(

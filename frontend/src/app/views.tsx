@@ -10,29 +10,54 @@ import { ModelSection } from "@/sections/model/ModelSection";
 import { ReportSection } from "@/sections/report/ReportSection";
 import { RunSection } from "@/sections/run/RunSection";
 import { UploadSection } from "@/sections/upload/UploadSection";
-import type { WorkspaceDocument } from "./transport";
 import type { Bodies, Section, SectionDocument } from "@/wire";
+import type {
+  AnalysisDocument,
+  CommitteeDocument,
+  DirectoryDocument,
+  ModelDocument,
+  ReportDocument,
+  RunSectionDocument,
+  UploadDocument,
+} from "@/wire/v1";
 
-// Only the five sections that stay on the legacy wire type through this: the
-// five enabled sections (brief 4.1, decision 9) take their v1 document type
-// directly, as Directory, Upload, Run, Analysis and Model already do above.
+/** The two sections still on the legacy wire type -- Book and Admin, which
+    are unavailable in every mode and never mounted with a served document. */
 export interface ViewProps<S extends keyof Bodies> {
   document: SectionDocument<Bodies[S]>;
   tab: string | null;
 }
 
-type AnyView = ComponentType<{ document: WorkspaceDocument; tab: string | null }>;
+/** Each enabled section's v1 document, by section. */
+interface V1Documents {
+  directory: DirectoryDocument;
+  upload: UploadDocument;
+  run: RunSectionDocument;
+  analysis: AnalysisDocument;
+  model: ModelDocument;
+  report: ReportDocument;
+  committee: CommitteeDocument;
+}
 
-// Each view is typed on its own body; the registry erases that so the
-// workspace can mount any of the nine without a switch.
-export const SECTION_VIEWS: Record<Section, AnyView> = {
-  directory: DirectorySection as unknown as AnyView,
-  upload: UploadSection as unknown as AnyView,
-  analysis: AnalysisSection as unknown as AnyView,
-  book: BookSection as unknown as AnyView,
-  run: RunSection as unknown as AnyView,
-  model: ModelSection as unknown as AnyView,
-  report: ReportSection as unknown as AnyView,
-  committee: CommitteeSection as unknown as AnyView,
-  admin: AdminSection as unknown as AnyView,
+export type DocumentFor<S extends Section> = S extends keyof V1Documents
+  ? V1Documents[S]
+  : S extends keyof Bodies
+    ? SectionDocument<Bodies[S]>
+    : never;
+
+/** Each view typed on exactly its own document, so a section wired to the
+    wrong parser is a compile error here rather than a render error later.
+    The workspace erases the key at its one lookup site. */
+export const SECTION_VIEWS: {
+  [S in Section]: ComponentType<{ document: DocumentFor<S>; tab: string | null }>;
+} = {
+  directory: DirectorySection,
+  upload: UploadSection,
+  analysis: AnalysisSection,
+  book: BookSection,
+  run: RunSection,
+  model: ModelSection,
+  report: ReportSection,
+  committee: CommitteeSection,
+  admin: AdminSection,
 };

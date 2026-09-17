@@ -93,6 +93,36 @@ _STRIPPED = (b"set-cookie", b"cache-control")
 _ASSET_CACHE = "public, max-age=31536000, immutable"
 
 
+def is_api_path(path: str) -> bool:
+    """Whether `path` is the API's: `/api` itself or anything under it. The one
+    predicate the guard, the dispatcher and the app's handlers all decide by."""
+    return path == "/api" or path.startswith("/api/")
+
+
+def refusal_body(code: RefusalCode) -> bytes:
+    """The one refusal body on the wire: the code, its constant clearance,
+    and no part of what caused it -- the same bytes whether the guard or the
+    app answers."""
+    return RefusalBody(code=code, clears=CLEARS[code]).model_dump_json().encode()
+
+
+async def startup_failed(receive: Receive, send: Send) -> None:
+    """Answer the lifespan startup as failed, `EDGE_CONFIG_INVALID`.
+
+    Sent before the caller raises, because a server whose lifespan mode is
+    "auto" treats a bare exception as a missing lifespan protocol and serves
+    anyway.
+    """
+    message = await receive()
+    if message["type"] == "lifespan.startup":
+        await send(
+            {
+                "type": "lifespan.startup.failed",
+                "message": RefusalCode.EDGE_CONFIG_INVALID.value,
+            }
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class EdgeMode:
     """Edge mode when `token` is set; dev mode when both are `None`."""
@@ -198,26 +228,14 @@ class EdgeGuard:
             raise
 
     async def _lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Refuse to start under an invalid edge configuration.
-
-        The failure is sent as `lifespan.startup.failed` before raising, because
-        a server whose lifespan mode is "auto" treats a bare exception as a
-        missing lifespan protocol and serves anyway.
-        """
+        """Refuse to start under an invalid edge configuration."""
         if scope.get("caos.edge_guarded"):
             await self.app(scope, receive, send)
             return
         try:
             resolve_mode()
         except Refusal:
-            message = await receive()
-            if message["type"] == "lifespan.startup":
-                await send(
-                    {
-                        "type": "lifespan.startup.failed",
-                        "message": RefusalCode.EDGE_CONFIG_INVALID.value,
-                    }
-                )
+            await startup_failed(receive, send)
             raise
         scope["caos.edge_guarded"] = True
         await self.app(scope, receive, send)
@@ -236,9 +254,7 @@ class EdgeGuard:
             return RefusalCode.EDGE_NOT_TRUSTED, 403
         if not _hygienic(headers):
             return RefusalCode.NOT_AUTHENTICATED, 401
-        if (path == "/api" or path.startswith("/api/")) and not _origin_allowed(
-            mode, method, headers
-        ):
+        if is_api_path(path) and not _origin_allowed(mode, method, headers):
             return RefusalCode.ORIGIN_REFUSED, 403
         return None
 
@@ -291,7 +307,7 @@ def _origin_allowed(
 
 def _secured(send: Send, path: str) -> Send:
     """Every response start gains the policy and loses any cookie or CORS."""
-    if path == "/api" or path.startswith("/api/"):
+    if is_api_path(path):
         cache = "no-store"
     elif path.startswith("/assets/"):
         cache = _ASSET_CACHE
@@ -322,7 +338,7 @@ SECURITY_HEADERS_BYTES = frozenset(name for name, _ in SECURITY_HEADER_PAIRS)
 
 
 async def _refuse(send: Send, code: RefusalCode, status: int) -> None:
-    body = RefusalBody(code=code, clears=CLEARS[code]).model_dump_json().encode()
+    body = refusal_body(code)
     await send(
         {
             "type": "http.response.start",

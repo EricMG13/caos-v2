@@ -1,14 +1,7 @@
 // The accepted CP-CF projection, read only. Values are server strings: this
 // view deliberately performs no model arithmetic or evidence navigation.
+import { NoteList } from "@/ds/atoms";
 import type { ModelDocument } from "@/wire/v1";
-
-function List({ label, values }: { label: string; values: readonly string[] }) {
-  return (
-    <div className="note">
-      <b>{label}</b> {values.length ? values.join(", ") : "none"}
-    </div>
-  );
-}
 
 export function ModelSection({ document }: { document: ModelDocument; tab: string | null }) {
   const { body } = document;
@@ -50,8 +43,8 @@ export function ModelSection({ document }: { document: ModelDocument; tab: strin
             <dt>Perimeter</dt>
             <dd>{forecast.perimeter}</dd>
           </dl>
-          <List label="Limitations." values={forecast.limitation_flags} />
-          <List label="Validation warnings." values={forecast.validation_warnings} />
+          <NoteList label="Limitations." values={forecast.limitation_flags} />
+          <NoteList label="Validation warnings." values={forecast.validation_warnings} />
         </div>
       </section>
       <section className="pnl">

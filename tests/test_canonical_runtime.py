@@ -60,6 +60,7 @@ from server.methodology.handoff import (
 )
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
+from server.methodology.verification import AcceptedRow
 from server.pricing import ModelPrice
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
@@ -602,11 +603,13 @@ def test_readers_verify_the_record_against_its_markdown(harness: _Harness) -> No
             harness.blobs,
             harness.bundle,
             harness.route,
-            run_id=harness.run_id,
-            route_node_id=gate,
-            attempt_id=attempt,
-            artifact_sha256=artifact,
-            record_sha256=harness.blobs.put(record_bytes(lying)),
+            AcceptedRow(
+                run_id=harness.run_id,
+                route_node_id=gate,
+                attempt_id=attempt,
+                artifact_sha256=artifact,
+                record_sha256=harness.blobs.put(record_bytes(lying)),
+            ),
         )
     harness.conn.rollback()
     assert mismatch.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH

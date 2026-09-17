@@ -37,12 +37,14 @@ from starlette.exceptions import HTTPException
 from starlette.types import Message, Receive
 
 from server.api.commands._request import (
+    CommandRequest,
     Key,
     command_response,
+    governed,
     json_body,
     require_case_writer,
 )
-from server.api.deps import Blobs, Caller, Store
+from server.api.deps import Blobs, Caller, CasePath, Store
 from server.api.identity import Actor, GlobalRole
 from server.api.wire import TITLE_CHARS, CaseCreated, CreateCase, SourcesAdmitted
 from server.boundary_text import BoundaryText
@@ -51,14 +53,7 @@ from server.evidence.ingest import Document, admit_prepared, prepare_pack
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction
-from server.store.commands import (
-    NIL_SCOPE,
-    CommandResult,
-    StoredReceipt,
-    find_receipt,
-    request_digest,
-    run_command,
-)
+from server.store.commands import NIL_SCOPE, CommandResult, StoredReceipt, find_receipt
 from server.store.members import Standing, grant
 
 # Measured by `tests/test_case_commands.py`.
@@ -98,18 +93,11 @@ def create_case_command(
 ) -> Response:
     title = BoundaryText.of(body.title, limit=TITLE_CHARS)
     case_id = uuid4()
-    result = run_command(
+    return governed(
         conn,
         scope=NIL_SCOPE,
         key=key,
-        command=CREATE_CASE,
-        request_sha256=request_digest(
-            CREATE_CASE,
-            case_id=None,
-            run_id=None,
-            gate=None,
-            body={"title": title.value},
-        ),
+        request=CommandRequest(CREATE_CASE, None, None, None, {"title": title.value}),
         action=GovernedAction(
             case_id=case_id,
             actor_id=actor.user_id,
@@ -119,8 +107,8 @@ def create_case_command(
         ),
         prepare=_open_case(case_id, title, actor.user_id),
         write=lambda _unit: (201, CaseCreated(case_id=case_id)),
+        model=CaseCreated,
     )
-    return command_response(result, CaseCreated)
 
 
 def _open_case(
@@ -209,7 +197,7 @@ def admit_sources(  # noqa: PLR0913 -- decision 2's dependency order, one per st
     _declared: Annotated[int, Depends(_upload_envelope)],
     key: Key,
     documents: Annotated[list[Document], Depends(_admission_documents)],
-    case_id: UUID,
+    case_id: CasePath,
     conn: Store,
     blobs: Blobs,
 ) -> Response:
@@ -220,23 +208,20 @@ def admit_sources(  # noqa: PLR0913 -- decision 2's dependency order, one per st
         }
         for document in documents
     ]
-    digest = request_digest(
-        ADMIT_SOURCES, case_id=case_id, run_id=None, gate=None, body=listing
-    )
+    request = CommandRequest(ADMIT_SOURCES, case_id, None, None, listing)
     stored = _peek(conn, actor.user_id, case_id, key)
     if stored is not None:
-        if stored.request_sha256 != digest:
+        if stored.request_sha256 != request.digest():
             raise Refusal(RefusalCode.IDEMPOTENCY_KEY_REUSED)
         replay = CommandResult(stored.status, stored.receipt, replayed=True)
         return command_response(replay, SourcesAdmitted)
 
     pack = prepare_pack(documents)  # no unit open, no case lock held
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command=ADMIT_SOURCES,
-        request_sha256=digest,
+        request=request,
         action=GovernedAction(
             case_id=case_id,
             actor_id=actor.user_id,
@@ -253,8 +238,8 @@ def admit_sources(  # noqa: PLR0913 -- decision 2's dependency order, one per st
                 case_id=case_id, source_ids=admit_prepared(unit, blobs, case_id, pack)
             ),
         ),
+        model=SourcesAdmitted,
     )
-    return command_response(result, SourcesAdmitted)
 
 
 def _peek(

@@ -16,14 +16,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from server.api.commands._request import (
+    CommandRequest,
     Key,
-    command_response,
+    governed,
     json_body,
     require_case_approver,
     require_case_reader,
     require_case_writer,
 )
-from server.api.deps import Caller, Methodology, Store
+from server.api.deps import Caller, CasePath, Methodology, RunPath, Store
 from server.api.wire import (
     ApproveGate,
     CreateRun,
@@ -40,7 +41,6 @@ from server.methodology.vendor import VENDOR_MODULE
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.audit import GovernedAction
-from server.store.commands import request_digest, run_command
 from server.store.gates import (
     Gate,
     GateApproval,
@@ -94,12 +94,8 @@ def path_gate(request: Request) -> Gate:
 
 PathGate = Annotated[Gate, Depends(path_gate)]
 
-
-def _run_id(value: str) -> UUID:
-    try:
-        return UUID(value)
-    except ValueError:
-        raise Refusal(RefusalCode.RUN_NOT_FOUND) from None
+# `run_id: RunPath` is declared after `_standing` on every route that takes
+# one: the run id is read after visibility, so a stranger learns nothing.
 
 
 def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID) -> tuple[bool, Any]:
@@ -133,7 +129,7 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
     key: Key,
     _standing: Writer,
     body: Annotated[CreateRun, Depends(json_body(CreateRun))],
-    case_id: UUID,
+    case_id: CasePath,
     conn: Store,
     bundle: Methodology,
 ) -> Response:
@@ -156,14 +152,11 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
         pinned = pin_route_in(unit, run_id, route)
         return 201, RunCreated(case_id=case_id, run_id=run_id, route_digest=pinned)
 
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command="CREATE_RUN",
-        request_sha256=request_digest(
-            "CREATE_RUN", case_id=case_id, run_id=None, gate=None, body=selection
-        ),
+        request=CommandRequest("CREATE_RUN", case_id, None, None, selection),
         action=GovernedAction(
             case_id=case_id,
             actor_id=actor.user_id,
@@ -172,8 +165,8 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
             payload={**selection, "route_digest": route_digest(route)},
         ),
         write=write,
+        model=RunCreated,
     )
-    return command_response(result, RunCreated)
 
 
 @router.post("/api/v1/cases/{case_id}/runs/{run_id}/input")
@@ -181,9 +174,9 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
     actor: Caller,
     key: Key,
     _standing: Writer,
+    run: RunPath,
     body: Annotated[PinRunInput, Depends(json_body(PinRunInput))],
-    case_id: UUID,
-    run_id: str,
+    case_id: CasePath,
     conn: Store,
     bundle: Methodology,
 ) -> Response:
@@ -193,7 +186,6 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
     A run whose input is already pinned is a conflict before any snapshot: a
     new key is a new intent, and a replay is the same key's receipt.
     """
-    run = _run_id(run_id)
     subject = RunSubject(**body.subject.model_dump())
     if not valid_subject(subject):
         raise Refusal(RefusalCode.REQUEST_INVALID)
@@ -209,17 +201,12 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
             input_fingerprint=pin.input_fingerprint,
         )
 
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command="PIN_RUN_INPUT",
-        request_sha256=request_digest(
-            "PIN_RUN_INPUT",
-            case_id=case_id,
-            run_id=run,
-            gate=None,
-            body=body.model_dump(mode="json"),
+        request=CommandRequest(
+            "PIN_RUN_INPUT", case_id, run, None, body.model_dump(mode="json")
         ),
         action=GovernedAction(
             case_id=case_id,
@@ -229,8 +216,8 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
             payload={"run_id": str(run), "build_id": bundle.build_id},
         ),
         write=write,
+        model=RunInputPinned,
     )
-    return command_response(result, RunInputPinned)
 
 
 @router.get(
@@ -241,15 +228,14 @@ def read_gate_preview(
     _actor: Caller,
     gate: PathGate,
     _standing: Reader,
-    case_id: UUID,
-    run_id: str,
+    run: RunPath,
+    case_id: CasePath,
     conn: Store,
 ) -> GatePreviewDocument:
     """The exact content an approver is shown and the digests to submit.
 
     Reading it records nothing and releases nothing; approval re-derives it.
     """
-    run = _run_id(run_id)
     pinned, observed_at = _owned_run(conn, case_id, run)
     if not pinned:
         raise Refusal(RefusalCode.RUN_INPUT_NOT_PINNED)
@@ -270,14 +256,13 @@ def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
     gate: PathGate,
     key: Key,
     _standing: Approver,
+    run: RunPath,
     body: Annotated[ApproveGate, Depends(json_body(ApproveGate))],
-    case_id: UUID,
-    run_id: str,
+    case_id: CasePath,
     conn: Store,
 ) -> Response:
     """Release one gate over the preview the approver submits, re-derived
     under the case and run locks at commit."""
-    run = _run_id(run_id)
     approval = GateApproval(
         run_id=run,
         gate=gate,
@@ -297,17 +282,12 @@ def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
             input_fingerprint=body.input_fingerprint,
         )
 
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command="APPROVE_GATE",
-        request_sha256=request_digest(
-            "APPROVE_GATE",
-            case_id=case_id,
-            run_id=run,
-            gate=gate.value,
-            body=body.model_dump(mode="json"),
+        request=CommandRequest(
+            "APPROVE_GATE", case_id, run, gate.value, body.model_dump(mode="json")
         ),
         action=GovernedAction(
             case_id=case_id,
@@ -322,5 +302,5 @@ def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
             },
         ),
         write=write,
+        model=GateApproved,
     )
-    return command_response(result, GateApproved)

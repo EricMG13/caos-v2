@@ -5,15 +5,11 @@
 // "Fixture fields dropped rather than faked").
 import { Link } from "react-router";
 import { Tag } from "@/ds/atoms";
+import { stamp } from "@/ds/format";
 import type { CaseRow } from "@/wire/v1";
 
 /** Not exported by `@/wire/v1` on its own; the shape lives only on `CaseRow`. */
 type RunSummary = NonNullable<CaseRow["latest_run"]>;
-
-/** `2026-09-09T14:30:00Z` reads `2026-09-09 14:30Z`. */
-export function stamp(iso: string): string {
-  return iso.replace("T", " ").replace(/:\d\d(?:\.\d+)?Z$/, "Z");
-}
 
 /** The one action a row has: open the case in Analysis. */
 export function caseHref(caseId: string): string {

@@ -11,11 +11,11 @@ import psycopg
 
 from server import methodology
 from server.boundary_text import BoundaryText
+from server.digest import canonical_digest, canonical_json
 from server.engine.route import ResolvedRoute, route_digest
-from server.evidence.ingest import _digest
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import RunEvent, append, lock_run
 from server.store.routes import resolved_route
 from server.store.source_sets import SourceSet, load_source_set
@@ -156,13 +156,7 @@ def _research(value: object) -> str | None:
         elif type(item) is list:
             pending.extend((v, depth + 1) for v in item)
     try:
-        raw = json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
+        raw = canonical_json(value)
     except (TypeError, ValueError, RecursionError):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID) from None
     if len(raw.encode("utf-8")) > 65536:
@@ -174,7 +168,7 @@ def _fingerprint(pin: RunInput) -> str:
     fields = input_fields(pin)
     del fields["run_id"], fields["input_fingerprint"]
     fields.update(format_version=pin.format_version, case_id=str(pin.case_id))
-    return _digest(fields)
+    return canonical_digest(fields)
 
 
 def _validate(pin: RunInput) -> None:
@@ -282,17 +276,10 @@ def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
     """
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
-    try:
+    with committed_unit(conn):
         candidate = pin_run_input_in(
             conn, run_id, source_version, bundle, research, subject=subject
         )
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return candidate
 
 

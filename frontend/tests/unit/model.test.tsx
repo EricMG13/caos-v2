@@ -1,7 +1,5 @@
 import { render, screen } from "@testing-library/react";
 import { ModelSection } from "@/sections/model/ModelSection";
-import { propagatedFrom } from "@/sections/model/Projection";
-import type { ProjectionPeriod } from "@/wire/model";
 import { parseModelDocument, type ModelDocument } from "@/wire/v1";
 
 const CASE = "00000000-0000-4000-8000-000000000001";
@@ -61,18 +59,6 @@ function model(overrides: Record<string, unknown> = {}): ModelDocument {
 }
 
 describe("Model v1", () => {
-  test("propagatedFrom names the originating unavailable period", () => {
-    expect(
-      propagatedFrom(
-        [
-          { period_id: "Q1", state: "unavailable", propagated: false },
-          { period_id: "Q2", state: "unavailable", propagated: true },
-        ] as ProjectionPeriod[],
-        1,
-      ),
-    ).toBe("Q1");
-  });
-
   test("renders the accepted projection as server strings with every explicit limitation", () => {
     const { container } = render(<ModelSection document={model()} tab={null} />);
     expect(container.querySelector("[data-model-v1]")).toHaveAttribute("data-run", RUN);

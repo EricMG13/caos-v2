@@ -4,12 +4,8 @@
 // pages or per-row check time -- withdrawal is checked live at every use,
 // and the envelope's own `observed_at` is when this document's check ran
 // (brief 4.1, "Fixture fields dropped rather than faked").
+import { stamp } from "@/ds/format";
 import type { SourceRow } from "@/wire/v1";
-
-/** `2026-09-09T14:30:00Z` reads `2026-09-09 14:30Z`. */
-export function stamp(iso: string): string {
-  return iso.replace("T", " ").replace(/:\d\d(?:\.\d+)?Z$/, "Z");
-}
 
 /** The clock part alone: `14:30Z`. */
 export function clock(iso: string): string {

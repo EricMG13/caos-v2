@@ -19,32 +19,29 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import nullcontext, suppress
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import MODEL_MODULE, ResolvedRoute, RouteNode
-from server.evidence.citations import Citation, TokenIndex, verify_citations
-from server.methodology.bundle import Bundle, verified_bytes
+from server.engine.route import ResolvedRoute, RouteNode
+from server.evidence.citations import TokenIndex
+from server.methodology.bundle import Bundle
 from server.methodology.executor import captured_blocks
-from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
-from server.methodology.invocation import (
-    accepted_lineage,
-    call_time_identity,
-    host_identity,
-    record_authority_matches,
+from server.methodology.verification import (
+    AcceptedRow,
+    PinnedEvidence,
+    Step,
+    load_vendor_authority,
+    verify_accepted,
 )
-from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import execution_reads
 from server.store.routes import resolved_route
 from server.store.source_sets import pinned_live_sources
-
-_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +58,11 @@ class Revision:
 def payload_bytes(payload: dict[str, Any]) -> bytes:
     """The payload's one canonical serialisation; its digest is what is signed."""
     return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
     ).encode("utf-8")
 
 
@@ -137,6 +138,14 @@ def canonical_payload(
     return payload
 
 
+def _refuse(step: Step) -> RefusalCode | None:
+    """`ARTIFACT_RECORD_MISMATCH` at every step but a quote that no longer
+    anchors, which keeps the citation's own code."""
+    return (
+        None if step is Step.CITATION_ANCHOR else RefusalCode.ARTIFACT_RECORD_MISMATCH
+    )
+
+
 class _Reader:
     """One payload's shared authority: contract, catalog and pinned evidence."""
 
@@ -150,75 +159,40 @@ class _Reader:
         captured: dict[UUID, frozenset[str]],
     ) -> None:
         self.conn, self.blobs, self.bundle, self.route = conn, blobs, bundle, route
-        self.contract = load_vendor_contract(bundle)
-        self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
-        self.pinned = pinned
+        self.vendor = load_vendor_authority(bundle)
         self.pairs: dict[str, tuple[str, str | None]] = {}
         # One reading of the token index for the whole payload: records cluster
-        # on the same pages of the same sources.
-        self.index = TokenIndex()
-        # The captured blocks of the pinned live sources: what any node was handed.
-        self.delivered = {
-            source: captured.get(source, frozenset()) for source in pinned.values()
-        }
+        # on the same pages of the same sources. The captured blocks of the
+        # pinned live sources are what any node was handed.
+        self.evidence = PinnedEvidence(
+            pinned,
+            {source: captured.get(source, frozenset()) for source in pinned.values()},
+            TokenIndex(),
+        )
 
     def proven(
         self, run_id: UUID, node: RouteNode, attempt: UUID, artifact: str, sha: str
     ) -> tuple[bytes, bytes]:
         """The proven Markdown and record bytes."""
-        bundle, route, pinned = self.bundle, self.route, self.pinned
-        host = host_identity(
-            self.conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt
-        )
-        stored = None
-        with suppress(Refusal):  # an unreadable record is `read_record`'s refusal
-            stored = self.blobs.get(sha)
-        expected = call_time_identity(
-            self.conn, route, host, attempt_id=attempt, record=stored
-        )
-        record = read_record(
-            self.blobs, artifact_sha256=artifact, record_sha256=sha, expected=expected
-        )
-        mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        if not record_authority_matches(
-            record, bundle=bundle, module_id=node.module_id, verify=True
-        ) or any(c.document_sha256 not in pinned for c in record.citations):
-            raise mismatch
-        upstream = record.identity.upstream
-        if record.lineage != accepted_lineage(
-            self.conn, self.blobs, run_id=run_id, upstream=upstream, accepted=self.pairs
-        ):
-            raise mismatch
-        markdown = self.blobs.get(artifact)
-        gate = frozenset(n.module_id for n in route.nodes) - {
-            GATE_MODULE,
-            MODEL_MODULE,
-        }
-        projections = None
-        with suppress(Refusal):  # a stored handoff that no longer validates
-            projections = validate_markdown(
-                self.contract,
-                self.catalog,
-                verified_bytes(bundle, node.module_id, "SKILL.md"),
-                markdown,
-                identity=expected,
-                gate_expects=gate if node.module_id == GATE_MODULE else frozenset(),
-            )
-        # Raised outside the handler, so the refusal's context is empty.
-        if projections is None or projections != record.projections:
-            raise mismatch
-        anchored = verify_citations(
+        verified = verify_accepted(
             self.conn,
-            delivered=self.delivered,
-            citations=[
-                Citation(pinned[c.document_sha256], c.page, c.matched_text)
-                for c in record.citations
-            ],
-            index=self.index,
+            self.blobs,
+            self.bundle,
+            self.route,
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=artifact,
+                record_sha256=sha,
+            ),
+            vendor=self.vendor,
+            accepted=self.pairs,
+            verify_authority=True,
+            reanchor=self.evidence,
+            refuse=_refuse,
         )
-        if tuple(anchored) != record.citations or stored is None:
-            raise mismatch
-        return markdown, stored
+        return verified.markdown, verified.stored
 
 
 def freeze_canonical(

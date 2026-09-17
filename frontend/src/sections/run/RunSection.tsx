@@ -17,6 +17,7 @@ import { NodeDetail } from "./NodeDetail";
 import { blockedByOf } from "./reason";
 import { RouteGraph } from "./RouteGraph";
 import type { GateView } from "./types";
+import { shortDigest } from "@/ds/format";
 import type { NodeState } from "@/wire";
 import type { RunSectionDocument } from "@/wire/v1";
 
@@ -25,12 +26,6 @@ const GATE_LABEL: Record<GateView["gate"], string> = {
   SOURCE_SET: "Source set",
   RESEARCH_PLAN: "Research plan",
 };
-
-/** The digest, shortened for the run summary; the full value is the `title`. */
-function abbreviate(digest: string | null): string {
-  if (digest === null) return "not pinned";
-  return digest.length > 12 ? `${digest.slice(0, 8)}…${digest.slice(-4)}` : digest;
-}
 
 function runHref(caseId: string, runId: string): string {
   return `?case=${encodeURIComponent(caseId)}&run=${encodeURIComponent(runId)}`;
@@ -144,7 +139,8 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           <header>
             <h2>Resolved route</h2>
             <span className="cp">
-              build {run.build_id ?? "not pinned"} · digest {abbreviate(run.route_digest)}
+              build {run.build_id ?? "not pinned"} · digest{" "}
+              {shortDigest(run.route_digest, "not pinned")}
             </span>
             <span className="tag right">{run.nodes.length} NODES</span>
             <span className="tag acc">{tally}</span>
@@ -221,7 +217,7 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
               <dd>{run.created_at}</dd>
               <dt>Route digest</dt>
               <dd className="wrap" title={run.route_digest ?? "not pinned"}>
-                {abbreviate(run.route_digest)}
+                {shortDigest(run.route_digest, "not pinned")}
               </dd>
               <dt>Build</dt>
               <dd>{run.build_id ?? "not pinned"}</dd>

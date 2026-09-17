@@ -28,12 +28,12 @@ _OWNERS = {
 
 
 def _document(markdown: bytes) -> dict[str, Any]:
-    from server.methodology.handoff import _strict_json
+    from server.methodology.handoff import strict_json
 
     try:
         found = _BLOCK.findall(markdown.decode("utf-8"))
         document = (
-            _strict_json(found[0])
+            strict_json(found[0])
             if len(found) == 1 and len(found[0].encode()) <= _LIMIT
             else None
         )

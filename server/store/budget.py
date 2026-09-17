@@ -34,8 +34,7 @@ from uuid import UUID
 import psycopg
 
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
-from server.store.events import lock_run
+from server.store import StoreConnection, committed_unit
 
 if TYPE_CHECKING:
     from server.pricing import ModelPrice
@@ -90,15 +89,8 @@ def reserve(
     both believe they fit. Under the same lock the run's lease must be held and
     no cancel requested (brief 4.3 D3).
     """
-    try:
+    with committed_unit(conn):
         _reserve(conn, attempt_id, amount, price, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
 
 
 def _reserve(
@@ -108,29 +100,17 @@ def _reserve(
     price: ModelPrice,
     lease: Lease | None,
 ) -> None:
-    # `work` imports `outcomes`, which imports this module.
-    from server.store.work import require_lease
+    # Both import this module at their top: `outcomes` directly, `work` through it.
+    from server.store.outcomes import _require_attempt
+    from server.store.work import require_running
 
     validate_spend(amount)
     _validate_price(price)
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     run_id = _run_of(conn, attempt_id)
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
-    if require_lease(conn, run_id, lease):
-        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
-    # Revalidate after waiting, then retain the native owner key through commit.
-    # A moved attempt must never spend under its former run lock.
-    if (
-        conn.execute(
-            "SELECT 1 FROM run_attempts WHERE attempt_id = %s AND run_id = %s"
-            " FOR KEY SHARE",
-            (attempt_id, run_id),
-        ).fetchone()
-        is None
-    ):
-        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    require_running(conn, run_id, lease)
+    _require_attempt(conn, attempt_id, run_id)
     if (
         reserved_for(conn, attempt_id) is not None
         or conn.execute(

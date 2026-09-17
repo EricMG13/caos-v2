@@ -29,7 +29,7 @@ from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute, RouteNode
+from server.engine.route import MODEL_MODULE, ResolvedRoute, RouteNode
 from server.evidence.citations import (
     AnchoredCitation,
     verify_citations,
@@ -59,18 +59,15 @@ from server.methodology.handoff import (
     Projections,
     UpstreamRef,
     parse_response,
-    read_record,
     record_bytes,
     stored_lineage,
     validate_markdown,
 )
 from server.methodology.invocation import (
-    accepted_lineage,
     build_handoff_prompt,
     call_time_identity,
     host_identity,
     prospective_identity,
-    record_authority_matches,
     request_size,
     upstream_markdown,
 )
@@ -79,7 +76,15 @@ from server.methodology.vendor import (
     VendorContract,
     load_vendor_contract,
 )
-from server.provider import CompletionProvider, _reported_charge
+from server.methodology.verification import (
+    AcceptedRow,
+    Step,
+    VendorAuthority,
+    Verified,
+    gate_expects,
+    verify_accepted,
+)
+from server.provider import CompletionProvider, reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.budget import reserved_for
@@ -231,7 +236,7 @@ def execute_handoff(
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     require_idle(conn)
     completion = provider.complete(prompt, json_object=True)
-    charge = _reported_charge(
+    charge = reported_charge(
         completion.charge if isinstance(completion.charge, Decimal) else None
     )
     generation = producer_identifier(completion.generation_id, limit=512)
@@ -320,7 +325,7 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
             authority.files[SKILL],
             markdown,
             identity=identity,
-            gate_expects=_gate_expects(assignment.route, assignment.module_id),
+            gate_expects=gate_expects(assignment.route, assignment.node),
         )
     )
     # A Blocked verdict ends the run only once its quotes are verified: an
@@ -720,17 +725,13 @@ def _replayed_answer(
     )
 
 
-def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
+def accepted_projections(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> Projections:
     """An accepted canonical artifact's projections, re-derived and compared.
@@ -745,32 +746,23 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     deliverable use too, so a soft input accepted after its target never makes
     the runtime refuse a record the other readers accept.
     """
-    _record, projections = _verified_accepted(
+    return _verified_accepted(
         conn,
         blobs,
         bundle,
         route,
-        run_id=run_id,
-        route_node_id=route_node_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
         accepted=accepted,
-    )
-    return projections
+    ).projections
 
 
-def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
+def accepted_handoff(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> tuple[bytes, CanonicalRecord]:
     """An accepted canonical artifact's exact Markdown and its verified record.
@@ -781,85 +773,83 @@ def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
     Markdown equal the record's (§42.4). Citations are not re-anchored; the
     rectangles are the ones recorded at acceptance.
     """
-    record, _projections = _verified_accepted(
+    verified = _verified_accepted(
         conn,
         blobs,
         bundle,
         route,
-        run_id=run_id,
-        route_node_id=route_node_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
         accepted=accepted,
     )
-    # The bytes just validated, read again digest-checked for the caller.
-    return blobs.get(artifact_sha256), record
+    return verified.markdown, verified.record
 
 
-def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
+def _refuse(step: Step) -> RefusalCode | None:
+    """The runtime's codes: `ROUTE_IDENTITY_INVALID` for a row naming no
+    pinned node, `ARTIFACT_RECORD_MISMATCH` for bytes that will not read,
+    `ORCHESTRATION_BUILD_MOVED` as the proof maps it; every other step's own."""
+    return {
+        Step.NODE_NOT_IN_ROUTE: RefusalCode.ROUTE_IDENTITY_INVALID,
+        Step.UNREADABLE: RefusalCode.ARTIFACT_RECORD_MISMATCH,
+        Step.AUTHORITY_MOVED: RefusalCode.ORCHESTRATION_BUILD_MOVED,
+    }.get(step)
+
+
+def _verified_accepted(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None,
-) -> tuple[CanonicalRecord, Projections]:
-    """`accepted_projections` with the verified record it read beside them."""
-    node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
-    if node is None:
-        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-    record = _accepted_record(
+) -> Verified:
+    """`accepted_projections` with the verified record and bytes it read.
+
+    `ARTIFACT_RECORD_MISMATCH` when the record does not bind (`read_record`)
+    or its lineage is not the accepted chain the store holds now (§45.4);
+    `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
+    build, manifest or authority, as the proof maps it; `validate_markdown`'s
+    own code for a stored handoff that no longer validates;
+    `AUTHORITY_BYTES_MISMATCH` for any file of the module's authority moved on
+    disk. Citations are not re-anchored (§42.4). The frontier keeps the
+    per-manifest authority digest cache. Caller owns the read.
+    """
+    verified = verify_accepted(
         conn,
         blobs,
         bundle,
         route,
-        node,
-        run_id=run_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
+        vendor=VendorAuthority(_contract(bundle), _catalog(bundle)),
         accepted=accepted,
+        verify_authority=False,
+        reanchor=None,
+        refuse=_refuse,
     )
-    identity = record.identity
-    try:
-        markdown = blobs.get(artifact_sha256)
-    except (Refusal, OSError):
-        markdown = None
-    if markdown is None:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    authority = assemble_authority(bundle, node.module_id)
-    projections = validate_markdown(
-        _contract(bundle),
-        _catalog(bundle),
-        authority.files[SKILL],
-        markdown,
-        identity=identity,
-        gate_expects=_gate_expects(route, node.module_id),
-    )
-    if projections != record.projections:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    if node.module_id == "CP-CF":
-        assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
+    node = next(n for n in route.nodes if n.route_node_id == row.route_node_id)
+    # Every file of the module's authority, verified on disk now: the shared
+    # steps read SKILL.md and compare cached digests, so this is what refuses
+    # a sibling reference file tampered under an unchanged manifest on the
+    # read that serves the frontier, the Run and Analysis documents and the
+    # matrix (§45.1). It is what the parent read paid; the cache costs nothing.
+    assemble_authority(bundle, node.module_id)
+    if node.module_id == MODEL_MODULE:
+        assignment = Assignment(node.module_id, row.run_id, node, route, row.attempt_id)
         _forecast_inputs(
             bundle,
             node.module_id,
-            markdown,
-            _context(conn, blobs, bundle, assignment, identity),
+            verified.markdown,
+            _context(conn, blobs, bundle, assignment, verified.record.identity),
         )
-    return record, projections
+    return verified
 
 
 def _forecast_inputs(
     bundle: Bundle, module: str, markdown: bytes, context: _Context
 ) -> None:
     """The same owner-binding check at acceptance, replay and every accepted read."""
-    if module != "CP-CF":
+    if module != MODEL_MODULE:
         return
     from server.methodology.forecast import (
         validate_driver_mapping,
@@ -884,55 +874,6 @@ def _forecast_inputs(
             for key in ("limitation_flags", "validation_warnings")
         ):
             raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
-
-
-def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
-    conn: StoreConnection,
-    blobs: BlobStore,
-    bundle: Bundle,
-    route: ResolvedRoute,
-    node: RouteNode,
-    *,
-    run_id: UUID,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
-    accepted: Mapping[str, tuple[str, str | None]] | None,
-) -> CanonicalRecord:
-    """An accepted row's record, bound to its call-time identity and this build.
-
-    `ARTIFACT_RECORD_MISMATCH` when it does not bind (`read_record`) or its
-    lineage is not the accepted chain the store holds now (§45.4);
-    `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
-    build, manifest or authority, as the proof maps it. Caller owns the read.
-    """
-    try:
-        stored = blobs.get(record_sha256)
-    except (Refusal, OSError):
-        stored = None
-    identity = call_time_identity(
-        conn,
-        route,
-        host_identity(
-            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
-        ),
-        attempt_id=attempt_id,
-        record=stored,
-    )
-    record = read_record(
-        blobs,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
-        expected=identity,
-    )
-    if not record_authority_matches(record, bundle=bundle, module_id=node.module_id):
-        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
-    upstream = record.identity.upstream
-    if record.lineage != accepted_lineage(
-        conn, blobs, run_id=run_id, upstream=upstream, accepted=accepted
-    ):
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    return record
 
 
 def _upstream_records(
@@ -970,28 +911,22 @@ def _upstream_records(
         _, attempt, digest, record_sha256 = row
         if record_sha256 is None:
             raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        record, _projections = _verified_accepted(
+        record = _verified_accepted(
             conn,
             blobs,
             bundle,
             assignment.route,
-            run_id=assignment.run_id,
-            route_node_id=ref.route_node_id,
-            attempt_id=attempt,
-            artifact_sha256=digest,
-            record_sha256=record_sha256,
+            AcceptedRow(
+                run_id=assignment.run_id,
+                route_node_id=ref.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=digest,
+                record_sha256=record_sha256,
+            ),
             accepted=accepted,
-        )
+        ).record
         verified[record_sha256] = by_node[ref.route_node_id] = record
     return by_node, stored_lineage(blobs, refs, accepted, verified=verified)
-
-
-def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
-    if module_id != GATE_MODULE:
-        return frozenset()
-    # The vendor T8 cannot name host modules; CP-CF is released by its four
-    # REQUIRED owner/gate edges, after these exact vendor readiness rows.
-    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
 
 
 def _identity(

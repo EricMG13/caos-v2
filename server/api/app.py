@@ -39,7 +39,7 @@ from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api import health
@@ -52,16 +52,19 @@ from server.api.deps import DATABASE_URL as DATABASE_URL
 from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
 from server.api.deps import Blobs as Blobs
 from server.api.deps import Caller as Caller
+from server.api.deps import CasePath as CasePath
 from server.api.deps import Methodology as Methodology
+from server.api.deps import RunQuery as RunQuery
 from server.api.deps import Store as Store
+from server.api.deps import VisibleCase as VisibleCase
 from server.api.deps import _database_url as _database_url
 from server.api.deps import _vendored_bundle as _vendored_bundle
 from server.api.deps import actor_from_request as actor_from_request
 from server.api.deps import blob_store as blob_store
 from server.api.deps import methodology_bundle as methodology_bundle
 from server.api.deps import store_connection as store_connection
-from server.api.edge import EdgeGuard
-from server.api.identity import Actor, actor_from_headers
+from server.api.edge import EdgeGuard, is_api_path, refusal_body
+from server.api.identity import actor_from_headers
 from server.api.reads import analysis as analysis_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
@@ -70,13 +73,9 @@ from server.api.reads import qualification as qualification_read
 from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
-from server.api.reads.analysis import RunQuery
-from server.api.reads.upload import CasePath
 from server.api.stream import CONNECT_IO, POLL_IO, StreamEvent, case_tail
-from server.api.wire import CLEARS, RefusalBody
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
-from server.store.members import Standing, satisfies, standing_of
 
 # `GET /api/v1/cases/{case_id}/events`, the one path this module serves: the
 # caller's standing and the run's case, the heads, the cursor frame's recheck,
@@ -85,10 +84,6 @@ from server.store.members import Standing, satisfies, standing_of
 # declare their own budgets.
 EVENTS_IO_BUDGET = 2 + CONNECT_IO + 1 + POLL_IO
 IO_BUDGET = EVENTS_IO_BUDGET
-
-# Tailing a case is reading it. Anything the tail shows, a reader of the
-# case may see; holding it grants nothing further.
-READ_REQUIRES = Standing.READER
 
 # §9: a tail closes so the edge can reauthenticate. Five minutes, and it lives
 # here rather than in `stream.py` because it is a property of the connection
@@ -315,9 +310,8 @@ for _commands in (
 
 
 def _body(code: RefusalCode, status: int) -> Response:
-    return JSONResponse(
-        status_code=status,
-        content=RefusalBody(code=code, clears=CLEARS[code]).model_dump(mode="json"),
+    return Response(
+        status_code=status, content=refusal_body(code), media_type="application/json"
     )
 
 
@@ -336,8 +330,7 @@ async def _undeclared(request: Request, error: StarletteHTTPException) -> Respon
     needs no identity. Outside `/api/`, and for any other status, the default
     stands: that surface is not this contract's.
     """
-    under_api = request.url.path == "/api" or request.url.path.startswith("/api/")
-    if under_api and error.status_code in (404, 405):
+    if is_api_path(request.url.path) and error.status_code in (404, 405):
         return _body(RefusalCode.ENDPOINT_NOT_FOUND, error.status_code)
     return await http_exception_handler(request, error)
 
@@ -373,16 +366,23 @@ async def _malformed_run_id(
 
 @app.get("/api/v1/cases/{case_id}/events")
 def read_case_events(
-    actor: Caller, case_id: CasePath, run: RunQuery, request: Request, conn: Store
+    actor: Caller,
+    case_id: CasePath,
+    run: RunQuery,
+    _standing: VisibleCase,
+    request: Request,
+    conn: Store,
 ) -> StreamingResponse:
     """The case's events as `text/event-stream`, resuming after `Last-Event-ID`.
 
-    The authority read happens here, before the first byte, so an unauthorised
+    The authority read happens before the first byte, so an unauthorised
     watcher gets the private 404 a missing case gets rather than an empty 200.
-    Identity, then the path and query parsers, then the store: the order is
-    what keeps an anonymous or malformed request off a connection.
+    Identity, then the path and query parsers and the case's visibility, then
+    the store: the order is what keeps an anonymous or malformed request off a
+    connection, and standing first means a stranger learns nothing about
+    which runs a case holds.
     """
-    _visible(conn, case_id, run, actor)
+    _owned_run(conn, case_id, run)
     # Read at request time rather than bound as defaults, so a corrected value
     # needs no restart (and a test can shorten them).
     events = case_tail(
@@ -416,17 +416,8 @@ def _frame(event: StreamEvent | None) -> bytes:
     return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
 
 
-def _visible(
-    conn: StoreConnection, case_id: UUID, run_id: UUID | None, actor: Actor
-) -> None:
-    """Refuse a case this actor may not read, then a run that is not the case's.
-
-    Standing first: a stranger learns nothing about which runs a case holds.
-    """
-    if not satisfies(
-        standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
-    ):
-        raise Refusal(RefusalCode.CASE_NOT_FOUND)
+def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID | None) -> None:
+    """Refuse a run that is not the case's; no run named is nothing to refuse."""
     if run_id is None:
         return
     row = conn.execute(

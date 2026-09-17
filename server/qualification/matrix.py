@@ -51,7 +51,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import READY, ResolvedRoute, readiness_from
+from server.engine.route import MODEL_MODULE, READY, ResolvedRoute, readiness_from
 from server.engine.runtime import accepted_artifacts
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
@@ -59,6 +59,7 @@ from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
 from server.methodology.handoff import Projections
 from server.methodology.vendor import load_vendor_contract
+from server.methodology.verification import AcceptedRow
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
@@ -284,7 +285,9 @@ def qualification_set_digest(qualification: QualificationSet) -> str:
     assert_measurable(qualification)
     canonical = sorted(_digested(case) for case in qualification.cases)
     return sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
     ).hexdigest()
 
 
@@ -604,11 +607,13 @@ def _projections_met(
                 blobs,
                 bundle,
                 route,
-                run_id=run_id,
-                route_node_id=node.route_node_id,
-                attempt_id=UUID(str(attempt_id)),
-                artifact_sha256=str(artifact_sha256),
-                record_sha256=str(record_sha256),
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node.route_node_id,
+                    attempt_id=UUID(str(attempt_id)),
+                    artifact_sha256=str(artifact_sha256),
+                    record_sha256=str(record_sha256),
+                ),
                 accepted=accepted,
             )
         except Refusal:
@@ -756,11 +761,13 @@ def _registers_met(
                 blobs,
                 bundle,
                 route,
-                run_id=run_id,
-                route_node_id=node.route_node_id,
-                attempt_id=UUID(str(attempt_id)),
-                artifact_sha256=str(artifact_sha256),
-                record_sha256=str(record_sha256),
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node.route_node_id,
+                    attempt_id=UUID(str(attempt_id)),
+                    artifact_sha256=str(artifact_sha256),
+                    record_sha256=str(record_sha256),
+                ),
                 accepted=accepted,
             )
             # Asked exactly as the bundle asks it: no `register_ids`, so the
@@ -810,7 +817,7 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
     route = resolved_route(conn, run_id)
     if route is None:
         return False
-    node = next((item for item in route.nodes if item.module_id == "CP-CF"), None)
+    node = next((item for item in route.nodes if item.module_id == MODEL_MODULE), None)
     if node is None:
         return False
     rows = conn.execute(
@@ -837,11 +844,13 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=node.route_node_id,
-            attempt_id=UUID(str(attempt_id)),
-            artifact_sha256=str(artifact_sha256),
-            record_sha256=str(record_sha256),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=UUID(str(attempt_id)),
+                artifact_sha256=str(artifact_sha256),
+                record_sha256=str(record_sha256),
+            ),
             accepted=accepted,
         )
         result = forecast_projection(markdown)
@@ -911,11 +920,13 @@ def _readiness(
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=gate.route_node_id,
-            attempt_id=UUID(str(row[2])),
-            artifact_sha256=str(row[0]),
-            record_sha256=str(row[1]),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=gate.route_node_id,
+                attempt_id=UUID(str(row[2])),
+                artifact_sha256=str(row[0]),
+                record_sha256=str(row[1]),
+            ),
         )
     except (Refusal, ValueError, TypeError):
         return ()

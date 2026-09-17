@@ -21,7 +21,15 @@ from fastapi import APIRouter
 
 from server import methodology
 from server.api.commands.availability import RunFacts, run_actions
-from server.api.deps import Blobs, Caller, Methodology, Store
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RunQuery,
+    Store,
+    readable,
+)
 from server.api.identity import Actor
 from server.api.wire import (
     ATTEMPTS_MAX,
@@ -71,7 +79,7 @@ from server.store.gates import (
     require_adapter_route,
     sources_live,
 )
-from server.store.members import Standing, satisfies
+from server.store.members import Standing
 from server.store.routes import resolved_route
 from server.store.run_inputs import load_run_input
 
@@ -128,43 +136,39 @@ IO_BUDGET = (
     + BLOCKED_BY_IO
 )
 
-# Reading the Run section is reading its case; holding it grants nothing more.
-READ_REQUIRES = Standing.READER
-
 router = APIRouter()
 
 
 @router.get("/api/v1/cases/{case_id}/run", response_model=RunSectionDocument)
-def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two ids
-    case_id: str,
+def read_run_section(  # noqa: PLR0913 -- identity, two ids, store, blobs, bundle
     actor: Caller,
+    case_id: CasePath,
+    run: RunQuery,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
-    run: str | None = None,
 ) -> RunSectionDocument:
     """The case's runs and the displayed run with each node's state.
 
-    Both ids are taken as text and read here, after identity: a malformed case
-    is `CASE_NOT_FOUND` and a malformed run `RUN_NOT_FOUND`, never FastAPI's
-    422 quoting the input back.
+    The order of the parameters is load-bearing: identity, then the path and
+    the query, then the store. Both ids are parsed by `deps`, so a malformed
+    case is `CASE_NOT_FOUND` and a malformed run `RUN_NOT_FOUND`, never
+    FastAPI's 422 quoting the input back, and neither opens a connection.
     """
-    case = _uuid(case_id, RefusalCode.CASE_NOT_FOUND)
-    title, standing, live_sources, observed_at = _visible_case(conn, case, actor)
-    wanted = None if run is None else _uuid(run, RefusalCode.RUN_NOT_FOUND)
+    title, standing, live_sources, observed_at = _visible_case(conn, case_id, actor)
 
     rows = conn.execute(
         "SELECT r.run_id, r.status, r.created_at, p.profile_id, p.selection_id"
         " FROM runs r LEFT JOIN run_routes p ON p.run_id = r.run_id"
         " WHERE r.case_id = %s ORDER BY r.created_at DESC, r.run_id DESC LIMIT %s",
-        (case, RUNS_MAX + 1),
+        (case_id, RUNS_MAX + 1),
     ).fetchall()
     notes = [SectionNote.LIST_TRUNCATED] if len(rows) > RUNS_MAX else []
     runs = [_summary(row) for row in rows[:RUNS_MAX]]
-    displayed = runs[0] if wanted is None and runs else None
-    if wanted is not None:
-        displayed = next((s for s in runs if s.run_id == wanted), None)
-        displayed = displayed or _displayed_beyond_the_list(conn, case, wanted)
+    displayed = runs[0] if run is None and runs else None
+    if run is not None:
+        displayed = next((s for s in runs if s.run_id == run), None)
+        displayed = displayed or _displayed_beyond_the_list(conn, case_id, run)
 
     view = facts = None
     if displayed is not None:
@@ -172,12 +176,12 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
         notes.extend(run_notes)
     return RunSectionDocument(
         chrome=Chrome(
-            subject=Subject(case_id=case, title=title),
+            subject=Subject(case_id=case_id, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
             actions=run_actions(actor.role, standing, facts, live_sources),
         ),
         body=RunBody(
-            case_id=case,
+            case_id=case_id,
             latest_run_id=runs[0].run_id if runs else None,
             displayed_run_id=None if displayed is None else displayed.run_id,
             runs=runs,
@@ -194,26 +198,16 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
     )
 
 
-def _uuid(value: str, code: RefusalCode) -> UUID:
-    """An id read from the request, or the refusal a missing one gets. Raised
-    outside the `except`, so nothing of the input is chained behind it."""
-    try:
-        parsed: UUID | None = UUID(value)
-    except ValueError:
-        parsed = None
-    if parsed is None:
-        raise Refusal(code)
-    return parsed
-
-
 def _visible_case(
     conn: StoreConnection, case_id: UUID, actor: Actor
 ) -> tuple[str, Standing, int, Any]:
     """The case's title, the caller's live standing, the case's live sources
     and the store's `now()`.
 
-    One query. An unknown case and a case the caller may not read are the same
-    refusal, or the difference between them is the disclosure.
+    One query: the membership join is folded into the projection row, so
+    visibility costs no round trip of its own, and the rule applied to it is
+    `deps.readable`'s. An unknown case and a case the caller may not read are
+    the same refusal, or the difference between them is the disclosure.
     """
     row = conn.execute(
         "SELECT c.title, m.standing, now(),"
@@ -224,9 +218,9 @@ def _visible_case(
         " WHERE c.case_id = %s",
         (actor.user_id, case_id),
     ).fetchone()
-    standing = None if row is None or row[1] is None else Standing(row[1])
-    if row is None or standing is None or not satisfies(standing, READ_REQUIRES):
+    if row is None:  # no such case: the same private answer as no standing
         raise Refusal(RefusalCode.CASE_NOT_FOUND)
+    standing = readable(None if row[1] is None else Standing(row[1]))
     return str(row[0]), standing, int(row[3]), row[2]
 
 
