@@ -2827,7 +2827,7 @@ private 404 on the event stream, the analysis section and evidence pages; under
 the new rule that row became a duplicate of the plain-stranger row, and each
 was restored to assert its property again.
 
-### 70.3 One outcome record per accepted node
+### 70.3 One outcome record per accepted node, less one that is still there
 
 Every accepted node recorded its provider call's outcome three times: in the
 executor immediately after the call, again in the frontier loop, and again
@@ -2843,6 +2843,16 @@ readily than before, since the deleted call let that refusal escape ahead of
 acceptance. The strongest statement is one of ordering: `_accept` commits the
 bill before `_accept_artifact` is entered, so an unbilled accepted artifact is
 impossible by construction rather than by a provider's good behaviour.
+
+**Two remain, not one, and the heading says so now.** `server/store/runs.py`'s
+`_accept` still records beside the executor's authoritative call. It is not
+free -- it goes through `committed_unit`, `_locked_attempt` and `lock_run`, so
+it costs a `COMMIT` and takes `cases` and `runs` row-exclusive, which is the
+cost W1 complained of. It is kept because it is load-bearing: it is the
+`CALL_OUTCOME_LEGACY` replay detector, and it is what makes the
+bill-before-accept ordering this entry leans on true. So W1 is closed by one
+deletion of three sites, not by reduction to one. Corrected at the phase
+confidence review, which found the heading claiming more than the body.
 
 **What is given up.** The loop no longer enforces that a returned call was
 billed; each `Provider` owes it, and that obligation is now a docstring plus
@@ -2943,15 +2953,17 @@ text of one evidence line, unique on its page, repeated verbatim in the body.
 That is deliberately **stricter than the host enforces, and the prompt no
 longer claims otherwise.** `verify_citations` accepts any whole-token run that
 is unique on its page and lies within one reading region — a fragment of a
-line, or a run spanning lines inside a region. Three enforced constraints the
-prompt does not state: the quote must lie within one reading region; ambiguity
-is counted over the whole page including lines that were never delivered; and
-a citation may not be repeated, which `server/methodology/handoff.py`'s
-transport check refuses as `HANDOFF_MALFORMED` before form is judged. A fourth,
-finer: uniqueness is of the token run, not of the line, so a once-only line
-whose words also occur as a run crossing a line break inside the same region is
-refused `CITATION_AMBIGUOUS` although it satisfies every sentence the prompt
-states. The instruction makes no claim about strictness in either direction,
+line, or a run spanning lines inside a region. **Two** enforced constraints the
+prompt does not state: the quote must lie within one reading region; and a
+citation may not be repeated, which `server/methodology/handoff.py`'s transport
+check refuses as `HANDOFF_MALFORMED` before form is judged. This entry first
+counted a third -- that ambiguity is judged over the whole page including
+undelivered lines -- and that one the prompt *does* state, in the words "that
+line must appear exactly once on its cited page". Corrected at the phase
+confidence review. A third constraint, finer and real: uniqueness is of the
+token run, not of the line, so a once-only line whose words also occur as a run
+crossing a line break inside the same region is refused `CITATION_AMBIGUOUS`
+although it satisfies every sentence the prompt states. The instruction makes no claim about strictness in either direction,
 because both the equality it first claimed and the one-sided bound that
 replaced it were false.
 

@@ -245,6 +245,32 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Audit remediation (2026-09-17).**
 
+- **A provider that returns without billing and then crashes is paid twice,
+  with nobody deciding to.** §70.3 deleted the frontier loop's duplicate
+  outcome record, and with it the loop's own enforcement that a returned call
+  was billed. Each `Provider` owes that now, and for every implementation that
+  ships it holds structurally, because `check_call` refuses a second recorder.
+  The cost of a future one forgetting is not a refusal: a provider that returns
+  unbilled and then crashes before acceptance leaves no `call_outcomes` row, so
+  neither `replay_billed` nor `unexplained_charge` matches, the node is
+  re-attempted and the money is spent again without an operator choosing it.
+  This is the same shape as "A billed call whose diagnostic body cannot be
+  stored is billed again", which was closed by giving the operator the choice;
+  this one has no such arm. The run ceiling bounds it, so it is two charges for
+  one node rather than unbounded. *Upgrade:* a record adjacent to the call --
+  nothing inside the acceptance unit can reach the window, which is why §70.3
+  records it rather than closing it.
+- **The deliverable's shared token index holds every cited page for the whole
+  payload, on a request path.** §71.3 gave the report and committee reads a
+  `TokenIndex` shared across the pinned nodes, which is what took six round
+  trips per served path out of `IO_BUDGET`. Nothing clears it: it holds tokens
+  for every cited page of every node until the reader is collected, where each
+  node's index was previously released when its proof returned. A wide route
+  citing many pages of a large credit agreement now holds them all at once, on
+  an API request rather than in a worker. The proof reader has carried the same
+  trade since it gained its own index. *Upgrade:* a bounded or per-node index
+  the day a real payload's peak memory is measured; nothing today measures it.
+
 - **The evidence seal is checked once per statement, and two costs come with
   that.** §74.2: migration `0027` makes `0008`'s immutability check an
   `AFTER INSERT ... FOR EACH STATEMENT` trigger with a transition table, and
