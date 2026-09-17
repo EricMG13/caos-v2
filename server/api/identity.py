@@ -8,6 +8,13 @@ the proxy: a proxy that forwarded a client-supplied `x-forwarded-groups` would b
 misconfigured in a way no code here can detect, which is why the group list is
 the *only* thing this reads in production and the role header is off by default.
 
+Which of the two carries the role is the deployment's mode, and the role is
+never a third thing. In edge mode (`CAOS_EDGE_TOKEN` set) the groups decide it,
+because a proxy stood between the client and this process. Without a token the
+groups header proves nothing -- no edge asserted it -- so it is not read at all,
+and the role comes from the role header only while the development switch below
+asks for it. A process configured as neither serves READER, whatever arrives.
+
 Two things this deliberately does not do.
 
 *It does not carry per-case standing.* A `GlobalRole` says what kind of account
@@ -38,12 +45,15 @@ IO_BUDGET = 0
 
 # The development convenience, and it is opt-in. An environment variable that had
 # to be set to *disable* trust is one a deployment forgets, and that failure is
-# silent and total: every request would arrive as whatever it said it was.
+# silent and total: every request would arrive as whatever it said it was. The
+# same reasoning is why the groups header is an edge-mode header: reading it
+# without a token would be the forgettable default in the other direction, one
+# any peer that reached a tokenless listener could use to name itself ADMIN.
 TRUST_SWITCH = "CAOS_TRUST_ROLE_HEADER"
 TRUSTED = "1"
 
 SUBJECT_HEADER = "x-caos-user"
-GROUPS_HEADER = "x-forwarded-groups"
+GROUPS_HEADER = "x-forwarded-groups"  # edge mode only: the edge's assertion
 ROLE_HEADER = "x-caos-role"
 # Edge mode (`server/api/edge.py`): while this is set, the switch above is never
 # believed, whatever it says -- boot refuses the pair, and this is the rule a
@@ -101,9 +111,13 @@ def actor_from_headers(headers: object) -> Actor:
         # `from None`: the ValueError's message is the header the client sent.
         raise Refusal(RefusalCode.NOT_AUTHENTICATED) from None
 
-    if os.environ.get(TRUST_SWITCH) == TRUSTED and EDGE_TOKEN_ENV not in os.environ:
+    if EDGE_TOKEN_ENV in os.environ:
+        return Actor(user_id=user_id, role=_from_groups(get(GROUPS_HEADER)))
+    if os.environ.get(TRUST_SWITCH) == TRUSTED:
         return Actor(user_id=user_id, role=_claimed(get(ROLE_HEADER)))
-    return Actor(user_id=user_id, role=_from_groups(get(GROUPS_HEADER)))
+    # ponytail: no token and no switch is nobody's deployment; the lowest role,
+    # never a header's word. The one line that closes C3.
+    return Actor(user_id=user_id, role=GlobalRole.READER)
 
 
 def _from_groups(groups: object) -> GlobalRole:
