@@ -35,6 +35,7 @@ from server.methodology.bundle import Bundle, verified_bytes
 from server.refusals import Refusal, RefusalCode
 
 VENDOR_MODULE = "CP-OS"
+MODULE_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 _AUTHORITY_BUNDLE = "references/CREDIT_OS_V_AUTHORITY_BUNDLE_v2.json"
 _SCRIPTS = "scripts/"
 _FILES = {
@@ -138,6 +139,25 @@ class _Loader:
             if f"{name}.{item}" in _FILES:
                 self.load(f"{name}.{item}")
         return leaf if fromlist or level else self.modules[parts[0]]
+
+
+def catalog(bundle: Bundle) -> dict[str, Any]:
+    """The bundle's verified module catalog, or `AUTHORITY_BYTES_MISMATCH`.
+
+    Here rather than beside either caller: the run command resolves its route
+    from this catalog and the canonical adapter executes against it, and a copy
+    each is two readings of the one authority invariant 4 names. The command
+    may not import the adapter at all
+    (`test_command_modules_import_no_runtime_provider_or_transport`), so the
+    shared reading lives with the bytes it verifies.
+    """
+    try:
+        loaded = json.loads(verified_bytes(bundle, VENDOR_MODULE, MODULE_CATALOG))
+    except ValueError:
+        loaded = None
+    if not isinstance(loaded, dict):
+        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    return loaded
 
 
 def load_vendor_contract(bundle: Bundle) -> VendorContract:

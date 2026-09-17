@@ -9,7 +9,6 @@ re-derives the preview under the case and run locks (`release_gate_in`).
 
 from __future__ import annotations
 
-import json
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -35,9 +34,8 @@ from server.api.wire import (
     RunInputPinned,
 )
 from server.engine.route import resolve_route, route_digest
-from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.handoff import ADAPTER_ROUTES
-from server.methodology.vendor import VENDOR_MODULE
+from server.methodology.vendor import catalog
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.audit import GovernedAction
@@ -74,7 +72,6 @@ PREVIEW_IO = PINNED_INPUT_IO + 2  # standing; ownership, pin and clock
 APPROVE_IO = REPLAY_IO + UNIT_IO + 1 + 4 + PINNED_INPUT_IO + 2
 IO_BUDGET = max(SUCCESSOR_RUN_IO, PIN_INPUT_IO, PREVIEW_IO, APPROVE_IO)
 
-_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 _GATES = {"source-set": Gate.SOURCE_SET, "research-plan": Gate.RESEARCH_PLAN}
 
 router = APIRouter()
@@ -113,16 +110,6 @@ def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID) -> tuple[bool
     return bool(row[0]), row[1]
 
 
-def _catalog(bundle: Bundle) -> dict[str, Any]:
-    try:
-        catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
-    except ValueError:
-        catalog = None
-    if not isinstance(catalog, dict):
-        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-    return catalog
-
-
 @router.post("/api/v1/cases/{case_id}/runs")
 def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bundle
     actor: Caller,
@@ -143,7 +130,7 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
     """
     if (body.profile_id, body.selection_id) not in ADAPTER_ROUTES:
         raise Refusal(RefusalCode.ROUTE_NOT_ENABLED)
-    route = resolve_route(_catalog(bundle), body.profile_id, body.selection_id)
+    route = resolve_route(catalog(bundle), body.profile_id, body.selection_id)
     require_adapter_route(route)
     selection = body.model_dump(mode="json")
 

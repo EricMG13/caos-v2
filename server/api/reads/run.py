@@ -63,7 +63,6 @@ from server.engine.route import (
     lite_object_unmet,
     node_states,
     readiness_from,
-    route_digest,
     waiting_on,
 )
 from server.engine.runtime import accepted_artifacts
@@ -80,7 +79,7 @@ from server.store.gates import (
     sources_live,
 )
 from server.store.members import Standing
-from server.store.routes import resolved_route
+from server.store.routes import route_pin
 from server.store.run_inputs import load_run_input
 
 # The case, the caller's standing, its live-source count and the store's
@@ -281,7 +280,8 @@ def _run_view(
         (run_id, ATTEMPTS_MAX + 1),
     ).fetchall()
     notes = [SectionNote.LIST_TRUNCATED] if len(attempts) > ATTEMPTS_MAX else []
-    route = resolved_route(conn, run_id)
+    pin_of_route = route_pin(conn, run_id)
+    route = None if pin_of_route is None else pin_of_route[0]
     nodes: list[NodeView] = []
     blocked_by = None
     if route is None:
@@ -294,10 +294,11 @@ def _run_view(
         run_id=run_id,
         status=summary.status,
         created_at=summary.created_at,
-        # Recomputed from the route just read, not read from its own column: it
-        # is then the digest of the thing this document describes, and a
-        # stored digest that had drifted would show up here.
-        route_digest=None if route is None else route_digest(route),
+        # The digest `route_pin` derived from the route just read, not the one
+        # read from its own column: it is then the digest of the thing this
+        # document describes, and a stored digest that had drifted refuses
+        # there rather than reaching a reader.
+        route_digest=None if pin_of_route is None else pin_of_route[1],
         build_id=None if pin is None else pin.build_id,
         source_set_version=None if pin is None else pin.source_version,
         subject=None

@@ -17,14 +17,12 @@ what rests on it (§41.3).
 from __future__ import annotations
 
 import hashlib
-import json
 import threading
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
 from uuid import UUID
 
 from server import methodology
@@ -41,7 +39,6 @@ from server.methodology.bundle import (
     authority_digest,
     delivered_authority,
     delivered_authority_digest,
-    verified_bytes,
 )
 from server.methodology.executor import (
     SKILL,
@@ -72,8 +69,8 @@ from server.methodology.invocation import (
     upstream_markdown,
 )
 from server.methodology.vendor import (
-    VENDOR_MODULE,
     VendorContract,
+    catalog,
     load_vendor_contract,
 )
 from server.methodology.verification import (
@@ -101,7 +98,6 @@ from server.store.outcomes import (
 from server.store.run_inputs import load_run_input
 from server.store.source_sets import SourceSet, load_source_set
 
-_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 # One compiled contract per manifest: the manifest digests every vendor file.
 _CONTRACTS: dict[str, VendorContract] = {}
 _CONTRACTS_LOCK = threading.Lock()
@@ -126,16 +122,6 @@ def _contract(bundle: Bundle) -> VendorContract:
         if key not in _CONTRACTS:
             _CONTRACTS[key] = load_vendor_contract(bundle)
         return _CONTRACTS[key]
-
-
-def _catalog(bundle: Bundle) -> dict[str, Any]:
-    try:
-        catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
-    except ValueError:
-        catalog = None
-    if not isinstance(catalog, dict):
-        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-    return catalog
 
 
 def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:
@@ -321,7 +307,7 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     projections = _unless_blocked(
         lambda: validate_markdown(
             _contract(bundle),
-            _catalog(bundle),
+            catalog(bundle),
             authority.files[SKILL],
             markdown,
             identity=identity,
@@ -494,7 +480,7 @@ def _prompt(
         _contract(bundle),
         identity=identity,
         authority=authority,
-        catalog=_catalog(bundle),
+        catalog=catalog(bundle),
         delivered=context.delivered,
         upstream=context.upstream,
         upstream_citations=context.citations,
@@ -821,7 +807,7 @@ def _verified_accepted(  # noqa: PLR0913 -- the unit's handles, its row, its pai
         bundle,
         route,
         row,
-        vendor=VendorAuthority(_contract(bundle), _catalog(bundle)),
+        vendor=VendorAuthority(_contract(bundle), catalog(bundle)),
         accepted=accepted,
         verify_authority=False,
         reanchor=None,
