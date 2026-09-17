@@ -16,7 +16,7 @@
       ],
       "expects": [
         {
-          "module_id": "CP-0",
+          "module_id": "CP-5",
           "document_sha256": "66055bbb8d27721d07a5e8cb834c9b96a256ada45a0812ea4fb2e7202ee4f64d",
           "matched_text": "When compliance reporting requirements have been completed and assuming no change from 31"
         },

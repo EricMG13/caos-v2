@@ -462,13 +462,44 @@ def _body_words(text: str) -> list[str]:
     return "\n".join(lines[closing + 1 :]).split()
 
 
+# Marks a body may put around a quotation without making it a different quote.
+_QUOTATION = "\"'\u2018\u2019\u201c\u201d\u201e\u201f\u00ab\u00bb"
+
+
 def _quoted(words: list[str], quote: str) -> bool:
+    """Whether the body quotes this text as whole tokens, typography aside.
+
+    A module writes its Evidence Trace as prose, and prose puts quotation marks
+    around a quotation: the body's tokens are then `\u201cRecorded` and `p1\u201d`
+    where the quote's are `Recorded` and `p1`. Refusing that is a host defect
+    recorded as the model's answer, which is what the CP-L10 attempt of the
+    second paid Terra run died of.
+
+    Only the two outer tokens are stripped, and only of quotation marks, so the
+    quote's own words and its internal punctuation still have to match exactly.
+    Nothing here widens what may be *cited*: `verify_citations` anchors against
+    the document's own tokens and is untouched. This decides only whether the
+    module quoted, in its own narrative, what it says it quoted.
+    """
     # ponytail: linear scan per citation; an index when bodies grow large.
     wanted = quote.split()
-    return any(
-        words[i : i + len(wanted)] == wanted
-        for i in range(len(words) - len(wanted) + 1)
-    )
+    if not wanted:
+        return False
+    span = len(wanted)
+    for start in range(len(words) - span + 1):
+        window = words[start : start + span]
+        if window == wanted:
+            return True
+        if window[1:-1] != wanted[1:-1]:
+            continue
+        first = window[0].lstrip(_QUOTATION)
+        last = window[-1].rstrip(_QUOTATION)
+        if span == 1:
+            first = first.rstrip(_QUOTATION)
+            last = first
+        if first == wanted[0] and last == wanted[-1]:
+            return True
+    return False
 
 
 def parse_response(

@@ -905,6 +905,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
+- **The VMO2 set measures two of its three modules by key.** CP-0's expectation
+  asked `SourceReadiness` for the issuer's current borrowing-capacity
+  statement, which is a credit fact and belongs to CP-5's reading; it was moved
+  there on 16 September 2026 and the set digest moved with it
+  (`ec84bf8b…` → `ae70850d…`), so the two runs performed are not comparable to
+  anything after. CP-0 is still measured by its proof — artifact accepted, host
+  record valid, every citation anchored — but not by evidence selection, which
+  is the half a key adds. *Upgrade:* a CP-0 expectation authored the way the
+  original was, from the Q4 release and CP-0's own contract. It must not be
+  taken from what either run cited: their output is on the record now, and a
+  key chosen from it would measure the model against itself.
+
 - ~~**A billed call whose diagnostic body cannot be stored is billed again.**~~
   Closed the same day it was raised. `_diagnostic` returning no body still commits the charge with
   `diagnostic_sha256` NULL, and `replay_billed` excludes exactly those rows, so
@@ -1152,8 +1164,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 2.**
 
-- **A quote matches whole tokens exactly.** `matched_text` is split on
-  whitespace and each word must equal a token, punctuation included. A module
+- **A quote matches whole tokens exactly, typography at its edges aside.**
+  `matched_text` is split on whitespace and each word must equal a token,
+  punctuation included -- except that the first and last tokens of the body's
+  window may carry quotation marks (`_QUOTATION`). That exception was paid for:
+  a module writes its Evidence Trace as prose, prose puts quotation marks
+  around a quotation, and the CP-L10 attempt of the second paid Terra run was
+  refused `HANDOFF_MALFORMED` for `“The preliminary` where the quote said
+  `The preliminary`. It is the body check only -- `verify_citations` still
+  anchors against the document's own tokens exactly, so nothing about what may
+  be cited moved. A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
   `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
   costs its claim under the retired claims adapter's per-claim refusal (§26,

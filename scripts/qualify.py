@@ -37,6 +37,10 @@ from uuid import UUID, uuid4
 
 import psycopg
 
+# Run as a script, not as a package module: the repository root is what makes
+# `server` importable, and a driver nobody can run is the gap this closes.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from server.blobs import BlobStore
 from server.engine.worker import price_from_environment
 from server.methodology import CANONICAL_ADAPTER_VERSION
