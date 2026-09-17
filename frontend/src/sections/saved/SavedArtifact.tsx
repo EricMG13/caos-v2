@@ -49,7 +49,10 @@ export function Values({
     plain block. `.artifact-scroll{min-height:24px}` (caos.css) is what keeps
     a one-line body at the WCAG 2.5.8 target size; without it, a `pre` given
     `tabIndex` here is an interactive control that reads 17px tall to the a11y
-    layout probe. */
+    layout probe. `role="region"` is what makes this WCAG 2.1.1 keyboard access
+    for a horizontally-scrolling block rather than the ordinary-element misuse
+    typescript:S6845 flags -- the same false positive jsx-a11y's own rule is
+    disabled for below, on the same line, for the same reason. */
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions */
 function ArtifactBody({ mark, label, text }: { mark: string; label: string; text: string }) {
   return (
@@ -58,7 +61,9 @@ function ArtifactBody({ mark, label, text }: { mark: string; label: string; text
       {...{ [mark]: true }}
       aria-label={label}
       role="region"
-      tabIndex={0}
+      tabIndex={0} // NOSONAR typescript:S6845 -- role="region" above makes this
+      // element a keyboard-scrollable landmark (WCAG 2.1.1), not the
+      // plain-<pre>-with-tabIndex the rule exists to catch.
       onKeyDown={scrollArtifact}
     >
       {text}
