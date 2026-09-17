@@ -1298,3 +1298,27 @@ def test_a_reservation_price_outside_its_constraint_refuses(
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(f"UPDATE budget_reservations SET {column} = %s", (given,))
         conn.rollback()
+
+
+def test_the_directory_listing_uses_an_index_on_case_members(
+    empty_database: str,
+) -> None:
+    """`cases_for_member` joins from `case_members` on the caller's user id, so the
+    membership side of that join needs an index of its own: the primary key
+    leads with `case_id` and cannot serve it."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.execute("SET enable_seqscan = off")
+        plan = "\n".join(
+            r[0]
+            for r in conn.execute(
+                "EXPLAIN SELECT c.case_id FROM case_members m"
+                " JOIN cases c ON c.case_id = m.case_id"
+                " WHERE m.user_id = %s AND m.revoked_at IS NULL",
+                (uuid4(),),
+            ).fetchall()
+        )
+    assert "case_members_by_user" in plan, plan
+    # The name alone would hold for an index of that name on any column;
+    # the condition is what pins it as a lookup on `user_id`.
+    assert "Index Cond: (user_id =" in plan, plan
