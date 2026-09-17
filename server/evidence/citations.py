@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from server.evidence.ingest import block_ids_by_line, line_groups
+from server.evidence.ingest import GROUP_WIDTH, block_ids_by_line
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -238,18 +238,31 @@ def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str,
 
 
 def _group_counts(conn: StoreConnection, source_id: UUID) -> dict[int, int]:
-    """How many blocks each line needs, recomputed from its text by admission's
-    own rule -- the read a source carrying a split line pays, and no other."""
+    """How many blocks each line needs, by admission's own rule.
+
+    The rule chunks a line by *length*, so the length is what is read --
+    computed in the database rather than by shipping the document. It used to
+    `fetchall` every token's text and rebuild each line in Python: with
+    `AdmissionLimits.max_tokens` at 500,000 that is an unbounded read, and it
+    runs inside `save_revision_in`'s and `freeze_in`'s governed transaction,
+    under the case lock, on any source carrying one line past `GROUP_WIDTH` --
+    an ordinary un-wrapped paragraph in a text export. `IO_BUDGET` could not
+    see it: one round trip either way, while the work behind it was the whole
+    token table. Found by the Completion Phase 12 adversarial audit.
+
+    `line_groups` normalises to NFC before it measures, and this counts the
+    stored characters instead. Where the two disagree the totals disagree, and
+    `_line_blocks`'s `sum(counts) != stored` guard refuses `EVIDENCE_NOT_AVAILABLE`
+    rather than handing out an id no row carries -- so a normalisation that
+    changes a length is loud, not silent.
+    """
     rows = conn.execute(
-        "SELECT line_id, text FROM source_tokens WHERE source_id = %s"
-        " ORDER BY token_id",
+        "SELECT line_id, sum(length(text)) + count(*) - 1 AS width"
+        " FROM source_tokens WHERE source_id = %s GROUP BY line_id",
         (source_id,),
     ).fetchall()
-    lines: dict[int, list[str]] = {}
-    for line_id, text in rows:
-        lines.setdefault(int(line_id), []).append(str(text))
     return {
-        line_id: len(line_groups(" ".join(words))) for line_id, words in lines.items()
+        int(line_id): max(1, -(-int(width) // GROUP_WIDTH)) for line_id, width in rows
     }
 
 

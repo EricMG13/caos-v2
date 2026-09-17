@@ -133,12 +133,10 @@ def test_a_packing_that_disagrees_with_the_stored_blocks_refuses(
     """
     conn, case_id = case
     source_id = _admit(conn, case_id, tmp_path, DOCUMENT)
-    # The rule this source was admitted under, moved: every line now packs
-    # into two groups, so the recomputation totals six blocks where four were
-    # stored.
-    monkeypatch.setattr(
-        "server.evidence.citations.line_groups", lambda text: (text[:1], text[1:])
-    )
+    # The rule this source was admitted under, moved: a quarter of the width
+    # packs the wide line into more groups than admission wrote, so the
+    # recomputed total no longer equals the stored count.
+    monkeypatch.setattr("server.evidence.citations.GROUP_WIDTH", GROUP_WIDTH // 4)
 
     with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
         verify_citations(
