@@ -202,6 +202,15 @@ def test_a_disk_set_binds_a_forecast_key_and_host_extension(tmp_path: Path) -> N
     )
 
 
+def test_a_disk_set_binds_a_readiness_key(tmp_path: Path) -> None:
+    manifest = _manifest()
+    first = manifest["cases"][0]  # type: ignore[index]
+    first["expects_ready"] = ["CP-1", "CP-2"]
+
+    [case] = load_qualification_set(_write(tmp_path, manifest)).cases[:1]
+    assert case.expects_ready == ("CP-1", "CP-2")
+
+
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
     """The one refusal here that is about safety rather than shape.
 
@@ -254,6 +263,11 @@ def test_a_manifest_that_is_not_the_declared_shape_is_refused(
         {"cases": [{**_manifest()["cases"][0], "expects": [{"module_id": "CP-0"}]}]},  # type: ignore[index]
         {"cases": [{**_manifest()["cases"][0], "label": ""}]},  # type: ignore[index]
         {"cases": [{**_manifest()["cases"][0], "undeclared": 1}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": []}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": "CP-0"}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": [""]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": [1]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": ["CP-0", "CP-0"]}]},  # type: ignore[index]
         ["not a mapping"],
     ]
 
