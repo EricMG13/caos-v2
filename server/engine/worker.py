@@ -174,17 +174,18 @@ def _refused(conn: StoreConnection, lease: Lease, refused: Refusal) -> None:
         try:
             cancel_run(conn, lease.run_id, lease=lease)  # commits its own unit
         except Refusal as lost:
-            # `cancel_run` refuses three codes and no others: a store fault,
+            # `cancel_run` refuses three classes and no others: a store
+            # fault (`STORE_UNAVAILABLE` or `STORE_NOT_TRANSACTIONAL`),
             # `LEASE_NOT_HELD` from its `require_lease` fence, and
             # `RUN_NOT_FOUND` from `lock_run` for a run row that is not there
             # (a run already terminal is answered False, not refused). The
-            # store fault heals itself -- released, the lease expires, the run
-            # is reclaimed and the cancel is retried, the same back-off the
-            # branch below gives that class -- and parking it would turn a
-            # transient fault into a stop an operator must requeue by hand. A
-            # missing run has no such recovery, and raising it would leave
-            # `work_once` holding the claim, with the run at the head of every
-            # later poll.
+            # store fault heals itself -- released, or failing that left to
+            # expire -- so the run is reclaimed and the cancel retried, the
+            # same back-off the branch below gives that class, and parking it
+            # would turn a transient fault into a stop an operator must
+            # requeue by hand. A missing run has no such recovery, and raising
+            # it would leave `work_once` holding the claim, with the run at
+            # the head of every later poll.
             unmet = lost.code
             if unmet in STORE_FAULTS:
                 _settle(conn, lambda: release(conn, lease))
