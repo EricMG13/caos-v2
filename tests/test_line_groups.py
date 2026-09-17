@@ -114,3 +114,35 @@ def test_a_document_whose_lines_fit_the_group_is_numbered_one_block_a_line(
         citations=[Citation(source_id, 1, "Section 7 of the annual report")],
     )
     assert anchored.bboxes
+
+
+def test_a_packing_that_disagrees_with_the_stored_blocks_refuses(
+    case: tuple[StoreConnection, UUID], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The recomputation is a derivation, so it is checked against what
+    admission actually wrote rather than trusted.
+
+    `_line_blocks` recomputes the packing only when the stored block count is
+    not the line count, and then numbers every block from it. The store cannot
+    drift underneath it -- migration 0027 seals extracted evidence, so no row
+    is inserted, updated or deleted after admission -- but the *rule* can:
+    a changed `GROUP_WIDTH` repacks an already-admitted source into a
+    different number of blocks, and the ids the recomputation then produces
+    are ids admission never wrote. Anchoring against them would ask whether a
+    block that does not exist was delivered. It refuses instead.
+    """
+    conn, case_id = case
+    source_id = _admit(conn, case_id, tmp_path, DOCUMENT)
+    # The rule this source was admitted under, moved: every line now packs
+    # into two groups, so the recomputation totals six blocks where four were
+    # stored.
+    monkeypatch.setattr(
+        "server.evidence.citations.line_groups", lambda text: (text[:1], text[1:])
+    )
+
+    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
+        verify_citations(
+            conn,
+            delivered={source_id: frozenset({"b000000"})},
+            citations=[Citation(source_id, 1, "Annual report of the issuer")],
+        )

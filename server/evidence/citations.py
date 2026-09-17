@@ -219,7 +219,16 @@ def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str,
     stored = int(rows[0][1]) if rows else 0
     if stored == len(line_ids):
         return block_ids_by_line(dict.fromkeys(line_ids, 1))
-    return block_ids_by_line(_group_counts(conn, source_id))
+    counts = _group_counts(conn, source_id)
+    if sum(counts.values()) != stored:
+        # The recomputation is a derivation of what admission wrote, and here
+        # it does not agree with it. The store cannot have drifted -- 0027
+        # seals extracted evidence -- so the rule has: this source was packed
+        # under a different `GROUP_WIDTH`. Every id past the disagreement is
+        # then an id no row carries, and asking whether such a block was
+        # delivered answers about the citation when the fault is the host's.
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+    return block_ids_by_line(counts)
 
 
 def _group_counts(conn: StoreConnection, source_id: UUID) -> dict[int, int]:
