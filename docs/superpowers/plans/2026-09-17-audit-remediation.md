@@ -1136,7 +1136,7 @@ def test_an_unset_price_says_unset_not_misconfigured(monkeypatch, capsys) -> Non
 
 - **D1** (with Task 7, Fable 5.1 `high` drafts): retire citation candidacy and change the prompt bytes before the next authorised live run. Assumed **yes** in this plan; if no, Task 7 shrinks to the END markers, the `_TAGGED` wording and the header grouping, and keeps the flag with the cap removed.
 - **D2** (Task 16): reduce Book and Admin to their unavailable shells, or keep the implementations. Recommended: reduce.
-- **D3** (after Task 5): split 503 into 503 (transient) and 500 (permanent server-side corruption), with or without `Retry-After`. Recommended: split; one `docs/DECISIONS.md` entry and one line per code.
+- **D3** (after Task 5): split 503 into 503 (transient) and 500 (permanent server-side corruption), with or without `Retry-After`. Recommended: split; one `docs/DECISIONS.md` entry and one line per code. **Decided 17 September 2026: split, with `Retry-After`** -- carried out as Task 21 (§75). It was never put to the owner until the phase adversarial audit found that it had not been, while the self-review below counted W5 as covered by "T5/D3". The self-review was wrong to; W5's substance was entirely open until §75.
 
 ## Phase close
 

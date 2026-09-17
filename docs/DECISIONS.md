@@ -3657,3 +3657,102 @@ tree: each was caught by an implementer doing the instruction as written and
 letting the suite answer, which is the right order and worth saying plainly,
 because the alternative — an implementer silently correcting a brief — leaves
 nobody knowing the plan was wrong.
+
+## 2026-09-17 §75 — A permanent fault answers 500; only a transient one says come back later
+
+Owner decision **D3**, and the reason it is a decision entry rather than a line
+in §70.5 is that **it was never put to the owner until the phase adversarial
+audit found it had not been.** D1 and D2 both reached the owner and are recorded
+(§71.1, §74.4). D3 lived in the plan's own deferred table, and the plan's
+self-review counted warning W5 as covered by "T5/D3". A self-review that counts
+an undecided question as covered is a gate that has stopped measuring. Put to
+the owner on 17 September 2026; decided: split, with `Retry-After`.
+
+### What was there
+
+Twenty-four refusal codes answered 503, **none** answered 500, and
+`Retry-After` appeared nowhere in `server/` or `frontend/src/`. Among the 503s
+were `BLOB_DIGEST_MISMATCH`, `ARTIFACT_RECORD_MISMATCH`, `AUTHORITY_BYTES_MISMATCH`
+and `HANDOFF_MALFORMED` — faults no retry can clear, telling a proxy to come
+back and try again.
+
+§70.5 made the status map total so that every code answered by decision rather
+than by falling through, and deliberately moved nothing. This is the move.
+
+### The classification, and why a near-total move is believed
+
+**One transient, twenty-three permanent.** The rule is one question per code:
+would retrying the identical request later plausibly succeed, with nobody doing
+anything in between? A fault only an *operator* can repair is not transient —
+the client retrying changes nothing.
+
+A rule that moves twenty-three of twenty-four is either a real finding or a rule
+applied without reading, and the two look identical in a diff. It was stopped
+on and re-read, and it is believed because **three records written by other
+hands for other purposes already said the same thing**:
+
+- `CLEARS`, the operator-facing clearance text, says "An operator must …" for
+  **eighteen** of the twenty-four and "Retry when the store answers" for
+  **exactly one**. It is fifteen distinct sentences over those eighteen, not one
+  rule stamped eighteen times, and it varies precisely where `_STATUS` was
+  constant — had the two shared a model, all twenty-four would have read
+  "retry".
+- §71.3, written weeks earlier by a different author, already recorded that
+  "twenty-two of the 23 codes served 503 today are permanent rather than
+  transient". It went uncited by the task and was found by the review.
+
+The finding underneath all three: **the 503 block was a blame judgement wearing
+a time status.** Every code in it meant "this server's fault, not the caller's",
+which is a true statement about *whose* problem it is and says nothing about
+*when* it clears. 5xx was right; 503 was the wrong 5xx.
+
+### Three adjacent entries, three justifications, one status
+
+`ROUTE_IDENTITY_INVALID`, `ROUTE_EDGE_UNSUPPORTED` and `READINESS_INVALID` sat
+together at 503 with three different explanations. The concurrent session that
+added the middle one **self-reported it as misfiled before anyone found it**,
+and described how: it wrote the justification for one answer and filed it under
+the neighbour's. The neighbour was wrong too. All three are permanent, all three
+now state the same time test, and `ROUTE_IDENTITY_INVALID` carries the history
+in a comment because it is the entry the copying started from.
+
+That is worth recording as a mechanism rather than an incident: an entry
+justified by its neighbour inherits the neighbour's error and hides it, because
+the second entry now looks corroborated.
+
+### What this does not fix, stated so the entry does not overclaim
+
+**The contract this establishes is narrower than "503 on the wire means come
+back later."** D3 fixed blame wearing time; it leaves **time wearing blame**
+untouched. Nine codes sit at 400 with retry-shaped clearances —
+`PROVIDER_UNAVAILABLE` says "Retry when the provider answers", `READINESS_INCOMPLETE`
+says "Retry the attempt", `INTERNAL_FAULT` says "Retry; an operator must
+investigate if it persists" — and the new partition test cannot see them,
+because it defines its universe as the codes already at 500 or 503.
+
+`INTERNAL_FAULT` is the sharpest case: it is 400 in `_STATUS` while
+`server/api/edge.py` answers 500 for it, so its only real wire status is
+outside the guard entirely, and nothing asserts the disagreement.
+
+So what holds is the narrower claim: **of the codes this table serves at 5xx,
+503 means come back later and 500 does not.** The 400 side is a separate
+question that has not been asked. *Upgrade:* put the retry-shaped 400s to the
+owner as D3's second half, and reconcile `INTERNAL_FAULT`'s two statuses first,
+because it is both the clearest instance and the one the guard cannot reach.
+
+`HANDOFF_MODULE_UNSUPPORTED` was escalated as possibly-4xx and is not: its 4xx
+twin already exists as `ROUTE_NOT_ENABLED`, 400, with a verbatim identical
+clearance, raised when the caller pins the route. This one is raised after the
+pin exists, on stored state the request cannot re-choose. `HANDOFF_BLOCKED`
+remains a fair question and was left alone.
+
+### Residuals
+
+`RETRY_AFTER_SECONDS` is five seconds. It is the implementer's number, not the
+owner's, and it is a floor for a restarting PostgreSQL rather than a forecast.
+`/api/health` still answers 503 with no `Retry-After` — defensible, since it is
+a probe rather than a refusal and never passes through the refusal body, but the
+wire now reads inconsistently. `STORE_UNAVAILABLE` genuinely spans both classes,
+because `committed_unit` maps every `psycopg.Error` to it including constraint
+violations; it is kept transient on asymmetric cost, and the retry it invites is
+answered from the idempotency receipt on a command that already committed.

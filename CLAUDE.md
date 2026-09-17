@@ -245,6 +245,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Audit remediation (2026-09-17).**
 
+- **The wire says "come back later" honestly at 5xx and not at 400.** §75 split
+  the twenty-four permanently-failing codes off 503: 500 for a fault no retry
+  clears, 503 with `Retry-After` for the one that a retry does. What it did not
+  touch is the other direction -- nine codes answer **400** carrying
+  retry-shaped clearances (`PROVIDER_UNAVAILABLE`: "Retry when the provider
+  answers"; `READINESS_INCOMPLETE`: "Retry the attempt";
+  `INTERNAL_FAULT`: "Retry; an operator must investigate if it persists"), and
+  `tests/test_api_routes.py`'s partition test cannot see them because it defines
+  its universe as the codes already at 500 or 503. `INTERNAL_FAULT` is the
+  sharpest: `server/api/app.py` maps it to 400 while `server/api/edge.py`
+  answers 500 for it, so its only real wire status sits outside the guard and
+  nothing asserts the disagreement. The contract that holds is therefore the
+  narrow one -- of the codes served at 5xx, 503 means come back later and 500
+  does not -- and a client reading 400 learns nothing about retrying.
+  *Upgrade:* reconcile `INTERNAL_FAULT`'s two statuses, then put the
+  retry-shaped 400s to the owner as D3's second half; the partition test widens
+  to the whole enum on the same day.
+
 - **A tokenless host believes the subject header, so a loopback peer who knows a
   member's id reads that member's cases.** §70.2 closed C3's *role* hole: with
   no `CAOS_EDGE_TOKEN` and no trust switch the global role is READER and no
