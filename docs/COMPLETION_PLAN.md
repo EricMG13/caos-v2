@@ -387,9 +387,18 @@ record stored before `blockers` existed refuses at every reader if its T8 named 
 condition, discharged by a new run.
 
 **O18 — Upstream identity ignores readiness; the anchor is derived; the
-boundary is read from prose [P2, Phase 10].** Repair: readiness joins the
-refs from the T8 reader; a stored anchor; the structured LITE boundary read
-beside the prose block with disagreement refused.
+boundary is read from prose [P2, Phase 10].** Repair: a stored anchor; the
+structured LITE boundary read beside the prose block with disagreement refused.
+**The first repair clause is withdrawn.** It said readiness joins the refs from
+the T8 reader, and Task 10.4 found that neither side can do that: where a soft
+input is unaccepted and its source READY, the vendor *raises* rather than naming
+the input, so there is no accepted artifact and no digest for a ref to carry.
+The rule itself is enforced once, in the engine's `_state_for`, and the two
+agree in every state a run can reach -- measured over 9,888 frontier memberships
+of a three-module route with no disagreement. What was actually owed is a
+comment at each rule naming the other, and a property test the day per-node
+evidence selection changes `node_states`. No code was written, which is the
+right outcome for a clause that described an unreachable state.
 
 **O19 — Quotes match whole tokens exactly [P2, Phase 10].** Letter-spaced
 headings, trailing punctuation and crop-edge glyph boxes refuse. Repair:
@@ -595,8 +604,14 @@ from this plan; no push, PR or ruleset change without authorization.
    `server/qualification/matrix.py`, read through
    `VendorContract.completeness_check.find_registers` on the accepted
    Markdown; `expects_register` in the on-disk manifest; the borrowing-capacity
-   key re-cast to the fact-carrying line; a key whose `row_key` matches no
-   row or more than one refuses `QUALIFICATION_KEY_AMBIGUOUS` at set load.
+   key re-cast to the fact-carrying line; a key the loader can judge without a
+   run refuses `QUALIFICATION_KEY_AMBIGUOUS` at set load -- an empty `row_key`,
+   or two column names that normalise to one. **Corrected after building it:**
+   this item first said a `row_key` matching no row or more than one refuses at
+   load, which set load cannot know, because how many rows a register will carry
+   is a fact about a run that has not happened. Zero rows and two rows are
+   scored as a miss when the matrix reads the artifact, which is the only place
+   the answer exists.
 2. The price with the reservation (Task 8.2): `budget_reservations` gains the
    dated price (name, input, output, `as_of`) in a migration; the encoded
    request is priced after the prompt is built and before the reservation;
@@ -618,15 +633,24 @@ from this plan; no push, PR or ruleset change without authorization.
 
 **Exit checks**
 
-- A key naming a wrong cell fails a run whose citations are all located; an
-  ambiguous `row_key` refuses at load; the VMO2 set gains one register key
-  per module and still loads with an unchanged citation key.
+- A key naming a wrong cell fails a run whose citations are all located; a key
+  the loader can judge ambiguous without a run refuses at load, and a `row_key`
+  matching zero or two rows is a miss at scoring; the VMO2 set gains a register
+  key for the module whose register has closed row-key cells -- CP-L10's TL10.2 --
+  and still loads with an unchanged citation key. **Corrected after building
+  it:** "one register key per module" was not reached and should not have been
+  asked for, because CP-0's T8 has one closed cell and CP-5's T5B.5 keys on free
+  prose, so a key there would measure wording.
 - A reservation row says which dated price produced it; a small prompt
   reserves its priced cost, not the byte ceiling.
 - A verdict naming an unused model is refused; a second signature is
   `VERDICT_ALREADY_RECORDED`.
-- `CORPUS.md` names every document Phase 9 and Phase 11 tasks will admit, with
-  status; the five requests exist and the handoff records them as pending.
+- `qualification/DOCUMENTS.md` names every document Phase 9 and Phase 11 tasks
+  will admit, with status, and a test holds it equal to what
+  `scripts/document_register.py --report` emits; the five requests exist and the
+  handoff records them as pending. (The file was named `CORPUS.md` here until the
+  vocabulary gate refused "corpus"; work item 4 was corrected and this check was
+  not.)
 
 **Guardrails:** no key authored from a run's output; no document fetched by
 the system; no vendor file edited by a request.
@@ -742,6 +766,16 @@ corpus:
 9. `DISTRESSED_RESTRUCTURING` (11.9): CP-4C's distress gate; **blocked on
    corpus** until a distressed issuer's documents are sourced; brief held.
 
+**Before the first wide pathway runs, the per-section bound is owed.** Measured
+on 17 September 2026: `FULL_CREDIT_ASSESSMENT`'s CP-5 carries 16 direct
+upstreams and 165,548 bytes of its own delivered authority, so authority plus
+upstream sections alone reach 47 % of `MAX_REQUEST_BYTES` at 20 KB per handoff,
+before any evidence. The only route ever measured is LITE's at about 210 KB.
+`CONTEXT_OVER_CEILING` refuses the whole request rather than truncating it, so a
+pathway over the ceiling cannot be run and therefore cannot be qualified. The
+Phase 5 ledger entry "An upstream section is unbounded" carries the numbers.
+Treat this as a precondition of 11.9, not a risk.
+
 **Exit checks**
 
 - Every FULL pathway except the one blocked on corpus is in `ADAPTER_ROUTES`
@@ -760,7 +794,18 @@ run; no fabricated owner rows; no spend without its authorization line.
 
 **Fixes:** O20–O22.
 
-**Work:** five commands over the governed-write pattern (12.1); controls and
+**Work:** five commands over the governed-write pattern (12.1), which is also
+where the API surface's positional-argument width should be taken: the
+remediation stream's redefined suppression gate counts functions callable with
+more than five positional arguments, and **eighteen of its twenty-two charges
+are under `server/api/`** -- the command handlers and the section reads, at six
+to nine positional parameters, twenty-one of the twenty-two declaring no
+keyword-only parameter at all. The hazard is a caller transposing two
+same-typed neighbours silently, and the fix is making the surplus keyword-only,
+so clearing the charge repairs the hazard rather than hiding it. Not a
+refactor for its own sake: 12.1 rewrites these handlers anyway, and a layer that
+never reached for keyword-only is one to correct while it is open rather than
+in a pass of its own; controls and
 availability, the clearance corrected, one available demo action (12.2);
 Book over accepted snapshots from the shell D2 leaves (12.3); `blocked_by` on
 `AnalysisBody`, a Markdown renderer with a closed element set, a citation

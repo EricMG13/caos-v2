@@ -427,6 +427,17 @@ def _row(
             raise
         refusal = unattributed.code
         cited = set()
+    try:
+        registers_met = _registers_met(conn, blobs, bundle, case=case, run_id=run_id)
+    except Refusal as unreadable:
+        if unreadable.code not in _ROW_REFUSALS:
+            raise
+        # The bundle failing its own integrity check is this row's uncertainty,
+        # not the module's miss. Scoring it `False` said the module wrote the
+        # wrong cell, and a reviewer went hunting the model for a vendored-bytes
+        # fault; `None` says the comparison was not made, which is the truth.
+        refusal = unreadable.code
+        registers_met = None
     met = tuple(expect for expect in case.expects if _matches(expect, cited))
     return MatrixRow(
         case_label=case.label,
@@ -444,7 +455,7 @@ def _row(
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
         projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
-        registers_met=_registers_met(conn, blobs, bundle, case=case, run_id=run_id),
+        registers_met=registers_met,
     )
 
 
@@ -628,14 +639,30 @@ def _normalised_cell(value: str) -> str:
     return " ".join(unicodedata.normalize("NFC", value).split())
 
 
-def _cell(row: Mapping[str, str], column: str) -> str | None:
+def _cell(
+    row: Mapping[str, str], column: str, header: Sequence[str] | None = None
+) -> str | None:
     """One row's cell under `column`, normalised, or `None` if it is not there.
 
     The column name is matched under the same rule as the cell, because a header
     is padded and wrapped like any other cell. A register whose header names the
     same column twice answers `None`: the host does not choose between them.
+
+    That last rule needs the header, not the row. The vendor's reader builds a
+    row as `dict(zip(header, cells))`, so two identical header names collapse to
+    the last cell before the host sees anything -- the row then holds one entry
+    and this function used to answer from it, while a person reading the table
+    reads the leftmost namesake. The header is where the duplicate is still
+    visible. Passing it is optional only so a caller testing one row need not
+    build one; every caller that has a register passes it. Found by the
+    Completion Phase 8 confidence review, which built the table and watched a
+    shipped key answer from the trailing column.
     """
     wanted = _normalised_cell(column)
+    if header is not None:
+        named = [name for name in header if _normalised_cell(str(name)) == wanted]
+        if len(named) != 1:
+            return None
     found = [
         value for name, value in row.items() if _normalised_cell(str(name)) == wanted
     ]
@@ -662,19 +689,19 @@ def _matches_register(
         # Anything but the reader's `(header, rows)` is not this key's answer:
         # the host reads the vendor's shape and invents no second one.
         return False
-    _header, rows = found
+    header, rows = found
     matched = [
         row
         for row in rows
         if isinstance(row, Mapping)
         if all(
-            _cell(row, column) == _normalised_cell(value)
+            _cell(row, column, header) == _normalised_cell(value)
             for column, value in expect.row_key
         )
     ]
     if len(matched) != 1:
         return False
-    return _cell(matched[0], expect.column) == _normalised_cell(expect.expected)
+    return _cell(matched[0], expect.column, header) == _normalised_cell(expect.expected)
 
 
 def _registers_met(
@@ -701,6 +728,16 @@ def _registers_met(
     if route is None:
         return False
     accepted = _accepted_rows(conn, run_id)
+    # One load for the whole row, not one per module: `load_vendor_contract` has
+    # no cache (`canonical._contract` is the cached reader, and this is not it),
+    # so asking per module recompiled and re-hashed twelve vendor files each
+    # time -- measured at 33 ms and 148 KB per call. And its own refusal is
+    # raised here rather than inside the per-module guard below, because an
+    # `AUTHORITY_BYTES_MISMATCH` is the bundle failing its integrity check, not
+    # the module writing the wrong cell: swallowing it as a miss pointed a
+    # reviewer at the model for a vendored-bytes fault. `build_matrix` turns it
+    # into the row's own refusal. Both found by the Completion Phase 8
+    # adversarial audit, which measured the cache claim and found it false.
     find_registers = load_vendor_contract(bundle).completeness_check.find_registers
     wanted: dict[str, list[ExpectedRegister]] = {}
     for expect in case.expects_register:
@@ -733,10 +770,23 @@ def _registers_met(
                 ),
                 accepted=accepted,
             )
-            registers = find_registers(
-                markdown.decode("utf-8"),
-                [expect.register_id for expect in expects],
-            )
+            # Asked exactly as the bundle asks it: no `register_ids`, so the
+            # locator uses its own pattern, which is what the vendor's `check()`
+            # effectively reads against. Narrowing the list changed the answer.
+            # The locator walks the few lines above each table nearest-first and
+            # breaks on the first line naming *any* id it was given, keeping the
+            # first table it finds -- so a handoff carrying several registers with
+            # identical columns (CP-L10 writes five, all required, all six-row)
+            # answered a narrowed `TL10.2` from whichever of them the module's own
+            # appendix prose happened to sit above. The host and the bundle then
+            # disagreed about which table the register is, in both directions: a
+            # key met from a sibling table while the honest one said MISSING, and
+            # an honest handoff's key missed because the prose named a different
+            # sibling first. Found by the Completion Phase 8 adversarial audit,
+            # which built a handoff passing the vendor's own completeness check
+            # with zero violations in which the shipped key was met from the
+            # wrong register.
+            registers = find_registers(markdown.decode("utf-8"))
             if not isinstance(registers, dict):
                 return False
             met = all(_matches_register(registers, expect) for expect in expects)
@@ -891,9 +941,17 @@ def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool
 
 
 # A row's own uncertainty, not a reason to end the matrix: a pin that no longer
-# reads, or a proven source withdrawn before its quotes were scored.
+# reads, a proven source withdrawn before its quotes were scored, or vendored
+# bytes that no longer match the manifest. The last one is here because the
+# register reader verifies the bundle where the cached validator does not, so it
+# is the one place a tampered vendor script surfaces during scoring -- and it
+# belongs in the row's refusal rather than in its comparison.
 _ROW_REFUSALS = frozenset(
-    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED}
+    {
+        RefusalCode.ROUTE_IDENTITY_INVALID,
+        RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED,
+        RefusalCode.AUTHORITY_BYTES_MISMATCH,
+    }
 )
 
 
@@ -961,12 +1019,29 @@ def assert_measurable(qualification: QualificationSet) -> None:
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
 
 
+def _register_cell(
+    expect: ExpectedRegister,
+) -> tuple[str, str, tuple[tuple[str, str], ...], str]:
+    """The cell a register key names, without the answer it expects.
+
+    Two keys sharing this and disagreeing on `expected` cannot both be met.
+    """
+    return (expect.module_id, expect.register_id, tuple(expect.row_key), expect.column)
+
+
 def assert_unambiguous(qualification: QualificationSet) -> None:
     """Refuse duplicate case labels or answer keys before either can be scored."""
     labels = [case.label for case in qualification.cases]
     if len(set(labels)) != len(labels) or any(
         len(set(case.expects)) != len(case.expects)
         or len(set(case.expects_register)) != len(case.expects_register)
+        # Two register keys naming one cell with different answers is a set no
+        # run can meet, and it loads clean if only whole tuples are compared:
+        # the semantic key is the cell, as the forecast check below uses the
+        # value's name rather than the whole value. A reviewer would read
+        # `registers_met: false` and hunt the model.
+        or len({_register_cell(item) for item in case.expects_register})
+        != len(case.expects_register)
         or (
             case.forecast is not None
             and len({value.name for value in case.forecast.values})

@@ -179,6 +179,70 @@ test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
 define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Completion Phase 8.**
+
+- ~~**A register is located by vendor prose, and a key trusts that location.**~~
+  Struck in the commit that closed it, and worth reading as an example of an
+  entry being wrong in the direction that matters. It said the narrowing was
+  "not a divergence from the authority: the vendor's own `check()` reads the
+  same table, so the host and the bundle agree". Both halves were false. The
+  host asked the vendor's locator with a **narrowed** register-id list where
+  the bundle's own `check()` asks with none, and the locator walks the lines
+  above each table nearest-first, breaking on the first line naming any id it
+  was given and keeping the first table it binds -- so the id list decides which
+  table answers. CP-L10 is required to write five registers with identical
+  columns and the same six-row minimum, and its own `SKILL.md` asks it for
+  appendix prose naming the TL10 family, so a handoff could be scored `met` from
+  a sibling register while the honest one said `MISSING`, and an honest handoff's
+  key could miss because the prose named a different sibling first. The entry's
+  reachability claim was wrong for the same reason, and its upgrade deferred the
+  fix to a module "whose registers are optional" when CP-L10's are all required
+  and the divergence was live on the only register key that ships. Closed by
+  asking the locator exactly as the bundle asks it -- no id list --
+  which `tests/test_qualification_matrix.py::test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it`
+  holds by building both readings of one handoff. Found by the Completion Phase 8
+  adversarial audit, which constructed a handoff passing the vendor's own
+  completeness check with zero violations in which the shipped key was met from
+  the wrong register. The confidence review had looked at the same code and
+  recorded it as safe; this is what a second, adversarial gate is for.
+- **Two vendor tests fail on bytecode any concurrent process can write.**
+  `tests/test_vendor_contract.py::test_vendor_loader_leaves_sys_path_untouched`
+  asserts no `__pycache__` under `vendor/deploy-v`, and
+  `tests/test_bundle_pin.py::test_the_bundle_verifies_with_its_own_tool` runs the
+  bundle's own `verify_package.py`, which refuses a tree carrying any. Both are
+  right to: the vendored tree is read-only and `docs/DECISIONS.md` §13 pins its
+  bytes. Neither is isolated from the rest of the machine. This checkout is
+  shared -- a peer session, review agents and the coordinator all run in it -- and
+  any Python process that imports a vendor script through the ordinary machinery
+  leaves bytecode beside the source, after which both tests fail for a cause
+  neither names. It happened twice while retesting Completion Phase 8, and cost
+  an hour: the first diagnosis blamed an agent that had used `-B` throughout and
+  proved it by timestamp, and the second blamed `load_vendor_contract`, which was
+  then shown to write nothing when nothing else is running. The real cause is
+  concurrency, and the evidence for it is that the failure does not reproduce in
+  an otherwise idle checkout. What is *not* in question: nothing in `server/` or
+  `scripts/` reaches a vendor module except through `load_vendor_contract`, which
+  uses `compile`/`exec` and writes no bytecode, and the one place that runs a
+  vendor script as a subprocess already passes `-B`. The seam holds; its test is
+  what is fragile. *Upgrade:* have the two tests clear `__pycache__` under
+  `vendor/` before asserting, so they measure this repository's own behaviour
+  rather than the machine's -- or give each agent its own checkout, which is the
+  standing worktree rule these sessions have been bending by working in one tree.
+- **A key over a duplicated column answers nothing, and that is now true rather
+  than only written down.** The vendor's reader builds a register row as
+  `dict(zip(header, cells))`, so a header naming one column twice collapses to
+  the trailing cell before the host sees anything. `_cell`'s documented rule --
+  "a register whose header names the same column twice answers `None`" -- could
+  therefore never fire, and a shipped key was met by `PARTIAL` in a second
+  `evidence_status` column while the first honestly said `MISSING`. `_cell` now
+  takes the header, where the duplicate is still visible, and
+  `tests/test_qualification_matrix.py::test_a_key_does_not_answer_from_a_duplicated_column`
+  holds it. What remains is that the bundle still collapses the row, so the host
+  refuses to answer where the vendor's own `check()` would read the trailing
+  cell: the two disagree, and the host takes the fail-closed side.
+  *Upgrade:* the bundle's, and it belongs with the other vendor requests -- a
+  duplicate header is a malformed register and the validator should refuse it.
+
 **Completion Phase 10.**
 
 - **A run that cannot afford its next node writes an attempt row before it is
@@ -583,20 +647,44 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   holds only for the bundle and sources present now. *Upgrade:* the proof and
   scoring in one REPEATABLE READ unit, the day a reviewer relies on the matrix
   as one consistent snapshot.
-- **Canonical upstream refs ignore readiness and predicates.**
-  `server/methodology/invocation.py` names every accepted direct input and
-  refuses a blocking one that is missing, as the vendor's
-  `expected_upstream_digests` does, but omits two of its inputs: a CONDITIONAL
-  edge always blocks (no predicate is evaluated, the Phase 3 gap below), and a
-  soft edge whose unaccepted source CP-0 reported READY is omitted where the
-  vendor refuses. The route engine already BLOCKS such a node, so the runtime
-  never asks for its identity. `module_name` is read from the verified catalog
-  at call time rather than pinned. Since slice 3.3c a non-gate node whose
-  upstream carries no direct CP-0 ref refuses `ROUTE_IDENTITY_INVALID` in
-  `host_identity` (§45.5), so before any attempt via `check_context`; the
-  anchor is still derived from that ref, not stored. *Upgrade:* readiness joins
-  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2),
-  and a stored anchor field with Phase 5.
+- **Canonical upstream refs do not read readiness, because the engine already
+  did.** `server/methodology/invocation.py`'s `_upstream` names every accepted
+  direct input and refuses a missing blocking one; the vendor's
+  `expected_upstream_digests` does the same and adds one clause the host does
+  not repeat — it also refuses when a **soft** input is unaccepted and CP-0
+  reported its source READY or READY_WITH_LIMITATIONS. Note what the vendor does
+  there: it raises, and it does not name the input. There is no accepted
+  artifact, so there is no digest for a ref to carry, and "readiness joins the
+  refs" — the upgrade this entry used to state, and O18's first repair clause in
+  `docs/COMPLETION_PLAN.md` — describes something neither side can do. The rule
+  itself is enforced, once, in `server/engine/route.py`'s `_state_for`, which
+  BLOCKS a node with an unmet soft edge whose source is READY on the same
+  predicate the vendor's own `node_states` uses. So the two agree in every state
+  a run can reach: a node reaches `host_identity` only through `frontier`, and
+  `frontier` excludes every node the vendor's clause would refuse. Measured
+  rather than read — over every edge-type assignment, accepted subset, QA status
+  and readiness assignment of a three-module route, 9,888 frontier memberships
+  produced no disagreement; and on the real LITE route with CP-0 accepted
+  declaring CP-L10 READY, the engine puts CP-L10 in the frontier and holds CP-5
+  BLOCKED. `test_the_lite_upstream_follows_the_pinned_edges` builds CP-5's
+  identity in that exact state, and can do so only because it calls
+  `host_identity` directly, past the frontier. What is left is that the
+  agreement rests on nothing written down: `_upstream` does not say it relies on
+  `_state_for`, and `_state_for` does not say anything depends on it. Nor can
+  `_upstream` cheaply re-check: readiness reaches the host through
+  `accepted_artifacts`, which builds each `NodeResult` by calling
+  `accepted_projections` and so `host_identity`, so an identity builder that
+  asked for readiness would be asking the reader that calls it; `host_identity`
+  also takes no `BlobStore`, and each gate row's readiness costs a record blob
+  read and a vendor validator run. *Upgrade:* not a second reading of readiness
+  — that would be a second authority over the rule, which invariant 3 refuses.
+  What closes this is a comment at each of the two rules naming the other, and,
+  the day per-node evidence selection changes `node_states`, a test that the
+  frontier admits no node the vendor's clause refuses — written as the property
+  it is rather than as a case the engine can reach. `module_name` is still read
+  from the verified catalog at call time rather than pinned, and the CP-0 anchor
+  is still derived from the direct CP-0 ref `host_identity` requires (§45.5)
+  rather than stored; both keep their own upgrade with Phase 5.
 - **A record's lineage is re-checked against the accepted rows, not re-proven
   ancestor by ancestor.** Record format v2 (slice 3.3c, §45.4) adds
   `delivered_authority_digest` -- over exactly the `DeliveredAuthority` the
@@ -1525,9 +1613,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   file changed on disk between the two can make it refuse, but with Phase 4's
   concurrent workers an upstream accepted in between can make the pre-check
   pass and the re-check refuse with a reservation held (no call is made).
-  *Upgrade:* a declared per-section bound the day a wide route or a large pack
-  comes near the ceiling, and Phase 4's lease fencing the node's inputs
-  between the two checks.
+  **That day is measurable and close.** On the catalog's widest
+  pathway, `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
+  upstreams**, and its own delivered authority is 165,548 bytes. At a modest
+  20 KB per upstream handoff the authority and upstream sections alone come to
+  493,228 bytes -- 47 % of `MAX_REQUEST_BYTES` -- before a single byte of
+  evidence, and the evidence section carries every block of every pinned source.
+  The only route ever measured is LITE's, three nodes and at most two upstreams,
+  whose prompts run about 210 KB. So the first FULL pathway to run is a
+  plausible `CONTEXT_OVER_CEILING`, which refuses the whole request rather than
+  truncating it: the run does not proceed at all, and a pathway that cannot run
+  cannot be qualified. Measured on 17 September 2026 from the vendored catalog
+  and the bundle's own authority bytes, because nobody had taken the number this
+  deferral rested on.
+  *Upgrade:* a declared per-section bound, owed with Phase 11's first wide
+  pathway rather than on a future measurement, and Phase 4's lease fencing the
+  node's inputs between the two checks.
 
 **Phase 4.**
 

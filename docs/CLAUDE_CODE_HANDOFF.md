@@ -229,6 +229,121 @@ gap already observed rather than predicted: run `ff71c457…` on
   be accepted. Phase 8 Tasks 8.1, 8.3 and 8.4 and Phase 9 Task 9.1 are already in
   the branch and are closed under their own phases' gates, not this one.
 
+## Completion Phase 8 close — in progress, 17 September 2026
+
+The phase-close order `docs/PHASE_7_ONWARDS_GOAL_PROMPT.md` sets: implementation,
+gate, confidence review, remediate and retest, separate adversarial audit,
+remediate, accept. Phase 8 is at step five.
+
+- **Implementation:** all five tasks in the branch. 8.1 `d88061e` and `da475c7`;
+  8.2 `0d31a67` with `9c7f161`; 8.3 `cf3d805`; 8.4 `2b5103e`; 8.5 `729e2cf`.
+- **Confidence review:** run on **Opus 5** through
+  `.claude/agents/phase-confidence-reviewer.md`, which pins `effort: max`, with
+  `ultrathink` opening the prompt. It reviewed `5ec86d8` and said plainly that a
+  subagent cannot read its own effort back, so what is attested is the launch
+  path. Four CONFIRMED findings, each reproduced with a probe.
+- **Remediation:** `0f49891`. All four fixed, each watched failing against the
+  old behaviour first, plus three smaller open items the review left and two new
+  ledger entries for what was recorded rather than fixed.
+- **The finding worth carrying forward** is the one that would have cost the most:
+  a snapshot the store itself called signable was refused as a wrong binding,
+  because a case whose declared refusal was met can leave a run that accepted
+  nothing, and the model comparison demanded every run confirm. One such case made
+  a whole set unsignable, and it is the deliberately restricted case
+  `docs/REPAIR_PLAN.md` Phase 6 asks for. Reported as a wrong binding, which is
+  the one thing the same task's other half exists to stop.
+- **Adversarial audit:** run at `0f49891` on the same pinned routing, aimed at
+  the remediation itself rather than at what the review had already covered. It
+  returned **BLOCK**: one critical, five warnings, and it built the critical
+  rather than reasoning about it.
+- **The critical is the one this phase most needed found.** The host asked the
+  bundle's register locator with a narrowed id list where the bundle's own
+  `check()` asks with none, and that list decides which table answers. The
+  module being measured is required to write five registers with identical
+  columns and is instructed to write appendix prose naming them, so the audit
+  constructed a handoff that passes the vendor's completeness check with zero
+  violations in which the one shipped answer key scores `met` from a sibling
+  register while the honest one says `MISSING` -- and the mirror case, reachable
+  with no adversarial intent, where an honest handoff's key misses and the set
+  becomes unsignable. An answer key steerable by prose the measured module wrote
+  is measuring the module's choice of where to put a sentence. The confidence
+  review had read the same code and recorded it as safe, which is the case for
+  running two gates rather than one.
+- **Remediation:** `0fd6841`. The locator is asked exactly as the bundle asks it;
+  the ledger entry that said this could not happen is struck, naming the test.
+  Four more: a bundle integrity failure reported as a model miss, a caching claim
+  measured false at 33 ms and twelve reads per call, a register-file test blind
+  to a row added by hand, and a fixture building a matrix row the matrix cannot
+  produce.
+- **Not yet:** acceptance. Phase 8 is **not accepted**, and its complete gate has
+  the same Trivy limit as Phase 7's.
+- **One retest failure that was not a defect.** Two vendor tests failed on
+  bytecode under the vendored tree. Diagnosed wrong twice -- first as the
+  auditor's doing, which it disproved by timestamp, then as a loader defect, for
+  which a fix and a test were written and then reverted when the test passed
+  with and without it. The cause is that this checkout is shared with other
+  sessions and any ordinary import of a vendor script leaves bytecode there. It
+  is a ledger entry with both wrong diagnoses recorded, because both were the
+  plausible ones.
+
+**Routing note.** These two gates ran on Opus 5 `max` with `ultrathink`, the
+owner's routing of 17 September 2026. Phase 7's two gates ran earlier the same day
+on Fable 5.1 `xhigh` and keep that record: a review is evidence about a tree at a
+time.
+
+## Where Phases 7–13 stand, and what each waits on — 17 September 2026
+
+Measured at `2c7e97d`, offline suite exit 0, **3,045 passed**, working tree clean.
+This supersedes the per-task table below where the two disagree.
+
+**Every remaining task in the completion plan is blocked, and on three things.**
+That is the state, not a pause: work continued until each open item reached
+something this session cannot supply.
+
+| Phase | State | Waiting on |
+|---|---|---|
+| 7 | complete, both `xhigh` gates run and remediated | `make image` with the pinned Trivy `0.70.0` |
+| 8 | complete, both gates run and remediated, one BLOCK found and fixed | the same Trivy run |
+| 9 | 9.1 done; 9.2–9.4 not started; 9.5–9.7 held by design | eight document sets nobody has sourced, then live-run authorization |
+| 10 | 10.2 and 10.3 done; 10.4 answered as a finding; 10.1 not started | the remediation stream's wave 3 (T11, T14), merged by the peer but not yet on the shared branch |
+| 11 | not started | Phase 9's documents, and the per-section bound below |
+| 12 | not started | Phase 11 |
+| 13 | not started | an identity-provider setting, TLS material, an authorized nightly |
+
+**The three blockers, in the order they free the most work.**
+
+1. **The documents.** `qualification/DOCUMENTS.md` lists eight sets to source or
+   author. They hold Tasks 9.2, 9.3 and 9.4 and the whole of Phase 11. Nothing
+   here fetches a document: invariant 1 makes web discovery structurally absent,
+   so a `to_source` row is a request to a person.
+2. **Live-run authorization**, naming provider, model, endpoint tag, reasoning
+   effort, ceiling and window. Every pathway's exit check ends in a verdict, and
+   no verdict exists over any snapshot: `qualification_verdicts` is empty in
+   every database. **Nothing in this tree is qualified**, and nothing describes
+   itself that way.
+3. **Trivy `0.70.0`** for `make image`, which is the only component of the
+   complete gate that has not run. It holds the acceptance of two finished
+   phases.
+
+**One thing the plan itself now owes, found by measuring rather than by
+review.** The per-section prompt bound was deferred to "the day a wide route
+comes near the ceiling", and nobody had taken that measurement. Taken: the widest
+pathway's CP-5 carries 16 direct upstreams against LITE's two, and its own
+delivered authority is 165,548 bytes, so authority plus upstream sections reach
+47 % of the transport ceiling at 20 KB per handoff, before any evidence. The
+over-ceiling refusal rejects the whole request rather than truncating, so such a
+pathway does not run and cannot be qualified. It is a precondition of Phase 11's
+widest task, recorded there and in the Phase 5 ledger entry.
+
+**What the two phase closes cost, which is the argument for running both gates.**
+Phase 7's audit found a P1 produced by its own two commits. Phase 8's audit
+returned BLOCK on a critical the confidence review had read and called safe: the
+host asked the bundle's register locator a narrower question than the bundle
+asks, so the one shipped answer key could be met from a sibling register while
+the honest one said the evidence was missing. Both were built rather than
+argued. Three commit messages in this plan's history asserted things the code
+contradicted, and every one was caught by a reviewer rather than its author.
+
 ## Goal-prompt discharge record — 17 September 2026
 
 `docs/PHASE_7_ONWARDS_GOAL_PROMPT.md` line by line against the tree, so the goal

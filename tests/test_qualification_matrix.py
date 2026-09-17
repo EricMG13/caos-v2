@@ -795,3 +795,106 @@ def test_two_identical_register_keys_for_one_case_are_refused(ran: Ran) -> None:
     duplicate = _registered(ran, _T8_READY, _T8_READY)
     with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
         assert_unambiguous(QualificationSet(cases=(duplicate,)))
+
+
+def test_a_key_does_not_answer_from_a_duplicated_column() -> None:
+    """A header naming the same column twice answers nothing, not the last cell.
+
+    The vendor's reader builds each row as `dict(zip(header, cells))`, so two
+    identical header names collapse to the trailing cell before the host sees
+    anything. The row then holds one entry under that name and the comparison
+    answered from it -- while a person reading the table reads the leftmost
+    namesake. A shipped key was met by `PARTIAL` in a second `evidence_status`
+    column over an honest `MISSING` in the first.
+
+    The guard was documented before it could fire: the duplicate is visible in
+    the header and nowhere else, so the header is what decides. Found by the
+    Completion Phase 8 confidence review, which built this table.
+    """
+    from server.qualification.matrix import _matches_register
+
+    expect = ExpectedRegister(
+        module_id="CP-L10",
+        register_id="TL10.2",
+        row_key=(("topic_id", "LIQUIDITY_MATURITIES"),),
+        column="evidence_status",
+        expected="PARTIAL",
+    )
+    duplicated = ("topic_id", "evidence_status", "evidence_status")
+    collapsed = {"topic_id": "LIQUIDITY_MATURITIES", "evidence_status": "PARTIAL"}
+    honest = ("topic_id", "evidence_status")
+
+    assert _matches_register({"TL10.2": (duplicated, (collapsed,))}, expect) is False
+    # The same key over a header naming the column once is met, so what the
+    # refusal above reports is the duplicate and not an unreadable register.
+    assert _matches_register({"TL10.2": (honest, (collapsed,))}, expect) is True
+
+
+def test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it() -> None:
+    """A key must not be answerable from a register it was not aimed at.
+
+    The vendor's locator walks the few lines above each pipe table nearest-first,
+    breaks on the first line naming any id it was given, and keeps the first
+    table it finds. The host used to pass a narrowed id list where the bundle's
+    own `check()` passes none, which changes which label line matches and
+    therefore which table answers. CP-L10 writes five registers with identical
+    columns, all required on every run, so a `TL10.2` key could be met from
+    `TL23.2` while the honest `TL10.2` said `MISSING` -- decided by appendix prose
+    the measured module wrote -- and, in the other direction, an honest handoff's
+    key could miss because the prose named `TL10.1` first.
+
+    Asking with no id list is what the bundle does, so host and vendor read the
+    same table. Found by the Completion Phase 8 adversarial audit, which built a
+    handoff that passed the vendor's own completeness check with zero violations
+    and still scored the key from the wrong register.
+    """
+    from server.methodology.bundle import Bundle
+    from server.methodology.vendor import load_vendor_contract
+    from server.qualification.matrix import _matches_register
+
+    find_registers = load_vendor_contract(
+        Bundle(VENDORED)
+    ).completeness_check.find_registers
+    # A sibling register with identical columns, written before the honest one --
+    # CP-L10 is required to write five such registers on every run. Its own
+    # heading is the line nearest its table; a line naming TL10.2 sits above that
+    # heading, which is the appendix transition prose the module's own SKILL.md
+    # asks it to write. Unnarrowed, the locator breaks on the nearest matching
+    # line and reads this table as TL23.2, leaving TL10.2 to the honest table
+    # below. Narrowed to TL10.2 the heading does not match, so it keeps walking
+    # up, matches the prose, and binds TL10.2 to this table first -- and the
+    # locator keeps the first table it binds, so the honest one never lands.
+    handoff = (
+        "The appendix carries `TL10.2` and its absorbed phases losslessly.\n"
+        "### TL23.2 - liquidity and maturities, absorbed phase\n"
+        "\n"
+        "| topic_id | evidence_status |\n"
+        "|---|---|\n"
+        "| LIQUIDITY_MATURITIES | PARTIAL |\n"
+        "\n"
+        "### TL10.2 - liquidity and maturities\n"
+        "\n"
+        "| topic_id | evidence_status |\n"
+        "|---|---|\n"
+        "| LIQUIDITY_MATURITIES | MISSING |\n"
+    )
+    expect = ExpectedRegister(
+        module_id="CP-L10",
+        register_id="TL10.2",
+        row_key=(("topic_id", "LIQUIDITY_MATURITIES"),),
+        column="evidence_status",
+        expected="PARTIAL",
+    )
+
+    unnarrowed = find_registers(handoff)
+    narrowed = find_registers(handoff, ["TL10.2"])
+
+    # What the bundle reads: the honest table, which says MISSING, so a key
+    # expecting PARTIAL is a miss.
+    assert _matches_register(unnarrowed, expect) is False
+    # What the narrowed call read: the sibling's table, and the key was met.
+    assert _matches_register(narrowed, expect) is True
+    assert unnarrowed["TL10.2"][1][0]["evidence_status"] == "MISSING"
+    assert narrowed["TL10.2"][1][0]["evidence_status"] == "PARTIAL"
+    # The host must ask the first question. `_registers_met` passes no id list;
+    # this is the reason, and the pair above is what changes if that regresses.

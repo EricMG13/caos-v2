@@ -43,7 +43,7 @@ def _answered(row: MatrixRow) -> bool:
     """Whether this row is a result a reviewer could sign QUALIFIED over.
 
     Every key the case declared has to be answered, and a case may declare
-    five kinds: expected citations, an expected refusal, an expected forecast,
+    six kinds: expected citations, an expected refusal, an expected forecast,
     expected readiness, expected projections and expected register cells. Each
     of the bool-or-None fields is `None` when its kind was not declared and a
     bool when it was, so `is not False` is the test -- a case keyed only by a
@@ -433,14 +433,30 @@ def _snapshot_runs(document: object) -> tuple[UUID, ...]:
 def _models_recorded(
     conn: StoreConnection, *, runs: tuple[UUID, ...], model: str
 ) -> None:
-    """Refuse unless every run recorded exactly the model the verdict names.
+    """Refuse unless no run contradicts the model the verdict names, and one
+    confirms it.
 
     `evidence.model` is what the harness was configured with; what the runs
     called is `call_outcomes.model` beside each accepted artifact (§25), and
     invariant 3 says the host owns identity -- so a reviewer's `provider`
     binding is checked against the store's fact, not against the caller's
-    configuration. A run that recorded no model at all refuses too: an
-    unnamed producer is exactly what this comparison exists to catch.
+    configuration.
+
+    It is "no run contradicts" rather than "every run confirms" because a
+    signable snapshot may legitimately contain a run that accepted nothing.
+    `PerformedEvidence.complete` waives the COMPLETE requirement for a case
+    whose declared refusal was met, and a run whose first node returns a
+    validated Blocked verdict ends BLOCKED with a billed attempt, a
+    `call_outcomes` row and no artifact -- so the join below returns no row for
+    it. Demanding every run appear refused exactly the case
+    `docs/REPAIR_PLAN.md` Phase 6 asks for, the deliberately restricted one,
+    and refused it as a *wrong binding* when the bindings were right. One
+    unsignable case poisons the whole set. Found by the Completion Phase 8
+    confidence review, which built the snapshot and reproduced it.
+
+    Every artifact-bearing run is still checked against the store's fact, and
+    an empty result still refuses: a snapshot in which nothing was ever
+    produced names no producer, which is what this comparison exists to catch.
     """
     rows = conn.execute(
         "SELECT DISTINCT o.run_id,o.model FROM call_outcomes o"
@@ -448,7 +464,7 @@ def _models_recorded(
         " WHERE o.run_id = ANY(%s)",
         (list(runs),),
     ).fetchall()
-    if {row[0] for row in rows} != set(runs) or any(row[1] != model for row in rows):
+    if not rows or any(row[1] != model for row in rows):
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
 
 
