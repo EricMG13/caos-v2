@@ -179,6 +179,69 @@ test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
 define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Completion Phase 12.**
+
+- **The Book compares on earnings, not on leverage, and on four credits it did
+  not let you choose.** Task 12.3 declares six columns, the five whose operands
+  are the period's own accepted driver row and the EBITDA margin over two of
+  them, because a cell can then name the driver behind it and that driver's
+  evidence. The debt and cash roll-forward and the leverage metrics over them
+  are not declared: `server/calculators/cash_flow.py` chains each period's
+  opening to the previous period's closing, so a passport naming only the local
+  drivers would understate the lineage -- and `metrics.net_leverage` is the
+  figure `docs/IA_SPEC.md` 4.4 names as a facet, so the section ships without
+  the number it is most likely to be opened for. The rows are the caller's
+  newest four credits by `created_at`, `LIST_TRUNCATED` past that, with no way
+  to say which four: a member of thirty compares the four most recently
+  created. Nothing filters, groups or saves a view either; three of IA_SPEC's
+  five grouping keys (sector, rating, vintage, sponsor) and two of its four
+  facets have no source in the store, while `pathway` and `status` do -- they
+  are `profile_id`/`selection_id` and `displayed_run_status`, both already
+  served -- and with four rows the rest buy nothing. *Upgrade:* a declared
+  transitive operand set over the roll-forward, computable from
+  `forecast_inputs` and the same change that lets a leverage cell carry an
+  honest passport; and an explicit selection of which credits are compared, the
+  day a reader asks the Book for leverage or for two credits it did not choose
+  for them. `tests/test_book_section.py` holds the six columns and their
+  passports.
+- **A Book passport names its evidence and draws none of it.**
+  `server/api/reads/book.py` serves each operand's citation from the accepted
+  owner binding, and `CitationView` carries the host's own rectangles -- but
+  `frontend/src/sections/book/passport.ts` adapts it to the passport overlay's
+  older `Citation`, which has no page frame to place a rectangle against, so
+  `bboxes` is `[]` and the drawer names the document, the page and the quote
+  over a blank silhouette. The v1 `SourceDrawer` is the one that fetches a
+  frame, and it resolves a fact against a document carrying `handoffs`, which
+  the Book's does not. Nothing is fabricated and invariant 11 is untouched --
+  the host anchored the quote and still serves the rectangle -- but a reader who
+  opens a chip from the Book sees the quote and not where on the page it sits,
+  where the same quote opened from Analysis shows both. For the same reason
+  every Book cell is a projection and none carries the `PROJECTED` marker:
+  `passport.ts` sets `driver: null`, and the ten-field passport
+  `tests/test_wire_contract.py` pins has no eleventh field for one. The
+  information is there under `derivation` and `citations`; the marker is not.
+  `deviation` is null for a different reason: one calculator owns every column,
+  so two spellings sharing a column cannot arise here rather than being left
+  unchecked. *Upgrade:* open the v1 source drawer from the Book by carrying each
+  citation's `case_id` on its row, the day a reader needs the rectangle from the
+  portfolio rather than from the credit.
+- **The Book's declared I/O is one route shape multiplied by four.**
+  `PER_ROW_IO` is `MODEL_IO - 1`, measured on the ten-node LITE forecast route,
+  and `IO_BUDGET` is `2 + 4 x that` = 598. `read_analysis` costs
+  `7 + 10 x handoffs`, so a `FULL_CREDIT_32` credit costs about 327 and four of
+  them about 1,310 against the declared 598. The convention is Model's and
+  Analysis' -- both declare the shape they were measured on -- but the Book is
+  the first reader to multiply it, so the gap between the declaration and the
+  widest real request is four times anyone else's. The payload has the same
+  shape of cost: `supporting_research` and each full `matched_text` repeat in
+  every one of up to 192 cells, where every other section carries a citation
+  once; the committed fixture is about 2.4 KB a cell, so a full book is roughly
+  0.5 MB at that density and more with real quotes. Neither figure is measured
+  against a wide route, because no wide route runs today. *Upgrade:* declare the
+  budget from the routes the read actually walked, and carry each citation and
+  each research link once with the cells referring to it, the day a
+  `FULL_CREDIT_32` credit reaches the Book.
+
 **Completion Phase 8.**
 
 - ~~**A register is located by vendor prose, and a key trusts that location.**~~

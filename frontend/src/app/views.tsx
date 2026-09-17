@@ -13,6 +13,7 @@ import { UploadSection } from "@/sections/upload/UploadSection";
 import type { Section } from "@/wire";
 import type {
   AnalysisDocument,
+  BookDocument,
   CommitteeDocument,
   DirectoryDocument,
   ModelDocument,
@@ -24,6 +25,7 @@ import type {
 /** Each enabled section's v1 document, by section. */
 interface V1Documents {
   directory: DirectoryDocument;
+  book: BookDocument;
   upload: UploadDocument;
   run: RunSectionDocument;
   analysis: AnalysisDocument;
@@ -32,8 +34,9 @@ interface V1Documents {
   committee: CommitteeDocument;
 }
 
-/** Book and Admin are unavailable in every mode and are never mounted with a
-    document, so `never` is what their shells are typed on (decision D2). */
+/** Admin is unavailable in every mode and is never mounted with a document,
+    so `never` is what its shell is typed on (decision D2). Book left that set
+    when the section began rendering real accepted projections. */
 export type DocumentFor<S extends Section> = S extends keyof V1Documents ? V1Documents[S] : never;
 
 /** Each view typed on exactly its own document, so a section wired to the

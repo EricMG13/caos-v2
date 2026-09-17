@@ -4,13 +4,17 @@
 import routes from "./routes.json";
 import { SECTIONS, type Section } from "@/wire/shared";
 
-/** The seven sections served in every mode (brief 4.1, decision 9). Book and
-    Admin render `unavailable` with no request and no event tail, demo included. */
+/** The sections served in every mode (brief 4.1, decision 9). Admin renders
+    `unavailable` with no request and no event tail, demo included. Book joined
+    them when `/api/v1/book` began serving real accepted CP-CF projections
+    (`tests/test_book_section.py`); it is the one section beside Directory that
+    is about no single case. */
 export const ENABLED_SECTIONS = [
   "directory",
   "upload",
   "run",
   "analysis",
+  "book",
   "model",
   "report",
   "committee",

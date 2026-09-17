@@ -68,6 +68,7 @@ from server.api.deps import store_connection as store_connection
 from server.api.edge import EdgeGuard, is_api_path, refusal_body
 from server.api.identity import actor_from_headers
 from server.api.reads import analysis as analysis_read
+from server.api.reads import book as book_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
 from server.api.reads import model as model_read
@@ -355,6 +356,7 @@ for _section in (
     run_read,
     analysis_read,
     model_read,
+    book_read,
     qualification_read,
     reports_read,
     evidence_read,

@@ -3,14 +3,14 @@
 // responses: a late response for a case the user has left is discarded. Pure;
 // no I/O.
 //
-// `bind`, `release`, `Binding` and `Authority.bound` have no production caller
-// since the Book was reduced to its unavailable shell: they were the Book's
-// one-snapshot-per-compared-case rule. They are kept, not orphaned by
-// oversight -- `test_book_binds_one_snapshot_per_compared_case` is pinned by
-// name in `tests/test_phase_exits.py`, whose own docstring says the cheapest
-// way to green that gate would be to re-excuse the name. Deleting these means
-// editing a gate to make a gate pass. Restore the Book's caller, or change the
-// gate deliberately; do not quietly delete either half.
+// `bind`, `release`, `Binding` and `Authority.bound` are the Book's
+// one-snapshot-per-compared-case rule. They had no production caller while the
+// Book was its unavailable shell and were kept rather than deleted, because
+// `test_book_binds_one_snapshot_per_compared_case` is pinned by name in
+// `tests/test_phase_exits.py` and deleting them would have meant editing a
+// gate to make a gate pass. Task 12.3 gave them their caller back: the Book
+// section binds each credit through `@/app/ledger`, and only the explicit lens
+// switch moves a binding.
 import type { EnabledSection } from "./sections";
 import type { Refusal, Section } from "@/wire";
 import type { EventName, SectionDocument } from "@/wire/v1";
@@ -91,6 +91,16 @@ export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> =
   filing_changed: ["report", "committee"],
 };
 
+/** Whether any event at all moves this section, which is whether a stream over
+    it is worth holding. Book is portfolio-scoped: no case event names it, so a
+    tail opened over one could only ever hold a worker thread and one of the
+    API's concurrency slots for its whole deadline. */
+export function tailed(section: Section): boolean {
+  return Object.values(REFETCHES).some((sections) =>
+    (sections as readonly string[]).includes(section),
+  );
+}
+
 export function refetches(name: EventName, section: Section): boolean {
   return (REFETCHES[name] as readonly string[]).includes(section);
 }
@@ -125,6 +135,14 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
   }
   if (section === "committee" && "revision_id" in body) {
     return `${body.revision_id}|${body.payload_sha256}`;
+  }
+  if (section === "book" && "basis" in body) {
+    // Every compared credit's snapshot, so a document moving any one of them
+    // waits for Reload rather than replacing figures under a lens still bound
+    // to the old snapshot. Without this the row drew the new digest, the new
+    // figures, and a note saying the comparison had stayed on the old one.
+    const snapshots = body.rows.map((row) => `${row.case_id}=${row.snapshot ?? ""}`).sort();
+    return snapshots.join(",");
   }
   return null;
 }

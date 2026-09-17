@@ -23,12 +23,13 @@ export interface FactIdentity {
 
 interface Evidence {
   openCitation(citation: Citation, opener: HTMLElement): void;
-  /** Open the metric passport overlay. No production caller since the Book
-      was reduced to its unavailable shell, and no test calls it either --
-      `test_passport_contract`, pinned by name in `tests/test_phase_exits.py`,
-      renders `MetricPassport` directly. Kept deliberately: see the note in
-      `app/authority.ts` for why deleting a pinned gate's subject is a gate
-      edit rather than a cleanup. */
+  /** Open the metric passport overlay. Its caller is the Book, which adapts
+      a v1 `BookPassport` to this shape in `sections/book/passport.ts`; it had
+      none while the Book was its unavailable shell and was kept for the reason
+      the note in `app/authority.ts` gives. `test_passport_contract`, pinned by
+      name in `tests/test_phase_exits.py`, still renders `MetricPassport`
+      directly, because what it holds is the ten fields rather than the route
+      a caller takes to them. */
   openPassport(passport: Passport, opener: HTMLElement): void;
   openFact(identity: FactIdentity, opener: HTMLElement): void;
   activeChip: string | null;

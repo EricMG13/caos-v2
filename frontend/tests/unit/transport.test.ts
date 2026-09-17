@@ -282,11 +282,12 @@ describe("the transport", () => {
       "upload",
       "run",
       "analysis",
+      "book",
       "model",
       "report",
       "committee",
     ]);
-    expect(DISABLED).toEqual(["book", "admin"]);
+    expect(DISABLED).toEqual(["admin"]);
     const spy = vi.fn();
     const tail = vi.fn();
     vi.stubGlobal("fetch", spy);

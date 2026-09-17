@@ -17,6 +17,7 @@ const PURPOSE: Record<EnabledSection, string> = {
   upload: "The admitted sources and their set versions.",
   run: "The pinned route, its gates and its attempts.",
   analysis: "Accepted handoffs, their citations and the nodes still pending.",
+  book: "The credits you hold standing on, on their accepted projections.",
   model: "The accepted CP-CF projection, exactly as the server supplied it.",
   report: "The exact saved revision, exactly as the server supplied it.",
   committee: "The frozen or filed saved revision, exactly as the server supplied it.",
