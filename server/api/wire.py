@@ -230,6 +230,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.VERDICT_BINDING_INVALID: "Correct the verdict bindings.",
     _C.VERDICT_UNDECLARED_FIELD: "Remove undeclared verdict fields.",
     _C.VERDICT_EXPIRED: "Obtain a current verdict.",
+    _C.VERDICT_ALREADY_RECORDED: "Read the verdict already recorded.",
     _C.QUALIFICATION_EVIDENCE_NOT_FOUND: "Name qualification evidence you may sign.",
     _C.STORE_SCHEMA_DRIFT: "An operator must reconcile the schema.",
     _C.STORE_NOT_TRANSACTIONAL: "An operator must fix the store connection.",

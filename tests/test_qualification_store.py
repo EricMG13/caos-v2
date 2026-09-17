@@ -4,11 +4,12 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from qualification_fixtures import qualification_performed
+from qualification_fixtures import qualification_performed, record_runs
 
 import server.store as store
 from server.qualification.matrix import ExpectedCitation
 from server.qualification.store import (
+    ONE_VERDICT_PER_EVIDENCE,
     Evidence,
     PerformedEvidence,
     current_verdict,
@@ -367,6 +368,7 @@ def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> 
         performed = _performed()
         evidence = performed.evidence
         record_performed(conn, performed)
+        record_runs(conn, performed)
         reviewer = uuid4()
         record_verdict(
             conn,
@@ -375,3 +377,60 @@ def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> 
             verdict=_verdict(now, evidence),
         )
         assert current_verdict(conn, evidence=evidence, now=now)
+
+
+@pytest.mark.parametrize("recorded", ["another-model", None])
+def test_a_verdict_is_refused_unless_every_run_recorded_the_model_it_names(
+    empty_database: str, recorded: str | None
+) -> None:
+    """`evidence.model` is what the harness configured; `call_outcomes.model`
+    is what the run called (§25). The verdict binds the second."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = _performed()
+        evidence = performed.evidence
+        record_performed(conn, performed)
+        record_runs(conn, performed, model=recorded, outcome=recorded is not None)
+        with pytest.raises(Refusal, match=r"^VERDICT_BINDING_INVALID$"):
+            record_verdict(
+                conn,
+                evidence=evidence,
+                reviewer_id=uuid4(),
+                verdict=_verdict(now, evidence),
+            )
+
+
+def test_the_one_verdict_constraint_is_mapped_by_name_not_by_message(
+    empty_database: str,
+) -> None:
+    """`0019_one_qualification_verdict.sql` is the only unique violation this
+    insert can raise that means "already signed", and it is matched by the
+    constraint name the migration declares."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = _performed()
+        evidence = performed.evidence
+        record_performed(conn, performed)
+        record_runs(conn, performed)
+        record_verdict(
+            conn,
+            evidence=evidence,
+            reviewer_id=uuid4(),
+            verdict=_verdict(now, evidence),
+        )
+        conn.commit()
+        with pytest.raises(Refusal, match=r"^VERDICT_ALREADY_RECORDED$"):
+            record_verdict(
+                conn,
+                evidence=evidence,
+                reviewer_id=uuid4(),
+                verdict=_verdict(now, evidence),
+            )
+        declared = conn.execute(
+            "SELECT conname FROM pg_constraint WHERE conname=%s",
+            (ONE_VERDICT_PER_EVIDENCE,),
+        ).fetchall()
+        conn.rollback()
+        assert declared == [(ONE_VERDICT_PER_EVIDENCE,)]

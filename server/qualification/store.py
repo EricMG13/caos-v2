@@ -16,6 +16,10 @@ from server.qualification.verdict import Verdict, read_verdict
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 
+# `0019_one_qualification_verdict.sql`. Named here so the refusal that maps
+# it and the migration that declares it cannot drift apart silently.
+ONE_VERDICT_PER_EVIDENCE = "one_verdict_per_evidence"
+
 
 @dataclass(frozen=True, slots=True)
 class Evidence:
@@ -395,6 +399,53 @@ def _digest(document: dict[str, object]) -> str:
     ).hexdigest()
 
 
+def _snapshot_runs(document: object) -> tuple[UUID, ...]:
+    """The run ids the stored snapshot names, or a refused binding.
+
+    `qualification_performed.performed_json` is the only place an evidence row
+    reaches its runs: no column joins `qualification_evidence` to `runs`, and
+    the snapshot document is what the reviewer signed, so the run ids it names
+    are the ones the comparison below is owed. A document this function cannot
+    read is a snapshot nobody may sign, never an empty run set that passes.
+    """
+    if not isinstance(document, dict):
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    records = document.get("performed")
+    if not isinstance(records, list) or not records:
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    runs: list[UUID] = []
+    for record in records:
+        if not isinstance(record, dict) or "run_id" not in record:
+            raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+        try:
+            runs.append(UUID(str(record["run_id"])))
+        except ValueError:
+            raise Refusal(RefusalCode.VERDICT_BINDING_INVALID) from None
+    return tuple(runs)
+
+
+def _models_recorded(
+    conn: StoreConnection, *, runs: tuple[UUID, ...], model: str
+) -> None:
+    """Refuse unless every run recorded exactly the model the verdict names.
+
+    `evidence.model` is what the harness was configured with; what the runs
+    called is `call_outcomes.model` beside each accepted artifact (§25), and
+    invariant 3 says the host owns identity -- so a reviewer's `provider`
+    binding is checked against the store's fact, not against the caller's
+    configuration. A run that recorded no model at all refuses too: an
+    unnamed producer is exactly what this comparison exists to catch.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT o.run_id,o.model FROM call_outcomes o"
+        " JOIN artifacts a ON a.attempt_id=o.attempt_id"
+        " WHERE o.run_id = ANY(%s)",
+        (list(runs),),
+    ).fetchall()
+    if {row[0] for row in rows} != set(runs) or any(row[1] != model for row in rows):
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+
+
 def record_verdict(
     conn: StoreConnection,
     *,
@@ -409,12 +460,14 @@ def record_verdict(
         or verdict.build_id != evidence.build_id
     ):
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
-    complete = conn.execute(
-        "SELECT complete FROM qualification_performed WHERE performed_sha256=%s",
+    snapshot = conn.execute(
+        "SELECT complete,performed_json FROM qualification_performed"
+        " WHERE performed_sha256=%s",
         (evidence.performed_sha256,),
     ).fetchone()
-    if complete != (True,):
+    if snapshot is None or snapshot[0] is not True:
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    _models_recorded(conn, runs=_snapshot_runs(snapshot[1]), model=evidence.model)
     digest = record_evidence(conn, evidence)
     try:
         conn.execute(
@@ -429,10 +482,15 @@ def record_verdict(
                 verdict.expires_at,
             ),
         )
-    except psycopg.errors.UniqueViolation:
+    except psycopg.errors.UniqueViolation as violation:
         # `0019_one_qualification_verdict.sql`: this evidence is already signed,
-        # which is the reviewer's binding and theirs to correct.
+        # which is a different thing from a wrong binding and says so. Matched
+        # by constraint name, not by message text: a message is the server's
+        # locale and version, and a second unique index on this table must not
+        # inherit this code by accident.
         rollback_or_close(conn)
+        if violation.diag.constraint_name == ONE_VERDICT_PER_EVIDENCE:
+            raise Refusal(RefusalCode.VERDICT_ALREADY_RECORDED) from None
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID) from None
     except psycopg.Error:
         # Any other driver fault is the store failing, not the document: a 400

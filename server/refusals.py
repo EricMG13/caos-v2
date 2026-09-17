@@ -144,6 +144,9 @@ class RefusalCode(StrEnum):
     VERDICT_BINDING_INVALID = "VERDICT_BINDING_INVALID"
     VERDICT_UNDECLARED_FIELD = "VERDICT_UNDECLARED_FIELD"
     VERDICT_EXPIRED = "VERDICT_EXPIRED"
+    # The one-verdict constraint, distinguished from a wrong binding so a
+    # retrying client is not told to correct a document that was right.
+    VERDICT_ALREADY_RECORDED = "VERDICT_ALREADY_RECORDED"
     # F17's producer: qualification evidence the caller may not sign, or
     # that the store does not hold. One answer for both, as CASE_NOT_FOUND is.
     QUALIFICATION_EVIDENCE_NOT_FOUND = "QUALIFICATION_EVIDENCE_NOT_FOUND"

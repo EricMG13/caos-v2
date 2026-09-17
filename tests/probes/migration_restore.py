@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qualification_fixtures import qualification_performed
+from qualification_fixtures import qualification_performed, record_runs
 from test_frozen_evidence import _insert
 from test_run_inputs import SUBJECT, _prepare, pin_version_one
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
@@ -131,6 +131,7 @@ def _record_qualification(conn: StoreConnection) -> tuple[Evidence, datetime]:
     performed = qualification_performed()
     evidence = performed.evidence
     record_performed(conn, performed)
+    record_runs(conn, performed)
     verdict = read_verdict(
         {
             "provider": evidence.provider + ":" + evidence.model,

@@ -1052,15 +1052,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   does not hold, the answer is one private 404. What it does not do: nothing
   here lets the host call itself qualified — the route records a person's
   assertion over evidence `record_verdict` already bound, and refuses when the
-  snapshot is not `complete` or the bindings do not match. Two limits remain.
-  A second signature over the same evidence is refused
-  `VERDICT_BINDING_INVALID` by the one-verdict constraint rather than by a
-  code of its own, so a retried request cannot tell "already signed" from
-  "wrong bindings" (`tests/test_qualification_sign.py`); and the write is one
-  transaction with no `command_requests` receipt, because there is no case to
-  scope a key to. *Upgrade:* a `VERDICT_ALREADY_RECORDED` code the day a
-  client retries, and a global-scope receipt the day a second global write
-  arrives and the shape is worth generalising.
+  snapshot is not `complete` or the bindings do not match. Both of the limits
+  this entry recorded are closed by Task 8.3: the one-verdict constraint is
+  mapped by its declared name to `VERDICT_ALREADY_RECORDED` (409), so a
+  retried request can tell "already signed" from "wrong bindings"
+  (`test_a_second_signature_over_the_same_evidence_is_already_recorded_not_invalid`,
+  `test_the_one_verdict_constraint_is_mapped_by_name_not_by_message`); and the
+  write now records a `command_requests` receipt under the nil scope in the
+  verdict's own transaction, so a replayed request is answered from it
+  (`test_a_replayed_signature_with_the_same_key_is_answered_by_its_receipt`,
+  `test_the_verdict_command_requires_an_idempotency_key`).
 - **The run-to-case binding lives in the matrix's only caller, not the matrix.**
   `build_matrix` accepts any `runs` mapping and checks only that a label is
   present; everything that makes a run the case's run — title, ceiling, profile,
