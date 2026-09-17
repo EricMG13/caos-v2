@@ -229,6 +229,39 @@ gap already observed rather than predicted: run `ff71c457…` on
   be accepted. Phase 8 Tasks 8.1, 8.3 and 8.4 and Phase 9 Task 9.1 are already in
   the branch and are closed under their own phases' gates, not this one.
 
+## Completion Phase 8 close — in progress, 17 September 2026
+
+The phase-close order `docs/PHASE_7_ONWARDS_GOAL_PROMPT.md` sets: implementation,
+gate, confidence review, remediate and retest, separate adversarial audit,
+remediate, accept. Phase 8 is at step five.
+
+- **Implementation:** all five tasks in the branch. 8.1 `d88061e` and `da475c7`;
+  8.2 `0d31a67` with `9c7f161`; 8.3 `cf3d805`; 8.4 `2b5103e`; 8.5 `729e2cf`.
+- **Confidence review:** run on **Opus 5** through
+  `.claude/agents/phase-confidence-reviewer.md`, which pins `effort: max`, with
+  `ultrathink` opening the prompt. It reviewed `5ec86d8` and said plainly that a
+  subagent cannot read its own effort back, so what is attested is the launch
+  path. Four CONFIRMED findings, each reproduced with a probe.
+- **Remediation:** `0f49891`. All four fixed, each watched failing against the
+  old behaviour first, plus three smaller open items the review left and two new
+  ledger entries for what was recorded rather than fixed.
+- **The finding worth carrying forward** is the one that would have cost the most:
+  a snapshot the store itself called signable was refused as a wrong binding,
+  because a case whose declared refusal was met can leave a run that accepted
+  nothing, and the model comparison demanded every run confirm. One such case made
+  a whole set unsignable, and it is the deliberately restricted case
+  `docs/REPAIR_PLAN.md` Phase 6 asks for. Reported as a wrong binding, which is
+  the one thing the same task's other half exists to stop.
+- **Adversarial audit:** dispatched at `0f49891` on the same pinned routing,
+  aimed at the remediation itself rather than at what the review already covered.
+- **Not yet:** its remediation, and acceptance. Phase 8 is **not accepted**, and
+  its complete gate has the same Trivy limit as Phase 7's.
+
+**Routing note.** These two gates ran on Opus 5 `max` with `ultrathink`, the
+owner's routing of 17 September 2026. Phase 7's two gates ran earlier the same day
+on Fable 5.1 `xhigh` and keep that record: a review is evidence about a tree at a
+time.
+
 ## Goal-prompt discharge record — 17 September 2026
 
 `docs/PHASE_7_ONWARDS_GOAL_PROMPT.md` line by line against the tree, so the goal
