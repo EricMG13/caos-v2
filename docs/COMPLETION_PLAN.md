@@ -869,8 +869,17 @@ nobody reads the clause as satisfied:
    to open a passport from: `create_run` resolves the route with no
    `RouteExtensions` and `CreateRun` carries no field to ask for one, while the
    only caller that requests the model extension is the qualification harness.
-   The ten fields are held by `tests/test_wire_contract.py`'s
-   `test_passport_contract` and the Book unit specs. The journey asserts the
+   The ten fields are held by three assertions, and **not** by
+   `test_passport_contract`, which this entry first cited: that test lives in
+   `frontend/tests/unit/evidence.test.tsx`, renders `MetricPassport` over a
+   hand-built passport, says nothing about a Book cell, and is pinned by name
+   in `tests/test_phase_exits.py` as *not* defined in the Python suite -- so
+   the citation sent a reader to a file that does not hold it and would have
+   broken the gate if anyone had "corrected" it by moving the test. What holds
+   the claim is `PINNED[wire.BookPassport]` in `tests/test_wire_contract.py`
+   (checked by `test_the_v1_wire_key_sets_are_pinned`),
+   `frontend/tests/unit/book.test.tsx`'s "selecting a cell opens the passport
+   with its ten fields", and `tests/test_book_section.py`. The journey asserts the
    *absence* of a table and a cell, so the day the extension becomes
    requestable that test fails and is rewritten to open the passport. See
    `CLAUDE.md`'s Completion Phase 12 entry, whose upgrade is a

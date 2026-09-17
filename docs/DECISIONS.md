@@ -3806,3 +3806,92 @@ Admin stays at its shell and D2's Admin half stands. Book's `bind`/`release`
 and the metric-passport overlay, which §74.4's ledger entry kept because
 deleting a pinned gate's subject is a gate edit, now have their production
 caller back; that entry is struck by the commit that gives them one.
+
+## 2026-09-17 §77 — A per-section bound on an upstream handoff, the line group, and the closed element set
+
+Three behaviour changes landed in Completion Phase 12's wave with no entry of
+their own. The Phase 12 confidence review asked for them, and it is right that
+a new refusal code and a new host policy bound over an accepted, immutable
+artifact belong in the binding record rather than only in a code comment and a
+struck ledger entry.
+
+### 77.1 An upstream handoff is bounded at 32,768 bytes, and the bound answers after identity
+
+`server/methodology/invocation.py` declares `MAX_UPSTREAM_HANDOFF_BYTES` and
+refuses `UPSTREAM_SECTION_OVER_CEILING` when an accepted upstream's Markdown
+exceeds it, in the prompt builder — so before any attempt, reservation or call.
+Until now `MAX_REQUEST_BYTES` refused the whole request and could never say
+*which* part was large.
+
+The number is arithmetic, not a measurement, and the arithmetic is worth
+keeping: on the catalog's widest pathway CP-5 carries 16 direct upstreams and
+its own delivered authority is 165,548 bytes, so at 32,768 each the authority
+and upstream sections alone reach about 690 KB before a byte of evidence. It is
+a ceiling chosen so that a wide route cannot be refused wholesale for a reason
+nobody can locate, not a figure any real handoff has approached — no FULL
+module has ever produced one, and the only measurement in the tree is a
+448,826-byte CP-0 *request* carrying no upstream at all.
+
+**The bound answers after the digest comparison, not before it.** The size
+check sits below `sha256(data) != ref.sha256` in `_utf8`'s caller, because the
+host owns identity (invariant 3) and a host policy bound does not get to answer
+ahead of it: bytes that are not the artifact they claim to be are refused as
+that, not as too large.
+
+**Three costs, recorded here because the ledger entry the bound closed did not
+state them.** Nothing bounds a handoff at *acceptance* — `MAX_FILE_BYTES` is
+26,214,400 — so the host will accept a 40 KiB handoff, bill it, and discover at
+the *consumer's* prompt that it cannot use it, which lands the refusal on the
+innocent node. The discharge is a new run, which calls the same model with the
+same prompt and may reproduce the same size. And the operator meets a run
+parked `STOPPED` whose stop code no surface renders, so the two entries compose
+into "the run stopped and nothing says why".
+
+### 77.2 A line past the group width is split, and the packing is re-derived in one direction
+
+`SYSTEM_SPEC.md` §5 asks for one block per line while small and a bounded line
+group once not. The splitting half is built: `GROUP_WIDTH` is `BoundaryText`'s
+own `DEFAULT_LIMIT`, `ingest.line_groups` cuts a line at it, and
+`verify_citations` requires every block a line was split into to have been
+delivered. Before it, a line past 4,096 characters refused the whole pack, so
+one wide table row in a text export meant no document carrying it could be
+admitted.
+
+The width is not a free parameter: anything narrower would re-number documents
+already admitted under this one, whose `source_blocks` rows are immutable and
+whose stored citations name the ids they were given. A cut falls wherever the
+width falls, inside a word if that is where it falls, because cutting at a
+token boundary would make the block count depend on the tokens and force
+anchoring to read every token's text back to learn it.
+
+`citations._line_blocks` re-derives the packing rather than storing a version,
+and does so **in one direction only**: splitting writes more blocks than lines,
+so only a source with more is repacked and checked against its stored count,
+while one with fewer keeps the one-block-a-line reading it was admitted under.
+That asymmetry is load-bearing, not tidiness — the two tests that demonstrate
+`CITATION_NOT_DELIVERED` at all narrow a delivery by deleting a stored block
+with the seal disabled, and reading that state as a disagreement about the rule
+would answer about the host's own derivation where the honest answer is about
+the citation, making the refusal unreachable in the tree.
+
+### 77.3 The deliverable renders a closed element set, and everything else reaches the page as itself
+
+Task 12.4 replaced `<pre>{escape(markdown)}</pre>` with a renderer over the
+twelve prose constructs `ELEMENTS` names, so a register reads as a table. The
+contract is that a construct outside the set has exactly two outcomes: it
+reaches the page as the characters the model wrote, or the block refuses
+`DELIVERABLE_MARKDOWN_UNSUPPORTED` because no faithful rendering of it exists.
+
+**There is no third outcome, and there briefly was.** A line-leading HTML
+comment was consumed and emitted nothing, and code-span contents and
+out-of-order emphasis each dropped characters. A signer's `payload_sha256`
+binds the record's bytes and this render is the only reading of them a
+committee sees, so a construct that vanishes is text bound and unseen — the
+invariant 5 shape read from the other side. Corrected at the Phase 12
+confidence review, together with the gate that could not see it: a tag census
+measures what the page *emits*, and a deleted construct emits no tag.
+
+Consequence recorded when the renderer moved: `renderer_sha256` is stored on a
+filing and compared against the renderer of the day a package is built, so a
+revision filed before a renderer change cannot be packaged verifiably again.
+Unreachable while no route serves a package, and owned by its own ledger entry.

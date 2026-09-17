@@ -181,6 +181,56 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 12.**
 
+- **The filing commands' I/O budget is a ceiling, where every other section
+  asserts equality.** `server/api/commands/deliverable.py` declares
+  `IO_BUDGET = 60` and `tests/test_governed_write_routes.py` asserts
+  `0 < counted.executed <= budget`, over measured costs of freeze 55, save 52,
+  filing 16 and signature 14. So the signature command may grow from fourteen
+  round trips to sixty with nothing failing, and two of the four run at a
+  quarter of their declared bound. The four share one envelope and one
+  declaration, which is why a single number covers them; what it costs is the
+  property every section read has, that an unnoticed read fails loudly. This is
+  the same argument the audit-remediation entry makes one screen above about
+  not fitting a budget to the widest shape, applied to a ceiling instead of a
+  raised number. *Upgrade:* a declared budget per command with `==`, the day
+  one of the four grows a read nobody meant to add.
+- **A signer can sign twice, and the detached receipt names one of them.**
+  `deliverable_opinions`' primary key is
+  `(case_id, revision_id, signed_by, signed_at)` and `sign_opinion_in` refuses
+  only a *frozen* revision, while `useCommand` mints a fresh idempotency key
+  for a press following a successful one -- so two presses of Sign are two
+  commands and two rows for one signer. Nothing false is written: the
+  revision's `signed_by` carries the same actor twice, the three-actor rule
+  still counts distinct actors, and the committee read pays one more
+  `payload_digests` round trip, which is the shape the signer-count entry above
+  already owns arrived at by another route. `file_deliverable_in` builds its
+  `Receipt` from `signatures[0]`, so a detached receipt names the first signer
+  where several signed -- it under-claims rather than misstates. Reachable
+  since the sign route shipped. *Upgrade:* a unique index on
+  `(case_id, revision_id, signed_by)` and a receipt carrying every signature,
+  the day a second signature on one revision is something a reader must see.
+- **A Book passport's evidence date is the analyst's declared reporting
+  period.** `server/api/reads/book.py` fills `evidence_date` from the pinned
+  run subject's `reporting_period`, which a person typed when the run was
+  created -- not a date the host derived from any admitted document. The code
+  says so; the field's name does not, and in a ten-field passport beside
+  `computed_at`, `snapshot` and a host-anchored citation it reads as one more
+  host fact. *Upgrade:* rename it to what it is, or derive it from the
+  documents the projection's operands cite, the day a reader relies on it to
+  date the evidence rather than the case.
+- **The demonstration Book is fully populated for a feature the real system
+  cannot reach.** `frontend/fixtures/book.json` carries two credits with cells,
+  chips and ten-field passports, and `make dev-ui-demo` renders them -- while
+  no run made through the API can carry CP-CF, so the real Book draws a credit
+  list and no table. The fixture is the shape the wire declares and the section
+  will serve; the workbench is explicitly never integration evidence
+  (`docs/DECISIONS.md` §14's rule, restated on every demo surface). But the
+  entries above say the Book's limits "are not things a reader meets now", and
+  a reader of the demonstration meets the opposite: a working portfolio.
+  *Upgrade:* the demo fixture says on the page that no pathway it can be served
+  from produces a forecast, or the model extension becomes requestable and the
+  fixture stops being ahead of the product.
+
 - **No run made through the API can carry CP-CF, so no Book cell and no
   passport is reachable.** `create_run` resolves the route with no
   `RouteExtensions` (`server/api/commands/runs.py`) and `CreateRun` carries no
@@ -195,8 +245,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the LITE pathway**: `ADAPTER_ROUTES` enables three pathways and
   `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's `MODEL_OWNERS`,
   so it would append CP-CF if anything asked. Completion Phase 12's exit clause
-  "a ten-field passport per cell" therefore rests on `test_passport_contract`
-  and the Book unit specs, not on the production stack; the journey records the
+  "a ten-field passport per cell" therefore rests on `PINNED[wire.BookPassport]`
+  in `tests/test_wire_contract.py`, on `frontend/tests/unit/book.test.tsx` and
+  on `tests/test_book_section.py`, not on the production stack; the journey records the
   absence deliberately, so the day a cell exists
   `journey: the Book names every credit of the portfolio on one stated basis`
   fails and is rewritten to open the passport. Found by the Task 12.5
