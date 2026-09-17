@@ -26,7 +26,7 @@ from uuid import UUID
 import psycopg
 
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import lock_run
 
 if TYPE_CHECKING:
@@ -68,15 +68,8 @@ def reserve(
     both believe they fit. Under the same lock the run's lease must be held and
     no cancel requested (brief 4.3 D3).
     """
-    try:
+    with committed_unit(conn):
         _reserve(conn, attempt_id, amount, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
 
 
 def _reserve(

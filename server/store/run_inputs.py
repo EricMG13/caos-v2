@@ -15,7 +15,7 @@ from server.engine.route import ResolvedRoute, route_digest
 from server.evidence.ingest import _digest
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import RunEvent, append, lock_run
 from server.store.routes import resolved_route
 from server.store.source_sets import SourceSet, load_source_set
@@ -282,17 +282,10 @@ def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
     """
     if conn.autocommit:
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
-    try:
+    with committed_unit(conn):
         candidate = pin_run_input_in(
             conn, run_id, source_version, bundle, research, subject=subject
         )
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return candidate
 
 

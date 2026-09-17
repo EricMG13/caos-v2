@@ -3,6 +3,13 @@
 A command commits its state, its audit event and its idempotency receipt as one
 unit, so every write it composes needs a form that neither commits nor rolls
 back. The committing functions stay, as thin wrappers over these.
+
+The committing wrappers themselves (audit remediation Task 10): eleven of them
+owned their transaction with the same eight lines -- commit on success, roll
+back or close on a store fault and answer it `STORE_UNAVAILABLE` with no driver
+text, roll back or close on anything else and let it through. `committed_unit`
+is those lines, beside `rollback_or_close`, and the last test here is what
+keeps a twelfth copy from growing back.
 """
 
 from __future__ import annotations
@@ -31,7 +38,7 @@ from server.evidence.ingest import (
 )
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import StoreConnection, apply_schema, committed_unit, connect
 from server.store.audit import audit_trail
 from server.store.gates import (
     Gate,
@@ -48,6 +55,15 @@ from server.store.source_sets import snapshot_in, snapshot_source_set
 __all__ = ["gated"]  # the fixture is used by name
 
 TEXT = b"Total debt at 31 December 2026 was USD 1,240.0m\n"
+STORE = Path(__file__).resolve().parents[1] / "server" / "store"
+# The commit block exactly: `execution_reads` ends in a rollback and
+# `apply_schema` refuses under its own code, so neither is this shape.
+COMMIT_BLOCK = (
+    "        conn.commit()\n"
+    "    except psycopg.Error:\n"
+    "        rollback_or_close(conn)\n"
+    "        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None"
+)
 
 
 def _count(conn: StoreConnection, table: str) -> int:
@@ -198,3 +214,46 @@ def test_admit_prepared_is_whole_or_nothing_without_commit(
         admit_prepared(conn, BlobStore(tmp_path), uuid4(), pack)
     conn.rollback()
     assert _count(conn, "sources") == 0
+
+
+def test_committed_unit_commits_once_and_hides_the_driver_message(
+    empty_database: str,
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        with committed_unit(conn):
+            conn.execute("SELECT 1")
+        assert conn.info.transaction_status is TransactionStatus.IDLE
+        with pytest.raises(Refusal) as refused, committed_unit(conn):
+            conn.execute("SELECT * FROM no_such_table")
+        assert refused.value.code is RefusalCode.STORE_UNAVAILABLE
+        assert refused.value.__cause__ is None
+        assert refused.value.__suppress_context__
+        # The aborted transaction was rolled back, so the next caller can go on.
+        assert conn.info.transaction_status is TransactionStatus.IDLE
+        assert conn.execute("SELECT 1").fetchone() == (1,)
+
+
+def test_committed_unit_rolls_back_and_lets_any_other_failure_through(
+    empty_database: str,
+) -> None:
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        with pytest.raises(KeyboardInterrupt), committed_unit(conn):
+            conn.execute("SELECT 1")
+            raise KeyboardInterrupt
+        assert conn.info.transaction_status is TransactionStatus.IDLE
+        refusal = Refusal(RefusalCode.RUN_NOT_FOUND)
+        with pytest.raises(Refusal) as refused, committed_unit(conn):
+            raise refusal
+        assert refused.value is refusal
+
+
+def test_no_store_module_spells_the_commit_block_by_hand() -> None:
+    offenders = sorted(
+        path.name
+        for path in STORE.glob("*.py")
+        if path.name != "__init__.py"
+        and COMMIT_BLOCK in path.read_text(encoding="utf-8")
+    )
+    assert offenders == [], offenders

@@ -12,7 +12,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit, rollback_or_close
 from server.store.budget import reserved_for, validate_spend
 from server.store.events import RunEvent, append, lock_run
 
@@ -181,15 +181,8 @@ def record_outcome(
     Owns the caller transaction. Exact replay is a no-op; conflicts and legacy
     rows refuse. Unknown outcomes remain immutable, with no backfill.
     """
-    try:
+    with committed_unit(conn):
         inserted = _record(conn, attempt_id, outcome)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return inserted
 
 
@@ -281,7 +274,7 @@ def record_refusal(
     if code in _NOT_AN_EXPLANATION:
         return False
     require_idle(conn)
-    try:
+    with committed_unit(conn):
         run, _case, _status = _locked_attempt(conn, attempt_id)
         # Imported here: `work` imports this module at its top.
         from server.store.work import require_lease
@@ -293,13 +286,6 @@ def record_refusal(
             " ON CONFLICT (attempt_id) DO NOTHING",
             (code.value, attempt_id),
         ).rowcount
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return bool(inserted)
 
 

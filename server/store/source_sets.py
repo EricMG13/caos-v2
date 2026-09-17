@@ -6,13 +6,11 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-import psycopg
-
 from server.boundary_text import BoundaryText
 from server.evidence.extract import ExtractorIdentity
 from server.evidence.ingest import _digest
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, rollback_or_close
+from server.store import StoreConnection, committed_unit
 from server.store.cases import lock_case
 
 
@@ -113,17 +111,10 @@ def load_source_set(
 def snapshot_source_set(conn: StoreConnection, case_id: UUID) -> SourceSet:
     """Own and finish the transaction, including replay; commit setup first."""
     try:
-        result = snapshot_in(conn, case_id)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+        with committed_unit(conn):
+            result = snapshot_in(conn, case_id)
     except OverflowError:
-        rollback_or_close(conn)
         raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return result
 
 

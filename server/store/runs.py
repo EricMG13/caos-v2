@@ -19,12 +19,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-import psycopg
-
 from server import methodology
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
@@ -111,15 +109,8 @@ def start_attempt(
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
-    try:
+    with committed_unit(conn):
         attempt_id = _start(conn, run_id, route_node_id, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return attempt_id
 
 
@@ -204,15 +195,8 @@ def accept_attempt(
     The bill is unfenced; the acceptance is the lease holder's alone, and is
     not gated on a requested cancel (brief 4.3 D3, D4).
     """
-    try:
+    with committed_unit(conn):
         inserted = _accept(conn, attempt_id, accepted, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return inserted
 
 
@@ -431,7 +415,7 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
     RUNNING run is ended only by its lease holder, and its work row closes in
     the same transaction (brief 4.3 D3, I8). A BLOCKED move with a `verdict`
     records it in that transaction too, riding the same conditional update."""
-    try:
+    with committed_unit(conn):
         changed = 0
         if lock_run(conn, run_id) is RunStatus.RUNNING:
             require_lease(conn, run_id, lease)
@@ -445,13 +429,6 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
             mark_work_done(conn, run_id)
             if verdict is not None:
                 _record_blocking_verdict(conn, run_id, into, verdict)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return bool(changed)
 
 
