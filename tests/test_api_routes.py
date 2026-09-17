@@ -400,7 +400,7 @@ def test_a_misconfigured_store_is_a_server_fault_not_a_bad_request(
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 503
+    assert response.status_code == 500
     assert response.json() == _refused("STORE_NOT_CONFIGURED")
 
 
@@ -541,7 +541,7 @@ def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
     response = _section(client, harness.case_id, harness.run_id, viewer)
 
     assert (response.status_code, response.json()) == (
-        503,
+        500,
         _refused("ARTIFACT_RECORD_MISMATCH"),
     )
 
@@ -670,7 +670,7 @@ def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
     response = _section(client, harness.case_id, harness.run_id, viewer)
 
     assert (response.status_code, response.json()) == (
-        503,
+        500,
         _refused("ARTIFACT_RECORD_MISMATCH"),
     )
 
@@ -933,7 +933,7 @@ def test_corrupt_route_is_a_sanitized_store_failure(
         conn.execute("UPDATE run_routes SET route_digest = 'synthetic-corruption'")
     conn.commit()
     response = _section(client, case_id, run_id, viewer)
-    assert response.status_code == 503
+    assert response.status_code == 500
     assert response.json() == _refused("ROUTE_IDENTITY_INVALID")
 
 
