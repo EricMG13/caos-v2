@@ -25,7 +25,10 @@ from server.api.edge import (
     SECURITY_HEADERS,
     EdgeGuard,
     EdgeMode,
+    is_api_path,
+    refusal_body,
     resolve_mode,
+    startup_failed,
 )
 from server.api.identity import (
     EDGE_TOKEN_ENV,
@@ -348,3 +351,62 @@ def test_an_unhandled_fault_answers_a_secured_constant_500() -> None:
     assert response.headers["cache-control"] == "no-store"
     with pytest.raises(RuntimeError):
         TestClient(faulty).get("/api/v1/fault")
+
+
+def test_is_api_path_matches_the_root_and_everything_under_it() -> None:
+    assert is_api_path("/api") is True
+    assert is_api_path("/api/v1/cases") is True
+    assert is_api_path("/apidoc") is False
+    assert is_api_path("/") is False
+
+
+def test_refusal_body_carries_the_code_and_its_constant_clearance() -> None:
+    import json
+
+    body = refusal_body(RefusalCode.ORIGIN_REFUSED)
+
+    assert json.loads(body) == {
+        "code": "ORIGIN_REFUSED",
+        "clears": CLEARS[RefusalCode.ORIGIN_REFUSED],
+    }
+
+
+def test_startup_failed_answers_only_a_lifespan_startup_message() -> None:
+    import asyncio
+    from collections.abc import MutableMapping
+    from typing import Any
+
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def receive() -> MutableMapping[str, Any]:
+        return {"type": "lifespan.startup"}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    asyncio.run(startup_failed(receive, send))
+
+    assert sent == [
+        {
+            "type": "lifespan.startup.failed",
+            "message": RefusalCode.EDGE_CONFIG_INVALID.value,
+        }
+    ]
+
+
+def test_startup_failed_ignores_a_non_startup_message() -> None:
+    import asyncio
+    from collections.abc import MutableMapping
+    from typing import Any
+
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def receive() -> MutableMapping[str, Any]:
+        return {"type": "lifespan.shutdown"}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    asyncio.run(startup_failed(receive, send))
+
+    assert sent == []
