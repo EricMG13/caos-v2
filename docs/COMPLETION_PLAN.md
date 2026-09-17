@@ -843,6 +843,46 @@ acceptance and updates an open drawer; Book compares on one stated basis with
 a ten-field passport per cell; the analysis page names the blocking node; nine
 sections honest.
 
+**How each was met, recorded on 17 September 2026 at the phase's exit rather
+than left to be read off the plan.** Five of the six are met. The fourth is
+met in one half and **unmeetable in the other**, and is written out here so
+nobody reads the clause as satisfied:
+
+1. *Seven-identity matrix* — **met.** `tests/test_actor_matrix.py` carries two
+   tables over the same nine actors: `MATRIX` for the nine earlier commands and
+   the three Task 12.1 added (`members`, `revocation`, `withdrawal`), and
+   `DELIVERABLE` for the four filing commands, which needs a different fixture
+   because a revision can only be derived from a run whose artifacts are
+   accepted. Both include `anonymous → 401`, `nonmember → 404`,
+   `revoked → 404` and a global READER with case standing → 403.
+2. *A signer cannot freeze and a freezer cannot file* — **met**, twice over: at
+   the surface by `report_actions`, at commit by `server/deliverable/filing.py`,
+   and now in the browser on three engines, with a control that distinguishes
+   `APPROVER_NOT_INDEPENDENT` from `DELIVERABLE_NOT_SIGNED` so the assertion
+   names which rule refused.
+3. *Withdrawal mid-run prevents fresh acceptance and updates an open drawer* —
+   **met**, in one journey test with a real control on each half: the drawer is
+   unchanged when a *different* source is withdrawn, and marked when its own is.
+4. *Book on one stated basis with a ten-field passport per cell* — **the basis
+   is met; the per-cell passport cannot be met end to end and is met by unit
+   test only.** No run made through the API can carry CP-CF, so no cell exists
+   to open a passport from: `create_run` resolves the route with no
+   `RouteExtensions` and `CreateRun` carries no field to ask for one, while the
+   only caller that requests the model extension is the qualification harness.
+   The ten fields are held by `tests/test_wire_contract.py`'s
+   `test_passport_contract` and the Book unit specs. The journey asserts the
+   *absence* of a table and a cell, so the day the extension becomes
+   requestable that test fails and is rewritten to open the passport. See
+   `CLAUDE.md`'s Completion Phase 12 entry, whose upgrade is a
+   `model_extension` field on `CreateRun`, pinned in the route digest.
+5. *The analysis page names the blocking node* — **met**, through the
+   production stack on three engines (Task 12.4's field, Task 12.5's proof).
+6. *Nine sections honest* — **met with two recorded dishonesties, both
+   entered in the ledger rather than fixed**: Report is served but unreachable
+   from the workspace, because nothing there can make a case's first revision;
+   and `work.stop_code` is on the wire and on no surface, so an operator
+   meeting a parked run is told only that Start and Retry are refused.
+
 ### Phase 13 — Concurrency, durability, the trusted edge, the release pack
 
 **Fixes:** O23–O26.
