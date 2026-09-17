@@ -993,21 +993,29 @@ def test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt() -> None
 
 
 def test_the_declared_section_bound_leaves_the_widest_node_its_authority() -> None:
-    """Why the declared number is the number: on the catalog's widest pathway
-    CP-5 takes 16 direct upstreams, so that many sections at the bound, beside
-    CP-5's own delivered authority, must still leave the request ceiling room
-    for evidence. A bundle that widens a node or grows an authority set fails
-    here rather than at the first FULL run."""
-    edges = CATALOG["profiles"]["FULL_CREDIT_32"]["edges"]
-    widest = max(
-        sum(1 for edge in edges if edge["target"] == node)
-        for node in {edge["target"] for edge in edges}
-    )
-    assert widest == 16
-    authority = sum(len(data) for _n, data in delivered_authority(BUNDLE, "CP-5").files)
-    sections = widest * MAX_UPSTREAM_HANDOFF_BYTES
-    assert sections + authority < MAX_REQUEST_BYTES
-    assert MAX_REQUEST_BYTES - sections - authority > MAX_REQUEST_BYTES // 4
+    """Why the declared number is the number: a node's own delivered authority
+    beside its direct upstreams at the bound must still leave the request
+    ceiling room for evidence. A bundle that widens a node or grows an
+    authority set fails here rather than at the first FULL run.
+
+    Maximised over every node of every profile, not over one pair. The review
+    that asked for this found the single-pair form would pass a bundle whose
+    third profile carried a wider node, or whose CP-3 authority grew past the
+    quarter, while the arithmetic the declared number rests on no longer held.
+    CP-5 is the true maximum on this bundle and the assertion does not depend
+    on that staying true."""
+    worst = 0
+    for profile in CATALOG["profiles"].values():
+        edges = profile["edges"]
+        for node in {edge["target"] for edge in edges}:
+            upstreams = sum(1 for edge in edges if edge["target"] == node)
+            files = delivered_authority(BUNDLE, node).files
+            cost = upstreams * MAX_UPSTREAM_HANDOFF_BYTES + sum(
+                len(data) for _name, data in files
+            )
+            worst = max(worst, cost)
+    assert worst < MAX_REQUEST_BYTES
+    assert MAX_REQUEST_BYTES - worst > MAX_REQUEST_BYTES // 4
 
 
 class _NoTransport:

@@ -768,9 +768,6 @@ def _upstream_section(
         return ""
     sections = []
     for ref, data in upstream:
-        # Before the decode, so the oversize section is refused rather than held.
-        if len(data) > MAX_UPSTREAM_HANDOFF_BYTES:
-            raise Refusal(RefusalCode.UPSTREAM_SECTION_OVER_CEILING)
         text = _utf8(data, RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
         if (
             hashlib.sha256(data).hexdigest() != ref.sha256
@@ -778,6 +775,14 @@ def _upstream_section(
             or ref.module_id not in owned
         ):
             raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
+        # After the identity comparison, not before it. These bytes are already
+        # whole in memory from the blob read, so checking the size first bought
+        # no memory and cost an answer: a handoff both altered and oversize
+        # reported a capacity problem to an operator who has an integrity one.
+        # The host owns identity (invariant 3); a host policy bound does not
+        # get to answer ahead of it.
+        if len(data) > MAX_UPSTREAM_HANDOFF_BYTES:
+            raise Refusal(RefusalCode.UPSTREAM_SECTION_OVER_CEILING)
         sections.append(
             f"module_id: {ref.module_id}\nroute_node_id: {ref.route_node_id}\n"
             f"sha256: {ref.sha256}\nallowed_use: {uses[ref.module_id]}\n"
