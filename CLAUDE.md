@@ -442,17 +442,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* a declared `work_mem` floor for the admission path, the day a
   document large enough to spill is admitted; none for the refusal ordering,
   which is the price of checking once.
-- **Two tested islands have no production caller, and deleting them is a gate
-  edit.** §74.4: reducing Book and Admin to their unavailable shells left
-  `bind`/`release` in `frontend/src/app/authority.ts` and
-  `EvidenceContext.openPassport` with the metric-passport overlay behind it
-  reachable from no section. Both are the subject of a test pinned by name in
-  `tests/test_phase_exits.py`
-  (`test_book_binds_one_snapshot_per_compared_case`, `test_passport_contract`),
-  whose own assertion exists to stop the names being re-excused to green it. So
-  neither may be deleted as cleanup, and both sites now carry a comment saying
-  so. *Upgrade:* delete each with the gate entry that pins it, in one commit, on
-  the day its section is served or its exit is formally withdrawn.
+- ~~**Two tested islands have no production caller, and deleting them is a gate
+  edit.**~~ Closed by Completion Phase 12 Task 12.3 (§76), which took the
+  upgrade's first arm rather than its second: the section is served, so neither
+  island is deleted and both have their caller back. `BookSection` binds each
+  compared credit through `bind`/`release`, and a Book cell opens the
+  metric-passport overlay through `EvidenceContext.openPassport`. The two tests
+  `tests/test_phase_exits.py` pins by name are untouched and still hold what
+  their names say
+  (`test_book_binds_one_snapshot_per_compared_case`,
+  `test_passport_contract`), which is the point of having pinned them: the
+  names could not be excused to green a tree, so they were still there to be
+  satisfied. The original entry, §74.4: reducing Book and Admin to their
+  unavailable shells left `bind`/`release` in `frontend/src/app/authority.ts`
+  and `EvidenceContext.openPassport` with the metric-passport overlay behind it
+  reachable from no section, so neither could be deleted as cleanup and both
+  sites carried a comment saying so.
 
 **Completion Phase 10.**
 

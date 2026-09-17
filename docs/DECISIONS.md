@@ -3756,3 +3756,53 @@ wire now reads inconsistently. `STORE_UNAVAILABLE` genuinely spans both classes,
 because `committed_unit` maps every `psycopg.Error` to it including constraint
 violations; it is kept transient on asymmetric cost, and the retry it invites is
 answered from the idempotency receipt on a command that already committed.
+
+## 2026-09-17 §76 — Book is served over accepted CP-CF projections; D2's Book half is superseded
+
+§74.4 reduced Book and Admin to unavailable shells because neither had a
+document to render. Completion Phase 12 Task 12.3 gives Book one.
+
+`GET /api/v1/book` is portfolio-scoped — no case in its path — and its rows are
+the credits the caller holds live standing on, read through `cases_for_member`
+exactly as Directory reads them and bounded at four, which is `docs/IA_SPEC.md`
+4.4's "two to four credits side by side". Each row's cells are values the
+accepted CP-CF projection already carries, re-derived by the Model section's own
+reader rather than by a second one: `accepted_forecast` is extracted from
+`read_model`, live-source check included, because two readers of one accepted
+pair are two answers to a question invariant 3 says the host owns once. The
+host computes no figure and reaches no verdict here.
+
+**The columns are declared in host code** — six of them, the five whose operands
+are the period's own accepted driver row and the EBITDA margin
+`cash_flow_forecast` derives from two of those. That is not a second authority
+beside the bundle: `caos-forecast-v1` is this host's calculator and its shape is
+the host's to state, so invariant 4 is untouched. The debt and cash roll-forward
+and the leverage metrics over it are **not** declared, because their lineage
+reaches every earlier period and a passport naming only the local drivers would
+understate it — which is the failure that matters on a leverage figure. The
+cost is that Book ships without `metrics.net_leverage`, the figure IA_SPEC names
+as a facet, and the honest-ledger entry records it as a gap rather than an
+omission.
+
+**The passport is closed at exactly ten fields**, IA_SPEC 4.4's, pinned in
+`tests/test_wire_contract.py`; an eleventh would be this host asserting
+something the accepted record does not say. That closure has a cost of its own,
+also recorded: every Book cell is a projection and none carries the `PROJECTED`
+marker, because there is no field for one.
+
+**The scenario is the record's own `case`.** The first implementation served the
+literal `NOT_DECLARED` on the stated ground that `caos-forecast-v1` declares no
+scenario. It declares one, under that name: `server/qualification/matrix.py`
+already matches `ExpectedForecast.scenario` against `item["case"]`,
+`MAX_FORECAST_CASES` caps it, and the same document renders it as
+`BookPeriod.case` and as each table's heading. So a credit carrying BASE and
+DOWNSIDE produced two tables whose every cell opened a passport saying neither —
+the one field whose whole job is telling them apart. The section names it, and
+`BookBasis.scenario` says `EVERY_ACCEPTED_CASE`, which is what the comparison
+spans. Found by the Task 12.3 acceptance review, which read the calculator
+rather than the comment above the constant.
+
+Admin stays at its shell and D2's Admin half stands. Book's `bind`/`release`
+and the metric-passport overlay, which §74.4's ledger entry kept because
+deleting a pinned gate's subject is a gate edit, now have their production
+caller back; that entry is struck by the commit that gives them one.
