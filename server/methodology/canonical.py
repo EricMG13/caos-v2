@@ -81,7 +81,7 @@ from server.methodology.vendor import (
     VendorContract,
     load_vendor_contract,
 )
-from server.provider import CompletionProvider, _reported_charge
+from server.provider import CompletionProvider, reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import (
@@ -202,7 +202,7 @@ def execute_handoff(
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     require_idle(conn)
     completion = provider.complete(prompt, json_object=True)
-    charge = _reported_charge(
+    charge = reported_charge(
         completion.charge if isinstance(completion.charge, Decimal) else None
     )
     generation = producer_identifier(completion.generation_id, limit=512)

@@ -45,6 +45,7 @@ from server.provider import (
     UrllibTransport,
     _opener,
     encode_request,
+    reported_charge,
 )
 from server.refusals import Refusal, RefusalCode
 
@@ -126,6 +127,19 @@ def test_the_charge_is_a_decimal_not_a_float() -> None:
 
     assert isinstance(completion.charge, Decimal)
     assert not isinstance(completion.charge, float)
+
+
+def test_reported_charge_accepts_an_int_or_a_decimal() -> None:
+    assert reported_charge(5) == Decimal(5)
+    assert reported_charge(Decimal("1.25")) == Decimal("1.25")
+
+
+def test_reported_charge_refuses_a_negative_amount_or_a_non_numeric_value() -> None:
+    """Invariant 7's own bound (`validate_spend`), and everything that is not
+    even a number in the first place."""
+    assert reported_charge(Decimal("-1")) is None
+    assert reported_charge("5") is None
+    assert reported_charge(None) is None
 
 
 @pytest.mark.parametrize("status", [200, 400, 429, 500, 302])
