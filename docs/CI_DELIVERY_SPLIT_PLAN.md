@@ -50,3 +50,65 @@ Delivery therefore closes on `main` when the #284–#295 stack and the audit-rem
 `scripts/check_pr_size.py` diffs `<base>...HEAD`; the hosted job diffs `origin/<base_ref>...HEAD` **against the pull request's merge ref**. The two disagree whenever a predecessor was squash-merged, because the squash leaves the predecessor's content in `main` without its ancestry, so a local three-dot diff re-counts it. #263 (790 hosted, 1,555 locally), #266 (124 against 942), #272 (234 against 1,716) and #282 (700 against 1,523) are all that shape. The hosted number is the gate; a local measurement is a forecast of it, and only the hosted `size` job's `changed lines:` line may be recorded as a result.
 
 This plan is a delivery map, not approval to push, open PRs, change branch protections, or make paid provider calls.
+
+## Per-PR hosted record, read 17 September 2026
+
+Every pull request since #258, as GitHub reported it. **Counted size is the
+hosted `size` job's own `changed lines:`**, never a local measurement:
+`scripts/check_pr_size.py` diffs `{base}...HEAD` with `HEAD` hardcoded, so it
+cannot measure any PR but the current checkout, and its three-dot diff
+overcounts once a predecessor was squash-merged (#263 measured 790 hosted
+against 1,555 local, #266 124 against 942, #272 234 against 1,716, #282 700
+against 1,523). "9/9" means the nine checks `CI_GATE_CONTRACT.md` requires
+(`lint`, `types`, `test`, `security`, `size`, `frontend`, `postgres`,
+`sonarqube`, `SonarCloud Code Analysis`); `provider` and `image` also ran on
+every PR and are not among the nine.
+
+| PR | Head | Base | Size | Nine checks | Landed |
+|---|---|---|---:|---|---|
+| 259 | `7a9496d9` | `4f4f4318` | 732 | 9/9 | `688da195` |
+| 260 | `5de39d13` | `688da195` | 656 | 9/9 | `fe311a0a` |
+| 261 | `3f43a2f6` | `fe311a0a` | 752 | 9/9 | `52f106fe` |
+| 262 | `63efab42` | `48ee7b6c` | 765 | 9/9 | `35f24a08` |
+| 263 | `fad25120` | `35f24a08` | 790 | 9/9 | `eefb6f0d` |
+| 264 | `acd262e4` | `52f106fe` | 209 | 9/9 | `4103530a` |
+| 265 | `6fc6ba38` | `4103530a` | 609 | 9/9 | `231f8e62` |
+| 266 | `777225f6` | `231f8e62` | 124 | 9/9 | `3a4868a9` |
+| 267 | `577377b2` | `a7467378` | 702 | 9/9 | `446df839` |
+| 268 | `cb17ad60` | `4f4f4318` | 23 | 9/9 | open |
+| 269 | `db44653d` | `446df839` | 600 | 9/9 | `30def90d` |
+| 270 | `3df08edb` | `15a781fa` | 471 | 9/9 | `3cf9b3fa` |
+| 271 | `e8d9cfb9` | `15a781fa` | 1482 | 8/9 — `size` FAILURE | closed unmerged |
+| 272 | `e4940c2e` | `3cf9b3fa` | 234 | 9/9 | `0a251593` |
+| 273 | `0a926ef2` | `0a251593` | 678 | 9/9 | `6277053a` |
+| 274 | `6bbb01e3` | `6277053a` | 772 | 9/9 | `8941396b` |
+| 275 | `c906d167` | `8941396b` | **1965** | 8/9 — `size` FAILURE | `b9911af3` (over-cap merge, **no split proof in its body**) |
+| 276 | `f37860fe` | `b9911af3` | 140 | 9/9 | `c75e0ba4` |
+| 277 | `eb9575d8` | main | 6 | 9/9 | `15a781fa` |
+| 278 | `f8be9956` | `c75e0ba4` | 568 | 9/9 | `372a10da` |
+| 279 | `cd3e3086` | `372a10da` | 663 | 9/9 | `a1b284f6` |
+| 280 | `d889d926` | `cd3e3086` | 801 | 8/9 — `size` FAILURE, one line over | closed unmerged |
+| 281 | `6d1b6588` | a PR branch | 0 | 5/9 — `test`, `security` FAILURE; `sonarqube` SKIPPED; `SonarCloud` absent | `6d1b6588` **into #280's branch, not `main`** |
+| 282 | `6cfc5937` | `a1b284f6` | 700 | 9/9 | `976c0a30` |
+| 283 | `c8906cdd` | `976c0a30` | 645 | 9/9 | `01c37247` (**current `main`**) |
+| 284 | `bee07276` | `c8906cdd` | 754 | 8/9 — `SonarCloud` FAILURE | open |
+| 285 | `4e6433d1` | a PR branch | 0 | 8/9 — `security` FAILURE | `4e6433d1` **into #284's branch, not `main`** |
+| 286 | `a26da048` | `4e6433d1` | 658 | 6/9 — `test` FAILURE; `sonarqube` SKIPPED; `SonarCloud` absent | open |
+| 287 | `0e4fcd10` | `a26da048` | 274 | 6/9 — as #286 | open |
+| 288 | `f7fb26dc` | `0e4fcd10` | 766 | 9/9 | open |
+| 289 | `c8520837` | `f7fb26dc` | 608 | 9/9 | closed unmerged (superseded by #291) |
+| 290 | `9154d073` | `f7fb26dc` | 79 | 9/9 | open |
+| 291 | `ec272cf9` | `9154d073` | 702 | 9/9 | open |
+| 292 | `b14dc6ec` | `7315abf1` | 709 | 9/9 | open |
+| 293 | `8aca244b` | `b14dc6ec` | 730 | 9/9 | open |
+| 294 | `ff8f0102` | `8aca244b` | 792 | 8/9 — `SonarCloud` FAILURE | open |
+| 295 | `e0d5a602` | `ff8f0102` | 633 | 8/9 — `SonarCloud` FAILURE | open |
+| 296 | `e2015953` | `01c37247` | **879** | 4/9 — `size` FAILURE; `test`, `frontend` IN_PROGRESS; `sonarqube`, `SonarCloud` absent | open |
+
+Three things this table says that a summary would hide. #281 and #285 are
+recorded MERGED and are **not on `main`**: each merged into a sibling PR's
+branch, #280 was then closed unmerged, and both carried red required checks.
+#275 is the only over-cap merge since #258 and its body carries no split
+attempt, which the standing over-cap authorization requires. And the last PR
+merged to `main` is #283, which is a Phase 4 slice (`4.1l`), so PR numbering
+does not track phase order.

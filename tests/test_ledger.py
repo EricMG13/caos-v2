@@ -115,8 +115,19 @@ def test_every_open_ledger_entry_states_its_upgrade_path() -> None:
 
 
 def test_the_reader_found_the_whole_ledger() -> None:
-    """A reader that matched nothing would make both rules above vacuous."""
+    """A reader that matched nothing would make both rules above vacuous.
+
+    A count alone left slack: the Phase 7 confidence review showed that a `## `
+    inserted mid-ledger would silently drop twelve entries and still clear a
+    count floor. So the floor also names the two phases that bracket the
+    section, which cannot both be present unless the reader ran its length.
+    """
     found = ledger_state.read()
+    phases = {entry.phase for entry in found}
+    assert "Completion Phase 7" in phases, "the newest phase heading was not read"
+    assert "Phase 1" in phases, (
+        "the oldest phase heading was not read, so the reader stopped early"
+    )
     assert len(found) > 80, f"read only {len(found)} ledger entries"
     assert any(entry.struck for entry in found), "no closed entry was recognised"
     assert any(entry.open for entry in found), "no open entry was recognised"

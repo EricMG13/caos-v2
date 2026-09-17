@@ -82,7 +82,8 @@ per-PR table with every hosted check result is in
   drafted against. Ruleset 22701406 "main gates" is **active**.
 - **The undelivered remainder is 13,036 counted lines over 173 files**, not the
   75,566 the Phase 6 checkpoint recorded nor the 123,065 the split plan names.
-  Most of the branch has landed. Phase 7's last merged PR on `main` is #283;
+  Most of the branch has landed. The last merged PR on `main` is #283, which is
+  a Phase 4 slice, so PR numbering does not track phase order;
   Phase 6 delivery is incomplete, with nine PRs open.
 - **Size was read from the hosted `size` job's own log**, not measured locally,
   because `scripts/check_pr_size.py` hardcodes `HEAD` and cannot measure an
@@ -105,21 +106,33 @@ Three findings a reader should not have to rediscover:
 
 ### Remediation stream, as of 17 September 2026
 
-Determined from commits, never from a plan checkbox. **Nothing in this stream is
-pushed, on `main`, or an ancestor of this branch.**
-
+Determined from commits, never from a plan checkbox. Wave 1 was local-only when
+this was first written and **was merged into this branch at `6eb7fef`** while
+this phase was in flight; nothing in that stream is pushed to `gh-origin` or on
+`main`, and its per-task rulings live in a gitignored ledger, so anything from
+them that belongs in the record has to be committed rather than pointed at.
 | Wave | Tasks | State |
 |---|---|---|
-| 1 — correctness and security | T1–T6 | Commits exist for all six, integrated at `86b0cd0` on the local-only `sdd/integration-wave1`. Two follow-up commits (T2's test naming, two of T4's) are outside that integration. **No `make check` result is recorded for `86b0cd0` anywhere, and there is no hosted result because the branch is unpushed** |
+| 1 — correctness and security | T1–T6 | **Merged into this branch at `6eb7fef`** by the remediation session (`docs/DECISIONS.md` §70), whose second parent is the integration tip `266ee28`. Task branches are `sdd/t1`–`sdd/t6`. An earlier integration commit, `86b0cd0`, was observed as the tip and is no longer an ancestor of `266ee28`: that branch was rebased onto this phase's commits, so `86b0cd0` is abandoned and must not be cited. **What that stream ran on the merged tree, in its own words: the offline engineering gate less the security scanners, the browser suites and the image** — the offline suite under `-n auto` with the production-image marker deselected, `ruff check` and `ruff format --check`, `mypy` over 233 files, `check_vocabulary.py`, `check_tested.py`, `io_budget.py --assert`, and in `frontend/` ESLint, 237 unit tests and a production build exporting 25 routes. It did **not** run bandit, pip-audit, gitleaks, `scan_floors.py`, the accessibility matrix, the workbench suite, the image gate or `smoke-production`. The first complete `make check` over the merged tree is this phase's at its freeze, which is a stronger and different claim |
 | 2 — prompt and evidence | T7, T8, T9 | no branch, no commits |
 | 3 — consolidation | T10–T15 | no branch, no commits |
 | 4 — store, operator surface, residue | T16–T20 | no branch, no commits; T16 is the owner's Book/Admin decision (D2) and no decision entry exists |
 
-Of the seven dependencies the completion plan names: **T2 and T3 are met by
-commits** on that unpushed branch; **T7, T8, T11, T13 and D2 are not met.** So
-Phase 10 Task 10.1, Phase 9 Task 9.4's prompt section, Phase 8 Tasks 8.2 and
-8.3, and every live qualification run remain blocked on that stream, exactly as
-the plan's Class C says.
+Of the seven dependencies the completion plan names, the merge at `6eb7fef`
+settles wave 1's: **T1–T6 are in this branch**, so T2, T3 and **T5** are met.
+**T7, T8, T11, T13 and D2 are not** — waves 2 to 4 have no branch. So Phase 8
+Task 8.3 is unblocked and rebases onto T5; Phase 8 Task 8.2 (T10), Phase 9 Task
+9.4's prompt section (T7), Phase 10 Task 10.1 (T7, T8, T11) and every live
+qualification run (T7's prompt identity) remain blocked, exactly as the plan's
+Class C says.
+
+Two consequences of that merge for this phase's own records. `server/api/app.py`'s
+`_STATUS` map is now exhaustive over `RefusalCode` with a `_STATUS[code]` lookup,
+so a new refusal code without an entry is a `KeyError` inside an exception
+handler rather than a typed refusal: any task adding a code must add its status
+in the same commit, and `tests/test_api_routes.py::test_every_refusal_code_has_an_explicit_http_status`
+is what says so. And §53.3 is superseded by §70.2 — with neither an edge token
+nor the trust switch, a groups header no longer chooses a global role.
 
 ## Completion Phase 8 — requests pending on the vendor, 17 September 2026
 

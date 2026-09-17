@@ -64,7 +64,13 @@ def _ledger_text(text: str) -> str:
     if not starts:
         raise ValueError(_MOVED)
     start = starts[0]
-    after = [i for i, line in enumerate(lines) if i > start and line.startswith("## ")]
+    # An H1 ends the section as surely as an H2: the contract carries an
+    # appended `# GitNexus` block, which was being read as ledger body.
+    after = [
+        i
+        for i, line in enumerate(lines)
+        if i > start and (line.startswith("## ") or line.startswith("# "))
+    ]
     end = after[0] if after else len(lines)
     return "\n".join(lines[start:end])
 
@@ -88,15 +94,20 @@ def entries(text: str) -> list[LedgerEntry]:
                 struck=current[0].startswith("- ~~"),
                 tests=tuple(sorted(frozenset(_TEST.findall(body)))),
                 commits=tuple(sorted(frozenset(_COMMIT.findall(body)))),
-                upgrade="Upgrade:" in body,
+                upgrade="*Upgrade:*" in body,
                 body=body,
             )
         )
         current.clear()
 
+    # A phase heading in this file always follows a blank line. Without that,
+    # a wrapped entry line that happens to be exactly a bold phrase splits the
+    # entry in two and relabels the phase.
+    blank_before = True
     for line in _ledger_text(text).splitlines():
         heading = _PHASE.fullmatch(line.strip())
-        if heading is not None and not line.startswith("- "):
+        was_blank, blank_before = blank_before, not line.strip()
+        if heading is not None and was_blank and not line.startswith("- "):
             flush()
             phase = heading.group(1)
             continue
