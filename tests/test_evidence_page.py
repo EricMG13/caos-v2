@@ -26,7 +26,7 @@ from test_pdf_extraction import FIRST_LINE, REPORT, SECOND_LINE
 
 from server.api import app as app_module
 from server.api.app import app, blob_store, store_connection
-from server.api.identity import TRUST_SWITCH
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.api.reads import evidence as evidence_read
 from server.api.wire import CLEARS, PAGE_LINES_MAX, PageDocument, SectionNote
 from server.blobs import BlobStore
@@ -49,7 +49,9 @@ def client(
 ) -> Iterator[TestClient]:
     conn, _ = case
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # Tokenless, so no groups header is read: the development switch is how a
+    # test here asserts a global role above the floor.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     app.dependency_overrides[store_connection] = lambda: conn
     app.dependency_overrides[blob_store] = lambda: blobs
     try:
@@ -69,10 +71,10 @@ class _CountingConnection:
         return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
 
 
-def _as(user_id: UUID, groups: str | None = None) -> dict[str, str]:
+def _as(user_id: UUID, role: str | None = None) -> dict[str, str]:
     headers = {"x-caos-user": str(user_id)}
-    if groups is not None:
-        headers["x-forwarded-groups"] = groups
+    if role is not None:
+        headers[ROLE_HEADER] = role
     return headers
 
 
@@ -131,15 +133,15 @@ def test_a_page_request_across_anonymous_nonmember_reader_writer_approver_revoke
         assert [line.text for line in document.body.lines] == [FIRST_LINE, SECOND_LINE]
 
     reader = allowed[0]
-    for user, groups, case_id in (
+    for user, role, case_id in (
         (uuid4(), None, report.case_id),
         (revoked, None, report.case_id),
-        (uuid4(), "caos-admins", report.case_id),
+        (uuid4(), "ADMIN", report.case_id),
         (reader, None, uuid4()),
         (reader, None, "not-a-case"),
     ):
         response = client.get(
-            _path(report, source, case=case_id), headers=_as(user, groups)
+            _path(report, source, case=case_id), headers=_as(user, role)
         )
         report.conn.rollback()
         assert _answer(response) == (404, _refused(RefusalCode.CASE_NOT_FOUND))

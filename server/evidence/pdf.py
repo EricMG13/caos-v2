@@ -133,7 +133,7 @@ class PdfExtractor:
         `SOURCE_NOT_READABLE` for anything else, an unreadable answer included.
         Only a code or the tokens cross back, never a message.
         """
-        return _answer(_in_child({"limits": asdict(limits)}, data, deadline))
+        return _answer(*_in_child({"limits": asdict(limits)}, data, deadline))
 
 
 def page_frame(
@@ -153,13 +153,20 @@ def page_frame(
     whose crop clips to nothing, and the child's codes otherwise.
     """
     header = {"limits": asdict(limits), "frame": page}
-    return _frame_answer(_in_child(header, data, deadline))
+    return _frame_answer(*_in_child(header, data, deadline))
 
 
-def _in_child(header: dict[str, object], data: bytes, deadline: float) -> bytes:
-    """The child's answer to `header` and `data`, or `SOURCE_EXTRACTION_TIMEOUT`
-    once `deadline` passes, with the child killed."""
+def _in_child(
+    header: dict[str, object], data: bytes, deadline: float
+) -> tuple[bytes, int]:
+    """The child's answer to `header` and `data` with its exit status, or
+    `SOURCE_EXTRACTION_TIMEOUT` once `deadline` passes, with the child killed."""
     line = json.dumps({**header, "deadline": deadline}).encode()
+    wait = None if deadline == float("inf") else deadline - time.monotonic()
+    if wait is not None and wait <= 0.0:
+        # Before `Popen`: an interpreter started only to be killed unanswered is
+        # a tenth of a second spent on a deadline that has already passed.
+        raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
     # ponytail: one interpreter per PDF; a pool if admission volume makes the
     # start-up cost show.
     # Fixed argv, no shell, an empty environment.
@@ -170,7 +177,6 @@ def _in_child(header: dict[str, object], data: bytes, deadline: float) -> bytes:
         stderr=subprocess.DEVNULL,
         env={},
     )
-    wait = None if deadline == float("inf") else max(0.0, deadline - time.monotonic())
     try:
         out, _ = child.communicate(line + b"\n" + data, timeout=wait)
     except subprocess.TimeoutExpired:
@@ -179,7 +185,7 @@ def _in_child(header: dict[str, object], data: bytes, deadline: float) -> bytes:
         child.kill()
         child.communicate()
         raise Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT)
-    return out
+    return out, child.returncode
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -198,8 +204,20 @@ _CHILD_CODES = frozenset(
 )
 
 
-def _answer(out: bytes) -> list[Token]:
+def _note_death(returncode: int) -> None:
+    """Say that the host's own child died rather than answering.
+
+    The refusal is still the document's -- nothing better can be said about
+    bytes no extraction was produced from -- but an unanswered child is a host
+    fault, and an exit status is an integer, never document text.
+    """
+    if returncode != 0:
+        print(f"extractor child exited {returncode}", file=sys.stderr)
+
+
+def _answer(out: bytes, returncode: int) -> list[Token]:
     """The child's JSON answer as tokens, or the refusal it names."""
+    _note_death(returncode)
     code = RefusalCode.SOURCE_NOT_READABLE
     tokens: list[Token] | None = None
     try:
@@ -215,9 +233,10 @@ def _answer(out: bytes) -> list[Token]:
     return tokens
 
 
-def _frame_answer(out: bytes) -> Frame:
+def _frame_answer(out: bytes, returncode: int) -> Frame:
     """The child's frame, `PAGE_NOT_AVAILABLE` for its `null`, or the code
     it names; anything else it says is an unreadable document."""
+    _note_death(returncode)
     code = RefusalCode.SOURCE_NOT_READABLE
     frame: Frame | None = None
     try:

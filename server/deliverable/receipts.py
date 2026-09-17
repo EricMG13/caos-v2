@@ -26,11 +26,15 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
     run_id: UUID,
     revision_id: UUID,
 ) -> bytes:
-    """Return proven canonical bytes in the caller's authorized, case-locked unit.
+    """Return proven canonical bytes in the caller's authorized read or write unit.
 
-    The caller owns authorization, locking and transaction cleanup, as for
-    `prove_revision`. Historical renderer pins remain valid; live source and
-    saved-payload authority must still prove. Legacy filings without bytes refuse.
+    The caller owns authorization, its own unit and transaction cleanup, as for
+    `prove_revision`: a write caller holds the case lock, the filed Committee
+    section read holds none, so the audit-head comparison below reads across
+    snapshots and a governed write committing mid-read makes it refuse rather
+    than serve bytes it cannot prove. Historical renderer pins remain valid; live
+    source and saved-payload authority must still prove. Legacy filings without
+    bytes refuse.
     """
     row = conn.execute(
         "SELECT r.payload_sha256,p.payload_sha256,p.frozen_by,p.filed_by,"

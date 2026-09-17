@@ -99,8 +99,11 @@ export function Workspace({ section }: { section: Section }) {
   const requested =
     sectionUrl(section, { case: caseId, run: runId, revision: revisionId, fixture }) !== null;
   // Everything the reader sees is keyed on the request that produced it, so a
-  // navigation shows `loading` without a render-time state write.
-  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${qualificationEvidence ?? ""}|${fixture ?? ""}`;
+  // navigation shows `loading` without a render-time state write. The
+  // qualification hash is not part of it: it binds global evidence the strip
+  // reads for itself and names no section request, so keying on it would tear
+  // the section down — and its open tail with it — for a label change.
+  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${fixture ?? ""}`;
   const [held, setHeld] = useState<Keyed<Held> | null>(null);
   const [tabChoice, setTabChoice] = useState<Keyed<string> | null>(null);
   const authority = useRef<Authority>(INITIAL);
@@ -237,7 +240,10 @@ export function Workspace({ section }: { section: Section }) {
               <LedgerProvider>
                 <RegionState status={status} onReload={reload}>
                   {(doc) => (
-                    <SectionBoundary key={mountKey}>
+                    // A render failure is about the document that caused it:
+                    // the next one served clears it, without waiting for a
+                    // navigation to unmount the boundary.
+                    <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
                       <View key={mountKey} document={doc} tab={activeTab} />
                     </SectionBoundary>
                   )}

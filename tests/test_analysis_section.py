@@ -25,7 +25,7 @@ from test_loop_charges import ESTIMATE
 
 from server.api import app as app_module
 from server.api.app import app, blob_store, methodology_bundle, store_connection
-from server.api.identity import TRUST_SWITCH
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.api.reads import analysis as analysis_read
 from server.api.wire import CLEARS, AnalysisDocument
 from server.boundary_text import BoundaryText
@@ -46,7 +46,9 @@ def client(
     harness: _Harness, empty_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # Tokenless, so no groups header is read: the development switch is how a
+    # test here asserts a global role above the floor.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     app.dependency_overrides[store_connection] = lambda: harness.conn
     app.dependency_overrides[blob_store] = lambda: harness.blobs
     app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
@@ -73,10 +75,10 @@ def _serving(counter: _CountingConnection) -> Callable[[], _CountingConnection]:
     return lambda: counter
 
 
-def _as(user_id: UUID, groups: str | None = None) -> dict[str, str]:
+def _as(user_id: UUID, role: str | None = None) -> dict[str, str]:
     headers = {"x-caos-user": str(user_id)}
-    if groups is not None:
-        headers["x-forwarded-groups"] = groups
+    if role is not None:
+        headers[ROLE_HEADER] = role
     return headers
 
 
@@ -364,17 +366,17 @@ def test_analysis_private_404_and_actor_matrix(
     refused = [
         (uuid4(), None, case_id),
         (revoked, None, case_id),
-        (uuid4(), "caos-admins", case_id),
+        (uuid4(), "ADMIN", case_id),
         (members[Standing.READER], None, uuid4()),
         (members[Standing.READER], None, "not-a-case"),
     ]
-    for user, groups, path_case in refused:
-        response = client.get(_analysis(path_case), headers=_as(user, groups))
+    for user, role, path_case in refused:
+        response = client.get(_analysis(path_case), headers=_as(user, role))
         conn.rollback()
         assert (response.status_code, response.json()) == (
             404,
             _refused(RefusalCode.CASE_NOT_FOUND),
-        ), (user, groups, path_case)
+        ), (user, role, path_case)
 
 
 def test_an_anonymous_or_malformed_analysis_request_opens_no_store_connection(

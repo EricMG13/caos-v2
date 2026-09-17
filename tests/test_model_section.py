@@ -255,10 +255,10 @@ def test_model_http_actor_matrix_and_declared_io(
     revoke(harness.conn, case_id=harness.case_id, user_id=revoked)
     harness.conn.commit()
     assert client.get(_path(harness)).status_code == 401
-    for who, groups in ((uuid4(), None), (revoked, None), (uuid4(), "caos-admins")):
+    for who, role in ((uuid4(), None), (revoked, None), (uuid4(), "ADMIN")):
         counter = _CountingConnection(harness.conn)
         app.dependency_overrides[store_connection] = _serving(counter)
-        response = client.get(_path(harness), headers=_as(who, groups))
+        response = client.get(_path(harness), headers=_as(who, role))
         harness.conn.rollback()
         assert response.status_code == 404
         assert response.json()["code"] == "CASE_NOT_FOUND"

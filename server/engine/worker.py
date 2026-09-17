@@ -17,6 +17,7 @@ import os
 import secrets
 import signal
 import sys
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -155,8 +156,11 @@ def work_once(
     except Exception as fault:  # noqa: BLE001 -- neither a refusal nor a store error
         # Parked, not raised: a worker that died holding the claim would find the
         # same run first after every lease expiry and never reach the rest of the
-        # queue. The class alone is written; a message may quote a document.
-        print(type(fault).__name__, file=sys.stderr)
+        # queue. The class and the frame it was raised in are host facts; the
+        # message may quote a document and is never written.
+        frames = traceback.extract_tb(fault.__traceback__)
+        where = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "?"
+        print(f"{type(fault).__name__} at {where}", file=sys.stderr)
         _settle(conn, lambda: stop(conn, lease, RefusalCode.INTERNAL_FAULT))
     return lease.run_id
 
@@ -170,8 +174,25 @@ def _refused(conn: StoreConnection, lease: Lease, refused: Refusal) -> None:
         try:
             cancel_run(conn, lease.run_id, lease=lease)  # commits its own unit
         except Refusal as lost:
-            if lost.code is not RefusalCode.LEASE_NOT_HELD:
-                raise
+            # `cancel_run` refuses three classes and no others: a store
+            # fault (`STORE_UNAVAILABLE` or `STORE_NOT_TRANSACTIONAL`),
+            # `LEASE_NOT_HELD` from its `require_lease` fence, and
+            # `RUN_NOT_FOUND` from `lock_run` for a run row that is not there
+            # (a run already terminal is answered False, not refused). The
+            # store fault heals itself -- released, or failing that left to
+            # expire -- so the run is reclaimed and the cancel retried, the
+            # same back-off the branch below gives that class, and parking it
+            # would turn a transient fault into a stop an operator must
+            # requeue by hand. A missing run has no such recovery, and raising
+            # it would leave `work_once` holding the claim, with the run at
+            # the head of every later poll.
+            unmet = lost.code
+            if unmet in STORE_FAULTS:
+                _settle(conn, lambda: release(conn, lease))
+                raise Refusal(unmet) from None
+            if unmet is not RefusalCode.LEASE_NOT_HELD:
+                print(unmet.value, file=sys.stderr)
+                _settle(conn, lambda: stop(conn, lease, unmet))
     elif code in STORE_FAULTS:
         _settle(conn, lambda: release(conn, lease))
         raise Refusal(code)

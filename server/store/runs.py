@@ -111,6 +111,22 @@ def start_attempt(
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
+    try:
+        attempt_id = _start(conn, run_id, route_node_id, lease)
+        conn.commit()
+    except psycopg.Error:
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
+    except BaseException:
+        rollback_or_close(conn)
+        raise
+    return attempt_id
+
+
+def _start(
+    conn: StoreConnection, run_id: UUID, route_node_id: str, lease: Lease | None
+) -> UUID:
+    """The attempt row and its event, under the caller's run lock."""
     # Under the run lock, so two starts cannot take one ordinal. Counting rows
     # rather than reading the maximum keeps attempts that predate ordinals.
     counted = conn.execute(
@@ -119,7 +135,6 @@ def start_attempt(
     ).fetchone()
     ordinal = (counted[0] if counted else 0) + 1
     if ordinal > MAX_ATTEMPT_ORDINAL:
-        rollback_or_close(conn)
         raise Refusal(RefusalCode.ATTEMPT_LIMIT_REACHED)
     attempt_id = uuid4()
     conn.execute(
@@ -135,7 +150,6 @@ def start_attempt(
         ),
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
-    conn.commit()
     return attempt_id
 
 

@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -30,7 +31,7 @@ from server.api.commands.qualification import (
     sign_verdict,
 )
 from server.api.deps import actor_from_request
-from server.api.identity import TRUST_SWITCH, GlobalRole, at_least
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED, GlobalRole, at_least
 from server.api.wire import QualificationState, SignVerdict, VerdictRecorded
 from server.qualification.store import (
     Evidence,
@@ -44,8 +45,6 @@ from server.store import StoreConnection, apply_schema, connect
 
 __all__ = ["evidence_path", "require_reviewer", "sign_verdict"]
 
-# The identity provider's group for each global role (`server/api/identity.py`).
-GROUPS = {"READER": "caos-readers", "ANALYST": "caos-analysts", "ADMIN": "caos-admins"}
 NOT_FOUND = {
     "code": "QUALIFICATION_EVIDENCE_NOT_FOUND",
     "clears": "Name qualification evidence you may sign.",
@@ -53,8 +52,14 @@ NOT_FOUND = {
 
 
 def _headers(user: UUID, role: str = "ADMIN") -> dict[str, str]:
-    """What the edge forwards: the subject and its groups, never a role."""
-    return {"x-caos-user": str(user), "x-forwarded-groups": GROUPS[role]}
+    """What the development proxy forwards: the subject and the role header.
+
+    Not the groups header: this app is served without an edge token, and a
+    tokenless API reads no groups (`server/api/identity.py`). The switch the
+    `client` fixture sets is what makes that header the deployment's word
+    rather than this client's.
+    """
+    return {"x-caos-user": str(user), ROLE_HEADER: role}
 
 
 def _document(evidence: Evidence, **changes: str) -> dict[str, Any]:
@@ -93,8 +98,9 @@ def client(
 ) -> Iterator[tuple[TestClient, StoreConnection]]:
     """The real app on one connection, over a complete snapshot and its
     evidence identity, recorded the way the harness records them."""
-    # Identity comes from groups: a developer's trusted role header must not leak in.
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # The development deployment: tokenless, so a role above READER is the
+    # switched-on role header or nothing at all.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     with connect(empty_database) as conn:
         apply_schema(conn)
@@ -364,4 +370,51 @@ def test_a_request_that_is_not_a_verdict_document_is_request_invalid(
         answer = _sign(http, evidence.sha256, body, uuid4())
         assert answer.status_code == 400, body
         assert answer.json()["code"] == RefusalCode.REQUEST_INVALID, body
+    assert _rows(conn) == ([], 1)
+
+
+class _Faulting:
+    """The request's connection, faulting on one statement the route sends."""
+
+    def __init__(self, conn: StoreConnection, on: str) -> None:
+        self._conn = conn
+        self._on = on
+
+    def execute(self, *args: object, **kwargs: object) -> object:
+        if args and str(args[0]).startswith(self._on):
+            raise psycopg.OperationalError("simulated")
+        return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT now()",
+        "SELECT e.qualification_set_sha256",
+        "SELECT qualification_set_sha256",
+        "INSERT INTO qualification_verdicts",
+    ],
+)
+def test_a_store_fault_while_signing_is_503_and_not_a_binding_error(
+    client: tuple[TestClient, StoreConnection], statement: str
+) -> None:
+    """The clock read, the evidence lookup and the writes underneath
+    `record_verdict` are the store answering, not the reviewer's document.
+
+    A driver fault on any of them said `VERDICT_BINDING_INVALID` -- a 400
+    telling a reviewer whose bindings were correct to correct them -- or left
+    the typed boundary entirely as an untyped 500. Both are 503 now.
+    """
+    http, conn = client
+    evidence = qualification_performed().evidence
+    app.dependency_overrides[store_connection] = lambda: _Faulting(conn, statement)
+
+    answer = _sign(http, evidence.sha256, _document(evidence), uuid4())
+
+    assert answer.status_code == 503, answer.text
+    assert answer.json()["code"] == "STORE_UNAVAILABLE"
+    app.dependency_overrides[store_connection] = lambda: conn
     assert _rows(conn) == ([], 1)

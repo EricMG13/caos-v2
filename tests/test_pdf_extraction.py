@@ -23,6 +23,7 @@ import pytest
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence import pdf
 from server.evidence.citations import anchor_citation
 from server.evidence.extract import Extractor, ExtractorIdentity, Token
 from server.evidence.ingest import Document, admit_pack
@@ -698,3 +699,20 @@ def test_a_frozen_v1_row_verifies_and_reanchors_as_stored(
         _verify_extractions_v1(conn)
     [box] = anchor_citation(conn, source_id=source_id, page=1, matched_text="debt")
     assert (box.x0, box.y0, box.x1, box.y1) == (102.012, 697.516, 125.364, 709.516)
+
+
+def test_a_dead_child_is_not_blamed_on_the_document(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """W4: a child that dies without answering leaves empty stdout, which reads
+    as an unreadable answer -- `SOURCE_NOT_READABLE`, the same code a corrupt
+    document gets. The refusal stays (nothing better can be said about bytes the
+    host could not extract), but the exit status says the host's own child never
+    ran, and an integer is not document text."""
+    monkeypatch.setattr(pdf, "_CHILD", "import sys; sys.exit(3)")
+
+    with pytest.raises(Refusal) as caught:
+        PdfExtractor().extract(REPORT)
+
+    assert caught.value.code is RefusalCode.SOURCE_NOT_READABLE
+    assert "extractor child exited 3" in capsys.readouterr().err

@@ -138,6 +138,21 @@ function SwitchCase() {
   );
 }
 
+const QUALIFICATION = "a".repeat(64);
+
+function AddQualification() {
+  const go = useNavigate();
+  return (
+    <button
+      type="button"
+      data-qualify
+      onClick={() => go(`/analysis/?case=${CASE}&qualification=${QUALIFICATION}`)}
+    >
+      qualify
+    </button>
+  );
+}
+
 async function mount(section: Section, path: string) {
   const view = render(
     <MemoryRouter initialEntries={[path]}>
@@ -148,6 +163,7 @@ async function mount(section: Section, path: string) {
             <>
               <Workspace section={section} />
               <SwitchCase />
+              <AddQualification />
             </>
           }
         />
@@ -401,5 +417,21 @@ describe("the workspace under its event tail", () => {
     expect(node()).toHaveAttribute("data-state", "COMPLETE");
     expect(node()).toHaveAttribute("aria-pressed", "true");
     expect(tabs().map((tab) => tab.textContent)).toEqual(tabBefore);
+  });
+
+  // The strip binds a global evidence identity, not the section's document, so
+  // naming one in the URL must not tear the section down and re-read it.
+  test("test_changing_the_qualification_strip_does_not_remount_the_section", async () => {
+    const { container } = await mount("analysis", `/analysis/?case=${CASE}`);
+    await answer(0, analysis());
+    const sections = () =>
+      sent.filter((one) => one.url.startsWith(`/api/v1/cases/${CASE}/analysis`));
+    expect(sections()).toHaveLength(1);
+    const shown = confidence(container);
+    act(() => fireEvent.click(container.querySelector("[data-qualify]")!));
+    await settle();
+    expect(sections()).toHaveLength(1);
+    expect(region(container).querySelector("[data-surface-state='loading']")).toBeNull();
+    expect(confidence(container)).toBe(shown);
   });
 });

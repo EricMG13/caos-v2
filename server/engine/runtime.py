@@ -53,10 +53,8 @@ from server.store.gates import execution_input
 
 # `artifact_digests` is re-exported: it now lives in the store (no import cycle).
 from server.store.outcomes import (
-    CallOutcome,
     accepted_rows,
     execution_reads,
-    record_outcome,
     record_refusal,
     require_idle,
 )
@@ -106,7 +104,15 @@ class Provider(Protocol):
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
-    ) -> ProviderResult: ...
+    ) -> ProviderResult:
+        """Call for this reserved attempt and record its own call outcome --
+        the charge, the producer identity and the diagnostic address -- before
+        returning, as `execute_handoff` does the moment the provider answers.
+
+        The loop does not record it a second time: a call that reached the
+        provider must be billed by the unit that made it, because only that
+        unit is still running when the answer arrives (invariant 6).
+        """
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,20 +438,17 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
         )
         return False
 
-    require_idle(conn)
-    # The canonical executor recorded its diagnostic with the call: this is
-    # then an exact replay, and acceptance binds the host record (§42).
-    record_outcome(
-        conn,
-        attempt_id=attempt_id,
-        outcome=CallOutcome(
-            result.charge,
-            result.model,
-            result.generation_id,
-            result.diagnostic_sha256,
-        ),
-    )
     _execution_route(conn, run_id, route, execution.bundle)
+    # ponytail: the executor recorded this outcome with the call, and `_accept`
+    # commits exactly it before it enters `_accept_artifact`, so no accepted
+    # artifact can be unbilled; a record here as well would be a knowing no-op
+    # costing a COMMIT and two row locks. Ceiling: a provider that returns
+    # without having billed its own call loses that call outright to a crash
+    # before acceptance -- `replay_billed` needs the joined ledger row and a
+    # stored body, `unexplained_charge` needs the outcome row, so neither
+    # matches and the node is re-attempted and paid for again with nobody
+    # deciding to. Nothing inside the acceptance unit can reach that window;
+    # only a record adjacent to the call can, which is where this one is.
     accept_attempt(
         conn,
         attempt_id=attempt_id,

@@ -16,14 +16,14 @@ from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
 from server.store.audit import _digest_of, audit_head, audit_trail, verify_chain
-from server.store.cases import lock_case
 from server.store.members import satisfies, standing_of
 from server.store.outcomes import execution_reads
 
-# Three-node LITE: authorization/lock/selection (6), live proof (46).
+# Three-node LITE: isolation/standing/selection (3), live proof (46). No lock:
+# a read takes none, and the payload digest below is the consistency check.
 # Committee adds publication/signatures (2) and three actor/audit proof reads.
 # Filed Committee also adds receipt/audit (5) and saved payload (1).
-IO_BUDGET = {"report": 52, "committee": 63, "frozen": 57}
+IO_BUDGET = {"report": 49, "committee": 60, "frozen": 54}
 router = APIRouter()
 
 
@@ -81,11 +81,6 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
     if run is None:
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     with execution_reads(conn):
-        if not satisfies(
-            standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
-        ):
-            raise Refusal(RefusalCode.CASE_NOT_FOUND)
-        lock_case(conn, case_id)
         standing = standing_of(conn, case_id=case_id, user_id=actor.user_id)
         if not satisfies(standing, READ_REQUIRES):
             raise Refusal(RefusalCode.CASE_NOT_FOUND)

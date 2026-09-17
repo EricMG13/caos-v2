@@ -540,7 +540,15 @@ def test_a_terminal_transition_marks_work_done_in_the_same_transaction(
 
 @dataclass
 class _Reclaiming:
-    """A provider during whose call another worker reclaims the run."""
+    """A provider during whose call another worker reclaims the run.
+
+    It deliberately does not record its own call outcome, unlike every other
+    provider here and unlike `ModuleProvider`, which is what makes the bill
+    this test counts `_accept`'s own record rather than the provider's: since
+    the loop stopped recording, only acceptance can write that row. Read it as
+    a probe of the acceptance unit, never as a template for a new provider --
+    `Provider.execute` requires an implementation to bill its own call.
+    """
 
     url: str
     run_id: UUID
@@ -864,10 +872,9 @@ class Once(Event):
         return True
 
 if os.environ.get("KILL") == "1":
-    real = runtime.record_outcome
     def killed(*args, **kwargs):
         os.kill(os.getpid(), signal.SIGKILL)
-    runtime.record_outcome = killed
+    runtime.accept_attempt = killed
 
 blobs = BlobStore(Path(os.environ["BLOBS"]))
 bundle = Bundle(VENDORED)
@@ -937,3 +944,72 @@ def test_worker_sigkilled_after_provider_return_restarts_without_a_second_call(
     assert _count(run.conn, "run_attempts", run.run_id) == len(_lite().nodes)
     assert _count(run.conn, "budget_ledger", run.run_id) == len(_lite().nodes)
     assert _events(run.conn, run.run_id, RunEvent.RUN_COMPLETE) == 1
+
+
+def test_a_report_read_never_blocks_a_governed_write_on_its_case(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C1: GET /report holds no row lock, so a writer's NOWAIT lock succeeds
+    while the read is in progress."""
+    import inspect
+    from typing import cast
+
+    import psycopg
+    from fastapi.testclient import TestClient
+    from test_deliverable_canonical import LITE, _accept
+    from test_execution_freshness import _Harness, harness
+    from test_revision_sections import _get
+    from test_revisions import _save
+
+    from server.api import app as app_module
+    from server.api.app import app, blob_store, methodology_bundle, store_connection
+    from server.api.identity import TRUST_SWITCH
+    from server.api.reads import reports as reports_read
+    from server.deliverable.revisions import prove_revision
+
+    make_harness = cast(
+        Callable[[tuple[StoreConnection, UUID], Path, ResolvedRoute], _Harness],
+        inspect.unwrap(harness),
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Issuer"))
+        conn.commit()
+        held = make_harness((conn, case_id), tmp_path, LITE)
+        for module in ("CP-0", "CP-L10", "CP-5"):
+            _accept(held, module)
+        revision = _save(held)
+        conn.commit()
+
+        probed: list[bool] = []
+        original = cast(Callable[..., object], prove_revision)
+
+        def probing(*args: object, **kwargs: object) -> object:
+            # While the read is inside its unit, a second connection must be able
+            # to take the case lock without waiting.
+            with connect(empty_database) as other:
+                try:
+                    other.execute(
+                        "SELECT case_id FROM cases WHERE case_id = %s"
+                        " FOR UPDATE NOWAIT",
+                        (case_id,),
+                    )
+                    probed.append(True)
+                except psycopg.errors.LockNotAvailable:
+                    probed.append(False)
+                other.rollback()
+            return original(*args, **kwargs)
+
+        monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+        monkeypatch.delenv(TRUST_SWITCH, raising=False)
+        monkeypatch.setattr(reports_read, "prove_revision", probing)
+        app.dependency_overrides[store_connection] = lambda: held.conn
+        app.dependency_overrides[blob_store] = lambda: held.blobs
+        app.dependency_overrides[methodology_bundle] = lambda: held.bundle
+        try:
+            with TestClient(app) as client:
+                body = _get(client, held, revision, "report")
+        finally:
+            app.dependency_overrides.clear()
+    assert body["revision_id"] == str(revision)
+    assert probed == [True]

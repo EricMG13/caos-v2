@@ -23,6 +23,7 @@ import uvicorn
 
 from server.api import app as app_module
 from server.api.app import app, store_connection
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.api.stream import CONNECT_IO, POLL_IO, case_tail
 from server.api.wire import CLEARS
 from server.blobs import BlobStore
@@ -55,6 +56,9 @@ def served(
     test abandons outlives it by much.
     """
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+    # Tokenless, so no groups header is read: the development switch is how a
+    # test here asserts a global role above the floor.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     monkeypatch.setattr(app_module, "TAIL_DEADLINE", 0.0)
     monkeypatch.setattr(app_module, "POLL_INTERVAL", 0.02)
     listener = socket.socket()
@@ -82,9 +86,9 @@ def served(
         listener.close()
 
 
-def _as(user: UUID | None, groups: str | None = None) -> dict[str, str]:
+def _as(user: UUID | None, role: str | None = None) -> dict[str, str]:
     headers = {} if user is None else {"x-caos-user": str(user)}
-    return headers if groups is None else {**headers, "x-forwarded-groups": groups}
+    return headers if role is None else {**headers, ROLE_HEADER: role}
 
 
 def _path(case_id: UUID | str, run_id: UUID | str | None = None) -> str:
@@ -191,7 +195,7 @@ def test_case_events_across_anonymous_nonmember_reader_writer_approver_revoked_a
     refused = [
         (_path(case_id), _as(uuid4())),
         (_path(case_id), _as(revoked)),
-        (_path(case_id), _as(uuid4(), "caos-admins")),
+        (_path(case_id), _as(uuid4(), "ADMIN")),
         (_path(uuid4()), _as(members[Standing.ADMIN])),
         (_path("not-a-case"), _as(members[Standing.ADMIN])),
     ]

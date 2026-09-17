@@ -14,7 +14,7 @@ from server.qualification.harness import Performed, PerformedSet, PreparedCase
 from server.qualification.matrix import MatrixRow
 from server.qualification.verdict import Verdict, read_verdict
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, rollback_or_close
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,8 +420,16 @@ def record_verdict(
                 verdict.expires_at,
             ),
         )
-    except psycopg.Error:
+    except psycopg.errors.UniqueViolation:
+        # `0019_one_qualification_verdict.sql`: this evidence is already signed,
+        # which is the reviewer's binding and theirs to correct.
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID) from None
+    except psycopg.Error:
+        # Any other driver fault is the store failing, not the document: a 400
+        # here told a reviewer whose bindings were right to correct them.
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
 
 
 def current_verdict(
