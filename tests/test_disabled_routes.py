@@ -247,7 +247,7 @@ def test_readers_refuse_an_artifact_without_its_record(
     assert proof.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
     app.dependency_overrides[store_connection] = lambda: harness.conn
     response = _section(client, harness.case_id, harness.run_id, viewer)
-    assert response.status_code == 503
+    assert response.status_code == 500
     assert response.json() == {
         "code": "ARTIFACT_RECORD_MISMATCH",
         "clears": CLEARS[RefusalCode.ARTIFACT_RECORD_MISMATCH],

@@ -163,7 +163,8 @@ def _handoffs(
     """Accepted handoffs in route order, then every other node with its state.
 
     A row without its record, or whose record no longer binds, refuses
-    `ARTIFACT_RECORD_MISMATCH` (503): the server's own bytes failed.
+    `ARTIFACT_RECORD_MISMATCH` (500): the server's own bytes failed, not a
+    store fault worth a retry.
     """
     rows = {
         str(node): (UUID(str(attempt)), str(artifact), record, created)

@@ -7,7 +7,7 @@ through `run_command` -- state, run event, work row, audit event and receipt
 commit together or not at all (T15).
 
 Start and retry classify inside the unit, under the case and run locks, in
-decision 7's order, so a caller's mistake is a 409 and never the 503 that
+decision 7's order, so a caller's mistake is a 409 and never the 500 that
 `execution_input` would give a foreign pin (T13):
 
 1. No pin: `RUN_INPUT_NOT_PINNED`.
