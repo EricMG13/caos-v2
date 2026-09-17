@@ -248,12 +248,26 @@ with keys authored from both.
 
 **O06 — The corpus in hand covers screening, not the FULL demands [P1,
 Phase 8].** Two earnings releases and three 10-K texts cover CP-0, CP-L10,
-CP-1, CP-1B, CP-1D, CP-2, CP-2D, CP-2E and CP-5. Not in hand: executed debt
-documents (CP-4, CP-3C, CP-4C — public EDGAR exhibits for CCL, BA and F);
-rating-agency reports and outlooks (CP-2H — public press releases); a dated
-market-data extract (CP-3D, CP-3 — must be supplied as a document); a peer
-pack (CP-1C — sector peers' filings); a distressed issuer with a documented
+CP-1, CP-1B, CP-1D, CP-2, CP-2D, CP-2E, CP-3C and CP-5. Not in hand, as Task
+8.4's reading of each `SKILL.md` established: executed debt documents for
+**CP-4**, whose step 1 is a Document Gate producing `T4F.1 Controlling
+Documents` (public EDGAR exhibits for CCL, BA and F) and which CP-4C inherits;
+a dated market-data extract (CP-3D, CP-3 — must be supplied as a document); a
+peer pack (CP-1C, inferred from its Peer Discovery and Peer Data gates, which
+name no document form); a named acquisition or sponsor transaction for
+**CP-1A**, whose ownership and governance registers the CCL 10-K serves but
+whose transaction registers it does not; a distressed issuer with a documented
 distress gate (CP-4C, `DISTRESSED_RESTRUCTURING`); a decision record (CP-8).
+
+Two demands this review had overstated, corrected by that reading. **CP-3C is
+not blocked on EDGAR exhibits**: its runbook names the maturity and debt
+schedule as the source gate, and the CCL 10-K carries the scheduled-maturities
+table, so the exhibits deepen it rather than gate it. **CP-2H degrades rather
+than blocking**: its Phase 1 permits methodology-only work with limitations
+when current rating evidence is absent, so it can be proven `Restricted` on the
+corpus in hand and only a `Passed` needs the agency documents. CP-1B, CP-1D and
+CP-6 state upstream-only source gates and demand no document of their own.
+
 Repair: the corpus register (Phase 8), sourced pathway by pathway, each
 document admitted under its own digest and named in the set manifest.
 
@@ -554,7 +568,7 @@ from this plan; no push, PR or ruleset change without authorization.
    the worst-case byte bound remains the ceiling check, not the reservation.
 3. Verdict hygiene (Task 8.3): the provider comparison against the models the
    runs recorded; `VERDICT_ALREADY_RECORDED`; a global-scope receipt.
-4. The corpus register (Task 8.4): `qualification/CORPUS.md` — one row per
+4. The corpus register (Task 8.4): `qualification/DOCUMENTS.md` — one row per
    document in hand or needed: pathway, module demand, source (URL,
    accession), digest once admitted, status (in hand / to source / not
    available); the sourcing list for the owner (EDGAR exhibits for CCL, BA and
@@ -678,14 +692,18 @@ corpus:
 5. `RELATIVE_VALUE` live (11.5): the enabled route has only a fixture; a
    real issuer pack (annual report, facility terms from an EDGAR exhibit, a
    peer/market table); keys; run.
-6. `COVENANT_REFINANCING` (11.6): CP-3C; CCL indentures sourced; keys on
-   maturities and covenant terms; run.
+6. `COVENANT_REFINANCING` (11.6): CP-2D and CP-3C. CP-3C runs on the CCL
+   10-K's maturity schedule; CP-4 on the same route is what needs the
+   indentures sourced, so this pathway waits on CP-4's documents rather than on
+   CP-3C's. Keys on maturities and covenant terms; run.
 7. `PORTFOLIO_DECISION` (11.7): CP-6 and the QA_GATE; the HTTP test over a
    canonical `read_run` with a QA verdict other than `Passed` (the ledger's
    owed test); keys; run.
-8. `FULL_CREDIT_ASSESSMENT` (11.8): CP-1A, CP-1D, CP-2E, CP-2H, CP-4C; the
-   CCL pack plus rating reports and the hedging note; needs Phase 10; retires
-   `NOT_YET_REACHED`; keys; run.
+8. `FULL_CREDIT_ASSESSMENT` (11.8): CP-1A, CP-1D, CP-2E, CP-2H, CP-4C. CP-2E's
+   Item 7A substrate is present in the CCL extract and CP-2H can be proven
+   `Restricted` without the agency documents, so the binding constraints are
+   CP-1A's missing transaction and CP-4C's inherited debt documents. Needs
+   Phase 10 for the pack size; retires `NOT_YET_REACHED`; keys; run.
 9. `DISTRESSED_RESTRUCTURING` (11.9): CP-4C's distress gate; **blocked on
    corpus** until a distressed issuer's documents are sourced; brief held.
 

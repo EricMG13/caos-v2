@@ -464,7 +464,7 @@ is answered by its receipt.
 
 ### Task 8.4: The Corpus Register
 
-**Files:** `qualification/CORPUS.md` (create), `qualification/<set>/RESULT.md`
+**Files:** `qualification/DOCUMENTS.md` (create), `qualification/<set>/RESULT.md`
 headers as documents are admitted.
 
 - [ ] One row per document in hand or needed: pathway(s), module demand,
