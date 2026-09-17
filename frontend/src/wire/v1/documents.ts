@@ -218,6 +218,7 @@ const AnalysisBody = object({
   displayed_run_id: nullable(uuid),
   subject: nullable(RunSubjectView),
   displayed_run_status: nullable(enumOf(RUN_STATUSES)),
+  blocked_by: nullable(BlockedByView),
   handoffs: array(HandoffView, 256),
   pending: array(PendingNode, 256),
 });
@@ -254,6 +255,8 @@ const ModelBody = object({
   latest_run_id: nullable(uuid),
   displayed_run_id: nullable(uuid),
   subject: nullable(RunSubjectView),
+  displayed_run_status: nullable(enumOf(RUN_STATUSES)),
+  blocked_by: nullable(BlockedByView),
   forecast: nullable(ModelForecast),
   unavailable_reason: nullable(literal("NO_ACCEPTED_FORECAST")),
 });
@@ -427,6 +430,7 @@ const RefusalCode = enumOf([
   "NARRATIVE_FIGURE_UNREFERENCED",
   "NARRATIVE_REFERENCE_INVALID",
   "DELIVERABLE_UNCITED_FIGURE",
+  "DELIVERABLE_MARKDOWN_UNSUPPORTED",
   "DELIVERABLE_NOT_SIGNED",
   "DELIVERABLE_NOT_FROZEN",
   "DELIVERABLE_MOVED_SINCE_SIGNING",

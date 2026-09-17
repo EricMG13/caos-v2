@@ -149,20 +149,28 @@ function HandoffCard({ handoff }: { handoff: HandoffView }) {
 function PendingList({
   pending,
   runStatus,
+  blockedBy,
 }: {
   pending: readonly PendingNode[];
   runStatus: AnalysisDocument["body"]["displayed_run_status"];
+  blockedBy: AnalysisDocument["body"]["blocked_by"];
 }) {
   // "Pending" is a claim about the future, and an ended run has none. The list
   // is recomputed from accepted artifacts, so a node the run never reached
   // looks exactly like one whose turn has not come; only the run's own status
-  // tells them apart.
+  // tells them apart. A Blocked verdict accepts nothing, so the node that
+  // answered and ended the run sits in this list too -- named here as what it
+  // is, rather than left among the nodes that never started.
   const ended = runStatus !== null && runStatus !== "RUNNING";
   return (
     <section className="pnl" data-pending data-run-ended={ended ? "yes" : "no"}>
       <header>
         <h2>{ended ? "Nodes that did not run" : "Pending nodes"}</h2>
-        <span className="cp">{ended ? `the run ended ${runStatus}` : "not yet accepted"}</span>
+        <span className="cp">
+          {ended
+            ? `the run ended ${runStatus}${blockedBy ? ` on ${blockedBy.module_id}` : ""}`
+            : "not yet accepted"}
+        </span>
         <span className="right">
           <span className="tag">{pending.length}</span>
         </span>
@@ -177,9 +185,15 @@ function PendingList({
               className="frontier"
               data-pending-node={node.module_id}
               data-state={node.state}
+              data-blocking={blockedBy?.route_node_id === node.route_node_id ? "yes" : "no"}
             >
               <span className="id">{node.module_id}</span>
               <span className="cp">{node.route_node_id}</span>
+              {blockedBy?.route_node_id === node.route_node_id ? (
+                <span className="cp" data-blocking-note>
+                  its verdict ended the run · attempt {blockedBy.attempt_id}
+                </span>
+              ) : null}
               <span className={`tag ${nodeTone(node.state)}`}>
                 <SeverityMark severity={NODE_SEVERITY[node.state]} /> {node.state}
               </span>
@@ -224,7 +238,11 @@ export function AnalysisSection({ document }: { document: AnalysisDocument; tab:
       {body.handoffs.map((handoff) => (
         <HandoffCard key={handoff.route_node_id} handoff={handoff} />
       ))}
-      <PendingList pending={body.pending} runStatus={body.displayed_run_status} />
+      <PendingList
+        pending={body.pending}
+        runStatus={body.displayed_run_status}
+        blockedBy={body.blocked_by}
+      />
     </div>
   );
 }

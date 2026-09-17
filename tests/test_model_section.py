@@ -197,6 +197,11 @@ def test_model_without_an_accepted_forecast_has_no_computed_values(
     body = _get(client, harness)["body"]
     assert body["forecast"] is None
     assert body["unavailable_reason"] == "NO_ACCEPTED_FORECAST"
+    # "No accepted forecast" is a fact about now, so it travels with the run
+    # state that says whether one is still coming: this run has not ended, and
+    # no verdict has blocked it.
+    assert body["displayed_run_status"] == "RUNNING"
+    assert body["blocked_by"] is None
     assert _get(client, harness)["status"] == "partial"
     foreign_case = create_case(harness.conn, BoundaryText.of("Other case"))
     foreign_run = start_run(harness.conn, foreign_case)

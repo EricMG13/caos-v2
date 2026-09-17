@@ -9,6 +9,8 @@
     "latest_run_id": "00000000-0000-4000-8000-0000000000a1",
     "displayed_run_id": "00000000-0000-4000-8000-0000000000a1",
     "subject": null,
+    "displayed_run_status": "COMPLETE",
+    "blocked_by": null,
     "forecast": {
       "route_node_id": "CP-CF",
       "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

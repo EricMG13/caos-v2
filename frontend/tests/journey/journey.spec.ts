@@ -672,6 +672,16 @@ test.describe.serial("journey", () => {
       await expect(card.locator("[data-citation] blockquote.matched").first()).toContainText(QUOTE);
     }
     await expect(page.locator("[data-pending-node='CP-5']")).toBeVisible();
+    // And which of the three it is: CP-5 answered and ended the run, so it is
+    // named here rather than left among the two that never started.
+    await expect(page.locator("[data-pending]")).toContainText("the run ended BLOCKED on CP-5");
+    await expect(page.locator("[data-pending-node='CP-5']")).toHaveAttribute(
+      "data-blocking",
+      "yes",
+    );
+    await expect(page.locator("[data-pending-node='CP-5']")).toContainText(
+      "its verdict ended the run",
+    );
     await expect(page.locator(".tag.ok", { hasText: "ACCEPTED" })).toHaveText("2 ACCEPTED");
 
     // The case register names the outcome beside the case.

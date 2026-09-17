@@ -21,6 +21,7 @@
       "analysis_date": "2026-09-08"
     },
     "displayed_run_status": "COMPLETE",
+    "blocked_by": null,
     "handoffs": [
       {
         "route_node_id": "rn-cp-0",

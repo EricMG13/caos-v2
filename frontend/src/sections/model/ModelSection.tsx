@@ -13,7 +13,15 @@ export function ModelSection({ document }: { document: ModelDocument; tab: strin
           <h2>Model</h2>
           <span className="cp">CP-CF</span>
         </header>
-        <div className="pb note">{body.unavailable_reason}</div>
+        {/* Why there is none, not only that there is none: an ended run is not
+            waiting for a forecast, and a verdict that ended it has a name. */}
+        <div className="pb note" data-model-unavailable>
+          {body.unavailable_reason}
+          {body.displayed_run_status !== null && body.displayed_run_status !== "RUNNING"
+            ? ` · the run ended ${body.displayed_run_status}`
+            : ""}
+          {body.blocked_by ? ` on ${body.blocked_by.module_id}` : ""}
+        </div>
       </section>
     );
   }

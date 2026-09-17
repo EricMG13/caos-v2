@@ -451,5 +451,10 @@ def test_the_deliverable_labels_source_fact_analysis_and_no_host_calculation(
     assert facts < analysis < calculation
     assert "<blockquote>" in section[facts:analysis]
     assert "<blockquote>" not in section[analysis:]
-    assert "<pre>" in section[analysis:calculation]
-    assert "<pre>" not in section[:analysis]
+    # The model's Markdown is rendered as the deliverable's closed element set
+    # -- headings and registers, with the host-owned front matter shown whole --
+    # and none of it appears above the label that says who authored it.
+    analysed = section[analysis:calculation]
+    assert '<pre class="front">' in analysed and "<table>" in analysed
+    assert '<h5 data-level="2">Audit Summary</h5>' in analysed
+    assert "<pre" not in section[:analysis]

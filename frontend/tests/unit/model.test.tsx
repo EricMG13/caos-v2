@@ -12,6 +12,8 @@ function model(overrides: Record<string, unknown> = {}): ModelDocument {
     latest_run_id: RUN,
     displayed_run_id: RUN,
     subject: null,
+    displayed_run_status: "COMPLETE",
+    blocked_by: null,
     forecast: {
       route_node_id: "CP-CF",
       artifact_sha256: HASH,
@@ -85,14 +87,50 @@ describe("Model v1", () => {
   });
 
   test("renders the declared no-forecast reason without projecting a value", () => {
-    render(
+    const { container } = render(
       <ModelSection
         document={model({ forecast: null, unavailable_reason: "NO_ACCEPTED_FORECAST" })}
         tab={null}
       />,
     );
-    expect(screen.getByText("NO_ACCEPTED_FORECAST")).toBeInTheDocument();
+    expect(container.querySelector("[data-model-unavailable]")).toHaveTextContent(
+      "NO_ACCEPTED_FORECAST",
+    );
     expect(screen.queryByText("123.45")).toBeNull();
+  });
+
+  test("test_an_absent_forecast_says_whether_the_run_can_still_produce_one", () => {
+    // "No accepted forecast" reads as "not yet" on a run that has ended, which
+    // is the same blindness the Analysis page carried until it named the node
+    // whose verdict stopped the run.
+    const { container } = render(
+      <ModelSection
+        document={model({
+          forecast: null,
+          unavailable_reason: "NO_ACCEPTED_FORECAST",
+          displayed_run_status: "BLOCKED",
+          blocked_by: { route_node_id: "rn-cp-5", module_id: "CP-5", attempt_id: RUN },
+        })}
+        tab={null}
+      />,
+    );
+    const note = container.querySelector("[data-model-unavailable]")!;
+    expect(note).toHaveTextContent("the run ended BLOCKED");
+    expect(note).toHaveTextContent("on CP-5");
+
+    const { container: working } = render(
+      <ModelSection
+        document={model({
+          forecast: null,
+          unavailable_reason: "NO_ACCEPTED_FORECAST",
+          displayed_run_status: "RUNNING",
+        })}
+        tab={null}
+      />,
+    );
+    expect(working.querySelector("[data-model-unavailable]")).not.toHaveTextContent(
+      "the run ended",
+    );
   });
 
   test("renders a period-level unavailable reason even when it has no values", () => {

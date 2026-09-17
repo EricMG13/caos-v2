@@ -89,6 +89,8 @@ describe("what a name refetches and what a view is", () => {
       latest_run_id: "00000000-0000-4000-8000-0000000000a1",
       displayed_run_id: "00000000-0000-4000-8000-0000000000a1",
       subject: null,
+      displayed_run_status: "COMPLETE",
+      blocked_by: null,
       forecast: null,
       unavailable_reason: "NO_ACCEPTED_FORECAST",
     },
