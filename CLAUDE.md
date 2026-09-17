@@ -1939,13 +1939,44 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.
-- **One block per line; the bounded line group is not built.**
-  `SYSTEM_SPEC.md` §5 wants one block per line "while small" and bounded line
-  groups once not. This build always packs a line per block, so a large document
-  produces more blocks than it should. *Upgrade:* the group arrives with the
-  first document big enough to need it, splitting a line at the group width
-  rather than giving it a block of its own. Block ids are zero-padded to six
-  digits, so reading order and `block_id` order agree up to 999,999 lines.
+- **A line is split at the group width; several lines in one block is not
+  built.** `SYSTEM_SPEC.md` §5 wants one block per line "while small", bounded
+  line groups once not, and a line past the group width split at it rather than
+  given a block of its own. The splitting half is built: `GROUP_WIDTH` is
+  `BoundaryText`'s own limit, `ingest.line_groups` cuts a line at it, and
+  `verify_citations` requires every block a line was split into to have been
+  delivered, so a quote crossing the cut needs both sides and a delivery
+  carrying half a split line carries none of it
+  (`test_a_line_wider_than_the_group_is_split_rather_than_refusing_the_pack`,
+  `test_a_quote_crossing_a_group_boundary_needs_every_block_of_its_line`).
+  Before it, a line past 4,096 characters refused the whole pack, so one wide
+  table row in a text export meant no document carrying it could be admitted at
+  all; the CCL 10-K fixture's widest line is 2,502 characters, which is how far
+  that was from a real document. The width is not a choice: any narrower would
+  re-number documents already admitted under this one, whose `source_blocks`
+  rows are immutable and whose stored citations name the ids they were given
+  (`test_a_document_whose_lines_fit_the_group_is_numbered_one_block_a_line`).
+  A cut falls wherever the width falls, inside a word if that is where it falls,
+  because cutting at a token boundary would make the block count depend on the
+  tokens and force anchoring to read every token's text back to learn it;
+  nothing reads a quote out of a block, so what it costs is a word shown in two
+  pieces. A single word past the width has nowhere to be cut and still refuses
+  `BOUNDARY_TEXT_TOO_LONG` at the door
+  (`test_a_document_the_boundary_refuses_never_reaches_the_pinned_set`). What is
+  **not** built is the other half -- several lines packed into one block -- so a
+  large document still produces more blocks than it should. Nothing in reach
+  needs it: the widest document this tree holds is the CCL 10-K at 1,726 lines
+  over 30 pages, and the two VMO2 releases are 1,347 and 1,019, against a 500,000
+  token admission ceiling. Building it would re-number every already-admitted
+  document, because the line-to-block numbering is re-derived at citation time
+  from the token index and is nowhere stored. Block ids are zero-padded to six
+  digits, so reading order and `block_id` order agree up to 999,999 **blocks**,
+  which is no longer the same as 999,999 lines. *Upgrade:* a stored block-format
+  version -- `source_extractions.format_version` is `CHECK (format_version = 1)`
+  today, so a migration -- read by `citations._line_blocks` so a v1 source keeps
+  one block a line while a v2 source groups, the shape §45.4's record v1-to-v2
+  already has and with no backfill either; owed the day a document arrives whose
+  block count can be measured to cost something.
 - **The plain-text extractor's rectangles are a fixed-pitch rendering.** A `.txt`
   document has no typography, so `PlainTextExtractor` states its cell size and
   derives rectangles from character positions. It is a real, reproducible

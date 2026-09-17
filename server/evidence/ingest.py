@@ -14,14 +14,15 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Iterable, Sequence
+import unicodedata
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from math import inf, isfinite
 from uuid import UUID, uuid4
 
 from server.blobs import BlobStore
-from server.boundary_text import BoundaryText
+from server.boundary_text import DEFAULT_LIMIT, BoundaryText
 from server.digest import canonical_digest
 from server.evidence.extract import (
     DEFAULT_LIMITS,
@@ -42,10 +43,13 @@ _PDFMINER = logging.getLogger("pdfminer")
 _PDFMINER.addHandler(logging.NullHandler())
 _PDFMINER.propagate = False
 
-# One block per line while small. `SYSTEM_SPEC.md` section 5 bounds line groups
-# once a document is not small; this build packs a line per block and the group
-# arrives with the document that needs it (CLAUDE.md known gaps).
 BLOCK_PREFIX = "b"
+# What one block may carry (`SYSTEM_SPEC.md` section 5's group width). Not a free
+# parameter: `source_blocks.text` is `BoundaryText`, so a block holds
+# `DEFAULT_LIMIT` characters and no more, and any narrower width would re-number
+# documents already admitted under this one -- whose rows are immutable and whose
+# stored citations name the ids they were given.
+GROUP_WIDTH = DEFAULT_LIMIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,7 +361,7 @@ def _store_tokens(conn: StoreConnection, source_id: UUID, tokens: list[Token]) -
 
 
 def _blocks(tokens: list[Token]) -> list[_Block]:
-    """One block per line, in reading order, its text across the boundary.
+    """One block per line while the line fits, its text across the boundary.
 
     `source_blocks.text` is pinned state, and CLAUDE.md's rule is that every
     string reaching pinned state carries `BoundaryText`. It was carried on the
@@ -366,34 +370,76 @@ def _blocks(tokens: list[Token]) -> list[_Block]:
     the override control the boundary exists to refuse were both admitted and
     then refused at every read. A refusal here costs a pack; there it cost a
     pinned source no run can read.
+
+    A line past `GROUP_WIDTH` is split at the width rather than given a block of
+    its own (`SYSTEM_SPEC.md` section 5), because a block of its own is a block
+    the boundary refuses -- and refusing it refused the whole pack, so one wide
+    table row in a text export meant no document of it could be admitted at all.
     """
     lines: dict[int, list[Token]] = {}
     for token in tokens:
         lines.setdefault(token.line_id, []).append(token)
-    block_ids = block_ids_by_line(lines)
+    groups = {
+        line_id: line_groups(" ".join(token.text for token in line))
+        for line_id, line in lines.items()
+    }
+    block_ids = block_ids_by_line({line_id: len(g) for line_id, g in groups.items()})
 
     return [
         _Block(
-            block_id=block_ids[line_id],
-            page=line[0].page,
-            text=BoundaryText.of(" ".join(token.text for token in line)),
+            block_id=block_id,
+            page=lines[line_id][0].page,
+            text=BoundaryText.of(text),
         )
-        for line_id, line in sorted(lines.items())
+        for line_id in sorted(lines)
+        for block_id, text in zip(block_ids[line_id], groups[line_id], strict=True)
     ]
 
 
-def block_ids_by_line(line_ids: Iterable[int]) -> dict[int, str]:
-    """Line id to the block id admission writes for it: the one numbering.
+def line_groups(text: str) -> list[str]:
+    """One line's blocks: the whole line while it fits `GROUP_WIDTH`, chunks of
+    that width once it does not.
 
-    One block per line, the source's distinct line ids numbered in ascending
-    order and zero-padded to six digits (wider past 999,999 lines). Admission
-    packs with it and citation anchoring reads it back from the token index, so
-    the two cannot disagree about which block a quoted line belongs to.
+    Normalised before it is measured and cut, because the width is
+    `BoundaryText`'s and `BoundaryText` measures what it has normalised. A line
+    that fits is therefore the one group it has always been, byte for byte.
+
+    A chunk cuts wherever the width falls, inside a word if that is where it
+    falls. Cutting at a token boundary instead would make the block count
+    depend on the tokens rather than on the width, and anchoring would have to
+    read every token's text back to learn it. Nothing reads a quote out of a
+    block -- `verify_citations` anchors in the token index -- so what a cut
+    costs is a word shown in two pieces to a module, on a line no document could
+    carry at all until now.
     """
-    return {
-        line_id: f"{BLOCK_PREFIX}{ordinal:06d}"
-        for ordinal, line_id in enumerate(sorted(set(line_ids)))
-    }
+    normalised = unicodedata.normalize("NFC", text)
+    if len(normalised) <= GROUP_WIDTH:
+        return [normalised]
+    return [
+        normalised[at : at + GROUP_WIDTH]
+        for at in range(0, len(normalised), GROUP_WIDTH)
+    ]
+
+
+def block_ids_by_line(groups: Mapping[int, int]) -> dict[int, tuple[str, ...]]:
+    """Line id to the block ids admission writes for it: the one numbering.
+
+    `groups` is how many blocks each line needs -- one while it fits
+    `GROUP_WIDTH`, more once it does not. Ordinals ascend over the lines in
+    line order and over the blocks within a line, zero-padded to six digits
+    (wider past 999,999 blocks). Admission packs with it and citation anchoring
+    reads it back from the token index, so the two cannot disagree about which
+    blocks a quoted line belongs to.
+    """
+    numbering: dict[int, tuple[str, ...]] = {}
+    ordinal = 0
+    for line_id in sorted(groups):
+        count = groups[line_id]
+        numbering[line_id] = tuple(
+            f"{BLOCK_PREFIX}{at:06d}" for at in range(ordinal, ordinal + count)
+        )
+        ordinal += count
+    return numbering
 
 
 def _store_blocks(conn: StoreConnection, source_id: UUID, blocks: list[_Block]) -> None:

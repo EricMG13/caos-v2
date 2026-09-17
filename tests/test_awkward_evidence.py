@@ -30,7 +30,12 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.citations import Citation, verify_citations
 from server.evidence.extract import LINES_PER_PAGE
-from server.evidence.ingest import Document, admit_pack, block_ids_by_line
+from server.evidence.ingest import (
+    Document,
+    admit_pack,
+    block_ids_by_line,
+    line_groups,
+)
 from server.evidence.read import read_block
 from server.refusals import Refusal
 from server.store import StoreConnection
@@ -190,18 +195,26 @@ def test_admission_and_anchoring_share_one_line_to_block_numbering(
             (source_id,),
         ).fetchall()
     }
-    numbering = block_ids_by_line(lines)
+    numbering = block_ids_by_line(
+        {line_id: len(line_groups(" ".join(words))) for line_id, words in lines.items()}
+    )
     assert len(stored) == len(lines) > LINES_PER_PAGE
     assert {
-        numbering[line_id]: " ".join(words) for line_id, words in lines.items()
+        numbering[line_id][0]: " ".join(words) for line_id, words in lines.items()
     } == stored
 
 
 def test_the_numbering_is_ascending_by_line_and_widens_past_six_digits() -> None:
-    assert block_ids_by_line([7, 3, 7, 11]) == {
-        3: "b000000",
-        7: "b000001",
-        11: "b000002",
+    assert block_ids_by_line(dict.fromkeys([7, 3, 11], 1)) == {
+        3: ("b000000",),
+        7: ("b000001",),
+        11: ("b000002",),
     }
-    wide = block_ids_by_line(range(1_000_001))
-    assert (wide[999_999], wide[1_000_000]) == ("b999999", "b1000000")
+    # A split line takes as many ordinals as it has blocks, and the next line
+    # starts after them: reading order and block id order still agree.
+    assert block_ids_by_line({3: 2, 7: 1}) == {
+        3: ("b000000", "b000001"),
+        7: ("b000002",),
+    }
+    wide = block_ids_by_line(dict.fromkeys(range(1_000_001), 1))
+    assert (wide[999_999], wide[1_000_000]) == (("b999999",), ("b1000000",))

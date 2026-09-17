@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from server.evidence.ingest import block_ids_by_line
+from server.evidence.ingest import block_ids_by_line, line_groups
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -119,7 +119,7 @@ class TokenIndex:
 
     pages: dict[tuple[UUID, int], list[_Token]] = field(default_factory=dict)
     digests: dict[UUID, str] = field(default_factory=dict)
-    line_blocks: dict[UUID, dict[int, str]] = field(default_factory=dict)
+    line_blocks: dict[UUID, dict[int, tuple[str, ...]]] = field(default_factory=dict)
 
 
 def verify_citations(
@@ -169,7 +169,7 @@ def verify_citations(
         if citation.source_id not in ordinals:
             ordinals[citation.source_id] = _line_blocks(conn, citation.source_id)
         lines = ordinals[citation.source_id]
-        if any(lines.get(token.line_id) not in blocks for token in run):
+        if any(not _delivered(lines.get(token.line_id), blocks) for token in run):
             raise Refusal(RefusalCode.CITATION_NOT_DELIVERED)
         boxes = _rectangles(run, citation.page)
         anchored.append(
@@ -197,14 +197,59 @@ def _page_tokens(conn: StoreConnection, source_id: UUID, page: int) -> list[_Tok
     return [_Token(*row) for row in rows]
 
 
-def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, str]:
-    """Line id to the block admission wrote for it, once per source: admission's
-    own numbering (`block_ids_by_line`) over the token index's line ids."""
+def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str, ...]]:
+    """Line id to the blocks admission wrote for it, once per source: admission's
+    own numbering (`block_ids_by_line`) over the token index's line ids.
+
+    A line past `GROUP_WIDTH` was split, so a line may own more than one block.
+    Which lines were split is not guessed: a source whose stored block count is
+    its line count had none, which is every source admitted before there was any
+    splitting and every source whose lines fit. Only when the counts differ is
+    the packing recomputed from the text, and the count travels with the line
+    ids rather than in a statement of its own.
+    """
     rows = conn.execute(
-        "SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s",
+        "SELECT lines.line_id, blocks.stored FROM"
+        " (SELECT DISTINCT line_id FROM source_tokens WHERE source_id = %s) AS lines,"
+        " (SELECT count(*) AS stored FROM source_blocks WHERE source_id = %s)"
+        " AS blocks",
+        (source_id, source_id),
+    ).fetchall()
+    line_ids = [int(row[0]) for row in rows]
+    stored = int(rows[0][1]) if rows else 0
+    if stored == len(line_ids):
+        return block_ids_by_line(dict.fromkeys(line_ids, 1))
+    return block_ids_by_line(_group_counts(conn, source_id))
+
+
+def _group_counts(conn: StoreConnection, source_id: UUID) -> dict[int, int]:
+    """How many blocks each line needs, recomputed from its text by admission's
+    own rule -- the read a source carrying a split line pays, and no other."""
+    rows = conn.execute(
+        "SELECT line_id, text FROM source_tokens WHERE source_id = %s"
+        " ORDER BY token_id",
         (source_id,),
     ).fetchall()
-    return block_ids_by_line(int(row[0]) for row in rows)
+    lines: dict[int, list[str]] = {}
+    for line_id, text in rows:
+        lines.setdefault(int(line_id), []).append(str(text))
+    return {
+        line_id: len(line_groups(" ".join(words))) for line_id, words in lines.items()
+    }
+
+
+def _delivered(ids: tuple[str, ...] | None, blocks: frozenset[str]) -> bool:
+    """A line is delivered when every block it was split into was.
+
+    Fail closed, and deliberately line-granular: a quote crossing a group
+    boundary needs both sides, and a delivery carrying half a split line
+    carries none of it. Nothing narrows a delivery below a whole source today,
+    so this is the rule per-node evidence selection will meet rather than one
+    any run can meet now.
+    """
+    if not ids:
+        return False
+    return all(block in blocks for block in ids)
 
 
 def _match_at(tokens: list[_Token], start: int, words: Sequence[str]) -> list[_Token]:
