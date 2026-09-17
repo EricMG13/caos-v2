@@ -52,6 +52,11 @@ const ActionName = enumOf([
   "START_RUN",
   "RETRY_RUN",
   "CANCEL_RUN",
+  "WITHDRAW_SOURCE",
+  "SAVE_REVISION",
+  "SIGN_OPINION",
+  "FREEZE_DELIVERABLE",
+  "FILE_DELIVERABLE",
 ]);
 
 const Subject = object({ case_id: uuid, title: text });
@@ -65,7 +70,7 @@ const ActionView = object({
 const Chrome = object({
   subject: nullable(Subject),
   served_role: ServedRole,
-  actions: array(ActionView, 9),
+  actions: array(ActionView, 14),
 });
 
 function sectionDocument<B extends ReturnType<typeof object>>(body: B) {

@@ -483,6 +483,23 @@ describe("the v1 wire contract", () => {
       "RunWork",
       "SignVerdict",
       "VerdictRecorded",
+      // Task 12.1's seven governed writes.
+      "GrantStanding",
+      "StandingGranted",
+      "RevokeStanding",
+      "StandingRevoked",
+      "WithdrawSource",
+      "SourceWithdrawn",
+      "NarrativeFigureRef",
+      "NarrativeDraft",
+      "SaveRevision",
+      "RevisionSaved",
+      "SignOpinion",
+      "OpinionSigned",
+      "FreezeDeliverable",
+      "DeliverableFrozen",
+      "FileDeliverable",
+      "DeliverableFiled",
     ];
     expect(Object.keys(V1_COMMAND_SHAPES).sort()).toEqual([...commands].sort());
     const shapes = new Map(Object.entries(V1_COMMAND_SHAPES));
