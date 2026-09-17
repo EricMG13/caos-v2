@@ -8,8 +8,8 @@ import json
 import re
 from uuid import UUID
 
+from server.digest import canonical_digest
 from server.evidence.extract import ExtractorIdentity
-from server.evidence.ingest import _digest
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
@@ -43,7 +43,7 @@ def _verify_extractions_v1(conn: StoreConnection) -> None:
                         for value in (document, output, extraction)
                     )
                     or _stored_output_v1(conn, source) != output
-                    or _digest(
+                    or canonical_digest(
                         {
                             "format_version": 1,
                             "document_sha256": document,
@@ -87,7 +87,7 @@ def _stored_output_v1(conn: StoreConnection, source: UUID) -> str:
         or any(row[0] != f"b{i:06d}" for i, row in enumerate(blocks))
     ):
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
-    return _digest(
+    return canonical_digest(
         {
             "format_version": 1,
             "tokens": [
