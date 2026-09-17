@@ -62,6 +62,7 @@ from server.api.wire import (
 from server.blobs import BlobStore
 from server.deliverable.filing import (
     file_deliverable_in,
+    filing_payload,
     freeze_in,
     persist_receipt,
     sign_opinion_in,
@@ -73,14 +74,14 @@ from server.store.audit import GovernedAction
 from server.store.members import Standing
 
 # A bound, not a pin, and the measurement asserts it as one
-# (`tests/test_governed_write_routes.py`). The envelope is 10 -- standing, the
-# receipt lookup, the case lock, chain head, standing, the twin lookup, the
-# receipt and two audit writes -- and a signature spends 14 of the 60. Save is
-# what the rest is for: `canonical_payload` re-derives the whole proof inside
-# the unit, which is the work `server/api/reads/reports.py` budgets at 43 for
-# one LITE run, and it scales with the route's node count. So this number is
-# the ceiling the costliest command must stay under, and a reader must not take
-# it for the count any one of them makes.
+# (`tests/test_governed_write_routes.py`). Measured over LITE's three nodes:
+# freeze 55, save 52, filing 16, signature 14. Freeze and save are the two that
+# matter and they cost the same thing -- `prove_revision` and
+# `canonical_payload` each re-derive the whole payload inside the unit, which is
+# the work `server/api/reads/reports.py` budgets at 45 for the same run -- so
+# both scale with the route's node count and this ceiling is stated for a route
+# of that shape. A reader must not take it for the count any one command makes,
+# and a wider route is what first raises it.
 IO_BUDGET = 60
 
 _REVISION = "/api/v1/cases/{case_id}/revisions/{revision_id}"
@@ -230,11 +231,14 @@ def sign(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
 ) -> Response:
     """Sign the exact stored bytes. A frozen revision takes no further signature."""
 
+    payload: dict[str, str] = {"revision_id": str(revision_id)}
+
     def write(unit: StoreConnection) -> tuple[int, OpinionSigned]:
         _reviewed(unit, case_id, revision_id, body.payload_sha256)
         digest = sign_opinion_in(
             unit, case_id=case_id, actor_id=actor.user_id, revision_id=revision_id
         )
+        payload["payload_sha256"] = digest
         return 200, OpinionSigned(
             case_id=case_id,
             revision_id=revision_id,
@@ -252,6 +256,7 @@ def sign(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
         body=body,
         write=write,
         model=OpinionSigned,
+        payload=payload,
     )
 
 
@@ -270,6 +275,8 @@ def freeze(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
 ) -> Response:
     """Re-prove under the case lock, then freeze exactly the signed bytes."""
 
+    payload: dict[str, str] = {"revision_id": str(revision_id)}
+
     def write(unit: StoreConnection) -> tuple[int, DeliverableFrozen]:
         _reviewed(unit, case_id, revision_id, body.payload_sha256)
         digest = freeze_in(
@@ -280,6 +287,7 @@ def freeze(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
             actor_id=actor.user_id,
             revision_id=revision_id,
         )
+        payload["payload_sha256"] = digest
         return 200, DeliverableFrozen(
             case_id=case_id,
             revision_id=revision_id,
@@ -297,6 +305,7 @@ def freeze(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
         body=body,
         write=write,
         model=DeliverableFrozen,
+        payload=payload,
     )
 
 
@@ -319,12 +328,14 @@ def file(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     cannot carry it. The Committee section serves it.
     """
     filed: list[Any] = []
+    payload: dict[str, str] = {"revision_id": str(revision_id)}
 
     def write(unit: StoreConnection) -> tuple[int, DeliverableFiled]:
         run_id = _reviewed(unit, case_id, revision_id, body.payload_sha256)
         receipt = file_deliverable_in(
             unit, case_id=case_id, actor_id=actor.user_id, revision_id=revision_id
         )
+        payload.update(filing_payload(receipt))
         filed.append(receipt)
         return 200, DeliverableFiled(
             case_id=case_id,
@@ -344,6 +355,7 @@ def file(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
         body=body,
         write=write,
         model=DeliverableFiled,
+        payload=payload,
         after_event=_persist(blobs, filed),
     )
 
@@ -368,6 +380,7 @@ def _command(  # noqa: PLR0913 -- one command's identity and unit, keyword-only
     body: BaseModel,
     write: Callable[[StoreConnection], tuple[int, BaseModel]],
     model: type[BaseModel],
+    payload: dict[str, str],
     after_event: Callable[[StoreConnection, str], None] | None = None,
 ) -> Response:
     """The three revision-scoped commands' shared envelope.
@@ -375,7 +388,6 @@ def _command(  # noqa: PLR0913 -- one command's identity and unit, keyword-only
     The revision is bound into the request's one free string slot, so two
     signatures of two revisions under one key are two different requests.
     """
-    payload = {"revision_id": str(revision_id)}
     # One literal per call site: `tests/test_event_names.py` reads the action set.
     action = {
         "SIGN_OPINION": GovernedAction(

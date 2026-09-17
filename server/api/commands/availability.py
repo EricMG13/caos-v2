@@ -51,7 +51,11 @@ def upload_actions(
     """Admission, and the withdrawal that is invariant 1's second half.
 
     A case with nothing live has nothing to withdraw; which source is named is
-    the command's to refuse, with the same code, from the path."""
+    the command's to refuse, with the same code, from the path. `live_sources`
+    is counted from what the section listed, which `SOURCES_MAX` bounds, so a
+    truncated listing can under-claim -- the control is then shown refused on a
+    case that does have live sources, which is the fail-closed direction and is
+    the command's to correct at commit."""
     writer = _floor(role, standing, Standing.WRITER)
     return [
         _view(_A.ADMIT_SOURCES, writer),

@@ -23,7 +23,8 @@ from server.deliverable.filing import revision_signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
-from server.store.audit import audit_head, audit_trail, digest_of, verify_chain
+from server.store.audit import audit_head, audit_trail, verify_chain
+from server.store.commands import payload_digests
 from server.store.members import standing_of
 from server.store.outcomes import execution_reads
 
@@ -32,8 +33,12 @@ from server.store.outcomes import execution_reads
 # Committee adds publication/signatures (2) and three actor/audit proof reads.
 # Filed Committee also adds receipt/audit (5) and saved payload (1).
 # Task 12.1 adds two to each: the publication row and the signatures the
-# section's four filing actions are judged from.
-IO_BUDGET = {"report": 45, "committee": 56, "frozen": 50}
+# section's four filing actions are judged from. Proving a filing act costs one
+# more read per actor it looks for -- the receipts that actor committed on this
+# case, which is how an event written by a command is rebuilt (`payload_digests`)
+# -- so a frozen revision pays two, one signer and its freezer, and a filed one
+# pays a third for its filer.
+IO_BUDGET = {"report": 45, "committee": 59, "frozen": 52}
 router = APIRouter()
 
 
@@ -185,11 +190,24 @@ def _publication(
         or (filer is None and filing_evidence)
     ):
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-    bound = digest_of({"revision_id": str(revision), "payload_sha256": digest})
+    bound = {"revision_id": str(revision), "payload_sha256": digest}
     trail = audit_trail(conn, case_id)
-    events = {(e.action, e.actor_id) for e in trail if e.payload_sha256 == bound}
     required = {("OPINION_SIGNED", who) for who in signers}
     required.add(("DELIVERABLE_FROZEN", freezer))
+    # One act, two possible writers: a store function called directly binds the
+    # payload as given, a command's envelope adds its request digest. Both are
+    # rebuilt exactly, so neither comparison is looser than the other. Read once
+    # per actor this read is looking for rather than once per entry of a trail
+    # that is the whole case's: only these actors' events can satisfy `required`.
+    accepted = {
+        actor: payload_digests(conn, scope=case_id, actor_id=actor, payload=bound)
+        for _action, actor in required
+    }
+    events = {
+        (entry.action, entry.actor_id)
+        for entry in trail
+        if entry.payload_sha256 in accepted.get(entry.actor_id, frozenset())
+    }
     if (
         not required <= events
         or not verify_chain(conn, case_id)

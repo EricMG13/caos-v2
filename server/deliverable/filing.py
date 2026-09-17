@@ -160,7 +160,7 @@ def file_deliverable(
         receipt = file_deliverable_in(
             unit, case_id=case_id, actor_id=actor_id, revision_id=revision_id
         )
-        payload.update(_filing_payload(receipt))
+        payload.update(filing_payload(receipt))
         receipts.append(receipt)
 
     def persist(unit: StoreConnection, event: str) -> None:
@@ -241,7 +241,7 @@ def persist_receipt(
     return filed
 
 
-def _filing_payload(receipt: Receipt) -> dict[str, str]:
+def filing_payload(receipt: Receipt) -> dict[str, str]:
     """The event binds every receipt field except its own resulting link."""
     return {
         key: str(value)

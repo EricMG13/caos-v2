@@ -32,7 +32,10 @@ from server.api.app import app, methodology_bundle, store_connection
 from server.api.commands import deliverable, members
 from server.api.commands._request import require_case_admin
 from server.api.deps import actor_from_request
+from server.deliverable.filing import Receipt, filing_payload, sign_opinion
 from server.store import StoreConnection, connect
+from server.store.audit import audit_trail, digest_of
+from server.store.commands import payload_digests, record_receipt
 from server.store.members import Standing, standing_of
 
 __all__ = ["command_client", "harness", "lite", "route"]
@@ -290,6 +293,15 @@ def test_a_save_that_raced_another_save_refuses_rather_than_committing(
 def test_a_freeze_against_a_digest_that_is_not_the_revisions_refuses(
     filing_client: TestClient, lite: _Harness
 ) -> None:
+    """An expectation check, and deliberately not a race.
+
+    A revision is immutable by trigger (`0015_revisions.sql`), so nothing can
+    move the bytes under a freeze; the only thing that can move is whether it is
+    already frozen, and that is raced on four connections in
+    `tests/test_postgres_races.py`. What this proves is the other half of
+    invariant 5 -- that an approver acting on bytes other than the ones in front
+    of them is refused -- and a literal digest is the whole of that case.
+    """
     revision = _save(lite)
     digest = _digest(lite, revision)
     _post(
@@ -312,6 +324,10 @@ def test_a_freeze_against_a_digest_that_is_not_the_revisions_refuses(
 def test_a_filing_against_a_digest_that_is_no_longer_the_frozen_one_refuses(
     filing_client: TestClient, lite: _Harness
 ) -> None:
+    """The same expectation check, and the same deliberate gap: the frozen
+    digest is the revision's, which cannot move. A second filing is what can
+    race, and that is `DELIVERABLE_ALREADY_FILED` on two connections.
+    """
     revision = _save(lite)
     digest = _digest(lite, revision)
     _post(
@@ -475,17 +491,22 @@ def test_every_filing_control_the_report_shows_answers_as_it_was_shown(
 def test_each_new_command_meets_its_declared_store_budget(
     filing_client: TestClient, lite: _Harness
 ) -> None:
-    """The declared `IO_BUDGET` is measured, not estimated.
+    """The declared `IO_BUDGET` is measured, and measured on every command.
+
+    Freeze is measured beside save because it pays the same price: `freeze_in`
+    re-proves the revision under the lock, which is the whole payload
+    derivation again, so "the ceiling the costliest command stays under" is a
+    claim about two commands and not one.
 
     The withdrawal is sent last on purpose: it takes the run's one source out
     of the live set, and every later derivation of this run's payload would
-    then refuse -- which is invariant 1 working, and would make the save's
-    measurement a measurement of a refusal.
+    then refuse -- which is invariant 1 working, and would make the earlier
+    measurements measurements of a refusal.
     """
     conn, case_id = lite.conn, lite.case_id
     counted = _Counting(conn)
     app.dependency_overrides[store_connection] = lambda: counted
-    approver = _approver(lite)
+    signer, freezer, filer = (_approver(lite) for _ in range(3))
     revision = _save(lite)
     digest = _digest(lite, revision)
     writer = member(conn, case_id, Standing.WRITER)
@@ -502,7 +523,19 @@ def test_each_new_command_meets_its_declared_store_budget(
         (
             deliverable.IO_BUDGET,
             f"{_case(lite)}/revisions/{revision}/signature",
-            approver,
+            signer,
+            {"payload_sha256": digest},
+        ),
+        (
+            deliverable.IO_BUDGET,
+            f"{_case(lite)}/revisions/{revision}/freeze",
+            freezer,
+            {"payload_sha256": digest},
+        ),
+        (
+            deliverable.IO_BUDGET,
+            f"{_case(lite)}/revisions/{revision}/filing",
+            filer,
             {"payload_sha256": digest},
         ),
         (
@@ -524,6 +557,177 @@ def test_each_new_command_meets_its_declared_store_budget(
         answer = filing_client.post(path, headers=command_headers(actor), json=body)
         assert answer.status_code in (200, 201), (path, answer.text)
         assert 0 < counted.executed <= budget, (path, counted.executed)
+
+
+def _chain_over_http(client: TestClient, lite: _Harness) -> tuple[UUID, UUID]:
+    """Save, sign, freeze and file one revision entirely over the wire."""
+    writer = member(lite.conn, lite.case_id, Standing.WRITER)
+    saved = _post(
+        client,
+        f"{_case(lite)}/runs/{lite.run_id}/revisions",
+        writer,
+        {"expected_revision_id": _latest_revision(lite), "narrative": []},
+    )
+    assert saved.status_code == 201, saved.text
+    revision = UUID(saved.json()["revision_id"])
+    digest = saved.json()["payload_sha256"]
+    for tail in ("signature", "freeze", "filing"):
+        answer = _post(
+            client,
+            f"{_case(lite)}/revisions/{revision}/{tail}",
+            _approver(lite),
+            {"payload_sha256": digest},
+        )
+        assert answer.status_code == 200, (tail, answer.text)
+    return revision, lite.run_id
+
+
+def _latest_revision(lite: _Harness) -> str | None:
+    row = lite.conn.execute(
+        "SELECT revision_id FROM deliverable_revisions WHERE case_id=%s AND run_id=%s"
+        " ORDER BY saved_at DESC, revision_id DESC LIMIT 1",
+        (lite.case_id, lite.run_id),
+    ).fetchone()
+    lite.conn.rollback()
+    return None if row is None else str(row[0])
+
+
+def _committee(
+    client: TestClient, lite: _Harness, revision: UUID, actor: UUID
+) -> Response:
+    answer: Response = client.get(
+        f"{_case(lite)}/committee?run={lite.run_id}&revision={revision}",
+        headers=command_headers(actor),
+    )
+    return answer
+
+
+def test_a_deliverable_filed_over_http_reads_back_from_the_committee_section(
+    filing_client: TestClient, lite: _Harness
+) -> None:
+    """The act and its proof are one contract, and the routes are only half of
+    it: a filing these commands make must verify through the reader that serves
+    it, or the deliverable is unreadable for good -- `audit_events`,
+    `deliverable_opinions` and `deliverable_publications` are all immutable.
+    """
+    reader = member(lite.conn, lite.case_id, Standing.READER)
+    revision, _run = _chain_over_http(filing_client, lite)
+
+    answer = _committee(filing_client, lite, revision, reader)
+
+    assert answer.status_code == 200, answer.text
+    body = answer.json()["body"]
+    assert body["state"] == "filed"
+    assert body["receipt"]["revision_id"] == str(revision)
+
+    # And the event itself, not only the 200: the filing's audit payload is the
+    # one `filing_payload` rebuilds, under the envelope's form.
+    served = body["receipt"]
+    receipt = Receipt(
+        case_id=UUID(served["case_id"]),
+        run_id=UUID(served["run_id"]),
+        revision_id=UUID(served["revision_id"]),
+        payload_sha256=served["payload_sha256"],
+        signed_by=UUID(served["signed_by"]),
+        frozen_by=UUID(served["frozen_by"]),
+        filed_by=UUID(served["filed_by"]),
+        renderer_sha256=served["renderer_sha256"],
+        filed_event_sha256=served["filed_event_sha256"],
+    )
+    filed = next(
+        entry
+        for entry in audit_trail(lite.conn, lite.case_id)
+        if entry.action == "DELIVERABLE_FILED"
+    )
+    accepted = payload_digests(
+        lite.conn,
+        scope=lite.case_id,
+        actor_id=receipt.filed_by,
+        payload=filing_payload(receipt),
+    )
+    lite.conn.rollback()
+    assert filed.payload_sha256 in accepted
+    assert filed.payload_sha256 != digest_of(filing_payload(receipt)), (
+        "a command's event carries its request digest; the store's does not"
+    )
+
+
+def test_a_signature_sent_over_http_is_provable_beside_one_the_store_made(
+    filing_client: TestClient, lite: _Harness
+) -> None:
+    """Mixed provenance, because a deployment upgraded mid-case has it: the
+    Committee read proves an act whoever wrote it."""
+    reader = member(lite.conn, lite.case_id, Standing.READER)
+    revision = _save(lite)
+    digest = _digest(lite, revision)
+    sign_opinion(
+        lite.conn,
+        case_id=lite.case_id,
+        actor_id=_approver(lite),
+        revision_id=revision,
+    )
+    lite.conn.commit()
+    frozen = _post(
+        filing_client,
+        f"{_case(lite)}/revisions/{revision}/freeze",
+        _approver(lite),
+        {"payload_sha256": digest},
+    )
+    assert frozen.status_code == 200, frozen.text
+
+    answer = _committee(filing_client, lite, revision, reader)
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["body"]["state"] == "frozen"
+
+
+def test_payload_digests_accepts_both_writers_and_nothing_else(
+    lite: _Harness, empty_database: str
+) -> None:
+    """An audit payload is digested and never stored, so a reader that proves an
+    event bound exactly some fields has to rebuild what the writer built -- and
+    there are two writers. A store function called directly binds the payload as
+    given; a command's envelope adds its request digest, which is not
+    recomputable from the payload and is read back from the receipts that actor
+    committed on that case.
+
+    Both are exact. A payload carrying one more field, or one different value,
+    matches neither, which is what keeps this a rebuild and not a relaxation.
+    """
+    conn, case_id = lite.conn, lite.case_id
+    actor = _approver(lite)
+    bound = {"revision_id": str(uuid4()), "payload_sha256": "a" * 64}
+
+    before = payload_digests(conn, scope=case_id, actor_id=actor, payload=bound)
+    assert before == {digest_of(bound)}, "no receipt yet: only the store's own form"
+
+    key, request = uuid4(), "b" * 64
+    record_receipt(
+        conn,
+        actor_id=actor,
+        scope=case_id,
+        key=key,
+        command="SIGN_OPINION",
+        request_sha256=request,
+        status=200,
+        receipt={"revision_id": bound["revision_id"]},
+    )
+    conn.commit()
+
+    after = payload_digests(conn, scope=case_id, actor_id=actor, payload=bound)
+
+    assert after == {digest_of(bound), digest_of({**bound, "request_sha256": request})}
+    for wrong in (
+        {**bound, "extra": "1"},
+        {**bound, "payload_sha256": "c" * 64},
+        {"revision_id": bound["revision_id"]},
+    ):
+        assert digest_of(wrong) not in after, wrong
+    # Another actor's receipt is not this actor's request.
+    assert payload_digests(conn, scope=case_id, actor_id=uuid4(), payload=bound) == {
+        digest_of(bound)
+    }
+    conn.rollback()
 
 
 def test_require_case_admin_is_the_floor_the_membership_commands_declare() -> None:

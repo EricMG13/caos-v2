@@ -6,7 +6,7 @@ from uuid import UUID
 from server.blobs import BlobStore
 from server.deliverable.filing import (
     Receipt,
-    _filing_payload,
+    filing_payload,
     receipt_bytes,
     revision_signatures,
 )
@@ -14,7 +14,8 @@ from server.deliverable.revisions import prove_revision
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.audit import audit_head, audit_trail, digest_of, verify_chain
+from server.store.audit import audit_head, audit_trail, verify_chain
+from server.store.commands import payload_digests
 
 
 def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
@@ -83,7 +84,10 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
         filed is None
         or filed.action != "DELIVERABLE_FILED"
         or filed.actor_id != filer
-        or filed.payload_sha256 != digest_of(_filing_payload(receipt))
+        or filed.payload_sha256
+        not in payload_digests(
+            conn, scope=case_id, actor_id=filer, payload=filing_payload(receipt)
+        )
         or not verify_chain(conn, case_id)
         or trail[-1].entry_sha256 != audit_head(conn, case_id)
     ):
