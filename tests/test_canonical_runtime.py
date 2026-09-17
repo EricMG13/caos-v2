@@ -59,9 +59,9 @@ from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, connect
+from server.store import StoreConnection, connect, outcomes
 from server.store.events import lock_run
-from server.store.outcomes import accepted_rows
+from server.store.outcomes import CallOutcome, accepted_rows
 from server.store.run_inputs import load_run_input
 from server.store.runs import block_run
 from server.store.source_sets import load_source_set
@@ -190,17 +190,23 @@ def test_a_lite_route_completes_through_the_real_runtime(
     )
 
 
+def _run_one_lite_node(harness: _Harness) -> None:
+    """Run the LITE route with CP-L10 gate-blocked, so exactly one node is
+    called, billed and accepted before the empty frontier ends the run."""
+    answers = CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"})
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+    called = [prompt.split(maxsplit=6)[5] for prompt in answers.prompts]
+    assert called == ["CP-0"]
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+
+
 def test_cp5_is_not_invoked_without_an_accepted_named_lite_object(
     harness: _Harness,
 ) -> None:
     """§46.1: CP-L10's edge into CP-5 is soft, but CP-5's verified LITE block
     retains `NAMED_LITE_OBJECT_ACCEPTED`. With CP-L10 gate-blocked no upstream
     owns an accepted object, so the run ends BLOCKED and CP-5 costs nothing."""
-    answers = CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"})
-    assert _run_route(harness, _module_provider(harness, answers)) is None
-    called = [prompt.split(maxsplit=6)[5] for prompt in answers.prompts]
-    assert called == ["CP-0"]
-    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    _run_one_lite_node(harness)
     with connect(harness.url) as observer:
         cp5 = observer.execute(
             "SELECT count(*), count(r.attempt_id) FROM run_attempts t"
@@ -210,6 +216,25 @@ def test_cp5_is_not_invoked_without_an_accepted_named_lite_object(
         ).fetchone()
     assert cp5 == (0, 0)
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+
+
+def test_an_accepted_node_records_its_outcome_exactly_twice(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W1: the executor records the bill once, with the call, and that row is
+    what a crash before acceptance is replayed from; acceptance re-asserts
+    exactly it in its own unit, where a legacy row is what routes the replay.
+    A third record costs a COMMIT and two row locks and decides nothing."""
+    calls: list[UUID] = []
+    original = outcomes._record
+
+    def counting(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
+        calls.append(attempt)
+        return original(conn, attempt, outcome)
+
+    monkeypatch.setattr(outcomes, "_record", counting)
+    _run_one_lite_node(harness)
+    assert (len(calls), len(set(calls))) == (2, 1), calls
 
 
 def test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry(

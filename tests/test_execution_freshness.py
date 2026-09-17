@@ -261,6 +261,12 @@ class _ArbitraryProvider:
         self.calls += 1
         digest = self.harness.blobs.put(b"arbitrary bytes")
         self.mutate()
+        # A provider bills its own call before returning, as the real one does.
+        record_outcome(
+            self.harness.conn,
+            attempt_id=attempt_id,
+            outcome=CallOutcome(REPORTED, MODEL, "gen-arbitrary"),
+        )
         return ProviderResult(digest, REPORTED, MODEL, "gen-arbitrary")
 
 
@@ -969,6 +975,13 @@ class _Charged:
         assert self.harness.conn.info.transaction_status is TransactionStatus.IDLE
         digest = self.harness.blobs.put(b"arbitrary bytes")
         self.mutate()
+        # A provider bills its own call before returning, as the real one does;
+        # an unknown charge is recorded as unknown exposure, without spend.
+        record_outcome(
+            self.harness.conn,
+            attempt_id=attempt_id,
+            outcome=CallOutcome(self.charge, MODEL, f"gen-{route_node_id}"),
+        )
         return ProviderResult(digest, self.charge, MODEL, f"gen-{route_node_id}")  # type: ignore[arg-type]
 
 

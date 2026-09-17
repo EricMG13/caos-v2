@@ -864,10 +864,9 @@ class Once(Event):
         return True
 
 if os.environ.get("KILL") == "1":
-    real = runtime.record_outcome
     def killed(*args, **kwargs):
         os.kill(os.getpid(), signal.SIGKILL)
-    runtime.record_outcome = killed
+    runtime.accept_attempt = killed
 
 blobs = BlobStore(Path(os.environ["BLOBS"]))
 bundle = Bundle(VENDORED)
