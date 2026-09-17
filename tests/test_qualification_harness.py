@@ -118,6 +118,7 @@ class _Completions:
 
     # What the host configured; with fallbacks off it is what answers.
     model: str = "a-model/for-the-test"
+    provider: str = "qualification-test"
     qa_by_module: dict[str, str] = field(default_factory=dict)
 
     def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
@@ -155,6 +156,10 @@ class _DamagesWhatWasAccepted:
         """Whatever it wraps. A double that invented its own identity would
         record a producer no test had asked for."""
         return self.inner.model
+
+    @property
+    def provider(self) -> str:
+        return self.inner.provider
 
     # What to damage on the second call. Two shapes of a store that moved
     # under a running set, and `perform` must survive both.

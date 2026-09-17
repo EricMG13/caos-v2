@@ -51,6 +51,8 @@ from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
+    ExpectedForecast,
+    ForecastValue,
     QualificationCase,
     QualificationSet,
 )
@@ -64,8 +66,37 @@ MANIFEST = "qualification.json"
 # The keys each declared object carries, and nothing else. Closed both ways for
 # the reason every wire model here is (`CLAUDE.md`, wire strictness): a key this
 # loader ignores is a statement the author believed they had made.
-_CASE_KEYS = frozenset({"label", "profile_id", "selection_id", "documents", "expects"})
+_CASE_KEYS = frozenset(
+    {
+        "label",
+        "profile_id",
+        "selection_id",
+        "documents",
+        "expects",
+    }
+)
+_OPTIONAL_CASE_KEYS = frozenset(
+    {
+        "forecast",
+        "expected_refusal",
+        "model_extension",
+    }
+)
 _EXPECT_KEYS = frozenset({"module_id", "document_sha256", "matched_text"})
+_FORECAST_KEYS = frozenset(
+    {
+        "scenario",
+        "period_id",
+        "values",
+        "currency",
+        "scale",
+        "perimeter",
+        "qa_status",
+        "limitation_flags",
+        "readiness",
+    }
+)
+_FORECAST_VALUE_KEYS = frozenset({"name", "value"})
 # Optional on a case, closed when present. Whether the values are a subject a
 # pin accepts is `prepare`'s question, asked before it writes anything.
 _SUBJECT_KEY = "subject"
@@ -107,7 +138,11 @@ def _manifest(root: Path) -> Mapping[str, Any]:
 def _case(root: Path, entry: object) -> QualificationCase:
     """One declared case, with its documents read from beside the manifest."""
     declared = isinstance(entry, dict) and _SUBJECT_KEY in entry
-    keys = _CASE_KEYS | {_SUBJECT_KEY} if declared else _CASE_KEYS
+    keys = _CASE_KEYS | {
+        key for key in _OPTIONAL_CASE_KEYS if isinstance(entry, dict) and key in entry
+    }
+    if declared:
+        keys |= {_SUBJECT_KEY}
     fields = _closed(entry, keys)
     documents = _declared(fields, "documents")
     expects = _declared(fields, "expects")
@@ -118,6 +153,9 @@ def _case(root: Path, entry: object) -> QualificationCase:
         selection_id=_text(fields, "selection_id"),
         expects=tuple(_expect(item) for item in expects),
         subject=_subject(fields[_SUBJECT_KEY]) if declared else None,
+        forecast=_forecast(fields.get("forecast")),
+        expected_refusal=_refusal(fields.get("expected_refusal")),
+        model_extension=_extension(fields.get("model_extension")),
     )
 
 
@@ -173,6 +211,46 @@ def _expect(item: object) -> ExpectedCitation:
     )
 
 
+def _forecast(item: object) -> ExpectedForecast | None:
+    if item is None:
+        return None
+    fields = _closed(item, _FORECAST_KEYS)
+    values = _declared(fields, "values")
+    readiness = _declared(fields, "readiness")
+    return ExpectedForecast(
+        scenario=_text(fields, "scenario"),
+        period_id=_text(fields, "period_id"),
+        values=tuple(
+            ForecastValue(**_closed(value, _FORECAST_VALUE_KEYS)) for value in values
+        ),
+        currency=_text(fields, "currency"),
+        scale=_text(fields, "scale"),
+        perimeter=_text(fields, "perimeter"),
+        qa_status=_text(fields, "qa_status"),
+        limitation_flags=_strings(fields, "limitation_flags"),
+        readiness=tuple(_pair(value) for value in readiness),
+    )
+
+
+def _refusal(item: object) -> RefusalCode | None:
+    if item is None:
+        return None
+    if not isinstance(item, str):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    try:
+        return RefusalCode(item)
+    except ValueError:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID) from None
+
+
+def _extension(item: object) -> bool:
+    if item is None:
+        return False
+    if type(item) is not bool:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return item
+
+
 def _closed(entry: object, keys: frozenset[str]) -> Mapping[str, Any]:
     """A declared object: a mapping carrying exactly `keys`."""
     if not isinstance(entry, dict) or set(entry) != keys:
@@ -195,6 +273,23 @@ def _text(fields: Mapping[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
     return value
+
+
+def _strings(fields: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = _declared(fields, key)
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(value)
+
+
+def _pair(item: object) -> tuple[str, str]:
+    if (
+        not isinstance(item, list)
+        or len(item) != 2
+        or any(not isinstance(value, str) or not value.strip() for value in item)
+    ):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return item[0], item[1]
 
 
 def _boundary(name: str) -> BoundaryText:

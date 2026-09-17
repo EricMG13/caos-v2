@@ -63,9 +63,11 @@ import psycopg
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import (
+    MODEL_MODULE,
     NodeResult,
     NodeState,
     ResolvedRoute,
+    RouteExtensions,
     node_states,
     resolve_route,
 )
@@ -75,20 +77,22 @@ from server.methodology.bundle import Bundle
 from server.methodology.invocation import named_objects
 from server.methodology.runner import ModuleProvider
 from server.pricing import ModelPrice, worst_case
-from server.provider import CompletionProvider
+from server.provider import CompletionProvider, OpenRouter
 from server.qualification.matrix import (
     Matrix,
     QualificationCase,
     QualificationSet,
     assert_measurable,
+    assert_unambiguous,
     build_matrix,
+    qualification_set_digest,
 )
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.gates import execution_input
-from server.store.outcomes import execution_reads, require_idle
+from server.store.outcomes import execution_reads, producer_identifier, require_idle
 from server.store.routes import pin_route, resolved_route
 from server.store.run_inputs import RunInput, pin_run_input, valid_subject
 from server.store.runs import create_case, run_status, start_run
@@ -210,6 +214,9 @@ class PreparedCase:
 
     case_label: str
     input: RunInput
+    qualification_set_sha256: str
+    provider: str
+    model: str
 
 
 def prepare(
@@ -225,10 +232,15 @@ def prepare(
     Existing helpers commit separately; earlier preparations survive later failure.
     """
     assert_measurable(qualification)
-    _distinct(qualification)
+    assert_unambiguous(qualification)
     _answerable(qualification)
     routes = [
-        resolve_route(harness.catalog, case.profile_id, case.selection_id)
+        resolve_route(
+            harness.catalog,
+            case.profile_id,
+            case.selection_id,
+            extensions=RouteExtensions(model_extension=case.model_extension),
+        )
         for case in qualification.cases
     ]
     titles = [
@@ -238,7 +250,10 @@ def prepare(
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     _subjects(qualification)
+    provider = _provider_identity(harness.completions)
+    model = _model_identity(harness.completions)
     require_idle(conn)
+    set_digest = qualification_set_digest(qualification)
     prepared = []
     try:
         with execution_reads(conn):
@@ -260,6 +275,9 @@ def prepare(
                         harness.bundle,
                         subject=case.subject,
                     ),
+                    set_digest,
+                    provider,
+                    model,
                 )
             )
     except psycopg.Error:
@@ -290,13 +308,22 @@ def perform(
     # is empty, and "it has no documents" is the more useful of two true
     # answers about the same defect.
     assert_measurable(qualification)
-    _distinct(qualification)
+    assert_unambiguous(qualification)
     _answerable(qualification)
+    set_digest = qualification_set_digest(qualification)
+    provider = _provider_identity(harness.completions)
+    model = _model_identity(harness.completions)
     if len(prepared) != len(qualification.cases) or any(
         type(item) is not PreparedCase
         or type(item.input) is not RunInput
         or type(item.case_label) is not str
+        or type(item.qualification_set_sha256) is not str
+        or type(item.provider) is not str
+        or type(item.model) is not str
         or item.case_label != case.label
+        or item.qualification_set_sha256 != set_digest
+        or item.provider != provider
+        or item.model != model
         or type(item.input.run_id) is not UUID
         or type(item.input.case_id) is not UUID
         for case, item in zip(qualification.cases, prepared, strict=True)
@@ -339,6 +366,27 @@ def perform(
     return PerformedSet(tuple(performed), matrix)
 
 
+def _provider_identity(provider: object) -> str:
+    """The configured provider, never a response-body claim."""
+    value = (
+        "openrouter"
+        if type(provider) is OpenRouter
+        else getattr(provider, "provider", None)
+    )
+    identity = producer_identifier(value, limit=256)
+    if identity is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return identity
+
+
+def _model_identity(provider: CompletionProvider) -> str:
+    """The configured model a prepared qualification set is allowed to call."""
+    model = producer_identifier(provider.model, limit=256)
+    if model is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return model
+
+
 def _eligible(
     conn: StoreConnection,
     harness: Harness,
@@ -369,6 +417,13 @@ def _eligible(
         owner != (BoundaryText.of(case.label, limit=_LABEL_LIMIT).value, CEILING)
         or (route.profile_id, route.selection_id)
         != (case.profile_id, case.selection_id)
+        # Whether the case still wants the model extension, read off the
+        # pinned route's own nodes -- not re-derived by calling resolve_route
+        # against harness.catalog again, which a catalog changed or emptied
+        # since the gate (execution reads only the pin) would refuse
+        # ROUTE_PROFILE_UNKNOWN on, defeating the pin this check exists beside.
+        or (MODEL_MODULE in {node.module_id for node in route.nodes})
+        != case.model_extension
         or pin.research_json is not None
         or sorted(members)
         != sorted(
@@ -419,18 +474,6 @@ def _subjects(qualification: QualificationSet) -> None:
     for case in qualification.cases:
         if not valid_subject(case.subject):
             raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-
-
-def _distinct(qualification: QualificationSet) -> None:
-    """Two cases under one label make "the answer" depend on read order.
-
-    `build_matrix` refuses this too, and only once every case has been paid
-    for — which is what the paragraph above promises does not happen. Checked
-    here so that promise is true.
-    """
-    labels = [case.label for case in qualification.cases]
-    if len(set(labels)) != len(labels):
-        raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)
 
 
 def _perform_one(
@@ -603,5 +646,7 @@ def _answerable(qualification: QualificationSet) -> None:
     """
     for case in qualification.cases:
         carried = {sha256(document.data).hexdigest() for document in case.documents}
-        if any(expect.document_sha256 not in carried for expect in case.expects):
+        if any(expect.document_sha256 not in carried for expect in case.expects) or (
+            case.forecast is not None and not case.model_extension
+        ):
             raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)

@@ -29,7 +29,7 @@ from server.methodology import executor
 from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.provider import Completion
 from server.qualification import harness as subject
-from server.qualification.matrix import QualificationSet
+from server.qualification.matrix import ExpectedCitation, QualificationSet
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
 from server.store.gates import Gate, execution_input, gate_preview, withdraw_source
@@ -63,6 +63,63 @@ def test_legacy_perform_refuses_without_spending(ready: Fixture) -> None:
     assert observed == (RefusalCode.RUN_INPUT_INVALID, 0, 0, 0)
     assert _count(conn, "SELECT count(*) FROM cases") == 0
     assert _count(conn, "SELECT count(*) FROM runs") == 0
+
+
+def test_changed_answer_key_refuses_before_any_provider_call(ready: Fixture) -> None:
+    conn, blobs, harness, qualification = ready
+    prepared = _prepared(ready)
+    first = qualification.cases[0]
+    changed = replace(
+        qualification,
+        cases=(
+            replace(
+                first,
+                expects=(
+                    ExpectedCitation(
+                        module_id="CP-L10",
+                        document_sha256=first.expects[0].document_sha256,
+                        matched_text=first.expects[0].matched_text,
+                    ),
+                ),
+            ),
+            *qualification.cases[1:],
+        ),
+    )
+
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        subject.perform(conn, blobs, harness, qualification=changed, prepared=prepared)
+
+    assert cast(_Completions, harness.completions).prompts == []
+    _unspent(conn)
+
+
+@pytest.mark.parametrize(
+    ("field", "changed"), [("provider", "other-provider"), ("model", "other/model")]
+)
+def test_changed_execution_target_refuses_before_any_provider_call(
+    ready: Fixture, field: str, changed: str
+) -> None:
+    conn, blobs, harness, qualification = ready
+    prepared = _prepared(ready)
+    completions = cast(_Completions, harness.completions)
+    changed_completions = (
+        replace(completions, provider=changed)
+        if field == "provider"
+        else replace(completions, model=changed)
+    )
+    changed_harness = replace(harness, completions=changed_completions)
+
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        subject.perform(
+            conn,
+            blobs,
+            changed_harness,
+            qualification=qualification,
+            prepared=prepared,
+        )
+
+    assert completions.prompts == []
+    _unspent(conn)
 
 
 def _run(ready: Fixture, prepared: object) -> subject.PerformedSet:
@@ -223,7 +280,13 @@ def test_untrusted_carrier_shape_refuses_before_paid_work(
             b,
         ),
         "item-subclass": (
-            type("CarrierItem", (subject.PreparedCase,), {})(a.case_label, a.input),
+            type("CarrierItem", (subject.PreparedCase,), {})(
+                a.case_label,
+                a.input,
+                a.qualification_set_sha256,
+                a.provider,
+                a.model,
+            ),
             b,
         ),
         "input-subclass": (

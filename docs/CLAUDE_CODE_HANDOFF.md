@@ -51,6 +51,36 @@ with `acf334d`. The tracked `CLAUDE.md` at `694660b` records acceptance
 through Task17e. Original logs and detailed reviews remain local supplements;
 this documentation update has not rerun their gates or accepted new code.
 
+## Phase 6 offline implementation checkpoint — 15 September 2026
+
+- **State:** Task 6.1, the verdict-clock guard, and the deterministic portion
+  of Task 6.2 are implemented and verified locally; Phase 6 is **not
+  accepted**.  The next accepted checkpoint still requires the restricted/PDF
+  production journey, Tasks 6.3–6.4, and all end-of-phase gates and reviews.
+- **Committed guards:** `5524f2c` binds preparation to the exact qualification
+  set; `e55ab19` additionally binds provider and model; `5cedb95` rejects
+  duplicate case labels and duplicate citation answer keys; `373ee07` and
+  `032e497` reject future-dated verdicts and validate the supplied review
+  clock before comparison.  The execution and qualification-focused pytest
+  suites, Ruff format/check, diff check, and pre-commit hooks passed for each
+  slice.  No provider credentials or live calls were used.
+- **Index evidence:** GitNexus was incrementally refreshed at `032e497`
+  (8,617 nodes, 22,063 edges, 372 clusters, 300 flows).  Its caller trace
+  confirms that existing governed writes and commands are case-scoped, while
+  a qualification verdict covers a complete, potentially multi-case set;
+  do not bind one to an arbitrary application case merely to reuse that API.
+- **Deterministic conclusion key:** `994b004` adds a closed CP-CF forecast key
+  (independent value, period/scenario, currency/scale, perimeter, QA,
+  limitations and gate-readiness checks), its on-disk form, exact host-route
+  extension binding, and regressions for wrong amount, unit and perimeter.
+  It reads the accepted artifact through the existing host recomputation seam,
+  never model prose.  CP-CF is a declared host extension of the enabled
+  FULL_CREDIT_32/RELATIVE_VALUE route, so a qualification case now binds the
+  extension explicitly.  The proof no longer asks vendor navigation T8 to
+  name that host-only extension; CP-CF's accepted artifact remains independently
+  proved.  Restricted/refusal examples and the real PDF production journey
+  remain required before Task 6.2 can be accepted.
+
 ## Phase 4 acceptance record — 14 September 2026
 
 - **Candidate:** `codex/execute-repair-plan` at `0deb4a4`; GitNexus index-only

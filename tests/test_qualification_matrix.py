@@ -48,6 +48,7 @@ from server.qualification.matrix import (
     MatrixRow,
     QualificationCase,
     QualificationSet,
+    assert_unambiguous,
     build_matrix,
     qualification_set_digest,
 )
@@ -341,6 +342,15 @@ def test_the_matrix_refuses_two_keys_for_one_case(ran: Ran) -> None:
         _matrix(ran, QualificationSet(cases=(_one_case(ran), _one_case(ran))))
 
     assert refused.value.code is RefusalCode.QUALIFICATION_SET_AMBIGUOUS
+
+
+def test_assert_unambiguous_refuses_duplicate_answer_keys(ran: Ran) -> None:
+    duplicate = replace(_one_case(ran), expects=_one_case(ran).expects * 2)
+
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+        assert_unambiguous(QualificationSet(cases=(duplicate,)))
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+        _matrix(ran, QualificationSet(cases=(duplicate,)))
 
 
 def test_a_qualification_set_digest_binds_every_case_and_key(ran: Ran) -> None:
