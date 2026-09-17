@@ -28,6 +28,7 @@ from uuid import UUID
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.digest import canonical_json
+from server.engine.route import MODEL_MODULE
 from server.evidence.citations import AnchoredCitation, Citation, Rect
 from server.methodology.vendor import VendorContract
 from server.refusals import Refusal, RefusalCode
@@ -48,7 +49,7 @@ ADAPTER_MODULES = frozenset(
         "CP-2",
         "CP-2G",
         "CP-3",
-        "CP-CF",
+        MODEL_MODULE,
     }
 )
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
@@ -181,7 +182,7 @@ def invocation_fields(
             ordinal=identity.ordinal,
         ),
     )
-    if identity.module_id == "CP-CF":
+    if identity.module_id == MODEL_MODULE:
         # The vendor grammar stops at stage 99. Validate its shared envelope
         # fields there, then bind our declared stage-100 host occurrence.
         envelope["route_node_id"] = identity.route_node_id
@@ -220,7 +221,7 @@ def invocation_fields(
 
 
 def _envelope_node(identity: HostIdentity) -> str:
-    if identity.module_id != "CP-CF":
+    if identity.module_id != MODEL_MODULE:
         return identity.route_node_id
     expected = f"RN-{identity.profile_id}-{identity.selection_id}-100-CP-CF"
     if identity.route_node_id != expected:
@@ -375,7 +376,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
 
     violations = (
         []
-        if identity.module_id == "CP-CF"
+        if identity.module_id == MODEL_MODULE
         else _or_refuse(
             RefusalCode.HANDOFF_INCOMPLETE,
             lambda: contract.completeness_check.check(
@@ -385,7 +386,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     )
     if violations:
         raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
-    if identity.module_id == "CP-CF":
+    if identity.module_id == MODEL_MODULE:
         from server.methodology.forecast import forecast_projection
 
         forecast_projection(markdown)

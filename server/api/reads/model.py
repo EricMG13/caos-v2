@@ -21,6 +21,7 @@ from server.api.wire import (
     ModelPeriod,
     ModelValue,
 )
+from server.engine.route import MODEL_MODULE
 from server.methodology.forecast import forecast_projection
 from server.refusals import Refusal, RefusalCode
 from server.store.source_sets import pinned_live_sources
@@ -46,7 +47,7 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
 ) -> ModelDocument:
     analysis = read_analysis(actor, case_id, run, standing, conn, blobs, bundle)
     body = analysis.body
-    accepted = next((h for h in body.handoffs if h.module_id == "CP-CF"), None)
+    accepted = next((h for h in body.handoffs if h.module_id == MODEL_MODULE), None)
     forecast = None
     if accepted is not None and body.displayed_run_id is not None:
         live = pinned_live_sources(conn, body.displayed_run_id)

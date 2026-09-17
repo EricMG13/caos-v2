@@ -51,7 +51,7 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import READY, ResolvedRoute, readiness_from
+from server.engine.route import MODEL_MODULE, READY, ResolvedRoute, readiness_from
 from server.engine.runtime import accepted_artifacts
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
@@ -762,7 +762,7 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
     route = resolved_route(conn, run_id)
     if route is None:
         return False
-    node = next((item for item in route.nodes if item.module_id == "CP-CF"), None)
+    node = next((item for item in route.nodes if item.module_id == MODEL_MODULE), None)
     if node is None:
         return False
     rows = conn.execute(
