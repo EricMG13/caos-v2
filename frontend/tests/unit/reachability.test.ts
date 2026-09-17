@@ -6,8 +6,8 @@
 // here it is asserted where the `typescript` it imports is installed.
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { importGraph, unreachableSections } from "../../scripts/check-tested.mjs";
+import { join, relative, resolve } from "node:path";
+import { importGraph, unreachable } from "../../scripts/check-tested.mjs";
 
 const SRC = resolve(process.cwd(), "src");
 
@@ -54,7 +54,7 @@ test("a type-only import does not reach: the bundler erases it, so the file ship
   expect(graph.has(join(root, "sections", "Live.tsx"))).toBe(true);
   expect(graph.has(join(root, "sections", "Planted.tsx"))).toBe(false);
   const files = ["Live.tsx", "Planted.tsx", "types.ts"].map((name) => join(root, "sections", name));
-  expect(unreachableSections(files, root)).toEqual([join(root, "sections", "Planted.tsx")]);
+  expect(unreachable(files, root)).toEqual([join(root, "sections", "Planted.tsx")]);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -85,38 +85,20 @@ function typescriptSources(directory: string): string[] {
   });
 }
 
-// `RETIRED` above is a list, and a list only sees what somebody wrote into it.
-// The three wire modules this wave deleted were reachable from nothing, and
-// neither the section walk above (scoped to `src/sections/`) nor the lint rule
-// beside it would have said so -- a wire module is not a component. This is the
-// rule rather than the list: a module under `src/wire/` that no other file
-// under `src/` names is orphaned, whether or not anyone remembered to add it.
+// `RETIRED` below is a list, and a list only sees what somebody wrote into it.
+// The rule beside it is the general form, and it is the graph rather than a
+// text match: a raw `source.includes("@/wire/x")` is satisfied by a comment, a
+// string literal, or a second orphan naming the first, none of which ships
+// anything. The audit that closed the audit remediation found exactly that in
+// the first version of this test, and found the walk it was compensating for
+// scoped to two directories of eight while its message claimed `src/`.
 //
-// Text, not the import graph, because a wire module is mostly types and a
-// type-only import is erased before the graph can see it. A barrel is named by
-// its directory (`@/wire/v1`), so an `index` file answers to that too.
-function wireSpecifiers(file: string): string[] {
-  const path = relative(SRC, file).replace(/\.tsx?$/, "");
-  const spellings = [`@/${path}`];
-  if (basename(path) === "index") spellings.push(`@/${dirname(path)}`);
-  return spellings;
-}
-
-test("test_every_module_under_wire_is_named_by_something_under_src", () => {
+// `unreachable` now walks all of `src/` from `main.tsx`, and `shipsNothing` is
+// what makes that safe: a file of pure types is erased whole, so it cannot be
+// dead shipped code. Nothing under `src/` is unreachable today.
+test("test_no_file_under_src_is_unreachable_from_the_entry_point", () => {
   const files = typescriptSources(SRC);
-  const orphans = files
-    .filter((file) => relative(SRC, file).startsWith(`wire${sep}`))
-    .filter((file) => {
-      const own = basename(file).replace(/\.tsx?$/, "");
-      return !files.some((other) => {
-        if (other === file) return false;
-        const source = readFileSync(other, "utf8");
-        if (wireSpecifiers(file).some((s) => source.includes(`"${s}"`))) return true;
-        return dirname(other) === dirname(file) && source.includes(`"./${own}"`);
-      });
-    })
-    .map((file) => relative(SRC, file));
-  expect(orphans).toEqual([]);
+  expect(unreachable(files, SRC).map((file: string) => relative(SRC, file))).toEqual([]);
 });
 
 test("nothing under src/ imports the retired Book and Admin modules", () => {

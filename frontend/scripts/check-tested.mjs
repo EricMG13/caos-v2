@@ -228,16 +228,20 @@ export function shipsNothing(source, filename) {
   );
 }
 
-// The section files the entry point cannot reach: the "reachable from the
-// entry point" rule above, over the files the export scan already holds.
-export function unreachableSections(files, src) {
+// Every file the entry point cannot reach: the "reachable from the entry
+// point" rule above, over the files the export scan already holds.
+//
+// This was scoped to `src/sections/` until the audit that closed the audit
+// remediation measured it: two directories of eight, 27 of 66 files, and a
+// message that claimed `src/` while inspecting one folder. The three wire
+// modules that wave deleted were exactly the class it could not see, because a
+// wire module is not a component. `shipsNothing` is what makes the wider scope
+// safe -- a file of pure types is erased whole and so cannot be dead shipped
+// code, which is why widening flags nothing that was already honest.
+export function unreachable(files, src) {
   const reached = importGraph(join(src, "main.tsx"), src);
-  const sections = join(src, "sections") + "/";
   return files.filter(
-    (file) =>
-      file.startsWith(sections) &&
-      !reached.has(file) &&
-      !shipsNothing(readFileSync(file, "utf8"), file),
+    (file) => !reached.has(file) && !shipsNothing(readFileSync(file, "utf8"), file),
   );
 }
 
@@ -264,7 +268,7 @@ function main(argv) {
     }
   }
   const src = root ? join(root, "src") : join(repo(), "frontend", "src");
-  for (const file of unreachableSections(files, src)) {
+  for (const file of unreachable(files, src)) {
     found.push(`${file}: unreachable from src/main.tsx; nothing in src/ imports it`);
   }
   for (const line of found) console.log(line);
