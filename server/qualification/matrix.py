@@ -284,7 +284,9 @@ def qualification_set_digest(qualification: QualificationSet) -> str:
     assert_measurable(qualification)
     canonical = sorted(_digested(case) for case in qualification.cases)
     return sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
     ).hexdigest()
 
 

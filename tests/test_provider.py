@@ -45,6 +45,7 @@ from server.provider import (
     UrllibTransport,
     _opener,
     encode_request,
+    reported_charge,
 )
 from server.refusals import Refusal, RefusalCode
 
@@ -996,3 +997,13 @@ def test_the_live_provider_returns_a_completion() -> None:
     assert isinstance(completion.charge, Decimal)
     assert completion.charge >= 0
     assert completion.generation_id
+
+
+def test_reported_charge_takes_a_decimal_and_refuses_anything_else() -> None:
+    """A charge the host cannot validate is no charge, never a guessed one."""
+    assert reported_charge(Decimal("0.0123")) == Decimal("0.0123")
+    assert reported_charge(2) == Decimal(2)
+    assert reported_charge(Decimal("-1")) is None
+    assert reported_charge(0.0123) is None  # a float never reaches a money path
+    assert reported_charge("0.0123") is None
+    assert reported_charge(None) is None

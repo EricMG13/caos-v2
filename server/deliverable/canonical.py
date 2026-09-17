@@ -61,7 +61,11 @@ class Revision:
 def payload_bytes(payload: dict[str, Any]) -> bytes:
     """The payload's one canonical serialisation; its digest is what is signed."""
     return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
     ).encode("utf-8")
 
 

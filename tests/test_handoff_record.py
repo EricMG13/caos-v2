@@ -52,6 +52,7 @@ from server.methodology.handoff import (
     read_record,
     record_bytes,
     stored_lineage,
+    strict_json,
     validate_markdown,
 )
 from server.methodology.invocation import record_authority_matches
@@ -649,3 +650,11 @@ def test_an_explicitly_empty_blocker_list_is_not_the_canonical_form(
     artifact = blobs.put(CP0_MD)
 
     _mismatch(blobs, artifact, blobs.put(data), CP0)
+
+
+def test_strict_json_refuses_a_duplicate_key_and_a_json_constant() -> None:
+    """The reader every handoff body goes through: one value per key, no NaN."""
+    assert strict_json('{"a":1,"b":[2,3]}') == {"a": 1, "b": [2, 3]}
+    for text in ('{"a":1,"a":2}', '{"a":NaN}', '{"a":Infinity}'):
+        with pytest.raises(ValueError):
+            strict_json(text)

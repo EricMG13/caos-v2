@@ -536,7 +536,7 @@ def test_approval_failure_is_atomic_and_releases_locks(
                 conn.close()
             raise KeyboardInterrupt
 
-        monkeypatch.setattr(audit, "_digest_of", cancel)
+        monkeypatch.setattr(audit, "digest_of", cancel)
     conn.commit()
     with pytest.raises(
         KeyboardInterrupt if failure in {"cancel", "broken"} else Refusal

@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.digest import canonical_digest
 from server.evidence.extract import (
     DEFAULT_LIMITS,
     AdmissionLimits,
@@ -264,7 +265,7 @@ def _prepare(document: Document, tokens: list[Token], identity: str) -> _Packed:
     except (AttributeError, TypeError, ValueError, OverflowError):
         raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
     blocks = _blocks(prepared)
-    output = _digest(
+    output = canonical_digest(
         {
             "format_version": 1,
             "tokens": [asdict(token) for token in prepared],
@@ -273,7 +274,7 @@ def _prepare(document: Document, tokens: list[Token], identity: str) -> _Packed:
             ],
         }
     )
-    extraction = _digest(
+    extraction = canonical_digest(
         {
             "format_version": 1,
             "document_sha256": sha256(document.data).hexdigest(),
@@ -282,17 +283,6 @@ def _prepare(document: Document, tokens: list[Token], identity: str) -> _Packed:
         }
     )
     return _Packed(document, prepared, blocks, identity, output, extraction)
-
-
-def _digest(value: object) -> str:
-    canonical = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _require_case(conn: StoreConnection, case_id: UUID) -> None:

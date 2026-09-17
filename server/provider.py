@@ -406,7 +406,7 @@ def _unambiguous_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return members
 
 
-def _reported_charge(value: object) -> Decimal | None:
+def reported_charge(value: object) -> Decimal | None:
     if type(value) is int:
         value = Decimal(value)
     if isinstance(value, Decimal):
@@ -422,7 +422,7 @@ def _completion(
     body: Mapping[str, Any], *, refusal: RefusalCode | None = None
 ) -> Completion:
     usage = body.get("usage")
-    charge = _reported_charge(usage.get("cost") if isinstance(usage, Mapping) else None)
+    charge = reported_charge(usage.get("cost") if isinstance(usage, Mapping) else None)
     generation = producer_identifier(body.get("id"), limit=512)
     if refusal is not None:
         return Completion(None, charge, generation, refusal)

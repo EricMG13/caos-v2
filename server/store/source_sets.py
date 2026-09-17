@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
+from server.digest import canonical_digest
 from server.evidence.extract import ExtractorIdentity
-from server.evidence.ingest import _digest
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, committed_unit
 from server.store.cases import lock_case
@@ -49,7 +49,7 @@ def _valid_member(member: SourceSetMember) -> bool:
                 member.extraction_sha256,
             )
         )
-        and _digest(
+        and canonical_digest(
             {
                 "format_version": 1,
                 "document_sha256": member.document_sha256,
@@ -65,7 +65,7 @@ def _fingerprint(case_id: UUID, members: tuple[SourceSetMember, ...]) -> str:
     """Validate stored provenance before using it as snapshot authority."""
     try:
         valid = all(_valid_member(member) for member in members)
-        digest = _digest(
+        digest = canonical_digest(
             {
                 "format_version": 1,
                 "case_id": str(case_id),
