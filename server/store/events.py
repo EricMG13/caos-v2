@@ -20,7 +20,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.cases import lock_case
 
 
@@ -54,17 +54,26 @@ def lock_run(conn: StoreConnection, run_id: UUID) -> RunStatus:
 
     Read status in a new statement after waiting for the case, so a transition
     committed during the wait is visible under READ COMMITTED.
+
+    `RUN_NOT_FOUND` ends the unit first. The first statement opens the caller's
+    transaction and takes an `ACCESS SHARE` on `runs`; raising with it open left
+    that lock held for as long as the caller went on doing whatever it did next,
+    for a run that is not there and that no later statement of that unit could
+    make appear. Every other refusal that takes a lock here -- `pin_route`,
+    `apply_schema`, `reserve` -- ends its transaction the same way.
     """
     owner = conn.execute(
         "SELECT case_id FROM runs WHERE run_id = %s", (run_id,)
     ).fetchone()
     if owner is None:
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     lock_case(conn, UUID(str(owner[0])), missing=RefusalCode.RUN_NOT_FOUND)
     row = conn.execute(
         "SELECT status FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
     ).fetchone()
     if row is None:
+        rollback_or_close(conn)
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     return RunStatus(row[0])
 
