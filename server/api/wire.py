@@ -140,6 +140,9 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.PROVIDER_NOT_CONFIGURED: "An operator must configure the provider.",
     _C.PROVIDER_CALL_INVALID: "Correct the provider call parameters.",
     _C.CONTEXT_OVER_CEILING: "Deliver less context to the module.",
+    _C.UPSTREAM_SECTION_OVER_CEILING: (
+        "Start a new run; an accepted handoff is never shortened."
+    ),
     _C.PROVIDER_UNAVAILABLE: "Retry when the provider answers.",
     _C.PROVIDER_OUTPUT_TRUNCATED: "Retry the attempt.",
     _C.PROVIDER_REFUSED: "Retry the attempt or revise the evidence.",

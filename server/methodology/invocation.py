@@ -77,6 +77,18 @@ from server.store.source_sets import SourceSet
 
 _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 
+# One accepted upstream handoff's bytes, whole. The per-section bound §45.3
+# never gave: the request ceiling bounds the sum and names no part, so the
+# first wide pathway would refuse CONTEXT_OVER_CEILING with nothing said about
+# which section was large. Declared rather than derived from the ceiling, so a
+# reader sees the number: on the catalog's widest pathway CP-5 takes 16 direct
+# upstreams, and 16 sections at this bound beside CP-5's 165,548 bytes of
+# delivered authority still leave the ceiling more than a quarter of itself for
+# evidence (`test_the_declared_section_bound_leaves_the_widest_node_its_authority`).
+# Nothing is ever truncated, and this does not make a wide route fit -- that is
+# per-node evidence selection, which the bundle has not yet declared.
+MAX_UPSTREAM_HANDOFF_BYTES = 32_768
+
 
 def host_identity(  # noqa: PLR0913 -- the brief's keyword-only identity inputs
     conn: StoreConnection,
@@ -756,6 +768,9 @@ def _upstream_section(
         return ""
     sections = []
     for ref, data in upstream:
+        # Before the decode, so the oversize section is refused rather than held.
+        if len(data) > MAX_UPSTREAM_HANDOFF_BYTES:
+            raise Refusal(RefusalCode.UPSTREAM_SECTION_OVER_CEILING)
         text = _utf8(data, RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
         if (
             hashlib.sha256(data).hexdigest() != ref.sha256

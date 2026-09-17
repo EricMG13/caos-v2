@@ -1814,38 +1814,59 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from
   the engine rather than from the run document.
-- **An upstream section is unbounded, but the whole context is refused.** A
-  node's prompt carries every direct predecessor's accepted Markdown whole
-  (`docs/DECISIONS.md` §28), with no per-section cap. Since Task 3.3b the whole
-  prompt -- authority, upstream, evidence -- is built by
-  `canonical.check_context` under `prospective_identity` before
+- ~~**An upstream section is unbounded, but the whole context is refused.**~~
+  Bounded by `invocation.MAX_UPSTREAM_HANDOFF_BYTES` (32,768); the citation
+  register and the evidence section still are not. A node's prompt carries
+  every direct predecessor's accepted Markdown whole (`docs/DECISIONS.md`
+  §28). Since Task 3.3b the whole prompt -- authority, upstream, evidence --
+  is built by `canonical.check_context` under `prospective_identity` before
   `start_attempt`, and one whose whole encoded request
   (`CompletionProvider.request_bytes`: model, parameters and prompt, as the
   provider sends it) exceeds `MAX_REQUEST_BYTES` refuses
   `CONTEXT_OVER_CEILING` with no attempt, reservation or call and nothing
-  truncated (§45.3). The executor rebuilds and re-bounds it under the
-  attempt's own identity, so each call reads its context twice (the pre-call
-  reads, the case lock hold included). That second check runs after the
-  attempt and its reservation exist: in the one sequential loop only a bundle
-  file changed on disk between the two can make it refuse, but with Phase 4's
-  concurrent workers an upstream accepted in between can make the pre-check
-  pass and the re-check refuse with a reservation held (no call is made).
-  **That day is measurable and close.** On the catalog's widest
-  pathway, `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
-  upstreams**, and its own delivered authority is 165,548 bytes. At a modest
-  20 KB per upstream handoff the authority and upstream sections alone come to
-  493,228 bytes -- 47 % of `MAX_REQUEST_BYTES` -- before a single byte of
-  evidence, and the evidence section carries every block of every pinned source.
-  The only route ever measured is LITE's, three nodes and at most two upstreams,
-  whose prompts run about 210 KB. So the first FULL pathway to run is a
-  plausible `CONTEXT_OVER_CEILING`, which refuses the whole request rather than
-  truncating it: the run does not proceed at all, and a pathway that cannot run
-  cannot be qualified. Measured on 17 September 2026 from the vendored catalog
-  and the bundle's own authority bytes, because nobody had taken the number this
-  deferral rested on.
-  *Upgrade:* a declared per-section bound, owed with Phase 11's first wide
-  pathway rather than on a future measurement, and Phase 4's lease fencing the
-  node's inputs between the two checks.
+  truncated (§45.3). What that bound could never say is *which* part was
+  large. It now does for the one this entry named: an accepted upstream
+  handoff past the declared bound refuses `UPSTREAM_SECTION_OVER_CEILING` in
+  the prompt builder, so before any attempt, reservation or call, and it
+  refuses rather than trims -- a silently shortened prompt is a module
+  answering a question nobody asked
+  (`tests/test_handoff_invocation.py::test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt`,
+  and the runtime half, which leaves no attempt, reservation, call or charge
+  for the node it could not prompt,
+  `tests/test_canonical_runtime.py::test_an_over_bound_upstream_section_refuses_before_its_attempt`).
+  The number is declared rather than derived from the ceiling so that a reader
+  can see it, and it is chosen against the measurement this deferral rested
+  on: on the catalog's widest pathway,
+  `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
+  upstreams**, and its own delivered authority is 165,548 bytes, so 16
+  sections at the bound beside that authority still leave `MAX_REQUEST_BYTES`
+  more than a quarter of itself for evidence -- asserted from the vendored
+  catalog and the bundle's own bytes, so a build that widens a node or grows
+  an authority set fails there rather than at the first FULL run
+  (`test_the_declared_section_bound_leaves_the_widest_node_its_authority`).
+  **What it does not buy.** It does not make a wide route fit: the evidence
+  section carries every block of every pinned source, so a FULL CP-5 whose
+  upstreams are each inside the bound can still refuse
+  `CONTEXT_OVER_CEILING`, and what first delivers less is per-node evidence
+  selection (the Phase 5 entry "The gate's evidence demands are dropped"). And
+  the 20 KB-per-handoff figure the 47 % estimate used is an assumption, not a
+  measurement: no FULL module has produced a handoff, and the only real number
+  the tree holds is the 448,826-byte two-document CP-0 request of the VMO2 run
+  (`qualification/vmo2-fy2025/RESULT.md`), which carries no upstream at all.
+  Three sections remain unbounded in their own right -- the upstream citation
+  register (its own entry owes it), the evidence section, and the delivered
+  authority set, which is the bundle's bytes rather than the host's to refuse
+  (invariant 4) and which `tests/test_delivered_authority.py` measures instead.
+  The executor rebuilds and re-bounds the prompt under the attempt's own
+  identity, so each call reads its context twice (the pre-call reads, the case
+  lock hold included). That second check runs after the attempt and its
+  reservation exist: in the one sequential loop only a bundle file changed on
+  disk between the two can make it refuse, but with Phase 4's concurrent
+  workers an upstream accepted in between can make the pre-check pass and the
+  re-check refuse with a reservation held (no call is made).
+  *Upgrade:* Phase 4's lease fencing the node's inputs between the two checks,
+  and a declared bound for the citation register and for the evidence section
+  the day per-node evidence selection has something to select.
 
 **Phase 4.**
 
