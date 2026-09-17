@@ -412,8 +412,8 @@ Rules that will cause your answer to be refused if broken:
   character for character and quotes included: change, reorder or drop none of
   them. After them, add only the model-authored fields named in the final check.
 - Every citation follows the one citation rule stated in the final response
-  check after the evidence; the host's own check is no stricter than that
-  rule, and no other rule is stated.
+  check after the evidence; the host's own check comes after your answer, and
+  no other rule is stated.
 - Use no keys other than those shown.
 """
 
