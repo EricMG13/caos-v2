@@ -434,3 +434,43 @@ def test_the_one_verdict_constraint_is_mapped_by_name_not_by_message(
         ).fetchall()
         conn.rollback()
         assert declared == [(ONE_VERDICT_PER_EVIDENCE,)]
+
+
+def test_a_set_holding_a_case_that_accepted_nothing_is_still_signable(
+    empty_database: str,
+) -> None:
+    """A deliberately restricted case must not make the whole set unsignable.
+
+    `PerformedEvidence.complete` waives the COMPLETE requirement for a case
+    whose declared refusal was met, and such a run can end BLOCKED at its first
+    node having accepted no artifact at all. The model comparison read
+    `call_outcomes` joined to `artifacts`, so that run contributed no row and
+    "every run confirms the model" refused the snapshot `complete` had just
+    called signable -- reporting a wrong binding when the bindings were right,
+    and poisoning every other case in the set with it.
+
+    The rule is now "no run contradicts, and at least one confirms". Every
+    artifact-bearing run is still checked against the store's fact, so invariant
+    3 is untouched, and a snapshot in which nothing at all was produced still
+    refuses: it names no producer.
+
+    Found by the Completion Phase 8 confidence review, which built the snapshot
+    and reproduced the refusal.
+    """
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = qualification_performed(blocked_label="restricted")
+        evidence = performed.evidence
+        assert performed.complete is True, "the snapshot a reviewer is offered"
+        record_performed(conn, performed)
+        record_runs(conn, performed, accepted_nothing="restricted")
+
+        record_verdict(
+            conn,
+            evidence=evidence,
+            reviewer_id=uuid4(),
+            verdict=_verdict(now, evidence),
+        )
+
+        assert current_verdict(conn, evidence=evidence, now=now)

@@ -1241,6 +1241,21 @@ real price for the live model is a user-supplied, dated fact; the byte bound is
 large for a real model against the default ceiling, and pricing the encoded
 request once it is built is the upgrade (CLAUDE.md known gaps).
 
+*Retired in part by Completion Phase 8 Task 8.2 (`0d31a67`, `9c7f161`):* the
+upgrade this entry named is taken. A call no longer reserves `worst_case(price)`;
+it reserves `priced_request(price, request_size(provider, prompt))` over the
+request `check_context` built and bounded, and `canonical._within_reservation`
+re-prices the rebuilt request against the reservation's stored price before the
+call. `worst_case` stays as the run's admission check against its **ceiling**,
+not its remainder. Migration `0024` stores the dated price beside the amount.
+Unchanged: the byte-per-token bound, the reconciliation after the call, and
+"an application price cannot guarantee a vendor bill" -- the reservation's output
+component is still the completion cap at the configured rate, so a vendor billing
+reasoning tokens beyond it still overruns. The price's source remains the owner's
+and is still not decided here. Recorded in place rather than as a new entry
+because this is one clause of §40 becoming untrue, and the Phase 8 confidence
+review found that no later entry said so.
+
 ## 2026-09-13 §41 — The canonical Markdown handoff's identity, storage and citations
 
 (This repository's §41; the inherited table above maps CAOS-Final's own §41.)
@@ -2481,10 +2496,18 @@ wire. The write is one transaction and a refusal rolls it back.
 **What this does not assert.** Nothing here lets the system call itself
 qualified. The route records a person's assertion over evidence the harness
 already produced and `record_verdict` already binds, and the label a reader sees
-is still `current_verdict` re-validating that document. Two limits: a second
-signature over the same evidence is refused `VERDICT_BINDING_INVALID` by the
-one-verdict constraint rather than by a code of its own, and there is no
-command receipt because there is no case scope to key one by. Verified against a
+is still `current_verdict` re-validating that document. Two limits were recorded
+here and both are closed by Completion Phase 8 Task 8.3 (`cf3d805`): a second
+signature is now `VERDICT_ALREADY_RECORDED` at 409, mapped by the one-verdict
+constraint's declared name, and the write records a `command_requests` receipt
+under the nil scope in the verdict's own transaction, with the evidence digest in
+the request digest so one key replayed against other evidence is an idempotency
+conflict rather than that evidence's receipt. The same task added a binding this
+entry did not have: a verdict must name a model the runs recorded, which is
+"no run contradicts and one confirms" rather than "every run confirms", because a
+signable snapshot may hold a case whose declared refusal was met and whose run
+accepted nothing. *Retired in place, for the reason under §40 above.* Verified
+against a
 throwaway clone of the retained `caos_qualify_5a47243d…`; that database still
 holds no verdict, because signing the evidence behind a final check is the
 reviewer's act and not this change's.

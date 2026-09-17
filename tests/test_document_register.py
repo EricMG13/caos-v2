@@ -180,3 +180,43 @@ def test_the_register_passes_its_own_gate_as_main(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert _run_as_main(["--report"], monkeypatch) == 0
+
+
+def test_the_committed_table_is_the_one_the_script_emits() -> None:
+    """`DOCUMENTS.md` carries the emission, not a copy that drifts from it.
+
+    The file says "do not hand-edit the table: change `documents.json` and
+    re-emit", and the commit that wrote it said the script emits the file. Both
+    were aspirations: the script printed to stdout, nothing wrote or compared the
+    file, and `test_the_report_names_every_row_...` above checks the function's
+    output rather than what is committed. So when Task 9.1 added the
+    portfolio-screen set's three document copies, the table lost three rows and
+    the prose kept saying thirteen documents and three in hand while the register
+    held sixteen and six. `CLAUDE.md`'s "Regenerate, don't hand-maintain" rule is
+    exactly what went unenforced.
+
+    This is the missing comparison. It would have failed that commit.
+
+    Found by the Completion Phase 8 confidence review, which re-ran the script
+    and diffed it against the file rather than reading either alone.
+    """
+    register = document_register.load_register(REGISTER)
+    emitted = document_register.report(register, REPO).rstrip("\n")
+    committed = (REPO / "qualification" / "DOCUMENTS.md").read_text(encoding="utf-8")
+
+    assert emitted in committed, (
+        "qualification/DOCUMENTS.md does not carry the emitted table; re-run"
+        " `scripts/document_register.py --report` and paste it in"
+    )
+    # And the prose's own counts, which no emission covers because a person
+    # writes them: a row count that disagrees with the table is the same defect
+    # one level up.
+    by_status: dict[str, int] = {}
+    for row in register.documents:
+        by_status[row.status] = by_status.get(row.status, 0) + 1
+    spelled = {3: "Three", 6: "Six", 7: "seven", 13: "Thirteen", 16: "Sixteen"}
+    total = spelled.get(len(register.documents))
+    in_hand = spelled.get(by_status.get("in_hand", 0))
+    assert total is not None and in_hand is not None, "spell the new counts here"
+    assert f"{total} documents" in committed, f"the prose does not say {total}"
+    assert f"{in_hand.lower()} `in_hand`" in committed, "the in-hand count drifted"

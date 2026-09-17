@@ -78,6 +78,7 @@ NOT_A_CITATION = {
 EXPECTED_PHASES = frozenset(
     {
         "Completion Phase 10",
+        "Completion Phase 8",
         "Completion Phase 7",
         "Repair Phase 5",
         "Repair Phase 4",

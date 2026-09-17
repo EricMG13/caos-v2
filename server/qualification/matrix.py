@@ -623,14 +623,30 @@ def _normalised_cell(value: str) -> str:
     return " ".join(unicodedata.normalize("NFC", value).split())
 
 
-def _cell(row: Mapping[str, str], column: str) -> str | None:
+def _cell(
+    row: Mapping[str, str], column: str, header: Sequence[str] | None = None
+) -> str | None:
     """One row's cell under `column`, normalised, or `None` if it is not there.
 
     The column name is matched under the same rule as the cell, because a header
     is padded and wrapped like any other cell. A register whose header names the
     same column twice answers `None`: the host does not choose between them.
+
+    That last rule needs the header, not the row. The vendor's reader builds a
+    row as `dict(zip(header, cells))`, so two identical header names collapse to
+    the last cell before the host sees anything -- the row then holds one entry
+    and this function used to answer from it, while a person reading the table
+    reads the leftmost namesake. The header is where the duplicate is still
+    visible. Passing it is optional only so a caller testing one row need not
+    build one; every caller that has a register passes it. Found by the
+    Completion Phase 8 confidence review, which built the table and watched a
+    shipped key answer from the trailing column.
     """
     wanted = _normalised_cell(column)
+    if header is not None:
+        named = [name for name in header if _normalised_cell(str(name)) == wanted]
+        if len(named) != 1:
+            return None
     found = [
         value for name, value in row.items() if _normalised_cell(str(name)) == wanted
     ]
@@ -657,19 +673,19 @@ def _matches_register(
         # Anything but the reader's `(header, rows)` is not this key's answer:
         # the host reads the vendor's shape and invents no second one.
         return False
-    _header, rows = found
+    header, rows = found
     matched = [
         row
         for row in rows
         if isinstance(row, Mapping)
         if all(
-            _cell(row, column) == _normalised_cell(value)
+            _cell(row, column, header) == _normalised_cell(value)
             for column, value in expect.row_key
         )
     ]
     if len(matched) != 1:
         return False
-    return _cell(matched[0], expect.column) == _normalised_cell(expect.expected)
+    return _cell(matched[0], expect.column, header) == _normalised_cell(expect.expected)
 
 
 def _registers_met(
@@ -696,7 +712,6 @@ def _registers_met(
     if route is None:
         return False
     accepted = _accepted_rows(conn, run_id)
-    find_registers = load_vendor_contract(bundle).completeness_check.find_registers
     wanted: dict[str, list[ExpectedRegister]] = {}
     for expect in case.expects_register:
         wanted.setdefault(expect.module_id, []).append(expect)
@@ -726,6 +741,15 @@ def _registers_met(
                 record_sha256=str(record_sha256),
                 accepted=accepted,
             )
+            # Resolved inside this guard rather than before the loop: an
+            # `AUTHORITY_BYTES_MISMATCH` from the bundle used to propagate out of
+            # `build_matrix` and turn a scorable set into an exception, where
+            # every other refusal here is a miss. The contract is cached per
+            # manifest digest, so asking once per module costs nothing. Found by
+            # the Completion Phase 8 confidence review.
+            find_registers = load_vendor_contract(
+                bundle
+            ).completeness_check.find_registers
             registers = find_registers(
                 markdown.decode("utf-8"),
                 [expect.register_id for expect in expects],
@@ -950,12 +974,29 @@ def assert_measurable(qualification: QualificationSet) -> None:
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
 
 
+def _register_cell(
+    expect: ExpectedRegister,
+) -> tuple[str, str, tuple[tuple[str, str], ...], str]:
+    """The cell a register key names, without the answer it expects.
+
+    Two keys sharing this and disagreeing on `expected` cannot both be met.
+    """
+    return (expect.module_id, expect.register_id, tuple(expect.row_key), expect.column)
+
+
 def assert_unambiguous(qualification: QualificationSet) -> None:
     """Refuse duplicate case labels or answer keys before either can be scored."""
     labels = [case.label for case in qualification.cases]
     if len(set(labels)) != len(labels) or any(
         len(set(case.expects)) != len(case.expects)
         or len(set(case.expects_register)) != len(case.expects_register)
+        # Two register keys naming one cell with different answers is a set no
+        # run can meet, and it loads clean if only whole tuples are compared:
+        # the semantic key is the cell, as the forecast check below uses the
+        # value's name rather than the whole value. A reviewer would read
+        # `registers_met: false` and hunt the model.
+        or len({_register_cell(item) for item in case.expects_register})
+        != len(case.expects_register)
         or (
             case.forecast is not None
             and len({value.name for value in case.forecast.values})

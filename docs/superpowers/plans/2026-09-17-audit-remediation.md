@@ -24,17 +24,24 @@
 
 ## Matrix use (Opus 5 / Fable 5.1)
 
-Routing follows `claude_fable_and_opus_reasoning_matrix.md`; Sonnet is out of the loop. `ultrathink` is an Opus 5 lever only and is never put in a Fable prompt.
+Routing follows `claude_fable_and_opus_reasoning_matrix.md`; Sonnet is out of the loop.
+
+**Superseded mid-plan, 17 September 2026.** The owner replaced Fable 5.1 with
+**Opus 5 at `max` effort carrying `ultrathink`** everywhere the matrix named it.
+The two Fable rows below and the per-task `Model/effort:` lines of waves 1-3 are
+kept as the record of what actually ran; every dispatch from wave 4 onward,
+including both phase gates, takes Opus 5 `max` + `ultrathink` in place of any
+Fable row.
 
 | Row | When this plan uses it | Tasks |
 |---|---|---|
 | **Opus 5 `low`** | one-file mechanical edits, config, docs, help text | T9, T17, T19, T20 |
 | **Opus 5 `medium`** | discrete bug fixes, an endpoint or store function, its unit test | T1 (fix), T2, T4, T5, T6, T8, T14 |
 | **Opus 5 `max` + `ultrathink`** | one isolated invariant: a race, a lock order, a money/exactly-once path, a migration that touches an immutability trigger | T1 (race test), T3, T18 |
-| **Fable 5.1 `medium`** | multi-file refactors that must stay behaviour-identical across a package | T10, T12, T13, T15 |
-| **Fable 5.1 `high`** | contract and governance changes: the prompt contract, the verification seam, decision entries, the two phase gates | T7, T11, wave gates, D1–D3 |
+| **Fable 5.1 `medium`** (superseded -> Opus 5 `max` + `ultrathink`) | multi-file refactors that must stay behaviour-identical across a package | T10, T12, T13, T15 |
+| **Fable 5.1 `high`** (superseded -> Opus 5 `max` + `ultrathink`) | contract and governance changes: the prompt contract, the verification seam, decision entries, the two phase gates | T7, T11, wave gates, D1–D3 |
 
-Per-task lines say `Model/effort:`. A mixed task takes the stricter row. The coordinator (Fable 5.1 `high`) writes every `docs/DECISIONS.md` entry, assigns section numbers at integration time, and runs the end-of-phase `confidence-review` and then the separate adversarial audit, both on Fable 5.1 at `high`/`max`, with remediation and re-verification between them.
+Per-task lines say `Model/effort:`. A mixed task takes the stricter row. The coordinator writes every `docs/DECISIONS.md` entry, assigns section numbers at integration time, and runs the end-of-phase `confidence-review` and then the separate adversarial audit, both on **Opus 5 at `max` with `ultrathink`**, with remediation and re-verification between them.
 
 ## Waves
 
@@ -44,7 +51,7 @@ Per-task lines say `Model/effort:`. A mixed task takes the stricter row. The coo
 | 2 — prompt and evidence | T7, T8, T9 | full `make check` once |
 | 3 — consolidation | T10, T11, T12, T13, T14, T15 | full `make check` once |
 | 4 — store, operator surface, residue | T16 (decision), T17, T18, T19, T20 | full `make check` + `make smoke-production` |
-| close | confidence-review → remediation → adversarial audit (Fable 5.1 high/max) → handoff update | — |
+| close | confidence-review → remediation → adversarial audit (Opus 5 `max` + `ultrathink`) → handoff update | — |
 
 Owner decisions this plan needs (D1–D3) are stated at the end; tasks that depend on one say so.
 
@@ -1134,8 +1141,8 @@ def test_an_unset_price_says_unset_not_misconfigured(monkeypatch, capsys) -> Non
 ## Phase close
 
 1. Coordinator runs the full gate on the integrated wave-4 tree, including `make smoke-production`.
-2. `confidence-review` on Fable 5.1 `high`/`max` over the whole change set; remediate; re-verify.
-3. Separate adversarial audit on Fable 5.1 `high`/`max`; remediate; re-verify.
+2. `confidence-review` on Opus 5 `max` with `ultrathink` over the whole change set; remediate; re-verify.
+3. Separate adversarial audit on Opus 5 `max` with `ultrathink`; remediate; re-verify.
 4. Update `docs/CLAUDE_CODE_HANDOFF.md` (acceptance record, the prompt-bytes note from Task 7, the REPAIR_PLAN F13 observation from Task 16), refresh GitNexus (`make index`), and strike the ledger entries the tasks closed (C1's lock, the batched block read, the triple record) in `CLAUDE.md`'s known-gaps section in the same commit as the code that closes them.
 
 ## Self-review

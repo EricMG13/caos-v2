@@ -1,6 +1,6 @@
 # The document register
 
-Emitted 17 September 2026 against `codex/execute-repair-plan` at `e59ad7b`.
+Emitted 17 September 2026 against `codex/execute-repair-plan`, re-emitted after Task 9.1 added the portfolio-screen set's document copies.
 
 > **How this file is made.** The hand-authored half is
 > [`documents.json`](documents.json) — the demand, the public location, the status,
@@ -38,8 +38,11 @@ names. Two rows are inferred; the note says from what.
 | `vmo2-q3-2025-earnings` | VMO2 | Virgin Media O2 Q3 2025 earnings release | in_hand | CP-0, CP-L10, CP-5, CP-1, CP-1B, CP-2, CP-8 | LITE_EARNINGS_UPDATE, LITE_PORTFOLIO_DECISION, EARNINGS_UPDATE | 144538 | yes | `505bf1a0f4181c9c…` |
 | `vmo2-q4-2025-earnings` | VMO2 | Virgin Media O2 Q4 2025 earnings release | in_hand | CP-0, CP-L10, CP-5, CP-1, CP-1B, CP-2, CP-8 | LITE_EARNINGS_UPDATE, LITE_PORTFOLIO_DECISION, EARNINGS_UPDATE | 178368 | yes | `66055bbb8d27721d…` |
 | `ccl-fy2025-10k` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract) | in_hand | CP-0, CP-L10, CP-1, CP-1A, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LITE_EARNINGS_UPDATE, LITE_PORTFOLIO_DECISION, LIQUIDITY_REVIEW, EARNINGS_UPDATE, COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | 311896 | yes | `8fa7fceda34be50b…` |
-| `ba-fy2025-10k` | BA | The Boeing Company FY2025 Form 10-K (text extract) | to_source | CP-0, CP-1, CP-1A, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, COVENANT_REFINANCING, FULL_CREDIT_ASSESSMENT | 1177234 | **no** | `0446b367110afddc…` |
-| `f-fy2025-10k` | F | Ford Motor Company FY2025 Form 10-K (text extract) | to_source | CP-0, CP-1, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, FULL_CREDIT_ASSESSMENT | 1922743 | **no** | `97a38bc17e505cd1…` |
+| `vmo2-q3-2025-earnings-portfolio` | VMO2 | Virgin Media O2 Q3 2025 earnings release (portfolio-screen set copy) | in_hand | CP-0, CP-L10 | LITE_PORTFOLIO_DECISION | 144538 | yes | `505bf1a0f4181c9c…` |
+| `vmo2-q4-2025-earnings-portfolio` | VMO2 | Virgin Media O2 Q4 2025 earnings release (portfolio-screen set copy) | in_hand | CP-0, CP-L10 | LITE_PORTFOLIO_DECISION | 178368 | yes | `66055bbb8d27721d…` |
+| `ccl-fy2025-10k-portfolio` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, portfolio-screen set copy) | in_hand | CP-0, CP-L10 | LITE_PORTFOLIO_DECISION | 311896 | yes | `8fa7fceda34be50b…` |
+| `ba-fy2025-10k` | BA | The Boeing Company FY2025 Form 10-K (text extract) | to_source | CP-0, CP-1, CP-1A, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, COVENANT_REFINANCING, FULL_CREDIT_ASSESSMENT | — | — | — |
+| `f-fy2025-10k` | F | Ford Motor Company FY2025 Form 10-K (text extract) | to_source | CP-0, CP-1, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, FULL_CREDIT_ASSESSMENT | — | — | — |
 | `ccl-debt-documents` | CCL | Executed debt documents: indentures, credit agreements, maturity schedules | to_source | CP-4, CP-3C, CP-4C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT, LITE_COVENANT_REFINANCING, DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
 | `ba-debt-documents` | BA | Executed debt documents: indentures, credit agreements, maturity schedules | to_source | CP-4, CP-3C, CP-4C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | — | — | — |
 | `ccl-rating-actions` | CCL | Dated agency rating actions, outlooks, watches and the applicable published criteria | to_source | CP-2H | LITE_DISTRESSED_RESTRUCTURING, LITE_FULL_CREDIT_SCREEN, FULL_CREDIT_ASSESSMENT, DISTRESSED_RESTRUCTURING | — | — | — |
@@ -50,8 +53,10 @@ names. Two rows are inferred; the note says from what.
 | `distressed-disclosure-statement` | — | A distressed issuer's disclosure statement, plan or restructuring support agreement | not_available | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
 | `answer-key-3issuer` | CCL, BA, F | ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer | **key source, never admitted** | — | — | — | — | — |
 
-Thirteen documents: three `in_hand`, seven `to_source`, two `to_author`, one
-`not_available`; plus one key source. The `bytes` and `sha256` columns are
+Sixteen documents: six `in_hand`, seven `to_source`, two `to_author`, one
+`not_available`; plus one key source. Three of the six in hand are the
+portfolio-screen set's own copies of the other three, which the on-disk loader
+requires because it refuses a declared path resolving outside its set root. The `bytes` and `sha256` columns are
 blank for a document that does not yet exist on the machine the table was
 emitted from — for `ba-fy2025-10k` and `f-fy2025-10k` they are filled from the
 owner's out-of-tree document register, which is why those two rows carry measurements

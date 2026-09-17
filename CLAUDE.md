@@ -179,6 +179,43 @@ test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
 define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Completion Phase 8.**
+
+- **A register is located by vendor prose, and a key trusts that location.**
+  `server/qualification/matrix.py` asks the bundle's own
+  `completeness_check.find_registers` where a register is, because invariant 4
+  says the host adds no table parser. That locator finds a register by looking
+  for its id in the few non-empty lines above a pipe table and keeps the first
+  match, so a handoff whose prose names `TL10.2` above an earlier table makes
+  that table answer as `TL10.2` -- and the module writes the prose. The host also
+  calls the locator with a **narrowed** id list where the vendor calls it with
+  all of them, which can attribute an intervening register's table to the one
+  asked for. Neither is a divergence from the authority: the vendor's own
+  `check()` reads the same table, so the host and the bundle agree about what
+  the register is, and a key measures what the bundle would measure. Reachability
+  is thin -- a required register absent from its declared place is refused at
+  validation, and `TL10.2` carries six minimum rows and critical columns -- but
+  a reader of Task 8.1's "located by the vendor's own `find_registers`" could
+  take the location for a fact the host established, and it is not.
+  *Upgrade:* the day a register key is authored for a module whose registers are
+  optional, pass the full id list as the vendor does and compare, which turns a
+  misattribution into a disagreement the host can refuse. Found by the
+  Completion Phase 8 confidence review, which built both tables.
+- **A key over a duplicated column answers nothing, and that is now true rather
+  than only written down.** The vendor's reader builds a register row as
+  `dict(zip(header, cells))`, so a header naming one column twice collapses to
+  the trailing cell before the host sees anything. `_cell`'s documented rule --
+  "a register whose header names the same column twice answers `None`" -- could
+  therefore never fire, and a shipped key was met by `PARTIAL` in a second
+  `evidence_status` column while the first honestly said `MISSING`. `_cell` now
+  takes the header, where the duplicate is still visible, and
+  `tests/test_qualification_matrix.py::test_a_key_does_not_answer_from_a_duplicated_column`
+  holds it. What remains is that the bundle still collapses the row, so the host
+  refuses to answer where the vendor's own `check()` would read the trailing
+  cell: the two disagree, and the host takes the fail-closed side.
+  *Upgrade:* the bundle's, and it belongs with the other vendor requests -- a
+  duplicate header is a malformed register and the validator should refuse it.
+
 **Completion Phase 10.**
 
 - **A run that cannot afford its next node writes an attempt row before it is

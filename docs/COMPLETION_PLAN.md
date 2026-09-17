@@ -595,8 +595,14 @@ from this plan; no push, PR or ruleset change without authorization.
    `server/qualification/matrix.py`, read through
    `VendorContract.completeness_check.find_registers` on the accepted
    Markdown; `expects_register` in the on-disk manifest; the borrowing-capacity
-   key re-cast to the fact-carrying line; a key whose `row_key` matches no
-   row or more than one refuses `QUALIFICATION_KEY_AMBIGUOUS` at set load.
+   key re-cast to the fact-carrying line; a key the loader can judge without a
+   run refuses `QUALIFICATION_KEY_AMBIGUOUS` at set load -- an empty `row_key`,
+   or two column names that normalise to one. **Corrected after building it:**
+   this item first said a `row_key` matching no row or more than one refuses at
+   load, which set load cannot know, because how many rows a register will carry
+   is a fact about a run that has not happened. Zero rows and two rows are
+   scored as a miss when the matrix reads the artifact, which is the only place
+   the answer exists.
 2. The price with the reservation (Task 8.2): `budget_reservations` gains the
    dated price (name, input, output, `as_of`) in a migration; the encoded
    request is priced after the prompt is built and before the reservation;
@@ -618,15 +624,24 @@ from this plan; no push, PR or ruleset change without authorization.
 
 **Exit checks**
 
-- A key naming a wrong cell fails a run whose citations are all located; an
-  ambiguous `row_key` refuses at load; the VMO2 set gains one register key
-  per module and still loads with an unchanged citation key.
+- A key naming a wrong cell fails a run whose citations are all located; a key
+  the loader can judge ambiguous without a run refuses at load, and a `row_key`
+  matching zero or two rows is a miss at scoring; the VMO2 set gains a register
+  key for the module whose register has closed row-key cells -- CP-L10's TL10.2 --
+  and still loads with an unchanged citation key. **Corrected after building
+  it:** "one register key per module" was not reached and should not have been
+  asked for, because CP-0's T8 has one closed cell and CP-5's T5B.5 keys on free
+  prose, so a key there would measure wording.
 - A reservation row says which dated price produced it; a small prompt
   reserves its priced cost, not the byte ceiling.
 - A verdict naming an unused model is refused; a second signature is
   `VERDICT_ALREADY_RECORDED`.
-- `CORPUS.md` names every document Phase 9 and Phase 11 tasks will admit, with
-  status; the five requests exist and the handoff records them as pending.
+- `qualification/DOCUMENTS.md` names every document Phase 9 and Phase 11 tasks
+  will admit, with status, and a test holds it equal to what
+  `scripts/document_register.py --report` emits; the five requests exist and the
+  handoff records them as pending. (The file was named `CORPUS.md` here until the
+  vocabulary gate refused "corpus"; work item 4 was corrected and this check was
+  not.)
 
 **Guardrails:** no key authored from a run's output; no document fetched by
 the system; no vendor file edited by a request.
