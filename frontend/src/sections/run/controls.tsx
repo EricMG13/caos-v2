@@ -24,6 +24,7 @@ import { fetchSection } from "@/app/transport";
 import { RefusalNote, RefusedControl } from "@/controls/RefusedControl";
 import type {
   ActionView,
+  CreateRun,
   GateApproved,
   GatePreviewDocument,
   Infer,
@@ -204,15 +205,26 @@ export function CreateRunControl({
   caseId,
   action,
   choices,
+  supersedes = null,
 }: {
   caseId: string;
   action: ActionView | undefined;
   choices: readonly RouteChoice[];
+  /** The BLOCKED run the new run would answer (§72), offered pre-filled
+      when the displayed run ended BLOCKED and nothing has answered it yet.
+      The analyst may clear it: a successor is an ordinary new run that names
+      its predecessor, and the name is the analyst's to give. */
+  supersedes?: string | null;
 }) {
   const [pick, setPick] = useState(0);
+  const [predecessor, setPredecessor] = useState(supersedes ?? "");
   const [, setParams] = useSearchParams();
   const { pending, result, run } = useCommand<RunCreated>();
   const chosen = choices[pick] ?? null;
+  const named = predecessor.trim();
+  const request: CreateRun | null = chosen
+    ? { ...chosen, supersedes: named === "" ? null : named }
+    : null;
   return (
     <section className="pnl" data-create-run>
       <header>
@@ -237,14 +249,25 @@ export function CreateRunControl({
                 ))}
               </select>
             </label>
+            <label className="fld">
+              Supersedes run
+              <input
+                data-supersedes-input
+                value={predecessor}
+                placeholder="none: an ordinary run"
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setPredecessor(event.target.value)
+                }
+              />
+            </label>
             <RefusedControl
               refusal={action ? action.refusal : null}
               className="rb acc"
               data-action="CREATE_RUN"
               onClick={
-                action && chosen
+                action && request
                   ? () => {
-                      void run(chosen, (intent) => createRun(caseId, chosen, intent)).then(
+                      void run(request, (intent) => createRun(caseId, request, intent)).then(
                         (outcome) => {
                           if (outcome.kind !== "ok") return;
                           // The address is corrected, not navigated: the

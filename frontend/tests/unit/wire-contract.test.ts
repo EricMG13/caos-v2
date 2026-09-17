@@ -337,6 +337,8 @@ function runSection(): { [key: string]: Json } {
         ],
         work: { state: "STOPPED", stop_code: "PROVIDER_UNAVAILABLE", cancel_requested: false },
         blocked_by: { route_node_id: "CP-5", module_id: "CP-5", attempt_id: RUN },
+        supersedes: null,
+        superseded_by: null,
       },
       route_choices: [{ profile_id: "LITE_CREDIT_22", selection_id: "LITE_EARNINGS_UPDATE" }],
     },

@@ -267,6 +267,50 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
         assert [e.name for e in events_of(conn, run_id)].count("RUN_COMPLETE") == 1
 
 
+def test_two_successors_for_one_blocked_run_commit_one(empty_database: str) -> None:
+    """At most one successor per predecessor (§72), under real contention.
+
+    Two connections each select the BLOCKED run `FOR SHARE` -- a share lock
+    contends with nothing but a writer, so both hold it -- and both insert.
+    The partial unique index `runs_one_successor` is the rule: the second
+    insert waits on the first's transaction and, once it commits, refuses
+    inside its own unit as the typed `RUN_ALREADY_SUPERSEDED`, mapped from the
+    index's declared name and never from a driver message. One link is
+    committed; the loser committed nothing."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Issuer"))
+        blocked = start_run(conn, case_id)
+        conn.commit()
+        assert block_run(conn, blocked)
+    start = Barrier(2)
+
+    def succeed(_: int) -> UUID | RefusalCode:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            try:
+                run_id = start_run(conn, case_id, supersedes=blocked)
+                conn.commit()
+            except Refusal as refusal:
+                return refusal.code
+            return run_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(succeed, range(2)))
+
+    winners = [o for o in outcomes if isinstance(o, UUID)]
+    assert [o for o in outcomes if not isinstance(o, UUID)] == [
+        RefusalCode.RUN_ALREADY_SUPERSEDED
+    ]
+    with connect(empty_database) as conn:
+        rows = conn.execute(
+            "SELECT run_id FROM runs WHERE supersedes_run_id = %s", (blocked,)
+        ).fetchall()
+        assert rows == [(winners[0],)]
+        counted = conn.execute("SELECT count(*) FROM runs").fetchone()
+        assert counted == (2,), "the loser inserted nothing"
+
+
 # -- The lease fence (brief 4.3 D3; interleavings I2-I4, I7, I8, I12) --------
 
 RESERVED = Decimal("0.10")

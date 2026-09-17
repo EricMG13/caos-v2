@@ -19,11 +19,14 @@ from server.api import app as app_module
 from server.api.commands import runs as runs_command
 from server.api.deps import store_connection
 from server.api.reads import run as run_read
+from server.api.wire import CLEARS
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document, admit_pack
+from server.refusals import RefusalCode
 from server.store import StoreConnection
-from server.store.audit import audit_trail
+from server.store.audit import _digest_of, audit_trail
+from server.store.commands import request_digest
 from server.store.events import events_of
 from server.store.gates import (
     Gate,
@@ -35,12 +38,16 @@ from server.store.gates import (
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pinned_route
 from server.store.run_inputs import load_run_input
-from server.store.runs import create_case, fail_run, start_run
+from server.store.runs import block_run, create_case, fail_run, start_run
 from server.store.source_sets import snapshot_source_set
 
 __all__ = ["command_client"]
 
-ROUTE = {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"}
+ROUTE = {
+    "profile_id": "LITE_CREDIT_22",
+    "selection_id": "LITE_EARNINGS_UPDATE",
+    "supersedes": None,
+}
 SUBJECT = {
     "issuer_id": "EXAMPLE",
     "issuer_name": "Example Holdings plc",
@@ -153,7 +160,7 @@ def test_only_an_adapter_route_can_be_selected(
         ("LITE_CREDIT_22", "NO_SUCH_PATHWAY"),
         ("NO_SUCH_PROFILE", "LITE_EARNINGS_UPDATE"),
     ]:
-        body = {"profile_id": profile, "selection_id": selection}
+        body = {"profile_id": profile, "selection_id": selection, "supersedes": None}
         refused = _send(client, _path(case_id), writer, body)
         assert _outcome(refused) == "400 ROUTE_NOT_ENABLED"
     assert resolved == [], "a disabled pair is refused before resolution"
@@ -175,6 +182,117 @@ def test_only_an_adapter_route_can_be_selected(
     [entry] = audit_trail(conn, case_id)
     conn.rollback()
     assert (entry.action, entry.actor_id) == ("RUN_CREATED", writer)
+
+
+def _refusal(code: str) -> dict[str, str]:
+    """The one refusal body: the code and its host-constant clearance."""
+    return {"code": code, "clears": CLEARS[RefusalCode(code)]}
+
+
+def _ended_blocked(conn: StoreConnection, case_id: UUID) -> UUID:
+    """A run of the case that ended BLOCKED, committed."""
+    run_id = start_run(conn, case_id)
+    conn.commit()
+    assert block_run(conn, run_id)
+    return run_id
+
+
+def _run_view(
+    client: TestClient, case_id: UUID, run_id: UUID, user: UUID
+) -> dict[str, object]:
+    """The displayed run of the Run section document, as `user` reads it."""
+    got = _send(client, f"/api/v1/cases/{case_id}/run?run={run_id}", user)
+    assert got.status_code == 200, got.text
+    view = got.json()["body"]["run"]
+    assert isinstance(view, dict)
+    return view
+
+
+def test_a_successor_run_links_a_blocked_run_of_its_case(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """§72: a BLOCKED run is answered by a new run that names it, never by a
+    resume. The command writes `runs.supersedes_run_id` in the unit that makes
+    the run, the audit payload binds the predecessor beside the selection, and
+    both run documents carry the link -- `supersedes` on the successor,
+    `superseded_by` on the run it answers. A second successor for the same
+    predecessor is refused `RUN_ALREADY_SUPERSEDED`, and nothing of it lands."""
+    conn, case_id = case
+    writer = member(conn, case_id)
+    blocked = _ended_blocked(conn, case_id)
+    body = {**ROUTE, "supersedes": str(blocked)}
+
+    created = _send(client, _path(case_id), writer, body)
+
+    assert created.status_code == 201, created.text
+    successor = UUID(created.json()["run_id"])
+    assert conn.execute(
+        "SELECT supersedes_run_id FROM runs WHERE run_id = %s", (successor,)
+    ).fetchone() == (blocked,)
+    [entry] = audit_trail(conn, case_id)
+    conn.rollback()
+    assert entry.action == "RUN_CREATED"
+    assert entry.payload_sha256 == _digest_of(
+        {
+            **body,
+            "route_digest": pinned_route(conn, successor),
+            "request_sha256": request_digest(
+                "CREATE_RUN", case_id=case_id, run_id=None, gate=None, body=body
+            ),
+        }
+    ), "the audit payload binds the predecessor"
+    conn.rollback()
+    after = _run_view(client, case_id, successor, writer)
+    before = _run_view(client, case_id, blocked, writer)
+    assert (after["supersedes"], after["superseded_by"]) == (str(blocked), None)
+    assert (before["supersedes"], before["superseded_by"]) == (None, str(successor))
+
+    effects = _effects(conn)
+    again = _send(client, _path(case_id), writer, body)
+    assert _outcome(again) == "409 RUN_ALREADY_SUPERSEDED"
+    assert again.json() == _refusal("RUN_ALREADY_SUPERSEDED")
+    assert _effects(conn) == effects
+
+
+def test_a_successor_for_a_running_run_or_another_case_is_refused(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """Only a BLOCKED run of the path's case can be answered. A run in any
+    other status is `RUN_NOT_BLOCKED`; a run of another case is the same
+    private `RUN_NOT_FOUND` -- status, code and clearance -- as a run that does
+    not exist, so neither answer says the other run is there. Every refusal is
+    inside the unit: nothing is inserted, no receipt is recorded, and the key
+    the refused request carried is not burned."""
+    conn, case_id = case
+    writer = member(conn, case_id)
+    running = start_run(conn, case_id)
+    conn.commit()
+    elsewhere = create_case(conn, BoundaryText.of("Another issuer"))
+    conn.commit()
+    foreign = _ended_blocked(conn, elsewhere)
+    before = _effects(conn)
+    key = uuid4()
+
+    not_blocked = _send(
+        client, _path(case_id), writer, {**ROUTE, "supersedes": str(running)}, key=key
+    )
+    other_case = _send(
+        client, _path(case_id), writer, {**ROUTE, "supersedes": str(foreign)}
+    )
+    unknown = _send(
+        client, _path(case_id), writer, {**ROUTE, "supersedes": str(uuid4())}
+    )
+
+    assert _outcome(not_blocked) == "409 RUN_NOT_BLOCKED"
+    assert not_blocked.json() == _refusal("RUN_NOT_BLOCKED")
+    assert (other_case.status_code, other_case.json()) == (
+        404,
+        _refusal("RUN_NOT_FOUND"),
+    )
+    assert (unknown.status_code, unknown.json()) == (404, _refusal("RUN_NOT_FOUND"))
+    assert _effects(conn) == before, "nothing inserted, no receipt"
+    # The refused request left no receipt, so its key answers a fresh request.
+    assert _send(client, _path(case_id), writer, ROUTE, key=key).status_code == 201
 
 
 def test_the_subject_pin_snapshots_live_sources_once(
@@ -473,6 +591,16 @@ def test_each_run_command_meets_its_declared_store_budget(
     digests = _digests(client, case_id, run_id, approver)
     path = _path(case_id, run_id, SOURCE_SET + "approval")
     assert measured(path, approver, digests, uuid4()) == (200, runs_command.APPROVE_IO)
-    budgets = [runs_command.CREATE_RUN_IO, runs_command.PIN_INPUT_IO]
-    budgets += [runs_command.PREVIEW_IO, runs_command.APPROVE_IO]
+    # A successor (§72) selects the run it answers `FOR SHARE`: one statement
+    # more than an ordinary run, measured on a run this case ended BLOCKED.
+    blocked = _ended_blocked(conn, case_id)
+    successor = {**ROUTE, "supersedes": str(blocked)}
+    assert measured(_path(case_id), writer, successor, uuid4()) == (
+        201,
+        runs_command.SUCCESSOR_RUN_IO,
+    )
+    assert runs_command.SUCCESSOR_RUN_IO == runs_command.CREATE_RUN_IO + 1
+    budgets = [runs_command.CREATE_RUN_IO, runs_command.SUCCESSOR_RUN_IO]
+    budgets += [runs_command.PIN_INPUT_IO, runs_command.PREVIEW_IO]
+    budgets += [runs_command.APPROVE_IO]
     assert runs_command.IO_BUDGET == max(budgets)

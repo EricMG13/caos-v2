@@ -40,7 +40,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
 from server.store.routes import resolved_route
 from server.store.run_inputs import RunInput, load_run_input
-from server.store.runs import create_case, run_status, start_run
+from server.store.runs import block_run, create_case, run_status, start_run
 
 # A declared schema that differs from the repository's by one table -- the shape
 # a later build has when it adds one, and the shape `IF NOT EXISTS` hides.
@@ -105,6 +105,58 @@ def test_the_declared_schema_holds_a_case_and_its_run(empty_database: str) -> No
         conn.commit()
 
         assert run_status(conn, run_id) is RunStatus.RUNNING
+
+
+def test_a_runs_predecessor_is_written_once_and_is_never_itself(
+    empty_database: str,
+) -> None:
+    """`0025_supersedes` (§72): the link is written by the insert that makes
+    the successor and by nothing after it. An UPDATE that would move it -- to
+    another run, to null, or from null onto a run -- is refused by trigger, so
+    a privileged edit cannot re-point which run a run answers; and a run can
+    never name itself. Every refusal leaves the link exactly as the insert
+    wrote it."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Acme 2026 refinancing"))
+        first, other = start_run(conn, case_id), start_run(conn, case_id)
+        conn.commit()
+        assert block_run(conn, first) and block_run(conn, other)
+        successor = start_run(conn, case_id, supersedes=first)
+        conn.commit()
+
+        moves = [
+            (
+                "UPDATE runs SET supersedes_run_id = %s WHERE run_id = %s",
+                (other, successor),
+            ),
+            (
+                "UPDATE runs SET supersedes_run_id = NULL WHERE run_id = %s",
+                (successor,),
+            ),
+            (
+                "UPDATE runs SET supersedes_run_id = %s WHERE run_id = %s",
+                (other, first),
+            ),
+        ]
+        for statement, params in moves:
+            with pytest.raises(psycopg.errors.RaiseException):
+                conn.execute(statement, params)
+            conn.rollback()
+        with pytest.raises(psycopg.errors.CheckViolation):
+            own = uuid4()
+            conn.execute(
+                "INSERT INTO runs (run_id, case_id, status, budget_ceiling,"
+                " supersedes_run_id) VALUES (%s, %s, 'RUNNING', 1, %s)",
+                (own, case_id, own),
+            )
+        conn.rollback()
+
+        links = conn.execute(
+            "SELECT run_id, supersedes_run_id FROM runs WHERE supersedes_run_id"
+            " IS NOT NULL"
+        ).fetchall()
+        assert links == [(successor, first)]
 
 
 def test_every_run_status_is_one_the_database_accepts(empty_database: str) -> None:

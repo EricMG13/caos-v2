@@ -42,7 +42,11 @@ from server.store.work import claim_run, stop
 __all__ = ["command_client"]
 
 A = ActionName
-ROUTE = {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"}
+ROUTE = {
+    "profile_id": "LITE_CREDIT_22",
+    "selection_id": "LITE_EARNINGS_UPDATE",
+    "supersedes": None,
+}
 SUBJECT = {
     "issuer_id": "EXAMPLE",
     "issuer_name": "Example Holdings plc",

@@ -120,6 +120,8 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.BLOB_ADDRESS_INVALID: "An operator must repair the stored address.",
     _C.RUN_NOT_FOUND: "Name a run you may read.",
     _C.RUN_NOT_RUNNING: "Act only on a running run.",
+    _C.RUN_NOT_BLOCKED: "Name a run of this case that ended BLOCKED.",
+    _C.RUN_ALREADY_SUPERSEDED: "Read the successor already recorded for that run.",
     _C.LEASE_NOT_HELD: "Reclaim the lease before acting on the node.",
     _C.RUN_CANCEL_REQUESTED: "Nothing; the run is being cancelled.",
     _C.RUN_NODES_UNACCEPTED: "Accept every pinned node first.",
@@ -488,6 +490,15 @@ class RunView(BaseModel):
     # node. Nullable so the wire never claims a blocking node that does not
     # exist -- the two ways a run ends BLOCKED are different things to a reader.
     blocked_by: BlockedByView | None
+    # The successor link (§72), both ends. `supersedes` is the BLOCKED run of
+    # this case that this run was created to answer, written once by the command
+    # that created it; `superseded_by` is the one run created to answer this
+    # one. Either is `None` for a run that answers nothing or has not been
+    # answered. The link says which run a run answers; whether the successor's
+    # source set carries what the verdict asked for is the reader's judgement,
+    # not a fact the host asserts.
+    supersedes: UUID | None
+    superseded_by: UUID | None
 
 
 class RunBody(BaseModel):
@@ -867,6 +878,10 @@ class CreateRun(BaseModel):
 
     profile_id: Id
     selection_id: Id
+    # The BLOCKED run of the path's case this run answers (§72), or null for an
+    # ordinary run. Stated on every request, as every request field is: an
+    # absent key is a malformed body, not a default.
+    supersedes: UUID | None
 
 
 class RunCreated(BaseModel):

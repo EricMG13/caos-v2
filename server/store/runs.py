@@ -41,6 +41,10 @@ from server.store.work import Lease, mark_work_done, require_lease
 
 # The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
 MAX_ATTEMPT_ORDINAL = 256
+# `0025_supersedes.sql`: the partial unique index that holds one successor per
+# predecessor. A violation is mapped to `RUN_ALREADY_SUPERSEDED` by this name
+# and never by the driver's message.
+ONE_SUCCESSOR_PER_RUN = "runs_one_successor"
 
 
 def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
@@ -54,7 +58,11 @@ def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
 
 
 def start_run(
-    conn: StoreConnection, case_id: UUID, *, budget_ceiling: Decimal | None = None
+    conn: StoreConnection,
+    case_id: UUID,
+    *,
+    budget_ceiling: Decimal | None = None,
+    supersedes: UUID | None = None,
 ) -> UUID:
     """Start a run against a case. RUNNING is the only state a run starts in.
 
@@ -62,17 +70,58 @@ def start_run(
     that existed for even one attempt without one is invariant 8 with the number
     left out. `server.store.budget.CEILING` is what a caller that names none
     gets.
+
+    `supersedes` names the BLOCKED run of this case the new run answers (§72),
+    written once with the row and never moved. Inside the caller's unit, under
+    the case lock, the target is selected `FOR SHARE` so no transition moves it
+    while the link is written: a run of another case is `RUN_NOT_FOUND`, the
+    same code an unknown run gets, so neither answer tells a caller the other
+    run exists; any status but BLOCKED is `RUN_NOT_BLOCKED`; and a second
+    successor is `RUN_ALREADY_SUPERSEDED`, refused by the partial unique index
+    in the unit that tried to write it. A refusal leaves the unit failed, and
+    the caller rolls it back as it does every other refusal from its unit.
     """
     ceiling = CEILING if budget_ceiling is None else budget_ceiling
     validate_spend(ceiling)
     lock_case(conn, case_id)
+    if supersedes is not None:
+        _require_answerable(conn, case_id, supersedes)
     run_id = uuid4()
-    conn.execute(
-        "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
-        " VALUES (%s, %s, %s, %s)",
-        (run_id, case_id, RunStatus.RUNNING.value, ceiling),
-    )
+    row = (run_id, case_id, RunStatus.RUNNING.value, ceiling)
+    if supersedes is None:
+        # The column is named only when it is written: a database at a
+        # migration prefix before 0025 still starts an ordinary run, which is
+        # what the populated-upgrade tests rely on.
+        conn.execute(
+            "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
+            " VALUES (%s, %s, %s, %s)",
+            row,
+        )
+        return run_id
+    try:
+        conn.execute(
+            "INSERT INTO runs (run_id, case_id, status, budget_ceiling,"
+            " supersedes_run_id) VALUES (%s, %s, %s, %s, %s)",
+            (*row, supersedes),
+        )
+    except psycopg.errors.UniqueViolation as violation:
+        if violation.diag.constraint_name != ONE_SUCCESSOR_PER_RUN:
+            raise
+        raise Refusal(RefusalCode.RUN_ALREADY_SUPERSEDED) from None
     return run_id
+
+
+def _require_answerable(conn: StoreConnection, case_id: UUID, run_id: UUID) -> None:
+    """The run a successor may answer: this case's, and BLOCKED, held `FOR
+    SHARE` for the rest of the caller's unit."""
+    row = conn.execute(
+        "SELECT status FROM runs WHERE run_id = %s AND case_id = %s FOR SHARE",
+        (run_id, case_id),
+    ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    if RunStatus(row[0]) is not RunStatus.BLOCKED:
+        raise Refusal(RefusalCode.RUN_NOT_BLOCKED)
 
 
 def run_status(conn: StoreConnection, run_id: UUID) -> RunStatus:

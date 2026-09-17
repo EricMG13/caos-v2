@@ -22,6 +22,10 @@ class RefusalCode(StrEnum):
     BLOB_ADDRESS_INVALID = "BLOB_ADDRESS_INVALID"
     RUN_NOT_FOUND = "RUN_NOT_FOUND"
     RUN_NOT_RUNNING = "RUN_NOT_RUNNING"
+    # The successor link (§72): only a BLOCKED run of the same case can be
+    # answered, and by one run.
+    RUN_NOT_BLOCKED = "RUN_NOT_BLOCKED"
+    RUN_ALREADY_SUPERSEDED = "RUN_ALREADY_SUPERSEDED"
     # Phase 4 Task 4.3 (worker lease and terminal decision).
     LEASE_NOT_HELD = "LEASE_NOT_HELD"
     RUN_CANCEL_REQUESTED = "RUN_CANCEL_REQUESTED"

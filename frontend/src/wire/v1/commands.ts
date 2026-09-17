@@ -5,7 +5,18 @@
 // A request carries no actor, case, run or approver: the server derives them
 // from the caller and the path. Digests it carries are expectations.
 import { V1_SHAPES } from "./documents";
-import { type Infer, array, datetime, enumOf, int, object, parse, string, uuid } from "./shape";
+import {
+  type Infer,
+  array,
+  datetime,
+  enumOf,
+  int,
+  nullable,
+  object,
+  parse,
+  string,
+  uuid,
+} from "./shape";
 
 const hash = string({ max: 64, pattern: "^[0-9a-f]{64}$" });
 const short = string({ max: 256 });
@@ -14,7 +25,9 @@ const RUN_STATUSES = ["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"] a
 const CreateCase = object({ title: string({ max: 256 }) });
 const CaseCreated = object({ case_id: uuid });
 const SourcesAdmitted = object({ case_id: uuid, source_ids: array(uuid, 50) });
-const CreateRun = object({ profile_id: short, selection_id: short });
+// `supersedes` is stated on every request, null for an ordinary run: the
+// BLOCKED run of the path's case the new run answers (§72).
+const CreateRun = object({ profile_id: short, selection_id: short, supersedes: nullable(uuid) });
 const RunCreated = object({ case_id: uuid, run_id: uuid, route_digest: hash });
 const PinRunInput = object({ subject: V1_SHAPES.RunSubjectView });
 const RunInputPinned = object({ run_id: uuid, source_set_version: int(), input_fingerprint: hash });

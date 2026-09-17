@@ -81,6 +81,10 @@ from server.store.run_inputs import load_run_input
 _FIXED_IO = 5
 # The displayed run's `run_work` row (Task 4.2 decision 14).
 WORK_IO = 1
+# The successor link, both ends in one row (§72): the run this one answers and
+# the run that answers it. Read for every displayed run, not only a BLOCKED
+# one -- `supersedes` sits on the successor, whatever its status.
+SUPERSEDES_IO = 1
 # Whether the pinned sources are still live, read once a pin exists.
 LIVE_IO = 1
 # Of those, the accepted artifacts are read only once a route is pinned.
@@ -94,8 +98,15 @@ PINNED_INPUT_IO = 5
 # approver's standing and the live-source check.
 GATE_IO = PINNED_INPUT_IO + 3
 # Before an input is pinned, the input read and each gate's find no row.
-UNPINNED_INPUT_IO = _FIXED_IO + WORK_IO + 1 + len(Gate)
-SECTION_READ_IO = _FIXED_IO + WORK_IO + LIVE_IO + PINNED_INPUT_IO + len(Gate) * GATE_IO
+UNPINNED_INPUT_IO = _FIXED_IO + WORK_IO + SUPERSEDES_IO + 1 + len(Gate)
+SECTION_READ_IO = (
+    _FIXED_IO
+    + WORK_IO
+    + SUPERSEDES_IO
+    + LIVE_IO
+    + PINNED_INPUT_IO
+    + len(Gate) * GATE_IO
+)
 # A canonical readiness row (§42.4) is read from its record under the host
 # identity the store rebuilds: the run input, the pinned route, the attempt's
 # owner and ordinal, the accepted digests, and the call-time narrowing's
@@ -267,6 +278,7 @@ def _run_view(
             }
         )
     )
+    supersedes, superseded_by = _successor_link(conn, run_id)
     attempts = conn.execute(
         "SELECT a.attempt_id, a.route_node_id, a.ordinal, a.started_at,"
         " f.attempt_id IS NOT NULL FROM run_attempts a"
@@ -316,6 +328,8 @@ def _run_view(
         ],
         work=work,
         blocked_by=blocked_by,
+        supersedes=supersedes,
+        superseded_by=superseded_by,
     )
     facts = RunFacts(
         running=summary.status == "RUNNING",
@@ -366,6 +380,26 @@ def _blocked_by(
         route_node_id=node.route_node_id,
         module_id=node.module_id,
         attempt_id=UUID(str(row[0])),
+    )
+
+
+def _successor_link(
+    conn: StoreConnection, run_id: UUID
+) -> tuple[UUID | None, UUID | None]:
+    """Both ends of the successor link (§72), read and never derived: the run
+    this one answers, and the one run that answers it. One row -- the partial
+    unique index `runs_one_successor` holds at most one successor, so the join
+    cannot widen the row."""
+    row = conn.execute(
+        "SELECT r.supersedes_run_id, s.run_id FROM runs r"
+        " LEFT JOIN runs s ON s.supersedes_run_id = r.run_id WHERE r.run_id = %s",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    return (
+        None if row[0] is None else UUID(str(row[0])),
+        None if row[1] is None else UUID(str(row[1])),
     )
 
 

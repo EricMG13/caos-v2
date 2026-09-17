@@ -49,7 +49,9 @@
       "nodes": [],
       "attempts": [],
       "work": null,
-      "blocked_by": null
+      "blocked_by": null,
+      "supersedes": null,
+      "superseded_by": null
     },
     "route_choices": []
   },

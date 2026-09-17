@@ -166,6 +166,12 @@ const RunView = object({
   attempts: array(AttemptView, 4096),
   work: nullable(WorkView),
   blocked_by: nullable(BlockedByView),
+  // The successor link (§72), both ends: the BLOCKED run of this case this run
+  // was created to answer, and the one run created to answer this one. Null at
+  // an end that has nothing to name. The link says which run answers which;
+  // whether the answer holds is the reader's judgement, not the host's claim.
+  supersedes: nullable(uuid),
+  superseded_by: nullable(uuid),
 });
 const RunBody = object({
   case_id: uuid,
@@ -358,6 +364,8 @@ const RefusalCode = enumOf([
   "BLOB_ADDRESS_INVALID",
   "RUN_NOT_FOUND",
   "RUN_NOT_RUNNING",
+  "RUN_NOT_BLOCKED",
+  "RUN_ALREADY_SUPERSEDED",
   "LEASE_NOT_HELD",
   "RUN_CANCEL_REQUESTED",
   "RUN_NODES_UNACCEPTED",

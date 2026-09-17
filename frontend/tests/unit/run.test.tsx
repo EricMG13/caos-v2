@@ -461,6 +461,7 @@ describe("Run", () => {
       expect(JSON.parse((createInit as RequestInit).body as string)).toEqual({
         profile_id: "FULL_CREDIT_ASSESSMENT",
         selection_id: "default",
+        supersedes: null,
       });
       expect(
         UUID.test(
@@ -827,6 +828,111 @@ describe("Run", () => {
     // A running run has no such line at all.
     const third = mount(running);
     expect(third.container.querySelector("[data-blocked-by]")).toBeNull();
+    third.unmount();
+  });
+
+  // The successor link (§72), both ends, in the run panel: a run says which
+  // run it answers, and a run that has been answered says by which. A run with
+  // neither carries no such line, so nothing here renders "none" as a link.
+  test("test_the_run_panel_names_the_run_a_successor_replaces", () => {
+    const base = running.body.run!;
+    const earlier = "00000000-0000-4000-8000-0000000000e1";
+    const later = "00000000-0000-4000-8000-0000000000e2";
+    const successor: RunSectionDocument = {
+      ...running,
+      body: { ...running.body, run: { ...base, supersedes: earlier } },
+    };
+    const first = mount(successor);
+    const supersedes = first.container.querySelector("[data-supersedes]")!;
+    expect(supersedes.textContent).toContain(earlier);
+    expect(supersedes.querySelector("a")!.getAttribute("href")).toContain(`run=${earlier}`);
+    expect(first.container.querySelector("[data-superseded-by]")).toBeNull();
+    first.unmount();
+
+    const answered: RunSectionDocument = {
+      ...running,
+      body: {
+        ...running.body,
+        run: { ...base, status: "BLOCKED", blocked_by: null, superseded_by: later },
+      },
+    };
+    const second = mount(answered);
+    const supersededBy = second.container.querySelector("[data-superseded-by]")!;
+    expect(supersededBy.textContent).toContain(later);
+    expect(supersededBy.querySelector("a")!.getAttribute("href")).toContain(`run=${later}`);
+    expect(second.container.querySelector("[data-supersedes]")).toBeNull();
+    second.unmount();
+
+    const third = mount(running);
+    expect(third.container.querySelector("[data-supersedes]")).toBeNull();
+    expect(third.container.querySelector("[data-superseded-by]")).toBeNull();
+    third.unmount();
+  });
+
+  // A BLOCKED run nobody has answered is what a successor is for: the create
+  // control offers `supersedes` pre-filled with it, the analyst may clear it,
+  // and the body sent carries whatever the field holds. A run already
+  // answered, or one that is not BLOCKED, offers nothing to pre-fill.
+  test("test_a_blocked_run_not_yet_answered_offers_supersedes_prefilled", async () => {
+    const base = running.body.run!;
+    const caseId = running.body.case_id;
+    const choices = [{ profile_id: "LITE_CREDIT_22", selection_id: "LITE_EARNINGS_UPDATE" }];
+    const blocked: RunSectionDocument = withActions(
+      {
+        ...running,
+        body: {
+          ...running.body,
+          route_choices: choices,
+          run: { ...base, status: "BLOCKED", blocked_by: null },
+        },
+      },
+      [{ action: "CREATE_RUN", refusal: null }],
+    );
+    const created = { case_id: caseId, run_id: base.run_id, route_digest: "f".repeat(64) };
+    const fetchSpy = vi.fn().mockResolvedValueOnce(jsonResponse(created, 201));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container, unmount } = mountAt(blocked, `/run/?case=${caseId}`);
+      const field = container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+      expect(field.value).toBe(base.run_id);
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const [, init] = fetchSpy.mock.calls[0]!;
+      expect(JSON.parse((init as RequestInit).body as string).supersedes).toBe(base.run_id);
+      unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const answered: RunSectionDocument = withActions(
+      {
+        ...running,
+        body: {
+          ...running.body,
+          route_choices: choices,
+          run: {
+            ...base,
+            status: "BLOCKED",
+            blocked_by: null,
+            superseded_by: "00000000-0000-4000-8000-0000000000e2",
+          },
+        },
+      },
+      [{ action: "CREATE_RUN", refusal: null }],
+    );
+    const second = mount(answered);
+    const answeredField = second.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+    expect(answeredField.value).toBe("");
+    second.unmount();
+
+    const third = mount(
+      withActions(
+        { ...running, body: { ...running.body, route_choices: choices } },
+        [{ action: "CREATE_RUN", refusal: null }],
+      ),
+    );
+    const runningField = third.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+    expect(runningField.value).toBe("");
     third.unmount();
   });
 

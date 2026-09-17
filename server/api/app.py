@@ -160,6 +160,8 @@ _STATUS = {
     # The request was sound and the state it expected has moved: a conflict.
     RefusalCode.IDEMPOTENCY_KEY_REUSED: 409,
     RefusalCode.RUN_NOT_RUNNING: 409,
+    RefusalCode.RUN_NOT_BLOCKED: 409,
+    RefusalCode.RUN_ALREADY_SUPERSEDED: 409,
     RefusalCode.GATE_APPROVAL_MISMATCH: 409,
     RefusalCode.EVIDENCE_NOT_AVAILABLE: 409,
     RefusalCode.ROUTE_ALREADY_PINNED: 409,

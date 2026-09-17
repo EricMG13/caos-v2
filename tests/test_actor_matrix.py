@@ -304,6 +304,7 @@ def _target(
         return runs, {
             "profile_id": ROUTE.profile_id,
             "selection_id": ROUTE.selection_id,
+            "supersedes": None,
         }
     if endpoint == "admit":
         return f"/api/v1/cases/{case_id}/sources", None

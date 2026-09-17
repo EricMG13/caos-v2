@@ -219,6 +219,8 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "attempts",
             "work",
             "blocked_by",
+            "supersedes",
+            "superseded_by",
         }
     ),
     RunBody: frozenset(
@@ -286,7 +288,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     CreateCase: frozenset({"title"}),
     CaseCreated: frozenset({"case_id"}),
     SourcesAdmitted: frozenset({"case_id", "source_ids"}),
-    CreateRun: frozenset({"profile_id", "selection_id"}),
+    CreateRun: frozenset({"profile_id", "selection_id", "supersedes"}),
     RunCreated: frozenset({"case_id", "run_id", "route_digest"}),
     PinRunInput: frozenset({"subject"}),
     RunInputPinned: frozenset({"run_id", "source_set_version", "input_fingerprint"}),

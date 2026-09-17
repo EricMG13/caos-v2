@@ -60,6 +60,8 @@ REPLAY_IO = 2  # standing, receipt lookup
 UNIT_IO = 8  # case lock, chain head, standing, receipt check; receipt, audit x2
 # `start_run` 3; `pin_route_in` 12 (run lock, route, attempts, insert, event 5).
 CREATE_RUN_IO = REPLAY_IO + UNIT_IO + 15
+# A successor (§72) selects the run it answers `FOR SHARE` before the insert.
+SUCCESSOR_RUN_IO = CREATE_RUN_IO + 1
 # Ownership 1; `snapshot_in` over an earlier, different set 8;
 # `pin_run_input_in` 16 (run lock, owner, set 2, route, pin, attempts, insert,
 # event 5).
@@ -70,7 +72,7 @@ PINNED_INPUT_IO = 5
 PREVIEW_IO = PINNED_INPUT_IO + 2  # standing; ownership, pin and clock
 # Ownership 1; `release_gate_in`: run lock, preview, live sources, upsert.
 APPROVE_IO = REPLAY_IO + UNIT_IO + 1 + 4 + PINNED_INPUT_IO + 2
-IO_BUDGET = max(CREATE_RUN_IO, PIN_INPUT_IO, PREVIEW_IO, APPROVE_IO)
+IO_BUDGET = max(SUCCESSOR_RUN_IO, PIN_INPUT_IO, PREVIEW_IO, APPROVE_IO)
 
 _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 _GATES = {"source-set": Gate.SOURCE_SET, "research-plan": Gate.RESEARCH_PLAN}
@@ -138,8 +140,10 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
     """A run with its route resolved from the verified catalog and pinned.
 
     A pair outside `ADAPTER_ROUTES` is refused before the catalog is read. The
-    audit payload binds the selection and route digest; the run id is in the
-    receipt committed beside it under the same `request_sha256`.
+    audit payload binds the selection, the run this one answers (`supersedes`,
+    §72, null for an ordinary run) and the route digest; the run id is in the
+    receipt committed beside it under the same `request_sha256`. The link's own
+    checks are `start_run`'s, inside the unit.
     """
     if (body.profile_id, body.selection_id) not in ADAPTER_ROUTES:
         raise Refusal(RefusalCode.ROUTE_NOT_ENABLED)
@@ -148,7 +152,7 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
     selection = body.model_dump(mode="json")
 
     def write(unit: StoreConnection) -> tuple[int, RunCreated]:
-        run_id = start_run(unit, case_id)
+        run_id = start_run(unit, case_id, supersedes=body.supersedes)
         pinned = pin_route_in(unit, run_id, route)
         return 201, RunCreated(case_id=case_id, run_id=run_id, route_digest=pinned)
 

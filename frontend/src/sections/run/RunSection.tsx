@@ -200,6 +200,23 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
                   </dd>
                 </>
               ) : null}
+              {run.supersedes !== null ? (
+                <>
+                  <dt>Supersedes</dt>
+                  <dd className="wrap" data-supersedes>
+                    run <Link to={runHref(body.case_id, run.supersedes)}>{run.supersedes}</Link>
+                  </dd>
+                </>
+              ) : null}
+              {run.superseded_by !== null ? (
+                <>
+                  <dt>Superseded by</dt>
+                  <dd className="wrap" data-superseded-by>
+                    run{" "}
+                    <Link to={runHref(body.case_id, run.superseded_by)}>{run.superseded_by}</Link>
+                  </dd>
+                </>
+              ) : null}
               <dt>Created</dt>
               <dd>{run.created_at}</dd>
               <dt>Route digest</dt>
@@ -277,9 +294,16 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           onRefetch={refetch}
         />
         <CreateRunControl
+          // A BLOCKED run nobody has answered is what a successor is for
+          // (§72): offer it pre-filled. Keyed on the run so the offer follows
+          // the displayed run rather than the first one this panel mounted for.
+          key={run.run_id}
           caseId={body.case_id}
           action={actionOf(actions, "CREATE_RUN")}
           choices={body.route_choices}
+          supersedes={
+            run.status === "BLOCKED" && run.superseded_by === null ? run.run_id : null
+          }
         />
       </div>
     </div>
