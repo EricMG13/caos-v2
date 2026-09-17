@@ -47,9 +47,10 @@ from server.store.gates import (
     gate_state,
     release_gate_in,
 )
+from server.store.outcomes import _require_attempt
 from server.store.routes import pin_route, pin_route_in
 from server.store.run_inputs import RunSubject, pin_run_input_in
-from server.store.runs import fail_run, start_run
+from server.store.runs import fail_run, start_attempt, start_run
 from server.store.source_sets import snapshot_in, snapshot_source_set
 from server.store.work import require_running
 
@@ -273,4 +274,21 @@ def test_the_spend_fence_refuses_an_ended_run_before_it_asks_for_a_lease(
     conn.rollback()
     with pytest.raises(Refusal, match=r"^RUN_NOT_FOUND$"):
         require_running(conn, uuid4(), None)
+    conn.rollback()
+
+
+def test_an_attempt_is_revalidated_under_the_run_it_was_started_for(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    conn, case_id = case
+    own = start_run(conn, case_id)
+    other = start_run(conn, case_id)
+    conn.commit()
+    attempt_id = start_attempt(conn, own, "CP-0")
+    _require_attempt(conn, attempt_id, own)
+    with pytest.raises(Refusal, match=r"^ATTEMPT_NOT_FOUND$"):
+        _require_attempt(conn, attempt_id, other)
+    conn.rollback()
+    with pytest.raises(Refusal, match=r"^ATTEMPT_NOT_FOUND$"):
+        _require_attempt(conn, uuid4(), own)
     conn.rollback()

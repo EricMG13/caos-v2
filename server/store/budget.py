@@ -74,7 +74,8 @@ def reserve(
 def _reserve(
     conn: StoreConnection, attempt_id: UUID, amount: Decimal, lease: Lease | None
 ) -> None:
-    # `work` imports `outcomes`, which imports this module.
+    # Both import this module at their top: `outcomes` directly, `work` through it.
+    from server.store.outcomes import _require_attempt
     from server.store.work import require_running
 
     validate_spend(amount)
@@ -82,17 +83,7 @@ def _reserve(
         raise Refusal(RefusalCode.STORE_NOT_TRANSACTIONAL)
     run_id = _run_of(conn, attempt_id)
     require_running(conn, run_id, lease)
-    # Revalidate after waiting, then retain the native owner key through commit.
-    # A moved attempt must never spend under its former run lock.
-    if (
-        conn.execute(
-            "SELECT 1 FROM run_attempts WHERE attempt_id = %s AND run_id = %s"
-            " FOR KEY SHARE",
-            (attempt_id, run_id),
-        ).fetchone()
-        is None
-    ):
-        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    _require_attempt(conn, attempt_id, run_id)
     if (
         reserved_for(conn, attempt_id) is not None
         or conn.execute(

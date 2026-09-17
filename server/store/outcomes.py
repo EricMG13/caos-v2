@@ -333,13 +333,19 @@ def _locked_attempt(
 ) -> tuple[UUID, UUID, RunStatus]:
     run, case = _attempt_owner(conn, attempt_id)
     status = lock_run(conn, run)
+    _require_attempt(conn, attempt_id, run)
+    return run, case, status
+
+
+def _require_attempt(conn: StoreConnection, attempt_id: UUID, run_id: UUID) -> None:
+    """Revalidate after waiting on the run lock, then retain the native owner
+    key through commit: a moved attempt must never write under its former run."""
     if (
         conn.execute(
             "SELECT 1 FROM run_attempts WHERE attempt_id = %s AND run_id = %s"
             " FOR KEY SHARE",
-            (attempt_id, run),
+            (attempt_id, run_id),
         ).fetchone()
         is None
     ):
         raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
-    return run, case, status
