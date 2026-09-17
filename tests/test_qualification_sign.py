@@ -30,7 +30,7 @@ from server.api.commands.qualification import (
     sign_verdict,
 )
 from server.api.deps import actor_from_request
-from server.api.identity import TRUST_SWITCH, GlobalRole, at_least
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED, GlobalRole, at_least
 from server.api.wire import QualificationState, SignVerdict, VerdictRecorded
 from server.qualification.store import (
     Evidence,
@@ -44,8 +44,6 @@ from server.store import StoreConnection, apply_schema, connect
 
 __all__ = ["evidence_path", "require_reviewer", "sign_verdict"]
 
-# The identity provider's group for each global role (`server/api/identity.py`).
-GROUPS = {"READER": "caos-readers", "ANALYST": "caos-analysts", "ADMIN": "caos-admins"}
 NOT_FOUND = {
     "code": "QUALIFICATION_EVIDENCE_NOT_FOUND",
     "clears": "Name qualification evidence you may sign.",
@@ -53,8 +51,14 @@ NOT_FOUND = {
 
 
 def _headers(user: UUID, role: str = "ADMIN") -> dict[str, str]:
-    """What the edge forwards: the subject and its groups, never a role."""
-    return {"x-caos-user": str(user), "x-forwarded-groups": GROUPS[role]}
+    """What the development proxy forwards: the subject and the role header.
+
+    Not the groups header: this app is served without an edge token, and a
+    tokenless API reads no groups (`server/api/identity.py`). The switch the
+    `client` fixture sets is what makes that header the deployment's word
+    rather than this client's.
+    """
+    return {"x-caos-user": str(user), ROLE_HEADER: role}
 
 
 def _document(evidence: Evidence, **changes: str) -> dict[str, Any]:
@@ -93,8 +97,9 @@ def client(
 ) -> Iterator[tuple[TestClient, StoreConnection]]:
     """The real app on one connection, over a complete snapshot and its
     evidence identity, recorded the way the harness records them."""
-    # Identity comes from groups: a developer's trusted role header must not leak in.
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # The development deployment: tokenless, so a role above READER is the
+    # switched-on role header or nothing at all.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
     with connect(empty_database) as conn:
         apply_schema(conn)

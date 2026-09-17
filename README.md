@@ -139,7 +139,9 @@ authenticating edge in front of it that sets `x-caos-user`,
 `server/api/edge.py` and `docs/DECISIONS.md` §53. In edge mode the API needs
 `CAOS_EDGE_TOKEN` (at least 32 bytes), `CAOS_PUBLIC_ORIGIN`, and no
 `CAOS_TRUST_ROLE_HEADER`, or it refuses to start. Started without a token, it
-answers only `GET /api/health`.
+answers only `GET /api/health`, and grants READER to whoever reaches it: with
+no edge in front, `x-forwarded-groups` is nobody's assertion and is not read,
+so only the development switch can name a role above the floor.
 
 The disposable local proof builds the image, boots it on its own database and
 blob volume (`compose.smoke.yaml`, project `caos-workbench-smoke`), runs the

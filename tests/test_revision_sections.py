@@ -302,7 +302,7 @@ def test_revision_http_actor_matrix_and_declared_io(
         app.dependency_overrides[store_connection] = lambda: counter  # noqa: B023
         response = client.get(
             _path(lite, receipt.revision_id, section),
-            headers=_as(actor, "caos-admins" if actor not in readers else None),
+            headers=_as(actor, "ADMIN" if actor not in readers else None),
         )
         lite.conn.rollback()
         if actor in readers:

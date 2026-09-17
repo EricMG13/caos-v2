@@ -24,7 +24,7 @@ from server.api.commands.availability import (
     run_actions,
     upload_actions,
 )
-from server.api.identity import TRUST_SWITCH, GlobalRole
+from server.api.identity import TRUST_SWITCH, TRUSTED, GlobalRole
 from server.api.wire import (
     ActionName,
     ActionView,
@@ -58,9 +58,10 @@ TAIL = {A.START_RUN: "start", A.RETRY_RUN: "retry", A.CANCEL_RUN: "cancel"}
 
 
 @pytest.fixture(autouse=True)
-def _groups_decide(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Identity from the groups header, whatever the developer environment set."""
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+def _the_role_header_decides(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The development deployment: no edge token, so no groups are read, and a
+    role above READER is the switched-on role header or nothing."""
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     yield
 
 
@@ -234,9 +235,14 @@ def test_served_role_and_actions_come_only_from_the_server(
 ) -> None:
     conn, case_id = case
     reader = member(conn, case_id, Standing.READER)
+    # The groups header is the escalation a tokenless API must not believe: no
+    # edge asserted it, so it names no role however well-formed it is. A role
+    # header is not the claim to make here -- the switch above is what serves
+    # this app, and under it that header is the deployment's word, not this
+    # client's.
     claimed = {
         **command_headers(reader, role="READER"),
-        "x-caos-role": "ADMIN",
+        "x-forwarded-groups": "caos-admins",
         "x-caos-standing": "ADMIN",
     }
 
