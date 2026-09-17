@@ -47,6 +47,7 @@ from server.methodology.canonical import accepted_projections
 from server.methodology.handoff import CanonicalRecord, record_bytes, validate_markdown
 from server.methodology.invocation import accepted_lineage, host_identity
 from server.methodology.vendor import authority_bundle_sha256
+from server.methodology.verification import AcceptedRow
 from server.refusals import Refusal, RefusalCode
 from server.store.members import Standing, grant
 from server.store.outcomes import CallOutcome, record_outcome
@@ -287,11 +288,13 @@ def test_a_soft_input_accepted_after_the_call_does_not_break_the_record(
         harness.blobs,
         harness.bundle,
         harness.route,
-        run_id=harness.run_id,
-        route_node_id=final,
-        attempt_id=row[0],
-        artifact_sha256=row[1],
-        record_sha256=row[2],
+        AcceptedRow(
+            run_id=harness.run_id,
+            route_node_id=final,
+            attempt_id=row[0],
+            artifact_sha256=row[1],
+            record_sha256=row[2],
+        ),
     )
     assert projections.qa_status == record["projections"]["qa_status"]
     harness.conn.rollback()
