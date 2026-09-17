@@ -31,7 +31,13 @@ from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
-from server.engine.route import BLOCKING, NamedObjects, ResolvedRoute, RouteNode
+from server.engine.route import (
+    BLOCKING,
+    MODEL_MODULE,
+    NamedObjects,
+    ResolvedRoute,
+    RouteNode,
+)
 from server.evidence.citations import AnchoredCitation
 from server.methodology.bundle import (
     Bundle,
@@ -317,7 +323,7 @@ def accepted_lineage(
 
 
 def _module_name(bundle: Bundle, route: ResolvedRoute, node: RouteNode) -> str:
-    if node.module_id == "CP-CF":
+    if node.module_id == MODEL_MODULE:
         from server.methodology.host import HOST_NAME, verify_extension
 
         verify_extension(route)
@@ -555,7 +561,7 @@ def allowed_uses(
     ):
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     result = {source: str(values.pop()) for source, values in uses.items()}
-    if target == "CP-CF":
+    if target == MODEL_MODULE:
         result.update(
             {
                 source: "Accepted forecast inputs within the host CP-CF contract"
@@ -985,7 +991,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     ):
         raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
     gate_expects = (
-        frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
+        frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, MODEL_MODULE}
         if identity.module_id == GATE_MODULE
         else frozenset()
     )
@@ -1034,7 +1040,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + f"\n--- END EVIDENCE {tag} ---\n"
     )
     if identity.module_id in {"CP-1", "CP-2G", "CP-4"} and any(
-        n.module_id == "CP-CF" for n in route.nodes
+        n.module_id == MODEL_MODULE for n in route.nodes
     ):
         prompt += "\n" + _FORECAST_EXTENSION.format(tag=tag)
     canonical_headings = contract.validate_handoff.CANONICAL_HEADINGS

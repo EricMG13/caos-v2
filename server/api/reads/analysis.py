@@ -34,7 +34,13 @@ from server.api.wire import (
 )
 from server.blobs import BlobStore
 from server.deliverable.render import SCREENING_ONLY
-from server.engine.route import NodeResult, NodeState, ResolvedRoute, node_states
+from server.engine.route import (
+    MODEL_MODULE,
+    NodeResult,
+    NodeState,
+    ResolvedRoute,
+    node_states,
+)
 from server.evidence.citations import AnchoredCitation
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_handoff
@@ -293,7 +299,7 @@ def _handoff_view(  # noqa: PLR0913 -- one accepted handoff and its lookups
         # Model-authored and rendered as text, never as markup (§46.3).
         model_analysis=markdown.decode("utf-8"),
         host_calculation=(
-            "CP_CF_FORECAST" if projections.module_id == "CP-CF" else "NONE"
+            "CP_CF_FORECAST" if projections.module_id == MODEL_MODULE else "NONE"
         ),
     )
 
