@@ -19,7 +19,7 @@ frontend/a11y-results/
 bandit.json
 /trivy.json
 coverage.xml
-.coverage
+.coverage*
 uv.lock
 # GitNexus writes this from the same index as CLAUDE.md's appended block,
 # so tracking it would mean a diff on every `analyze`. The index itself is

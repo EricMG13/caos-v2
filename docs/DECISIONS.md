@@ -3416,6 +3416,19 @@ The surviving unit is the one where gaming it is the fix. A gate should be
 chosen by asking what its cheapest evasion does to the code, and kept only if
 the answer is "improves it".
 
+**The same class of error cost this wave an environment, and is worth the
+comparison.** `.gitignore` excluded `.venv*/` and `node_modules/`, both with a
+trailing slash, which matches a *directory*. An integration worktree reaches
+the interpreter and the packages through symlinks to the main checkout, and a
+symlink is not a directory — so the moment those paths became links the ignore
+stopped covering them, `git add -A` swept them into the tree, and the merge
+wrote the tracked links over the real ones, each resolving to its own path.
+Every pre-commit hook and the whole type gate run through them. The rule
+described the shape it expected rather than the thing it meant to exclude,
+which is what the suppression budget did when it counted annotations instead
+of hazards. Both rules now carry the bare form beside the directory form, and
+no tracked symlink remains in the tree.
+
 Every suppression is still parsed, and a marker ruff would no longer raise
 fails its own assertion, so the keyword rule cannot become a hiding place for a
 stale one. Both arms were mutation-checked. The test's docstring carries the
