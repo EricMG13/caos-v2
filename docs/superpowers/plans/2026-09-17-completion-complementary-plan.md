@@ -184,22 +184,33 @@ Recorded here so a fresh clone does not depend on a Downloads file.
 |---|---|---|---|
 | Opus 5 | `low` | scaffolding and mechanical edits | fixture moves, schema regeneration, ledger relabelling, corpus admission manifests, docstrings, status edits |
 | Opus 5 | `medium` (default dev) | daily-driver implementation | per-module fixtures and contract tests, route enablement slices, key authoring from documents, endpoints, wire, controls, per-task review |
-| Opus 5 | `max` with `ultrathink` | targeted invariant audits | each module's register semantics before its fixture is trusted; the money path; three-actor independence; two-worker interleavings; the trust trace |
-| Opus 5 | `max` with `ultrathink` | long-horizon autonomous execution | what Fable 5.1 `low`/`medium` held: evidence selection, CP-DR brief delivery, the command chain, async store and second-worker fencing, the signed assertion |
-| Opus 5 | `max` with `ultrathink` | architecture and governance | what Fable 5.1 `high`/`xhigh` held: phase and task briefs, vendor request documents, decision entries, and task-level review |
+| Opus 5 | `xhigh` with `ultrathink` | targeted invariant audits | each module's register semantics before its fixture is trusted; the money path; three-actor independence; two-worker interleavings; the trust trace |
+| Opus 5 | `xhigh` with `ultrathink` | long-horizon autonomous execution | what Fable 5.1 `low`/`medium` held: evidence selection, CP-DR brief delivery, the command chain, async store and second-worker fencing, the signed assertion |
+| Opus 5 | `xhigh` with `ultrathink` | architecture and governance | what Fable 5.1 `high`/`xhigh` held: phase and task briefs, vendor request documents, decision entries, and task-level review |
 | Opus 5 | **`xhigh`** with `ultrathink` | the two per-phase gates | the confidence review and the separate adversarial audit that close each phase. `xhigh`, not `max`: `CLAUDE.md` has said "both at actual `xhigh` reasoning" since the repair phases began, so the `max` pin contradicted the contract it was meant to satisfy |
 | **Fable 5.1** | **`xhigh`**, no `ultrathink` | the **one** final review across all phases | run once, after the last phase's own two gates have passed and been remediated; never for a single phase. Fable returns for this gate alone |
 | **Fable 5.1** | `high`, no `ultrathink` | plan updates | revising a plan document when the build turns up an issue that needs one |
 
 ### Rules
 
+- **`xhigh` is the ceiling, for every model. `max` is not dispatched.** The owner
+  capped effort on 17 September 2026, after `max` had been the top row for a day.
+  It binds regardless of model, so there is no slice anywhere in this plan that
+  asks for more: the four agent definitions carry `effort: xhigh`, and every
+  forward-looking row and targeted prompt below says `xhigh`.
+- **Records of work already done keep the effort they ran at, and are not
+  rewritten.** `docs/CLAUDE_CODE_HANDOFF.md`, the audit remediation plan and the
+  Phase 8 and Phase 10 task briefs still say `max` in places, and correctly: a
+  review is evidence about a tree at a time, and restating the setting it ran
+  under would make the record say something that did not happen. Only live
+  settings and unstarted work were capped.
 - A mixed slice takes the stricter row.
 - `ultrathink` is an Opus 5 lever only. It now governs two live cases again: the
   final all-phases review and plan updates both run on Fable 5.1, and neither
   prompt may carry it. The rule was kept rather than deleted when it briefly
   governed nothing, which is why it was available within hours when Fable
   returned.
-- **Every slice Fable 5.1 held runs on Opus 5 `max` with `ultrathink`, except the
+- **Every slice Fable 5.1 held runs on Opus 5 `xhigh` with `ultrathink`, except the
   two the owner named back on 17 September 2026**: the final review across all
   phases (Fable 5.1 `xhigh`) and plan updates (Fable 5.1 `high`). The reason for
   the first is disconfirming evidence rather than preference — every other review
@@ -207,7 +218,7 @@ Recorded here so a fresh clone does not depend on a Downloads file.
   spots, and a different model reading the same tree is the only independent
   check available at the end of a programme. Otherwise the replacement stands,
   not only for the reviews. The owner's instruction of 17 September 2026 named no scope, so
-  it is read as it was written: Opus 5 `max` with `ultrathink` **instead of**
+  it is read as it was written: Opus 5 at top effort with `ultrathink` **instead of**
   Fable 5.1, wherever Fable appeared. The reviews were the live case when it
   arrived and were rerouted first; the long-horizon implementation rows followed
   once a peer session read the same instruction the broader way, which is the
@@ -240,31 +251,31 @@ Recorded here so a fresh clone does not depend on a Downloads file.
 |---|---|---|---|
 | 7.1 record reconciliation | Opus 5 `low`; the ledger gate test Opus 5 `medium` | none | — |
 | 7.2 land and verify | Opus 5 `medium` (PR bodies, split proofs) | — | — |
-| 8.1 register keys | Opus 5 `medium` | Opus 5 `medium` | Opus 5 `max` `ultrathink`: can a key be met by a wrong row |
-| 8.2 price with reservation | Opus 5 `medium` | Opus 5 `medium` | Opus 5 `max` `ultrathink`: the money path |
+| 8.1 register keys | Opus 5 `medium` | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink`: can a key be met by a wrong row |
+| 8.2 price with reservation | Opus 5 `medium` | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink`: the money path |
 | 8.3 verdict hygiene | Opus 5 `medium` | Opus 5 `medium` | — |
 | 8.4 corpus register | Opus 5 `low` (the register); owner sources | — | — |
 | 8.5 vendor requests | Fable 5.1 `high` | — | — |
-| 9.1–9.4 LITE pathways | template rows below | Opus 5 `medium` | Opus 5 `max` `ultrathink` per unproven module |
-| 9.4 CP-DR brief delivery (host prompt change) | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `max` `ultrathink`: the brief as a trust boundary |
+| 9.1–9.4 LITE pathways | template rows below | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink` per unproven module |
+| 9.4 CP-DR brief delivery (host prompt change) | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink`: the brief as a trust boundary |
 | 9.5–9.7 held LITE pathways | brief only, Fable 5.1 `high` | — | — |
-| 10.1 evidence selection | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `max` `ultrathink`: delivery/anchoring |
+| 10.1 evidence selection | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink`: delivery/anchoring |
 | 10.2 conditional-edge guard | Opus 5 `low` | none | — |
 | 10.3 successor runs | Opus 5 `medium` | Opus 5 `medium` | — |
 | 10.4 readiness refs, anchor, boundary | Opus 5 `medium` | Opus 5 `medium` | — |
 | 10.5 quote normalisation | Opus 5 `medium` | Opus 5 `medium` | — |
-| 11.1–11.9 FULL pathways | template rows below | Opus 5 `medium` | Opus 5 `max` `ultrathink` per unproven module |
-| 12.1 five commands | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `max` `ultrathink`: three-actor independence |
+| 11.1–11.9 FULL pathways | template rows below | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink` per unproven module |
+| 12.1 five commands | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink`: three-actor independence |
 | 12.2 controls; 12.3 Book; 12.4 analysis/renderer | Opus 5 `medium` | Opus 5 `medium` | — |
 | 12.5 journey | Opus 5 `medium` | none (test-only) | — |
-| 13.1 async and `gather`; 13.2 second worker; 13.4 signed assertion | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `max` `ultrathink` (13.2 interleavings; 13.4 trust trace) |
+| 13.1 async and `gather`; 13.2 second worker; 13.4 signed assertion | Fable 5.1 `medium` | Opus 5 `medium` | Opus 5 `xhigh` `ultrathink` (13.2 interleavings; 13.4 trust trace) |
 | 13.3 notify/cap/readiness/frame; 13.5 hygiene and gate scripts | Opus 5 `medium` | Opus 5 `medium` | — |
 | 13.6 release pack, nightly | Opus 5 `low` (generated) | — | — |
-| Every phase brief and vendor request | Fable 5.1 `high` | — | Opus 5 `max` `ultrathink` stress test |
+| Every phase brief and vendor request | Fable 5.1 `high` | — | Opus 5 `xhigh` `ultrathink` stress test |
 | Every phase exit | — | Fable 5.1 `xhigh` ×2 | — |
 
 **Template rows (each pathway task):** step 1 contract stress test — Opus 5
-`max` `ultrathink`; steps 2–4 fixtures, contract tests, whole-route run —
+`xhigh` `ultrathink`; steps 2–4 fixtures, contract tests, whole-route run —
 Opus 5 `medium`, one implementer per module and one per route; step 5 corpus
 admission manifests — Opus 5 `low`, sourcing by the owner; step 6 keys —
 Opus 5 `medium` reading documents only, material figures confirmed by the
@@ -292,7 +303,7 @@ Every phase starts with this sequence:
       signatures, failing assertions, executor row, risk classification,
       commands and cumulative PR size estimate; for a pathway task, the
       template's seven steps instantiated with the pathway's modules, edges,
-      documents and keys. Stress-test it with one Opus 5 `max` `ultrathink`
+      documents and keys. Stress-test it with one Opus 5 `xhigh` `ultrathink`
       prompt before code.
 - [ ] Map task dependencies and launch at most five implementers only for
       disjoint ownership, each with its own UUID-owned test database and blob
@@ -444,7 +455,7 @@ the corpus register and five vendor request documents.
 - [ ] The VMO2 set gains one register key per module; the borrowing-capacity
       key re-cast to the fact-carrying line.
 
-**Targeted prompt (Opus 5 `max`):** `ultrathink: Construct a handoff that
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Construct a handoff that
 meets an ExpectedRegister key while concluding the opposite of what the key
 was authored to check — through row order, a duplicated register heading, a
 fenced table, or a cell that matches after normalisation. Name the parser
@@ -470,7 +481,7 @@ pre-call unit), `tests/test_budget.py`, `tests/test_loop_charges.py`.
       computed after `check_context` built the prompt and before
       `start_attempt`; the worst case remains the ceiling admission check.
 
-**Targeted prompt (Opus 5 `max`):** `ultrathink: Under a changed price
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Under a changed price
 between pre-check and reservation, a retried attempt, a replayed billed
 answer and a crash between pricing and reservation, find any path that
 reserves less than the call can cost or charges without a reservation.`
@@ -619,7 +630,7 @@ keys and refuses a consumer the route does not carry),
       respectively in TDR.3.
 - [ ] Step 7.
 
-**Targeted prompt (Opus 5 `max`):** `ultrathink: The brief is caller text
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: The brief is caller text
 that reaches the prompt. Trace it from PIN_RUN_INPUT through the pin, the
 section and CP-DR's answer; find any path where it selects a module, a
 source, a tool or a web access the invariants forbid, or where a consumer
@@ -673,7 +684,7 @@ phase entry.
       the bounded line group; a per-section bound; one recorded narrowing;
       never truncation.
 
-**Targeted prompt (Opus 5 `max`):** `ultrathink: Trace one citation from the
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Trace one citation from the
 model's quote through the delivery row, the token index, the proof's and the
 deliverable's re-anchoring. Find any path where the delivery recorded, the
 blocks prompted and the blocks anchored against differ — including a v2
@@ -789,7 +800,7 @@ renderer, the journey through all of it.
       with receipts, digest-bound conflicts, three independent actors checked
       at commit, the seven-identity matrix per command.
 
-**Targeted prompt (Opus 5 `max`):** `ultrathink: Enumerate save, sign,
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Enumerate save, sign,
 freeze, file and revoke interleavings across two cases and three actors. Find
 any path where an actor checked before commit, a detached digest or a stale
 revision authorizes different bytes than the ones reviewed.`
@@ -819,14 +830,14 @@ revision authorizes different bytes than the ones reviewed.`
 
 ### Task 13.1: Async Store and `gather`
 ### Task 13.2: Second-Worker Safety
-**Targeted prompt (Opus 5 `max`):** `ultrathink: Enumerate every two-worker
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Enumerate every two-worker
 interleaving from claim through reservation, provider return, ancestor
 acceptance, cancellation, lease loss, artifact acceptance and terminal event.
 Identify the database predicate that prevents each stale acceptance without a
 lock across transport.`
 ### Task 13.3: Notify, Cap, Readiness, Frame
 ### Task 13.4: Signed Assertion, TLS, CI Smoke
-**Targeted prompt (Opus 5 `max`):** `ultrathink: Trace every header, cookie,
+**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Trace every header, cookie,
 token, assertion, proxy hop and listener that can influence Actor. Find a
 deployment where a client-supplied group or a replayed assertion reaches a
 governed command.`

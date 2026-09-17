@@ -477,13 +477,13 @@ September 2026); Sonnet is not used.
 |---|---|---|
 | GitNexus refresh and caller verification | any, `low` | `analyze --force --index-only`, `status`; verify callers in source |
 | Phase brief, spec, ADR, request document to the vendor | **Fable 5.1 `high`** | one brief per phase; one code-ready brief per task at phase entry |
-| Plan or trade-off stress test | **Opus 5 `max` with `ultrathink`** | one targeted prompt per brief; never `ultrathink` on Fable |
+| Plan or trade-off stress test | **Opus 5 `xhigh` with `ultrathink`** | one targeted prompt per brief; never `ultrathink` on Fable |
 | Long-horizon multi-file implementation | **Fable 5.1 `medium`** | evidence selection (10.1), CP-DR brief delivery (9.4), the command chain (12.1), async store and second worker (13.1, 13.2), signed assertion (13.4) |
 | Per-module fixture and contract tests; route enablement slices | **Opus 5 `medium`** | the Task 5.2a precedent; one implementer per module, one per route |
 | Answer-key authoring from documents | **Opus 5 `medium`**, documents only | the key file and its derivations; the owner confirms every material figure; nothing read from a run |
 | Ordinary implementation: endpoints, wire, UI, unit and integration tests | **Opus 5 `medium`** | 8.1–8.3, 10.2–10.5, 12.2–12.4, 13.3, 13.5, 13.6 |
 | Scaffolding, fixtures, regenerated ledgers, docstrings, status | **Opus 5 `low`** | 7.1, corpus admission manifests, schema regeneration |
-| Targeted invariant audit | **Opus 5 `max` with `ultrathink`** | each module's register semantics before its fixture is trusted (the 5.2a precedent); money path (8.2); three-actor independence (12.1); interleavings (13.2); trust trace (13.4) |
+| Targeted invariant audit | **Opus 5 `xhigh` with `ultrathink`** | each module's register semantics before its fixture is trusted (the 5.2a precedent); money path (8.2); three-actor independence (12.1); interleavings (13.2); trust trace (13.4) |
 | Ordinary per-task review | **Opus 5 `medium`** | the exact base…candidate range |
 | Whole-phase `confidence-review` and adversarial audit | **Fable 5.1 `xhigh`** | actual `xhigh`, read back from the session record before the review turn |
 
@@ -516,7 +516,7 @@ Every pathway task in Phases 9 and 11 has the same shape; each brief
 instantiates it against the current interfaces. Numbers in brackets are the
 step's model row.
 
-1. **Contract stress test** [Opus 5 `max`, `ultrathink`]: for each unproven
+1. **Contract stress test** [Opus 5 `xhigh`, `ultrathink`]: for each unproven
    module, read its `SKILL.md`, `load_contract` registers and payload schema;
    name the register rows whose semantics a fixture could fake and the cells
    a key must pin.
