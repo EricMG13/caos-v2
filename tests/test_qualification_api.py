@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from qualification_fixtures import qualification_performed
+from qualification_fixtures import qualification_performed, record_runs
 
 from server.api import app as app_module
 from server.api.app import app, store_connection
@@ -51,7 +51,11 @@ def client(
 
 def _record(conn: StoreConnection, *, expires_at: datetime) -> Evidence:
     evidence = _evidence()
-    record_performed(conn, qualification_performed())
+    performed = qualification_performed()
+    record_performed(conn, performed)
+    # The runs behind the snapshot: `record_verdict` refuses a verdict naming
+    # a model no accepted artifact of them recorded.
+    record_runs(conn, performed)
     decided_at = expires_at - timedelta(days=1)
     verdict = read_verdict(
         {

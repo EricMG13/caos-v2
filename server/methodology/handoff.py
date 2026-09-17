@@ -53,7 +53,11 @@ ADAPTER_MODULES = frozenset(
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
 # work item 6): adapter modules on any other pathway stay disabled.
 ADAPTER_ROUTES = frozenset(
-    {("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE"), ("FULL_CREDIT_32", "RELATIVE_VALUE")}
+    {
+        ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE"),
+        ("LITE_CREDIT_22", "LITE_PORTFOLIO_DECISION"),
+        ("FULL_CREDIT_32", "RELATIVE_VALUE"),
+    }
 )
 GATE_MODULE = "CP-0"
 ZERO_SHA256 = "0" * 64

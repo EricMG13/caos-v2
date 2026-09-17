@@ -656,3 +656,51 @@ def test_an_object_carried_by_the_edge_meets_a_named_boundary() -> None:
     done = {"RN-S": NodeResult()}
     assert node_states(route, done, named)["RN-T"] is NodeState.RUNNABLE
     assert lite_object_unmet(route, {}, "T", named) == (route.edges[0],)
+
+
+def _one_edge_profile(edge_type: str) -> dict[str, Any]:
+    """The smallest catalog `resolve_route` accepts: two modules, one typed edge.
+
+    Hand-built rather than mutated from the vendored catalog, because the point
+    is an edge type the vendored catalog does not declare.
+    """
+    return {
+        "profiles": {
+            "P": {
+                "pathways": {
+                    "S": {
+                        "nodes": [
+                            {"route_node_id": "RN-A", "module_id": "A", "stage": 1},
+                            {"route_node_id": "RN-B", "module_id": "B", "stage": 2},
+                        ]
+                    }
+                },
+                "edges": [{"source": "A", "target": "B", "type": edge_type}],
+            }
+        }
+    }
+
+
+def test_a_profile_with_a_conditional_edge_is_refused_at_resolution() -> None:
+    """Invariant 10 freezes predicates and nothing evaluates them, so a
+    CONDITIONAL edge would pin a route whose target blocks whatever the evidence
+    says -- the state a reader of the pin would read as a condition enforced.
+    `_edges_among` refuses before the `Edge` is built, so nothing is resolved
+    and nothing can be pinned. CONDITIONAL stays in `BLOCKING` and in the
+    bundle's vocabulary (CONTEXT.md); what is refused is a *route* carrying one.
+    """
+    with pytest.raises(Refusal) as refused:
+        resolve_route(_one_edge_profile("CONDITIONAL"), "P", "S")
+
+    assert refused.value.code is RefusalCode.ROUTE_EDGE_UNSUPPORTED
+
+
+@pytest.mark.parametrize("edge_type", ["REQUIRED", "QA_GATE", "OPTIONAL", "ADVISORY"])
+def test_the_four_edge_types_this_engine_evaluates_still_resolve(
+    edge_type: str,
+) -> None:
+    """The guard is one type, not a narrowing of the other four: the same
+    profile resolves for every type `_edges_among` does accept."""
+    route = resolve_route(_one_edge_profile(edge_type), "P", "S")
+
+    assert route.edges == (Edge("A", "B", EdgeType(edge_type)),)

@@ -35,25 +35,39 @@ from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Depends, Response
-from fastapi.responses import JSONResponse
 
-from server.api.commands._request import json_body
+from server.api.commands._request import Key, command_response, json_body
 from server.api.deps import Caller, Store
 from server.api.identity import Actor, GlobalRole, at_least
 from server.api.wire import SignVerdict, VerdictRecorded
 from server.qualification.store import evidence_at, record_verdict
-from server.qualification.verdict import Verdict, read_verdict
+from server.qualification.verdict import read_verdict
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, rollback_or_close
+from server.store.commands import (
+    NIL_SCOPE,
+    CommandResult,
+    StoredReceipt,
+    find_receipt,
+    record_receipt,
+    request_digest,
+)
 
-# The store's clock, the exact evidence lookup, then `record_verdict`: the
-# `complete` read, `record_evidence`'s three statements, and the insert.
+# The receipt lookup, the store's clock, the exact evidence lookup, then
+# `record_verdict` (the snapshot read, the recorded models, `record_evidence`'s
+# three statements and the insert) and the receipt.
 # Measured in `tests/test_qualification_sign.py`.
-SIGN_IO = 1 + 1 + 5
+SIGN_IO = 1 + 1 + 1 + 6 + 1
+REPLAY_IO = 1  # the receipt lookup alone; a replay writes nothing
 IO_BUDGET = SIGN_IO
 
 # Who may sign. Compared by rank (`at_least`), not by identity.
 SIGNS = GlobalRole.ADMIN
+
+# The command this route records a receipt for. There is no case to scope a key
+# to, so the scope is the nil UUID `0014_command_requests.sql` already uses for
+# create case: a key is unique per reviewer, which is what a retry needs.
+SIGN_VERDICT = "SIGN_VERDICT"
 
 router = APIRouter()
 
@@ -85,19 +99,44 @@ Reviewer = Annotated[Actor, Depends(require_reviewer)]
 EvidencePath = Annotated[str, Depends(evidence_path)]
 
 
-def _signed(
+def _replayed(
+    conn: StoreConnection, stored: StoredReceipt, request_sha256: str
+) -> CommandResult:
+    """`server/store/commands.py`'s two replay predicates, over the one scope
+    this command has: the same request replays its receipt, a different one
+    under the same key is the conflict. Both end the read unit."""
+    rollback_or_close(conn)
+    if stored.request_sha256 != request_sha256:
+        raise Refusal(RefusalCode.IDEMPOTENCY_KEY_REUSED)
+    return CommandResult(stored.status, stored.receipt, replayed=True)
+
+
+def _signed(  # noqa: PLR0913 -- one command's identity, key and document
     conn: StoreConnection,
     *,
     evidence_sha256: str,
     reviewer_id: UUID,
+    key: UUID,
+    request_sha256: str,
     document: dict[str, Any],
-) -> Verdict:
+) -> CommandResult:
     """Every statement the request sends, so the route can type what fails.
 
     Its own function because each of these is the store answering: with them
     inline the route could not tell a driver fault from a refusal without
     catching `psycopg.Error` around raises of its own.
+
+    The receipt is looked up first and written last, in the verdict's own
+    transaction, which is `run_command`'s shape without the governed unit it
+    has no case to run: no case lock to serialise twins and no audit event,
+    because the immutable verdict row is the record. A twin that took the key
+    while this request was in flight makes `record_receipt` insert nothing,
+    and this request replays the commit that won rather than keeping a verdict
+    nobody has a receipt for.
     """
+    stored = find_receipt(conn, actor_id=reviewer_id, scope=NIL_SCOPE, key=key)
+    if stored is not None:
+        return _replayed(conn, stored, request_sha256)
     row = conn.execute("SELECT now()").fetchone()
     if row is None:
         raise Refusal(RefusalCode.STORE_UNAVAILABLE)
@@ -107,30 +146,69 @@ def _signed(
     if evidence is None:
         raise Refusal(RefusalCode.QUALIFICATION_EVIDENCE_NOT_FOUND)
     record_verdict(conn, evidence=evidence, reviewer_id=reviewer_id, verdict=verdict)
+    receipt = VerdictRecorded(
+        evidence_sha256=evidence_sha256,
+        reviewer_id=reviewer_id,
+        decided_at=verdict.decided_at,
+        expires_at=verdict.expires_at,
+    ).model_dump(mode="json")
+    if not record_receipt(
+        conn,
+        actor_id=reviewer_id,
+        scope=NIL_SCOPE,
+        key=key,
+        command=SIGN_VERDICT,
+        request_sha256=request_sha256,
+        status=201,
+        receipt=receipt,
+    ):
+        rollback_or_close(conn)
+        twin = find_receipt(conn, actor_id=reviewer_id, scope=NIL_SCOPE, key=key)
+        if twin is None:
+            rollback_or_close(conn)
+            raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+        return _replayed(conn, twin, request_sha256)
     conn.commit()
-    return verdict
+    return CommandResult(201, receipt, replayed=False)
 
 
 @router.post("/api/v1/qualification/{evidence_sha256}/verdict")
 def sign_verdict(
     reviewer: Reviewer,
     evidence_sha256: EvidencePath,
+    key: Key,
     body: Annotated[SignVerdict, Depends(json_body(SignVerdict))],
     conn: Store,
 ) -> Response:
     """Record the reviewer's verdict over one exact evidence identity.
 
-    Order: the reviewer's document is read first, against the store's clock,
-    because a document that is not a verdict is refused whatever it names;
-    then the evidence it names must be held; then the store binds the two or
-    refuses. A refusal after the first write rolls the transaction back, so a
-    verdict that did not bind leaves no evidence row behind it either.
+    Order is `server/api/commands/_request.py`'s, with the rank standing in
+    for a case's standing: identity, the path's evidence digest, the
+    `Idempotency-Key`, the body, and only then the store. A request missing
+    its key opens no connection.
+
+    Then: the reviewer's document is read against the store's clock, because a
+    document that is not a verdict is refused whatever it names; then the
+    evidence it names must be held; then the store binds the two or refuses. A
+    refusal after the first write rolls the transaction back, so a verdict that
+    did not bind leaves no evidence row behind it either.
     """
     try:
-        verdict = _signed(
+        result = _signed(
             conn,
             evidence_sha256=evidence_sha256,
             reviewer_id=reviewer.user_id,
+            key=key,
+            # The path's evidence digest travels in the one canonical slot
+            # that takes a string: a key replayed against other evidence is
+            # then the idempotency conflict, not this evidence's receipt.
+            request_sha256=request_digest(
+                SIGN_VERDICT,
+                case_id=None,
+                run_id=None,
+                gate=evidence_sha256,
+                body=body.model_dump(mode="json"),
+            ),
             document=body.model_dump(mode="json"),
         )
     except Refusal:
@@ -142,10 +220,4 @@ def sign_verdict(
         # untyped 500 carrying the driver's own message into whatever logs it.
         rollback_or_close(conn)
         raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    receipt = VerdictRecorded(
-        evidence_sha256=evidence_sha256,
-        reviewer_id=reviewer.user_id,
-        decided_at=verdict.decided_at,
-        expires_at=verdict.expires_at,
-    )
-    return JSONResponse(status_code=201, content=receipt.model_dump(mode="json"))
+    return command_response(result, VerdictRecorded)

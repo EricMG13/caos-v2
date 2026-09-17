@@ -16,9 +16,9 @@ contracts.
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
 | Latest accepted phase | **Phase 6 signed off at `e59ad7b`** (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
-| Enabled routes | Two of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE` and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
+| Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 7** (reconcile the record, land the branch). Task 7.1 implemented at the commit this table lands in; Task 7.2's delivery record follows. Phase 7 is **not accepted** until the complete gate and both `xhigh` reviews run |
+| Current task | **Completion Phase 7** (reconcile the record, land the branch), implemented with both `xhigh` reviews and their remediation done. Phase 7 is **not accepted**: `make check` did not complete because `make image` needs the pinned Trivy `0.70.0` and this machine has `0.72.0`. See the Phase 7 gate and review record below for the one owner action that closes it. Tasks 8.1, 8.3, 8.4 and 9.1 are in the branch under their own phases |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) runs concurrently in `sdd/t1`–`sdd/t6` and is **not** a task of the completion plan. Its landed waves and the completion tasks each unblocks are recorded under Phase 7 Task 7.2 below |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
@@ -59,7 +59,11 @@ Fable 5.1 at actual `xhigh`.
   being the four that collide with completion phase numbers.
 - **Two new ledger entries** under "Completion Phase 7": what the ledger gate
   cannot catch, and the demonstration Admin panel still claiming `/api/health`
-  is not served.
+  is not served. (The counts in this record are Task 7.1's own and did not
+  move with it: `fa6bbfe` struck a third entry, `budget_ledger`, and `885f416`
+  added a third, the status inventory's dated citations, so the phase ends at
+  three struck and three added. The Phase 7 gate and review record below
+  carries the closing state.)
 - **Six stale `feature-status.csv` rows** regenerated to name the tests that now
   prove them (ADM-01, API-09, INT-01, INT-02, ERR-16, ERR-17); 248 rows parse,
   only those six changed and only in two fields.
@@ -82,7 +86,8 @@ per-PR table with every hosted check result is in
   drafted against. Ruleset 22701406 "main gates" is **active**.
 - **The undelivered remainder is 13,036 counted lines over 173 files**, not the
   75,566 the Phase 6 checkpoint recorded nor the 123,065 the split plan names.
-  Most of the branch has landed. Phase 7's last merged PR on `main` is #283;
+  Most of the branch has landed. The last merged PR on `main` is #283, which is
+  a Phase 4 slice, so PR numbering does not track phase order;
   Phase 6 delivery is incomplete, with nine PRs open.
 - **Size was read from the hosted `size` job's own log**, not measured locally,
   because `scripts/check_pr_size.py` hardcodes `HEAD` and cannot measure an
@@ -105,21 +110,33 @@ Three findings a reader should not have to rediscover:
 
 ### Remediation stream, as of 17 September 2026
 
-Determined from commits, never from a plan checkbox. **Nothing in this stream is
-pushed, on `main`, or an ancestor of this branch.**
-
+Determined from commits, never from a plan checkbox. Wave 1 was local-only when
+this was first written and **was merged into this branch at `6eb7fef`** while
+this phase was in flight; nothing in that stream is pushed to `gh-origin` or on
+`main`, and its per-task rulings live in a gitignored ledger, so anything from
+them that belongs in the record has to be committed rather than pointed at.
 | Wave | Tasks | State |
 |---|---|---|
-| 1 — correctness and security | T1–T6 | Commits exist for all six, integrated at `86b0cd0` on the local-only `sdd/integration-wave1`. Two follow-up commits (T2's test naming, two of T4's) are outside that integration. **No `make check` result is recorded for `86b0cd0` anywhere, and there is no hosted result because the branch is unpushed** |
+| 1 — correctness and security | T1–T6 | **Merged into this branch at `6eb7fef`** by the remediation session (`docs/DECISIONS.md` §70), whose second parent is the integration tip `266ee28`. Task branches are `sdd/t1`–`sdd/t6`. An earlier integration commit, `86b0cd0`, was observed as the tip and is no longer an ancestor of `266ee28`: that branch was rebased onto this phase's commits, so `86b0cd0` is abandoned and must not be cited. **What that stream ran on the merged tree, in its own words: the offline engineering gate less the security scanners, the browser suites and the image** — the offline suite under `-n auto` with the production-image marker deselected, `ruff check` and `ruff format --check`, `mypy` over 233 files, `check_vocabulary.py`, `check_tested.py`, `io_budget.py --assert`, and in `frontend/` ESLint, 237 unit tests and a production build exporting 25 routes. It did **not** run bandit, pip-audit, gitleaks, `scan_floors.py`, the accessibility matrix, the workbench suite, the image gate or `smoke-production`. The first complete `make check` over the merged tree is this phase's at its freeze, which is a stronger and different claim |
 | 2 — prompt and evidence | T7, T8, T9 | no branch, no commits |
 | 3 — consolidation | T10–T15 | no branch, no commits |
 | 4 — store, operator surface, residue | T16–T20 | no branch, no commits; T16 is the owner's Book/Admin decision (D2) and no decision entry exists |
 
-Of the seven dependencies the completion plan names: **T2 and T3 are met by
-commits** on that unpushed branch; **T7, T8, T11, T13 and D2 are not met.** So
-Phase 10 Task 10.1, Phase 9 Task 9.4's prompt section, Phase 8 Tasks 8.2 and
-8.3, and every live qualification run remain blocked on that stream, exactly as
-the plan's Class C says.
+Of the seven dependencies the completion plan names, the merge at `6eb7fef`
+settles wave 1's: **T1–T6 are in this branch**, so T2, T3 and **T5** are met.
+**T7, T8, T11, T13 and D2 are not** — waves 2 to 4 have no branch. So Phase 8
+Task 8.3 is unblocked and rebases onto T5; Phase 8 Task 8.2 (T10), Phase 9 Task
+9.4's prompt section (T7), Phase 10 Task 10.1 (T7, T8, T11) and every live
+qualification run (T7's prompt identity) remain blocked, exactly as the plan's
+Class C says.
+
+Two consequences of that merge for this phase's own records. `server/api/app.py`'s
+`_STATUS` map is now exhaustive over `RefusalCode` with a `_STATUS[code]` lookup,
+so a new refusal code without an entry is a `KeyError` inside an exception
+handler rather than a typed refusal: any task adding a code must add its status
+in the same commit, and `tests/test_api_routes.py::test_every_refusal_code_has_an_explicit_http_status`
+is what says so. And §53.3 is superseded by §70.2 — with neither an edge token
+nor the trust switch, a groups header no longer chooses a global role.
 
 ## Completion Phase 8 — requests pending on the vendor, 17 September 2026
 
@@ -149,6 +166,104 @@ the ledger's policy; and the CP-0 gate lives at
 gap already observed rather than predicted: run `ff71c457…` on
 `LITE_EARNINGS_UPDATE` accepted a CP-0 declaring `Committee Ready` at 93 on a
 `SCREENING_ONLY` pathway.
+
+## Completion Phase 7 gate and review record — 17 September 2026
+
+- **Candidate:** `codex/execute-repair-plan` at `cf3d805`. Phase 7's work ends at
+  `acfe398`; `cf3d805` is Phase 8 Task 8.3 in the same branch. The per-commit
+  map, including which commits are later phases' work in the same range, is in
+  [`PHASE_7_EXIT_EVIDENCE.md`](PHASE_7_EXIT_EVIDENCE.md).
+- **Delivered:** the completion plan for Phases 7–13 with its twelve task briefs;
+  the ledger read back by `scripts/ledger_state.py` under a seven-test gate;
+  three struck entries, two withdrawn upgrade paths and four relabelled rebuild
+  headings; the per-PR delivery table with hosted results; the exit-evidence
+  record; the concurrent stream's records tracked.
+- **Whole-phase reviews:** both run at `xhigh` under
+  `.claude/agents/phase-confidence-reviewer.md` and
+  `.claude/agents/phase-adversarial-auditor.md`, which are tracked and pin that
+  effort. The confidence review returned CONCERNS with no P0/P1 and two P2s,
+  remediated in `fa6bbfe`. The separate adversarial audit then returned CONCERNS
+  with one P1 and six P2s, remediated in `885f416` and `acfe398`. The model was
+  Fable 5.1 in both cases, at `xhigh` rather than `max`, as the goal directed.
+- **The P1 is worth naming here.** It was produced by this phase's own two
+  commits read together: one deleted a blank line before a ledger phase heading,
+  the next made a heading require one, and the entry count -- the signal the
+  remediation relied on -- stayed identical while four entries moved under the
+  wrong phase. The gate now raises on such a heading. Writing the remediation
+  commit reproduced the same loss once more and the new rule caught it, which is
+  the strongest evidence it works that this phase can offer.
+- **Gate:** provider variables stripped on every command. `make check` **did not
+  run to completion, and Phase 7 is therefore not accepted.** Its components,
+  each run at the candidate:
+
+| Component | Result |
+|---|---|
+| `make test` (lint, types, offline suite, coverage floors, I/O budget) | exit 0; **3,009 passed**, 94 % branch coverage, all 23 route modules declare `IO_BUDGET` |
+| `make test-postgres-races` | exit 0; **22 passed** |
+| `make security` (Bandit, pip-audit `--require-hashes`, gitleaks) | exit 0; no issues, no known vulnerabilities, no leaks |
+| `make frontend-check` | exit 0; **90 workbench tests** with the units, builds and the accessibility matrix |
+| `make smoke-production` | exit 0; production image built, real-stack journey **15 passed** on the first engine |
+| `make image` | **not run** |
+| `tests/test_ledger.py` + `tests/test_gate_scripts.py` | **59 passed** |
+
+- **Why `make image` did not run, and what unblocks it.** The target refuses any
+  Trivy but the pinned `0.70.0`, which is the version CI installs; this machine
+  carries `0.72.0` and nothing else. Substituting `0.72.0` would be changing a
+  gate to get a pass, and installing a release binary is not something this
+  session takes on its own. It is one owner action:
+
+  ```
+  TRIVY=/path/to/trivy-0.70.0 make image
+  ```
+
+  Until it runs, no claim is made about the image's HIGH/CRITICAL surface.
+- **One disagreement recorded rather than settled.** The audit asked that
+  `docs/feature-status.csv`'s test citations be made to resolve. They were not:
+  206 of its 248 rows are dated and nine names across 14 rows were deleted with
+  the code they covered, so editing them would buy agreement with the tree at the
+  cost of the file being a record of its date. It is a ledger entry with its own
+  upgrade path instead. The audit's other finding on that file was taken: a
+  previous commit had rewritten all 249 line endings while changing six rows, and
+  the bytes are restored and pinned.
+- **Next:** the owner's `make image` run closes the gate, after which Phase 7 can
+  be accepted. Phase 8 Tasks 8.1, 8.3 and 8.4 and Phase 9 Task 9.1 are already in
+  the branch and are closed under their own phases' gates, not this one.
+
+## Completion plan state and what blocks each task — 17 September 2026
+
+Determined from the tree and the briefs, not from plan checkboxes. A task is
+"blocked" only where no amount of implementation effort in this session can
+satisfy its contract.
+
+| Task | State | Blocked on |
+|---|---|---|
+| 7.1, 7.2 | in the branch, reviewed, remediated | — |
+| 8.1 register keys | in the branch (`d88061e`, `da475c7`) | — |
+| 8.2 price with the reservation | in flight | — |
+| 8.3 verdict hygiene | in the branch (`cf3d805`) | — |
+| 8.4 document register | in the branch (`2b5103e`) | the owner's sourcing of eight document sets; nothing is fetched by the system |
+| 8.5 bundle requests | in the branch (`729e2cf`) | the vendor, or a dated §61-style authorization per request |
+| 9.1 `LITE_PORTFOLIO_DECISION` | in the branch (`1921448`, `da475c7`) | its live run and verdict need the owner's authorization |
+| 9.2 `LITE_RELATIVE_VALUE` | not started | a peer table document from 8.4's sourcing list. CP-1C's benchmark registers cannot be keyed against evidence the tree does not hold, and authoring a peer table here would be inventing the evidence a key measures |
+| 9.3 `LITE_DECISION_LEDGER` | not started | an owner-authored decision record (8.4 item 6) |
+| 9.4 `LITE_DEEP_RESEARCH` | not started | an owner-authored research brief and its evidence (8.4 item 7) |
+| 9.5–9.7 | held by design | the LITE producers request (O03) |
+| 10.1 per-node evidence selection | not started | remediation T7, T8, T11 and T14, which are waves 2–4 and have no branch. Its seam is exactly the readers those tasks rewrite |
+| 10.2 conditional-edge guard | in flight | — |
+| 10.3 successor runs | in flight | part (b) of its decision, whether QA `Restricted` releases CP-6 as RESTRICTED, is the owner's |
+| 11–13 | not started | 11 needs 8.4's documents and authorized runs; 13.4 needs an identity-provider setting and TLS material; 13.6 needs an authorized nightly |
+
+**Three things only the owner can unblock, in the order they gate the most
+work.** First, the documents in `qualification/DOCUMENTS.md`'s sourcing list:
+they gate Tasks 9.2, 9.3, 9.4 and the whole of Phase 11. Second, live-run
+authorization with a ceiling, which gates every pathway's verdict and so every
+pathway's exit check. Third, the pinned Trivy `0.70.0` for `make image`, which
+gates Phase 7's acceptance and every later phase gate that runs the complete
+gate.
+
+**One thing the remediation stream unblocks:** waves 2–4. Task 10.1 is the
+completion plan's largest remaining piece of engineering and cannot start
+before T7, T8, T11 and T14 land, because it changes the same four readers.
 
 ## Phase 5 acceptance record — 15 September 2026
 

@@ -13,6 +13,7 @@ copy is byte-identical to the manifest it shipped with.
 from __future__ import annotations
 
 import collections
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -20,6 +21,9 @@ from pathlib import Path
 import pytest
 from canonical_fixtures import CONTRACT, identity, upstream_ref
 from lite_route_fixtures import realistic_handoff_markdown
+
+from server.engine import route
+from server.refusals import Refusal, RefusalCode
 
 BUNDLE = Path(__file__).resolve().parents[1] / "vendor" / "deploy-v"
 CATALOG = (
@@ -124,6 +128,9 @@ def test_cp_parse_is_superseded_upstream_and_stage_zero_is_not_runnable(
 def test_the_catalog_declares_no_conditional_edge(catalog: dict[str, object]) -> None:
     # CONDITIONAL is a live edge type in CONTEXT.md and no edge uses it today,
     # so predicate freezing has nothing to act on. Recorded, not assumed.
+    # The census beside this one pins the other four counts and drives the
+    # engine's guard; this stays as the one-line pin `docs/PHASE_7_EXIT_
+    # EVIDENCE.md` and the ledger cite by name.
     profiles = catalog["profiles"]
     assert isinstance(profiles, dict)
     conditional = [
@@ -133,6 +140,65 @@ def test_the_catalog_declares_no_conditional_edge(catalog: dict[str, object]) ->
         if edge["type"] == "CONDITIONAL"
     ]
     assert conditional == []
+
+
+# Counted at this build. CONDITIONAL is absent and is the one type
+# `server/engine/route.py` refuses, because nothing evaluates a predicate.
+EDGE_CENSUS = {"REQUIRED": 60, "OPTIONAL": 26, "ADVISORY": 29, "QA_GATE": 1}
+
+
+def test_the_vendored_catalog_carries_no_edge_this_engine_cannot_evaluate(
+    catalog: dict[str, object],
+) -> None:
+    """The whole typed-edge census, not only the type that matters.
+
+    A bundle pull that moves any of the four counts is visible here rather than
+    silently changing every route the system runs, and one that introduces a
+    CONDITIONAL edge is refused by `resolve_route` rather than pinned -- which
+    the mutated copy below proves against the real catalog, since a hand-built
+    profile cannot show that the vendored one would be caught.
+    """
+    profiles = catalog["profiles"]
+    assert isinstance(profiles, dict)
+    counted = collections.Counter(
+        str(edge["type"]) for profile in profiles.values() for edge in profile["edges"]
+    )
+
+    assert dict(counted) == EDGE_CENSUS
+    assert counted["CONDITIONAL"] == 0
+
+    # Through the engine, not only the bytes: every pathway of every profile
+    # resolves today, and retyping one edge of a profile to CONDITIONAL refuses
+    # every pathway of that profile whose nodes carry it.
+    resolved = 0
+    refused = 0
+    for profile_id, profile in profiles.items():
+        for selection_id in profile["pathways"]:
+            route.resolve_route(catalog, profile_id, selection_id)
+            resolved += 1
+
+        mutated = copy.deepcopy(catalog)
+        mutated_profile = mutated["profiles"][profile_id]  # type: ignore[index]
+        mutated_profile["edges"][0]["type"] = "CONDITIONAL"
+        source = str(mutated_profile["edges"][0]["source"])
+        target = str(mutated_profile["edges"][0]["target"])
+        for selection_id in profile["pathways"]:
+            carried = {
+                str(node["module_id"])
+                for node in profile["pathways"][selection_id]["nodes"]
+            }
+            if not {source, target} <= carried:
+                continue
+            with pytest.raises(Refusal) as caught:
+                route.resolve_route(mutated, profile_id, selection_id)
+            assert caught.value.code is RefusalCode.ROUTE_EDGE_UNSUPPORTED
+            refused += 1
+
+    # A census that counted nothing, or a mutation no pathway carried, would
+    # read as a clean pass (CLAUDE.md: a scanner that scanned nothing is a
+    # failure).
+    assert resolved == 18
+    assert refused > 0
 
 
 def test_the_bundle_verifies_with_its_own_tool() -> None:

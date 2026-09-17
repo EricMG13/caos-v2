@@ -35,6 +35,7 @@ from server.qualification.matrix import (
     ExpectedCitation,
     ExpectedForecast,
     ExpectedProjection,
+    ExpectedRegister,
     ForecastValue,
     QualificationCase,
     QualificationSet,
@@ -509,3 +510,142 @@ def test_a_subject_that_is_not_the_closed_shape_is_refused(
         load_qualification_set(_write(tmp_path, manifest))
 
     assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+# --- Register keys (Completion Phase 8 Task 8.1) -----------------------------
+
+REGISTER_KEY = {
+    "module_id": "CP-L10",
+    "register_id": "TL10.2",
+    "row_key": {"topic_id": "LIQUIDITY_MATURITIES"},
+    "column": "evidence_status",
+    "expected": "PARTIAL",
+}
+
+
+def _with_register(key: object) -> dict[str, object]:
+    manifest = _manifest()
+    cases = manifest["cases"]
+    assert isinstance(cases, list)
+    cases[0]["expects_register"] = key
+    return manifest
+
+
+def test_expects_register_loads_from_a_manifest(tmp_path: Path) -> None:
+    """The declared register keys reach the case, and move the set's digest."""
+    plain = load_qualification_set(_write(tmp_path / "plain", _manifest()))
+    keyed = load_qualification_set(
+        _write(tmp_path / "keyed", _with_register([dict(REGISTER_KEY)]))
+    )
+
+    [expect] = keyed.cases[0].expects_register
+    assert expect == ExpectedRegister(
+        module_id="CP-L10",
+        register_id="TL10.2",
+        row_key=(("topic_id", "LIQUIDITY_MATURITIES"),),
+        column="evidence_status",
+        expected="PARTIAL",
+    )
+    assert keyed.cases[1].expects_register == ()
+    assert qualification_set_digest(keyed) != qualification_set_digest(plain)
+
+
+def test_an_empty_row_key_refuses_at_load(tmp_path: Path) -> None:
+    """A row key that names no cell names every row, which is not one answer.
+
+    Its own code: the file is well formed and the key is not answerable, so
+    "correct the set manifest" would send the author looking at the shape rather
+    than at the row they meant to name.
+    """
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(
+            _write(tmp_path, _with_register([{**REGISTER_KEY, "row_key": {}}]))
+        )
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_KEY_AMBIGUOUS
+
+
+def test_two_spellings_of_one_row_key_column_refuse_at_load(tmp_path: Path) -> None:
+    """Bounded to one column name, so the key names the row twice."""
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(
+            _write(
+                tmp_path,
+                _with_register(
+                    [
+                        {
+                            **REGISTER_KEY,
+                            "row_key": {
+                                "topic_id": "LIQUIDITY_MATURITIES",
+                                "topic_id ": "CASH_CONVERSION",
+                            },
+                        }
+                    ]
+                ),
+            )
+        )
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_KEY_AMBIGUOUS
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        [{**REGISTER_KEY, "undeclared": "x"}],
+        [{k: v for k, v in REGISTER_KEY.items() if k != "column"}],
+        [{**REGISTER_KEY, "row_key": [["topic_id", "LIQUIDITY_MATURITIES"]]}],
+        [{**REGISTER_KEY, "row_key": {"topic_id": 7}}],
+        [{**REGISTER_KEY, "expected": ""}],
+        [dict(REGISTER_KEY), dict(REGISTER_KEY)],
+        [],
+        "TL10.2",
+    ],
+)
+def test_an_undeclared_register_key_field_refuses(
+    tmp_path: Path, declared: object
+) -> None:
+    """Closed both ways, like every other declared object here.
+
+    A key this loader ignored -- a `row` beside `row_key`, a second identical
+    key, a list where an object belongs -- would be a statement its author
+    believed they had made.
+    """
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(_write(tmp_path, _with_register(declared)))
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_register_key_carrying_a_bidi_control_is_refused_at_the_boundary(
+    tmp_path: Path,
+) -> None:
+    """A key is pinned state, so it crosses `BoundaryText` like a case label.
+
+    The code is the boundary's own, as it already is for a projection key: this
+    is not a manifest whose shape is wrong, it is a string that may not become
+    pinned state at all.
+    """
+    # U+202E, one of the nine controls `BoundaryText` refuses.
+    hostile = {**REGISTER_KEY, "column": "evidence\u202estatus"}
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(_write(tmp_path, _with_register([hostile])))
+
+    assert refused.value.code is RefusalCode.BOUNDARY_TEXT_INVALID
+
+
+def test_the_vmo2_set_still_loads_with_its_register_key(tmp_path: Path) -> None:
+    """The set in the tree is read by the loader that now has one more key.
+
+    Authored from the two admitted earnings releases: each release states
+    undrawn commitments and covenant leverage and neither carries a maturity
+    profile of the group's debt, so the topic's evidence is `PARTIAL` -- not
+    `SUFFICIENT` and not `MISSING`. The key is not taken from any run.
+    """
+    root = Path(__file__).resolve().parents[1] / "qualification" / "vmo2-fy2025"
+    [case] = load_qualification_set(root).cases
+
+    [expect] = case.expects_register
+    assert (expect.module_id, expect.register_id) == ("CP-L10", "TL10.2")
+    assert expect.row_key == (("topic_id", "LIQUIDITY_MATURITIES"),)
+    assert (expect.column, expect.expected) == ("evidence_status", "PARTIAL")
+    assert len(qualification_set_digest(QualificationSet(cases=(case,)))) == 64

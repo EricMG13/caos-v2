@@ -329,7 +329,8 @@ closes none alone.
 **O12 — The branch has not landed [P1, Phase 7].** Measured by Task 7.2:
 `main` is `01c3724` and the undelivered remainder is 13,036 counted lines over
 173 files. Phase 7's last merged PR on `main` is #283; Phase 6 delivery is
-incomplete, with nine PRs open and #296 failing `size` at 879. Two PRs recorded
+incomplete, with nine PRs open and #296 failing `size` at 879. The last merged
+PR is #283, a Phase 4 slice: PR numbering does not track phase order. Two PRs recorded
 as merged, #281 and #285, merged into sibling PR branches rather than `main`,
 one of them with `test` and `security` red; their content reaches `main` only if
 #284's stack merges. The one over-cap merge since #258, #275 at 1,965 lines,
@@ -352,8 +353,9 @@ retires citation candidates and moves the prompt identity: every snapshot
 before it is not comparable, so the programme's live runs start after T7
 lands. T8 (`read_run_blocks`) and T11 (one verification reader) are what the
 evidence-selection task builds on. T2 closes the tokenless dev-mode role hole.
-D2 decides where Book starts. T3 removes two transactions per node while
-keeping the replay binding.
+D2 decides where Book starts. T3 removes one of the three outcome-record
+transactions per node while keeping the replay binding; whether that meets T3 is
+that stream's own definition.
 
 ### Route semantics
 
@@ -545,9 +547,14 @@ step's model row.
    their commits; rewrite the two withdrawn upgrade paths (O16, O17); relabel
    the rebuild headings; add a "Completion Phase 7" heading; rewrite the
    handoff's checkpoint table to §69's state and this plan; regenerate the
-   stale `feature-status.csv` rows; a `tests/test_ledger.py` gate that fails
-   when a struck entry cites a test the suite lacks or an open entry cites
-   the test that proves its closure. Move `gemini-audit.md` and
+   stale `feature-status.csv` rows; a `tests/test_ledger.py` gate. Its rules are
+   the ones that proved mechanical: a cited test the suite does not define, an
+   open entry stating no `*Upgrade:*`, a heading with no blank line before it,
+   a foreign list marker, and a floor naming the whole phase set. A sixth was
+   specified here first -- an open entry citing the test that proves its
+   closure -- and was measured against the real ledger and dropped, because the
+   best phrase rule flagged three entries of which two were correct entries
+   using the same words. The gate does not read prose, and the ledger says so. Move `gemini-audit.md` and
    `PATHFINDER-2026-09-15/` under `docs/reviews/supplemental/` with a header
    naming the concurrent review, or delete them.
 2. Land and verify (Task 7.2): for each PR the delivery session merges, the

@@ -19,11 +19,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from qualification_fixtures import qualification_performed
+from qualification_fixtures import qualification_performed, record_runs
 
 from server.api import app as app_module
-from server.api.app import app, store_connection
+from server.api.app import _STATUS, app, store_connection
 from server.api.commands import qualification as sign_command
+from server.api.commands._request import IDEMPOTENCY_HEADER, REPLAYED_HEADER
 from server.api.commands.qualification import (
     SIGNS,
     evidence_path,
@@ -42,6 +43,7 @@ from server.qualification.store import (
 from server.qualification.verdict import read_verdict
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
+from server.store.commands import NIL_SCOPE
 
 __all__ = ["evidence_path", "require_reviewer", "sign_verdict"]
 
@@ -107,6 +109,10 @@ def client(
         performed = qualification_performed()
         record_performed(conn, performed)
         record_evidence(conn, performed.evidence)
+        # The runs behind the snapshot, each accepted artifact recording the
+        # model the harness configured: what `record_verdict` compares the
+        # reviewer's `provider` against.
+        record_runs(conn, performed)
         conn.commit()
         app.dependency_overrides[store_connection] = lambda: conn
         try:
@@ -116,14 +122,21 @@ def client(
             app.dependency_overrides.clear()
 
 
-def _sign(
+def _sign(  # noqa: PLR0913 -- one request's identity, body and key
     client: TestClient,
     evidence_sha256: str,
     body: object,
     user: UUID | None,
     role: str = "ADMIN",
+    key: UUID | None = None,
+    *,
+    send_key: bool = True,
 ) -> Response:
+    """One signing request. `send_key` off omits the `Idempotency-Key`; a key
+    left unnamed is a fresh one, so each call is its own command."""
     headers = {} if user is None else _headers(user, role)
+    if send_key:
+        headers[IDEMPOTENCY_HEADER] = str(key or uuid4())
     answer: Response = client.post(
         f"/api/v1/qualification/{evidence_sha256}/verdict", headers=headers, json=body
     )
@@ -171,11 +184,16 @@ def test_an_admin_signs_a_complete_snapshot_and_the_row_carries_their_identity(
     assert shown.json()["reviewer"] == "A. Reviewer"
 
 
-def test_a_second_signature_over_the_same_evidence_is_refused(
+def test_a_second_signature_over_the_same_evidence_is_already_recorded_not_invalid(
     client: tuple[TestClient, StoreConnection],
 ) -> None:
-    """One verdict per evidence identity (`0019_one_qualification_verdict.sql`);
-    the store's refusal reaches the wire as the binding it is."""
+    """One verdict per evidence identity (`0019_one_qualification_verdict.sql`).
+
+    Told `VERDICT_BINDING_INVALID`, a retrying client could not tell "already
+    signed" from "wrong bindings" and would correct a document that was right.
+    The constraint has its own code and its own status, matched by constraint
+    name so a future unique index cannot borrow it.
+    """
     http, conn = client
     evidence = qualification_performed().evidence
     first = _sign(http, evidence.sha256, _document(evidence), uuid4())
@@ -183,9 +201,157 @@ def test_a_second_signature_over_the_same_evidence_is_refused(
 
     again = _sign(http, evidence.sha256, _document(evidence), uuid4())
 
-    assert again.status_code == 400
-    assert again.json()["code"] == "VERDICT_BINDING_INVALID"
+    assert again.status_code == 409, again.text
+    assert again.json()["code"] == "VERDICT_ALREADY_RECORDED"
+    assert _STATUS[RefusalCode.VERDICT_ALREADY_RECORDED] == 409
     assert len(_rows(conn)[0]) == 1
+
+
+@pytest.mark.parametrize("recorded", ["another-model", None])
+def test_a_verdict_naming_a_model_no_run_recorded_is_refused(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch, recorded: str | None
+) -> None:
+    """Invariant 3: the host owns identity, so `provider` is checked against
+    what the runs called, not against what the harness was configured with.
+
+    Two ways a snapshot fails it: an accepted artifact whose call recorded
+    another model, and a run that recorded no model at all. Both refuse.
+    """
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
+    monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = qualification_performed()
+        record_performed(conn, performed)
+        record_evidence(conn, performed.evidence)
+        record_runs(conn, performed, model=recorded, outcome=recorded is not None)
+        conn.commit()
+        app.dependency_overrides[store_connection] = lambda: conn
+        try:
+            with TestClient(app) as http:
+                evidence = performed.evidence
+                answer = _sign(http, evidence.sha256, _document(evidence), uuid4())
+        finally:
+            app.dependency_overrides.clear()
+
+        assert answer.status_code == 400, answer.text
+        assert answer.json()["code"] == "VERDICT_BINDING_INVALID"
+        assert _rows(conn)[0] == []
+
+
+def test_a_verdict_naming_the_recorded_model_records(
+    client: tuple[TestClient, StoreConnection],
+) -> None:
+    """The comparison's other side: the model every accepted artifact of every
+    run recorded is the one the document names, and the verdict is stored."""
+    http, conn = client
+    evidence = qualification_performed().evidence
+    recorded = conn.execute("SELECT DISTINCT model FROM call_outcomes").fetchall()
+    conn.rollback()
+    assert recorded == [(evidence.model,)]
+
+    answer = _sign(http, evidence.sha256, _document(evidence), uuid4())
+
+    assert answer.status_code == 201, answer.text
+    assert len(_rows(conn)[0]) == 1
+
+
+def test_a_replayed_signature_with_the_same_key_is_answered_by_its_receipt(
+    client: tuple[TestClient, StoreConnection],
+) -> None:
+    """The receipt this route had none of (§65's second stated limit).
+
+    Same actor, same key, same document: the stored receipt is the answer and
+    nothing is written a second time. The same key over a different document
+    is the idempotency conflict every other command answers.
+    """
+    http, conn = client
+    evidence = qualification_performed().evidence
+    reviewer = uuid4()
+    key = uuid4()
+    document = _document(evidence)
+
+    first = _sign(http, evidence.sha256, document, reviewer, key=key)
+    assert first.status_code == 201, first.text
+    assert REPLAYED_HEADER not in first.headers
+
+    counted = _Counting(conn)
+    app.dependency_overrides[store_connection] = lambda: counted
+    again = _sign(http, evidence.sha256, document, reviewer, key=key)
+    app.dependency_overrides[store_connection] = lambda: conn
+
+    assert again.status_code == 201, again.text
+    assert again.headers[REPLAYED_HEADER] == "true"
+    # The lookup alone: a replay reads the receipt and writes nothing.
+    assert counted.executed == sign_command.REPLAY_IO
+    assert again.json() == first.json()
+    assert len(_rows(conn)[0]) == 1
+    receipts = conn.execute(
+        "SELECT actor_id,scope,command,status FROM command_requests"
+    ).fetchall()
+    conn.rollback()
+    assert receipts == [(reviewer, NIL_SCOPE, sign_command.SIGN_VERDICT, 201)]
+
+    other = _document(evidence, reviewer="B. Reviewer")
+    reused = _sign(http, evidence.sha256, other, reviewer, key=key)
+    assert reused.status_code == 409, reused.text
+    assert reused.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
+    assert len(_rows(conn)[0]) == 1
+
+
+def test_the_verdict_command_requires_an_idempotency_key(
+    client: tuple[TestClient, StoreConnection],
+) -> None:
+    """The header every other command requires, refused before the store."""
+    http, conn = client
+    evidence = qualification_performed().evidence
+    opened: list[str] = []
+
+    def counted() -> StoreConnection:
+        opened.append(store_connection.__name__)
+        return conn
+
+    app.dependency_overrides[store_connection] = counted
+    answer = _sign(http, evidence.sha256, _document(evidence), uuid4(), send_key=False)
+
+    assert answer.status_code == 400, answer.text
+    assert answer.json()["code"] == "IDEMPOTENCY_KEY_REQUIRED"
+    assert opened == []
+    app.dependency_overrides[store_connection] = lambda: conn
+    assert _rows(conn) == ([], 1)
+
+
+# What each identity gets on the one route that is account-wide rather than
+# case-scoped: there is no standing to hold, so rank is the whole matrix.
+VERDICT_ACTORS: tuple[tuple[str, str | None, int], ...] = (
+    ("anonymous", None, 401),
+    ("reader", "READER", 404),
+    ("analyst", "ANALYST", 404),
+    ("admin", "ADMIN", 201),
+)
+
+
+@pytest.mark.parametrize(("name", "role", "status"), VERDICT_ACTORS)
+def test_the_verdict_route_answers_each_identity_by_rank(
+    client: tuple[TestClient, StoreConnection],
+    name: str,
+    role: str | None,
+    status: int,
+) -> None:
+    """The actor row `tests/test_actor_matrix.py` has no case scope for."""
+    http, conn = client
+    evidence = qualification_performed().evidence
+
+    answer = _sign(
+        http,
+        evidence.sha256,
+        _document(evidence),
+        None if role is None else uuid4(),
+        role or "ADMIN",
+    )
+
+    assert answer.status_code == status, (name, answer.text)
+    assert len(_rows(conn)[0]) == (1 if status == 201 else 0)
 
 
 @pytest.mark.parametrize("role", ["READER", "ANALYST"])
@@ -395,6 +561,7 @@ class _Faulting:
         "SELECT now()",
         "SELECT e.qualification_set_sha256",
         "SELECT qualification_set_sha256",
+        "SELECT DISTINCT o.run_id",
         "INSERT INTO qualification_verdicts",
     ],
 )

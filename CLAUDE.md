@@ -194,6 +194,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* none that is mechanical. What closes this class is the discipline
   `docs/COMPLETION_PLAN.md` states in its definition of done, that the entry a
   task closes is struck in the commit that closes it, naming the test.
+- **The feature-status record is dated evidence, so some of its citations name
+  tests the tree deleted.** `docs/feature-status.csv` carries 248 rows of which
+  206 are dated, 198 of them 2026-09-11, and each row says what was true when it
+  was written. Nine test names it cites are defined nowhere in the suite and
+  nowhere on disk -- `test_a_revision_is_frozen_once`,
+  `test_the_receipt_names_the_signer_of_the_frozen_bytes` and seven more of the
+  filing and revision-signing set, across 14 rows -- because `9bf20b2` wrote them
+  and the repair deleted the code they covered. The Completion Phase 7
+  adversarial audit asked for the citations to be made to resolve. They are
+  deliberately not: a dated row whose evidence is edited later is no longer a
+  record of that date, and rewriting 14 of them would make the file agree with
+  the tree by giving up the one property that makes it worth keeping. So the
+  ledger gate reads this file not at all, and a reader must take a row's date as
+  part of its claim. *Upgrade:* a regenerated inventory emitted from the suite,
+  which this file's own "Regenerate, don't hand-maintain" rule already asks for
+  and which belongs with Completion Phase 13 Task 13.6, the task that generates
+  the release pack from the suite and the store; the dated file is then the
+  archived predecessor rather than the live answer.
 - **The demonstration Admin panel says the health route is not served.**
   `frontend/fixtures/admin.json` carries `HEALTH` and `GET /api/health` marked
   not served, and the admin unit test's comment repeats it;
@@ -475,9 +493,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the adapter is one constant: every reader refuses a row without its record
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
   `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
-  modules; every route outside that pathway and LITE earnings remains
-  disabled (`ADAPTER_ROUTES`: LITE portfolio decision,
-  CP-0 -> CP-L10, has no contract test) pins and passes its
+  modules; Phase 9 Task 9.1 adds LITE portfolio decision (CP-0 -> CP-L10,
+  `tests/test_lite_portfolio_route.py`); every route outside those three
+  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
@@ -632,7 +650,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   discharge is a new run. A CAS back to RUNNING would reopen a run whose pins
   cannot change. Completion Phase 10 records the link instead: the T8 blocker
   cell projected so a reader sees which source the verdict asked for, and
-  `runs.supersedes_run_id` naming the run a successor replaces.
+  `runs.supersedes_run_id` naming the run a successor replaces. That withdrawal
+  covers a readiness verdict and nothing else. A run also ends BLOCKED when the
+  frontier empties with required work unfinished -- for a QA_GATE whose source is
+  not `Passed` -- and there the discharge is a human decision under unchanged
+  pins, not a supplied source. The Repair Phase 2 entry "Only a QA `Passed`
+  releases CP-6" owns that case and names its own discharge; this entry does not
+  speak for it. Scoped after the Completion Phase 7 adversarial audit read the
+  two entries side by side and got two incompatible answers.
 - ~~**The terminal decision reads outside the run lock, and the store does not
   check it.**~~ Closed by Phase 4 Task 4.3c (§49.4): `complete_run` refuses
   `RUN_NODES_UNACCEPTED` while a pinned node is unaccepted and `complete_run`/
@@ -682,8 +707,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **`check_tested.py` sees module-level definitions only.** A method is covered
   through the class that holds it. *Upgrade:* descend into classes when a
   governed path first puts logic on a method.
-- **`check_vocabulary.py` enforces 9 of the 33 synonyms `CONTEXT.md` lists.**
-  The other 24 carry an ordinary technical meaning here — `file`, `state`,
+- **`check_vocabulary.py` enforces 11 of the 34 synonyms `CONTEXT.md` lists.**
+  The other 23 carry an ordinary technical meaning here — `file`, `state`,
   `version`, `response` — and each is exempt with a stated reason in
   `NOT_ENFORCED`. The check refuses to run if `CONTEXT.md` and that list drift
   apart. *Upgrade:* enforce an exempt synonym the day it is actually misused.
@@ -1027,15 +1052,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   does not hold, the answer is one private 404. What it does not do: nothing
   here lets the host call itself qualified — the route records a person's
   assertion over evidence `record_verdict` already bound, and refuses when the
-  snapshot is not `complete` or the bindings do not match. Two limits remain.
-  A second signature over the same evidence is refused
-  `VERDICT_BINDING_INVALID` by the one-verdict constraint rather than by a
-  code of its own, so a retried request cannot tell "already signed" from
-  "wrong bindings" (`tests/test_qualification_sign.py`); and the write is one
-  transaction with no `command_requests` receipt, because there is no case to
-  scope a key to. *Upgrade:* a `VERDICT_ALREADY_RECORDED` code the day a
-  client retries, and a global-scope receipt the day a second global write
-  arrives and the shape is worth generalising.
+  snapshot is not `complete` or the bindings do not match. Both of the limits
+  this entry recorded are closed by Task 8.3: the one-verdict constraint is
+  mapped by its declared name to `VERDICT_ALREADY_RECORDED` (409), so a
+  retried request can tell "already signed" from "wrong bindings"
+  (`test_a_second_signature_over_the_same_evidence_is_already_recorded_not_invalid`,
+  `test_the_one_verdict_constraint_is_mapped_by_name_not_by_message`); and the
+  write now records a `command_requests` receipt under the nil scope in the
+  verdict's own transaction, so a replayed request is answered from it
+  (`test_a_replayed_signature_with_the_same_key_is_answered_by_its_receipt`,
+  `test_the_verdict_command_requires_an_idempotency_key`).
 - **The run-to-case binding lives in the matrix's only caller, not the matrix.**
   `build_matrix` accepts any `runs` mapping and checks only that a label is
   present; everything that makes a run the case's run — title, ceiling, profile,
@@ -1413,24 +1439,46 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 3.**
 
-- **A route's predicates are frozen and never evaluated.** `ResolvedRoute`
-  carries them, `route_digest` covers them, and `server/store/routes.py` writes
-  and reads them back — and no code consults them. `CONDITIONAL` sits in
-  `BLOCKING` beside `REQUIRED`, so a conditional edge blocks unconditionally and
-  its condition decides nothing. That is the fail-closed direction, and the only
-  one available: a condition the host cannot evaluate must not be assumed met,
-  and the predecessor's failure was the opposite — edges that did not enforce
-  what they claimed. But invariant 10's "frozen predicates" are, for now, frozen
-  without yet being predicates, and a reader of the pin could take the presence
-  of a predicate for its enforcement. *Upgrade:* not an evaluator. The vendored
-  catalog declares 60 REQUIRED, 26 OPTIONAL, 29 ADVISORY and one QA_GATE typed
-  edge, and **no** CONDITIONAL edge, so the blocking branch is unreachable on
-  this bundle and a grammar written for it would be code for a route that does
-  not exist. Completion Phase 10 pins the fact instead: a test over the catalog's
-  typed-edge counts, and `_edges_among` refusing `ROUTE_EDGE_UNSUPPORTED` rather
-  than pinning a route whose target would block whatever the evidence said. The
-  evaluator is owed the day that guard fails, which is also the first day a real
-  predicate exists to parse.
+- **A route's predicates are frozen and never evaluated, and an edge that would
+  need one is refused.** `ResolvedRoute` carries them, `route_digest` covers
+  them, and `server/store/routes.py` writes and reads them back — and no code
+  consults them. That is the fail-closed direction, and the only one available:
+  a condition the host cannot evaluate must not be assumed met, and the
+  predecessor's failure was the opposite — edges that did not enforce what they
+  claimed. But invariant 10's "frozen predicates" are, for now, frozen without
+  yet being predicates, and a reader of the pin could take the presence of a
+  predicate for its enforcement. What closes the reachable half of that reading
+  is Completion Phase 10 Task 10.2: `_edges_among` refuses
+  `ROUTE_EDGE_UNSUPPORTED` for a `CONDITIONAL` **edge** before the `Edge` is
+  built, so no such route resolves and none can be pinned — where before it
+  would have pinned a route whose target blocks whatever the evidence said. The
+  refusal is scoped to the route, not to the bundle: the membership filter runs
+  first, so a CONDITIONAL edge whose source or target is outside the resolved
+  node set is skipped as any other out-of-route edge is, and a build carrying
+  one off every pathway refuses nothing. That is deliberate — an edge no pin
+  carries misleads no reader of a pin — and it means this guard fires at the
+  first build that puts such an edge **on a resolved route**, not at the first
+  build that declares one anywhere. `CONDITIONAL` stays in `BLOCKING` and stays
+  in the bundle's vocabulary (`CONTEXT.md`): it remains a CP-0 *verdict*, which
+  `tests/test_route_resolution.py::test_a_conditional_verdict_blocks_like_a_blocked_one`
+  still holds, and only an edge of that type is refused. The refusal is a 503:
+  the pinned build's own catalog, not the caller's request, and no profile or
+  pathway a caller could name instead would avoid it. The branch is unreachable
+  on this bundle — the vendored catalog declares 60 REQUIRED, 26 OPTIONAL, 29
+  ADVISORY and one QA_GATE typed edge and **no** CONDITIONAL edge, pinned by
+  `tests/test_bundle_pin.py::test_the_catalog_declares_no_conditional_edge`
+  since `4f06337` and now as a whole census, through the engine and against a
+  mutated copy, by
+  `tests/test_bundle_pin.py::test_the_vendored_catalog_carries_no_edge_this_engine_cannot_evaluate`
+  — so a grammar written for it today would be code for a route that does not
+  exist. `tests/test_route_resolution.py::test_a_profile_with_a_conditional_edge_is_refused_at_resolution`
+  is the guard, and
+  `test_the_four_edge_types_this_engine_evaluates_still_resolve` says the guard
+  is one type rather than a narrowing of the other four. *Upgrade:* an
+  evaluator, owed the day that guard fires — which is also the first day an
+  upstream build carries a real predicate for a grammar to parse, and the day
+  the frozen `predicates` field has something to be read against.
+
 **Phase 2.**
 
 - **A quote matches whole tokens exactly, typography at its edges aside.**
@@ -1504,12 +1552,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   migrates it. *Upgrade:* apply the declared schema into a scratch namespace and
   diff `information_schema` against the live one, the day a database is edited by
   anything but this function.
-- **`budget_ledger` records a charge and enforces no ceiling.** One charge per
-  attempt is a database fact, but nothing refuses the charge that takes a run
-  past a budget, because invariant 8's reservation belongs to the provider call
-  and there is no provider call yet. *Upgrade:* Phase 4 reserves before the call
-  and reconciles after, and its three named tests
-  (`docs/REBUILD_PLAN.md` Phase 4) are what make the ceiling bite.
+- ~~**`budget_ledger` records a charge and enforces no ceiling.**~~ Closed by the
+  phase its own upgrade path named. `server/store/budget.py::_reserve` refuses
+  `BUDGET_CEILING_REACHED` under the run row lock before any call, and
+  `_remaining` subtracts `greatest(reservations.amount, ledger.amount)` per
+  attempt, so a charge that came in above its reservation consumes the capacity
+  the next reservation is measured against.
+  `tests/test_budget.py::test_a_reservation_past_the_ceiling_is_refused_before_it_is_taken`
+  and `test_concurrent_reservations_at_the_ceiling_refuse` hold it. What cannot
+  be refused is a bill already incurred, which is not this entry's claim and is
+  covered by the Repair Phase 2 entries on indeterminate exposure. Found by the
+  Completion Phase 7 confidence review, which is the reason the entry above this
+  one says the gate cannot read prose.
 - **A blob is read whole into memory and has no size ceiling of its own.**
   `BlobStore.get` still returns `bytes`, with nothing bounding a read but the
   process. What has changed since this entry was written: `admit_pack` now
@@ -1545,7 +1599,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **caos-v2** (8993 symbols, 22700 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **caos-v2** (10131 symbols, 24716 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

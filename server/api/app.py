@@ -125,6 +125,10 @@ _STATUS = {
     # and nothing the caller holds could be corrected to avoid it.
     RefusalCode.READINESS_INVALID: 503,
     RefusalCode.ROUTE_IDENTITY_INVALID: 503,
+    # A pinned build whose catalog declares an edge type this engine cannot
+    # evaluate: the vendored bytes, not the request. No profile or pathway the
+    # caller could name instead would avoid it.
+    RefusalCode.ROUTE_EDGE_UNSUPPORTED: 503,
     RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 503,
     # A recorded blocking verdict at a node the pinned route does not carry:
     # rows this server wrote disagreeing with pins it wrote (§68).
@@ -234,6 +238,7 @@ _STATUS = {
     RefusalCode.QUALIFICATION_SET_EMPTY: 400,
     RefusalCode.QUALIFICATION_KEY_UNANSWERABLE: 400,
     RefusalCode.QUALIFICATION_SET_AMBIGUOUS: 400,
+    RefusalCode.QUALIFICATION_KEY_AMBIGUOUS: 400,
     RefusalCode.QUALIFICATION_RUN_MISSING: 400,
     RefusalCode.QUALIFICATION_SET_FILE_INVALID: 400,
     RefusalCode.QUALIFICATION_SET_PATH_ESCAPES: 400,
@@ -246,6 +251,7 @@ _STATUS = {
     RefusalCode.VERDICT_BINDING_INVALID: 400,
     RefusalCode.VERDICT_UNDECLARED_FIELD: 400,
     RefusalCode.VERDICT_EXPIRED: 400,
+    RefusalCode.VERDICT_ALREADY_RECORDED: 409,
 }
 
 
