@@ -75,6 +75,7 @@ function FilingAct({
   name,
   action,
   label,
+  request,
   send,
   onDone,
 }: {
@@ -84,6 +85,12 @@ function FilingAct({
   name: string;
   action: ActionView | undefined;
   label: string;
+  /** What this press asks for, which is what the idempotency key is derived
+      from. The label would key two presses of the same button alike even when
+      the revision or the digest beneath them had moved; `_replay` refuses the
+      mismatch, so keying on the label fails closed rather than wrongly -- but
+      it fails where this asks the right question instead. */
+  request: unknown;
   send: (intent: Intent) => Promise<CommandResult<{ payload_sha256: string }>>;
   onDone: () => void;
 }) {
@@ -98,7 +105,7 @@ function FilingAct({
           action
             ? () => {
                 if (refusal || pending) return;
-                void run(label, send).then((outcome) => {
+                void run(request, send).then((outcome) => {
                   if (outcome.kind === "ok") onDone();
                 });
               }
@@ -205,6 +212,11 @@ export function FilingControls({
         </div>
         <FilingAct
           name="SIGN_OPINION"
+          request={{
+            action: "SIGN_OPINION",
+            revision_id: body.revision_id,
+            payload_sha256: digest,
+          }}
           action={actionOf("SIGN_OPINION")}
           label="Sign opinion"
           send={(intent) => signOpinion(body.case_id, body.revision_id, digest, intent)}
@@ -212,6 +224,11 @@ export function FilingControls({
         />
         <FilingAct
           name="FREEZE_DELIVERABLE"
+          request={{
+            action: "FREEZE_DELIVERABLE",
+            revision_id: body.revision_id,
+            payload_sha256: digest,
+          }}
           action={actionOf("FREEZE_DELIVERABLE")}
           label="Freeze deliverable"
           send={(intent) => freezeDeliverable(body.case_id, body.revision_id, digest, intent)}
@@ -219,6 +236,11 @@ export function FilingControls({
         />
         <FilingAct
           name="FILE_DELIVERABLE"
+          request={{
+            action: "FILE_DELIVERABLE",
+            revision_id: body.revision_id,
+            payload_sha256: digest,
+          }}
           action={actionOf("FILE_DELIVERABLE")}
           label="File deliverable"
           send={(intent) => fileDeliverable(body.case_id, body.revision_id, digest, intent)}
