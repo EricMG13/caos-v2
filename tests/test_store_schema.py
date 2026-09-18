@@ -1360,3 +1360,85 @@ def test_the_directory_listing_uses_an_index_on_case_members(
     # The name alone would hold for an index of that name on any column;
     # the condition is what pins it as a lookup on `user_id`.
     assert "Index Cond: (user_id =" in plan, plan
+
+
+# Tuple position, not ordinal: `0022` and `0023` are permanent gaps
+# (`docs/MIGRATIONS.md`), so `0028` is the 26th migration.
+_AT_0028 = [name for name, _ in store.MIGRATIONS].index("0028_worker_heartbeats") + 1
+
+
+def _two_opinions_at_0028(conn: StoreConnection, *, same_signer: bool) -> None:
+    """A store at `0028` holding two signatures of one saved revision."""
+    case_id = create_case(conn, BoundaryText.of("Signed twice"))
+    run_id = start_run(conn, case_id)
+    revision_id = uuid4()
+    conn.execute(
+        "INSERT INTO deliverable_revisions"
+        " (revision_id,case_id,run_id,payload_sha256,saved_by)"
+        " VALUES (%s,%s,%s,%s,%s)",
+        (revision_id, case_id, run_id, "a" * 64, uuid4()),
+    )
+    first = uuid4()
+    for signer in (first, first if same_signer else uuid4()):
+        conn.execute(
+            "INSERT INTO deliverable_opinions"
+            " (case_id,revision_id,payload_sha256,signed_by,signed_at)"
+            " VALUES (%s,%s,%s,%s,clock_timestamp())",
+            (case_id, str(revision_id), "a" * 64, signer),
+        )
+    conn.commit()
+
+
+def test_migration_0029_holds_one_signature_per_signer_and_revision(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`0029_one_opinion_per_signer` advances a store whose revisions carry
+    distinct signers, and from then on a second signature by the same signer is
+    refused by the store under the constraint's own name."""
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:_AT_0028])
+            apply_schema(conn)
+        _two_opinions_at_0028(conn, same_signer=False)
+
+        apply_schema(conn)
+
+        assert store.MIGRATIONS[_AT_0028][0] == "0029_one_opinion_per_signer"
+        assert conn.execute("SELECT count(*) FROM deliverable_opinions").fetchone() == (
+            2,
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation) as caught:
+            conn.execute(
+                "INSERT INTO deliverable_opinions"
+                " (case_id,revision_id,payload_sha256,signed_by)"
+                " SELECT case_id,revision_id,payload_sha256,signed_by"
+                " FROM deliverable_opinions LIMIT 1"
+            )
+        assert caught.value.diag.constraint_name == "one_opinion_per_signer"
+        conn.rollback()
+
+
+def test_migration_0029_refuses_a_store_where_a_signer_signed_twice(
+    empty_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A doubled signature is governed evidence that an `OPINION_SIGNED` event
+    names, so the migration does not choose which of the two to delete. It
+    refuses before any DDL, leaving the history at `0028` and both rows in
+    place, for an operator to reconcile -- the pattern `0017` set."""
+    with connect(empty_database) as conn:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:_AT_0028])
+            apply_schema(conn)
+        _two_opinions_at_0028(conn, same_signer=True)
+
+        with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
+            apply_schema(conn)
+        conn.rollback()
+
+        assert conn.execute("SELECT max(version) FROM store_migrations").fetchone() == (
+            _AT_0028,
+        )
+        assert conn.execute("SELECT count(*) FROM deliverable_opinions").fetchone() == (
+            2,
+        )
+        conn.rollback()
