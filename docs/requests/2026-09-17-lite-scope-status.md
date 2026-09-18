@@ -2,6 +2,15 @@
 
 Date: 2026-09-17. Bundle: `vendor/deploy-v` at build `30222a49`.
 
+**Status (2026-09-18):** done in build `62a94ccd` under the owner's
+authorisation (`docs/DECISIONS.md` §92, `docs/VENDOR_CHANGES.md`):
+`validate_handoff.py` declares `COMMITTEE_STATUSES_BY_SCOPE`, `SCREENING_ONLY`
+never permits `Committee Ready`, `validate_text(decision_scope=...)` refuses a
+status outside the scope, `CANON_SHARED.md` says so in one line, and the host
+hands the vendor the pathway's scope
+(`tests/test_bundle_pin.py::test_screening_only_never_permits_committee_ready`,
+`tests/test_canonical_handoff.py::test_a_screening_only_handoff_may_not_say_committee_ready`).
+
 ## What is asked
 
 Every LITE pathway is declared `decision_scope: SCREENING_ONLY`, and nothing

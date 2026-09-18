@@ -2,6 +2,19 @@
 
 Date: 2026-09-17. Bundle: `vendor/deploy-v` at build `30222a49`.
 
+**Status (2026-09-18):** done in build `62a94ccd`, in the bundle's own
+validators at the `SHARED` owner, under the owner's authorisation
+(`docs/DECISIONS.md` §92, `docs/VENDOR_CHANGES.md`). `semantic_rules`: all
+five declared kinds enforced by `completeness_check.check`
+(`tests/test_bundle_pin.py::test_the_vendor_enforces_cp_l10s_semantic_rules`).
+`document_substrings_casefold`: the fixture half enforced with the marker
+split, the evidence half projected. `required_payload_fields`:
+`completeness_check.check_payload` over a payload object
+(`test_the_vendor_checks_a_lite_payloads_required_fields`) -- shipped and
+callable, and unreachable from the canonical adapter, which never receives a
+payload; the ledger says so. The vendor's own `tests/` were edited so their
+artifacts conform to the rules they declare, which §92 records.
+
 ## What is asked
 
 Three rules are declared in the bundle's `SKILL.md` contracts and implemented

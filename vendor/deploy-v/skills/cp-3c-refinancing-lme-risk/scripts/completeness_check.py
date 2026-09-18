@@ -39,11 +39,29 @@ sys.dont_write_bytecode = True
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cp_tables import SEPARATOR_RE, _split_row, parse_tables  # noqa: E402
-from validate_handoff import unfenced_markdown  # noqa: E402
+from validate_handoff import FrontmatterError, parse_restricted_frontmatter, unfenced_markdown  # noqa: E402
 
 BULLET_RE = re.compile(r"^(?P<indent> *)- (?:\*\*(?P<key>[^*]+)\*\*:\s?)?(?P<value>.*)$")
 PLACEHOLDERS = {"structured below", ""}
+# An unkeyed bullet opening a nested mapping (one `semantic_rules` entry).
+STRUCTURED_ITEM = "structured item"
 IDENTICAL_TO_COLUMNS = "identical to columns"
+# The two classes a profile's marker lists fall into. A fixture marker says the
+# handoff is not real work and disqualifies a run; an evidence marker says the
+# evidence is thin and is projected for a reader, never enforced here.
+FIXTURE_KEYS = (
+    ("fixture_limitation_flags", "fixture_flags"),
+    ("fixture_validation_warnings", "fixture_warnings"),
+    ("fixture_document_substrings_casefold", "fixture_substrings"),
+)
+EVIDENCE_KEYS = (
+    ("frontmatter_limitation_flags", "evidence_flags"),
+    ("frontmatter_validation_warnings", "evidence_warnings"),
+    ("document_substrings_casefold", "evidence_substrings"),
+)
+DISQUALIFIER_BLOCKS = ("full_run_disqualifiers", "screening_run_disqualifiers")
+PROJECTED_BLOCK = "projected_evidence_limitations"
+SEMANTIC_RULE_KINDS = ("unique_columns", "required_values")
 PROFILE_PREFIX = "## Output profile"
 FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 
@@ -127,7 +145,12 @@ def _parse_tree(lines):
             stack.pop()
         parent = stack[-1][1]
         if key is None:
-            parent.setdefault("_items", []).append(value)
+            if value == STRUCTURED_ITEM:
+                item = {}
+                parent.setdefault("_items", []).append(item)
+                stack.append((indent, item, None))
+            else:
+                parent.setdefault("_items", []).append(value)
             continue
         node = {} if value in PLACEHOLDERS else {"_value": value}
         parent[key.strip()] = node
@@ -149,10 +172,31 @@ def _scalar(node):
 def _list(node, *, keep_empty=False):
     raw = _scalar(node)
     if raw is None and isinstance(node, dict) and "_value" not in node and node.get("_items"):
-        raw = ";".join(node.get("_items", []))
+        raw = ";".join(item for item in node.get("_items", []) if isinstance(item, str))
     if raw is None or raw.strip().casefold() == "none":
         return []
     return [p.strip() for p in raw.split(";") if keep_empty or p.strip()]
+
+
+def _structured_items(node):
+    """The nested mappings under a key, each opened by a `structured item` bullet."""
+    if not isinstance(node, dict):
+        return []
+    return [item for item in node.get("_items", []) if isinstance(item, dict)]
+
+
+def _semantic_rules(node):
+    """`semantic_rules` as declared: one mapping per rule, list values split."""
+    rules = []
+    for item in _structured_items(node):
+        rule = {key: _scalar(value) for key, value in item.items() if not key.startswith("_")}
+        if "columns" in item:
+            rule["columns"] = _list(item["columns"])
+        if "values" in item:
+            rule["values"] = _list(item["values"])
+        rule["case_sensitive"] = str(rule.get("case_sensitive", "True")).strip().casefold() == "true"
+        rules.append(rule)
+    return rules
 
 
 def module_id_of(handoff_text):
@@ -164,7 +208,14 @@ def module_id_of(handoff_text):
 
 def load_contract(skill_text, module_id=None):
     """{'registers': {id: {columns, critical_columns, min_rows, exempt}},
-        'blocklist': set, 'substrings': list}"""
+        'blocklist': set, 'substrings': list,
+        'fixture_flags' | 'fixture_warnings' | 'fixture_substrings': list
+            (the fixture markers, from every `*_disqualifiers` block; enforced),
+        'evidence_flags' | 'evidence_warnings' | 'evidence_substrings': list
+            (the thin-evidence markers under `projected_evidence_limitations`;
+            projected for a reader and enforced by nothing here),
+        'semantic_rules': [{rule_id, rule, register_id, ...}],
+        'required_payload_fields': list (the payload contract's, for check_payload)}"""
     body = _profile_body(skill_text, module_id)
     if not body.strip():
         raise ValueError("SKILL.md has no `## Output profile` section")
@@ -197,12 +248,33 @@ def load_contract(skill_text, module_id=None):
     blocklist = {v.casefold() for v in _list(disq.get("critical_cell_values_casefold", {}), keep_empty=True)}
     substrings = [v.casefold() for v in _list(disq.get("critical_cell_substrings_casefold", {}))]
 
+    # Fixture markers from every disqualifier block the profile declares (a
+    # screening-only module declares its own beside the full-run one), each
+    # list de-duplicated in declaration order; substrings case-folded.
+    markers = {}
+    for declared, name in FIXTURE_KEYS:
+        seen = []
+        for block in DISQUALIFIER_BLOCKS:
+            for value in _list(completeness.get(block, {}).get(declared, {})):
+                value = value.casefold() if name.endswith("substrings") else value
+                if value not in seen:
+                    seen.append(value)
+        markers[name] = seen
+    projected = completeness.get(PROJECTED_BLOCK, {})
+    for declared, name in EVIDENCE_KEYS:
+        values = _list(projected.get(declared, {}))
+        markers[name] = [v.casefold() for v in values] if name.endswith("substrings") else values
+
     stable_tables = _list(completeness.get("unconditional_stable_tables_cp_model", {}))
+    payload = completeness.get("payload_contract", {})
 
     return {
         "registers": registers,
         "blocklist": blocklist,
         "substrings": substrings,
+        **markers,
+        "semantic_rules": _semantic_rules(completeness.get("semantic_rules", {})),
+        "required_payload_fields": _list(payload.get("required_payload_fields", {})),
         "unconditional_stable_tables": stable_tables,
     }
 
@@ -306,6 +378,9 @@ def check(skill_text, handoff_text, module_id=None):
                         )
                         break
 
+    violations.extend(_semantic_violations(contract["semantic_rules"], present, contract["blocklist"]))
+    violations.extend(_fixture_violations(contract, handoff_text))
+
     try:
         stable_tables = parse_tables(handoff_text)
     except ValueError as exc:
@@ -319,6 +394,103 @@ def check(skill_text, handoff_text, module_id=None):
             )
 
     return violations, contract, present
+
+
+def _semantic_violations(rules, present, blocklist=frozenset()):
+    """The profile's `semantic_rules`, each over one located register.
+
+    The five kinds the profiles declare: `unique_columns` (no value repeats in
+    any named column); `required_values` (every declared value appears in the
+    column); `allowed_values` (every cell of the column is a declared value);
+    `exact_values` (the column holds each declared value exactly once and
+    nothing else); `at_least_one_row_populates` (some row fills every named
+    column with a value that is not a disqualifying placeholder). Comparison
+    is case-sensitive unless the rule says otherwise. A register the handoff
+    lacks is already a violation above and is not judged twice; a rule kind
+    this script does not implement is a violation, never a silent pass.
+    """
+    out = []
+    for rule in rules:
+        reg_id, rule_id, kind = rule.get("register_id"), rule.get("rule_id"), rule.get("rule")
+        if reg_id not in present:
+            continue
+        _, rows = present[reg_id]
+        fold = (lambda v: v.strip()) if rule.get("case_sensitive", True) else (lambda v: v.strip().casefold())
+        col = rule.get("column")
+        values = [fold(v) for v in rule.get("values", [])]
+        cells = [fold(row.get(col, "")) for row in rows] if col else []
+        if kind == "unique_columns":
+            for column in rule.get("columns", []):
+                seen = set()
+                for row in rows:
+                    cell = fold(row.get(column, ""))
+                    if cell in seen:
+                        out.append(f"{reg_id}: {rule_id} -- column {column!r} repeats {cell!r}")
+                        break
+                    seen.add(cell)
+        elif kind == "required_values":
+            for value in rule.get("values", []):
+                if fold(value) not in cells:
+                    out.append(f"{reg_id}: {rule_id} -- column {col!r} lacks {value!r}")
+        elif kind == "allowed_values":
+            for n, cell in enumerate(cells, 1):
+                if cell not in values:
+                    out.append(f"{reg_id} row {n}: {rule_id} -- column {col!r} holds "
+                               f"{cell!r}, not one of the allowed values")
+                    break
+        elif kind == "exact_values":
+            if sorted(cells) != sorted(values):
+                out.append(f"{reg_id}: {rule_id} -- column {col!r} must hold exactly "
+                           f"{rule.get('values', [])!r} once each")
+        elif kind == "at_least_one_row_populates":
+            columns = rule.get("columns", [])
+            if not any(all(row.get(c, "").strip() and row.get(c, "").strip().casefold() not in blocklist
+                           for c in columns) for row in rows):
+                out.append(f"{reg_id}: {rule_id} -- no row populates every one of {columns!r}")
+        else:
+            out.append(f"{reg_id}: {rule_id} -- semantic rule kind {kind!r} is not implemented")
+    return out
+
+
+def _fixture_violations(contract, handoff_text):
+    """The fixture markers: a front-matter flag or warning naming one, or the
+    unfenced document carrying one of the declared substrings.
+
+    The front matter is read with the shared restricted parser; a handoff with
+    none (or one the parser refuses, which validate_handoff.py reports on its
+    own) declares no flags and is judged on its text alone.
+    """
+    out = []
+    try:
+        fields, _ = parse_restricted_frontmatter(handoff_text)
+    except FrontmatterError:
+        fields = {}
+    for field, name in (("limitation_flags", "fixture_flags"),
+                        ("validation_warnings", "fixture_warnings")):
+        declared = fields.get(field)
+        for flag in (declared if isinstance(declared, list) else []):
+            if isinstance(flag, str) and flag in contract[name]:
+                out.append(f"{field} declares the fixture marker {flag!r}")
+    text = unfenced_markdown(handoff_text).casefold()
+    for sub in contract["fixture_substrings"]:
+        if sub and sub in text:
+            out.append(f"document contains the fixture marker text {sub!r}")
+    return out
+
+
+def check_payload(skill_text, payload, module_id=None):
+    """Violations of the profile's `payload_contract.required_payload_fields`
+    over a module's JSON payload object: every declared field must be present
+    under `runtime_output`. The canonical Markdown handoff carries no payload,
+    so this judges the payload alone and never the Markdown."""
+    contract = load_contract(skill_text, module_id or (payload or {}).get("module_id"))
+    runtime = payload.get("runtime_output") if isinstance(payload, dict) else None
+    if not contract["required_payload_fields"]:
+        return []
+    if not isinstance(runtime, dict):
+        return ["payload has no runtime_output object"]
+    return [f"runtime_output lacks the required payload field {field!r}"
+            for field in contract["required_payload_fields"] if field not in runtime]
 
 
 def main(argv=None):
@@ -413,6 +585,125 @@ def _self_check():
     # substring disqualifier
     v, _, _ = check(skill, good.replace("| 4.2x |", "| source-limited estimate |"))
     assert any("disqualifying text" in x for x in v), v
+
+    # the fixture markers disqualify; the thin-evidence markers are projected only
+    split = skill.replace(
+        "    - **critical_cell_values_casefold**: ; n/a; tbd; unknown\n",
+        "    - **critical_cell_values_casefold**: ; n/a; tbd; unknown\n"
+        "    - **fixture_document_substrings_casefold**: integration fixture\n"
+        "    - **fixture_limitation_flags**: INTEGRATION_FIXTURE_ONLY\n"
+        "    - **fixture_validation_warnings**: PRESENTATION_FIXTURE\n"
+        "  - **projected_evidence_limitations**: structured below\n"
+        "    - **document_substrings_casefold**: source-limited\n"
+        "    - **frontmatter_limitation_flags**: SOURCE_LIMITED_NOT_COMMITTEE_READY\n"
+        "    - **frontmatter_validation_warnings**: structured below\n"
+        "      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED\n",
+    )
+    c = load_contract(split)
+    assert c["fixture_flags"] == ["INTEGRATION_FIXTURE_ONLY"], c
+    assert c["fixture_warnings"] == ["PRESENTATION_FIXTURE"], c
+    assert c["fixture_substrings"] == ["integration fixture"], c
+    assert c["evidence_flags"] == ["SOURCE_LIMITED_NOT_COMMITTEE_READY"], c
+    assert c["evidence_warnings"] == ["FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED"], c
+    assert c["evidence_substrings"] == ["source-limited"], c
+    honest = ("---\nmodule_id: CP-X\nlimitation_flags:\n  - SOURCE_LIMITED_NOT_COMMITTEE_READY\n"
+              "validation_warnings: []\n---\nA source-limited screen.\n" + good)
+    v, _, _ = check(split, honest)
+    assert v == [], v
+    fixture = honest.replace("SOURCE_LIMITED_NOT_COMMITTEE_READY", "INTEGRATION_FIXTURE_ONLY")
+    v, _, _ = check(split, fixture)
+    assert v == ["limitation_flags declares the fixture marker 'INTEGRATION_FIXTURE_ONLY'"], v
+    v, _, _ = check(split, honest.replace("validation_warnings: []", "validation_warnings:\n  - PRESENTATION_FIXTURE"))
+    assert v == ["validation_warnings declares the fixture marker 'PRESENTATION_FIXTURE'"], v
+    v, _, _ = check(split, honest.replace("A source-limited screen.", "An Integration Fixture."))
+    assert v == ["document contains the fixture marker text 'integration fixture'"], v
+    v, _, _ = check(split, honest.replace("A source-limited screen.", "```\nintegration fixture\n```"))
+    assert v == [], v
+
+    # semantic rules over a located register; an unknown kind never passes silently
+    ruled = skill.replace(
+        "  - **unconditional_stable_tables_cp_model**: cpx.model_register\n",
+        "  - **semantic_rules**: structured below\n"
+        "    - structured item\n"
+        "      - **columns**: Item\n"
+        "      - **register_id**: T1.1\n"
+        "      - **rule**: unique_columns\n"
+        "      - **rule_id**: cpx.items_unique\n"
+        "    - structured item\n"
+        "      - **case_sensitive**: True\n"
+        "      - **column**: Item\n"
+        "      - **register_id**: T1.1\n"
+        "      - **rule**: required_values\n"
+        "      - **rule_id**: cpx.coverage_present\n"
+        "      - **values**: Leverage; Coverage\n"
+        "  - **unconditional_stable_tables_cp_model**: cpx.model_register\n",
+    )
+    c = load_contract(ruled)
+    assert [r["rule_id"] for r in c["semantic_rules"]] == ["cpx.items_unique", "cpx.coverage_present"], c
+    assert c["semantic_rules"][1]["values"] == ["Leverage", "Coverage"], c
+    v, _, _ = check(ruled, good)
+    assert v == [], v
+    v, _, _ = check(ruled, good.replace("| Coverage | 2.1x | E2 |", "| Leverage | 2.1x | E2 |"))
+    assert v == ["T1.1: cpx.items_unique -- column 'Item' repeats 'Leverage'",
+                 "T1.1: cpx.coverage_present -- column 'Item' lacks 'Coverage'"], v
+    v, _, _ = check(ruled, good.replace("| Coverage |", "| coverage |"))
+    assert v == ["T1.1: cpx.coverage_present -- column 'Item' lacks 'Coverage'"], v
+    v, _, _ = check(ruled.replace("      - **rule**: unique_columns\n", "      - **rule**: novel_rule\n"), good)
+    assert v == ["T1.1: cpx.items_unique -- semantic rule kind 'novel_rule' is not implemented"], v
+    assert load_contract(skill)["semantic_rules"] == []
+    enumerated = skill.replace(
+        "  - **unconditional_stable_tables_cp_model**: cpx.model_register\n",
+        "  - **semantic_rules**: structured below\n"
+        "    - structured item\n"
+        "      - **case_sensitive**: True\n"
+        "      - **column**: Item\n"
+        "      - **register_id**: T1.1\n"
+        "      - **rule**: exact_values\n"
+        "      - **rule_id**: cpx.items_exact\n"
+        "      - **values**: structured below\n"
+        "        - Leverage\n"
+        "        - Coverage\n"
+        "    - structured item\n"
+        "      - **case_sensitive**: False\n"
+        "      - **column**: Evidence ID\n"
+        "      - **register_id**: T1.1\n"
+        "      - **rule**: allowed_values\n"
+        "      - **rule_id**: cpx.evidence_enum\n"
+        "      - **values**: e1; e2\n"
+        "    - structured item\n"
+        "      - **columns**: Item; Value\n"
+        "      - **register_id**: T1.1\n"
+        "      - **rule**: at_least_one_row_populates\n"
+        "      - **rule_id**: cpx.has_valued_row\n"
+        "  - **unconditional_stable_tables_cp_model**: cpx.model_register\n",
+    )
+    assert load_contract(enumerated)["semantic_rules"][0]["values"] == ["Leverage", "Coverage"]
+    v, _, _ = check(enumerated, good)
+    assert v == [], v
+    v, _, _ = check(enumerated, good.replace("| Coverage | 2.1x | E2 |", "| Coverage | 2.1x | E2 |\n| Margin | 3 | E1 |"))
+    assert v == ["T1.1: cpx.items_exact -- column 'Item' must hold exactly ['Leverage', 'Coverage'] once each"], v
+    v, _, _ = check(enumerated, good.replace("| E2 |", "| E9 |"))
+    assert v == ["T1.1 row 2: cpx.evidence_enum -- column 'Evidence ID' holds 'e9', not one of the allowed values"], v
+    v, _, _ = check(enumerated, good.replace("| 4.2x |", "| tbd |").replace("| 2.1x |", "| n/a |"))
+    assert "T1.1: cpx.has_valued_row -- no row populates every one of ['Item', 'Value']" in v, v
+
+    # the payload contract is judged over a payload object, never the Markdown
+    paid = skill.replace(
+        "  - **unconditional_stable_tables_cp_model**: cpx.model_register\n",
+        "  - **payload_contract**: structured below\n"
+        "    - **required_payload_fields**: structured below\n"
+        "      - screen_status\n"
+        "      - upgrade_plan\n"
+        "  - **unconditional_stable_tables_cp_model**: cpx.model_register\n",
+    )
+    assert load_contract(paid)["required_payload_fields"] == ["screen_status", "upgrade_plan"]
+    assert check_payload(paid, {"runtime_output": {"screen_status": 1, "upgrade_plan": 2}}) == []
+    assert check_payload(paid, {"runtime_output": {"screen_status": 1}}) == [
+        "runtime_output lacks the required payload field 'upgrade_plan'"]
+    assert check_payload(paid, {}) == ["payload has no runtime_output object"]
+    assert check_payload(skill, {}) == []
+    v, _, _ = check(paid, good)
+    assert v == [], v
 
     # an entry serving two modules: the profile is chosen by the handoff's own
     # module_id, and an ambiguous request raises instead of picking the first

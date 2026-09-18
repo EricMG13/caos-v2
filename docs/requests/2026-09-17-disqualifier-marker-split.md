@@ -2,6 +2,14 @@
 
 Date: 2026-09-17. Bundle: `vendor/deploy-v` at build `30222a49`.
 
+**Status (2026-09-18):** done in build `62a94ccd` under the owner's
+authorisation (`docs/DECISIONS.md` §92, `docs/VENDOR_CHANGES.md`): every
+`SKILL.md` declares `fixture_*` lists under its disqualifiers and a
+`projected_evidence_limitations` block beside them, and the bundle's own
+`completeness_check` enforces the fixture lists and enforces nothing on the
+projected ones
+(`tests/test_bundle_pin.py::test_the_fixture_markers_are_split_from_the_thin_evidence_marker`).
+
 ## What is asked
 
 `full_run_disqualifiers.frontmatter_limitation_flags` lists four flags in one

@@ -2,6 +2,12 @@
 
 Date: 2026-09-17. Bundle: `vendor/deploy-v` at build `30222a49`.
 
+**Status (2026-09-18):** decided, no change (`docs/DECISIONS.md` §92, item
+6). The owner's recommendation taken is the fail-closed reading this request
+preferred: the bundle governs, CP-0 gates each consumer, and `route.py` is not
+weakened. No vendor file moved for this request, and the ledger entry that
+owed the decision closes on §92.
+
 ## What is asked
 
 A decision on which governs: the vendored methodology, which makes CP-0 a

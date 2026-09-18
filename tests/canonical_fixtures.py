@@ -93,6 +93,67 @@ def skill(module_id: str) -> bytes:
     return verified_bytes(BUNDLE, module_id, "SKILL.md")
 
 
+def conforming_rows(
+    register: str,
+    spec: dict[str, Any],
+    rules: dict[str, Any],
+    fill: Callable[[str, int], str],
+) -> list[list[str]]:
+    """Body rows for `register` that satisfy the profile's `semantic_rules`.
+
+    `fill(column, row)` is the cell a builder would otherwise write. Since §92
+    the bundle's checker enforces the rules its profiles declare, so a fixture
+    that repeats one cell no longer conforms; the rows are derived from the
+    vendor's own declarations rather than hand-typed. A `required_values` or
+    `exact_values` column carries each declared value once, an `allowed_values`
+    column carries only declared values, and a `unique_columns` column never
+    repeats; any other cell is `fill`'s.
+    """
+    columns = spec["columns"] or ["Evidence"]
+    mine = [
+        r for r in rules.get("semantic_rules", ()) if r.get("register_id") == register
+    ]
+    exact = {
+        r["column"]: list(r["values"]) for r in mine if r["rule"] == "exact_values"
+    }
+    required = {
+        r["column"]: list(r["values"]) for r in mine if r["rule"] == "required_values"
+    }
+    # An enum may permit a value the placeholder blocklist refuses in a
+    # critical column (`Not Assessable`); a conforming row takes the first
+    # value that is not one.
+    blocklist = rules.get("blocklist", set())
+    allowed = {
+        r["column"]: [v for v in r["values"] if v.casefold() not in blocklist]
+        for r in mine
+        if r["rule"] == "allowed_values"
+    }
+    unique = {c for r in mine if r["rule"] == "unique_columns" for c in r["columns"]}
+    count = max(
+        [max(1, spec["minimum_body_rows"]), *(len(v) for v in required.values())]
+    )
+    if exact:
+        count = max(len(v) for v in exact.values())
+        assert count >= spec["minimum_body_rows"], (register, exact)
+    rows: list[list[str]] = []
+    for n in range(count):
+        row = []
+        for column in columns:
+            if column in exact:
+                cell = exact[column][n]
+            elif column in required and n < len(required[column]):
+                cell = required[column][n]
+            elif column in allowed:
+                cell = allowed[column][0]
+            else:
+                cell = fill(column, n)
+                if column in unique:
+                    cell = f"{cell} {n + 1}"
+            row.append(cell)
+        rows.append(row)
+    return rows
+
+
 def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
     identity: HostIdentity,
     *,
@@ -140,8 +201,9 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
             columns = spec["columns"] or ["Evidence"]
             appendix += _table(
                 columns,
-                [["Recorded source p1"] * len(columns)]
-                * max(1, spec["minimum_body_rows"]),
+                conforming_rows(
+                    register, spec, rules, lambda _c, _n: "Recorded source p1"
+                ),
             )
     for table_id in rules["unconditional_stable_tables"]:
         appendix += (

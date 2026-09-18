@@ -3,6 +3,15 @@
 Date: 2026-09-17. Bundle: `vendor/deploy-v` at build `30222a49` (upstream
 `EricMG13/Deploy-V@c4d2e356` plus §61's two edits and §63's one).
 
+**Status (2026-09-18):** done, option 1, in build `62a94ccd` under the
+owner's authorisation (`docs/DECISIONS.md` §92, `docs/VENDOR_CHANGES.md`):
+`CP-L10 -> CP-2A` carries `lite_fundamental_credit_screen` and
+`CP-L10 -> CP-3C` carries `lite_liquidity_sensitivity_screen` (a judgement,
+recorded in §92), both `allowed_use: SCREENING_ONLY`; CP-3C's heading is
+keyed and names its three objects
+(`tests/test_bundle_pin.py::test_every_lite_edge_into_a_named_object_consumer_declares_the_object_it_carries`).
+The three pathways stay disabled in `ADAPTER_ROUTES` until their own tasks.
+
 ## What is asked
 
 The bundle declares four LITE objects that FULL modules accept under

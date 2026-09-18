@@ -89,6 +89,10 @@ class Recommendation:
     candidate_command: str
     exact_command: str
     why_now_or_blocker: str
+    # T8's `Source files to attach` cell, as written: the module's per-consumer
+    # evidence demand, kept rather than dropped after width validation so that a
+    # consumer of the parsed table has one reader of it -- this one.
+    source_files_to_attach: str = ""
 
     @property
     def runnable(self) -> bool:
@@ -404,6 +408,7 @@ def parse_t8(text: str, catalog: Catalog) -> tuple[Recommendation, ...]:
             raise NavigationError(f"{module_id} cannot appear as a downstream T8 recommendation")
         if is_legacy:
             exact_command, readiness, reason = cells[2], cells[5], cells[6]
+            source_files = cells[3]
             exact_command = _unwrap_command(exact_command, module_id)
             if readiness in RUNNABLE:
                 candidate_command = exact_command
@@ -421,7 +426,7 @@ def parse_t8(text: str, catalog: Catalog) -> tuple[Recommendation, ...]:
             candidate_command, exact_command = cells[2], cells[3]
             candidate_command = _unwrap_command(candidate_command, module_id)
             exact_command = _unwrap_command(exact_command, module_id)
-            readiness, reason = cells[6], cells[7]
+            source_files, readiness, reason = cells[4], cells[6], cells[7]
         module = catalog.modules.get(module_id)
         if module is None or not module.navigable or module.layer_id is None:
             raise NavigationError(f"CP-0 recommends unknown or non-navigable module: {module_id}")
@@ -445,7 +450,7 @@ def parse_t8(text: str, catalog: Catalog) -> tuple[Recommendation, ...]:
         previous_sequence = sequence
         rows.append(Recommendation(
             sequence, module_id, readiness, candidate_command,
-            exact_command, reason.strip(),
+            exact_command, reason.strip(), source_files.strip(),
         ))
         row_index += 1
     if not rows:

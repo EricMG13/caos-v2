@@ -4426,3 +4426,176 @@ stopped a set whose route could not be finished at worst-case prices. Now such a
 route may start and stop short at `BUDGET_CEILING_REACHED`, having spent at most
 its ceiling -- the amount the owner authorized. Invariant 8 is unchanged: no
 call without a reservation, and no reservation past the ceiling.
+
+## 2026-09-18 §92 — One authorised bundle build answering the six vendor requests
+
+Invariant 4 says never edit a file that exists upstream. On 18 September 2026
+the owner wrote "Vendor files - approved to alter but keep a record of
+changes", which overrides that rule for the edits below exactly as §61 and §63
+did for theirs, and §13's pin moves to the build they produce:
+`30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18` ->
+`62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c`. The record
+the owner asked for is `docs/VENDOR_CHANGES.md`, which lists every vendor file
+each build touched; this entry is the decision. Upstream
+`github.com/EricMG13/Deploy-V@c4d2e356` carries none of it. The six requests
+are the `docs/requests/2026-09-17-*.md` files, each of which now states what
+was done.
+
+**1. T8's `Source files to attach` reaches the parsed row.** The vendor's
+`parse_t8` validated the column for width and dropped it; `Recommendation`
+now carries it as `source_files_to_attach`, so the per-module evidence demand
+CP-0 already writes has one reader, the bundle's
+(`tests/test_bundle_pin.py::test_the_t8_parser_keeps_the_source_files_column`,
+current and legacy headers). The host reads nothing new: `Projections` and
+the readiness row are unchanged, and per-node evidence selection is a later
+task with the owner's question -- may a model-authored register decide what a
+downstream node may cite -- still to answer.
+
+**2. The fixture markers are split from the thin-evidence marker.** §66 found
+that enforcing the declared lists refused seven of the 25 retained real bodies,
+every one for declaring `SOURCE_LIMITED_NOT_COMMITTEE_READY` truthfully, and
+that the one substring hit was `source-limited` in honest prose. In every
+`SKILL.md` that declares them (21 files, 117 lists), the three mixed lists
+become `fixture_limitation_flags`, `fixture_validation_warnings` and
+`fixture_document_substrings_casefold`, holding only the markers that say a
+document is not real work, and the thin-evidence markers move to a sibling
+`projected_evidence_limitations` block that says what it is. The bundle's own
+`completeness_check` now enforces the fixture lists -- a front-matter fixture
+flag or warning, or a fixture substring in the unfenced document, is a
+violation the host maps to `HANDOFF_INCOMPLETE` -- and returns the projected
+lists for a reader without enforcing them
+(`test_the_fixture_markers_are_split_from_the_thin_evidence_marker`). By
+§66's own measurement none of the 25 bodies carries a fixture marker, so the
+split refuses none of them; those bodies live in a retired blob root outside
+this tree, so that is derived from §66's record rather than re-run, and the
+host suite's own corpus of every fixture handoff passes the enforced lists.
+
+**3. `decision_scope` maps to the committee statuses it permits.**
+`validate_handoff.py` declares `COMMITTEE_STATUSES_BY_SCOPE` -- `FULL` permits
+every D2 value, `SCREENING_ONLY` every value but `Committee Ready` -- and
+`validate_text` refuses a status outside the named scope, or a scope it does
+not declare; `CANON_SHARED.md` gains the one "D2 BY SCOPE" line saying so. The
+host hands the vendor the scope it already reads from the catalog, so run
+`ff71c457…`'s screening-only CP-0 declaring `Committee Ready` is now refused
+`HANDOFF_MALFORMED` by the bundle's rule and not by one the host invented
+(`test_screening_only_never_permits_committee_ready`,
+`tests/test_canonical_handoff.py::test_a_screening_only_handoff_may_not_say_committee_ready`).
+The permitted set for `SCREENING_ONLY` is the widest honest one -- `Draft
+Only`, `Requires More Work`, `Insufficient Information`, `Restricted`,
+`Blocked` -- because the request left narrowing it to the vendor and nothing
+in the canon narrows it.
+
+**4. Every LITE edge into a named-object consumer names the object it
+carries (option 1).** The typed edges `CP-L10 -> CP-2A` and `CP-L10 -> CP-3C`
+declare `accepted_object_id` -- `lite_fundamental_credit_screen` and
+`lite_liquidity_sensitivity_screen` -- and `allowed_use: SCREENING_ONLY`, as
+the sibling edges to CP-2H and CP-4C already did; CP-3C's unkeyed prose
+heading becomes the keyed block the host reads, naming the three objects the
+execution profiles already declared for it. Which of CP-3C's three the edge
+carries is a judgement: the liquidity screen, first-named in CP-3C's own prose
+and the one a refinancing assessment turns on. Every LITE route's digest that
+carries either edge moves, which is a vendor fact arriving as one
+(`test_every_lite_edge_into_a_named_object_consumer_declares_the_object_it_carries`,
+and `tests/test_handoff_invocation.py`'s boundary test now runs
+`LITE_COVENANT_REFINANCING` too). The three pathways stay disabled in
+`ADAPTER_ROUTES`; what this removes is the boundary reason, not the adapter
+one.
+
+**5. The three unshipped rules are shipped in the bundle's own validators.**
+`semantic_rules`: `completeness_check` reads each `structured item` as its own
+mapping -- before, the vendor's parser collapsed CP-L10's three rules into one
+-- and enforces the five kinds the profiles declare (`unique_columns`,
+`required_values`, `allowed_values`, `exact_values`,
+`at_least_one_row_populates`); an unknown kind is a violation, never a silent
+pass (`test_the_vendor_enforces_cp_l10s_semantic_rules`).
+`document_substrings_casefold`: the fixture half is enforced under change 2.
+`required_payload_fields`: `check_payload` judges a JSON payload's
+`runtime_output` against the profile's list
+(`test_the_vendor_checks_a_lite_payloads_required_fields`). **What that last
+one does not buy:** the canonical adapter never receives a payload --
+`invocation._FINAL_CHECK` tells the model not to author `runtime_output` --
+so the host calls `check_payload` for nothing today; it is shipped, callable
+through the verified contract, and unreachable from any run, which the ledger
+now says. The rules cost the fixtures their shortcut: every builder that
+repeated one cell per register -- the host's three and the vendor's own two
+test files -- now derives its rows from the profile's rules
+(`canonical_fixtures.conforming_rows`), and one enum's tension is recorded
+there: CP-2 permits `Not Assessable` in a column its placeholder blocklist
+refuses, so a conforming fixture takes the first value that is not one.
+
+**6. CP-0 gates each consumer; nothing changes.** The owner's recommendation
+taken is the fail-closed reading recorded in the request: the bundle states
+per-consumer readiness in four places and its own scripts refuse a non-ready
+module, so the host enforcing it is invariant 4 working, and `route.py` is not
+weakened. No vendor file moves for this request; the ledger entry that owed a
+decision closes on this paragraph.
+
+**How the edit was made.** The validators were changed once each at the
+`SHARED` owner and `verify_package.py --refresh` synchronised the 24 copies of
+`validate_handoff.py` and 22 of `completeness_check.py`, ran the bundle's 52
+unit tests and 10 helper self-checks, and regenerated the manifests. The
+catalog is a pinned component of the vendor's authority bundle, so the refresh
+ran with `--rebuild-authorities`, the bundle's own release operation, and
+`authority_bundle_sha256` moved `47fec65f…` -> `e3d0f8b2…` with the vendor's
+`local_rebuild` provenance naming the previous digest. The manifest the host
+verifies at rest, `DEPLOY_V_INTEGRITY_v1.json`, is now `4945d137…`, still
+68,657 bytes, so §35's ceiling reasoning is unchanged. The six host pins moved
+with it, and `tests/test_delivered_authority.py` re-measures all three
+delivered authorities (CP-0 146,605, CP-L10 199,898, CP-5 165,973 bytes),
+because every `SKILL.md` and the canon grew.
+
+**What it costs.** Every run pinned to `30222a49` -- including run
+`62308d4e…`, the one `qualification_performed.complete` snapshot this project
+holds -- now refuses `ORCHESTRATION_BUILD_MOVED` on re-proof, as §61 and §63
+did to the runs before them. Their artifacts, charges, citations and the
+recorded proof stand as recorded: the snapshot is a true statement about build
+`30222a49`, and no qualification record is rewritten. There is no complete
+snapshot on `62a94ccd`, and nothing is qualified. Unlike §61 and §63, the
+vendor's own `tests/` **were** edited, because the rules the bundle now
+enforces refused its own test artifacts; that edit is in the record.
+
+**Decided against, here.** Enforcing the projected evidence lists anywhere:
+they stay a projection a reader and a qualification key see, which is the
+whole point of the split. Reading `source_files_to_attach` on the host: that
+is per-node evidence selection, a later task under its own decision. Option 2
+of the producers request (five `owned_object`s on CP-L10): it needs a host
+change and says less than the edges do.
+
+## 2026-09-18 §94 — The release pack is emitted from the suite, the tree and the store
+
+The owner authorized Task 13.6 on 18 September 2026 ("authorised to apply your
+recommendations"). This is its in-tree half; the first authorized nightly and
+the hosted checks verified on `main` need a push and are not part of it.
+
+- **What.** `scripts/release_pack.py` (`make release-pack`) writes
+  `release-pack/release-pack.json` and `release-pack/RELEASE_PACK.md`: the
+  methodology build id and manifest digest, the migration head digested exactly
+  as a migrated store records `store_schema.applied_digest`, the SHA-256 of the
+  four locks, the test inventory (every Python test `tests/` defines and every
+  workspace title `frontend/tests/` defines, read from the source), and one row
+  per pathway the vendored catalog advertises.
+- **The pathway rule.** A pathway outside `ADAPTER_ROUTES` is `DISABLED` and
+  says why, whatever was signed over it. An enabled one is `UNVERIFIED` when no
+  store was read, `NOT_QUALIFIED` when one was and nothing covers it, and
+  `QUALIFIED` only when a `qualification_verdicts` row reads back through
+  `current_verdict` at the named moment, for this bundle's build, over a
+  snapshot one of whose prepared runs is pinned in `run_routes` to that pathway
+  under the route digest the snapshot names. Evidence that does not re-digest
+  to its key refuses the pack rather than being skipped.
+- **Reproducible.** Sorted everywhere, no clock, no host, no git state: two
+  emissions over one tree are byte-identical, including across interpreters
+  and hash seeds. A store read needs `AS_OF` for that reason -- currency is a
+  decision taken at a moment, as `read_verdict` already takes `now` -- and
+  names the store only through `CAOS_DATABASE_URL`, so no credential reaches an
+  argument list.
+- **Emitted, not committed.** `release-pack/` is ignored. A committed copy
+  would move with every test added and turn each commit into a checksum edit,
+  which is the thing the exit check forbids.
+- **Inventory by definition, not collection.** `pytest --collect-only` imports
+  every module and needs database configuration, and its parametrised ids can
+  carry values; the definitions are what the ledger gate already resolves
+  citations against. A parametrised test is one row and a computed workspace
+  title is recorded as its template.
+- **`docs/feature-status.csv`.** Kept, unedited, as the dated predecessor; the
+  pack is the live answer, and the Completion Phase 7 ledger entry is struck
+  with that said.
