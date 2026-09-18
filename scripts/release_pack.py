@@ -358,8 +358,14 @@ def render_markdown(pack: Mapping[str, Any]) -> str:
 
 
 def write_pack(pack: Mapping[str, Any], out: Path) -> None:
-    """Both files, bytes fixed by the pack alone."""
-    out.mkdir(parents=True, exist_ok=True)
+    """Both files, bytes fixed by the pack alone.
+
+    `out` traces back to `--out`, a CLI argument from `main`'s own operator,
+    not a request body -- there is no HTTP boundary for a path-traversal
+    scanner's "user request" source to have crossed. See `main`'s `--out`
+    definition for the fuller note.
+    """
+    out.mkdir(parents=True, exist_ok=True)  # NOSONAR pythonsecurity:S8707
     (out / JSON_NAME).write_text(
         json.dumps(pack, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
