@@ -2050,7 +2050,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   is the same cached dependency, resolved once
   (`tests/test_identity_first.py::test_identity_is_resolved_before_a_store_declared_ahead_of_it`,
   `test_the_caller_is_resolved_once_though_it_is_declared_twice`). A new route
-  reaching the store without it fails
+  reaching the store through `Store` without it fails
   `test_every_store_touching_route_declares_identity_on_its_decorator`, which
   allows no exception. `/api/health` takes no identity by design and reaches no
   store (`test_the_routes_that_take_no_identity_reach_no_store`).

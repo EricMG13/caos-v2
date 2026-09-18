@@ -236,6 +236,9 @@ _STATUS = {
     # and the same attempt meets the same reservation later (so not 503). A new
     # attempt, which reserves for what it sends, is the discharge.
     RefusalCode.RESERVATION_BELOW_REQUEST: 500,
+    # Served only by `_undeclared`, for a path under `/api/` nobody declared;
+    # an undeclared method on a declared path is routing's own 405.
+    RefusalCode.ENDPOINT_NOT_FOUND: 404,
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,
@@ -295,7 +298,6 @@ _STATUS = {
     RefusalCode.ENVELOPE_UNDECLARED_FIELD: 400,
     RefusalCode.ENVELOPE_UNCITED_CLAIM: 400,
     RefusalCode.READINESS_INCOMPLETE: 400,
-    RefusalCode.ENDPOINT_NOT_FOUND: 400,
     RefusalCode.EDGE_CONFIG_INVALID: 400,
     RefusalCode.REQUEST_INVALID: 400,
     RefusalCode.IDEMPOTENCY_KEY_REQUIRED: 400,

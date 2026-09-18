@@ -987,6 +987,9 @@ def test_an_undeclared_api_path_or_method_answers_endpoint_not_found_in_the_refu
             _refused("ENDPOINT_NOT_FOUND"),
         )
     assert client.get("/not-api").json() == {"detail": "Not Found"}
+    # One status per code (§87): the declared status is the one served for a
+    # path nobody declared; 405 is routing's own answer to a known path.
+    assert _STATUS[RefusalCode.ENDPOINT_NOT_FOUND] == missing.status_code
 
 
 def test_the_surface_is_exactly_the_routes_it_declares(
