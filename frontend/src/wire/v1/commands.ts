@@ -8,6 +8,7 @@ import { V1_SHAPES } from "./documents";
 import {
   type Infer,
   array,
+  bool,
   datetime,
   enumOf,
   int,
@@ -26,8 +27,15 @@ const CreateCase = object({ title: string({ max: 256 }) });
 const CaseCreated = object({ case_id: uuid });
 const SourcesAdmitted = object({ case_id: uuid, source_ids: array(uuid, 50) });
 // `supersedes` is stated on every request, null for an ordinary run: the
-// BLOCKED run of the path's case the new run answers (§72).
-const CreateRun = object({ profile_id: short, selection_id: short, supersedes: nullable(uuid) });
+// BLOCKED run of the path's case the new run answers (§72). `model_extension`
+// is stated too: whether the route carries CP-CF, a route-selection input the
+// pinned digest covers.
+const CreateRun = object({
+  profile_id: short,
+  selection_id: short,
+  supersedes: nullable(uuid),
+  model_extension: bool,
+});
 const RunCreated = object({ case_id: uuid, run_id: uuid, route_digest: hash });
 const PinRunInput = object({ subject: V1_SHAPES.RunSubjectView });
 const RunInputPinned = object({ run_id: uuid, source_set_version: int(), input_fingerprint: hash });

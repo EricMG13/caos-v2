@@ -48,6 +48,7 @@ ROUTE = {
     "profile_id": "LITE_CREDIT_22",
     "selection_id": "LITE_EARNINGS_UPDATE",
     "supersedes": None,
+    "model_extension": False,
 }
 SUBJECT = {
     "issuer_id": "EXAMPLE",
