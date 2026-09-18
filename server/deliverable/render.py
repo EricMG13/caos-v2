@@ -223,9 +223,13 @@ _MAX_HEADING = 6
 # ponytail: lists nest four deep. Deeper than that is refused rather than
 # flattened, because a flattened list states a structure the module did not.
 _MAX_NESTING = 4
-_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
-_UNORDERED = re.compile(r"^([-*+])\s+(.*)$")
-_ORDERED = re.compile(r"^([0-9]{1,3}[.)])\s+(.*)$")
+# Possessive `\s++`: the trailing `(.*)$` can match anything up to the same
+# newline-free end `\s+` would also match, so backtracking into the leading
+# run is never needed for a real match -- only for the VM to search it, which
+# is what made these super-linear on crafted whitespace. `++` closes that off.
+_HEADING = re.compile(r"^(#{1,6})\s++(.*)$")
+_UNORDERED = re.compile(r"^([-*+])\s++(.*)$")
+_ORDERED = re.compile(r"^([0-9]{1,3}[.)])\s++(.*)$")
 # A table's delimiter row. `_block` also requires it to contain a `|`, because
 # this pattern matches a bare `---` -- so a prose line carrying a pipe followed
 # by a thematic break used to be read as a one-column table, and the page then

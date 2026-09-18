@@ -123,7 +123,9 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
   const body = doc.body;
   if (section === "run" && "run" in body) return body.run?.run_id ?? "";
   if (section === "analysis" && "handoffs" in body) {
-    const records = body.handoffs.map((handoff) => handoff.record_sha256).sort();
+    const records = body.handoffs
+      .map((handoff) => handoff.record_sha256)
+      .sort((a, b) => a.localeCompare(b));
     return `${body.displayed_run_id ?? ""}|${records.join(",")}`;
   }
   if (section === "model" && "forecast" in body) {
@@ -141,7 +143,9 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
     // waits for Reload rather than replacing figures under a lens still bound
     // to the old snapshot. Without this the row drew the new digest, the new
     // figures, and a note saying the comparison had stayed on the old one.
-    const snapshots = body.rows.map((row) => `${row.case_id}=${row.snapshot ?? ""}`).sort();
+    const snapshots = body.rows
+      .map((row) => `${row.case_id}=${row.snapshot ?? ""}`)
+      .sort((a, b) => a.localeCompare(b));
     return snapshots.join(",");
   }
   return null;

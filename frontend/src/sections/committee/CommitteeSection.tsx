@@ -27,7 +27,9 @@ function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts
           data-committee-artifact-text
           aria-label="Saved artifact markdown"
           role="region"
-          tabIndex={0}
+          tabIndex={0} // NOSONAR typescript:S6845 -- role="region" above makes this
+          // element a keyboard-scrollable landmark (WCAG 2.1.1), not the
+          // plain-<pre>-with-tabIndex the rule exists to catch.
           onKeyDown={scrollArtifact}
         >
           {artifact.markdown}
@@ -37,7 +39,9 @@ function Artifact({ artifact }: { artifact: CommitteeDocument["body"]["artifacts
           data-committee-artifact-record
           aria-label="Saved artifact record"
           role="region"
-          tabIndex={0}
+          tabIndex={0} // NOSONAR typescript:S6845 -- role="region" above makes this
+          // element a keyboard-scrollable landmark (WCAG 2.1.1), not the
+          // plain-<pre>-with-tabIndex the rule exists to catch.
           onKeyDown={scrollArtifact}
         >
           {artifact.record}

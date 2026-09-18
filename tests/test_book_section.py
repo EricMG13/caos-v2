@@ -89,11 +89,9 @@ def test_the_book_row_carries_the_accepted_projection_cells_and_their_passports(
     assert "EBITDA margin" in passport.definition
     assert "caos-forecast-v1" in passport.definition
     # The driver's own evidence: the CP-2G quote the accepted binding names,
-    # anchored where that module cited it.
-    assert [citation.document_sha256 for citation in passport.citations] == [
-        citation.document_sha256 for citation in passport.citations
-    ]
+    # anchored where that module cited it, all from the one source document.
     assert passport.citations, "a projected cell names the evidence of its driver"
+    assert len({citation.document_sha256 for citation in passport.citations}) == 1
     for citation in passport.citations:
         assert "/drivers/0/ebitda = " in citation.matched_text
     assert {research.module_id for research in passport.supporting_research} >= {
