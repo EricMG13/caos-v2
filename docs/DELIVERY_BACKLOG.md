@@ -7,9 +7,10 @@ pushes or opens a pull request.
 
 ## The shape, and the thing that is easy to get wrong
 
-**Main is behind this branch, not diverged from it.** That reading is not
-obvious from the commit graph and the obvious reading is wrong, so the evidence
-is written down.
+**Main is mostly behind this branch rather than diverged from it -- but not
+strictly behind.** The obvious reading of the commit graph is wrong, and so was
+the first correction of it; both are written down, with what settles the
+question at the end of this section.
 
 `git cherry HEAD main` reports 131 of main's 180 commits as "missing" from this
 branch. They are not. They are **squashed pull-request merges of this branch's
@@ -28,6 +29,22 @@ here:
 produces **215 conflicted files** -- every one an artefact of re-applying a
 squashed copy of this branch's own work. The worktree was removed and `HEAD`
 was not touched.
+
+**And main is not strictly behind either -- 24 files exist there and not
+here.** This was measured after the paragraph above was written, and it
+narrows it: `git diff --diff-filter=D --name-only main HEAD`. Most are
+deliberate -- the Book, Committee, Report and Model components and the
+pre-`v1` `wire/*.ts` modules that Phase 12 replaced. Four are not, and they are
+the reason this is a **two-way merge rather than a fast-forward**:
+
+| file | what it is |
+|---|---|
+| `server/deliverable/host.py` | maps the portable renderer's `RenderRefused` to a closed `RefusalCode`. **Nothing on this branch catches `RenderRefused` at all**, and nothing needs to yet: `render()` has no production caller here, only tests. It becomes a real gap the day a route serves a rendered deliverable |
+| `tests/test_digest.py` | main's dedicated test for `server/digest.py`, which this branch has without that test |
+| `tests/test_api_deps.py` | direct unit tests for `deps.py`'s id parsers. This branch covers the same parsers inside `tests/test_api_routes.py` instead |
+| `tests/test_pdf_page_frame.py` | `page_frame` in the section 47 child |
+
+Any delivery must triage those four rather than assume them superseded.
 
 **Main is not a *prefix* of this branch either.** It carries §75's
 `TRANSIENT`/`PERMANENT` split (Task 21, newer) while lacking Phase 8's document
@@ -118,7 +135,11 @@ correctness gate, and it does not run on a direct push.
 
 ## Recommended
 
-**Option 2.** It keeps review at the boundary where review actually happened --
+**Option 2.** The 24 files above settle it. Option 3 would drop them silently:
+a trunk swap moves a ref and says nothing about what the other side held, and
+three of those four are tests -- exactly the thing that disappears without
+anyone noticing. A pull request puts each deletion in a diff where a person
+decides it. It keeps review at the boundary where review actually happened --
 the phase -- and it makes each over-cap merge a stated decision with its
 acceptance record attached, rather than a gate quietly not running. Option 3 is
 defensible on the evidence and is materially cheaper; it should be taken only
