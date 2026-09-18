@@ -327,13 +327,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {fetch-depth: 0}
-      - run: |
-          n=$(git diff --numstat origin/${{ github.base_ref }}...HEAD -- . \
-              ':!*.lock' ':!requirements*.txt' ':!**/vendor/**' ':!docs/**' \
-              ':!*package-lock.json' ':!frontend/fixtures/**' \
-              | awk '{s+=$1+$2} END {print s+0}')
-          echo "changed lines: $n"
-          [ "$n" -le 800 ] || { echo "PR too large; split it (docs/AI_CODE_QUALITY.md)"; exit 1; }
+      - run: python3 scripts/check_pr_size.py "origin/${{ github.base_ref }}"
 
   frontend:
     # The workspace (Phase 9): the TypeScript vocabulary gate rides `npm run
