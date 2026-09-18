@@ -247,6 +247,26 @@ def test_a_run_may_request_the_model_extension_and_its_pin_carries_cp_cf(
     assert [entry.action for entry in trail] == ["RUN_CREATED", "RUN_CREATED"]
 
 
+def test_an_extended_run_pins_its_input_and_shows_cp_cf_on_the_run_document(
+    client: TestClient, case: tuple[StoreConnection, UUID], sourced: UUID
+) -> None:
+    """The flag reaches the steps after creation: the subject pins, the gate
+    previews, and the Run document draws CP-CF as a node of the pinned route."""
+    conn, case_id = case
+    writer = member(conn, case_id)
+    approver = member(conn, case_id, Standing.APPROVER)
+    created = _send(client, _path(case_id), writer, MODEL_ROUTE)
+    assert created.status_code == 201, created.text
+    run_id = UUID(created.json()["run_id"])
+
+    pinned = _send(client, _path(case_id, run_id, "input"), writer, PIN)
+    assert pinned.status_code == 200, pinned.text
+    assert _digests(client, case_id, run_id, approver)
+    nodes = _run_view(client, case_id, run_id, writer)["nodes"]
+    assert isinstance(nodes, list)
+    assert MODEL_MODULE in [node["module_id"] for node in nodes]
+
+
 def test_the_model_extension_is_refused_on_a_pathway_without_its_owners(
     client: TestClient, case: tuple[StoreConnection, UUID]
 ) -> None:
