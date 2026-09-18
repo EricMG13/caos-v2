@@ -1065,11 +1065,11 @@ test.describe.serial("journey", () => {
           { timeout: 180_000, intervals: [2_000] },
         )
         .toBe("EVIDENCE_NOT_AVAILABLE");
-      // No section renders `work.stop_code` -- it is on the wire and on no
-      // surface -- so the line above reads the run document this browser
-      // session is served, through the real edge. What the surface *does* say
-      // is that nothing more can happen here: start and retry carry the same
-      // code the command answers, and no node of this run was ever accepted.
+      // The line above reads the run document this browser session is served,
+      // through the real edge; the Run section's work panel names the same
+      // code, asserted below. The surface also says nothing more can happen
+      // here: start and retry carry the same code the command answers, and no
+      // node of this run was ever accepted.
       const parked = await readRun(other.page, withdrawalCase, withdrawalRun);
       expect(parked?.status).toBe("RUNNING");
       expect(parked?.nodes.map((node) => node.state)).not.toContain("COMPLETE");
@@ -1080,6 +1080,9 @@ test.describe.serial("journey", () => {
       // surface shows is the order of `availability.py`'s queue, not a fact
       // about the withdrawal; asserting the exact code there would pin a list
       // order and go red on an unrelated reorder.
+      await expect(
+        other.page.locator("[data-work-controls] [data-stop-code]"),
+      ).toHaveAttribute("data-stop-code", "EVIDENCE_NOT_AVAILABLE");
       await expect(
         other.page.locator("[data-work-controls] [data-action='RETRY_RUN']"),
       ).toHaveAttribute("data-refusal", "EVIDENCE_NOT_AVAILABLE");
