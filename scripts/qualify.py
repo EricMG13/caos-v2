@@ -12,8 +12,9 @@ It creates a database and a blob root of its own, so a performed set can be
 kept for re-checking without touching a developer's own store, and it prints
 where both are. Configuration is the caller's environment and nothing else:
 `OPENROUTER_*` for the provider (§16), `CAOS_MODEL_PRICE` for the dated price
-the reservation is computed from, and `CAOS_TEST_POSTGRES_URL` for the server
-to create the run database on.
+the reservation is computed from, and `CAOS_QUALIFY_POSTGRES_URL` for the
+persistent server to keep the run database on -- never the in-memory test
+server, whose restart erases it.
 
     scripts/qualify.py qualification/vmo2-fy2025 \
         --expect-identity openrouter/openai/flex/high/65536 --ceiling 22.00
@@ -259,6 +260,17 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    # A paid run's database is its evidence, so it is kept on a server named
+    # for that and never on the test server, whose data lives in memory: a
+    # restart of that container erased every retained run of 18 September 2026.
+    admin_url = os.environ.get("CAOS_QUALIFY_POSTGRES_URL")
+    if not admin_url:
+        print(
+            "CAOS_QUALIFY_POSTGRES_URL is unset: name the persistent server the"
+            " run's database is kept on; nothing was spent",
+            file=sys.stderr,
+        )
+        return 2
     price = price_from_environment(provider.model, os.environ["CAOS_MODEL_PRICE"])
     harness = Harness(
         bundle=bundle,
@@ -269,7 +281,6 @@ def main(argv: list[str] | None = None) -> int:
         run_ceiling=args.ceiling,
     )
 
-    admin_url = os.environ["CAOS_TEST_POSTGRES_URL"]
     database = f"caos_qualify_{uuid4().hex}"
     parts = urlsplit(admin_url)
     run_url = urlunsplit(parts._replace(path=f"/{database}"))

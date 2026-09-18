@@ -161,6 +161,38 @@ class _FakeProvider:
         ).complete(prompt, json_object=json_object)
 
 
+def test_main_refuses_to_keep_a_paid_run_where_it_cannot_last(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A paid run's database is its evidence. The test server keeps its data
+    in memory, so a restart erased every retained run of 18 September 2026;
+    the driver now needs a server named for the purpose and spends nothing
+    without one."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-not-a-real-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-5.6-terra")
+    monkeypatch.setenv("OPENROUTER_PROVIDER", "openai/flex")
+    monkeypatch.setenv("OPENROUTER_REASONING_EFFORT", "high")
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    monkeypatch.delenv("CAOS_QUALIFY_POSTGRES_URL", raising=False)
+    monkeypatch.setenv("CAOS_TEST_POSTGRES_URL", "postgresql://nobody@127.0.0.1:1/none")
+    monkeypatch.setenv(
+        "CAOS_MODEL_PRICE", "openai/gpt-5.6-terra,0.000002,0.000012,2026-09-16"
+    )
+
+    code = qualify.main(
+        [
+            str(Path(__file__).resolve().parents[1] / "qualification/vmo2-fy2025"),
+            "--expect-identity",
+            "openrouter/openai/flex/high/65536",
+            "--ceiling",
+            "22.00",
+        ]
+    )
+
+    assert code == 2
+    assert "CAOS_QUALIFY_POSTGRES_URL" in capsys.readouterr().err
+
+
 def _skip_without_postgres() -> None:
     """The same skip/fail split `tests/conftest.py`'s database fixtures use.
 
@@ -190,6 +222,8 @@ def test_main_performs_a_full_qualification_set_against_a_real_database(
     upward is the real store.
     """
     _skip_without_postgres()
+    test_server = os.environ["CAOS_TEST_POSTGRES_URL"]
+    monkeypatch.setenv("CAOS_QUALIFY_POSTGRES_URL", test_server)
     monkeypatch.setattr(qualify, "OpenRouter", _FakeProvider)
     monkeypatch.setenv("CAOS_MODEL_PRICE", "a-model/for-the-test,0,0.00001,2026-09-13")
     set_root = _write_lite_set(tmp_path / "set")
@@ -264,6 +298,8 @@ def test_main_writes_no_capture_file_when_the_flag_is_omitted(
     stdout and returns 0 on a complete run; it just writes nothing to disk.
     """
     _skip_without_postgres()
+    test_server = os.environ["CAOS_TEST_POSTGRES_URL"]
+    monkeypatch.setenv("CAOS_QUALIFY_POSTGRES_URL", test_server)
     monkeypatch.setattr(qualify, "OpenRouter", _FakeProvider)
     monkeypatch.setenv("CAOS_MODEL_PRICE", "a-model/for-the-test,0,0.00001,2026-09-13")
     set_root = _write_lite_set(tmp_path / "set")
