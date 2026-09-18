@@ -497,12 +497,11 @@ def test_every_filing_control_the_report_shows_answers_as_it_was_shown(
 def test_each_new_command_meets_its_declared_store_budget(
     filing_client: TestClient, lite: _Harness
 ) -> None:
-    """The declared `IO_BUDGET` is measured, and measured on every command.
+    """Each filing command's declared cost is measured, and met exactly.
 
     Freeze is measured beside save because it pays the same price: `freeze_in`
     re-proves the revision under the lock, which is the whole payload
-    derivation again, so "the ceiling the costliest command stays under" is a
-    claim about two commands and not one.
+    derivation again. The membership commands still share one ceiling.
 
     The withdrawal is sent last on purpose: it takes the run's one source out
     of the live set, and every later derivation of this run's payload would
@@ -519,31 +518,36 @@ def test_each_new_command_meets_its_declared_store_budget(
     admin = member(conn, case_id, Standing.ADMIN)
     target = member(conn, case_id, Standing.READER)
 
-    sent = [
+    # The filing commands each declare their own cost and are held to it
+    # exactly, as every section read is: a ceiling shared by four commands let
+    # the signature grow from fourteen round trips to sixty unnoticed.
+    exact = [
         (
-            deliverable.IO_BUDGET,
+            deliverable.SAVE_IO,
             f"{_case(lite)}/runs/{lite.run_id}/revisions",
             writer,
             {"expected_revision_id": str(revision), "narrative": []},
         ),
         (
-            deliverable.IO_BUDGET,
+            deliverable.SIGN_IO,
             f"{_case(lite)}/revisions/{revision}/signature",
             signer,
             {"payload_sha256": digest},
         ),
         (
-            deliverable.IO_BUDGET,
+            deliverable.FREEZE_IO,
             f"{_case(lite)}/revisions/{revision}/freeze",
             freezer,
             {"payload_sha256": digest},
         ),
         (
-            deliverable.IO_BUDGET,
+            deliverable.FILE_IO,
             f"{_case(lite)}/revisions/{revision}/filing",
             filer,
             {"payload_sha256": digest},
         ),
+    ]
+    bounded = [
         (
             members.IO_BUDGET,
             f"{_case(lite)}/members",
@@ -558,11 +562,21 @@ def test_each_new_command_meets_its_declared_store_budget(
             {},
         ),
     ]
-    for budget, path, actor, body in sent:
-        counted.executed = 0
-        answer = filing_client.post(path, headers=command_headers(actor), json=body)
-        assert answer.status_code in (200, 201), (path, answer.text)
-        assert 0 < counted.executed <= budget, (path, counted.executed)
+    for held_exactly, sent in ((True, exact), (False, bounded)):
+        for budget, path, actor, body in sent:
+            counted.executed = 0
+            answer = filing_client.post(path, headers=command_headers(actor), json=body)
+            assert answer.status_code in (200, 201), (path, answer.text)
+            if held_exactly:
+                assert counted.executed == budget, (path, counted.executed)
+            else:
+                assert 0 < counted.executed <= budget, (path, counted.executed)
+    assert deliverable.IO_BUDGET == max(
+        deliverable.SAVE_IO,
+        deliverable.SIGN_IO,
+        deliverable.FREEZE_IO,
+        deliverable.FILE_IO,
+    )
 
 
 def _chain_over_http(client: TestClient, lite: _Harness) -> tuple[UUID, UUID]:
