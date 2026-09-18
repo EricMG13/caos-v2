@@ -162,6 +162,10 @@ class RefusalCode(StrEnum):
     STORE_NOT_TRANSACTIONAL = "STORE_NOT_TRANSACTIONAL"
     STORE_NOT_CONFIGURED = "STORE_NOT_CONFIGURED"
     STORE_UNAVAILABLE = "STORE_UNAVAILABLE"
+    # Every stream slot is taken. Transient by the D3 question -- the identical
+    # request later, with nobody doing anything in between, plausibly succeeds,
+    # because a watcher only has to close a tab.
+    STREAM_LIMIT_REACHED = "STREAM_LIMIT_REACHED"
 
 
 class Refusal(Exception):

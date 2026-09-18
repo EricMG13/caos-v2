@@ -28,7 +28,7 @@ identity-header hygiene, the Origin check -- before routing or identity.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
 from json import dumps
 from uuid import UUID
@@ -76,7 +76,14 @@ from server.api.reads import qualification as qualification_read
 from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
-from server.api.stream import CONNECT_IO, POLL_IO, StreamEvent, case_tail
+from server.api.stream import (
+    CONNECT_IO,
+    POLL_IO,
+    StreamEvent,
+    case_tail,
+    release_stream_slot,
+    take_stream_slot,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
 
@@ -109,7 +116,10 @@ POLL_INTERVAL = 0.5
 # stored bytes failing verification against what this server itself wrote, a
 # pinned input the run cannot change, or an operator's repair; each `CLEARS`
 # entry beside them already said as much in words before the status agreed.
-TRANSIENT = frozenset({RefusalCode.STORE_UNAVAILABLE})
+# `STREAM_LIMIT_REACHED` joins it for the same reason and not by analogy: the
+# capacity is released by a watcher closing a tail, so waiting is exactly what
+# repairs it. Nothing an operator does is required.
+TRANSIENT = frozenset({RefusalCode.STORE_UNAVAILABLE, RefusalCode.STREAM_LIMIT_REACHED})
 PERMANENT = frozenset(
     {
         RefusalCode.STORE_NOT_CONFIGURED,
@@ -160,6 +170,7 @@ _STATUS = {
     RefusalCode.PAGE_NOT_AVAILABLE: 404,
     RefusalCode.STORE_NOT_CONFIGURED: 500,
     RefusalCode.STORE_UNAVAILABLE: 503,
+    RefusalCode.STREAM_LIMIT_REACHED: 503,
     RefusalCode.STORE_NOT_TRANSACTIONAL: 500,
     RefusalCode.STORE_SCHEMA_DRIFT: 500,
     RefusalCode.BLOB_NOT_FOUND: 500,
@@ -456,8 +467,14 @@ def read_case_events(
     which runs a case holds.
     """
     _owned_run(conn, case_id, run)
-    # Read at request time rather than bound as defaults, so a corrected value
-    # needs no restart (and a test can shorten them).
+    # The slot is taken before the response is built, so a refusal is an
+    # ordinary refusal body with a status and a `Retry-After` -- a 503 the
+    # client can read. Taken *after* the authority read, so a stranger still
+    # learns nothing: a private 404 must not become "the case exists but we are
+    # busy". `stream_slot` releases on every way out of the generator,
+    # `GeneratorExit` included, which is how a browser going away returns its
+    # slot.
+    take_stream_slot()
     events = case_tail(
         conn,
         case_id=case_id,
@@ -468,8 +485,16 @@ def read_case_events(
         poll=POLL_INTERVAL,
         heartbeat=True,
     )
+
+    def framed() -> Iterator[bytes]:
+        try:
+            for event in events:
+                yield _frame(event)
+        finally:
+            release_stream_slot()
+
     return StreamingResponse(
-        (_frame(event) for event in events),
+        framed(),
         media_type="text/event-stream",
         # No store, and no proxy buffering: a tail that arrived in one block
         # when the deadline passed would not be a tail.

@@ -10,6 +10,7 @@ the one each request opens.
 
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -22,14 +23,21 @@ import pytest
 import uvicorn
 
 from server.api import app as app_module
+from server.api import stream, wire
 from server.api.app import app, store_connection
 from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
-from server.api.stream import CONNECT_IO, POLL_IO, case_tail
+from server.api.stream import (
+    CONNECT_IO,
+    POLL_IO,
+    case_tail,
+    release_stream_slot,
+    take_stream_slot,
+)
 from server.api.wire import CLEARS
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document, admit_pack
-from server.refusals import RefusalCode
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.audit import GovernedAction, actions_after, governed_write
 from server.store.events import RunEvent
@@ -40,6 +48,7 @@ from server.store.runs import create_case, fail_run, start_attempt, start_run
 Frame = dict[str, str]
 Headers = Mapping[str, str] | httpx.Headers
 # Read at collection, before any test patches them.
+REPO = Path(__file__).resolve().parents[1]
 SHIPPED = (app_module.TAIL_DEADLINE, app_module.POLL_INTERVAL)
 
 
@@ -629,3 +638,66 @@ def test_the_event_stream_costs_its_declared_budget(
     assert len(log) == 2 + CONNECT_IO + 1 + polls * POLL_IO + named
     assert app_module.EVENTS_IO_BUDGET == 2 + CONNECT_IO + 1 + POLL_IO
     assert app_module.IO_BUDGET == app_module.EVENTS_IO_BUDGET
+
+
+def test_a_tail_slot_is_returned_however_the_stream_ends() -> None:
+    """A leaked slot is capacity only a restart returns, so the release sits in
+    a `finally` and not at the end of the happy path. A tail ends at its
+    deadline, on lost standing, or because the browser went away -- which
+    reaches the generator as a `GeneratorExit`, the case a `return` at the
+    bottom would miss entirely."""
+    slots = stream._Slots()
+
+    take_stream_slot(slots, limit=1)
+    assert slots.open == 1
+    release_stream_slot(slots)
+    assert slots.open == 0
+
+    def tail() -> Iterator[int]:
+        take_stream_slot(slots, limit=1)
+        try:
+            yield 1
+            yield 2
+        finally:
+            release_stream_slot(slots)
+
+    abandoned = tail()
+    next(abandoned)
+    assert slots.open == 1
+    abandoned.close()  # the browser going away, mid-stream
+
+    assert slots.open == 0
+
+
+def test_the_twenty_fifth_tail_is_refused_rather_than_the_next_ordinary_request() -> (
+    None
+):
+    """The defect this closes. Uvicorn counts an open stream like any other
+    request against `--limit-concurrency`, so without a cap of its own the
+    watchers' pressure lands on an unrelated reader, with a 503 that names
+    nothing they can act on. Refused here, it names the streams.
+
+    The cap is asserted to sit *below* the image's limit, because a cap at or
+    above it would leave no headroom and would change nothing.
+    """
+    slots = stream._Slots()
+    for _ in range(stream.STREAM_LIMIT):
+        take_stream_slot(slots)
+
+    with pytest.raises(Refusal) as caught:
+        take_stream_slot(slots)
+
+    assert caught.value.code is RefusalCode.STREAM_LIMIT_REACHED
+    dockerfile = (REPO / "Dockerfile").read_text(encoding="utf-8")
+    [limit] = re.findall(r'"--limit-concurrency", "(\d+)"', dockerfile)
+    assert stream.STREAM_LIMIT < int(limit), "the cap leaves no headroom"
+
+
+def test_a_refused_tail_answers_503_with_a_retry_after_and_its_clearance() -> None:
+    """`STREAM_LIMIT_REACHED` is transient by the D3 question -- the identical
+    request later, with nobody doing anything in between, plausibly succeeds,
+    because a watcher only has to close a tab. So it answers 503 with
+    `Retry-After`, where a fault only an operator can repair answers 500."""
+    assert RefusalCode.STREAM_LIMIT_REACHED in app_module.TRANSIENT
+    assert app_module._STATUS[RefusalCode.STREAM_LIMIT_REACHED] == 503
+    assert wire.CLEARS[RefusalCode.STREAM_LIMIT_REACHED]

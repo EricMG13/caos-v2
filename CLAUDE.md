@@ -916,10 +916,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 - **An idle case stream held its thread until the deadline.** Fixed in
   `0db50fa`: each poll now ends in an SSE comment, so a disconnected browser
   releases its worker thread and uvicorn concurrency slot within one
-  `POLL_INTERVAL`. What remains is the poll itself (the Phase 6 entry "A run
+  `POLL_INTERVAL`. ~~What remains is the poll itself (the Phase 6 entry "A run
   tail polls") and `--limit-concurrency 32` counting every open stream: 32
-  watching tabs refuse a 33rd request with 503. *Upgrade:* `LISTEN`/`NOTIFY`
-  and a stream cap below the concurrency limit, the day real watchers measure it.
+  watching tabs refuse a 33rd request with 503.~~ The **cap** half is closed by
+  Completion Phase 13.3: `STREAM_LIMIT = 24` in `server/api/stream.py`, below
+  the image's limit, so the 25th tail is refused `STREAM_LIMIT_REACHED` (503
+  with `Retry-After`, transient by §75's own question -- a watcher only has to
+  close a tab) and the eight slots left over keep the rest of the surface
+  answering. The pressure is now refused where it is caused, rather than
+  landing on an unrelated reader with a 503 naming nothing they can act on
+  (`test_the_twenty_fifth_tail_is_refused_rather_than_the_next_ordinary_request`,
+  which also asserts the cap sits below the Dockerfile's limit so it cannot be
+  raised into uselessness; `test_a_tail_slot_is_returned_however_the_stream_ends`
+  holds the release through `GeneratorExit`, which is how a browser going away
+  returns its slot). **The poll itself is untouched** and keeps its own Phase 6
+  entry. *Upgrade:* `LISTEN`/`NOTIFY`, so the poll becomes a fallback rather
+  than the mechanism -- still owed, and still worth doing only when there are
+  enough concurrent watchers to measure it. The cap is also a number nobody has
+  measured: 24 is chosen to leave headroom against 32, not from an observed
+  load, and the day a deployment runs a different `--limit-concurrency` the two
+  have to be reconciled by hand, which the constant says out loud rather than
+  silently following whichever value is in force.
 - **The test edge's session cookie is weaker than the contract's.** Over
   `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
   drops `Secure` and the `__Host-` prefix the contract names and keeps
@@ -959,8 +976,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `TAIL_DEADLINE` against the API's `--limit-concurrency 32` (the "idle case
   stream" entry above), and unlike `waitForNode` they carry no `toPass`
   wrapper. *Upgrade:* diagnose the two flakes from a recorded trace rather than
-  by lengthening a wait, and a stream cap below the concurrency limit, which
-  the entry above already owes.
+  by lengthening a wait. The stream cap this entry also owed has landed
+  (`STREAM_LIMIT = 24`, the entry above), which bounds the tails those
+  navigations leave open -- but it does **not** make the journey greener by
+  itself: twenty-four is still more tails than that sequence opens, so what the
+  cap changes is which request fails when the ceiling is reached, not whether
+  this one reaches it.
 
 **Repair Phase 3.**
 
