@@ -166,6 +166,12 @@ def read(path: Path = CONTRACT) -> list[LedgerEntry]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    # Path-traversal scanners flag `--contract` as a generic "user request"
+    # source reaching a file-read sink -- the template does not know this is
+    # argv, not a request body. There is no HTTP boundary here: this module
+    # is a CLI script an operator runs from their own shell (never imported
+    # by server/), so the path is exactly as trusted as any other argument
+    # to a command they typed themselves.
     parser.add_argument("--contract", type=Path, default=CONTRACT)
     parser.add_argument(
         "--report", action="store_true", help="print one line per entry"
