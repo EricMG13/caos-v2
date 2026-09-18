@@ -187,7 +187,9 @@ def test_a_host_control_reads_orchestration_proof_never_qualified(
 
     Behaviourally the control returns ORCHESTRATION_PROOF over a run that did
     something; structurally `QUALIFIED` is named only by its assurance/verdict
-    binding and the exact-evidence API wire/read that relays that binding.
+    binding and the exact-evidence API wire/read that relays that binding --
+    and the release pack (§94), which relays the same `current_verdict` read
+    per pathway and is held to it by `tests/test_release_pack.py`.
     """
     proof = _prove(ran)
     assert proof.assurance is Assurance.ORCHESTRATION_PROOF
@@ -195,6 +197,7 @@ def test_a_host_control_reads_orchestration_proof_never_qualified(
     assert proof.route_digest == route_digest(ran.route)
     assert proof.artifacts == len(ran.route.nodes)
     assert names_qualified() == {
+        "scripts/release_pack.py",
         "server/api/reads/qualification.py",
         "server/api/wire.py",
         "server/qualification/__init__.py",

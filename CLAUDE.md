@@ -162,6 +162,10 @@ Standing rules that back them:
   sequentially.
   `make check-fast` is explicitly partial; `make check-size PR_BASE=<commit>` is
   the separate PR-only size gate.
+- `make release-pack` — the release pack (§94), emitted into the ignored
+  `release-pack/`: build, locks, migration head, test inventory and every
+  catalog pathway. `STORE=1 AS_OF=<ISO-8601 with offset>` reads verdicts from
+  `CAOS_DATABASE_URL`; without it no pathway is claimed qualified.
 - There is no workbook build and no LibreOffice (`docs/DECISIONS.md` §14).
 
 ## Known gaps (honest ledger)
@@ -212,6 +216,26 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and `TRIVY` defaults to that binary. `make check` therefore runs whole on a
   machine carrying any other Trivy; it did at `eca3f5f`, one invocation, exit
   0. The pin itself is unchanged, and `image` still refuses any other version.
+
+- **The release pack relays verdicts, and it has none to relay.** §94's
+  `scripts/release_pack.py` reports a pathway `QUALIFIED` only when a
+  `qualification_verdicts` row -- over a complete snapshot bound to this build,
+  current at the `--as-of` moment, covering a run pinned to that pathway --
+  reads back through `current_verdict`
+  (`tests/test_release_pack.py::test_no_pathway_is_qualified_without_a_signed_verdict_row`,
+  `test_a_verdict_that_is_not_current_for_this_build_qualifies_nothing`). No
+  such row exists in any store, so the three enabled pathways read
+  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the fifteen
+  others read `DISABLED` -- which is the exit check met by saying so, not by
+  qualifying anything. Two limits of the pack itself: its inventory is test
+  *definitions*, not pytest's collection, so a parametrised test is one row and
+  a workspace title computed at run time is recorded as its template; and the
+  pack is emitted, not committed, because a committed copy would change with
+  every test added. What Task 13.6 also names and this does not do: the first
+  authorized nightly and the hosted checks verified on `main`, both of which
+  need a push. *Upgrade:* the nightly and hosted-check halves when a push is
+  authorized, and a reviewer's signature over a complete performed snapshot for
+  each enabled pathway, which is a person's act and not the host's.
 
 **Completion Phase 12.**
 
@@ -726,24 +750,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *Upgrade:* none that is mechanical. What closes this class is the discipline
   `docs/COMPLETION_PLAN.md` states in its definition of done, that the entry a
   task closes is struck in the commit that closes it, naming the test.
-- **The feature-status record is dated evidence, so some of its citations name
-  tests the tree deleted.** `docs/feature-status.csv` carries 248 rows of which
-  206 are dated, 198 of them 2026-09-11, and each row says what was true when it
-  was written. Nine test names it cites are defined nowhere in the suite and
-  nowhere on disk -- `test_a_revision_is_frozen_once`,
+- ~~**The feature-status record is dated evidence, so some of its citations
+  name tests the tree deleted.**~~ Closed by the upgrade it named, Completion
+  Phase 13 Task 13.6 (§94): `make release-pack` emits the inventory from the
+  suite -- every Python test `tests/` defines and every workspace title
+  `frontend/tests/` defines, read from the source -- beside the build, the
+  locks, the migration head and every catalog pathway, and two emissions over
+  one tree are byte-identical
+  (`tests/test_release_pack.py::test_the_inventory_is_read_from_both_suites`,
+  `test_two_packs_over_one_tree_are_byte_identical`). That pack is the live
+  answer; `docs/feature-status.csv` is its archived predecessor and is **not**
+  edited. Its 248 rows still say what was true on their dates, and nine names
+  it cites -- `test_a_revision_is_frozen_once`,
   `test_the_receipt_names_the_signer_of_the_frozen_bytes` and seven more of the
-  filing and revision-signing set, across 14 rows -- because `9bf20b2` wrote them
-  and the repair deleted the code they covered. The Completion Phase 7
-  adversarial audit asked for the citations to be made to resolve. They are
-  deliberately not: a dated row whose evidence is edited later is no longer a
-  record of that date, and rewriting 14 of them would make the file agree with
-  the tree by giving up the one property that makes it worth keeping. So the
-  ledger gate reads this file not at all, and a reader must take a row's date as
-  part of its claim. *Upgrade:* a regenerated inventory emitted from the suite,
-  which this file's own "Regenerate, don't hand-maintain" rule already asks for
-  and which belongs with Completion Phase 13 Task 13.6, the task that generates
-  the release pack from the suite and the store; the dated file is then the
-  archived predecessor rather than the live answer.
+  filing and revision-signing set, across 14 rows -- are still defined nowhere,
+  because `9bf20b2` wrote them and the repair deleted the code they covered.
+  Rewriting those rows would make the file agree with the tree by giving up the
+  one property that makes it worth keeping, so the ledger gate still reads it
+  not at all, and a reader takes a row's date as part of its claim.
 - ~~**The demonstration Admin panel says the health route is not served.**~~
   Closed: `frontend/fixtures/admin.json` names `GET /api/health` as served and
   shown in no panel, which is what `server/api/health.py` does
