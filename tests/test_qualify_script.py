@@ -243,6 +243,7 @@ def test_main_performs_a_full_qualification_set_against_a_real_database(
     # so these three columns are present (this revision's `QualificationMatrixRow`
     # carries them) but unset for a case that never asked to be judged by them.
     assert matrix[0]["ready_met"] is None
+    assert matrix[0]["blocked_met"] is None
     assert matrix[0]["forecast_met"] is None
     assert matrix[0]["expected_refusal_met"] is None
 

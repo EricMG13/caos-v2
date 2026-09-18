@@ -259,6 +259,10 @@ def test_preparation_creates_exact_inputs_and_external_previews(ready: Fixture) 
         ("duplicate", "QUALIFICATION_SET_AMBIGUOUS"),
         ("duplicate-key", "QUALIFICATION_SET_AMBIGUOUS"),
         ("unanswerable", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("ready-and-blocked", "QUALIFICATION_SET_AMBIGUOUS"),
+        ("blocked-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("blocked-gate", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("ready-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("route", "ROUTE_SELECTION_UNKNOWN"),
         ("label", "BOUNDARY_TEXT_TOO_LONG"),
         ("control", "BOUNDARY_TEXT_INVALID"),
@@ -277,6 +281,14 @@ def test_whole_set_pure_defects_leave_no_setup(
         "duplicate": replace(second, label=first.label),
         "duplicate-key": replace(second, expects=second.expects * 2),
         "unanswerable": replace(second, expects=first.expects),
+        # §99: a readiness key names a consumer CP-0 rules on for this route,
+        # and no module in both lists.
+        "ready-and-blocked": replace(
+            second, expects_ready=("CP-L10",), expects_blocked=("CP-L10",)
+        ),
+        "blocked-off-route": replace(second, expects_blocked=("CP-9",)),
+        "blocked-gate": replace(second, expects_blocked=("CP-0",)),
+        "ready-off-route": replace(second, expects_ready=("CP-9",)),
         "route": replace(second, selection_id="NO_SUCH_PATHWAY"),
         "label": replace(second, label="x" * 129),
         "control": replace(second, label="bad\x00label"),

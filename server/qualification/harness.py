@@ -63,6 +63,7 @@ import psycopg
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import (
+    GATE_MODULE,
     MODEL_MODULE,
     NodeResult,
     NodeState,
@@ -249,6 +250,7 @@ def prepare(
     titles = [
         BoundaryText.of(case.label, limit=_LABEL_LIMIT) for case in qualification.cases
     ]
+    _consumers(qualification, routes)
     _affordable(qualification, harness, routes)
     if not isinstance(harness.bundle, Bundle):
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
@@ -340,6 +342,7 @@ def perform(
     for case, item in zip(qualification.cases, prepared, strict=True):
         with execution_reads(conn):
             routes.append(_eligible(conn, harness, case, item))
+    _consumers(qualification, routes)
     _affordable(qualification, harness, routes)
 
     # Each turn can purchase work; preserve its stopped record before returning.
@@ -504,6 +507,24 @@ def _affordable(
     call = Fraction(worst_case(harness.price))
     if routes and call > Fraction(harness.run_ceiling):
         raise Refusal(RefusalCode.QUALIFICATION_SET_OVER_CEILING)
+
+
+def _consumers(
+    qualification: QualificationSet, routes: Sequence[ResolvedRoute]
+) -> None:
+    """Every readiness key names a module CP-0 rules on for its case's route.
+
+    CP-0's T8 carries a verdict for each pinned consumer and none for itself, so
+    a key naming the gate, or a module the route does not pin, can never be met
+    -- and a readiness miss reads as the gate's decision, which it would not
+    be. Refused before anything is written, like the other unanswerable keys.
+    """
+    for case, route in zip(qualification.cases, routes, strict=True):
+        consumers = {
+            node.module_id for node in route.nodes if node.module_id != GATE_MODULE
+        }
+        if not set(case.expects_ready) | set(case.expects_blocked) <= consumers:
+            raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)
 
 
 def _subjects(qualification: QualificationSet) -> None:

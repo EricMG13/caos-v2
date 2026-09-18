@@ -56,11 +56,11 @@ from server.qualification.matrix import (
 )
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant
 from server.store.routes import resolved_route
-from server.store.runs import start_run
+from server.store.runs import run_status, start_run
 
 REPO = Path(__file__).resolve().parents[1]
 VENDORED = REPO / "vendor/deploy-v"
@@ -95,8 +95,17 @@ def catalog_route(request: pytest.FixtureRequest) -> ResolvedRoute:
 
 
 @pytest.fixture
+def readiness(request: pytest.FixtureRequest) -> dict[str, str]:
+    """CP-0's T8 verdicts for the run below; empty clears every consumer."""
+    return dict(getattr(request, "param", {}))
+
+
+@pytest.fixture
 def ran(
-    case: tuple[StoreConnection, UUID], tmp_path: Path, catalog_route: ResolvedRoute
+    case: tuple[StoreConnection, UUID],
+    tmp_path: Path,
+    catalog_route: ResolvedRoute,
+    readiness: dict[str, str],
 ) -> Ran:
     """One case of a qualification set, really run."""
     conn, case_id = case
@@ -122,7 +131,7 @@ def ran(
         conn=conn,
         bundle=bundle,
         blobs=blobs,
-        completions=CanonicalCompletions(source_id),
+        completions=CanonicalCompletions(source_id, readiness=readiness),
         route=catalog_route,
         run_id=run_id,
     )
@@ -931,3 +940,109 @@ def test_ready_met_is_false_when_the_route_is_unpinned(ran: Ran) -> None:
     case = replace(_one_case(ran), expects_ready=("CP-0",))
     [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
     assert row.ready_met is False
+
+
+# `expects_blocked` (§99): the key a set declares when the honest answer is that
+# CP-0 refuses a consumer on this corpus. Read from the same `readiness_from`
+# projection `ready_met` reads, over the gate's own two uncleared verdicts.
+BLOCKED_CP_L10 = pytest.mark.parametrize(
+    "readiness", [{"CP-L10": "BLOCKED"}], indirect=True
+)
+
+
+def test_blocked_met_is_none_when_a_case_names_no_module(ran: Ran) -> None:
+    [row] = _matrix(ran, QualificationSet(cases=(_one_case(ran),))).rows
+    assert row.blocked_met is None
+
+
+@BLOCKED_CP_L10
+def test_blocked_met_is_true_when_cp0_refused_every_named_module(ran: Ran) -> None:
+    """CP-0 answered BLOCKED for CP-L10, so the run ended BLOCKED with CP-L10
+    never attempted -- and a case that declared exactly that refusal met it."""
+    assert run_status(ran.conn, ran.run_id) is RunStatus.BLOCKED
+    case = replace(_one_case(ran), expects_blocked=("CP-L10",))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.blocked_met is True
+    # The readiness key reads the same projection the other way round.
+    ready = replace(_one_case(ran), expects_ready=("CP-L10",))
+    [row] = _matrix(ran, QualificationSet(cases=(ready,))).rows
+    assert row.ready_met is False
+
+
+@pytest.mark.parametrize("readiness", [{"CP-L10": "CONDITIONAL"}], indirect=True)
+def test_blocked_met_counts_a_conditional_verdict_as_a_refusal(ran: Ran) -> None:
+    """CONDITIONAL does not clear a module either (`UNCLEARED_READINESS`); the
+    difference from BLOCKED is the reason, which this key does not ask."""
+    case = replace(_one_case(ran), expects_blocked=("CP-L10",))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.blocked_met is True
+
+
+def test_blocked_met_is_false_when_the_named_module_was_cleared(ran: Ran) -> None:
+    """The gate cleared CP-L10 and it ran: the refusal the case declared did not
+    happen, which is a miss rather than an unanswered question."""
+    case = replace(_one_case(ran), expects_blocked=("CP-L10",))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.blocked_met is False
+
+
+@BLOCKED_CP_L10
+def test_blocked_met_is_false_for_a_module_the_gate_never_ruled_on(ran: Ran) -> None:
+    """Absence from T8 is not a refusal. CP-0 rules on its consumers, never on
+    itself, so a case naming the gate cannot be met -- and must not be met by
+    reading "not READY" as "BLOCKED"."""
+    case = replace(_one_case(ran), expects_blocked=("CP-L10", "CP-0"))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.blocked_met is False
+
+
+@BLOCKED_CP_L10
+def test_blocked_met_is_false_when_the_route_is_unpinned(ran: Ran) -> None:
+    with route_fault(ran.conn):
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+
+    case = replace(_one_case(ran), expects_blocked=("CP-L10",))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.blocked_met is False
+
+
+def test_a_case_keyed_only_by_a_blocked_module_is_measurable(ran: Ran) -> None:
+    """A declared refusal is a question, so it is enough to make a case one."""
+    case = replace(_one_case(ran), expects=(), expects_blocked=("CP-L10",))
+    assert len(qualification_set_digest(QualificationSet(cases=(case,)))) == 64
+
+
+def test_a_module_expected_both_ready_and_blocked_is_ambiguous(ran: Ran) -> None:
+    """No run can meet both, so the set is refused before it is scored."""
+    case = replace(
+        _one_case(ran), expects_ready=("CP-L10",), expects_blocked=("CP-L10",)
+    )
+    with pytest.raises(Refusal) as refused:
+        assert_unambiguous(QualificationSet(cases=(case,)))
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_AMBIGUOUS
+
+
+def test_the_blocked_key_moves_the_digest_and_is_told_apart_from_readiness(
+    ran: Ran,
+) -> None:
+    """The same module ids under the two keys are two different sets. Appended
+    positionally like `expects_ready`, they would digest identically."""
+    base = _one_case(ran)
+    plain = qualification_set_digest(QualificationSet(cases=(base,)))
+    ready = qualification_set_digest(
+        QualificationSet(cases=(replace(base, expects_ready=("CP-L10",)),))
+    )
+    blocked = qualification_set_digest(
+        QualificationSet(cases=(replace(base, expects_blocked=("CP-L10",)),))
+    )
+    assert len({plain, ready, blocked}) == 3
+    reordered = qualification_set_digest(
+        QualificationSet(cases=(replace(base, expects_blocked=("CP-5", "CP-L10")),))
+    )
+    assert reordered == qualification_set_digest(
+        QualificationSet(cases=(replace(base, expects_blocked=("CP-L10", "CP-5")),))
+    )
