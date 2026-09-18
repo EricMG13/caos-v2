@@ -68,6 +68,13 @@ from server.methodology.invocation import (
     request_size,
     upstream_markdown,
 )
+from server.methodology.selection import (
+    Basis,
+    Selection,
+    demand_cells,
+    demand_items,
+    select_sources,
+)
 from server.methodology.vendor import (
     VendorContract,
     catalog,
@@ -380,12 +387,15 @@ _NO_ATTEMPT = UUID(int=0)
 class _Context:
     """What one prompt is built from, each part read in one pre-call unit."""
 
+    # What the node is handed: the whole pin, or the members its gate row names.
     delivered: list[Delivery]
     upstream: tuple[tuple[UpstreamRef, bytes], ...]
     lineage: tuple[LineageRef, ...]
     # Each direct upstream's anchored citations, from its verified record.
     citations: dict[str, tuple[AnchoredCitation, ...]]
     source_set: SourceSet | None
+    # Why `delivered` is what it is (§95); the gate's own is always the whole pin.
+    selection: Selection
 
 
 def _source_preparation(
@@ -397,18 +407,58 @@ def _source_preparation(
     """CP-0 alone receives the verified source snapshot it must prepare."""
     if assignment.module_id != GATE_MODULE:
         return None
-    pin = load_run_input(conn, assignment.run_id)
-    if pin is None:
-        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
-    source_set = load_source_set(conn, pin.case_id, pin.source_version)
-    if source_set is None or source_set.fingerprint != pin.source_fingerprint:
-        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    source_set = _pinned_source_set(conn, assignment.run_id)
     if {member.source_id for member in source_set.members} != {
         item.source_id for item in delivered
     }:
         raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
     _assert_originals(blobs, source_set)
     return source_set
+
+
+def _pinned_source_set(conn: StoreConnection, run_id: UUID) -> SourceSet:
+    """The run's pinned source-set version, verified against its pin."""
+    pin = load_run_input(conn, run_id)
+    if pin is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    source_set = load_source_set(conn, pin.case_id, pin.source_version)
+    if source_set is None or source_set.fingerprint != pin.source_fingerprint:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return source_set
+
+
+def _selected(
+    conn: StoreConnection,
+    bundle: Bundle,
+    assignment: Assignment,
+    upstream: Sequence[tuple[UpstreamRef, bytes]],
+    delivered: list[Delivery],
+) -> tuple[list[Delivery], Selection]:
+    """The deliveries a consumer is handed: the pin narrowed to the members
+    its gate row names (§95), read from the accepted CP-0 Markdown the unit
+    has just verified, through the vendor's own T8 parser.
+
+    Pure over pinned inputs, so the pre-call check, the attempt and a crash
+    replay select alike. The whole pin was already read and counted against
+    the pin by `read_run_blocks`, so a withdrawn member still refuses before
+    anything is narrowed (invariant 1). The pinned members are read only when
+    the cell has items to map, so a node without a demand -- the gate itself,
+    the host's CP-CF, every legacy-header T8 -- costs no extra round trip.
+    """
+    if assignment.module_id == GATE_MODULE:
+        return delivered, Selection(Basis.WHOLE_NO_DEMAND, None)
+    gate = next(data for ref, data in upstream if ref.module_id == GATE_MODULE)
+    cell = demand_cells(_contract(bundle).navigation, catalog(bundle), gate).get(
+        assignment.module_id
+    )
+    if cell is None or not demand_items(cell):
+        return delivered, Selection(Basis.WHOLE_NO_DEMAND, None)
+    selection = select_sources(
+        _pinned_source_set(conn, assignment.run_id).members, cell
+    )
+    if selection.source_ids is None:
+        return delivered, selection
+    return [d for d in delivered if d.source_id in selection.source_ids], selection
 
 
 def _assert_originals(blobs: BlobStore, source_set: SourceSet) -> None:
@@ -444,12 +494,16 @@ def _context(
     records, lineage = _upstream_records(
         conn, blobs, bundle, assignment, identity.upstream
     )
+    upstream = upstream_markdown(blobs, identity.upstream)
+    # The gate's verified record is what the selection is read from (§95).
+    delivered, selection = _selected(conn, bundle, assignment, upstream, delivered)
     return _Context(
         delivered=delivered,
-        upstream=upstream_markdown(blobs, identity.upstream),
+        upstream=upstream,
         lineage=lineage,
         citations={node: record.citations for node, record in records.items()},
         source_set=source_set,
+        selection=selection,
     )
 
 

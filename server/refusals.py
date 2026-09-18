@@ -123,6 +123,13 @@ class RefusalCode(StrEnum):
     # Distinct from EVIDENCE_NOT_AVAILABLE because pinning a live source cannot
     # clear it -- the source is live -- and re-admitting it under this build can.
     EVIDENCE_PACKING_MISMATCH = "EVIDENCE_PACKING_MISMATCH"
+    # §95: CP-0's `Source files to attach` cell for a consumer names some
+    # pinned members and something the pin does not carry, or one name that two
+    # members answer to. Neither the readable half nor the whole pin is what
+    # the gate said, so the node is refused before any attempt. Distinct from
+    # EVIDENCE_NOT_AVAILABLE because every pinned source is live; what clears
+    # it is a successor run whose gate writes a cell the host can read.
+    EVIDENCE_DEMAND_UNRESOLVED = "EVIDENCE_DEMAND_UNRESOLVED"
     # Phase 4 Task 4.4c: an evidence page the caller may not or cannot read.
     PAGE_NOT_AVAILABLE = "PAGE_NOT_AVAILABLE"
     CITATION_NOT_LOCATED = "CITATION_NOT_LOCATED"

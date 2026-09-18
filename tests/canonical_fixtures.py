@@ -165,12 +165,15 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
     body_note: str = "Recorded source p1.",
     readiness: dict[str, str] | None = None,
     blockers: dict[str, str] | None = None,
+    source_files: dict[str, str] | None = None,
 ) -> bytes:
     """A handoff the vendor validators accept for `identity`, then varied.
 
     `fields` replaces the host-owned front matter (a fake provider copies what
     the prompt handed it); `readiness` sets CP-0's T8 status per pinned module,
-    and `blockers` that row's `Why now / blocker` cell.
+    `blockers` that row's `Why now / blocker` cell, and `source_files` its
+    `Source files to attach` cell (§95; "Source p1" when unset, which names no
+    pinned member and so selects nothing).
     """
     front: dict[str, Any] = {
         **(fields if fields is not None else invocation_fields(CONTRACT, identity)),
@@ -195,7 +198,8 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
         appendix += "#### " + register + "\n\n"
         if identity.module_id == "CP-0" and register == "T8":
             appendix += _table(
-                CONTRACT.navigation.NEW_HEADERS, _t8(readiness or {}, blockers or {})
+                CONTRACT.navigation.NEW_HEADERS,
+                _t8(readiness or {}, blockers or {}, source_files or {}),
             )
         else:
             columns = spec["columns"] or ["Evidence"]
@@ -220,7 +224,11 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
     return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
 
 
-def _t8(readiness: dict[str, str], blockers: dict[str, str]) -> list[list[str]]:
+def _t8(
+    readiness: dict[str, str],
+    blockers: dict[str, str],
+    source_files: dict[str, str] | None = None,
+) -> list[list[str]]:
     rows = []
     for n, module in enumerate(sorted(PINNED), 1):
         status = readiness.get(module, "READY")
@@ -232,7 +240,7 @@ def _t8(readiness: dict[str, str], blockers: dict[str, str]) -> list[list[str]]:
                 module,
                 command,
                 command if runnable else "DO NOT RUN",
-                "Source p1",
+                (source_files or {}).get(module, "Source p1"),
                 "Current handoff",
                 status,
                 blockers.get(module, "Relevant source p1"),
@@ -312,6 +320,11 @@ class CanonicalCompletions:
     readiness: dict[str, str] = field(default_factory=dict)
     blockers: dict[str, str] = field(default_factory=dict)
     quotes: tuple[str, ...] = (QUOTE,)
+    # §95: CP-0's `Source files to attach` cell per consumer module, and a
+    # consumer's own quotes of another pinned source, `(source_id, quote)`,
+    # cited beside `quotes` and written into the body so they are quoted.
+    source_files: dict[str, str] = field(default_factory=dict)
+    cited: tuple[tuple[UUID, str], ...] = ()
     mutate: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     content: str | None = None
     during: Callable[[], None] | None = None
@@ -342,12 +355,21 @@ class CanonicalCompletions:
             authored={**AUTHORED[qa], "qa_status": qa},
             readiness=self.readiness,
             blockers=self.blockers,
-            body_note=f"{QUOTE} was recorded. {UNANCHORED} here.",
+            source_files=self.source_files,
+            body_note=" ".join(
+                (
+                    f"{QUOTE} was recorded. {UNANCHORED} here.",
+                    *(q for _, q in self.cited),
+                )
+            ),
         )
         self.answers.append(markdown)
         citations: list[dict[str, object]] = [
             {"source_id": str(self.source_id), "page": 1, "matched_text": quote}
             for quote in self.quotes
+        ] + [
+            {"source_id": str(source), "page": 1, "matched_text": quote}
+            for source, quote in self.cited
         ]
         self.bodies.append(wire(markdown, citations))
         return Completion(self.bodies[-1], self.charge, self.generation_id)

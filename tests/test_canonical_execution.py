@@ -409,14 +409,14 @@ def test_billing_survives_every_analytical_refusal(
 def test_a_quote_outside_the_captured_blocks_refuses_the_handoff(
     harness: _Harness,
 ) -> None:
-    """Wiring only, not exit evidence: the executor anchors on the blocks it
-    delivered. In production those are every block of every pinned source
-    (`source_blocks` rows are immutable), so no real run narrows delivery below
-    a whole source; this test narrows it by deleting a block with the
-    immutability trigger disabled. The rule itself -- an undelivered page of a
-    delivered source cannot be cited -- is proven at `verify_citations` in
-    `tests/test_awkward_evidence.py`; `CLAUDE.md`'s Repair Phase 3 ledger says
-    why nothing narrows delivery yet."""
+    """Wiring for the page grain: the executor anchors on the blocks it
+    delivered. Since §95 a real run narrows delivery to whole pinned members
+    the gate's T8 row names (`tests/test_evidence_selection.py`), but never
+    below a whole source, so an undelivered *page* of a delivered source is
+    still reached only by deleting a block with the immutability trigger
+    disabled, as here. The rule itself -- an undelivered page of a delivered
+    source cannot be cited -- is proven at `verify_citations` in
+    `tests/test_awkward_evidence.py`."""
     conn, source = harness.conn, harness.source_id
     whole = captured_blocks(conn, harness.run_id)
     assert whole[source] == frozenset({"b000000", "b000001"})
