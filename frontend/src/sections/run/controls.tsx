@@ -6,7 +6,7 @@
 // commit, so an advisory `null` refusal here is never trusted as the last
 // word. A success is shown, and the caller is handed one refetch to run
 // (`onRefetch`); the control never claims a write took effect on its own say.
-import { useCallback, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
 import { useSearchParams } from "react-router";
 import {
   approveGate,
@@ -42,6 +42,7 @@ import type { V1_SHAPES } from "@/wire/v1/documents";
 // way rather than duplicated by hand.
 type GateView = Infer<typeof V1_SHAPES.GateView>;
 type RunSubjectView = Infer<typeof V1_SHAPES.RunSubjectView>;
+type WorkView = Infer<typeof V1_SHAPES.WorkView>;
 
 export type ActionName = ActionView["action"];
 
@@ -497,6 +498,23 @@ export function GatePanelControl({
   );
 }
 
+/** Why the store parked this run's work, as the typed code it recorded.
+
+    The wire carries the code alone -- `WorkView` has no clearance beside it,
+    and nothing in this workspace maps a code to one -- so the code is named
+    and no clearance is invented for it. Stated in words, never by colour. */
+function StopCode({ state, code }: { state: WorkView["state"]; code: string }) {
+  const id = useId();
+  return (
+    <div className="refusal" role="note" aria-labelledby={id} data-stop-code={code}>
+      <div className="cl" id={id}>
+        Work {state.toLowerCase()} — stop code
+      </div>
+      <code>{code}</code>
+    </div>
+  );
+}
+
 const NO_FINGERPRINT = {
   code: "COMMAND_EXPECTATION_STALE",
   clears:
@@ -511,12 +529,14 @@ export function WorkControls({
   caseId,
   runId,
   fingerprint,
+  work,
   actions,
   onRefetch,
 }: {
   caseId: string;
   runId: string;
   fingerprint: string | null;
+  work: WorkView | null;
   actions: readonly ActionView[];
   onRefetch: (runId: string | null) => void;
 }) {
@@ -539,6 +559,7 @@ export function WorkControls({
         <h2>Work</h2>
       </header>
       <div className="pb flush">
+        {work?.stop_code ? <StopCode state={work.state} code={work.stop_code} /> : null}
         <RefusedControl
           refusal={startRefusal}
           className="rb acc"
