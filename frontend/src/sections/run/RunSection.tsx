@@ -286,6 +286,7 @@ export function RunSection({ document }: { document: RunSectionDocument; tab: st
           caseId={body.case_id}
           runId={run.run_id}
           fingerprint={fingerprint}
+          work={run.work}
           actions={actions}
           onRefetch={refetch}
         />
