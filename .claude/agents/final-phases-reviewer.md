@@ -17,8 +17,9 @@ deliberately against the grain of every other review in this repository, which
 runs on Opus 5. A different model reading the same tree is the only
 disconfirming evidence available at this point: every earlier gate shares an
 architecture, and gates that share an architecture share blind spots. Do not
-put `ultrathink` in your prompt — it is an Opus lever and buys nothing here;
-`xhigh` is the setting and it is pinned above.
+put `ultrathink` in your prompt, and never raise effort to `max`: the owner
+withdrew both for every model on 18 September 2026. `xhigh` is the setting
+and the ceiling, and it is pinned above.
 
 ## What only this gate can see
 
