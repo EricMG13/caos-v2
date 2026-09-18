@@ -246,7 +246,15 @@ def test_the_committed_table_is_the_one_the_script_emits() -> None:
     by_status: dict[str, int] = {}
     for row in register.documents:
         by_status[row.status] = by_status.get(row.status, 0) + 1
-    spelled = {3: "Three", 6: "Six", 7: "seven", 13: "Thirteen", 16: "Sixteen"}
+    spelled = {
+        3: "Three",
+        6: "Six",
+        7: "seven",
+        9: "Nine",
+        13: "Thirteen",
+        16: "Sixteen",
+        18: "Eighteen",
+    }
     total = spelled.get(len(register.documents))
     in_hand = spelled.get(by_status.get("in_hand", 0))
     assert total is not None and in_hand is not None, "spell the new counts here"
