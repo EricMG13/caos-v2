@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import collections
 import copy
+import dataclasses
 import hashlib
 import json
 import shutil
+import types
 from pathlib import Path
 
 import pytest
@@ -49,9 +51,9 @@ CATALOG = (
     BUNDLE / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
 
-# docs/DECISIONS.md §98, which moved the §13 pin (after §61, §63, §92). A
-# run pinned to one build never executes under another.
-BUILD_ID = "91c219fb7147cf1e0089b6119bca7de013ad94bcd7f4b6cea6536a88776f2c77"
+# docs/DECISIONS.md §96 and §98 together moved the §13 pin last (after §61,
+# §63, §92). A run pinned to one build never executes under another.
+BUILD_ID = "78c24be4483612e75d9a0809fcb1cb7c2dd5617e669491de13be9c0123e3ff93"
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -416,6 +418,39 @@ def test_the_t8_parser_keeps_the_source_files_column(
         "Audited statements",
     ]
     assert [row.readiness for row in parsed] == ["READY", "BLOCKED"]
+
+
+def test_the_t8_parser_accepts_the_cp_dr_row_cp0s_contract_permits(
+    catalog: dict[str, object],
+) -> None:
+    """Request 2026-09-18-t8-cp-dr-row (§96): CP-DR is navigable with no layer,
+    which `validate_catalog` admits and CP-0's T8 contract lists; `parse_t8`
+    now reads its row instead of refusing it, so a pathway whose only consumer
+    is CP-DR has a T8 the bundle accepts. A layerless module that is not CP-DR
+    is still refused, and so is an empty T8."""
+    nav = CONTRACT.navigation
+    validated = nav.validate_catalog(catalog)
+    assert validated.modules["CP-DR"].navigable
+    assert validated.modules["CP-DR"].layer_id is None
+    row = ["1", "CP-DR", "Run CP-DR", "Run CP-DR", "Pack", "Why", "READY", "Now."]
+    parsed = nav.parse_t8(
+        "## Analysis\n\n" + _t8_table(nav.NEW_HEADERS, [row]), validated
+    )
+    assert [(r.module_id, r.readiness) for r in parsed] == [("CP-DR", "READY")]
+    with pytest.raises(nav.NavigationError, match="no navigable recommendation"):
+        nav.parse_t8("## Analysis\n\n" + _t8_table(nav.NEW_HEADERS, []), validated)
+    # Any other layerless module is still refused -- by the catalog first, and
+    # by the parser if a catalog ever carried one.
+    module = validated.modules["CP-L10"]
+    bent = dataclasses.replace(
+        validated,
+        modules=types.MappingProxyType(
+            {**validated.modules, "CP-L10": dataclasses.replace(module, layer_id=None)}
+        ),
+    )
+    other = ["1", "CP-L10", "Run CP-L10", "Run CP-L10", "Pack", "Why", "READY", "Now."]
+    with pytest.raises(nav.NavigationError, match="non-navigable module: CP-L10"):
+        nav.parse_t8("## Analysis\n\n" + _t8_table(nav.NEW_HEADERS, [other]), bent)
 
 
 def _profiles_with_disqualifiers() -> list[tuple[str, str]]:
