@@ -1415,12 +1415,35 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   This one fails immediately -- the cheapest way to satisfy it is to name the
   symbol in a comment, which makes the tree worse by leaving prose where a test
   should be, exactly as happened above.
-  *Upgrade:* resolve references through the AST, which moves the axis from
-  "mentioned" to "referenced"; the honest fix is an assertion reaching the
-  definition, which no static check can see, so the AST version is a better
-  proxy rather than the right one. Worth taking now rather than "once the suite
-  is large enough", since the false negative has been paid for once on a money
-  path.
+  ~~*Upgrade:* resolve references through the AST.~~ **Taken on 18 September
+  2026 (Completion Phase 13.5).** `referenced_names` parses each test and
+  collects bare names, attribute finals, import bindings and the last segment
+  of a dotted identifier path given as a string -- the last because
+  `monkeypatch.setattr("server.store.runs.append", ...)` is a real reference
+  and Python gives it no other spelling, while an English sentence is not a
+  dotted path. A comment, a docstring and prose now satisfy nothing
+  (`test_a_name_that_appears_only_in_a_comment_references_nothing`,
+  `test_a_dotted_path_in_a_string_is_a_reference_and_prose_is_not`).
+  **It found thirteen definitions the byte search had cleared**, several on
+  exactly the evidence this entry describes: `tests/test_accepted_owner.py`'s
+  own docstring said "`accepted_owner` is the store read every guard below goes
+  through" and no test called it; `tests/test_disabled_routes.py`'s said "both
+  refusal points share `require_adapter_route`" and both were driven while the
+  rule never was; `server/evidence/pdf.py`'s `child_main` -- the section 47
+  boundary whose entire purpose is that a traceback would print
+  document-derived text -- had no test at all. Three siblings of an existing
+  path-parser walk (`source_path`, `revision_path`, `member_path`) had been
+  added without being added to it. All thirteen now have tests that drive them.
+  Two structural exemptions are declared rather than discovered: a route
+  handler, detected by its HTTP-method decorator, is reached by its path the
+  way a React component is reached by rendering -- the TypeScript half states
+  the same rule -- and `main` stays exempt as a subprocess entry point.
+  **What remains** is the limit this entry always named: a reference is not an
+  assertion, so a test that imports a symbol and does nothing with it still
+  clears the gate. Coverage is what measures execution, and `scan_floors.py`
+  already does. *Upgrade:* none mechanical -- the honest fix is an assertion
+  reaching the definition, which no static check can see. The axis is now the
+  closest proxy available.
 - **`check_tested.py` sees module-level definitions only.** A method is covered
   through the class that holds it. *Upgrade:* descend into classes when a
   governed path first puts logic on a method.
@@ -2513,7 +2536,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **caos-v2** (10131 symbols, 24716 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **caos-v2** (10879 symbols, 26894 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

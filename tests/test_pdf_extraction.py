@@ -13,10 +13,12 @@ any other -- and unlike a blob, a reviewer can see what it says and where.
 
 from __future__ import annotations
 
+import io
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Literal, cast
+from unittest import mock
 from uuid import UUID
 
 import pytest
@@ -25,7 +27,12 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence import pdf
 from server.evidence.citations import anchor_citation
-from server.evidence.extract import Extractor, ExtractorIdentity, Token
+from server.evidence.extract import (
+    DEFAULT_LIMITS,
+    Extractor,
+    ExtractorIdentity,
+    Token,
+)
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.pdf import PdfExtractor
 from server.refusals import Refusal, RefusalCode
@@ -716,3 +723,69 @@ def test_a_dead_child_is_not_blamed_on_the_document(
 
     assert caught.value.code is RefusalCode.SOURCE_NOT_READABLE
     assert "extractor child exited 3" in capsys.readouterr().err
+
+
+def _drive_child(header: dict[str, object], data: bytes) -> dict[str, object]:
+    """Run the section 47 child in-process over one stdin, returning its JSON.
+
+    In-process rather than as a subprocess so a raised exception reaches the
+    test instead of becoming an exit code: the claim being checked is that
+    `child_main` never raises, and a subprocess cannot tell that apart from a
+    clean refusal.
+    """
+    stdin, stdout = io.BytesIO(json.dumps(header).encode() + b"\n" + data), io.BytesIO()
+    with (
+        mock.patch.object(pdf.sys, "stdin", mock.Mock(buffer=stdin)),
+        mock.patch.object(pdf.sys, "stdout", mock.Mock(buffer=stdout)),
+    ):
+        pdf.child_main()
+    return cast(dict[str, object], json.loads(stdout.getvalue()))
+
+
+# The header the parent sends: the whole limits record, never a subset --
+# `child_main` rebuilds `AdmissionLimits(**header["limits"])` and a missing
+# field is a TypeError the bare `except` turns into SOURCE_NOT_READABLE, so a
+# partial fixture here would silently test the refusal path twice.
+CHILD_HEADER: dict[str, object] = {
+    "limits": asdict(DEFAULT_LIMITS),
+    "deadline": 1e18,
+}
+
+
+def test_the_extraction_child_answers_a_typed_code_and_never_raises() -> None:
+    """The boundary section 47 exists for. A traceback out of this function
+    would print the bytes pdfminer choked on -- document-derived text, which
+    this repository's standing rule says may never be logged -- so every
+    failure becomes one JSON code and nothing else travels.
+
+    Driven with bytes no reader will open, which is the case that reaches the
+    bare `except BaseException`.
+    """
+    answer = _drive_child(CHILD_HEADER, b"%PDF-1.7\nnot a document at all")
+
+    assert answer == {"refused": RefusalCode.SOURCE_NOT_READABLE.value}
+    assert "not a document at all" not in json.dumps(answer)
+
+
+def test_the_extraction_child_returns_the_tokens_it_was_asked_for() -> None:
+    """Without this the refusal test above would pass against a child that
+    refused every document, and the extractor would be measuring nothing."""
+    answer = _drive_child(CHILD_HEADER, REPORT)
+
+    assert "refused" not in answer
+    assert answer["tokens"][0][0] == "Total"  # type: ignore[index]
+
+
+def test_the_extraction_child_refuses_a_header_it_cannot_read() -> None:
+    """A malformed header is the parent's fault rather than the document's, and
+    it still leaves by the same door: a code, never an exception."""
+    stdin, stdout = io.BytesIO(b"{not json}\n"), io.BytesIO()
+    with (
+        mock.patch.object(pdf.sys, "stdin", mock.Mock(buffer=stdin)),
+        mock.patch.object(pdf.sys, "stdout", mock.Mock(buffer=stdout)),
+    ):
+        pdf.child_main()
+
+    assert json.loads(stdout.getvalue()) == {
+        "refused": RefusalCode.SOURCE_NOT_READABLE.value
+    }

@@ -18,7 +18,12 @@ from uuid import uuid4
 import pytest
 from test_deliverable_render import PAYLOAD_DATA
 
-from server.deliverable.package import build_package, verify_package, write_package
+from server.deliverable.package import (
+    Verification,
+    build_package,
+    verify_package,
+    write_package,
+)
 from server.deliverable.render import render
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -401,3 +406,23 @@ def test_verify_package_without_an_argument_prints_usage_and_exits_2() -> None:
 
     assert done.returncode == 2, done.stderr
     assert "usage:" in done.stderr
+
+
+def test_a_refused_archive_says_why_and_a_verified_one_has_nothing_to_say() -> None:
+    """`Verification` carries two fields and the suite asserted one of them.
+
+    Every test above reads `.verified` alone, so a verifier that always
+    returned `reason=None` would pass all of them while telling a reader
+    holding a bad archive nothing about what is wrong with it -- and the
+    archived verifier this type wraps exists precisely so that a reader
+    without this repository can find out. The `reason` is the half a person
+    actually acts on, and it is asserted here as one.
+    """
+    good = verify_package(_package())
+    assert isinstance(good, Verification)
+    assert (good.verified, good.reason) == (True, None)
+
+    truncated = verify_package(_package()[:-1])
+    assert truncated.verified is False
+    assert truncated.reason
+    assert isinstance(truncated.reason, str)

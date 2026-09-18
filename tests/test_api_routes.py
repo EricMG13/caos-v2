@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import replace
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -25,7 +27,7 @@ from uuid import UUID, uuid4
 import pytest
 from canonical_fixtures import CanonicalCompletions
 from conftest import route_fault
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -53,6 +55,7 @@ from server.api.commands import cases as cases_command
 from server.api.commands import execution as execution_command
 from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
+from server.api.commands._request import governed
 from server.api.deps import actor_from_request
 from server.api.edge import is_api_path, refusal_body, startup_failed
 from server.api.reads import analysis as analysis_read
@@ -1137,6 +1140,19 @@ def test_the_shared_parsers_refuse_in_the_declared_body_and_chain_nothing() -> N
         (lambda: deps.run_query("not-a-run"), RefusalCode.RUN_NOT_FOUND),
         (lambda: deps.revision_query(None), RefusalCode.DELIVERABLE_NOT_FOUND),
         (lambda: deps.revision_query("x"), RefusalCode.DELIVERABLE_NOT_FOUND),
+        # The three path siblings, each answering a different code on purpose:
+        # a source nobody may use and a revision that is not there are private
+        # 404s, while a malformed member subject is a malformed *request* --
+        # the caller already reads this case, so hiding it would say nothing.
+        (
+            lambda: deps.source_path("not-a-source"),
+            RefusalCode.EVIDENCE_NOT_AVAILABLE,
+        ),
+        (
+            lambda: deps.revision_path("not-a-revision"),
+            RefusalCode.DELIVERABLE_NOT_FOUND,
+        ),
+        (lambda: deps.member_path("not-a-member"), RefusalCode.REQUEST_INVALID),
         (
             lambda: deps.parse_uuid("", RefusalCode.PAGE_NOT_AVAILABLE),
             RefusalCode.PAGE_NOT_AVAILABLE,
@@ -1151,6 +1167,8 @@ def test_the_shared_parsers_refuse_in_the_declared_body_and_chain_nothing() -> N
     assert deps.case_path(str(known)) == deps.run_path(str(known)) == known
     assert deps.run_query(None) is None
     assert deps.run_query(str(known)) == deps.revision_query(str(known)) == known
+    assert deps.source_path(str(known)) == known
+    assert deps.revision_path(str(known)) == deps.member_path(str(known)) == known
 
 
 def test_case_visibility_is_one_rule_wherever_the_standing_was_read() -> None:
@@ -1233,3 +1251,66 @@ def test_the_gateway_helpers_answer_the_same_for_the_guard_and_the_app() -> None
             "message": RefusalCode.EDGE_CONFIG_INVALID.value,
         }
     ]
+
+
+def test_an_unknown_gate_slug_is_routings_own_404_before_any_connection() -> None:
+    """`path_gate` maps the path's slug to a `Gate` and raises a bare
+    `HTTPException` for anything else -- deliberately not a `Refusal`, because
+    a slug the router does not carry is a route that does not exist, answered
+    before an idempotency key or a store connection is asked for. The two
+    declared slugs are asserted beside it so a rename cannot pass by making
+    every slug unknown."""
+    from starlette.requests import Request
+
+    from server.api.commands.runs import path_gate
+    from server.store.gates import Gate
+
+    def _request(slug: str) -> Request:
+        return Request({"type": "http", "path_params": {"gate": slug}})
+
+    assert path_gate(_request("source-set")) is Gate.SOURCE_SET
+    assert path_gate(_request("research-plan")) is Gate.RESEARCH_PLAN
+
+    with pytest.raises(HTTPException) as caught:
+        path_gate(_request("no-such-gate"))
+
+    assert caught.value.status_code == 404
+
+
+def test_every_governed_write_goes_through_the_one_envelope() -> None:
+    """`governed` is where the digest, the replay under the key, the case lock
+    and the receipt's validation against its declared model are wired together.
+    A command that reached `run_command` itself would get the unit and skip
+    `command_response`, so its answer would never be checked against the model
+    it declares -- and nothing else in the tree would notice.
+
+    Written as the shape of the hand-rolled-parser test above, and for the same
+    reason: what must not exist cannot be proved by testing what does.
+    `qualification.py` is the stated exception and calls neither -- its write is
+    `record_verdict` in its own transaction, which its docstring says out loud.
+    """
+    commands = Path(__file__).resolve().parents[1] / "server" / "api" / "commands"
+    callers = sorted(
+        path.name
+        for path in commands.rglob("*.py")
+        if re.search(r"^\s*(?:\w+ = )?run_command\(", path.read_text("utf-8"), re.M)
+    )
+    assert callers == ["_request.py"], callers
+
+    # A module that declares a *write* route, by the decorator rather than by
+    # its name: `availability.py` sits here and declares none, and a module
+    # added tomorrow must be judged on what it serves, not on what it is called.
+    writes = re.compile(r"@router\.(?:post|put|patch|delete)\(")
+    declaring = sorted(
+        path.name
+        for path in commands.rglob("*.py")
+        if writes.search(path.read_text("utf-8"))
+    )
+    assert declaring, "no module declares a write route; the reader read nothing"
+    for name in declaring:
+        if name == "qualification.py":
+            continue  # the stated exception; its own docstring says why
+        module = import_module(f"server.api.commands.{name[:-3]}")
+        # The object, not the spelling: a module that defined its own helper
+        # called `governed` would satisfy a text search and bypass the envelope.
+        assert getattr(module, "governed", None) is governed, name

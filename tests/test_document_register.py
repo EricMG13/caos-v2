@@ -230,3 +230,16 @@ def test_the_committed_table_is_the_one_the_script_emits() -> None:
     assert total is not None and in_hand is not None, "spell the new counts here"
     assert f"{total} documents" in committed, f"the prose does not say {total}"
     assert f"{in_hand.lower()} `in_hand`" in committed, "the in-hand count drifted"
+
+
+def test_the_register_reads_back_as_its_two_declared_halves() -> None:
+    """`Register` is the shape the gate compares against, and the two fields
+    answer different questions: `documents` is what the sets may pin, and
+    `key_sources` is where each key's figures were read from. A loader that
+    returned the documents alone would still satisfy every caller that only
+    counts rows, so the type is asserted rather than assumed."""
+    register = document_register.load_register(REGISTER)
+
+    assert isinstance(register, document_register.Register)
+    assert register.documents and register.key_sources
+    assert all(document.id for document in register.documents)

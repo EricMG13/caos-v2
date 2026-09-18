@@ -48,7 +48,13 @@ from server.methodology.bundle import Bundle
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.gates import Gate, approve_gate, approved_run_input, execution_input
+from server.store.gates import (
+    Gate,
+    approve_gate,
+    approved_run_input,
+    execution_input,
+    require_adapter_route,
+)
 from server.store.members import Standing, grant
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route
@@ -256,3 +262,31 @@ def test_readers_refuse_an_artifact_without_its_record(
         "code": "ARTIFACT_RECORD_MISMATCH",
         "clears": CLEARS[RefusalCode.ARTIFACT_RECORD_MISMATCH],
     }
+
+
+@pytest.mark.parametrize("selection", [FULL, DEEP, ALL_ADAPTER])
+def test_require_adapter_route_is_the_one_rule_both_refusal_points_share(
+    selection: tuple[str, str],
+) -> None:
+    """This file's docstring has said the two refusal points share
+    `require_adapter_route` since it was written, and a sentence is not a test:
+    both were driven and the rule itself never was.
+
+    It is pure and takes no connection, which is what lets execution and
+    acceptance apply it identically. The two disabled shapes are distinct on
+    purpose -- `FULL`/`DEEP` carry modules the adapter does not own, while
+    `ALL_ADAPTER` carries only adapter modules on a pathway no contract test
+    proves (work item 6) -- and the same code answers both.
+    """
+    with pytest.raises(Refusal) as refused:
+        require_adapter_route(resolve_route(CATALOG, *selection))
+
+    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
+
+
+def test_require_adapter_route_admits_the_pathway_that_is_enabled() -> None:
+    """Without this the test above would pass against a function that refused
+    every route, which would disable the product rather than the disabled
+    routes."""
+    assert require_adapter_route(resolve_route(CATALOG, *LITE)) is None
