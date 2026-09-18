@@ -179,6 +179,29 @@ test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
 define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
+**Completion Phase 13.**
+
+- **The image gate cannot run on a machine whose Trivy has moved off the pin.**
+  `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
+  refuses anything else, which is the pin working: a scanner is only a gate
+  while everyone runs the same one, and a newer Trivy can change both its
+  findings and its report shape, which `scripts/scan_floors.py --trivy` then
+  reads. The development machine was upgraded to 0.72.0 between Completion
+  Phase 12's gate (17 September 2026, which ran `image` green) and Phase 13's,
+  so `make check` now stops there and **never reaches `smoke-production`,
+  which is the step after it**. Nothing is wrong with the tree: every step
+  before `image` is green, and `smoke-production` runs on its own. The gate is
+  parameterised for exactly this -- `TRIVY ?= trivy`, so
+  `make check TRIVY=/path/to/0.70.0/trivy` runs it whole -- and that is the
+  fix rather than moving the pin, which would be changing a gate to get a
+  pass. What it costs is that the phase's own evidence is assembled from
+  `make check` up to `image` plus a separate `make smoke-production`, rather
+  than from one green invocation. *Upgrade:* pin the scanner the way the locks
+  pin everything else -- a hashed, version-exact Trivy the bootstrap installs
+  into the project rather than one the machine happens to carry -- the day a
+  second person has to reproduce this gate. Until then the escape hatch is the
+  answer and this entry is where it is written down.
+
 **Completion Phase 12.**
 
 - **Two filing digest checks cannot fire, and one refusal's clearance cannot
