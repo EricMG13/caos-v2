@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from itertools import islice
 from typing import Protocol
 
+from server.boundary_text import DEFAULT_LIMIT as BOUNDARY_LIMIT
 from server.boundary_text import BoundaryText
 from server.digest import canonical_json
 from server.refusals import Refusal, RefusalCode
@@ -157,6 +158,13 @@ def dispatch_by_content(data: bytes) -> Extractor:
     return PlainTextExtractor()
 
 
+# The widest token this extractor emits. `BoundaryText`'s own limit, which is
+# also what `GROUP_WIDTH` uses, so a token can never be the reason a block is
+# refused. A cut falls wherever the width falls, inside a word if that is where
+# it falls -- the same trade the line group takes, for the same reason.
+MAX_TOKEN_CHARS = BOUNDARY_LIMIT
+
+
 @dataclass(frozen=True, slots=True)
 class PlainTextExtractor:
     """UTF-8 text as tokens on a fixed-pitch page.
@@ -169,7 +177,10 @@ class PlainTextExtractor:
     def identity(self) -> ExtractorIdentity:
         return ExtractorIdentity(
             "caos.plain-text",
-            "2",
+            # v3: a run past `max_token_chars` is cut. v2 rows keep their
+            # stored identity and verify as recorded; readmission is how a
+            # source gains the new tokenisation (section 44.4's rule).
+            "3",
             {
                 "encoding": "utf-8",
                 # Cells from the page's top-left corner, y down: the PDF
@@ -179,6 +190,7 @@ class PlainTextExtractor:
                 "cell_height": CELL_HEIGHT,
                 "margin": MARGIN,
                 "lines_per_page": LINES_PER_PAGE,
+                "max_token_chars": MAX_TOKEN_CHARS,
             },
         )
 
@@ -234,6 +246,38 @@ def _line_tokens(line: str, line_number: int, region_id: int) -> Iterator[Token]
         )
 
 
+def _bounded(run: str, start: int) -> Iterator[tuple[str, int]]:
+    """One whitespace-separated run, cut into tokens no wider than
+    `MAX_TOKEN_CHARS`.
+
+    A run longer than `BoundaryText`'s limit refuses the **whole pack** at
+    `ingest._prepare`, before any line is grouped -- which is what stops
+    Boeing's 71,243-character and Ford's 105,966-character single runs, and
+    what no line group can help with, because the line group cuts between
+    tokens and this is one token. Cut here instead: the extractor is where a
+    token's boundaries are decided, and the cut is declared in its identity.
+
+    Splitting rather than refusing, for the reason the line group splits. A
+    refusal leaves the document unadmissible and every honest word in it
+    uncitable; a split costs only the artefact. What a run of tens of thousands
+    of characters with no whitespace in it actually is -- a base64 blob, a rule
+    of dashes, a mangled extraction -- is not a thing a reader could quote as a
+    word either.
+
+    **What it costs, stated because `_words` states the rule it breaks.** The
+    docstring below says the extractor and `citations.py` must agree on where a
+    word ends. They still do for every run inside the bound. For one past it
+    they cannot: `matched_text.split()` yields the whole run as one word and no
+    stored token equals it, so the run is quotable only piece by piece. It was
+    not quotable at all before, because the document did not admit.
+    """
+    if len(run) <= MAX_TOKEN_CHARS:
+        yield run, start
+        return
+    for offset in range(0, len(run), MAX_TOKEN_CHARS):
+        yield run[offset : offset + MAX_TOKEN_CHARS], start + offset
+
+
 def _words(line: str) -> Iterator[tuple[str, int]]:
     """Each whitespace-separated run with the column it starts at.
 
@@ -250,7 +294,7 @@ def _words(line: str) -> Iterator[tuple[str, int]]:
             if start is None:
                 start = column
         elif start is not None:
-            yield line[start:column], start
+            yield from _bounded(line[start:column], start)
             start = None
     if start is not None:
-        yield line[start:], start
+        yield from _bounded(line[start:], start)

@@ -742,7 +742,12 @@ route enabled before its whole-route test; no key from a run.
 - A node is handed only what its verdict demanded; a quote on an undelivered
   page of a delivered source is refused on a real run.
 - Boeing's and Ford's 10-K texts admit, group into bounded blocks, and a node
-  demanding their statements runs under the ceiling.
+  demanding their statements runs under the ceiling. **The first obstacle is
+  closed (18 September 2026)**: `PlainTextExtractor` declares `max_token_chars`
+  and cuts a longer run, so the 71,243- and 105,966-character single tokens no
+  longer refuse the pack. The texts themselves are still outside the tree and
+  `MAX_REQUEST_BYTES` is still the second obstacle, which per-node evidence
+  selection (10.1) owns.
 - The catalog guard passes; a profile with a CONDITIONAL edge refuses at
   resolution.
 - A BLOCKED run's document names the source its CONDITIONAL row asked for; a

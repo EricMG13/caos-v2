@@ -2556,8 +2556,36 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   be measured to cost something; a stored `source_extractions.format_version`
   past its `CHECK (format_version = 1)` is owed with it only if the count ever
   stops distinguishing the two rules.
-- **A single token past the boundary limit refuses the whole pack, and that is
-  what stops the large 10-K texts.** `ingest._prepare` calls
+- ~~**A single token past the boundary limit refuses the whole pack, and that is
+  what stops the large 10-K texts.**~~ Closed by Completion Phase 13, by the
+  upgrade this entry named and in the place it named -- the extractor, "which is
+  where a token's boundaries are decided". `PlainTextExtractor` declares
+  `max_token_chars` (`BoundaryText`'s own limit, the same number `GROUP_WIDTH`
+  uses) and cuts a longer run there, so a Boeing-sized 71,243-character run
+  admits and the ordinary sentences around it anchor exactly as they would in
+  any other document
+  (`test_a_boeing_sized_run_admits_and_its_neighbours_stay_citable`). Splitting
+  rather than refusing, for the reason the line group splits: a refusal leaves
+  the document unadmissible and every honest word in it uncitable, where a
+  split costs only the artefact. The identity is v3 and v2 rows verify as
+  recorded; readmission is how a source gains the new tokenisation (§44.4).
+  **Three things it costs, each with a test.** The run is quotable only piece by
+  piece, because `matched_text.split()` yields it as one word and no stored
+  token equals it -- it was quotable not at all before, since the document did
+  not admit. A uniform run splits into identical pieces, so quoting one is
+  `CITATION_AMBIGUOUS`, which is the anchoring rule answering correctly rather
+  than the admission failing. And splitting forgives **length and nothing
+  else**: each piece is checked exactly as the whole run was, so an override
+  control in a run of any length still refuses `BOUNDARY_TEXT_INVALID`
+  (`test_a_split_run_is_still_refused_for_what_the_boundary_actually_guards`,
+  written because `tests/test_ingestion.py`'s docstring asserted it before
+  anything checked it). *Upgrade:* the same bound for `PdfExtractor`, which
+  still refuses a run past the limit -- the fail-closed direction, and no
+  document in reach needs it. **This does not admit the 10-Ks by itself**: the
+  texts are still held outside the tree, and `MAX_REQUEST_BYTES` is the second
+  obstacle behind this one. What it does is make them admissible the day they
+  are supplied.
+- **The original entry, for the reader who wants the measurement.** `ingest._prepare` calls
   `BoundaryText.of(token.text)` on every token before `_blocks` runs, so a
   4,097-character token refuses `BOUNDARY_TEXT_TOO_LONG` at the door -- before
   any line is packed, and with nothing the line group can do about it, because a

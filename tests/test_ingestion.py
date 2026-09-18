@@ -245,11 +245,6 @@ def test_a_pack_for_a_case_that_does_not_exist_is_refused(
     ("body", "code"),
     [
         pytest.param(
-            "word" * 1250,
-            RefusalCode.BOUNDARY_TEXT_TOO_LONG,
-            id="a word longer than the boundary's limit",
-        ),
-        pytest.param(
             "Total debt \N{RIGHT-TO-LEFT OVERRIDE} was USD 1,240.0m",
             RefusalCode.BOUNDARY_TEXT_INVALID,
             id="a line carrying an override control",
@@ -265,11 +260,18 @@ def test_a_document_the_boundary_refuses_never_reaches_the_pinned_set(
     `BoundaryText.of` and admission wrote a bare `str`. So text over the
     boundary's limit, and a line carrying the override control the boundary
     exists to refuse, were both admitted -- into the set a SOURCE_SET gate can
-    then be approved over -- and refused at every later read. A *line* over the
-    limit is now split at `GROUP_WIDTH` instead (`test_line_groups.py`); a
-    single word over it has nowhere to be split and still refuses here. That is
+    then be approved over -- and refused at every later read. That is
     `admit_pack`'s own argument against admitting a document with no text, one
     run and one provider bill later than here.
+
+    **Only the malformed case is left here, and the change is deliberate.** A
+    *line* over the limit is split at `GROUP_WIDTH` (`test_line_groups.py`) and
+    a single *word* over it is now split at `MAX_TOKEN_CHARS`
+    (`test_long_tokens.py`) -- this docstring used to say a word "has nowhere to
+    be split", which the extractor's own bound made false. What the boundary
+    still refuses at the door is text it cannot represent rather than text that
+    is merely long: an override control in a run of any length still refuses
+    here, because each split piece is checked exactly as the whole run was.
     """
     conn, case_id = case
     blobs = BlobStore(tmp_path / "blobs")

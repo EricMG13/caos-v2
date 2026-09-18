@@ -66,7 +66,7 @@ def test_known_identity_is_versioned_bounded_and_stable(
     assert first[0] == 1
     adapter = json.loads(str(first[1]))
     assert adapter["name"] == "caos.plain-text"
-    assert adapter["version"] == "2"
+    assert adapter["version"] == "3"
     assert adapter["config"]["cell_width"] == 7.2
     assert len(str(first[1])) <= 4096
     assert PdfExtractor().identity.name == "caos.pdfminer"
@@ -79,7 +79,7 @@ def test_known_identity_is_versioned_bounded_and_stable(
 
 @pytest.mark.parametrize(
     "field,value",
-    [("name", "other"), ("version", "3"), ("config", {"cell_width": 8.0})],
+    [("name", "other"), ("version", "4"), ("config", {"cell_width": 8.0})],
 )
 def test_host_identity_changes_extraction_digest(
     case: tuple[StoreConnection, UUID], tmp_path: Path, field: str, value: object
