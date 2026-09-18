@@ -24,6 +24,7 @@ from canonical_fixtures import (
     VENDORED,
     CanonicalCompletions,
 )
+from canonical_route_fixtures import RouteCompletions
 from conftest import priced
 from conftest import reserve_at as reserve
 from test_run_events import RECORD, accept_nodes, approved_nodes
@@ -32,7 +33,7 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine import runtime
 from server.engine.route import NodeState, ResolvedRoute, resolve_route
-from server.engine.runtime import Execution, ProviderResult, run_route
+from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect, runs
@@ -1160,3 +1161,133 @@ def test_two_saves_against_one_head_commit_one_revision(
         ).fetchone()
         conn.rollback()
         assert (saved, withdrawn) == ((1,), (1,))
+
+
+@pytest.fixture
+def relative_harness(case: tuple[StoreConnection, UUID], tmp_path: Path) -> object:
+    """The RELATIVE_VALUE run, which is the only enabled route whose frontier
+    is ever wider than one node -- 1, then 2, then 4, then 2 -- and therefore
+    the only place the concurrent pass can be raced at all."""
+    from test_relative_value_route import harness as build
+
+    from server.engine.route import resolve_route
+
+    route = resolve_route(CATALOG, "FULL_CREDIT_32", "RELATIVE_VALUE")
+    return build.__wrapped__(case, tmp_path, route)  # type: ignore[attr-defined]
+
+
+def _relative_provider(harness: object, answers: object) -> Provider:
+    from server.methodology.runner import ModuleProvider
+
+    return ModuleProvider(
+        harness.conn,  # type: ignore[attr-defined]
+        harness.bundle,  # type: ignore[attr-defined]
+        harness.blobs,  # type: ignore[attr-defined]
+        answers,  # type: ignore[arg-type]
+        harness.route,  # type: ignore[attr-defined]
+        harness.run_id,  # type: ignore[attr-defined]
+    )
+
+
+def test_two_workers_on_a_queue_of_two_runs_take_one_each(
+    case: tuple[StoreConnection, UUID], empty_database: str, tmp_path: Path
+) -> None:
+    """Completion Phase 13.2: with work for both, neither worker idles.
+
+    The neighbour above proves two workers cannot claim the *same* run. This
+    proves the other half, and it is the half an operator wants: a queue that
+    handed both pollers the same row and made the loser wait would satisfy
+    every other test in this file while halving the fleet.
+
+    Claims only. What happens *after* a claim -- one accepted artifact per
+    node, one terminal event -- is the neighbour's, which drives a whole run
+    through `work_once`; proving it twice here would need each worker to hold
+    answers for whichever run its claim happened to give it, which measures the
+    fixture rather than the queue.
+    """
+    from test_worker import CONFIG, queued_run
+
+    from server.store.work import claim_run
+
+    blobs = BlobStore(tmp_path / "blobs")
+    queued = {
+        queued_run(case, _lite(), Bundle(VENDORED), blobs).run_id for _ in range(2)
+    }
+    start = Barrier(2)
+
+    def poll(worker: int) -> UUID | None:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            lease = claim_run(
+                conn,
+                worker=BoundaryText.of(f"{CONFIG.worker.value}-{worker}"),
+                lease_seconds=CONFIG.lease_seconds,
+            )
+            return None if lease is None else lease.run_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claimed = list(pool.map(poll, range(2)))
+
+    assert None not in claimed, "a worker idled while there was work for it"
+    assert set(claimed) == queued, "the two workers did not take one run each"
+
+
+def test_two_nodes_of_one_concurrent_pass_each_accept_exactly_once(
+    relative_harness: object,
+) -> None:
+    """The race Completion Phase 13.1 created, proven rather than argued.
+
+    A concurrent pass has two nodes of one run writing through two connections
+    under one lease at the same time. Every guard they meet -- the run row lock
+    the reservation takes, the case lock the pre-call unit takes, the
+    conditional update every event insert rides -- was written for one writer
+    at a time, and `docs/AI_CODE_QUALITY.md` puts concurrency at ~2x in
+    agent-written code with this file named as the control.
+
+    One artifact, one reservation and one ledger row per node is the claim. A
+    run that merely reached COMPLETE would not show it: a doubled reservation
+    is money, and it leaves the run's status untouched.
+    """
+    from server.engine.runtime import Execution, run_route
+    from server.methodology.runner import ModuleProvider
+
+    harness = relative_harness
+    answers = RouteCompletions(harness.source_id)  # type: ignore[attr-defined]
+
+    opened: list[int] = []
+
+    def per_node() -> tuple[StoreConnection, object]:
+        opened.append(1)
+        node_conn = connect(harness.url)  # type: ignore[attr-defined]
+        return node_conn, ModuleProvider(
+            node_conn,
+            harness.bundle,  # type: ignore[attr-defined]
+            harness.blobs,  # type: ignore[attr-defined]
+            answers,
+            harness.route,  # type: ignore[attr-defined]
+            harness.run_id,  # type: ignore[attr-defined]
+        )
+
+    run_route(
+        harness.conn,  # type: ignore[attr-defined]
+        harness.blobs,  # type: ignore[attr-defined]
+        run_id=harness.run_id,  # type: ignore[attr-defined]
+        route=harness.route,  # type: ignore[attr-defined]
+        execution=Execution(
+            _relative_provider(harness, answers),
+            priced(Decimal("0.10")),
+            harness.bundle,  # type: ignore[attr-defined]
+            per_node=per_node,  # type: ignore[arg-type]
+        ),
+    )
+
+    conn, run_id = harness.conn, harness.run_id  # type: ignore[attr-defined]
+    nodes = len(harness.route.nodes)  # type: ignore[attr-defined]
+    # Without this the assertions below would hold just as well over a
+    # sequential run, and this test would quietly stop being a race at all the
+    # day the batch narrowed. A factory call is one node of a concurrent pass.
+    assert len(opened) > 1, "the pass never ran two nodes at once"
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    for table in ("artifacts", "run_attempts", "budget_reservations", "budget_ledger"):
+        assert _count(conn, table, run_id) == nodes, table
+    assert _events(conn, run_id, RunEvent.RUN_COMPLETE) == 1

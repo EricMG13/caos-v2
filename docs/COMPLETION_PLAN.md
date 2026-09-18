@@ -914,7 +914,10 @@ nobody reads the clause as satisfied:
 that socket and psycopg's release the interpreter lock; what the exit check
 needed instead was `independent_batch`, a rule the spec does not state);
 second-worker
-safety in the race suite (13.2); `LISTEN`/`NOTIFY`, a stream cap, worker
+safety in the race suite (13.2 -- **landed 18 September 2026**: two workers on a
+queue of two runs take one each, and the concurrent pass 13.1 introduced accepts
+each node exactly once. The I6 residual is **not** closed and is what a
+*deployed* second worker still has to answer); `LISTEN`/`NOTIFY`, a stream cap, worker
 readiness, the frame outside the transaction (13.3); the signed identity
 assertion or mTLS, TLS in the smoke stack, the smoke stack in CI (13.4); store
 hygiene and gate scripts (13.5); the release pack generated from the suite and
