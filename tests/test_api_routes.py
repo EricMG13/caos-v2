@@ -1110,7 +1110,9 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         if isinstance(route, APIRoute)
         and route.path == "/api/v1/cases/{case_id}/events"
     )
+    # Identity on the decorator first, then the parameters in their own order.
     assert [d.call for d in events.dependant.dependencies] == [
+        actor_from_request,
         actor_from_request,
         deps.case_path,
         deps.run_query,

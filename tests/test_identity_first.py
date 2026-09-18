@@ -44,7 +44,6 @@ NO_IDENTITY = frozenset({("GET", "/api/health")})
 # Store-touching routes declared in `server/api/app.py`, which this change does
 # not own. Listed so the census stays exact: the day the route gains
 # `IDENTITY_FIRST`, this set must shrink or the census fails.
-OWED_BY_APP = frozenset({("GET", "/api/v1/cases/{case_id}/events")})
 
 
 def _calls(dependant: Dependant) -> Iterator[Callable[..., object]]:
@@ -119,7 +118,7 @@ def test_every_store_touching_route_declares_identity_on_its_decorator() -> None
     missing = {
         key for route in touching if not _identity_first(route) for key in _keys(route)
     }
-    assert missing == OWED_BY_APP
+    assert missing == set()
 
 
 def test_the_routes_that_take_no_identity_reach_no_store() -> None:

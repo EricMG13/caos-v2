@@ -52,6 +52,7 @@ from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
 from server.api.deps import DATABASE_URL as DATABASE_URL
+from server.api.deps import IDENTITY_FIRST
 from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
 from server.api.deps import Blobs as Blobs
 from server.api.deps import Caller as Caller
@@ -470,7 +471,7 @@ async def _malformed_run_id(
     return _refused(request, Refusal(code))
 
 
-@app.get("/api/v1/cases/{case_id}/events")
+@app.get("/api/v1/cases/{case_id}/events", dependencies=[IDENTITY_FIRST])
 def read_case_events(
     actor: Caller,
     case_id: CasePath,
