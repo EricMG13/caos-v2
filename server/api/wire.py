@@ -828,8 +828,11 @@ class ReportBody(BaseModel):
 
     case_id: UUID
     displayed_run_id: UUID
-    revision_id: UUID
-    payload_sha256: Sha256
+    # Both null on the one Report with no revision: a run nothing has been
+    # saved from, served with the artifacts a first save would carry. Committee
+    # serves only a frozen revision and redeclares both required.
+    revision_id: UUID | None
+    payload_sha256: Sha256 | None
     case_title: Text
     artifacts: Annotated[list[ReportArtifact], Field(max_length=ROUTE_NODES_MAX)]
     narrative: Annotated[
@@ -852,6 +855,8 @@ class FiledReceipt(BaseModel):
 
 
 class CommitteeBody(ReportBody):
+    revision_id: UUID
+    payload_sha256: Sha256
     state: Literal["frozen", "filed"]
     signed_by: Annotated[list[UUID], Field(max_length=1000)]
     frozen_by: UUID

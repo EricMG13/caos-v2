@@ -95,9 +95,11 @@ export function sectionUrl(section: Section, query: SectionQuery): string | null
   // one is selected.
   if (section === "book") return `/api/v1/book${suffix}`;
   if (!query.case) return null;
-  if ((section === "report" || section === "committee") && (!query.run || !query.revision)) {
-    return null;
-  }
+  // Report without a revision is the run's head, or its first save: nothing
+  // else sets `?revision`, so a Report that needed one could never make one.
+  // Committee serves only a named frozen revision.
+  if (section === "report" && !query.run) return null;
+  if (section === "committee" && (!query.run || !query.revision)) return null;
   return `/api/v1/cases/${encodeURIComponent(query.case)}/${section}${suffix}`;
 }
 

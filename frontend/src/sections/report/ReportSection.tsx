@@ -73,13 +73,15 @@ export function ReportSection({ document }: { document: ReportDocument; tab: str
     <div
       className="col"
       data-report-v1
-      data-revision={body.revision_id}
-      data-payload={body.payload_sha256}
+      data-revision={body.revision_id ?? undefined}
+      data-payload={body.payload_sha256 ?? undefined}
     >
       <section className="pnl">
         <header>
           <h2>{body.case_title}</h2>
-          <span className="cp">SAVED REPORT</span>
+          {/* A run nothing has been saved from is served its accepted
+              artifacts as a first save would carry them, and says so. */}
+          <span className="cp">{body.revision_id === null ? "NOT YET SAVED" : "SAVED REPORT"}</span>
         </header>
         <div className="pb">
           <dl className="kv">
@@ -88,9 +90,9 @@ export function ReportSection({ document }: { document: ReportDocument; tab: str
             <dt>Run</dt>
             <dd>{body.displayed_run_id}</dd>
             <dt>Revision</dt>
-            <dd>{body.revision_id}</dd>
+            <dd>{body.revision_id ?? "Not yet saved"}</dd>
             <dt>Payload</dt>
-            <dd>sha256:{body.payload_sha256}</dd>
+            <dd>{body.payload_sha256 === null ? "None" : `sha256:${body.payload_sha256}`}</dd>
           </dl>
         </div>
       </section>
