@@ -280,13 +280,29 @@ _ROOT_MENTION = re.compile(
 )
 _ROOT_LITERAL = re.compile(rb"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:md|txt)")
 
+# The one exception to "one-level-up links are not delivered" (§101): CP-DR's
+# own authority says to read CP-OS's research contract, which "governs field
+# names, hashes and run placement" -- the `table-id` tags and closed value sets
+# the vendor's `research.validate_dossier` refuses a dossier for. It is a
+# reference, not a script, so it is delivered to CP-DR under the literal
+# CP-DR's `SKILL.md` names it by, verified under CP-OS's manifest entry, and
+# only while that `SKILL.md` still names it. Declared per module rather than
+# derived from every `../<skill>/` mention because every other SKILL.md names
+# the same file for the consumer side of research, and delivering it there
+# would move each module's prompt and delivered digest for a route none of
+# them is on.
+CROSS_SKILL_AUTHORITY: dict[str, tuple[tuple[str, str], ...]] = {
+    "CP-DR": (("CP-OS", "references/CP_DR_RESEARCH_BRIEF_V1.md"),),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class DeliveredAuthority:
     """Exactly the verified files a module is handed, in delivery order.
 
     `SKILL.md` first, then the module's non-script manifest files by name, then
-    the root files `SKILL.md` names, each under its `../../` literal
+    any declared file of another skill its `SKILL.md` names (§101), then the
+    root files `SKILL.md` names, each under its `../../` literal
     (`docs/DECISIONS.md` §45.1).
     """
 
@@ -309,6 +325,21 @@ def _named_root_files(bundle: Bundle, skill: bytes) -> list[str]:
     return sorted(names)
 
 
+def _cross_skill_files(
+    bundle: Bundle, module_id: str, skill: bytes
+) -> list[tuple[str, bytes]]:
+    """The declared files of other skills this module's `SKILL.md` names, each
+    under `../<folder>/<path>` and verified under its owner's manifest entry.
+    `AUTHORITY_BYTES_MISMATCH` when the `SKILL.md` no longer names one."""
+    files: list[tuple[str, bytes]] = []
+    for owner, path in CROSS_SKILL_AUTHORITY.get(module_id, ()):
+        name = f"../{bundle.skill_of(owner)['folder_slug']}/{path}"
+        if f"`{name}`".encode() not in skill:
+            raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
+        files.append((name, verified_bytes(bundle, owner, path)))
+    return files
+
+
 def delivered_authority(bundle: Bundle, module_id: str) -> DeliveredAuthority:
     """The module's delivered set: names come only from the manifest and the
     verified `SKILL.md`, never from a caller, a source or a model."""
@@ -322,6 +353,7 @@ def delivered_authority(bundle: Bundle, module_id: str) -> DeliveredAuthority:
     )
     files = [("SKILL.md", skill)]
     files += [(name, verified_bytes(bundle, module_id, name)) for name in references]
+    files += _cross_skill_files(bundle, module_id, skill)
     files += [
         (ROOT_PREFIX + name, verified_root_bytes(bundle, name))
         for name in _named_root_files(bundle, skill)
