@@ -1080,9 +1080,10 @@ test.describe.serial("journey", () => {
       // surface shows is the order of `availability.py`'s queue, not a fact
       // about the withdrawal; asserting the exact code there would pin a list
       // order and go red on an unrelated reorder.
-      await expect(
-        other.page.locator("[data-work-controls] [data-stop-code]"),
-      ).toHaveAttribute("data-stop-code", "EVIDENCE_NOT_AVAILABLE");
+      await expect(other.page.locator("[data-work-controls] [data-stop-code]")).toHaveAttribute(
+        "data-stop-code",
+        "EVIDENCE_NOT_AVAILABLE",
+      );
       await expect(
         other.page.locator("[data-work-controls] [data-action='RETRY_RUN']"),
       ).toHaveAttribute("data-refusal", "EVIDENCE_NOT_AVAILABLE");
