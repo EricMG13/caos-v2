@@ -133,36 +133,23 @@ def cases_for_member(
     """
     # Without `members_limit` no member is read and every row's `members` is
     # `None`, "not served" -- never an empty tuple, which would say "none".
-    members = (
-        "NULL"
-        if members_limit is None
-        else "CASE WHEN m.standing = 'ADMIN' THEN (SELECT coalesce(json_agg("
+    rows = conn.execute(
+        "SELECT c.case_id, c.title, c.created_at, m.standing,"
+        " (SELECT count(*) FROM live_sources s WHERE s.case_id = c.case_id),"
+        " r.run_id, r.status, r.created_at, rr.profile_id, rr.selection_id,"
+        " CASE WHEN %s AND m.standing = 'ADMIN' THEN (SELECT coalesce(json_agg("
         "  json_build_array(x.user_id, x.standing) ORDER BY x.user_id), '[]')"
         "  FROM (SELECT o.user_id, o.standing FROM case_members o"
         "   WHERE o.case_id = c.case_id AND o.revoked_at IS NULL"
         "   ORDER BY o.user_id LIMIT %s) x) END"
-    )
-    params = (
-        (user_id, limit) if members_limit is None else (members_limit, user_id, limit)
-    )
-    # nosec B608 -- `members` is not caller-controlled text: it is one of
-    # exactly two literals selected by `members_limit is None`, a boolean
-    # branch, so the concatenation bandit flags as string-built SQL never
-    # carries external input. Every actual value (`user_id`, `limit`,
-    # `members_limit`) stays a `%s` placeholder bound through `params`.
-    rows = conn.execute(  # nosec B608
-        "SELECT c.case_id, c.title, c.created_at, m.standing,"
-        " (SELECT count(*) FROM live_sources s WHERE s.case_id = c.case_id),"
-        " r.run_id, r.status, r.created_at, rr.profile_id, rr.selection_id, "
-        + members  # nosec B608
-        + " FROM case_members m JOIN cases c ON c.case_id = m.case_id"
+        " FROM case_members m JOIN cases c ON c.case_id = m.case_id"
         " LEFT JOIN LATERAL (SELECT run_id, status, created_at FROM runs"
         "  WHERE runs.case_id = c.case_id"
         "  ORDER BY created_at DESC, run_id DESC LIMIT 1) r ON true"
         " LEFT JOIN run_routes rr ON rr.run_id = r.run_id"
         " WHERE m.user_id = %s AND m.revoked_at IS NULL"
         " ORDER BY c.created_at DESC, c.case_id DESC LIMIT %s",
-        params,
+        (members_limit is not None, members_limit or 0, user_id, limit),
     ).fetchall()
     return [
         CaseListing(
