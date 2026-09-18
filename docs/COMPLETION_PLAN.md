@@ -412,7 +412,14 @@ right outcome for a clause that described an unreachable state.
 
 **O19 — Quotes match whole tokens exactly [P2, Phase 10].** Letter-spaced
 headings, trailing punctuation and crop-edge glyph boxes refuse. Repair:
-declared normalisations versioned in the extractor identity.
+declared normalisations, tried only where the exact search finds nothing.
+**Closed for the first two by Task 10.5 (§78); the crop-edge box is not this
+item's and keeps its own ledger entry.** The repair clause first read
+"versioned in the extractor identity" and is corrected: the identity records how
+*tokens* were produced and these rules change no token, so a bump would force
+every source in every database to be re-admitted for a change that altered no
+extraction. The version is declared as `NORMALISATION_VERSION` beside the rules
+it names.
 
 ### Workbench
 
@@ -723,7 +730,12 @@ route enabled before its whole-route test; no key from a run.
 3. Successor runs (Task 10.3): the projected blocker cell; `supersedes_run_id`;
    both documents; the Restricted-clearance decision recorded.
 4. Readiness-joined refs, a stored anchor, the structured boundary (Task 10.4).
-5. Declared quote normalisations (Task 10.5).
+5. Declared quote normalisations (Task 10.5) — **landed 18 September 2026**
+   (§78): the quote's first and last word may differ from their token by
+   `EDGE_PUNCTUATION`, and a maximal run of single-character tokens on one line
+   of one region joins into the word a reader sees. Both only where the exact
+   search found nothing, so the widening is monotone and every stored record
+   re-verifies. Phase 10 is **not** exited by it: Task 10.1 is still held.
 
 **Exit checks**
 

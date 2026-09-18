@@ -24,8 +24,10 @@ single enclosing rectangle would cover text the quote does not contain.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from itertools import groupby
 from uuid import UUID
 
 from server.evidence.ingest import GROUP_WIDTH, block_ids_by_line
@@ -74,6 +76,73 @@ class _Token:
     y1: float
 
 
+# The declared quote normalisations (Task 10.5, `docs/DECISIONS.md` section 78).
+#
+# They are tried **only** after the exact search above has found nothing, which
+# is what makes them safe: the widening is monotone, so every quote that
+# anchored before this existed anchors to the same rectangles, every stored
+# record re-verifies, and a normalisation can never resolve an ambiguity --
+# an ambiguous exact match refuses before the normalised pass is reached.
+NORMALISATION_VERSION = "1"
+
+# What a quote may carry at its outer edges that the token does not, or the
+# other way round: a module writing a sentence ends it with a full stop and
+# wraps a quotation in quotation marks. Only the first and last word of a run
+# are stripped; an interior word must equal its token, or the quote names a
+# sentence the page does not carry.
+EDGE_PUNCTUATION = "\"'\u201c\u201d\u2018\u2019()[]{}.,;:!?"
+
+# Glyphs tracked past pdfminer's `word_margin` come back one token per letter
+# (section 44.5), so a heading tracked for display cannot be quoted as a word.
+# Joining them is scoped to the extractor whose rule split them: in plain text
+# a single-character token is a single-character word, and joining those would
+# anchor a concatenation the file does not contain.
+TRACKING_EXTRACTORS = frozenset({"caos.pdfminer"})
+
+
+def _stripped(word: str) -> str:
+    return word.strip(EDGE_PUNCTUATION)
+
+
+def _joined_tracking(tokens: list[_Token]) -> list[_Token]:
+    """Each maximal run of single-character tokens on one line of one region,
+    joined into the word a reader sees, with the union of their rectangles.
+
+    The grouping key *is* the rule, which is why it is written as one: tokens
+    are consecutive, single-character, and share a line and a region. Maximal
+    follows from `groupby`, and so does the bound that matters -- any token
+    that is not a single character has a different key, so it ends the run and
+    is carried through untouched. `Alpha` and `Beta` kerned apart are tokens of
+    five and four characters, so `AlphaBeta` -- text on no rendered page -- is
+    out of this rule's reach, which is the axis that separates a tracked word
+    from two words and what
+    `test_two_widely_spaced_words_still_refuse_their_concatenation` holds.
+
+    A run of one is not a join, so it is carried through as itself rather than
+    rebuilt: a single-character token is already the word it is.
+    """
+    joined: list[_Token] = []
+    for (single, _line, _region), group in groupby(
+        tokens, key=lambda token: (len(token.text) == 1, token.line_id, token.region_id)
+    ):
+        run = list(group)
+        if not single or len(run) == 1:
+            joined.extend(run)
+            continue
+        joined.append(
+            _Token(
+                text="".join(token.text for token in run),
+                region_id=run[0].region_id,
+                line_id=run[0].line_id,
+                x0=min(token.x0 for token in run),
+                y0=min(token.y0 for token in run),
+                x1=max(token.x1 for token in run),
+                y1=max(token.y1 for token in run),
+            )
+        )
+    return joined
+
+
 def anchor_citation(
     conn: StoreConnection, *, source_id: UUID, page: int, matched_text: str
 ) -> list[Rect]:
@@ -85,27 +154,54 @@ def anchor_citation(
     `CITATION_NOT_LOCATED` when the quote is not there and `CITATION_AMBIGUOUS`
     when it is there more than once. Neither refusal carries the quote.
     """
-    return _locate(_page_tokens(conn, source_id, page), page, matched_text)
+    _digest, tracking = _source_facts(conn, source_id)
+    tokens = _page_tokens(conn, source_id, page)
+    return _rectangles(_unique_run(tokens, matched_text, tracking=tracking), page)
 
 
-def _locate(tokens: list[_Token], page: int, matched_text: str) -> list[Rect]:
-    return _rectangles(_unique_run(tokens, matched_text), page)
-
-
-def _unique_run(tokens: list[_Token], matched_text: str) -> list[_Token]:
+def _unique_run(
+    tokens: list[_Token], matched_text: str, *, tracking: bool = False
+) -> list[_Token]:
     """The one search rule both entry points use: exactly once, never across a
-    region."""
+    region -- and, only where that finds nothing, once more under the declared
+    normalisations.
+
+    The order is the safety. An exact match that is ambiguous refuses here and
+    never reaches the second pass, so no normalisation can pick between two
+    places a quote might be; and an exact match that is unique returns before
+    the second pass exists, so every quote that anchored before these rules
+    were written anchors to the same rectangles.
+    """
     words = matched_text.split()
     if not words:
         raise Refusal(RefusalCode.CITATION_NOT_LOCATED)
-    matches = [
-        run for start in range(len(tokens)) if (run := _match_at(tokens, start, words))
-    ]
-    if not matches:
+    exact = _one_match(tokens, words, normalised=False)
+    if exact is not None:
+        return exact
+    candidates = _joined_tracking(tokens) if tracking else tokens
+    run = _one_match(candidates, words, normalised=True)
+    if run is None:
         raise Refusal(RefusalCode.CITATION_NOT_LOCATED)
+    return run
+
+
+def _one_match(
+    tokens: list[_Token], words: Sequence[str], *, normalised: bool
+) -> list[_Token] | None:
+    """The single run matching `words`, `None` for no run, a refusal for two.
+
+    Ambiguity is counted over the whole page in both passes (section 44.5):
+    highlighting one of two identical sentences asserts a precision the host
+    does not have, whichever rule found them.
+    """
+    matches = [
+        run
+        for start in range(len(tokens))
+        if (run := _match_at(tokens, start, words, normalised=normalised))
+    ]
     if len(matches) > 1:
         raise Refusal(RefusalCode.CITATION_AMBIGUOUS)
-    return matches[0]
+    return matches[0] if matches else None
 
 
 @dataclass(slots=True)
@@ -119,6 +215,7 @@ class TokenIndex:
 
     pages: dict[tuple[UUID, int], list[_Token]] = field(default_factory=dict)
     digests: dict[UUID, str] = field(default_factory=dict)
+    tracking: dict[UUID, bool] = field(default_factory=dict)
     line_blocks: dict[UUID, dict[int, tuple[str, ...]]] = field(default_factory=dict)
 
 
@@ -154,6 +251,7 @@ def verify_citations(
     if index is None:
         index = TokenIndex()
     pages, digests, ordinals = index.pages, index.digests, index.line_blocks
+    tracking = index.tracking
 
     anchored = []
     for citation in citations:
@@ -164,8 +262,12 @@ def verify_citations(
         if key not in pages:
             pages[key] = _page_tokens(conn, citation.source_id, citation.page)
         if citation.source_id not in digests:
-            digests[citation.source_id] = _document_sha256(conn, citation.source_id)
-        run = _unique_run(pages[key], citation.matched_text)
+            digests[citation.source_id], tracking[citation.source_id] = _source_facts(
+                conn, citation.source_id
+            )
+        run = _unique_run(
+            pages[key], citation.matched_text, tracking=tracking[citation.source_id]
+        )
         if citation.source_id not in ordinals:
             ordinals[citation.source_id] = _line_blocks(conn, citation.source_id)
         lines = ordinals[citation.source_id]
@@ -280,17 +382,34 @@ def _delivered(ids: tuple[str, ...] | None, blocks: frozenset[str]) -> bool:
     return all(block in blocks for block in ids)
 
 
-def _match_at(tokens: list[_Token], start: int, words: Sequence[str]) -> list[_Token]:
+def _match_at(
+    tokens: list[_Token],
+    start: int,
+    words: Sequence[str],
+    *,
+    normalised: bool = False,
+) -> list[_Token]:
     """The tokens matching `words` from `start`, or an empty list.
 
     A run may cross a line boundary only inside one region. Crossing regions is
     what assembles a phrase across a column gutter, and the phrase it assembles
     is on no page.
+
+    Under `normalised`, the first and last word may differ from their token by
+    `EDGE_PUNCTUATION` alone. The edges only: a word inside the run still has
+    to equal its token, because forgiving punctuation there would let one quote
+    stand for two different sentences of the page.
     """
     if start + len(words) > len(tokens):
         return []
     run = tokens[start : start + len(words)]
-    if any(token.text != word for token, word in zip(run, words, strict=True)):
+    last = len(words) - 1
+    for position, (token, word) in enumerate(zip(run, words, strict=True)):
+        if token.text == word:
+            continue
+        edge = normalised and position in (0, last)
+        if edge and _stripped(word) and _stripped(token.text) == _stripped(word):
+            continue
         return []
     if any(token.region_id != run[0].region_id for token in run):
         return []
@@ -314,11 +433,43 @@ def _rectangles(run: list[_Token], page: int) -> list[Rect]:
     ]
 
 
-def _document_sha256(conn: StoreConnection, source_id: UUID) -> str:
+def _source_facts(conn: StoreConnection, source_id: UUID) -> tuple[str, bool]:
+    """A live source's document digest, and whether its extractor is one whose
+    own rule can split a tracked word into letters.
+
+    Both in one round trip rather than two, because the digest read is already
+    paid for once per source and every section's `IO_BUDGET` is asserted with
+    `==`: a second query here would move four declared budgets for a fact the
+    first row could carry.
+
+    `source_extractions` is outer-joined, and a source with no row is not
+    tracking-normalised -- "no row means UNKNOWN: never attribute legacy
+    extraction to today's adapter" is that table's own rule, and the
+    fail-closed reading of it here is the exact search alone.
+    """
     row = conn.execute(
-        "SELECT document_sha256 FROM live_sources WHERE source_id = %s",
+        "SELECT live.document_sha256, extraction.extractor_identity"
+        " FROM live_sources AS live"
+        " LEFT JOIN source_extractions AS extraction USING (source_id)"
+        " WHERE live.source_id = %s",
         (source_id,),
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
-    return str(row[0])
+    return str(row[0]), _extractor_name(row[1]) in TRACKING_EXTRACTORS
+
+
+def _extractor_name(identity: str | None) -> str:
+    """The `name` of a stored extractor identity, or `""` for anything this
+    build cannot read as one.
+
+    Never raises and never carries the stored text out: an identity that will
+    not parse means the exact search alone, which is the same answer as no row.
+    """
+    if identity is None:
+        return ""
+    try:
+        name = json.loads(identity).get("name")
+    except (ValueError, AttributeError):
+        return ""
+    return name if isinstance(name, str) else ""

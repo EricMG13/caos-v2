@@ -651,6 +651,49 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 10.**
 
+- **A run of single-letter words is indistinguishable from a tracked word, so a
+  quote of their concatenation anchors over them.** Task 10.5's joining rule
+  (§78) turns each maximal run of single-character tokens on one line of one
+  region into one word, which is exactly right for a heading tracked past
+  `word_margin` and wrong for a table cell reading `a b c`, where the page
+  shows three words and the quote `abc` now anchors across them. The host
+  cannot tell the two apart from what it stores: pdfminer split both for the
+  same reason, and the gap that would separate them is typography the token
+  index does not record. Three things bound it, and none of them closes it. The
+  rule is reached **only** where the exact search found nothing, so no quote
+  that anchored before meets it. Ambiguity still refuses, counted over the whole
+  page in the normalised pass
+  (`test_a_normalised_match_found_twice_is_ambiguous`). And the rectangle is the
+  union of those letters' own boxes, so a reader who opens the citation sees the
+  highlight over the glyphs the quote names — which is what separates this from
+  the `AlphaBeta` case the tree refuses and must keep refusing, where the
+  rectangle would span two whole words
+  (`test_two_widely_spaced_words_still_refuse_their_concatenation`). So the
+  anchor is *disputable by a reader looking at it*, not invisible, which is the
+  weakest honest claim to make for it. *Upgrade:* a declared inter-glyph gap
+  recorded in the extractor identity, which is the fact that actually separates
+  tracking from spacing — owed the day a real document is mis-anchored this way,
+  and not before, because a threshold chosen without one is a number nobody can
+  check.
+- **The two normalisations answer a specification, not a caller.** Recorded
+  beside the entry above because they were taken together and the reason is the
+  same: `docs/COMPLETION_PLAN.md`'s Phase 10 exit check names a letter-spaced
+  heading and a quote ending in a full stop, and eleven authorized live runs
+  named neither — no `CITATION_NOT_LOCATED` from typography appears anywhere in
+  `qualification/*/RESULT.md`. The Phase 2 ledger entry that owed this work set
+  the opposite condition, "when a real module's real quotes say which
+  normalisations are needed", and it is struck above with that difference stated
+  rather than quietly satisfied. What makes taking them anyway defensible is
+  that both failures are demonstrable in the tree today — the extractor's own
+  suite pins the letter split — rather than hypothesised. What it costs is that
+  the *shape* of the rules is a guess about a caller: `EDGE_PUNCTUATION` is a
+  closed list somebody wrote down, and the day a module is refused for a
+  character outside it, that refusal is this entry.
+  `test_the_declared_normalisations_carry_a_version` is the one thing a reader
+  can point at to say which rules were in force. *Upgrade:* widen the list from
+  the refusal, the day a real run produces one; never from a reading of what a
+  module might write.
+
 - **A run that cannot afford its next node writes an attempt row before it is
   refused.** `_affordable` reads the run's own ceiling rather than what is left
   of it, which is what lets a resume finish (the reason is in `runtime.py`). The
@@ -917,12 +960,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   tokens; v1 rows keep their stored identity and bottom-left rectangles, and
   verify and re-anchor as recorded
   (`test_v1_pdf_extractions_still_verify_and_reanchor_as_recorded`) --
-  readmission is how a source gains v2 geometry (§44.4). (b) Slice 3.2c's
-  `word_margin` rule (§44.5) means glyphs spread
-  by `Tc` character tracking beyond `word_margin` -- a heading tracked for
-  display rather than readability -- split into single-letter tokens, so the
-  word cannot be quoted as itself; `test_tracked_glyphs_beyond_word_margin_split_into_letters`
-  pins it. *Upgrade:* quote normalisation, Phase 5.
+  readmission is how a source gains v2 geometry (§44.4). (b) ~~Slice 3.2c's
+  `word_margin` rule (§44.5) means glyphs spread by `Tc` character tracking
+  beyond `word_margin` -- a heading tracked for display rather than
+  readability -- split into single-letter tokens, so the word cannot be quoted
+  as itself.~~ Closed by Completion Phase 10 Task 10.5 (§78): each maximal run
+  of **single-character** tokens on one line of one region joins into the word
+  a reader sees, with the union of their rectangles, and only where the exact
+  search found nothing
+  (`test_a_letter_spaced_heading_anchors_as_the_word_a_reader_sees`). The
+  extractor still splits them, so
+  `test_tracked_glyphs_beyond_word_margin_split_into_letters` is untouched and
+  still says what it says; what changed is what may be quoted of them. *Upgrade:*
+  none for the heading; what the joining rule costs has an entry of its own
+  below.
 - **A word just inside a crop edge can be dropped.** `PdfExtractor`'s
   `drop-outside` crop policy (slice 3.2d) tests membership on pdfminer's full
   glyph box -- the font size, descent included -- not the baseline, so a word
@@ -2270,17 +2321,30 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   refused `HANDOFF_MALFORMED` for `“The preliminary` where the quote said
   `The preliminary`. It is the body check only -- `verify_citations` still
   anchors against the document's own tokens exactly, so nothing about what may
-  be cited moved. A module
+  be cited moved. ~~A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
-  `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
-  costs its claim under the retired claims adapter's per-claim refusal (§26,
-  closed with the claims executor in f-2b); on the canonical adapter one
-  unanchored quote refuses the whole handoff (§41.3) — an over-eager match
-  costs a rectangle over text the quote does not contain either way — but it
-  will refuse quotes a reader would call correct.
-  *Upgrade:* Phase 5, when a real module's real quotes say which normalisations
-  are needed; anything decided before then is guesswork about a caller that does
-  not exist.
+  `CITATION_NOT_LOCATED`.~~ Closed by Completion Phase 10 Task 10.5 (§78): the
+  quote's **first and last** word may differ from its token by
+  `EDGE_PUNCTUATION` alone, and only where the exact search found nothing
+  (`test_a_quote_ending_in_a_full_stop_anchors_to_the_words_it_names`). An
+  interior word must still equal its token
+  (`test_interior_punctuation_is_never_stripped`), because forgiving
+  punctuation there would let one quote stand for two different sentences of
+  the page. The direction of the old refusal was the fail-closed one — a
+  refused citation costs its claim under the retired claims adapter's per-claim
+  refusal (§26, closed with the claims executor in f-2b); on the canonical
+  adapter one unanchored quote refuses the whole handoff (§41.3) — and what the
+  widening buys back is that it no longer refuses quotes a reader would call
+  correct. **What did not happen is the condition this entry set.** It said the
+  normalisations were owed only "when a real module's real quotes say which are
+  needed", and no run has said so: eleven authorized live runs produced **no**
+  `CITATION_NOT_LOCATED` from either cause, and the one real typography refusal
+  in the record was the quotation-mark case, which `_QUOTATION` closed in the
+  body check and not here. What authorized these two and no others is
+  `docs/COMPLETION_PLAN.md`'s Phase 10 exit check naming exactly them. A reader
+  should know the rules answer a specification rather than a caller.
+  *Upgrade:* none for these two; the next normalisation waits for the run that
+  asks for it, and the entry below carries what the joining rule cost.
 - **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
   blob store inside the caller's transaction, and the blob store is a filesystem
   that transaction cannot roll back. The admission command (§51) extracts

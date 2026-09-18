@@ -3912,3 +3912,73 @@ Consequence recorded when the renderer moved: `renderer_sha256` is stored on a
 filing and compared against the renderer of the day a package is built, so a
 revision filed before a renderer change cannot be packaged verifiably again.
 Unreachable while no route serves a package, and owned by its own ledger entry.
+
+
+## 2026-09-18 §78 — Two declared quote normalisations, tried only after the exact search finds nothing
+
+Completion Phase 10 Task 10.5. `docs/COMPLETION_PLAN.md`'s Phase 10 exit check
+asks that "a letter-spaced heading and a quote ending in a full stop anchor to
+the rectangle a reader sees". Both are refused today, and both for a reason the
+host created rather than one the document did: a quote is split on whitespace
+and every word must equal a token, so a module that ends its sentence with a
+full stop has quoted a word the page does not carry; and pdfminer inserts a
+virtual word break between glyphs tracked past `word_margin` (§44.5), so a
+heading tracked for display comes back one token per letter and the word cannot
+be quoted as itself.
+
+**The order between the two searches is the whole of the safety, and it is what
+makes this a widening rather than a change.** The exact search runs first and is
+untouched. A normalised search runs only where the exact one found *nothing*, so:
+
+- every quote that anchored before this existed anchors to the same rectangles,
+  and every stored record re-verifies — the proof, the deliverable and the
+  runtime all re-anchor and none of them moves;
+- a normalisation can never resolve an ambiguity, because an ambiguous exact
+  match refuses before the second pass is reached;
+- ambiguity is counted over the whole page in the normalised pass too, on the
+  same rule, so two places a normalised quote could be is a refusal and not a
+  choice.
+
+**The two rules.** `EDGE_PUNCTUATION` may differ between the quote's *first and
+last* word and its token — a module writing prose ends a sentence with a full
+stop and wraps a quotation in quotation marks, which is the same trade the
+handoff body check already took for `_QUOTATION`. An interior word must still
+equal its token: forgiving punctuation there would let one quote stand for two
+different sentences of the page. `_joined_tracking` joins each maximal run of
+**single-character** tokens on one line of one region into the word a reader
+sees, with the union of their rectangles.
+
+**Why single characters is the axis and not a convenience.**
+`test_widely_spaced_glyphs_refuse_the_joined_quote` holds that `Alpha` and
+`Beta` kerned apart must not answer a quote of `AlphaBeta`, because that text is
+on no rendered page. Those are tokens of five and four characters, so the
+joining rule cannot reach them, and
+`test_two_widely_spaced_words_still_refuse_their_concatenation` pins that in the
+new rule's own file rather than trusting the old test to notice.
+
+**Scoped to the extractor whose rule split the glyphs.** `TRACKING_EXTRACTORS`
+is `caos.pdfminer` alone. In a plain-text document a single-character token is a
+single-character *word*, and joining those would anchor a concatenation the file
+does not contain. The extractor is read from `source_extractions` in the same
+round trip as the document digest, so no section's declared `IO_BUDGET` moves;
+a source with no extraction row, or an identity this build cannot parse, gets
+the exact search alone — that table's own "no row means UNKNOWN" rule, read
+fail-closed.
+
+**Not versioned in the extractor identity, which is what O19 proposed.** The
+identity records how *tokens* were produced, and these rules change no token: a
+bump would force every source in every database to be re-admitted for a change
+that did not alter a single extraction, and `apply_schema`-style verification
+would then refuse rows that are entirely correct. The version is declared as
+`NORMALISATION_VERSION` beside the rules it names, which is the thing a reader
+asking "which rule anchored this quote" can actually be pointed at. O19's
+repair clause is corrected rather than followed.
+
+**What it does not claim.** Eleven authorized live runs produced no
+`CITATION_NOT_LOCATED` from either cause — the one real typography refusal in
+the record was the quotation-mark case, which `_QUOTATION` closed in a different
+check. So these two rules are the plan's named cases and not a caller's measured
+demand, which is the condition the Phase 2 ledger entry set. That is recorded in
+the ledger rather than smoothed over, together with the residual the joining
+rule buys: a genuine sequence of single-letter words is indistinguishable from
+a tracked word, and a quote of their concatenation anchors over them.
