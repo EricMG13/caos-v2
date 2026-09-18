@@ -137,20 +137,19 @@ def module_execution(
             conn, bundle, blobs, completions, route, run_id, lease
         )
 
-        def per_node() -> tuple[StoreConnection, Provider]:
-            assert connect_store is not None  # only reachable when it is set
-            node_conn = connect_store()
-            return node_conn, ModuleProvider(
-                node_conn, bundle, blobs, completions, route, run_id, lease
-            )
+        per_node: Callable[[], tuple[StoreConnection, Provider]] | None = None
+        if connect_store is not None:
+            connect = connect_store
 
-        return Execution(
-            provider,
-            price,
-            bundle,
-            lease=lease,
-            per_node=per_node if connect_store else None,
-        )
+            def per_node_conn() -> tuple[StoreConnection, Provider]:
+                node_conn = connect()
+                return node_conn, ModuleProvider(
+                    node_conn, bundle, blobs, completions, route, run_id, lease
+                )
+
+            per_node = per_node_conn
+
+        return Execution(provider, price, bundle, lease=lease, per_node=per_node)
 
     return execution_for
 
