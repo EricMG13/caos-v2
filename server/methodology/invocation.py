@@ -904,10 +904,29 @@ def _member_identity(stored: str) -> object:
         raise Refusal(RefusalCode.SOURCE_IDENTITY_INVALID) from None
 
 
-def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
-    """CP-0's verified source provenance, deliberately outside evidence."""
+# §98: said once, beside the metadata, when any source is shown as a page map.
+_PAGE_MAP_NOTE = (
+    "A source whose entry carries evidence_delivery PAGE_MAP is larger than "
+    "the host shows this gate whole: its EVIDENCE is the first "
+    "leading_lines_per_page lines of each of its pages (lines_shown of lines), "
+    "and no other line of it is in your evidence or may be cited. The "
+    "authority's Step I rules 5 and 8 say how to attach it by page.\n"
+)
+
+
+def _source_preparation_section(
+    source_set: SourceSet | None,
+    tag: str,
+    page_maps: Mapping[UUID, Mapping[str, int]] | None = None,
+) -> str:
+    """CP-0's verified source provenance, deliberately outside evidence.
+
+    A source shown as its page map (§98) says so beside its identity, and one
+    note says what the map is; a pin with none renders exactly as before.
+    """
     if source_set is None:
         return ""
+    maps = page_maps or {}
     metadata = {
         "source_set_version": source_set.version,
         "source_set_fingerprint": source_set.fingerprint,
@@ -930,6 +949,11 @@ def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
                 "output_sha256": member.output_sha256,
                 "extraction_sha256": member.extraction_sha256,
             }
+            | (
+                {"evidence_delivery": "PAGE_MAP", **maps[member.source_id]}
+                if member.source_id in maps
+                else {}
+            )
             for member in source_set.members
         ],
     }
@@ -941,6 +965,7 @@ def _source_preparation_section(source_set: SourceSet | None, tag: str) -> str:
         "this call. This does not attest that CP-0's triage, parsing, fidelity, "
         "representation or package workflow has run: author and validate P1-P8 "
         "yourself. Cite only the EVIDENCE section for source-content claims.\n"
+        + (_PAGE_MAP_NOTE if maps else "")
         + body
         + f"\n--- END HOST SOURCE PREPARATION {tag} ---\n"
     )
@@ -977,6 +1002,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     upstream_citations: Mapping[str, tuple[AnchoredCitation, ...]],
     route: ResolvedRoute,
     source_set: SourceSet | None = None,
+    page_maps: Mapping[UUID, Mapping[str, int]] | None = None,
 ) -> str:
     """The task, the host-owned front matter, the host's own steps, every
     delivered authority file, upstream, its citation register, evidence.
@@ -1040,7 +1066,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _authority_sections(authority, "")
         + _upstream_section(upstream, uses, owned)
         + _citation_register(upstream, upstream_citations)
-        + _source_preparation_section(source_set, "")
+        + _source_preparation_section(source_set, "", page_maps)
         + evidence
     )
     # Host-owned values join the derivation: none of them can pre-compute a tag.
@@ -1066,7 +1092,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _authority_sections(authority, tag)
         + _upstream_section(upstream, uses, owned, tag)
         + _citation_register(upstream, upstream_citations, tag)
-        + _source_preparation_section(source_set, tag)
+        + _source_preparation_section(source_set, tag, page_maps)
         + f"\n--- EVIDENCE {tag} ---\n"
         + evidence
         + f"\n--- END EVIDENCE {tag} ---\n"

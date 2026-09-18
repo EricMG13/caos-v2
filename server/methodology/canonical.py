@@ -73,6 +73,7 @@ from server.methodology.selection import (
     Selection,
     demand_cells,
     demand_items,
+    gate_view,
     select_sources,
 )
 from server.methodology.vendor import (
@@ -446,19 +447,27 @@ def _selected(
     the host's CP-CF, every legacy-header T8 -- costs no extra round trip.
     """
     if assignment.module_id == GATE_MODULE:
-        return delivered, Selection(Basis.WHOLE_NO_DEMAND, None)
+        # §98: the whole pin, a source past the gate bound as its page map.
+        shown, maps = gate_view(delivered)
+        basis = Basis.PAGE_MAP if maps else Basis.WHOLE_NO_DEMAND
+        return shown, Selection(basis, None, page_maps=maps)
     gate = next(data for ref, data in upstream if ref.module_id == GATE_MODULE)
     cell = demand_cells(_contract(bundle).navigation, catalog(bundle), gate).get(
         assignment.module_id
     )
     if cell is None or not demand_items(cell):
         return delivered, Selection(Basis.WHOLE_NO_DEMAND, None)
+    last_pages: dict[UUID, int] = {}
+    for item in delivered:
+        last_pages[item.source_id] = max(item.page, last_pages.get(item.source_id, 0))
     selection = select_sources(
-        _pinned_source_set(conn, assignment.run_id).members, cell
+        _pinned_source_set(conn, assignment.run_id).members,
+        cell,
+        last_pages=last_pages,
     )
-    if selection.source_ids is None:
+    if selection.whole:
         return delivered, selection
-    return [d for d in delivered if d.source_id in selection.source_ids], selection
+    return [d for d in delivered if selection.delivers(d.source_id, d.page)], selection
 
 
 def _assert_originals(blobs: BlobStore, source_set: SourceSet) -> None:
@@ -540,6 +549,7 @@ def _prompt(
         upstream_citations=context.citations,
         route=assignment.route,
         source_set=context.source_set,
+        page_maps=context.selection.page_maps,
     )
 
 

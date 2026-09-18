@@ -324,7 +324,8 @@ class CanonicalCompletions:
     # consumer's own quotes of another pinned source, `(source_id, quote)`,
     # cited beside `quotes` and written into the body so they are quoted.
     source_files: dict[str, str] = field(default_factory=dict)
-    cited: tuple[tuple[UUID, str], ...] = ()
+    # A third element is the page cited (§98); without one it is page 1.
+    cited: tuple[tuple[UUID, str] | tuple[UUID, str, int], ...] = ()
     mutate: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     content: str | None = None
     during: Callable[[], None] | None = None
@@ -359,7 +360,7 @@ class CanonicalCompletions:
             body_note=" ".join(
                 (
                     f"{QUOTE} was recorded. {UNANCHORED} here.",
-                    *(q for _, q in self.cited),
+                    *(c[1] for c in self.cited),
                 )
             ),
         )
@@ -368,8 +369,12 @@ class CanonicalCompletions:
             {"source_id": str(self.source_id), "page": 1, "matched_text": quote}
             for quote in self.quotes
         ] + [
-            {"source_id": str(source), "page": 1, "matched_text": quote}
-            for source, quote in self.cited
+            {
+                "source_id": str(c[0]),
+                "page": c[2] if len(c) > 2 else 1,
+                "matched_text": c[1],
+            }
+            for c in self.cited
         ]
         self.bodies.append(wire(markdown, citations))
         return Completion(self.bodies[-1], self.charge, self.generation_id)

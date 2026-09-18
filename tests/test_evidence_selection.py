@@ -10,6 +10,7 @@ any attempt. The rule is pure over pinned inputs, so every reader selects alike.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,20 +23,25 @@ from test_canonical_execution import (
     harness,
     route,
 )
+from test_delivered_authority import MEASURED
 from test_execution_freshness import _counts, _Harness
 from test_loop_charges import REPORTED
 
+from server.boundary_text import BoundaryText
 from server.methodology import canonical
 from server.methodology.canonical import check_context
 from server.methodology.executor import Assignment
 from server.methodology.invocation import prospective_identity
 from server.methodology.selection import (
+    GATE_SOURCE_BYTES,
     Basis,
     Selection,
     demand_cells,
     demand_items,
+    gate_view,
     select_sources,
 )
+from server.provider import MAX_REQUEST_BYTES
 from server.refusals import Refusal, RefusalCode
 from server.store.source_sets import SourceSetMember
 
@@ -295,3 +301,136 @@ def test_the_gate_itself_is_always_handed_the_whole_pin(harness: _Harness) -> No
         harness.source_id,
         harness.witness_id,
     }
+
+
+# --- §98: pages beside a filename, and the gate's page map ---------------------
+
+
+def test_a_page_range_narrows_a_named_member_to_those_pages() -> None:
+    """Step I rule 5's form: `<filename> pages <first>-<last>` or `page <n>`,
+    one range per item; the filename again for a second range."""
+    a, b = _member("BA_FY2025_10K.txt"), _member("other.txt")
+    last = {a.source_id: 108, b.source_id: 3}
+    found = select_sources((a, b), "BA_FY2025_10K.txt pages 13-31", last_pages=last)
+    assert found.basis is Basis.NAMED and found.source_ids == frozenset({a.source_id})
+    assert found.pages == {a.source_id: frozenset(range(13, 32))}
+    assert found.delivers(a.source_id, 13) and found.delivers(a.source_id, 31)
+    assert not found.delivers(a.source_id, 12)
+    assert not found.delivers(b.source_id, 1)
+    two = select_sources(
+        (a, b),
+        "`BA_FY2025_10K.txt` (pages 2"
+        + chr(0x2013)
+        + "3); BA_FY2025_10K.txt page 40; other.txt",
+        last_pages=last,
+    )
+    assert two.source_ids == frozenset({a.source_id, b.source_id})
+    assert two.pages == {a.source_id: frozenset({2, 3, 40})}
+    assert two.delivers(b.source_id, 3) and not two.whole
+
+
+def test_a_member_named_whole_and_by_page_is_delivered_whole() -> None:
+    a = _member("a.txt")
+    found = select_sources((a,), "a.txt pages 1-2; a.txt", last_pages={a.source_id: 9})
+    assert found.pages == {} and found.delivers(a.source_id, 9)
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "a.txt pages 3-2",  # backwards
+        "a.txt pages 0-2",  # no page zero
+        "a.txt pages 4-12",  # past the source's last page
+        "a.txt page 11",
+        "a.txt pages 1-9999999999",  # past any bound the form admits
+    ],
+)
+def test_a_page_range_the_source_cannot_carry_is_refused(cell: str) -> None:
+    """Narrowing to the pages that exist would decide what the gate did not."""
+    a = _member("a.txt")
+    with pytest.raises(Refusal) as refused:
+        select_sources((a,), cell, last_pages={a.source_id: 10})
+    assert refused.value.code is RefusalCode.EVIDENCE_DEMAND_UNRESOLVED
+    assert refused.value.__context__ is None and refused.value.__cause__ is None
+
+
+def test_a_page_range_is_refused_when_the_sources_pages_are_not_known() -> None:
+    a = _member("a.txt")
+    with pytest.raises(Refusal) as refused:
+        select_sources((a,), "a.txt pages 1-2")
+    assert refused.value.code is RefusalCode.EVIDENCE_DEMAND_UNRESOLVED
+
+
+def test_a_filename_that_itself_ends_in_a_page_phrase_is_matched_whole_first() -> None:
+    odd, plain = _member("minutes page 3"), _member("minutes")
+    found = select_sources((odd, plain), "minutes page 3", last_pages={})
+    assert found == Selection(Basis.NAMED, frozenset({odd.source_id}))
+
+
+def test_a_page_range_naming_nothing_pinned_counts_as_unmapped() -> None:
+    a = _member("a.txt")
+    last = {a.source_id: 5}
+    assert select_sources((a,), "b.txt pages 1-2", last_pages=last).whole
+    with pytest.raises(Refusal):
+        select_sources((a,), "a.txt; b.txt pages 1-2", last_pages=last)
+
+
+@dataclass(frozen=True, slots=True)
+class _Block:
+    """The fields `gate_view` reads, as `Delivery` carries them."""
+
+    source_id: UUID
+    block_id: str
+    page: int
+    text: BoundaryText
+
+
+def _paged(source_id: UUID, pages: int, per_page: int, width: int) -> list[_Block]:
+    return [
+        _Block(
+            source_id,
+            f"b{n:06d}",
+            n // per_page + 1,
+            BoundaryText.of(f"{n:0{width}d}"),
+        )
+        for n in range(pages * per_page)
+    ]
+
+
+def test_the_gate_is_shown_a_source_within_the_bound_whole() -> None:
+    small = _paged(uuid4(), 3, 4, 10)
+    shown, maps = gate_view(small, budget=120)
+    assert shown == small and maps == {}
+
+
+def test_a_source_past_the_bound_is_shown_as_the_leading_lines_of_every_page() -> None:
+    """The largest uniform number of leading blocks per page that fits the
+    budget, every page present, each block whole, the order kept."""
+    big, small = uuid4(), uuid4()
+    blocks = _paged(big, 5, 6, 10) + _paged(small, 1, 2, 10)
+    shown, maps = gate_view(blocks, budget=110)
+    # 5 pages x 2 blocks x 10 bytes = 100 fits; 3 per page = 150 does not.
+    assert maps == {
+        big: {"leading_lines_per_page": 2, "pages": 5, "lines_shown": 10, "lines": 30}
+    }
+    assert [b.block_id for b in shown if b.source_id == big] == [
+        f"b{n:06d}" for p in range(5) for n in (p * 6, p * 6 + 1)
+    ]
+    assert [b for b in shown if b.source_id == small] == blocks[30:]
+    assert shown == [b for b in blocks if b in shown]
+
+
+def test_a_source_whose_first_lines_alone_pass_the_bound_is_refused() -> None:
+    """Nothing is cut: a page map that cannot hold one whole line a page is
+    the ceiling's refusal, never a trimmed line."""
+    with pytest.raises(Refusal) as refused:
+        gate_view(_paged(uuid4(), 5, 2, 30), budget=100)
+    assert refused.value.code is RefusalCode.CONTEXT_OVER_CEILING
+    assert refused.value.__context__ is None and refused.value.__cause__ is None
+
+
+def test_the_gate_bound_leaves_two_mapped_sources_and_the_authority_room() -> None:
+    """Derived, not chosen: two sources at the bound beside CP-0's measured
+    delivered authority stay under the whole request ceiling."""
+    assert GATE_SOURCE_BYTES == 3 * MAX_REQUEST_BYTES // 8
+    assert 2 * GATE_SOURCE_BYTES + MEASURED["CP-0"] < MAX_REQUEST_BYTES
