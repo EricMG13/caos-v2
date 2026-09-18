@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router";
 import { ReportSection } from "@/sections/report/ReportSection";
 import { parseReportDocument, type ActionView, type ReportDocument } from "@/wire/v1";
 
@@ -146,6 +146,77 @@ describe("Report v1", () => {
       ],
     });
     expect(await screen.findByText(/00000000-0000-4000-8000-0000000000c4/)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  test("test_a_run_with_no_revision_offers_the_save_that_makes_its_first", async () => {
+    // The document a Report without `?revision` is served for a run nothing
+    // has been saved from: no revision, no digest, and only the save offered.
+    const saved = report();
+    const missing = {
+      code: "DELIVERABLE_NOT_FOUND",
+      clears: "Name a saved revision of this case.",
+    };
+    const document = parseReportDocument({
+      ...saved,
+      chrome: {
+        ...saved.chrome,
+        actions: [
+          { action: "SAVE_REVISION", refusal: null },
+          { action: "SIGN_OPINION", refusal: missing },
+          { action: "FREEZE_DELIVERABLE", refusal: missing },
+          { action: "FILE_DELIVERABLE", refusal: missing },
+        ],
+      },
+      body: { ...saved.body, revision_id: null, payload_sha256: null, narrative: [] },
+      observed_empty: true,
+    });
+    const first = "00000000-0000-4000-8000-0000000000c5";
+    const fetchSpy = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        {
+          case_id: document.body.case_id,
+          run_id: document.body.displayed_run_id,
+          revision_id: first,
+          payload_sha256: "c".repeat(64),
+        },
+        201,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    function Where() {
+      return <output data-where>{useLocation().search}</output>;
+    }
+    const { container } = render(
+      <MemoryRouter initialEntries={[`/report/?run=${document.body.displayed_run_id}`]}>
+        <ReportSection document={document} tab={null} />
+        <Where />
+      </MemoryRouter>,
+    );
+
+    const root = container.querySelector("[data-report-v1]")!;
+    expect(root).not.toHaveAttribute("data-revision");
+    expect(root).toHaveTextContent("Not yet saved");
+    for (const name of ["SIGN_OPINION", "FREEZE_DELIVERABLE", "FILE_DELIVERABLE"]) {
+      expect(container.querySelector(`button[data-action='${name}']`)).toHaveAttribute(
+        "data-refusal",
+        "DELIVERABLE_NOT_FOUND",
+      );
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Sign opinion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save revision" }));
+    await settle();
+
+    // Only the save was sent, naming no head because the run has none.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchSpy.mock.calls[0]![1].body)).toEqual({
+      expected_revision_id: null,
+      narrative: [],
+    });
+    // Its success is what first sets `?revision`.
+    await waitFor(() =>
+      expect(container.querySelector("[data-where]")).toHaveTextContent(`revision=${first}`),
+    );
     vi.unstubAllGlobals();
   });
 

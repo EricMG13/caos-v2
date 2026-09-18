@@ -220,8 +220,10 @@ describe("the workspace under its event tail", () => {
     expect(sent).toHaveLength(5);
   });
 
-  test("Report requires a direct exact selection and refreshes for saved-source or filing changes", async () => {
-    await mount("report", `/report/?case=${CASE}&run=${RUN}`);
+  test("Report requires a case and run and refreshes for saved-source or filing changes", async () => {
+    // A revision is optional -- absent, the run's head or its first save is
+    // served -- but a Report names no run's deliverable without the run.
+    await mount("report", `/report/?case=${CASE}`);
     expect(sent).toHaveLength(0);
     await mount("report", `/report/?case=${CASE}&run=${RUN}&revision=${REVISION}`);
     expect(sent[0]!.url).toBe(`/api/v1/cases/${CASE}/report?run=${RUN}&revision=${REVISION}`);

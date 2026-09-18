@@ -342,6 +342,13 @@ def test_revision_authentication_and_syntax_precede_connection(
         _path(lite, "bad", section),
         _path(lite, uuid4(), section).replace(str(lite.run_id), "bad"),
         _path(lite, uuid4(), section).replace(str(lite.case_id), "bad"),
-        f"/api/v1/cases/{lite.case_id}/{section}?run={lite.run_id}",
+        # Report without a revision reads the run's head or offers its first
+        # save (`tests/test_governed_write_routes.py`); Committee serves only a
+        # named frozen revision, so it still refuses before the store.
+        *(
+            [f"/api/v1/cases/{lite.case_id}/{section}?run={lite.run_id}"]
+            if section == "committee"
+            else []
+        ),
     ):
         assert client.get(path, headers=_as(lite.approver)).status_code == 404

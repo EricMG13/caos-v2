@@ -5,7 +5,9 @@
 // Sign and freeze sit on Report rather than Committee because `read_committee`
 // refuses a revision that is not frozen, so the Committee section can never
 // offer the two acts that would make it one. Save is there for the same
-// reason. Filing acts on an already-frozen revision, which is exactly what
+// reason -- and it is the one act a run with no revision is offered, so the
+// Report served without `?revision` is where a case's first revision is made
+// and where that address is first set. Filing acts on an already-frozen revision, which is exactly what
 // Committee serves; it sits here to keep the chain on one surface, not
 // because Committee could not offer it.
 //
@@ -71,11 +73,19 @@ async function refetchReport(
   }
 }
 
+/** The saved revision the three revision-scoped acts name: its id and the
+    digest on screen. Null on a run nothing has been saved from, where the
+    document refuses all three `DELIVERABLE_NOT_FOUND` and nothing is sent. */
+interface Saved {
+  id: string;
+  digest: string;
+}
+
 function FilingAct({
   name,
   action,
   label,
-  request,
+  saved,
   send,
   onDone,
 }: {
@@ -85,14 +95,9 @@ function FilingAct({
   name: string;
   action: ActionView | undefined;
   label: string;
-  /** What this press asks for, which is what the idempotency key is derived
-      from. The label would key two presses of the same button alike even when
-      the revision or the digest beneath them had moved; `_replay` refuses the
-      mismatch, so keying on the label fails closed rather than wrongly -- but
-      it fails where this asks the right question instead. */
-  request: unknown;
-  send: (intent: Intent) => Promise<CommandResult<{ payload_sha256: string }>>;
-  onDone: () => void;
+  saved: Saved | null;
+  send: (saved: Saved, intent: Intent) => Promise<CommandResult<{ payload_sha256: string }>>;
+  onDone: (saved: Saved) => void;
 }) {
   const { pending, result, run } = useCommand<{ payload_sha256: string }>();
   const refusal = action?.refusal ?? null;
@@ -104,9 +109,20 @@ function FilingAct({
         onClick={
           action
             ? () => {
-                if (refusal || pending) return;
-                void run(request, send).then((outcome) => {
-                  if (outcome.kind === "ok") onDone();
+                if (refusal || pending || !saved) return;
+                // What this press asks for is what the idempotency key is
+                // derived from. The label would key two presses of the same
+                // button alike even when the revision or the digest beneath
+                // them had moved; `_replay` refuses the mismatch, so keying on
+                // the label fails closed rather than wrongly -- but it fails
+                // where this asks the right question instead.
+                const request = {
+                  action: name,
+                  revision_id: saved.id,
+                  payload_sha256: saved.digest,
+                };
+                void run(request, (intent) => send(saved, intent)).then((outcome) => {
+                  if (outcome.kind === "ok") onDone(saved);
                 });
               }
             : undefined
@@ -136,17 +152,22 @@ export function FilingControls({
   const [refreshFailed, setRefreshFailed] = useState(false);
   const save = useCommand<{ revision_id: string }>();
   const actionOf = (name: string) => document.chrome.actions.find((a) => a.action === name);
-  const digest = body.payload_sha256;
+  const saved: Saved | null =
+    body.revision_id !== null && body.payload_sha256 !== null
+      ? { id: body.revision_id, digest: body.payload_sha256 }
+      : null;
 
-  async function reread() {
+  async function reread(acted: Saved) {
     setRefreshFailed(false);
-    const next = await refetchReport(body.case_id, body.displayed_run_id, body.revision_id);
+    const next = await refetchReport(body.case_id, body.displayed_run_id, acted.id);
     if (next) onRefreshed(next);
     else setRefreshFailed(true);
   }
 
   const saveAction = actionOf("SAVE_REVISION");
   const narrative = paragraphs(draft);
+  // The served revision is the head this draft was composed against; on a run
+  // with none it is null, which is what a first save names.
   const request = { expected_revision_id: body.revision_id, narrative };
 
   return (
@@ -212,39 +233,27 @@ export function FilingControls({
         </div>
         <FilingAct
           name="SIGN_OPINION"
-          request={{
-            action: "SIGN_OPINION",
-            revision_id: body.revision_id,
-            payload_sha256: digest,
-          }}
+          saved={saved}
           action={actionOf("SIGN_OPINION")}
           label="Sign opinion"
-          send={(intent) => signOpinion(body.case_id, body.revision_id, digest, intent)}
-          onDone={() => void reread()}
+          send={(on, intent) => signOpinion(body.case_id, on.id, on.digest, intent)}
+          onDone={(on) => void reread(on)}
         />
         <FilingAct
           name="FREEZE_DELIVERABLE"
-          request={{
-            action: "FREEZE_DELIVERABLE",
-            revision_id: body.revision_id,
-            payload_sha256: digest,
-          }}
+          saved={saved}
           action={actionOf("FREEZE_DELIVERABLE")}
           label="Freeze deliverable"
-          send={(intent) => freezeDeliverable(body.case_id, body.revision_id, digest, intent)}
-          onDone={() => void reread()}
+          send={(on, intent) => freezeDeliverable(body.case_id, on.id, on.digest, intent)}
+          onDone={(on) => void reread(on)}
         />
         <FilingAct
           name="FILE_DELIVERABLE"
-          request={{
-            action: "FILE_DELIVERABLE",
-            revision_id: body.revision_id,
-            payload_sha256: digest,
-          }}
+          saved={saved}
           action={actionOf("FILE_DELIVERABLE")}
           label="File deliverable"
-          send={(intent) => fileDeliverable(body.case_id, body.revision_id, digest, intent)}
-          onDone={() => void reread()}
+          send={(on, intent) => fileDeliverable(body.case_id, on.id, on.digest, intent)}
+          onDone={(on) => void reread(on)}
         />
         {refreshFailed ? (
           <p className="note warn" role="alert" data-filing-refresh-failed>
