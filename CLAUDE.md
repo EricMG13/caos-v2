@@ -181,25 +181,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 13.**
 
-- **Every green smoke run logs an unhandled traceback, and it is the test
-  edge's rather than the product's.** Measured on two full three-engine runs:
-  exactly **one** `ERROR: Exception in ASGI application` and **three**
-  `httpx.RemoteProtocolError: peer closed connection without sending complete
-  message body` per engine, on runs that exit 0 with 22 tests passing. The
-  stack is `httpx`/`httpcore` -- the *client* side -- so it is
-  `tests/journey/edge.py` proxying an SSE tail to the API when the browser
-  navigates away from the page holding it, which is an ordinary thing for a
-  browser to do and which the API answers correctly (its own log line is the
-  `INFO` above it). Nothing in `server/` raises here. What it costs is not
-  correctness but attention: a traceback printed on every passing run teaches a
-  reader to scroll past tracebacks, and the next one will be real. It is also
-  why this phase had to diagnose the same exception three separate times before
-  concluding it was benign -- once per engine, against a stream-cap change that
-  could plausibly have caused it. *Upgrade:* the test edge catches the
-  disconnect its own proxy loop is certain to meet and logs one line naming it,
-  so a traceback in a smoke log goes back to meaning something. It is a change
-  to the journey's edge and not to the product, which is why it is an entry
-  rather than a task.
+- ~~**Every green smoke run logs an unhandled traceback, and it is the test
+  edge's rather than the product's.**~~ Closed by the upgrade named:
+  `tests/journey/edge.py` catches the disconnect its own proxy loop meets on an
+  event stream -- `httpx.RemoteProtocolError` from the upstream, Starlette's
+  `ClientDisconnect` from the browser -- and logs one line naming its type and
+  path, never its text; a JSON body the upstream cuts still raises
+  (`tests/test_journey_tooling.py::test_an_event_stream_the_upstream_cuts_ends_with_one_line_not_a_traceback`).
+  Measured on the three-engine smoke run at `7fe44a8`: **no** `Exception in
+  ASGI application` and no traceback in the log, three one-line edge notices, 22
+  tests passing on each engine. A traceback in a smoke log means something again.
+
+- **The journey runner does not refuse an edge port already taken.**
+  `tests/journey/run.py` starts the test edge on `127.0.0.1:18080` without first
+  asking whether something holds it. An orphaned edge from a stopped run keeps
+  the port and its old `CAOS_EDGE_TOKEN`, the new stack's browser reaches the
+  orphan, and every engine fails its first test on `EDGE_NOT_TRUSTED` -- a
+  failure that names a trust fault rather than a leftover process. It happened
+  once on 18 September 2026, after a smoke run was stopped mid-flight, and cost
+  one full three-engine run to diagnose. *Upgrade:* refuse before building, as
+  the mount check does, when the edge port is already bound, naming the port and
+  the holder.
 
 - **The image gate cannot run on a machine whose Trivy has moved off the pin.**
   `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
