@@ -244,8 +244,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   reads back through `current_verdict`
   (`tests/test_release_pack.py::test_no_pathway_is_qualified_without_a_signed_verdict_row`,
   `test_a_verdict_that_is_not_current_for_this_build_qualifies_nothing`). No
-  such row exists in any store, so the three enabled pathways read
-  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the fifteen
+  such row exists in any store, so the four enabled pathways read
+  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the fourteen
   others read `DISABLED` -- which is the exit check met by saying so, not by
   qualifying anything. Two limits of the pack itself: its inventory is test
   *definitions*, not pytest's collection, so a parametrised test is one row and
@@ -1251,8 +1251,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
   `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
   modules; Phase 9 Task 9.1 adds LITE portfolio decision (CP-0 -> CP-L10,
-  `tests/test_lite_portfolio_route.py`); every route outside those three
-  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
+  `tests/test_lite_portfolio_route.py`); Task 9.2 adds LITE relative value
+  (CP-0 -> CP-L10 -> CP-1C, `tests/test_lite_relative_value_route.py`); every
+  route outside those four `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
