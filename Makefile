@@ -15,7 +15,7 @@ export CAOS_DEV_USER CAOS_DEV_ROLE
 
 .PHONY: bootstrap venv lock lint types test test-fast test-provider test-postgres-races \
 	check-postgres security image smoke-production frontend-check check-fast check-size \
-	check doctor dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index trivy
+	check doctor dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index trivy release-pack
 
 bootstrap: venv trivy  ## exact locked Python and Node environments, pinned Trivy
 	npm --prefix frontend ci --ignore-scripts
@@ -132,6 +132,12 @@ check:
 	@$(MAKE) --no-print-directory frontend-check
 	@$(MAKE) --no-print-directory image
 	@$(MAKE) --no-print-directory smoke-production
+
+# docs/DECISIONS.md §94. Without STORE no verdict is read and no pathway is
+# claimed qualified; STORE=1 reads CAOS_DATABASE_URL and needs AS_OF, the
+# ISO-8601 moment (with an offset) verdicts are judged current at.
+release-pack:  ## the release pack, emitted from the suite, the tree and (STORE=1) the store
+	$(PY) scripts/release_pack.py --out release-pack $(if $(STORE),--store --as-of "$(AS_OF)")
 
 doctor:  ## versions and configuration presence; values are never printed
 	@$(PY) scripts/dev_doctor.py

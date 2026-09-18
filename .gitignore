@@ -26,3 +26,5 @@ uv.lock
 # excluded in .git/info/exclude; this is the instruction file beside it.
 AGENTS.md
 .tools/
+# Emitted by `make release-pack` (docs/DECISIONS.md §94); reproducible, not kept.
+/release-pack/

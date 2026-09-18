@@ -4426,3 +4426,42 @@ stopped a set whose route could not be finished at worst-case prices. Now such a
 route may start and stop short at `BUDGET_CEILING_REACHED`, having spent at most
 its ceiling -- the amount the owner authorized. Invariant 8 is unchanged: no
 call without a reservation, and no reservation past the ceiling.
+
+## 2026-09-18 §94 — The release pack is emitted from the suite, the tree and the store
+
+The owner authorized Task 13.6 on 18 September 2026 ("authorised to apply your
+recommendations"). This is its in-tree half; the first authorized nightly and
+the hosted checks verified on `main` need a push and are not part of it.
+
+- **What.** `scripts/release_pack.py` (`make release-pack`) writes
+  `release-pack/release-pack.json` and `release-pack/RELEASE_PACK.md`: the
+  methodology build id and manifest digest, the migration head digested exactly
+  as a migrated store records `store_schema.applied_digest`, the SHA-256 of the
+  four locks, the test inventory (every Python test `tests/` defines and every
+  workspace title `frontend/tests/` defines, read from the source), and one row
+  per pathway the vendored catalog advertises.
+- **The pathway rule.** A pathway outside `ADAPTER_ROUTES` is `DISABLED` and
+  says why, whatever was signed over it. An enabled one is `UNVERIFIED` when no
+  store was read, `NOT_QUALIFIED` when one was and nothing covers it, and
+  `QUALIFIED` only when a `qualification_verdicts` row reads back through
+  `current_verdict` at the named moment, for this bundle's build, over a
+  snapshot one of whose prepared runs is pinned in `run_routes` to that pathway
+  under the route digest the snapshot names. Evidence that does not re-digest
+  to its key refuses the pack rather than being skipped.
+- **Reproducible.** Sorted everywhere, no clock, no host, no git state: two
+  emissions over one tree are byte-identical, including across interpreters
+  and hash seeds. A store read needs `AS_OF` for that reason -- currency is a
+  decision taken at a moment, as `read_verdict` already takes `now` -- and
+  names the store only through `CAOS_DATABASE_URL`, so no credential reaches an
+  argument list.
+- **Emitted, not committed.** `release-pack/` is ignored. A committed copy
+  would move with every test added and turn each commit into a checksum edit,
+  which is the thing the exit check forbids.
+- **Inventory by definition, not collection.** `pytest --collect-only` imports
+  every module and needs database configuration, and its parametrised ids can
+  carry values; the definitions are what the ledger gate already resolves
+  citations against. A parametrised test is one row and a computed workspace
+  title is recorded as its template.
+- **`docs/feature-status.csv`.** Kept, unedited, as the dated predecessor; the
+  pack is the live answer, and the Completion Phase 7 ledger entry is struck
+  with that said.
