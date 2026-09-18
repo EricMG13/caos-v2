@@ -225,9 +225,10 @@ Rules:
 2. `candidate_command` is `Run <module_id>` plus only objective, issuer/entity and period qualifiers supported by this run. Its command module must match the row module exactly.
 3. READY and READY_WITH_LIMITATIONS rows set `exact_command` equal to `candidate_command` and carry every limitation into the row.
 4. CONDITIONAL and BLOCKED rows set `exact_command` to exactly `DO NOT RUN`; retain the candidate only as a non-executable preview and state the missing or unusable evidence briefly. A CONDITIONAL row is discharged only when the named source is supplied and CP-0 is re-run; it never waits on an upstream analytical handoff.
-5. Source filenames come only from the frozen Representation Catalog/effective-source set. `PASS_THROUGH` attaches its original; `COMPLETE` or `DEGRADED` attaches its managed prepared artifact; `BLOCKED` and skipped rows attach nothing. Never attach both original and parsed content for one logical source.
+5. Source filenames come only from the frozen Representation Catalog/effective-source set. `PASS_THROUGH` attaches its original; `COMPLETE` or `DEGRADED` attaches its managed prepared artifact; `BLOCKED` and skipped rows attach nothing. Never attach both original and parsed content for one logical source. A `PARSE_TARGETED` source attaches only its retained pages, written after the filename as `<filename> pages <first>-<last>` or `<filename> page <n>`, one range per item; name the file again for another range. Pages are the `page` locators the evidence shows. A filename written alone attaches the whole source.
 6. Every receiving module retains this CP-0 handoff's `run_id` in canonical `upstream_artifacts_used`, even when another handoff is its immediate analytical dependency.
 7. CP-0 passes managed artifacts directly to downstream modules. The user does not copy derivatives back into the source folder or reattach them between parsing and readiness.
+8. A source the host delivers as a page map -- the leading lines of each of its pages, because the whole source is larger than one request can carry -- is evidence only in the lines shown. Triage it `PARSE_TARGETED`, or `BLOCKED` when the map cannot locate what a module needs; attach each receiving module the pages it needs in the rule 5 form, never the file alone; and carry the page-map limitation into every row it affects.
 
 ## CP-MODEL boundary
 
