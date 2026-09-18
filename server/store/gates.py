@@ -332,20 +332,30 @@ def withdraw_source(
         payload={"source_id": str(source_id)},
     )
 
-    def write(connection: StoreConnection) -> None:
-        withdrawn = connection.execute(
-            "UPDATE sources SET withdrawn_at = now()"
-            " WHERE source_id = %s AND case_id = %s AND withdrawn_at IS NULL",
-            (source_id, case_id),
-        ).rowcount
-        if not withdrawn:
-            # Already withdrawn, another case's, or no source at all: nothing
-            # was withdrawn, so the chain must not say something was. One code
-            # for the three, as `read_evidence` gives one -- the difference
-            # between them is not this caller's to learn from a refusal.
-            raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+    governed_write(
+        conn,
+        action,
+        lambda connection: withdraw_source_in(
+            connection, case_id=case_id, source_id=source_id
+        ),
+    )
 
-    governed_write(conn, action, write)
+
+def withdraw_source_in(
+    conn: StoreConnection, *, case_id: UUID, source_id: UUID
+) -> None:
+    """Withdraw one source in the caller's governed transaction; never commits."""
+    withdrawn = conn.execute(
+        "UPDATE sources SET withdrawn_at = now()"
+        " WHERE source_id = %s AND case_id = %s AND withdrawn_at IS NULL",
+        (source_id, case_id),
+    ).rowcount
+    if not withdrawn:
+        # Already withdrawn, another case's, or no source at all: nothing
+        # was withdrawn, so the chain must not say something was. One code
+        # for the three, as `read_evidence` gives one -- the difference
+        # between them is not this caller's to learn from a refusal.
+        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
 
 
 def _case_of(conn: StoreConnection, run_id: UUID) -> UUID:

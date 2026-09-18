@@ -39,6 +39,7 @@ from server.store.gates import (
     approve_gate,
     gate_state,
     release_gate_in,
+    withdraw_source_in,
 )
 from server.store.routes import pin_route, pin_route_in
 from server.store.run_inputs import RunSubject, pin_run_input_in
@@ -120,6 +121,25 @@ def test_approval_on_a_terminal_run_is_refused(
     assert audit_trail(conn, case_id) == []
     assert _count(conn, "run_gates") == 0
     assert gate_state(conn, run_id, Gate.SOURCE_SET) is GateState.OPEN
+
+
+def test_withdraw_source_in_does_not_commit(
+    gated: tuple[StoreConnection, UUID, UUID, UUID, UUID],
+) -> None:
+    conn, case_id, _run_id, source_id, _approver = gated
+
+    withdraw_source_in(conn, case_id=case_id, source_id=source_id)
+    assert conn.info.transaction_status is TransactionStatus.INTRANS
+    conn.rollback()
+
+    row = conn.execute(
+        "SELECT withdrawn_at FROM sources WHERE source_id = %s", (source_id,)
+    ).fetchone()
+    assert row is not None and row[0] is None
+
+    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
+        withdraw_source_in(conn, case_id=case_id, source_id=uuid4())
+    conn.rollback()
 
 
 def test_prepare_pack_touches_no_store(
