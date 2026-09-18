@@ -302,6 +302,23 @@ what landed and what it is worth.
     of the five new suites under the gate's own invocation (`18b6c91`) --
     `mypy server` is not `mypy scripts tests server`, which is what
     `make types` runs and what caught eight errors I had not seen.
+- **O07's first obstacle, closed after the record was first written.**
+  `PlainTextExtractor` declares `max_token_chars` and cuts a longer run, so
+  Boeing's 71,243- and Ford's 105,966-character single tokens no longer refuse
+  the whole pack at `ingest._prepare`. It was deferred here once, on the
+  reading that its trigger ("the day one of these texts is needed whole") had
+  not fired -- and that reading was wrong in a way worth naming: Phase 11 needs
+  those texts, and the fix needs **none of them**, because a synthetic run
+  reproduces the refusal exactly. What it buys is that they admit the day they
+  are supplied rather than a day later. It is v3 of that identity; v2 rows
+  verify as recorded. The texts are still outside the tree and
+  `MAX_REQUEST_BYTES` remains the second obstacle, which Task 10.1 owns.
+- **Two deferral clauses were corrected rather than restated.** The blob
+  ceiling's said "the day a caller other than admission needs one", which
+  invites a reader to count the ten non-admission callers of `BlobStore.get`
+  and build the wrong thing; it now says what actually gates it. And
+  `tests/test_ingestion.py`'s docstring said a word past the boundary "has
+  nowhere to be split", which the extractor's own bound made false.
 - **What was deliberately not built, and why it is not a gap.** Every
   remaining 13.3/13.5 item carries a trigger condition in its own ledger entry
   and none has fired: the orphan blob sweep ("the day the store is large enough
@@ -363,10 +380,14 @@ what landed and what it is worth.
   ledger entry and the gate's own `TRIVY=` escape hatch rather than a moved
   pin. `make smoke-production` was therefore run separately, **at `d2b2d8c`,
   exit 0, 22 tests passing on chromium, firefox and webkit** (5.8, 5.9 and
-  9.4 minutes, each paying the real 300-second lease wait). It was run twice:
-  the first three-engine pass predated the stream-slot fix, and since that fix
-  touches the SSE path the journey exercises hardest, its evidence did not
-  transfer -- so it was re-run rather than carried over.
+  9.4 minutes, each paying the real 300-second lease wait). It was run **three
+  times**, and each re-run was because a change had landed that the previous
+  run's evidence could not speak for: the first predated the stream-slot fix,
+  which touches the SSE path the journey exercises hardest, and the second
+  predated the extractor's token bound, which touches admission. The last is at
+  `2a1f68a`, exit 0, 22 tests on all three engines (5.8, 5.9 and 10.1 minutes).
+  Re-running rather than reasoning that a change was low-risk is the rule this
+  phase arrived at the hard way, twice.
 - **Blast radius.** GitNexus puts the change at CRITICAL over 141 changed
   symbols, most of them document headings; the code risk is `_unique_run`, the
   frontier loop and the worker, each reviewed and each with a guard watched
