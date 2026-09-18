@@ -26,6 +26,17 @@ API_ORIGIN = "http://127.0.0.1:18000"
 EDGE_HOST, EDGE_PORT = "127.0.0.1", 18080
 REFUSED = 2
 BROWSER_PROJECTS = ("chromium", "firefox", "webkit")
+# What `compose.smoke.yaml` bind-mounts into `journey-worker`, relative to the
+# repository root. Docker Desktop on macOS shares only the host paths its File
+# Sharing list names -- on the development machine `/Users` and not
+# `/private/tmp` -- and a bind mount from anywhere else comes up *empty*, so
+# the worker exits `ModuleNotFoundError: No module named 'journey'`, naming
+# neither the mount nor the path. Declared here, overridable per machine by
+# `JOURNEY_DOCKER_SHARED` (os.pathsep-separated), and checked only on macOS: a
+# Linux daemon, CI's included, sees the whole host filesystem.
+MOUNTED = "./tests"
+DOCKER_SHARED = (Path("/Users"),)
+SHARED_ENV = "JOURNEY_DOCKER_SHARED"
 
 
 def _compose(*args: str) -> list[str]:
@@ -115,6 +126,31 @@ def run_playwright(env: dict[str, str], project: str) -> int:
     ).returncode
 
 
+def shared_prefixes() -> tuple[Path, ...]:
+    """The host paths Docker shares: the declared default, or this machine's."""
+    declared = os.environ.get(SHARED_ENV)
+    if not declared:
+        return DOCKER_SHARED
+    return tuple(Path(part) for part in declared.split(os.pathsep) if part)
+
+
+def mount_refusal(root: Path, *, platform: str, shared: tuple[Path, ...]) -> str | None:
+    """Why Docker could not mount `root`'s tests, or None when it can."""
+    if platform != "darwin":
+        return None
+    source = (root / MOUNTED).resolve()
+    if any(source.is_relative_to(prefix.resolve()) for prefix in shared):
+        return None
+    names = ", ".join(str(prefix) for prefix in shared)
+    return (
+        f"journey refused: {COMPOSE_FILE} bind-mounts {MOUNTED} from {source}, "
+        f"which is not under a path Docker Desktop shares ({names}); the "
+        "journey worker would start with an empty /app/tests. Run from a "
+        f"checkout under one of them, or name this machine's shared paths in "
+        f"{SHARED_ENV}."
+    )
+
+
 def browser_projects() -> tuple[str, ...]:
     """Each browser gets its own crash-once worker and disposable stack."""
     selected = os.environ.get("JOURNEY_PLAYWRIGHT_PROJECT")
@@ -145,6 +181,10 @@ def main() -> int:
     if missing:
         names = ", ".join(str(path.relative_to(REPO)) for path in missing)
         print(f"journey refused: missing stack files: {names}", file=sys.stderr)
+        return REFUSED
+    refusal = mount_refusal(REPO, platform=sys.platform, shared=shared_prefixes())
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
         return REFUSED
     # Every engine runs, whatever an earlier one did. Returning on the first
     # failure discarded the other two engines' evidence, so one flake in one
