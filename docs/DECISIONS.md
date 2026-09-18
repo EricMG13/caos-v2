@@ -4235,3 +4235,26 @@ commit answers; the head rides the revision's own statement at no round trip.
   them unreachable and proposed deleting them. They are unreachable through this
   code and reachable through a row altered outside it, so they are kept as
   tamper evidence, each with a test that gives it that cause.
+
+## 2026-09-18 §85 — The owner's model matrix routes every dispatch
+
+The owner, 18 September 2026, supplied a model-and-effort matrix and asked that
+it govern all work. It supersedes the 17 September split (Sonnet detects, Opus
+implements and reviews) and sits inside §81's caps.
+
+| Model | Effort | Role |
+|---|---|---|
+| Sonnet 5 | `low` | configs, pre-commit rules, docstrings, regex, simple fixtures |
+| Sonnet 5 | `medium` | routine endpoints, UI and wire integration, bug fixes, PR drafting |
+| Sonnet 5 | `xhigh` | localized complex refactors and transformations |
+| Opus 5 | `medium` | critical-path endpoints, deterministic calculation, strict diff size |
+| Opus 5 | `high` | races, state transitions, spend reconciliation, row locking |
+| Opus 5 | `xhigh` | adversarial audits, pre-merge security review, race verification |
+| Fable 5.1 | `low`/`medium` | long-horizon autonomous passes, phased plan execution |
+| Fable 5.1 | `high` | architecture, governance, end-of-phase reviews |
+
+In this repository: the phase confidence review moves to Fable 5.1 at `high`
+(`.claude/agents/phase-confidence-reviewer.md`), so a phase's two gates are read
+by two models; the phase adversarial audit and task acceptance stay on Opus 5 at
+`xhigh`; the final all-phases review stays on Fable 5.1 at `high`. Work already
+dispatched keeps its recorded model.

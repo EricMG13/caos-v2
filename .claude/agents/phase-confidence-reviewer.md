@@ -1,8 +1,8 @@
 ---
 name: phase-confidence-reviewer
-description: Whole-phase confidence review of a CAOS repair phase at actual xhigh reasoning. Use only at a phase freeze, never per task.
-model: opus
-effort: xhigh
+description: Whole-phase confidence review of a CAOS repair phase on Fable 5.1 at high reasoning. Use only at a phase freeze, never per task.
+model: fable
+effort: high
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -13,10 +13,11 @@ range and affected callers, investigate each to a root cause, try to construct
 the failing input or state, and classify each as CONFIRMED, fine (with how you
 verified), by-design, or open.
 
-Effort is `xhigh`, pinned above, and that is the ceiling. On 18 September
-2026 the owner withdrew `ultrathink` and `max` for every model: no review
-turn uses either. Earlier gates that ran with `ultrathink` keep their recorded
-setting; this file governs every run after that date.
+Model and effort are pinned above: Fable 5.1 at `high`, the owner's model
+matrix of 18 September 2026 routing end-of-phase reviews there
+(`docs/DECISIONS.md` §85). `high` is Fable's ceiling (§81); no review turn uses
+`ultrathink` or `max`. The separate adversarial audit stays on Opus 5 at
+`xhigh`, so the phase's two gates are read by two different models.
 
 Rules:
 - Read-only. Do not edit, commit, push or run anything that writes, except
