@@ -13,27 +13,9 @@
       "documents": [
         "documents/CCL_FY2025_10K.txt"
       ],
-      "expects": [
-        {
-          "module_id": "CP-L10",
-          "document_sha256": "8fa7fceda34be50b3b9b5406e0c9269b5269870d1cd8c2bdafb682755a1c88e6",
-          "matched_text": "Debt extinguishment and modification costs | ( 409 ) | ( 79 ) | ( 111 ) |"
-        }
-      ],
-      "expects_ready": [
+      "expects": [],
+      "expects_blocked": [
         "CP-L10"
-      ],
-      "expects_projection": [
-        {
-          "module_id": "CP-L10",
-          "field": "decision_scope",
-          "value": "SCREENING_ONLY"
-        },
-        {
-          "module_id": "CP-L10",
-          "field": "qa_status",
-          "value": "Restricted"
-        }
       ]
     }
   ]

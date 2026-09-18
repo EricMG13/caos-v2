@@ -8,7 +8,10 @@ costs real money and calls a real model.
 ## The set
 
 - Qualification-set digest:
-  `5d50d1e7b9d39b0318d730ea98c795518c72e8f8644fe321b6f96acbc4bb2f29`
+  `7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c` since
+  owner decision A (below); the set the authorized run was performed against
+  was `5d50d1e7b9d39b0318d730ea98c795518c72e8f8644fe321b6f96acbc4bb2f29`. A
+  digest covers the keys, so the two are different sets.
 - Route: `LITE_CREDIT_22 / LITE_PORTFOLIO_DECISION` (`CP-0` → `CP-L10`, one
   REQUIRED edge, `decision_scope: SCREENING_ONLY`, terminal deliverable
   `CP-L10`)
@@ -21,6 +24,11 @@ costs real money and calls a real model.
   (`qualification/documents.json`) carries a row for the copy.
 
 ## Keys, and where each came from
+
+**Superseded by owner decision A (below).** The keys this section describes are
+the ones the authorized run was performed against; the set now carries only
+`expects_blocked: ["CP-L10"]`. They are kept here as the record of what that
+run was measured by.
 
 Authored from the document, never from any run output, capture file or result
 section. Nothing has been run on this route, so there was nothing to copy from.
@@ -87,3 +95,33 @@ a portfolio decision over a 10-K alone, which is a defensible reading of what
 otherwise. Whether the key or the corpus should change is the owner's call; the
 key is not edited to match the run. The VMO2 set, over two earnings releases,
 was judged ready on the same build.
+
+## Owner decision A, 18 September 2026 — the set measures the refusal
+
+The owner chose to keep this set and change what it measures: over a 10-K
+alone, the correct answer for `LITE_PORTFOLIO_DECISION` is that CP-0 refuses
+CP-L10 for want of portfolio context, and a correct refusal is a pass. The VMO2
+portfolio set keeps measuring the ready path. **The key was changed by the
+owner's decision about what the set measures, not fitted to a run's output**:
+nothing in it is taken from the run's text, and it names no reason the refusal
+must give -- only that CP-0 withholds CP-L10.
+
+- Removed: `expects_ready: ["CP-L10"]`, the CP-L10 citation key and the two
+  CP-L10 projection keys (`decision_scope`, `qa_status`). Each asks something
+  of a CP-L10 handoff, which a refused CP-L10 never produces. The set carried
+  no CP-0 key, so none is kept.
+- Added: `expects_blocked: ["CP-L10"]` (`docs/DECISIONS.md` §99), met when
+  CP-0's T8 verdict for CP-L10 is `BLOCKED` or `CONDITIONAL`; a met key waives
+  the run-COMPLETE requirement only for a run that ended BLOCKED.
+- New set digest:
+  `7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c`.
+
+**The retained run was not re-scored through the matrix.** Its database,
+`caos_qualify_13ec1a9ca0814387aca7e8977dd1f9f1`, no longer exists on the test
+server (its blob root does), and nothing was re-run or re-called. Read offline
+from the retained CP-0 record blob (`34b54985…`, T8 readiness `CP-L10:
+BLOCKED`) and this directory's capture (status `BLOCKED`, proof sound), the row
+would read `blocked_met: true` and the snapshot `complete: true`. That is a
+reading of stored facts, not a performed snapshot: the stored evidence
+(`9b9868e0…`) binds the earlier digest and stays unsignable, and a verdict over
+this set needs it performed again.

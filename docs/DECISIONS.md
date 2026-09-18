@@ -4709,3 +4709,60 @@ work; `gpt-5.5` may provide a deliberate previous-generation compatibility
 baseline. Any available GPT model may be used when its documented strength is
 the best fit and the reason is recorded. The `xhigh` ceiling and all authority
 limits remain unchanged.
+
+## 2026-09-18 §99 — A set may declare the readiness refusal it expects; the CCL portfolio set does
+
+Owner decision A, 18 September 2026, on `qualification/ccl-fy2025-portfolio/`:
+keep the set and change its key to expect CP-0 to refuse CP-L10, so the set
+tests the refusal and the VMO2 portfolio set keeps testing the ready path. The
+authorized run of that set ended BLOCKED at CP-0's gate, whose T8 row for
+CP-L10 asked for portfolio holdings, mandate and limits, the eligible
+universe, market evidence and governing security documents -- a defensible
+reading of what `LITE_PORTFOLIO_DECISION` needs over a 10-K alone -- while the
+set's `expects_ready: ["CP-L10"]` assumed otherwise.
+
+No existing key said that honestly. `expected_refusal: HANDOFF_BLOCKED` is met
+by any BLOCKED run, but its code means a validated Blocked *handoff*, not a gate
+verdict. So a case gains `expects_blocked: [module_id, ...]`:
+
+1. **The reading.** `MatrixRow.blocked_met` reads `readiness_from(route,
+   accepted)` -- the projection `ready_met` and the engine read -- and is met
+   when every named module's verdict is in `UNCLEARED_READINESS`
+   (`CONDITIONAL`, `BLOCKED`), the gate's own words for "does not run". A
+   module the gate did not rule on is not refused; an unreadable route or
+   artifacts is `False`; an undeclared key is `None`.
+2. **Answerability.** `blocked_met is False` makes a row unanswered.
+   `PerformedEvidence.complete` waives the COMPLETE requirement for a row whose
+   key was met **and** whose run ended BLOCKED -- the run the key declared --
+   and for no other status, mirroring the met-`expected_refusal` waiver.
+3. **Validation.** The loader bounds and de-duplicates the list like
+   `expects_ready`, and refuses a module in both lists
+   (`QUALIFICATION_SET_FILE_INVALID`; `assert_unambiguous` refuses the same
+   for an in-memory set). `prepare` and `perform` refuse, before anything is
+   written, a readiness key of either kind naming a module that is not a
+   pinned consumer of CP-0 on the case's route
+   (`QUALIFICATION_KEY_UNANSWERABLE`). That check was not previously made for
+   `expects_ready`; every committed set passes it.
+4. **Digest stability.** The digest appends the key tagged
+   (`["expects_blocked", [...]]`) so the same ids under the two keys cannot
+   digest alike, and only when declared; the matrix row serialises
+   `blocked_met` only when not `None`. Every existing set digest and every
+   stored performed digest is therefore unchanged, and
+   `tests/test_qualification_on_disk.py::test_every_committed_set_binds_its_recorded_digest`
+   pins every committed set's digest.
+
+The CCL portfolio set drops `expects_ready`, its CP-L10 citation key and its
+two CP-L10 projection keys -- unreachable when CP-L10 is refused -- and gains
+`expects_blocked: ["CP-L10"]`. It carried no CP-0 key to keep. Its digest moves
+`5d50d1e7…` -> `7dcfa846…`. The key was changed by the owner's decision about
+what the set measures, not fitted to a run's output: what a set should
+measure over a 10-K alone was decided first, and the run's verdict is the thing
+it will be scored against.
+
+What it does not do: re-score the retained run through `build_matrix`. Its
+database, `caos_qualify_13ec1a9c…`, no longer exists on the test server; only
+its blob root does. Scored from the retained record blob (T8 readiness
+`CP-L10: BLOCKED`) and the capture's run status and proof, the row reads
+`blocked_met: true` and the snapshot `complete: true` under the new key -- an
+offline reading of stored facts, not a performed snapshot, and nothing
+signable until the set is performed again.
