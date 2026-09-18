@@ -145,11 +145,16 @@ def cases_for_member(
     params = (
         (user_id, limit) if members_limit is None else (members_limit, user_id, limit)
     )
-    rows = conn.execute(
+    # nosec B608 -- `members` is not caller-controlled text: it is one of
+    # exactly two literals selected by `members_limit is None`, a boolean
+    # branch, so the concatenation bandit flags as string-built SQL never
+    # carries external input. Every actual value (`user_id`, `limit`,
+    # `members_limit`) stays a `%s` placeholder bound through `params`.
+    rows = conn.execute(  # nosec B608
         "SELECT c.case_id, c.title, c.created_at, m.standing,"
         " (SELECT count(*) FROM live_sources s WHERE s.case_id = c.case_id),"
         " r.run_id, r.status, r.created_at, rr.profile_id, rr.selection_id, "
-        + members
+        + members  # nosec B608
         + " FROM case_members m JOIN cases c ON c.case_id = m.case_id"
         " LEFT JOIN LATERAL (SELECT run_id, status, created_at FROM runs"
         "  WHERE runs.case_id = c.case_id"
