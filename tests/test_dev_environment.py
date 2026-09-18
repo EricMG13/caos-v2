@@ -48,6 +48,16 @@ def test_doctor_reports_presence_without_secret_values(
     assert sentinel not in captured.out + captured.err
     assert "CAOS_DATABASE_URL: present" in captured.out
     assert "OPENROUTER_API_KEY: present (optional live mode)" in captured.out
+    assert "CAOS_MODEL_PRICE: present (optional live mode)" in captured.out
+    assert "CAOS_SITE_ROOT: present (deployment)" in captured.out
+
+
+def test_deployment_and_live_configuration_do_not_overlap() -> None:
+    doctor = _load_doctor()
+    assert doctor.LIVE_CONFIGURATION.isdisjoint(doctor.DEPLOYMENT_CONFIGURATION)
+    assert doctor.OPTIONAL_CONFIGURATION == (
+        doctor.LIVE_CONFIGURATION | doctor.DEPLOYMENT_CONFIGURATION
+    )
 
 
 def test_doctor_rejects_the_wrong_runtime(

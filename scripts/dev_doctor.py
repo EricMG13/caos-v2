@@ -27,15 +27,16 @@ LIVE_CONFIGURATION = frozenset(
         "OPENROUTER_PROVIDER",
         "OPENROUTER_REASONING_EFFORT",
         "CAOS_REQUIRE_PROVIDER",
-        # `make dev-worker` and `scripts/qualify.py` read the price; absent, the
-        # worker refuses PROVIDER_NOT_CONFIGURED before it claims anything. The
-        # ceiling is read by the live suite alone, not by anything under
-        # `scripts/` or `server/`.
+        # `make dev-worker` and `scripts/qualify.py` read the dated price (§49);
+        # absent, the worker refuses PROVIDER_NOT_CONFIGURED before it claims
+        # anything. The ceiling is read by the live suite alone, not by
+        # anything under `scripts/` or `server/`.
         "CAOS_MODEL_PRICE",
         "CAOS_LIVE_BUDGET_CEILING",
     }
 )
-# Read by the production image and the edge only (§53); absent in local work.
+# Read by the production image, the site dispatcher and the edge guard only
+# (`server/api/site.py`, `server/api/edge.py`); absent in local dev work.
 DEPLOYMENT_CONFIGURATION = frozenset(
     {"CAOS_SITE_ROOT", "CAOS_EDGE_TOKEN", "CAOS_PUBLIC_ORIGIN"}
 )

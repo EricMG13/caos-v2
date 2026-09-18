@@ -65,7 +65,7 @@ from server.api.reads import model as model_read
 from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
-from server.api.reads.run import _node_view, read_run_section
+from server.api.reads.run import _node_view, node_readiness, read_run_section
 from server.api.wire import CLEARS, EdgeView, NodeView, RefusalBody, RunSectionDocument
 from server.blobs import BlobStore
 from server.engine.route import (
@@ -562,6 +562,18 @@ def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
 
     response = _section(client, harness.case_id, harness.run_id, viewer)
 
+    assert (response.status_code, response.json()) == (
+        500,
+        _refused("ARTIFACT_RECORD_MISMATCH"),
+    )
+    harness.conn.execute(
+        "UPDATE artifacts SET record_sha256 = %s WHERE attempt_id = %s",
+        (harness.blobs.put(record_bytes(lying)), attempt),
+    )
+    harness.conn.commit()
+
+    response = _section(client, harness.case_id, harness.run_id, viewer)
+
     # 500 under D3: the record is stored bytes, and a later read reads them.
     assert (response.status_code, response.json()) == (
         500,
@@ -622,7 +634,9 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     reasons = blockers_from(full, accepted)
 
     by_module = {
-        node.module_id: _node_view(full, accepted, node, states, readiness, reasons)
+        node.module_id: _node_view(
+            full, accepted, node, states, readiness, reasons=reasons
+        )
         for node in full.nodes
     }
 
@@ -631,6 +645,31 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     gate = EdgeView(source="CP-5", type=EdgeType.QA_GATE)
     assert (gate in cp6.waiting_on) is held
     assert by_module["CP-5"].waiting_on == []
+
+
+def test_node_readiness_is_the_shared_computation_node_view_builds_on(
+    catalog: dict[str, Any],
+) -> None:
+    """`node_readiness` is the one computation of a node's unmet edges, its
+    awaiting-gate flag and its readiness. It was extracted when two wires each
+    had a `_node_view` and could drift apart; the legacy one in
+    `server/api/app.py` has since been retired with the run tail, so this is
+    now what keeps the computation named and covered on its own rather than
+    only through whichever caller happens to exercise it."""
+    full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
+    accepted: dict[str, NodeResult] = {}
+    states = node_states(full, accepted)
+    readiness = readiness_from(full, accepted)
+    cp0 = next(n for n in full.nodes if n.module_id == "CP-0")
+
+    unmet, awaiting_gate, gate_verdict = node_readiness(
+        full, accepted, cp0, states, readiness
+    )
+
+    view = _node_view(full, accepted, cp0, states, readiness)
+    assert [e.source for e in unmet] == [e.source for e in view.waiting_on]
+    assert awaiting_gate == view.awaiting_gate
+    assert gate_verdict == view.gate_verdict
 
 
 def test_nothing_is_awaited_on_a_run_that_is_no_longer_running(

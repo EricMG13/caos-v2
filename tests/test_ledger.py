@@ -232,3 +232,96 @@ def test_a_heading_without_a_blank_line_before_it_is_refused() -> None:
         "Phase 9",
         "Phase 8",
     ]
+
+
+def test_a_fenced_example_is_not_read_as_a_real_entry() -> None:
+    """A struck bullet inside a fenced block illustrates the convention;
+    it does not describe a gap this ledger actually has."""
+    found = ledger_state.entries(
+        "## Known gaps (honest ledger)\n\n"
+        "**Phase 9.**\n\n"
+        "```\n"
+        "- ~~**An example.**~~ Not a real entry.\n"
+        "```\n\n"
+        "- **A real one.** Text. *Upgrade:* do the work.\n"
+    )
+    assert [entry.title for entry in found] == ["A real one"]
+
+
+def _write_contract(path: Path, body: str = "") -> Path:
+    contract = path / "CLAUDE.md"
+    contract.write_text(
+        body
+        or (
+            "## Known gaps (honest ledger)\n\n"
+            "**Phase 9.**\n\n"
+            "- ~~**Closed.**~~ Fixed in `abc1234`.\n"
+            "- **Open.** Still true. *Upgrade:* do the work.\n"
+        ),
+        encoding="utf-8",
+    )
+    return contract
+
+
+def test_main_reports_one_line_per_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--report` is how a person checks the parser itself."""
+    contract = _write_contract(tmp_path)
+
+    code = ledger_state.main(["--contract", str(contract), "--report"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "closed [Phase 9] Closed" in out
+    assert "open   [Phase 9] Open" in out
+    assert "2 entries, 1 closed, 1 open" in out
+
+
+def test_main_without_report_prints_only_the_count(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default is the summary a script can grep for; `--report` is opt-in."""
+    contract = _write_contract(tmp_path)
+
+    code = ledger_state.main(["--contract", str(contract)])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.strip() == "2 entries, 1 closed, 1 open"
+
+
+def test_main_refuses_a_contract_that_does_not_exist(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A missing file is refused with its own message, not an unhandled trace."""
+    code = ledger_state.main(["--contract", str(tmp_path / "nowhere.md")])
+
+    assert code == 2
+    assert "ledger unreadable" in capsys.readouterr().err
+
+
+def test_main_refuses_a_contract_with_no_ledger_heading(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`entries`'s own refusal, surfaced by `main` as its own exit code."""
+    contract = _write_contract(tmp_path, "# No ledger heading here\n")
+
+    code = ledger_state.main(["--contract", str(contract)])
+
+    assert code == 2
+    assert "ledger unreadable" in capsys.readouterr().err
+
+
+def test_main_refuses_a_contract_with_no_ledger_entries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A scan of nothing is a failure, not a quiet pass."""
+    contract = _write_contract(
+        tmp_path, "## Known gaps (honest ledger)\n\nNothing under the heading.\n"
+    )
+
+    code = ledger_state.main(["--contract", str(contract)])
+
+    assert code == 2
+    assert "read no ledger entries" in capsys.readouterr().err

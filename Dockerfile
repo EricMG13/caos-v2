@@ -23,9 +23,10 @@ RUN npm run build
 # scan is a re-pin, the same as a red audit is a recompile.
 FROM python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
-# The official 3.14-slim digest still carried twelve fixable findings across
-# four OS packages on 2026-09-12. These are the exact fixed trixie candidates;
-# --only-upgrade prevents this repair from expanding the image's package set.
+# The 3.14-slim digest above still carries twelve fixable HIGH/CRITICAL findings
+# across four OS packages as of 2026-09-14. These are the exact fixed trixie
+# candidates; --only-upgrade prevents this repair from expanding the image's
+# package set.
 # Provenance: security-tracker.debian.org/tracker/source-package/{gzip,perl,pcre2,sqlite3}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade \

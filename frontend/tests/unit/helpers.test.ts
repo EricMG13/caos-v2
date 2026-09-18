@@ -3,6 +3,7 @@
 // name and why the section-level tests beside this file did not cover them:
 // rendering a section exercises a helper without ever naming it, so a helper
 // that quietly returned the wrong thing would still leave the section green.
+import { failureMessage } from "@/app/commands";
 import { sectionPath } from "@/app/sections";
 import { OFFLINE_WORDING, UNAVAILABLE_WORDING } from "@/app/transport";
 import { toneOf } from "@/chrome/SeverityMark";
@@ -176,5 +177,25 @@ describe("the helpers a section reads its own rows with", () => {
     const other = event("ArrowDown");
     expect(other.scrollBy).not.toHaveBeenCalled();
     expect(other.preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe("why a command did not succeed", () => {
+  test("every outcome reads the same way whichever control ran the command", () => {
+    expect(
+      failureMessage({
+        kind: "refused",
+        refusal: { code: "RUN_NOT_RUNNING", clears: "the run is running again" },
+      }),
+    ).toBe("RUN_NOT_RUNNING — clears when the run is running again");
+    expect(failureMessage({ kind: "error", code: "RESPONSE_INVALID" })).toBe("RESPONSE_INVALID");
+    // Offline is the page-level sentence, never engine text.
+    expect(failureMessage({ kind: "offline" })).toBe(OFFLINE_WORDING);
+  });
+
+  test("a successful command has no failure to describe", () => {
+    expect(() =>
+      failureMessage({ kind: "ok", status: 201, receipt: {}, replayed: false }),
+    ).toThrow();
   });
 });

@@ -28,6 +28,7 @@ from server.methodology.handoff import (
     Projections,
     expected_filename,
     invocation_fields,
+    strict_json,
     validate_markdown,
 )
 from server.refusals import Refusal, RefusalCode
@@ -392,3 +393,21 @@ def test_a_blocker_cell_past_its_bound_refuses_with_no_document_text() -> None:
 
     assert refused.code is RefusalCode.HANDOFF_MALFORMED
     assert refused.__context__ is None and refused.__cause__ is None
+
+
+def test_strict_json_parses_ordinary_json() -> None:
+    assert strict_json('{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}
+
+
+def test_strict_json_refuses_a_duplicate_key() -> None:
+    """Which value is meant is undecidable, so neither is taken."""
+    with pytest.raises(ValueError):
+        strict_json('{"a": 1, "a": 2}')
+
+
+def test_strict_json_refuses_nan_and_infinity() -> None:
+    """Not JSON, whatever `json.loads` would otherwise accept."""
+    with pytest.raises(ValueError):
+        strict_json("[NaN]")
+    with pytest.raises(ValueError):
+        strict_json("[Infinity]")

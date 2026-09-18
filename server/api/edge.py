@@ -73,8 +73,13 @@ _SAFE = frozenset({"GET", "HEAD"})
 _IDENTITY = frozenset({SUBJECT_HEADER, GROUPS_HEADER, ROLE_HEADER})
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
 _HOST = re.compile(r"^(?P<name>localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$")
+# Loopback only, and only when no public origin is configured (`_origin_allowed`):
+# these never leave the machine, so there is no transport to secure. A production
+# deployment sets `CAOS_PUBLIC_ORIGIN` and this set is not consulted at all.
 DEV_ORIGINS = frozenset(
-    f"http://{host}:{port}" for host in _LOOPBACK_HOSTS for port in (5173, 8000)
+    f"http://{host}:{port}"  # NOSONAR -- loopback, never a network hop
+    for host in _LOOPBACK_HOSTS
+    for port in (5173, 8000)
 )
 
 SECURITY_HEADERS: Mapping[str, str] = {
