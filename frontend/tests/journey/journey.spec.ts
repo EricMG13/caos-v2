@@ -1402,16 +1402,11 @@ test.describe.serial("journey", () => {
 
   test("journey: the Book names every credit of the portfolio on one stated basis", async () => {
     // What the Book can be driven to on this stack, and what it cannot.
-    // `read_book` fills a credit's cells from the accepted CP-CF projection,
-    // and no run made through the API can carry CP-CF on any pathway:
-    // `create_run` resolves the route with no `RouteExtensions`
-    // (`server/api/commands/runs.py`) and `CreateRun` carries no field to ask
-    // for one, while CP-CF is a host extension appended only by
-    // `resolve_route(..., extensions=RouteExtensions(model_extension=True))`,
-    // whose one caller is the qualification harness. Not a property of the
-    // LITE route: `ADAPTER_ROUTES` enables three pathways and
-    // `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's
-    // `MODEL_OWNERS`, so it would append CP-CF if anything asked. So every
+    // `read_book` fills a credit's cells from the accepted CP-CF projection.
+    // `CreateRun.model_extension` can pin CP-CF, but only on
+    // `FULL_CREDIT_32/RELATIVE_VALUE` (LITE pathways refuse it
+    // `ROUTE_EXTENSION_OWNER_MISSING`), the workspace offers no control for it,
+    // and this journey's runs are LITE, created with it `false`. So every
     // credit here is
     // `NO_ACCEPTED_FORECAST`, no period is served, no comparison table is
     // drawn and no cell exists to open a passport from. The ten-field
