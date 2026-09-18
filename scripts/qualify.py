@@ -230,6 +230,12 @@ def _perform_until(  # noqa: PLR0913 -- one set, one loop, keyword-only tail
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    # Path-traversal scanners flag `set_root`/`--capture` as a generic
+    # "user request" source reaching a file sink -- the template does not
+    # know this is argv, not a request body. There is no HTTP boundary here:
+    # this module is a CLI script an operator runs from their own shell
+    # (never imported by server/), so the path is exactly as trusted as any
+    # other argument to a command they typed themselves.
     parser.add_argument("set_root", type=Path, help="the on-disk qualification set")
     parser.add_argument("--expect-identity", required=True)
     parser.add_argument("--ceiling", required=True, type=Decimal)
