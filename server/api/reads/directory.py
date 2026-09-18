@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from server.api.commands.availability import directory_actions
-from server.api.deps import Caller, Store
+from server.api.deps import IDENTITY_FIRST, Caller, Store
 from server.api.wire import (
     CASES_MAX,
     CaseRow,
@@ -32,7 +32,9 @@ IO_BUDGET = 2
 router = APIRouter()
 
 
-@router.get("/api/v1/directory", response_model=DirectoryDocument)
+@router.get(
+    "/api/v1/directory", response_model=DirectoryDocument, dependencies=[IDENTITY_FIRST]
+)
 def read_directory(actor: Caller, conn: Store) -> DirectoryDocument:
     """`actor` is declared before `conn`: an anonymous request is refused
     before a connection opens."""

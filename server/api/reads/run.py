@@ -22,6 +22,7 @@ from fastapi import APIRouter
 from server import methodology
 from server.api.commands.availability import RunFacts, run_actions
 from server.api.deps import (
+    IDENTITY_FIRST,
     Blobs,
     Caller,
     CasePath,
@@ -142,7 +143,11 @@ IO_BUDGET = (
 router = APIRouter()
 
 
-@router.get("/api/v1/cases/{case_id}/run", response_model=RunSectionDocument)
+@router.get(
+    "/api/v1/cases/{case_id}/run",
+    response_model=RunSectionDocument,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_run_section(  # noqa: PLR0913 -- identity, two ids, store, blobs, bundle
     actor: Caller,
     case_id: CasePath,

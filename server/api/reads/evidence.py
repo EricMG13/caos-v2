@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Response
 
 from server.api.deps import (
+    IDENTITY_FIRST,
     Blobs,
     Caller,
     CasePath,
@@ -41,6 +42,7 @@ router = APIRouter()
 @router.get(
     "/api/v1/cases/{case_id}/runs/{run_id}/sources/{source_id}/pages/{page}",
     response_model=PageDocument,
+    dependencies=[IDENTITY_FIRST],
 )
 def read_evidence_page(  # noqa: PLR0913 -- identity, three ids and a page, stores
     actor: Caller,

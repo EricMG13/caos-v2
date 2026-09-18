@@ -11,7 +11,7 @@ from re import fullmatch
 
 from fastapi import APIRouter
 
-from server.api.deps import Caller, Store
+from server.api.deps import IDENTITY_FIRST, Caller, Store
 from server.api.identity import GlobalRole
 from server.api.wire import QualificationRead, QualificationState
 from server.qualification.store import Evidence, current_verdict, evidence_at
@@ -23,7 +23,11 @@ IO_BUDGET = 3
 router = APIRouter()
 
 
-@router.get("/api/v1/qualification/{evidence_sha256}", response_model=QualificationRead)
+@router.get(
+    "/api/v1/qualification/{evidence_sha256}",
+    response_model=QualificationRead,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_qualification(
     actor: Caller, evidence_sha256: str, conn: Store
 ) -> QualificationRead:

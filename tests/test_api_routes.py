@@ -1070,8 +1070,15 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         for route in router.router.routes
         if isinstance(route, APIRoute)
     }
+    # Each route first declares identity on its decorator (`IDENTITY_FIRST`),
+    # which FastAPI puts at the front of the list; what follows is the
+    # parameters' own order, compared below.
+    leading = {
+        path: route.dependant.dependencies[0].call for path, route in routes.items()
+    }
+    assert set(leading.values()) == {actor_from_request}
     calls = {
-        path: [d.call for d in route.dependant.dependencies]
+        path: [d.call for d in route.dependant.dependencies[1:]]
         for path, route in routes.items()
     }
     assert calls["/api/v1/directory"] == [actor_from_request, store_connection]

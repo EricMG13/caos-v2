@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter
 
 from server.api.deps import (
+    IDENTITY_FIRST,
     Blobs,
     Caller,
     CasePath,
@@ -77,7 +78,11 @@ IO_BUDGET = FIXED_IO + LITE_NODES * PER_HANDOFF_IO
 router = APIRouter()
 
 
-@router.get("/api/v1/cases/{case_id}/analysis", response_model=AnalysisDocument)
+@router.get(
+    "/api/v1/cases/{case_id}/analysis",
+    response_model=AnalysisDocument,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
     actor: Caller,
     case_id: CasePath,

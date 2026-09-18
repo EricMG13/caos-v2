@@ -37,7 +37,7 @@ import psycopg
 from fastapi import APIRouter, Depends, Response
 
 from server.api.commands._request import Key, command_response, json_body
-from server.api.deps import Caller, Store
+from server.api.deps import IDENTITY_FIRST, Caller, Store
 from server.api.identity import Actor, GlobalRole, at_least
 from server.api.wire import SignVerdict, VerdictRecorded
 from server.qualification.store import evidence_at, record_verdict
@@ -172,7 +172,9 @@ def _signed(  # noqa: PLR0913 -- one command's identity, key and document
     return CommandResult(201, receipt, replayed=False)
 
 
-@router.post("/api/v1/qualification/{evidence_sha256}/verdict")
+@router.post(
+    "/api/v1/qualification/{evidence_sha256}/verdict", dependencies=[IDENTITY_FIRST]
+)
 def sign_verdict(
     reviewer: Reviewer,
     evidence_sha256: EvidencePath,

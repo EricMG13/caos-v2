@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from server.api.deps import (
+    IDENTITY_FIRST,
     Blobs,
     Caller,
     CasePath,
@@ -37,7 +38,11 @@ IO_BUDGET = 150
 router = APIRouter()
 
 
-@router.get("/api/v1/cases/{case_id}/model", response_model=ModelDocument)
+@router.get(
+    "/api/v1/cases/{case_id}/model",
+    response_model=ModelDocument,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
     actor: Caller,
     case_id: CasePath,
