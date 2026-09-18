@@ -16,7 +16,7 @@
 // digest each act binds and the head a draft was composed against are all
 // checked at commit, under the case lock. A signer whose browser still offers
 // "Freeze" is refused there, and that refusal is what this surface shows.
-import { useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
   fileDeliverable,
@@ -29,25 +29,13 @@ import {
 import { sectionUrl } from "@/app/transport";
 import { RefusedControl } from "@/controls/RefusedControl";
 import { CommandOutcome, useCommand } from "@/sections/run/controls";
+import { citationsOf, figureToken, paragraphs, type CitationChoice } from "./figures";
 import {
   parseReportDocument,
   type ActionView,
   type NarrativeDraft,
   type ReportDocument,
 } from "@/wire/v1";
-
-/** One paragraph per non-empty line, one prose span per paragraph. A figure
-    span names a citation of a verified record, which needs a picker this
-    surface does not have yet, so a draft written here carries prose only --
-    and a revision saved from it says so by carrying no figure, rather than by
-    this file guessing at one. */
-function paragraphs(draft: string): NarrativeDraft[][] {
-  return draft
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => [{ text: line, figure: null }]);
-}
 
 /** The Report document as it is now, re-read once after an act that changed
     it. Same `sectionUrl` and v1 parser every load uses; a value this file
@@ -79,6 +67,86 @@ async function refetchReport(
 interface Saved {
   id: string;
   digest: string;
+}
+
+const choiceKey = (choice: { route_node_id: string; citation_index: number }) =>
+  `${choice.route_node_id}#${choice.citation_index}`;
+
+const choiceLabel = (choice: CitationChoice) =>
+  `${choice.route_node_id} · p.${choice.page} · ${choice.matched_text}`;
+
+/** The draft as it will be sent, each figure shown by the citation it names --
+    or said to name none the served records carry, which the server will then
+    refuse. What is read back after a save is the host's resolution, not this. */
+function DraftPreview({
+  narrative,
+  choices,
+}: {
+  narrative: NarrativeDraft[][];
+  choices: CitationChoice[];
+}) {
+  if (!narrative.some((spans) => spans.some((span) => span.figure))) return null;
+  const byKey = new Map(choices.map((choice) => [choiceKey(choice), choice]));
+  return (
+    <div className="note" data-draft-preview>
+      <p>Draft as it will be saved:</p>
+      {narrative.map((spans, index) => (
+        <p key={index}>
+          {spans.map((span, spanIndex) => {
+            if (!span.figure) return <span key={spanIndex}>{span.text}</span>;
+            const choice = byKey.get(choiceKey(span.figure));
+            return (
+              <span key={spanIndex} data-draft-figure>
+                {choice
+                  ? `[${choiceLabel(choice)}]`
+                  : `[${span.figure.route_node_id} · no such citation in this report]`}
+              </span>
+            );
+          })}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** The picker: every citation the served records carry, and a press that puts
+    its marker into the draft at the caret. Editing, not a governed act, so it
+    is offered whatever `chrome.actions` says; the save is what is judged. */
+function FigurePicker({
+  choices,
+  onInsert,
+}: {
+  choices: CitationChoice[];
+  onInsert: (choice: CitationChoice) => void;
+}) {
+  const [picked, setPicked] = useState(choices[0] ? choiceKey(choices[0]) : "");
+  if (choices.length === 0) {
+    return (
+      <p className="note" data-figure-picker>
+        No verified citation in this report, so no figure can be inserted.
+      </p>
+    );
+  }
+  const chosen = choices.find((choice) => choiceKey(choice) === picked) ?? choices[0]!;
+  return (
+    <div className="fld" data-figure-picker>
+      <label htmlFor="figure-citation">Citation</label>
+      <select
+        id="figure-citation"
+        value={choiceKey(chosen)}
+        onChange={(event) => setPicked(event.target.value)}
+      >
+        {choices.map((choice) => (
+          <option key={choiceKey(choice)} value={choiceKey(choice)}>
+            {choiceLabel(choice)}
+          </option>
+        ))}
+      </select>
+      <button type="button" className="rb" onClick={() => onInsert(chosen)}>
+        Insert figure
+      </button>
+    </div>
+  );
 }
 
 function FilingAct({
@@ -148,6 +216,17 @@ export function FilingControls({
 }) {
   const { body } = document;
   const [draft, setDraft] = useState("");
+  const editor = useRef<HTMLTextAreaElement>(null);
+  // Where the caret goes after a figure is inserted: set with the draft, and
+  // placed once React has written the new value, which moves the caret.
+  const caret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const at = caret.current;
+    if (at === null || !editor.current) return;
+    caret.current = null;
+    editor.current.focus();
+    editor.current.setSelectionRange(at, at);
+  }, [draft]);
   const [, setParams] = useSearchParams();
   const [refreshFailed, setRefreshFailed] = useState(false);
   const save = useCommand<{ revision_id: string }>();
@@ -166,6 +245,16 @@ export function FilingControls({
 
   const saveAction = actionOf("SAVE_REVISION");
   const narrative = paragraphs(draft);
+  // Parsed once per served document, not per keystroke: a record may be large.
+  const choices = useMemo(() => citationsOf(body.artifacts), [body.artifacts]);
+
+  function insert(choice: CitationChoice) {
+    const token = figureToken(choice.route_node_id, choice.citation_index);
+    const start = editor.current?.selectionStart ?? draft.length;
+    const end = editor.current?.selectionEnd ?? start;
+    caret.current = start + token.length;
+    setDraft(draft.slice(0, start) + token + draft.slice(end));
+  }
   // The served revision is the head this draft was composed against; on a run
   // with none it is null, which is what a first save names.
   const request = { expected_revision_id: body.revision_id, narrative };
@@ -182,11 +271,19 @@ export function FilingControls({
         </label>
         <textarea
           id="narrative-draft"
+          ref={editor}
           value={draft}
           rows={4}
-          placeholder="One paragraph per line. A figure needs a citation picker this surface does not have."
+          placeholder="One paragraph per line."
+          aria-describedby="narrative-draft-rule"
           onChange={(event) => setDraft(event.target.value)}
         />
+        <p className="note" id="narrative-draft-rule">
+          Type prose only. Every figure goes in through the citation picker, which names a citation
+          of a verified record; prose carrying a digit is refused at save.
+        </p>
+        <FigurePicker key={choices.map(choiceKey).join(" ")} choices={choices} onInsert={insert} />
+        <DraftPreview narrative={narrative} choices={choices} />
         <div className="fld">
           <RefusedControl
             refusal={saveAction?.refusal ?? null}

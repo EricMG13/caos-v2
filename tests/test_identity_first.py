@@ -41,10 +41,6 @@ from server.store.members import Standing, grant
 # orchestrator that has none, and it does no I/O on the request.
 NO_IDENTITY = frozenset({("GET", "/api/health")})
 
-# Store-touching routes declared in `server/api/app.py`, which this change does
-# not own. Listed so the census stays exact: the day the route gains
-# `IDENTITY_FIRST`, this set must shrink or the census fails.
-
 
 def _calls(dependant: Dependant) -> Iterator[Callable[..., object]]:
     for sub in dependant.dependencies:
