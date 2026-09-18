@@ -13,19 +13,26 @@ copy is byte-identical to the manifest it shipped with.
 from __future__ import annotations
 
 import collections
+import copy
 import hashlib
 import json
 from pathlib import Path
 
 import pytest
+from canonical_fixtures import CONTRACT, identity, upstream_ref
+from lite_route_fixtures import realistic_handoff_markdown
+
+from server.engine import route
+from server.refusals import Refusal, RefusalCode
 
 BUNDLE = Path(__file__).resolve().parents[1] / "vendor" / "deploy-v"
 CATALOG = (
     BUNDLE / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
 
-# docs/DECISIONS.md §13. A run pinned to one build never executes under another.
-BUILD_ID = "a43cb903ca2751f79e77b6da71f6ea131b8462a32e1b549d65fd0f67389d185f"
+# docs/DECISIONS.md §61, which moved the §13 pin. A run pinned to one build
+# never executes under another.
+BUILD_ID = "30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18"
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -121,6 +128,9 @@ def test_cp_parse_is_superseded_upstream_and_stage_zero_is_not_runnable(
 def test_the_catalog_declares_no_conditional_edge(catalog: dict[str, object]) -> None:
     # CONDITIONAL is a live edge type in CONTEXT.md and no edge uses it today,
     # so predicate freezing has nothing to act on. Recorded, not assumed.
+    # The census beside this one pins the other four counts and drives the
+    # engine's guard; this stays as the one-line pin `docs/PHASE_7_EXIT_
+    # EVIDENCE.md` and the ledger cite by name.
     profiles = catalog["profiles"]
     assert isinstance(profiles, dict)
     conditional = [
@@ -130,6 +140,65 @@ def test_the_catalog_declares_no_conditional_edge(catalog: dict[str, object]) ->
         if edge["type"] == "CONDITIONAL"
     ]
     assert conditional == []
+
+
+# Counted at this build. CONDITIONAL is absent and is the one type
+# `server/engine/route.py` refuses, because nothing evaluates a predicate.
+EDGE_CENSUS = {"REQUIRED": 60, "OPTIONAL": 26, "ADVISORY": 29, "QA_GATE": 1}
+
+
+def test_the_vendored_catalog_carries_no_edge_this_engine_cannot_evaluate(
+    catalog: dict[str, object],
+) -> None:
+    """The whole typed-edge census, not only the type that matters.
+
+    A bundle pull that moves any of the four counts is visible here rather than
+    silently changing every route the system runs, and one that introduces a
+    CONDITIONAL edge is refused by `resolve_route` rather than pinned -- which
+    the mutated copy below proves against the real catalog, since a hand-built
+    profile cannot show that the vendored one would be caught.
+    """
+    profiles = catalog["profiles"]
+    assert isinstance(profiles, dict)
+    counted = collections.Counter(
+        str(edge["type"]) for profile in profiles.values() for edge in profile["edges"]
+    )
+
+    assert dict(counted) == EDGE_CENSUS
+    assert counted["CONDITIONAL"] == 0
+
+    # Through the engine, not only the bytes: every pathway of every profile
+    # resolves today, and retyping one edge of a profile to CONDITIONAL refuses
+    # every pathway of that profile whose nodes carry it.
+    resolved = 0
+    refused = 0
+    for profile_id, profile in profiles.items():
+        for selection_id in profile["pathways"]:
+            route.resolve_route(catalog, profile_id, selection_id)
+            resolved += 1
+
+        mutated = copy.deepcopy(catalog)
+        mutated_profile = mutated["profiles"][profile_id]  # type: ignore[index]
+        mutated_profile["edges"][0]["type"] = "CONDITIONAL"
+        source = str(mutated_profile["edges"][0]["source"])
+        target = str(mutated_profile["edges"][0]["target"])
+        for selection_id in profile["pathways"]:
+            carried = {
+                str(node["module_id"])
+                for node in profile["pathways"][selection_id]["nodes"]
+            }
+            if not {source, target} <= carried:
+                continue
+            with pytest.raises(Refusal) as caught:
+                route.resolve_route(mutated, profile_id, selection_id)
+            assert caught.value.code is RefusalCode.ROUTE_EDGE_UNSUPPORTED
+            refused += 1
+
+    # A census that counted nothing, or a mutation no pathway carried, would
+    # read as a clean pass (CLAUDE.md: a scanner that scanned nothing is a
+    # failure).
+    assert resolved == 18
+    assert refused > 0
 
 
 def test_the_bundle_verifies_with_its_own_tool() -> None:
@@ -147,3 +216,75 @@ def test_the_bundle_verifies_with_its_own_tool() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+
+
+# `docs/DECISIONS.md` §61: the three places CP-0 reads `CONDITIONAL` from must
+# say the same thing -- a source condition, discharged by supplying the source
+# and re-running CP-0, never an upstream handoff that has not run yet.
+CP0_CONDITIONAL_TEXTS = (
+    "skills/cp-0-source-readiness/SKILL.md",
+    "skills/cp-0-source-readiness/references/REF_CP-0_STEPS.md",
+    "skills/cp-0-source-readiness/references/CP-0__SourceReadiness__payload.schema.txt",
+)
+
+
+@pytest.mark.parametrize("relative", CP0_CONDITIONAL_TEXTS)
+def test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read(
+    relative: str,
+) -> None:
+    text = (BUNDLE / relative).read_text(encoding="utf-8")
+    assert "never a readiness ground" in text, relative
+    assert "CP-0 is re-run" in text, relative
+
+
+# `docs/DECISIONS.md` §63: T5B.5 is where CP-5 records what became of a
+# calculation, and "not calculable from provided materials" is the answer its
+# runbook asks for when the sources carry none. Its two status columns are
+# exempt from the placeholder disqualifiers; its seven substantive columns are
+# not, so a validator still cannot pass by leaving the work blank.
+CP5_SKILL = "skills/cp-5-evidence-trace-validator/SKILL.md"
+T5B5_STATUS_COLUMNS = ("Status", "Claim Status")
+T5B5_PLACEHOLDER = "Not Calculable from Provided Materials"
+
+
+def _cp5_handoff() -> str:
+    cp0 = realistic_handoff_markdown(identity("CP-0"))
+    cp0_ref = upstream_ref(identity("CP-0"), cp0)
+    l10 = realistic_handoff_markdown(identity("CP-L10", upstream=(cp0_ref,)))
+    upstream = (cp0_ref, upstream_ref(identity("CP-L10"), l10))
+    return realistic_handoff_markdown(identity("CP-5", upstream=upstream)).decode()
+
+
+def _with_t5b5_cell(markdown: str, column: str, value: str) -> str:
+    """The fixture's first T5B.5 body row with one cell replaced, by column name."""
+    start = markdown.index("#### T5B.5\n")
+    lines = markdown[start:].split("\n")
+    columns = [cell.strip() for cell in lines[2].strip().strip("|").split("|")]
+    cells = [cell.strip() for cell in lines[4].strip().strip("|").split("|")]
+    cells[columns.index(column)] = value
+    lines[4] = "| " + " | ".join(cells) + " |"
+    return markdown[:start] + "\n".join(lines)
+
+
+def test_cp5_exempts_only_its_status_columns_from_the_disqualifiers() -> None:
+    skill = (BUNDLE / CP5_SKILL).read_text(encoding="utf-8")
+    rules = CONTRACT.completeness_check.load_contract(skill, "CP-5")
+    register = rules["registers"]["T5B.5"]
+    assert register["disqualifier_exempt_columns"] == list(T5B5_STATUS_COLUMNS)
+    assert register["critical_columns"] == register["columns"]
+    assert T5B5_PLACEHOLDER.casefold() in rules["blocklist"]
+    substantive = [c for c in register["columns"] if c not in T5B5_STATUS_COLUMNS]
+    assert len(substantive) == 7
+
+    handoff = _cp5_handoff()
+    check = CONTRACT.completeness_check.check
+    assert check(skill, handoff, "CP-5")[0] == []
+    for column in T5B5_STATUS_COLUMNS:
+        honest = _with_t5b5_cell(handoff, column, T5B5_PLACEHOLDER)
+        assert check(skill, honest, "CP-5")[0] == [], column
+    for column in substantive:
+        blank = _with_t5b5_cell(handoff, column, T5B5_PLACEHOLDER)
+        assert check(skill, blank, "CP-5")[0] == [
+            f"T5B.5 row 1: critical column '{column}' holds a disqualifying "
+            f"placeholder '{T5B5_PLACEHOLDER}'"
+        ]

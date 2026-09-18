@@ -14,7 +14,11 @@ from server.qualification.harness import Performed, PerformedSet, PreparedCase
 from server.qualification.matrix import MatrixRow
 from server.qualification.verdict import Verdict, read_verdict
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection
+from server.store import RunStatus, StoreConnection, rollback_or_close
+
+# `0019_one_qualification_verdict.sql`. Named here so the refusal that maps
+# it and the migration that declares it cannot drift apart silently.
+ONE_VERDICT_PER_EVIDENCE = "one_verdict_per_evidence"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +33,9 @@ class Evidence:
     @property
     def sha256(self) -> str:
         return sha256(
-            json.dumps(asdict(self), sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                asdict(self), sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
         ).hexdigest()
 
 
@@ -37,13 +43,25 @@ def _answered(row: MatrixRow) -> bool:
     """Whether this row is a result a reviewer could sign QUALIFIED over.
 
     Every key the case declared has to be answered, and a case may declare
-    three kinds: expected citations, an expected refusal, and an expected
-    forecast. `forecast_met` is `None` when no forecast was declared and a
-    bool when one was, so `is not False` is the test -- a case keyed only by a
+    six kinds: expected citations, an expected refusal, an expected forecast,
+    expected readiness, expected projections and expected register cells. Each
+    of the bool-or-None fields is `None` when its kind was not declared and a
+    bool when it was, so `is not False` is the test -- a case keyed only by a
     forecast (which `assert_measurable` allows) was otherwise signable with
     that forecast unmet, because nothing here read the field.
+
+    `registers_met` joined that list the day register keys existed, and for the
+    same reason: `assert_measurable` counts a register key as a declared
+    comparison, so a case keyed only by one would otherwise have been signable
+    with the cell wrong. A key the reviewer cannot see missed is a key that
+    measures nothing.
     """
-    if row.forecast_met is False or row.ready_met is False:
+    if (
+        row.forecast_met is False
+        or row.ready_met is False
+        or row.projections_met is False
+        or row.registers_met is False
+    ):
         return False
     if row.expected_refusal_met is not None:
         return row.expected_refusal_met
@@ -87,11 +105,20 @@ class PerformedEvidence:
         matrix = self.performed.matrix
         if matrix is None:
             return False
-        if any(
-            record.status is not RunStatus.COMPLETE
-            for record in self.performed.performed
-        ):
-            return False
+        rows = {row.case_label: row for row in matrix.rows}
+        for record in self.performed.performed:
+            row = rows.get(record.case_label)
+            if row is None:
+                return False
+            # A case that declared its refusal declared that the run would not
+            # finish. Demanding COMPLETE of it as well made the key
+            # unanswerable by any run this system produces, which is what
+            # `docs/REPAIR_PLAN.md` Phase 6 asks for in a deliberately
+            # restricted case.
+            if row.expected_refusal_met:
+                continue
+            if record.status is not RunStatus.COMPLETE:
+                return False
         return all(_answered(row) for row in matrix.rows)
 
     @property
@@ -135,7 +162,9 @@ def record_performed(conn: StoreConnection, performed: PerformedEvidence) -> str
             evidence.provider,
             evidence.model,
             performed.complete,
-            json.dumps(document, sort_keys=True, separators=(",", ":")),
+            json.dumps(
+                document, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ),
         ),
     )
     row = conn.execute(
@@ -360,6 +389,8 @@ def _matrix_document(performed: PerformedSet) -> dict[str, object] | None:
                 # able to see a readiness miss, or a snapshot refused because
                 # CP-0 gated a module reads as the model citing nothing.
                 "ready_met": row.ready_met,
+                "projections_met": row.projections_met,
+                "registers_met": row.registers_met,
             }
             for row in matrix.rows
         ],
@@ -368,8 +399,73 @@ def _matrix_document(performed: PerformedSet) -> dict[str, object] | None:
 
 def _digest(document: dict[str, object]) -> str:
     return sha256(
-        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            document, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
     ).hexdigest()
+
+
+def _snapshot_runs(document: object) -> tuple[UUID, ...]:
+    """The run ids the stored snapshot names, or a refused binding.
+
+    `qualification_performed.performed_json` is the only place an evidence row
+    reaches its runs: no column joins `qualification_evidence` to `runs`, and
+    the snapshot document is what the reviewer signed, so the run ids it names
+    are the ones the comparison below is owed. A document this function cannot
+    read is a snapshot nobody may sign, never an empty run set that passes.
+    """
+    if not isinstance(document, dict):
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    records = document.get("performed")
+    if not isinstance(records, list) or not records:
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    runs: list[UUID] = []
+    for record in records:
+        if not isinstance(record, dict) or "run_id" not in record:
+            raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+        try:
+            runs.append(UUID(str(record["run_id"])))
+        except ValueError:
+            raise Refusal(RefusalCode.VERDICT_BINDING_INVALID) from None
+    return tuple(runs)
+
+
+def _models_recorded(
+    conn: StoreConnection, *, runs: tuple[UUID, ...], model: str
+) -> None:
+    """Refuse unless no run contradicts the model the verdict names, and one
+    confirms it.
+
+    `evidence.model` is what the harness was configured with; what the runs
+    called is `call_outcomes.model` beside each accepted artifact (§25), and
+    invariant 3 says the host owns identity -- so a reviewer's `provider`
+    binding is checked against the store's fact, not against the caller's
+    configuration.
+
+    It is "no run contradicts" rather than "every run confirms" because a
+    signable snapshot may legitimately contain a run that accepted nothing.
+    `PerformedEvidence.complete` waives the COMPLETE requirement for a case
+    whose declared refusal was met, and a run whose first node returns a
+    validated Blocked verdict ends BLOCKED with a billed attempt, a
+    `call_outcomes` row and no artifact -- so the join below returns no row for
+    it. Demanding every run appear refused exactly the case
+    `docs/REPAIR_PLAN.md` Phase 6 asks for, the deliberately restricted one,
+    and refused it as a *wrong binding* when the bindings were right. One
+    unsignable case poisons the whole set. Found by the Completion Phase 8
+    confidence review, which built the snapshot and reproduced it.
+
+    Every artifact-bearing run is still checked against the store's fact, and
+    an empty result still refuses: a snapshot in which nothing was ever
+    produced names no producer, which is what this comparison exists to catch.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT o.run_id,o.model FROM call_outcomes o"
+        " JOIN artifacts a ON a.attempt_id=o.attempt_id"
+        " WHERE o.run_id = ANY(%s)",
+        (list(runs),),
+    ).fetchall()
+    if not rows or any(row[1] != model for row in rows):
+        raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
 
 
 def record_verdict(
@@ -386,12 +482,14 @@ def record_verdict(
         or verdict.build_id != evidence.build_id
     ):
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
-    complete = conn.execute(
-        "SELECT complete FROM qualification_performed WHERE performed_sha256=%s",
+    snapshot = conn.execute(
+        "SELECT complete,performed_json FROM qualification_performed"
+        " WHERE performed_sha256=%s",
         (evidence.performed_sha256,),
     ).fetchone()
-    if complete != (True,):
+    if snapshot is None or snapshot[0] is not True:
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
+    _models_recorded(conn, runs=_snapshot_runs(snapshot[1]), model=evidence.model)
     digest = record_evidence(conn, evidence)
     try:
         conn.execute(
@@ -406,8 +504,21 @@ def record_verdict(
                 verdict.expires_at,
             ),
         )
-    except psycopg.Error:
+    except psycopg.errors.UniqueViolation as violation:
+        # `0019_one_qualification_verdict.sql`: this evidence is already signed,
+        # which is a different thing from a wrong binding and says so. Matched
+        # by constraint name, not by message text: a message is the server's
+        # locale and version, and a second unique index on this table must not
+        # inherit this code by accident.
+        rollback_or_close(conn)
+        if violation.diag.constraint_name == ONE_VERDICT_PER_EVIDENCE:
+            raise Refusal(RefusalCode.VERDICT_ALREADY_RECORDED) from None
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID) from None
+    except psycopg.Error:
+        # Any other driver fault is the store failing, not the document: a 400
+        # here told a reviewer whose bindings were right to correct them.
+        rollback_or_close(conn)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
 
 
 def current_verdict(

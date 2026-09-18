@@ -28,6 +28,7 @@ from server.api.wire import (
     AnalysisDocument,
     ApproveGate,
     AttemptView,
+    BlockedByView,
     CancelRun,
     CaseCreated,
     CaseRow,
@@ -35,15 +36,23 @@ from server.api.wire import (
     CitationView,
     CreateCase,
     CreateRun,
+    DeliverableFiled,
+    DeliverableFrozen,
     DirectoryBody,
     DirectoryDocument,
     EdgeView,
+    FileDeliverable,
     FrameView,
+    FreezeDeliverable,
     GateApproved,
     GatePreviewDocument,
     GateView,
+    GrantStanding,
     HandoffView,
+    NarrativeDraft,
+    NarrativeFigureRef,
     NodeView,
+    OpinionSigned,
     PageBody,
     PageDocument,
     PageLine,
@@ -52,6 +61,8 @@ from server.api.wire import (
     RectView,
     RefusalBody,
     RetryRun,
+    RevisionSaved,
+    RevokeStanding,
     RouteChoice,
     RunBody,
     RunCreated,
@@ -61,15 +72,23 @@ from server.api.wire import (
     RunSummary,
     RunView,
     RunWork,
+    SaveRevision,
     SectionNote,
     ServedRole,
     SetVersion,
+    SignOpinion,
+    SignVerdict,
     SourceRow,
     SourcesAdmitted,
+    SourceWithdrawn,
+    StandingGranted,
+    StandingRevoked,
     StartRun,
     Subject,
     UploadBody,
     UploadDocument,
+    VerdictRecorded,
+    WithdrawSource,
     WorkView,
     wire_schema,
 )
@@ -120,6 +139,30 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     ),
     wire.ReportDocument: ENVELOPE,
     wire.CommitteeDocument: ENVELOPE,
+    wire.BookColumn: frozenset({"key", "label"}),
+    wire.BookResearch: frozenset({"route_node_id", "module_id", "qa_status"}),
+    # The ten fields of IA_SPEC.md 4.4, and nothing beside them: a passport
+    # that grew an eleventh would be this host asserting something the
+    # accepted record does not say.
+    wire.BookPassport: frozenset(
+        (
+            "definition period scenario evidence_date computed_at snapshot method "
+            "derivation citations supporting_research"
+        ).split()
+    ),
+    wire.BookCell: frozenset({"column", "value", "unavailable_reason", "passport"}),
+    wire.BookPeriod: frozenset(
+        {"case", "period_id", "fiscal_year", "days", "unavailable_reason", "cells"}
+    ),
+    wire.BookRow: frozenset(
+        (
+            "case_id title standing subject displayed_run_id displayed_run_status "
+            "snapshot currency scale periods unavailable_reason refusal"
+        ).split()
+    ),
+    wire.BookBasis: frozenset({"period", "scenario", "accepted_only"}),
+    wire.BookBody: frozenset({"basis", "columns", "rows"}),
+    wire.BookDocument: ENVELOPE,
     wire.ModelValue: frozenset({"name", "value", "unavailable_reason"}),
     wire.ModelPeriod: frozenset(
         {"case", "period_id", "fiscal_year", "days", "values", "unavailable_reason"}
@@ -145,6 +188,8 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "latest_run_id",
             "displayed_run_id",
             "subject",
+            "displayed_run_status",
+            "blocked_by",
             "forecast",
             "unavailable_reason",
         }
@@ -198,8 +243,10 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "waiting_on",
             "awaiting_gate",
             "gate_verdict",
+            "gate_reason",
         }
     ),
+    BlockedByView: frozenset({"route_node_id", "module_id", "attempt_id"}),
     RunView: frozenset(
         {
             "run_id",
@@ -213,6 +260,9 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "nodes",
             "attempts",
             "work",
+            "blocked_by",
+            "supersedes",
+            "superseded_by",
         }
     ),
     RunBody: frozenset(
@@ -264,6 +314,8 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
             "latest_run_id",
             "displayed_run_id",
             "subject",
+            "displayed_run_status",
+            "blocked_by",
             "handoffs",
             "pending",
         }
@@ -279,7 +331,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     CreateCase: frozenset({"title"}),
     CaseCreated: frozenset({"case_id"}),
     SourcesAdmitted: frozenset({"case_id", "source_ids"}),
-    CreateRun: frozenset({"profile_id", "selection_id"}),
+    CreateRun: frozenset({"profile_id", "selection_id", "supersedes"}),
     RunCreated: frozenset({"case_id", "run_id", "route_digest"}),
     PinRunInput: frozenset({"subject"}),
     RunInputPinned: frozenset({"run_id", "source_set_version", "input_fingerprint"}),
@@ -299,6 +351,38 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     RetryRun: frozenset({"input_fingerprint"}),
     CancelRun: frozenset(),
     RunWork: frozenset({"run_id", "run_status", "work"}),
+    # A verdict (F17's producer, `docs/DECISIONS.md` §65): the reviewer's six
+    # bindings in, and the host's receipt out.
+    SignVerdict: frozenset(
+        (
+            "provider qualification_set_sha256 build_id decided_at expires_at reviewer"
+        ).split()
+    ),
+    VerdictRecorded: frozenset(
+        {"evidence_sha256", "reviewer_id", "decided_at", "expires_at"}
+    ),
+    # The seven governed writes Task 12.1 routes: membership, withdrawal and
+    # the filing chain. Requests first, then their receipts.
+    GrantStanding: frozenset({"user_id", "standing"}),
+    StandingGranted: frozenset({"case_id", "user_id", "standing"}),
+    RevokeStanding: frozenset(),
+    StandingRevoked: frozenset({"case_id", "user_id"}),
+    WithdrawSource: frozenset(),
+    SourceWithdrawn: frozenset({"case_id", "source_id"}),
+    NarrativeFigureRef: frozenset({"route_node_id", "citation_index"}),
+    NarrativeDraft: frozenset({"text", "figure"}),
+    SaveRevision: frozenset({"expected_revision_id", "narrative"}),
+    RevisionSaved: frozenset({"case_id", "run_id", "revision_id", "payload_sha256"}),
+    SignOpinion: frozenset({"payload_sha256"}),
+    OpinionSigned: frozenset({"case_id", "revision_id", "payload_sha256", "signed_by"}),
+    FreezeDeliverable: frozenset({"payload_sha256"}),
+    DeliverableFrozen: frozenset(
+        {"case_id", "revision_id", "payload_sha256", "frozen_by"}
+    ),
+    FileDeliverable: frozenset({"payload_sha256"}),
+    DeliverableFiled: frozenset(
+        {"case_id", "run_id", "revision_id", "payload_sha256", "filed_by"}
+    ),
 }
 
 REQUESTS: tuple[type[BaseModel], ...] = (
@@ -309,6 +393,14 @@ REQUESTS: tuple[type[BaseModel], ...] = (
     StartRun,
     RetryRun,
     CancelRun,
+    SignVerdict,
+    GrantStanding,
+    RevokeStanding,
+    WithdrawSource,
+    SaveRevision,
+    SignOpinion,
+    FreezeDeliverable,
+    FileDeliverable,
 )
 
 # What `frontend/src/wire/v1/shape.ts` can express. `title` and `description`
@@ -437,6 +529,11 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "START_RUN",
         "RETRY_RUN",
         "CANCEL_RUN",
+        "WITHDRAW_SOURCE",
+        "SAVE_REVISION",
+        "SIGN_OPINION",
+        "FREEZE_DELIVERABLE",
+        "FILE_DELIVERABLE",
     }
     assert [model.__name__ for model in V1_DOCUMENTS] == [
         "DirectoryDocument",
@@ -444,6 +541,7 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "RunSectionDocument",
         "AnalysisDocument",
         "ModelDocument",
+        "BookDocument",
         "ReportDocument",
         "CommitteeDocument",
     ]
@@ -550,7 +648,7 @@ def test_every_section_router_declares_its_store_budget() -> None:
 
 def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> None:
     assert set(REQUESTS) <= set(V1_COMMANDS)
-    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 14
+    assert len(V1_COMMANDS) == len(set(V1_COMMANDS)) == 30
     defs = json.loads(COMMITTED.read_text(encoding="utf-8"))["$defs"]
     for model in V1_COMMANDS:
         assert model.__name__ in defs, model.__name__
@@ -561,6 +659,7 @@ def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> N
 
     # T1: a request names no actor, case, run or approver; the server derives them.
     authority = {"actor_id", "actor", "case_id", "run_id", "approver", "approver_id"}
+    authority |= {"reviewer_id"}  # a verdict's signer is the actor, never a field
     for request in REQUESTS:
         assert not authority & set(request.model_fields), request.__name__
 
@@ -581,3 +680,12 @@ def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> N
     for request in (StartRun, RetryRun, ApproveGate):
         field = defs[request.__name__]["properties"]["input_fingerprint"]
         assert field["pattern"] == "^[0-9a-f]{64}$"
+    # A verdict's moments are text the server's reader parses, not datetimes
+    # the wire would have judged first; the receipt's are the host's, aware.
+    for moment in ("decided_at", "expires_at"):
+        assert defs["SignVerdict"]["properties"][moment] == {
+            "maxLength": wire.MOMENT_CHARS,
+            "title": moment.replace("_", " ").title(),
+            "type": "string",
+        }
+        assert defs["VerdictRecorded"]["properties"][moment]["format"] == "date-time"

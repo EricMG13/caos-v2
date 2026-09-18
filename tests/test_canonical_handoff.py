@@ -119,6 +119,98 @@ def test_restricted_is_accepted_with_limitations() -> None:
     assert projections.limitation_flags == ("Interim period only",)
 
 
+# The T5 register as live CP-0 runs wrote it (`docs/DECISIONS.md` §61): a
+# header named Severity, and CRITICAL | MATERIAL | MINOR in its cells.
+def _with_findings(
+    markdown: bytes, *severities: str, header: str = "Severity"
+) -> bytes:
+    table = (
+        f"| ID | Type | {header} | Affected modules | Remediation |\n"
+        "|---|---|---|---|---|\n"
+        + "".join(
+            f"| G-{n} | SOURCE_GAP | {s} | CP-5 | Obtain it |\n"
+            for n, s in enumerate(severities, 1)
+        )
+    )
+    return markdown.replace(
+        b"## Gaps & Conflicts\n\n",
+        b"## Gaps & Conflicts\n\n" + table.encode() + b"\n",
+        1,
+    )
+
+
+RESTRICTED = {
+    "qa_status": "Restricted",
+    "confidence_score": 50,
+    "confidence_band": "Low",
+    "committee_status": "Restricted",
+}
+BLOCKED = {
+    "qa_status": "Blocked",
+    "confidence_score": 30,
+    "confidence_band": "Insufficient Information",
+    "committee_status": "Blocked",
+}
+
+
+def test_a_material_finding_over_passed_is_refused_as_the_canon_says() -> None:
+    """CANON_SHARED § CP_CONFIDENCE_SCORE: any MATERIAL finding, no CRITICAL,
+    is `Restricted`. A live CP-0 declared Passed/93 over its own MATERIAL row
+    and the host accepted it; the vendor validator now reads the rows."""
+    markdown = _with_findings(CP0_MD, "MATERIAL")
+    result = CONTRACT.validate_handoff.validate_text(markdown.decode())
+    assert any("MATERIAL" in e and "Restricted" in e for e in result.errors)
+    assert _refused(CP0, markdown).code is RefusalCode.HANDOFF_MALFORMED
+
+
+@pytest.mark.parametrize("header", ["severity", "`Severity`", "Severity (CP-5A)"])
+@pytest.mark.parametrize("cell", ["MATERIAL", "`MATERIAL`", "**Material** — disclosed"])
+def test_the_finding_is_read_however_the_module_spelt_it(
+    header: str, cell: str
+) -> None:
+    markdown = _with_findings(CP0_MD, cell, header=header)
+    assert _refused(CP0, markdown).code is RefusalCode.HANDOFF_MALFORMED
+
+
+def test_a_critical_finding_requires_blocked() -> None:
+    over_restricted = _with_findings(_markdown(CP0, authored=RESTRICTED), "CRITICAL")
+    result = CONTRACT.validate_handoff.validate_text(over_restricted.decode())
+    assert any("CRITICAL" in e and "Blocked" in e for e in result.errors)
+    over_blocked = _with_findings(_markdown(CP0, authored=BLOCKED), "CRITICAL")
+    assert CONTRACT.validate_handoff.validate_text(over_blocked.decode()).errors == ()
+    assert _refused(CP0, over_blocked).code is RefusalCode.HANDOFF_BLOCKED
+
+
+def test_a_material_finding_over_restricted_or_blocked_is_conformant() -> None:
+    restricted = _with_findings(
+        _markdown(CP0, authored=RESTRICTED), "MATERIAL", "MINOR"
+    )
+    assert _validate(CP0, restricted).qa_status == "Restricted"
+    blocked = _with_findings(_markdown(CP0, authored=BLOCKED), "MATERIAL")
+    assert _refused(CP0, blocked).code is RefusalCode.HANDOFF_BLOCKED
+
+
+def test_a_minor_finding_or_no_finding_leaves_the_declared_status_alone() -> None:
+    assert _validate(CP0, _with_findings(CP0_MD, "MINOR")).qa_status == "Passed"
+    # A column that is not a severity, and a severity cell outside the enum,
+    # are not findings: the rule reads the canon's three words and nothing else.
+    assert _validate(CP0, _with_findings(CP0_MD, "Severe")).qa_status == "Passed"
+    other = _with_findings(CP0_MD, "MATERIAL", header="Materiality")
+    assert _validate(CP0, other).qa_status == "Passed"
+    # Restricted with no finding row stays the module's own, stricter call.
+    assert _validate(CP0, _markdown(CP0, authored=RESTRICTED)).qa_status == "Restricted"
+
+
+def test_a_finding_inside_a_code_fence_is_not_a_finding() -> None:
+    fenced = CP0_MD.replace(
+        b"## Gaps & Conflicts\n\n",
+        b"## Gaps & Conflicts\n\n```\n| ID | Severity |\n|---|---|\n"
+        b"| 1 | MATERIAL |\n```\n\n",
+        1,
+    )
+    assert _validate(CP0, fenced).qa_status == "Passed"
+
+
 def test_no_validator_text_reaches_a_refusal() -> None:
     markdown = _markdown(
         L10, override={"issuer_name": ["x"]}, body_note=SECRET
@@ -258,6 +350,49 @@ def test_only_the_gate_module_may_return_a_readiness_map() -> None:
     CP-0's T8 alone; any other module's handoff carries none."""
     assert _validate(CP0, CP0_MD).readiness
     assert _validate(L10, L10_MD).readiness == ()
+
+
+def test_a_conditional_row_projects_its_blocker_text_bounded() -> None:
+    """The cell that names the source a CONDITIONAL verdict asked for (§61).
+
+    `_readiness` kept `(module_id, readiness)` and dropped `why_now_or_blocker`,
+    which the schema requires and which is the only place the named source is
+    written -- so a run ended BLOCKED by a readiness verdict could not say
+    which source would discharge it. `blockers` carries that cell for every
+    CONDITIONAL or BLOCKED row and for no other: a READY row's cell is
+    orientation, not a condition, and projecting it would put model prose on
+    the wire for every node of every run.
+    """
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    markdown = _markdown(
+        CP0,
+        readiness={"CP-5": "CONDITIONAL", "CP-L10": "READY"},
+        blockers={"CP-5": asked, "CP-L10": "Runs now."},
+    )
+
+    gate = _validate(CP0, markdown)
+
+    assert gate.readiness == (("CP-5", "CONDITIONAL"), ("CP-L10", "READY"))
+    assert gate.blockers == (("CP-5", asked),)
+
+
+def test_a_blocker_cell_past_its_bound_refuses_with_no_document_text() -> None:
+    """512 characters, `BoundaryText`-normalised, and the vendor's own cell
+    text never rides out on the refusal (invariant 2)."""
+    at_bound = "S" * 512
+    kept = _validate(
+        CP0,
+        _markdown(CP0, readiness={"CP-5": "BLOCKED"}, blockers={"CP-5": at_bound}),
+    )
+    assert kept.blockers == (("CP-5", at_bound),)
+
+    refused = _refused(
+        CP0,
+        _markdown(CP0, readiness={"CP-5": "BLOCKED"}, blockers={"CP-5": "S" * 513}),
+    )
+
+    assert refused.code is RefusalCode.HANDOFF_MALFORMED
+    assert refused.__context__ is None and refused.__cause__ is None
 
 
 def test_strict_json_parses_ordinary_json() -> None:

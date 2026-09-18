@@ -28,9 +28,14 @@ from conftest import every_block
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.evidence.citations import Citation, citation_candidates, verify_citations
+from server.evidence.citations import Citation, verify_citations
 from server.evidence.extract import LINES_PER_PAGE
-from server.evidence.ingest import Document, admit_pack, block_ids_by_line
+from server.evidence.ingest import (
+    Document,
+    admit_pack,
+    block_ids_by_line,
+    line_groups,
+)
 from server.evidence.read import read_block
 from server.refusals import Refusal
 from server.store import StoreConnection
@@ -169,47 +174,6 @@ def test_a_repeated_quote_with_one_undelivered_copy_stays_ambiguous(
             )
 
 
-def test_citation_candidates_keep_only_unique_delivered_lines(
-    case: tuple[StoreConnection, UUID], tmp_path: Path
-) -> None:
-    conn, case_id = case
-    [source_id] = admit_pack(
-        conn,
-        BlobStore(tmp_path / "blobs"),
-        case_id=case_id,
-        documents=[
-            Document(
-                filename=BoundaryText.of("candidate.txt"),
-                data=(
-                    b"FORM 10-K\nFORM 10-K\n"
-                    b"Fiscal year ended November 30 2025\n"
-                    b"Net income rose sharply in 2025\n"
-                    b"Total debt declined during 2025\n"
-                    b"Cash increased in 2025\n"
-                ),
-            )
-        ],
-    )
-    delivered = every_block(conn, source_id)
-    proposed = [
-        Citation(source_id, int(page), str(text))
-        for page, text in conn.execute(
-            "SELECT page, text FROM source_blocks WHERE source_id = %s"
-            " ORDER BY block_id",
-            (source_id,),
-        ).fetchall()
-    ]
-
-    candidates = citation_candidates(conn, delivered=delivered, proposed=proposed)
-
-    assert [candidate.matched_text for candidate in candidates] == [
-        "Fiscal year ended November 30 2025",
-        "Net income rose sharply in 2025",
-        "Total debt declined during 2025",
-    ]
-    assert verify_citations(conn, delivered=delivered, citations=candidates)
-
-
 def test_admission_and_anchoring_share_one_line_to_block_numbering(
     admitted: tuple[StoreConnection, UUID],
 ) -> None:
@@ -231,18 +195,26 @@ def test_admission_and_anchoring_share_one_line_to_block_numbering(
             (source_id,),
         ).fetchall()
     }
-    numbering = block_ids_by_line(lines)
+    numbering = block_ids_by_line(
+        {line_id: len(line_groups(" ".join(words))) for line_id, words in lines.items()}
+    )
     assert len(stored) == len(lines) > LINES_PER_PAGE
     assert {
-        numbering[line_id]: " ".join(words) for line_id, words in lines.items()
+        numbering[line_id][0]: " ".join(words) for line_id, words in lines.items()
     } == stored
 
 
 def test_the_numbering_is_ascending_by_line_and_widens_past_six_digits() -> None:
-    assert block_ids_by_line([7, 3, 7, 11]) == {
-        3: "b000000",
-        7: "b000001",
-        11: "b000002",
+    assert block_ids_by_line(dict.fromkeys([7, 3, 11], 1)) == {
+        3: ("b000000",),
+        7: ("b000001",),
+        11: ("b000002",),
     }
-    wide = block_ids_by_line(range(1_000_001))
-    assert (wide[999_999], wide[1_000_000]) == ("b999999", "b1000000")
+    # A split line takes as many ordinals as it has blocks, and the next line
+    # starts after them: reading order and block id order still agree.
+    assert block_ids_by_line({3: 2, 7: 1}) == {
+        3: ("b000000", "b000001"),
+        7: ("b000002",),
+    }
+    wide = block_ids_by_line(dict.fromkeys(range(1_000_001), 1))
+    assert (wide[999_999], wide[1_000_000]) == (("b999999",), ("b1000000",))

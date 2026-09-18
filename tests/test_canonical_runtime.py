@@ -13,8 +13,10 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import date
+from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import QUOTE, UNANCHORED, CanonicalCompletions
@@ -58,11 +60,13 @@ from server.methodology.handoff import (
 )
 from server.methodology.invocation import host_identity
 from server.methodology.runner import ModuleProvider
+from server.methodology.verification import AcceptedRow
+from server.pricing import ModelPrice
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection, connect
+from server.store import StoreConnection, connect, outcomes
 from server.store.events import lock_run
-from server.store.outcomes import accepted_rows
+from server.store.outcomes import CallOutcome, accepted_rows
 from server.store.run_inputs import load_run_input
 from server.store.runs import block_run
 from server.store.source_sets import load_source_set
@@ -191,17 +195,28 @@ def test_a_lite_route_completes_through_the_real_runtime(
     )
 
 
+def _run_one_lite_node(harness: _Harness) -> None:
+    """Run the LITE route with CP-L10 gate-blocked, so exactly one node is
+    called, billed and accepted before the empty frontier ends the run.
+
+    Both callers rest on the three assertions below: they are this helper's
+    contract, not either test's private working, so weaken one and the other
+    test stops saying what its name claims.
+    """
+    answers = CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"})
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+    called = [prompt.split(maxsplit=6)[5] for prompt in answers.prompts]
+    assert called == ["CP-0"]
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+
+
 def test_cp5_is_not_invoked_without_an_accepted_named_lite_object(
     harness: _Harness,
 ) -> None:
     """§46.1: CP-L10's edge into CP-5 is soft, but CP-5's verified LITE block
     retains `NAMED_LITE_OBJECT_ACCEPTED`. With CP-L10 gate-blocked no upstream
     owns an accepted object, so the run ends BLOCKED and CP-5 costs nothing."""
-    answers = CanonicalCompletions(harness.source_id, readiness={"CP-L10": "BLOCKED"})
-    assert _run_route(harness, _module_provider(harness, answers)) is None
-    called = [prompt.split(maxsplit=6)[5] for prompt in answers.prompts]
-    assert called == ["CP-0"]
-    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    _run_one_lite_node(harness)
     with connect(harness.url) as observer:
         cp5 = observer.execute(
             "SELECT count(*), count(r.attempt_id) FROM run_attempts t"
@@ -211,6 +226,25 @@ def test_cp5_is_not_invoked_without_an_accepted_named_lite_object(
         ).fetchone()
     assert cp5 == (0, 0)
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+
+
+def test_an_accepted_node_records_its_outcome_exactly_twice(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W1: the executor records the bill once, with the call, and that row is
+    what a crash before acceptance is replayed from; acceptance re-asserts
+    exactly it in its own unit, where a legacy row is what routes the replay.
+    A third record costs a COMMIT and two row locks and decides nothing."""
+    calls: list[UUID] = []
+    original = outcomes._record
+
+    def counting(conn: StoreConnection, attempt: UUID, outcome: CallOutcome) -> bool:
+        calls.append(attempt)
+        return original(conn, attempt, outcome)
+
+    monkeypatch.setattr(outcomes, "_record", counting)
+    _run_one_lite_node(harness)
+    assert (len(calls), len(set(calls))) == (2, 1), calls
 
 
 def test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry(
@@ -233,6 +267,51 @@ def test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry(
             (blocked, _node(harness, "CP-5").route_node_id),
         ).fetchone()
     assert row == (1,)
+    # The transition recorded which answer ended the run, in the transaction
+    # that ended it. Nothing can re-derive this later: `replay_billed` goes
+    # through `check_attempt`, which refuses once the run is no longer RUNNING,
+    # so the row is the only durable form of the cause (§68).
+    assert _blocking_verdict(harness) == _attempt_of(harness, "CP-5")
+
+
+def test_a_blocking_verdict_names_only_an_attempt_of_the_run_it_ends(
+    harness: _Harness,
+) -> None:
+    """`block_run(verdict=)` is the store recording the runtime's decision, and
+    it records only an attempt this run made: another run's, or one that does
+    not exist, refuses `ATTEMPT_NOT_FOUND` and ends nothing -- the status, the
+    event and the verdict are one transaction. Without a verdict the run still
+    ends BLOCKED (§39's empty frontier) and names no node."""
+    with pytest.raises(Refusal, match=r"^ATTEMPT_NOT_FOUND$"):
+        block_run(harness.conn, harness.run_id, verdict=uuid4())
+    _still_running(harness)
+    assert _events(harness, "RUN_BLOCKED") == 0
+    assert _blocking_verdict(harness) is None
+
+    assert block_run(harness.conn, harness.run_id) is True
+    assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+    assert _blocking_verdict(harness) is None
+
+
+def _blocking_verdict(harness: _Harness) -> UUID | None:
+    """The attempt the store says ended this run with a Blocked verdict."""
+    with connect(harness.url) as observer:
+        row = observer.execute(
+            "SELECT attempt_id FROM run_blocking_verdicts WHERE run_id=%s",
+            (harness.run_id,),
+        ).fetchone()
+    return None if row is None else UUID(str(row[0]))
+
+
+def _attempt_of(harness: _Harness, module_id: str) -> UUID:
+    """The one attempt this run made at `module_id`."""
+    with connect(harness.url) as observer:
+        rows = observer.execute(
+            "SELECT attempt_id FROM run_attempts WHERE run_id=%s AND route_node_id=%s",
+            (harness.run_id, _node(harness, module_id).route_node_id),
+        ).fetchall()
+    assert len(rows) == 1
+    return UUID(str(rows[0][0]))
 
 
 def test_an_unanchorable_blocked_handoff_is_an_ordinary_refusal(
@@ -255,8 +334,9 @@ class _UnbilledBlocked:
 
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        pass
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -277,11 +357,15 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     crashes = [RefusalCode.STORE_UNAVAILABLE]
 
     def crashing(
-        conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+        conn: StoreConnection,
+        run_id: UUID,
+        *,
+        lease: Lease | None = None,
+        verdict: UUID | None = None,
     ) -> bool:
         if crashes:
             raise Refusal(crashes.pop())
-        return block_run(conn, run_id, lease=lease)
+        return block_run(conn, run_id, lease=lease, verdict=verdict)
 
     monkeypatch.setattr(runtime, "block_run", crashing)
     answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
@@ -298,7 +382,7 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
             route=harness.route,
             route_node_ids=[screen],
         )
-    assert verdict
+    assert verdict == _attempt_of(harness, "CP-5")
     # The delivered blocks are read once, in one statement, by the reader the
     # verdict re-anchors on.
     assert statements.count(evidence_read._RUN_BLOCKS_QUERY) == 1
@@ -325,6 +409,8 @@ def test_a_crash_before_the_block_commits_resumes_blocked_without_a_second_call(
     assert len(answers.prompts) == 3
     assert _counts(harness) == (3, [REPORTED] * 3, 2, 3, 3)
     assert (_status(harness), _events(harness, "RUN_BLOCKED")) == ("BLOCKED", 1)
+    # The replayed path records the same reason the live path would have.
+    assert _blocking_verdict(harness) == _attempt_of(harness, "CP-5")
 
 
 def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
@@ -334,11 +420,15 @@ def test_an_unreadable_stored_verdict_is_a_fault_not_a_second_call(
     crashes = [RefusalCode.STORE_UNAVAILABLE]
 
     def crashing(
-        conn: StoreConnection, run_id: UUID, *, lease: Lease | None = None
+        conn: StoreConnection,
+        run_id: UUID,
+        *,
+        lease: Lease | None = None,
+        verdict: UUID | None = None,
     ) -> bool:
         if crashes:
             raise Refusal(crashes.pop())
-        return block_run(conn, run_id, lease=lease)
+        return block_run(conn, run_id, lease=lease, verdict=verdict)
 
     monkeypatch.setattr(runtime, "block_run", crashing)
     answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
@@ -449,8 +539,8 @@ class _ClaimsBlocked:
     module: str = "CP-0"
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -513,11 +603,13 @@ def test_readers_verify_the_record_against_its_markdown(harness: _Harness) -> No
             harness.blobs,
             harness.bundle,
             harness.route,
-            run_id=harness.run_id,
-            route_node_id=gate,
-            attempt_id=attempt,
-            artifact_sha256=artifact,
-            record_sha256=harness.blobs.put(record_bytes(lying)),
+            AcceptedRow(
+                run_id=harness.run_id,
+                route_node_id=gate,
+                attempt_id=attempt,
+                artifact_sha256=artifact,
+                record_sha256=harness.blobs.put(record_bytes(lying)),
+            ),
         )
     harness.conn.rollback()
     assert mismatch.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
@@ -684,6 +776,24 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call(
     _still_running(harness)
 
 
+def test_an_over_bound_upstream_section_refuses_before_its_attempt(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-section bound through the runtime: a node whose direct upstream
+    handoff is past `MAX_UPSTREAM_HANDOFF_BYTES` refuses before `start_attempt`,
+    so the node that could not be prompted leaves no attempt, reservation, call
+    or charge -- and the upstream that ran before it keeps everything it paid
+    for. The bound is moved rather than the handoff, because an accepted
+    handoff's bytes are immutable."""
+    answers = _answers(harness)
+    provider = _module_provider(harness, answers)
+    monkeypatch.setattr(invocation, "MAX_UPSTREAM_HANDOFF_BYTES", 1)
+    assert _run_route(harness, provider) is RefusalCode.UPSTREAM_SECTION_OVER_CEILING
+    assert answers.calls == 1
+    assert _counts(harness) == (1, [REPORTED], 1, 1, 1)
+    _still_running(harness)
+
+
 @dataclass
 class _Sized:
     """Records each prompt whose request is bounded; `after_check` runs once,
@@ -713,9 +823,10 @@ class _ChangesAfterCheck:
     change: Callable[[], None]
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        measured = self.inner.check_context(route_node_id, module_id)
         self.change()
+        return measured
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -748,3 +859,92 @@ def test_the_executor_rechecks_the_context_after_reservation(
     assert answers.calls == 0
     assert _counts(harness) == (0, [], 0, 1, 1)
     _still_running(harness)
+
+
+def test_a_reservation_never_falls_below_the_call_it_pays_for(
+    harness: _Harness,
+) -> None:
+    """Invariant 8 under Task 8.2's tighter bound, over a whole canonical run.
+
+    The reservation is no longer the byte ceiling, so the property has to be
+    asserted rather than assumed: priced on the request the provider was sent
+    and the completion cap, the only way past it is a provider billing more
+    than the price it was reserved under.
+    """
+    answers = CanonicalCompletions(harness.source_id)
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+
+    rows = harness.conn.execute(
+        "SELECT r.amount, l.amount, r.price_model FROM budget_reservations AS r"
+        " JOIN budget_ledger AS l USING (attempt_id, run_id)"
+    ).fetchall()
+    assert len(rows) == 3, "every attempt of the run reserved and was charged"
+    for reserved, charged, model in rows:
+        assert charged <= reserved, (reserved, charged)
+        assert model == MODEL, "under the price of the model that answered"
+    harness.conn.rollback()
+
+
+# A real frontier model's rates, where the request size actually moves the
+# price: $3/M input, $15/M output.
+_PRICED_INPUT = ModelPrice(
+    MODEL, Decimal("0.000003"), Decimal("0.000015"), date(2026, 9, 17)
+)
+
+
+@dataclass
+class _UnderMeasures:
+    """A provider whose pre-check under-reports the request it will send."""
+
+    inner: ModuleProvider
+
+    @property
+    def model(self) -> str:
+        return self.inner.model
+
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id) // 10
+
+    def execute(
+        self, route_node_id: str, module_id: str, *, attempt_id: UUID
+    ) -> ProviderResult:
+        return self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
+
+
+def test_a_request_costing_more_than_was_reserved_refuses_before_the_call(
+    harness: _Harness,
+) -> None:
+    """The window Task 8.2 opens, closed inside the unit that spends.
+
+    The loop prices the prompt the pre-check built; the attempt unit builds its
+    own. A rebuilt prompt that is bigger, or a `CAOS_MODEL_PRICE` that moved
+    between the two, would otherwise call under a reservation too small for the
+    call -- invariant 8's "no provider call without a reservation" met in form
+    only. Whatever the cause, it reaches the executor as a reservation that
+    does not cover the request, which is what a pre-check reporting a tenth of
+    its own prompt reproduces here at the one seam it can enter by.
+
+    `execute_handoff` reads its own reservation back with the price it was
+    taken under and prices the request it is about to send against exactly
+    that, so the refusal costs no call and no charge.
+    """
+    answers = CanonicalCompletions(harness.source_id)
+    provider = _UnderMeasures(_module_provider(harness, answers))
+
+    with pytest.raises(Refusal) as caught:
+        run_route(
+            harness.conn,
+            harness.blobs,
+            run_id=harness.run_id,
+            route=harness.route,
+            execution=Execution(provider, _PRICED_INPUT, harness.bundle),
+        )
+
+    assert caught.value.code is RefusalCode.CONTEXT_OVER_CEILING
+    assert answers.prompts == [], "nothing reached the provider"
+    assert _counts(harness)[1] == [], "and nothing was charged"
+    # The reservation stands: nothing is released (`server/store/budget.py`).
+    assert harness.conn.execute(
+        "SELECT count(*) FROM budget_reservations"
+    ).fetchone() == (1,)
+    harness.conn.rollback()

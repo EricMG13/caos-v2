@@ -11,7 +11,9 @@ import copy
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import replace
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -19,11 +21,13 @@ from canonical_fixtures import (
     BUNDLE,
     CATALOG,
     CONTRACT,
+    VENDORED,
     handoff_markdown,
     identity,
     skill,
     upstream_ref,
 )
+from conftest import reserve_at as reserve
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -36,8 +40,10 @@ from server.engine.route import (
     node_states,
     resolve_route,
 )
-from server.evidence.citations import AnchoredCitation, Citation, Rect
+from server.evidence.citations import AnchoredCitation, Rect
 from server.methodology.bundle import (
+    MANIFEST_NAME,
+    Bundle,
     delivered_authority,
     verified_bytes,
     verified_root_bytes,
@@ -52,7 +58,12 @@ from server.methodology.handoff import (
     validate_markdown,
 )
 from server.methodology.invocation import (
+    _FINAL_CHECK,
+    _FORECAST_EXTENSION,
+    _HOST_STEPS,
+    _INSTRUCTION,
     HOST_PERFORMED_SCRIPTS,
+    MAX_UPSTREAM_HANDOFF_BYTES,
     MODULE_AUTHORED_SCRIPTS,
     _carried_objects,
     allowed_uses,
@@ -62,13 +73,13 @@ from server.methodology.invocation import (
     named_objects,
     owned_objects,
     prospective_identity,
+    request_size,
     upstream_markdown,
     within_request_ceiling,
 )
 from server.methodology.vendor import VENDOR_MODULE, authority_bundle_sha256
-from server.provider import MAX_REQUEST_BYTES, OpenRouter
+from server.provider import MAX_REQUEST_BYTES, OpenRouter, encode_request
 from server.refusals import Refusal, RefusalCode
-from server.store.budget import reserve
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.routes import pin_route
 from server.store.run_inputs import RunSubject, load_run_input, pin_run_input
@@ -95,7 +106,6 @@ def _prompt(
     of: HostIdentity,
     delivered: list[Delivery] | None = None,
     upstream: tuple[tuple[UpstreamRef, bytes], ...] = (),
-    citation_candidates: tuple[Citation, ...] = (),
 ) -> str:
     items = _delivered() if delivered is None else delivered
     return build_handoff_prompt(
@@ -107,7 +117,6 @@ def _prompt(
         upstream=upstream,
         upstream_citations={ref.route_node_id: ANCHORED for ref in of.upstream},
         route=LITE_ROUTE,
-        citation_candidates=citation_candidates,
         source_set=(
             _source_set(*(item.source_id for item in items))
             if of.module_id == "CP-0"
@@ -423,6 +432,44 @@ def test_a_filename_the_host_renders_can_always_be_quoted_back() -> None:
     assert '"filename": "ReportQ4.pdf"' in prompt
 
 
+def test_cp0_is_told_the_readiness_rule_its_own_skill_states() -> None:
+    """The host restates the bundle to CP-0; it does not add to it.
+
+    Run 62698a60… marked CP-5 CONDITIONAL because CP-L10 had not run yet, which
+    `cp-0-source-readiness/SKILL.md` tells CP-0 not to do, and the route ended
+    BLOCKED with two modules paid for. The sentence in CP-0's final check is
+    that file's own, quoted; this asserts it is the bundle's words and that no
+    other module is given them.
+    """
+    quoted = (
+        "Source readiness does not assert that upstream analytical handoffs "
+        "already exist: navigation checks those separately."
+    )
+    skill = (
+        Path(__file__).resolve().parents[1]
+        / "vendor/deploy-v/skills/cp-0-source-readiness/SKILL.md"
+    ).read_text()
+    assert quoted in " ".join(skill.split()), "the quote is the bundle's own"
+
+    delivered = _delivered()
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=identity("CP-0"),
+        authority=delivered_authority(BUNDLE, "CP-0"),
+        catalog=CATALOG,
+        delivered=delivered,
+        upstream=(),
+        upstream_citations={},
+        route=LITE_ROUTE,
+        source_set=_source_set(*(item.source_id for item in delivered)),
+    )
+    assert quoted in " ".join(prompt.split())
+
+    # CP-0-only delivery is asserted by the source-preparation gating tests
+    # beside this one; what is asserted here is that the sentence the host
+    # states is the bundle's and not the host's own.
+
+
 def test_only_cp0_can_receive_source_preparation() -> None:
     with pytest.raises(Refusal) as refused:
         build_handoff_prompt(
@@ -542,8 +589,9 @@ def test_the_prompt_carries_exact_upstream_bytes_and_every_block(
         )
         assert prompt.index(data.decode(), label) > label
     for item in delivered:
-        assert f"source_id: {item.source_id}\npage: {item.page}\n{item.text.value}" in (
-            prompt
+        assert (
+            f"source_id: {item.source_id}\npage: {item.page}\n\n{item.text.value}"
+            in prompt
         )
     assert prompt.index("--- AUTHORITY ") < prompt.index("--- UPSTREAM")
     assert prompt.index("--- UPSTREAM") < prompt.index("--- EVIDENCE ")
@@ -562,12 +610,7 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     upstream = () if module_id == "CP-0" else ((ref, gate),)
     of = identity(module_id, tuple(r for r, _ in upstream))
     delivered = _delivered()
-    candidate = Citation(
-        delivered[0].source_id, delivered[0].page, delivered[0].text.value
-    )
-    prompt = _prompt(
-        of, delivered=delivered, upstream=upstream, citation_candidates=(candidate,)
-    )
+    prompt = _prompt(of, delivered=delivered, upstream=upstream)
     tag = _tag(prompt)
     reminder = prompt.split(f"--- END EVIDENCE {tag} ---\n", 1)[1]
     compact = " ".join(reminder.split())
@@ -580,22 +623,14 @@ def test_the_prompt_repeats_the_closed_contract_after_evidence(
     )
     assert f"Add only these model-authored front-matter fields: {authored}." in compact
     assert "Do not add any other front-matter fields" in compact
-    assert "appears exactly once on its cited evidence page" in compact
-    assert (
-        f"citation_candidate: true\nsource_id: {candidate.source_id}\n"
-        f"page: {candidate.page}\n{candidate.matched_text}" in prompt
-    )
-    assert "Use only evidence whose host header says `citation_candidate: true`" in (
-        compact
-    )
-    assert "eligible, not required" in compact
-    assert "Do not enumerate all eligible candidates" in compact
-    assert "omit every candidate not quoted in the Markdown body" in compact
-    assert "copy its complete `matched_text` under `## Evidence Trace`" in compact
+    assert "that line must appear exactly once on its cited page" in compact
+    assert "is the complete text of one evidence line" in compact
+    assert "Cite only lines that support a claim you wrote" in compact
+    assert "`page` is the page shown in that line's evidence header" in compact
     source_ids = json.dumps(
         sorted({str(item.source_id) for item in delivered}), separators=(",", ":")
     )
-    assert f"Valid `source_id` values are exactly: {source_ids}." in reminder
+    assert f"Valid `source_id` values are exactly: {source_ids}," in compact
     assert " -> ".join(CONTRACT.validate_handoff.CANONICAL_HEADINGS) in reminder
     assert ("P1-P8 and T1-T8" in reminder) is (module_id == "CP-0")
     t8_header = "| " + " | ".join(CONTRACT.navigation.NEW_HEADERS) + " |"
@@ -945,6 +980,11 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
     whole = evidence(fits)
     prompt = within_request_ceiling(provider, _prompt(gate, whole))
     assert len(provider.request_bytes(prompt, json_object=True)) == MAX_REQUEST_BYTES
+    # `request_size` is the number `within_request_ceiling` bounds and the number
+    # Task 8.2 prices the reservation on, so the bytes bounded here and the bytes
+    # paid for are the same bytes. Named directly rather than only through its
+    # wrapper, because a reservation now depends on what it returns.
+    assert request_size(provider, prompt) == MAX_REQUEST_BYTES
     tag = _tag(prompt)
     assert f"\n{whole[0].text.value}\n--- END EVIDENCE {tag} ---\n" in prompt
     over = _prompt(gate, evidence(fits + 1))
@@ -954,6 +994,86 @@ def test_an_over_ceiling_context_refuses_without_truncation_or_call() -> None:
         within_request_ceiling(provider, over)
     assert refused.value.code is RefusalCode.CONTEXT_OVER_CEILING
     assert refused.value.__context__ is None
+
+
+def test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt() -> None:
+    """The per-section bound the request ceiling never gave: one accepted
+    upstream handoff of exactly `MAX_UPSTREAM_HANDOFF_BYTES` is carried whole,
+    and one byte more refuses `UPSTREAM_SECTION_OVER_CEILING` -- naming the
+    section rather than the whole request, which is still far inside
+    `MAX_REQUEST_BYTES`, and cutting nothing out of it."""
+    gate = handoff_markdown(identity("CP-0"))
+    exact = gate.ljust(MAX_UPSTREAM_HANDOFF_BYTES, b" ")
+    assert len(exact) == MAX_UPSTREAM_HANDOFF_BYTES
+    provider = OpenRouter(api_key="never-sent", model=MODEL, transport=_NoTransport())
+
+    ref = upstream_ref(identity("CP-0"), exact)
+    prompt = _prompt(identity("CP-L10", (ref,)), upstream=((ref, exact),))
+    assert exact.decode() in prompt
+    whole = len(provider.request_bytes(prompt, json_object=True))
+
+    over = exact + b" "
+    ahead = upstream_ref(identity("CP-0"), over)
+    with pytest.raises(Refusal) as refused:
+        _prompt(identity("CP-L10", (ahead,)), upstream=((ahead, over),))
+    assert refused.value.code is RefusalCode.UPSTREAM_SECTION_OVER_CEILING
+    assert refused.value.__context__ is None
+    # The section, not the request: one more byte would have been sent.
+    assert whole + 1 < MAX_REQUEST_BYTES
+
+
+def test_the_declared_section_bound_leaves_the_widest_node_its_authority() -> None:
+    """Why the declared number is the number: a node's own delivered authority
+    beside its direct upstreams at the bound must still leave the request
+    ceiling room for evidence. A bundle that widens a node or grows an
+    authority set fails here rather than at the first FULL run.
+
+    Maximised over every node of every profile, not over one pair. The review
+    that asked for this found the single-pair form would pass a bundle whose
+    third profile carried a wider node, or whose CP-3 authority grew past the
+    quarter, while the arithmetic the declared number rests on no longer held.
+    **CP-3** is the true maximum on this bundle at 711,482 encoded bytes
+    against a 1,048,576 ceiling, 32% of it left -- and the assertion does not
+    depend on that staying true. The raw-byte version of this test named CP-5,
+    which was an artefact of its unit: CP-5 carries the most upstreams, CP-3
+    the heavier authority once JSON escaping is paid.
+
+    **Measured through `encode_request`, not by summing raw lengths.** The
+    Completion Phase 12 adversarial audit found this test's arithmetic was in
+    the wrong unit: `MAX_REQUEST_BYTES` bounds
+    `len(json.dumps(request).encode())` with `ensure_ascii=True`, so every
+    non-ASCII character costs six bytes and every quote and newline two --
+    and the vendored authority is full of em-dashes, section signs and curly
+    quotes. A sum of raw lengths cannot see any of it, so the test could pass
+    while the real encoded request was over the ceiling. The authority files
+    are used as their real bytes for the same reason.
+
+    What it still does not carry is the citation register, which is explicitly
+    unbounded, and the evidence section, which is the room this assertion
+    exists to prove is left. The fixed host sections are included.
+    """
+    filler = "x" * MAX_UPSTREAM_HANDOFF_BYTES
+    worst = 0
+    worst_node = ""
+    for profile in CATALOG["profiles"].values():
+        edges = profile["edges"]
+        for node in {edge["target"] for edge in edges}:
+            upstreams = sum(1 for edge in edges if edge["target"] == node)
+            files = delivered_authority(BUNDLE, node).files
+            prompt = "\n".join(
+                [
+                    *(data.decode("utf-8", "replace") for _name, data in files),
+                    *(filler for _ in range(upstreams)),
+                    _HOST_STEPS,
+                    _INSTRUCTION,
+                    _FINAL_CHECK,
+                ]
+            )
+            cost = len(encode_request("a-model/for-the-test", prompt))
+            if cost > worst:
+                worst, worst_node = cost, node
+    assert worst < MAX_REQUEST_BYTES, (worst_node, worst)
+    assert MAX_REQUEST_BYTES - worst > MAX_REQUEST_BYTES // 4, (worst_node, worst)
 
 
 class _NoTransport:
@@ -970,9 +1090,9 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     prompt = _prompt(gate, delivered)
     tag = _tag(prompt)
     files = len(delivered_authority(BUNDLE, "CP-0").files)
-    # Instructions, front matter (2), host steps, each file (2), source prep
-    # (2), evidence (2), check.
-    assert prompt.count(tag) == 9 + 2 * files and tag not in forged
+    # The tag rule (2), front matter (2), host steps (2), each file (2), source
+    # prep (2), evidence (2), final check (2), CP-0 final check (2).
+    assert prompt.count(tag) == 14 + 2 * files and tag not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
 
 
@@ -1010,3 +1130,156 @@ def test_an_edge_carried_object_meets_the_boundary_on_other_lite_routes(
     held = [n.route_node_id for n in route.nodes if n.module_id in named.accepted_ids]
     stuck = [node for node in held if node not in accepted]
     assert not stuck, (stuck, states)
+
+
+def _bundle_with(tmp_path: Path, name: str, data: bytes) -> Bundle:
+    """A copy of the vendored bundle carrying `data` at `name`, manifest and all.
+
+    The manifest entry moves with the bytes, because a bundle whose manifest
+    still named the original would refuse at `verified_bytes` and never reach
+    the reader under test -- a test that passed for the wrong reason.
+    """
+    root = tmp_path / "deploy-v"
+    shutil.copytree(VENDORED, root)
+    slug = Bundle(root=root).skill_of(VENDOR_MODULE)["folder_slug"]
+    (root / "skills" / slug / name).write_bytes(data)
+    manifest_path = root / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_bytes())
+    entry = next(s for s in manifest["skills"] if s["module_id"] == VENDOR_MODULE)
+    entry["relative_file_hashes"][name] = {
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    manifest_path.write_text(json.dumps(manifest))
+    return Bundle(root=root)
+
+
+def test_a_non_json_catalog_refuses_authority_bytes_mismatch_in_named_objects(
+    tmp_path: Path,
+) -> None:
+    """Verified bytes that will not parse are the bundle failing, not a route.
+
+    `json.loads` raising `ValueError` out of a reader is an untyped 500 at the
+    API and a crash in the runtime; the code says which authority moved.
+    """
+    catalog = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
+    bad = _bundle_with(tmp_path, catalog, b"{not json")
+    assert verified_bytes(bad, VENDOR_MODULE, catalog) == b"{not json"
+
+    with pytest.raises(Refusal) as refused:
+        named_objects(bad, LITE_ROUTE)
+
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+    assert refused.value.__context__ is None
+
+
+def test_an_extractor_identity_that_is_not_json_refuses_source_identity_invalid() -> (
+    None
+):
+    """The host's own stored extraction identity, rendered into CP-0's
+    preparation section. Bytes this server wrote that will not parse are a
+    store fault with a code, never a `ValueError` out of the prompt builder."""
+    delivered = _delivered()
+    source_set = _source_set(*(item.source_id for item in delivered))
+    broken = replace(source_set.members[0], extractor_identity="{not json")
+    source_set = replace(source_set, members=(broken, *source_set.members[1:]))
+
+    with pytest.raises(Refusal) as refused:
+        build_handoff_prompt(
+            CONTRACT,
+            identity=identity("CP-0"),
+            authority=delivered_authority(BUNDLE, "CP-0"),
+            catalog=CATALOG,
+            delivered=delivered,
+            upstream=(),
+            upstream_citations={},
+            route=LITE_ROUTE,
+            source_set=source_set,
+        )
+
+    assert refused.value.code is RefusalCode.SOURCE_IDENTITY_INVALID
+    # `from None`: the decoder's message never travels with the code.
+    assert refused.value.__suppress_context__ is True
+    assert refused.value.__cause__ is None
+
+
+def _two_pages_three_lines() -> list[Delivery]:
+    """One source, two pages, three lines: two `(source_id, page)` groups."""
+    source = uuid4()
+    return [
+        Delivery(source, "000001", 1, BoundaryText.of("Revenue rose 4% to 1,240.")),
+        Delivery(source, "000002", 1, BoundaryText.of("EBITDA was 310.")),
+        Delivery(source, "000003", 2, BoundaryText.of("Net leverage was 4.2x.")),
+    ]
+
+
+def prompt_for(delivered: list[Delivery] | None = None) -> str:
+    """The gate's prompt: every host section the builder can emit is present."""
+    return _prompt(identity("CP-0"), delivered=delivered)
+
+
+def test_evidence_is_grouped_by_source_page_with_one_header() -> None:
+    prompt = prompt_for(delivered=_two_pages_three_lines())
+    evidence = prompt.split("--- EVIDENCE ")[1].split("--- END EVIDENCE ")[0]
+    assert evidence.count("source_id: ") == 2
+    assert evidence.count("page: ") == 2
+    assert "citation_candidate" not in prompt
+
+
+def _paired_markers(prompt: str) -> tuple[list[str], list[str]]:
+    found = re.search(r"--- HOST-OWNED FRONT MATTER ([0-9a-f]{16}) ", prompt)
+    assert found is not None
+    tag = found.group(1)
+    # An authority marker carries its file name after the tag, so a marker is
+    # matched up to the tag, not to the line's end.
+    opened = re.findall(rf"^--- (?!END )([A-Z0-9 -]+?) {tag}\b", prompt, re.M)
+    closed = re.findall(rf"^--- END ([A-Z0-9 -]+?) {tag}\b", prompt, re.M)
+    return opened, closed
+
+
+@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def test_every_host_section_opens_and_closes_with_a_tagged_marker(
+    module_id: str,
+) -> None:
+    """The gate carries source preparation and its own final check; a
+    consumer carries UPSTREAM and the citation register instead."""
+    gate = handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), gate)
+    upstream = () if module_id == "CP-0" else ((ref, gate),)
+    of = identity(module_id, tuple(r for r, _ in upstream))
+    prompt = _prompt(of, upstream=upstream)
+    opened, closed = _paired_markers(prompt)
+    assert opened, "no tagged section opened"
+    assert sorted(opened) == sorted(closed), (opened, closed)
+    expected = {"UPSTREAM", "UPSTREAM CITATION REGISTER"} if upstream else set()
+    assert expected <= set(closed)
+    assert ("HOST SOURCE PREPARATION" in closed) is (module_id == "CP-0")
+    assert ("CP-0 FINAL CHECK" in closed) is (module_id == "CP-0")
+
+
+def test_the_forecast_extension_opens_and_closes_with_a_tagged_marker() -> None:
+    """No LITE fixture reaches a CP-CF route, so the one section the gate
+    and the LITE consumers never carry is asserted on its text."""
+    tag = "0123456789abcdef"
+    section = _FORECAST_EXTENSION.format(tag=tag)
+    assert section.startswith(f"--- HOST FORECAST EXTENSION {tag} ---\n")
+    assert section.endswith(f"\n--- END HOST FORECAST EXTENSION {tag} ---\n")
+
+
+def test_the_tag_rule_describes_the_markers_the_prompt_emits() -> None:
+    prompt = prompt_for()
+    assert "opens with a marker line of the form" in prompt
+    assert "ending in the tag" not in prompt
+
+
+def test_the_prompt_states_one_citation_rule_and_it_is_the_enforced_one() -> None:
+    # The rule's own line wrap falls inside the phrase; compare it unwrapped.
+    compact = " ".join(prompt_for().split())
+    assert (
+        compact.count("appear exactly once on its cited")
+        + compact.count("appears exactly once on its cited")
+        == 1
+    )
+    prompt = prompt_for()
+    assert "without shortening" not in prompt
+    assert "Evidence Trace` before using" not in prompt

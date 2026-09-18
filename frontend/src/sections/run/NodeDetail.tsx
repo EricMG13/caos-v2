@@ -2,14 +2,25 @@
 // edges in, the gate's own verdict when it named one, and its attempts.
 // No accept action here (brief 4.1: commands are 4.2).
 import { severityOf } from "./RouteGraph";
-import { reasonOf, runningOf } from "./reason";
+import { blockingOf, reasonOf, runningOf } from "./reason";
 import { SeverityMark, toneOf } from "@/chrome/SeverityMark";
-import type { AttemptView } from "./types";
-import type { NodeView } from "@/wire/v1";
+import type { AttemptView, BlockedByView } from "./types";
+import type { NodeView, RunView } from "@/wire/v1";
 
-export function NodeDetail({ node, attempts }: { node: NodeView; attempts: AttemptView[] }) {
-  const running = runningOf(node, attempts);
-  const severity = severityOf(node, running);
+export function NodeDetail({
+  node,
+  attempts,
+  status,
+  blockedBy,
+}: {
+  node: NodeView;
+  attempts: AttemptView[];
+  status: RunView["status"];
+  blockedBy: BlockedByView | null;
+}) {
+  const running = runningOf(node, attempts, status);
+  const blocking = blockingOf(node, blockedBy);
+  const severity = severityOf(node, running, blocking);
   const mine = attempts.filter((attempt) => attempt.route_node_id === node.route_node_id);
   return (
     <>
@@ -27,7 +38,7 @@ export function NodeDetail({ node, attempts }: { node: NodeView; attempts: Attem
         <div className="pb">
           <dl className="kv">
             <dt>Reason</dt>
-            <dd className="wrap">{reasonOf(node)}</dd>
+            <dd className="wrap">{reasonOf(node, status, blocking)}</dd>
             <dt>Stage</dt>
             <dd>{node.stage}</dd>
             <dt>Edges in</dt>
@@ -44,6 +55,19 @@ export function NodeDetail({ node, attempts }: { node: NodeView; attempts: Attem
                 <dd data-gate-verdict>{node.gate_verdict}</dd>
               </>
             ) : null}
+            {/* The gate's own words for a verdict it did not clear: under §61 a
+                CONDITIONAL one names a source the pinned set does not carry,
+                and supplying that source is what a successor run is for. The
+                module wrote it, so it is labelled as the gate's statement and
+                not as the workspace's. */}
+            {node.gate_reason ? (
+              <>
+                <dt>Gate condition</dt>
+                <dd className="wrap" data-gate-reason>
+                  {node.gate_reason}
+                </dd>
+              </>
+            ) : null}
           </dl>
         </div>
       </section>
@@ -54,15 +78,30 @@ export function NodeDetail({ node, attempts }: { node: NodeView; attempts: Attem
         </header>
         <div className="pb flush">
           {mine.length ? (
-            mine.map((attempt) => (
-              <div key={attempt.attempt_id} className="att" data-attempt={attempt.ordinal ?? "—"}>
-                <span className="a">attempt {attempt.ordinal ?? "unassigned"}</span>
-                <span>started {attempt.started_at}</span>
-                <span className={attempt.accepted ? "t-ok" : "t-run"}>
-                  {attempt.accepted ? "ACCEPTED" : "NOT ACCEPTED"}
-                </span>
-              </div>
-            ))
+            mine.map((attempt) => {
+              // The attempt the wire names as the one that answered Blocked
+              // (§68). Not accepted -- a Blocked verdict accepts nothing --
+              // and said so beside the verdict rather than instead of it.
+              const verdict = blockedBy !== null && attempt.attempt_id === blockedBy.attempt_id;
+              return (
+                <div
+                  key={attempt.attempt_id}
+                  className="att"
+                  data-attempt={attempt.ordinal ?? "—"}
+                  {...(verdict ? { "data-blocking-attempt": "" } : {})}
+                >
+                  <span className="a">attempt {attempt.ordinal ?? "unassigned"}</span>
+                  <span>started {attempt.started_at}</span>
+                  <span className={attempt.accepted ? "t-ok" : verdict ? "t-crit" : "t-run"}>
+                    {attempt.accepted
+                      ? "ACCEPTED"
+                      : verdict
+                        ? "BLOCKED · NOT ACCEPTED"
+                        : "NOT ACCEPTED"}
+                  </span>
+                </div>
+              );
+            })
           ) : (
             <div className="att">
               <span className="a">none</span>

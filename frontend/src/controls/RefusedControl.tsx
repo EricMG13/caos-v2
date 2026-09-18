@@ -5,14 +5,19 @@ import type { ReactNode } from "react";
 import { ActionReason } from "@/ds/ActionReason";
 import type { Refusal } from "@/wire";
 
-/** Why a governed write cannot land from this workspace today. The store calls
-    exist; the HTTP routes that would reach them do not. */
-export const READ_ONLY_API = "this build's API serves only the run document and its event stream";
+/** A governed action this section's own document does not name is refused,
+    not simulated.
 
-/** A governed action nothing in this build performs is refused, not simulated. */
+    The clearance says what is actually missing. Until Task 12.1 that was the
+    route: the store calls existed and no HTTP path reached them. Every v1
+    command has one now, so an unplaced control no longer means "nothing
+    performs it" -- it means the section it is drawn in composes its
+    `chrome.actions` from a read that judges no such action, and until one
+    does, pressing it could only guess. */
 export const ACTION_UNPLACED: Refusal = {
   code: "ACTION_UNPLACED",
-  clears: `the API serves a route that performs it — ${READ_ONLY_API}`,
+  clears:
+    "this section's own document names it in chrome.actions, which needs a read that can judge it",
 };
 
 export function refusalText(refusal: Refusal): string {

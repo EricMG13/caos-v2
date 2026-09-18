@@ -87,7 +87,12 @@ def test_every_run_event_and_audit_action_maps_to_one_stream_name_or_is_declared
     assert STREAM_NAMES["RUN_CANCEL_REQUESTED"] == "runs_changed"
     for action in ("OPINION_SIGNED", "DELIVERABLE_FROZEN", "DELIVERABLE_FILED"):
         assert STREAM_NAMES[action] == "filing_changed"
-    for silent in ("CASE_CREATED", "REVISION_SAVED"):
+    for silent in (
+        "CASE_CREATED",
+        "REVISION_SAVED",
+        "STANDING_GRANTED",
+        "STANDING_REVOKED",
+    ):
         assert STREAM_NAMES[silent] is None
     with pytest.raises(TypeError):
         STREAM_NAMES["SOURCE_WITHDRAWN"] = None  # type: ignore[index]

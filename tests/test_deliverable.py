@@ -27,6 +27,11 @@ REVISION = BoundaryText.of("rev-001")
 NFC_LABEL = BoundaryText.of("rev-caf\u00e9")
 NFD_SPELLING = "rev-cafe\u0301"
 
+# The canonical shape `render()` understands since the claims render path was
+# deleted (f-2a; `docs/DECISIONS.md` decision 42.1): one artifact carries a
+# Markdown handoff and its host record, each addressed by digest, bound by
+# hand -- these tests only need bytes `render()` accepts, not a store-produced
+# record.
 _MARKDOWN = "Total debt at 31 December 2026 was USD 1,240.0m.\n"
 _DIGEST = hashlib.sha256(_MARKDOWN.encode()).hexdigest()
 _RECORD = {

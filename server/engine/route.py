@@ -110,6 +110,12 @@ class NodeResult:
 
     readiness: tuple[tuple[str, str], ...] = ()
     qa_status: str | None = None
+    # `(module_id, why_now_or_blocker)` for each gate row that is CONDITIONAL or
+    # BLOCKED, read from the CP-0 node like `readiness`. No state turns on it:
+    # the readiness status alone decides whether a node may run, and this is the
+    # reason the gate wrote beside that status, carried so a reader can be told
+    # which source the verdict asked for (§61) rather than only that it refused.
+    blockers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,6 +341,63 @@ def frontier(
     ]
 
 
+def reachable(route: ResolvedRoute) -> Mapping[str, frozenset[str]]:
+    """Every node each node can reach along the route's typed edges.
+
+    Pure, like everything else here, and over **every** edge type rather than
+    the blocking ones alone. A soft edge is exactly the case this exists for:
+    the frontier may offer a node and one of its own optional upstreams at the
+    same time, and that pair is the one that must not run together.
+    """
+    forward: dict[str, set[str]] = {node.route_node_id: set() for node in route.nodes}
+    for edge in route.edges:
+        forward.setdefault(edge.source, set()).add(edge.target)
+    reach: dict[str, frozenset[str]] = {}
+
+    def walk(node: str) -> frozenset[str]:
+        if node in reach:
+            return reach[node]
+        reach[node] = frozenset()  # a cycle cannot occur; resolution refuses one
+        seen: set[str] = set()
+        for target in forward.get(node, ()):
+            seen.add(target)
+            seen |= walk(target)
+        reach[node] = frozenset(seen)
+        return reach[node]
+
+    for node in route.nodes:
+        walk(node.route_node_id)
+    return reach
+
+
+def independent_batch(route: ResolvedRoute, ready: Sequence[str]) -> list[str]:
+    """The nodes of `ready` that may be executed at the same time.
+
+    Greedy in route order, which is what keeps it deterministic: the same
+    pinned route and the same accepted set choose the same batch, so replay
+    takes the same path (invariant 10) even though the nodes overlap in time.
+
+    The rule is that no chosen node reaches another, in either direction. It is
+    not a tidiness constraint, it is a money one: `execute_handoff` binds an
+    attempt to the upstream accepted when its prompt was built and refuses when
+    another of its inputs is accepted during the call, so running a node beside
+    one of its own transitive upstreams buys a billed attempt that is then
+    thrown away. The frontier can offer such a pair whenever the edge between
+    them is soft, because a soft edge does not hold its target back.
+
+    Nodes left out are not lost: they are simply still in the frontier on the
+    next pass, which is recomputed from the store like every other pass.
+    """
+    reach = reachable(route)
+    chosen: list[str] = []
+    for node in ready:
+        related = reach[node]
+        if any(other in related or node in reach[other] for other in chosen):
+            continue
+        chosen.append(node)
+    return chosen
+
+
 def waiting_on(
     route: ResolvedRoute, accepted: Mapping[str, NodeResult], route_node_id: str
 ) -> tuple[Edge, ...]:
@@ -398,23 +461,59 @@ def readiness_from(
     return {}
 
 
+def blockers_from(
+    route: ResolvedRoute, accepted: Mapping[str, NodeResult]
+) -> dict[str, str]:
+    """Per-module blocker text, from the accepted gate artifact and nowhere else.
+
+    Keyed exactly like `readiness_from`, and holding a module only where the
+    gate did not clear it: a module absent here either was cleared or was never
+    ruled on, and a reader must not read absence as "no reason given".
+    """
+    for node in route.nodes:
+        if node.module_id != GATE_MODULE:
+            continue
+        result = accepted.get(node.route_node_id)
+        return {} if result is None else dict(result.blockers)
+    return {}
+
+
+NODE_FIELDS = ("route_node_id", "module_id", "stage")
+EDGE_FIELDS = ("source", "target", "type")
+
+
+def route_json(route: ResolvedRoute) -> dict[str, Any]:
+    """The route as JSON rows, each in `NODE_FIELDS` / `EDGE_FIELDS` order.
+
+    One spelling of what a serialised route carries, for the two byte forms
+    that must never drift apart in content: `route_digest` below hashes these
+    rows with its edges sorted, and the stored pin
+    (`server/store/routes.py::_canonical`) keys each row by its field name and
+    keeps the route's own edge order. Both forms are pinned -- the digest by
+    invariant 10 and by every `run_routes.route_digest` already written, the
+    stored shape by every row that must still read back -- so this returns what
+    they share and leaves each caller to spell its own shape.
+    """
+    return {
+        "profile_id": route.profile_id,
+        "selection_id": route.selection_id,
+        "nodes": [
+            [node.route_node_id, node.module_id, node.stage] for node in route.nodes
+        ],
+        "edges": [[edge.source, edge.target, edge.type.value] for edge in route.edges],
+        # Passed through rather than coerced to lists: the stored pin is read
+        # back and validated, and `list()` over a malformed pair would turn a
+        # shape `_decode` refuses into one it accepts.
+        "predicates": route.predicates,
+    }
+
+
 def route_digest(route: ResolvedRoute) -> str:
     """The digest pinned at the plan gate. A function of the route alone."""
-    canonical = dumps(
-        {
-            "profile_id": route.profile_id,
-            "selection_id": route.selection_id,
-            "nodes": [
-                [node.route_node_id, node.module_id, node.stage] for node in route.nodes
-            ],
-            "edges": sorted(
-                [edge.source, edge.target, edge.type.value] for edge in route.edges
-            ),
-            "predicates": [list(pair) for pair in route.predicates],
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    rows = route_json(route)
+    rows["edges"] = sorted(rows["edges"])
+    rows["predicates"] = [list(pair) for pair in rows["predicates"]]
+    canonical = dumps(rows, sort_keys=True, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -510,16 +609,39 @@ def _pathway(profile: Mapping[str, Any], selection_id: str) -> Mapping[str, Any]
 
 def _edges_among(profile: Mapping[str, Any], modules: set[str]) -> tuple[Edge, ...]:
     """`profile["edges"]`, restricted to this route's nodes. Never
-    `navigation.dependencies`, which carries no type at all."""
-    return tuple(
-        Edge(
-            source=str(edge["source"]),
-            target=str(edge["target"]),
-            type=EdgeType(edge["type"]),
+    `navigation.dependencies`, which carries no type at all.
+
+    A CONDITIONAL edge is refused rather than resolved. Invariant 10 freezes a
+    route's predicates and nothing evaluates them, so such an edge would pin a
+    route whose target blocks whatever the evidence says -- and a reader of the
+    pin would take the frozen predicate for an enforced condition. The vendored
+    catalog declares none (`tests/test_bundle_pin.py::test_the_vendored_catalog_
+    carries_no_edge_this_engine_cannot_evaluate`), so this refuses at the first
+    upstream build that puts one **on a resolved route**: the membership filter
+    above runs first, so an edge whose source or target is outside the resolved
+    node set is skipped like any other out-of-route edge, and a build carrying
+    one off every pathway refuses nothing. That is the right scope -- an edge no
+    pin carries misleads no reader of a pin -- and it is the scope the ledger
+    entry states. The docstring said "introduces one" until the Task 10.2
+    acceptance review read the two against the code. `CONDITIONAL` stays in `BLOCKING`
+    and in the bundle's vocabulary (CONTEXT.md): it remains a CP-0 *verdict*,
+    and only an *edge* of that type is refused.
+    """
+    edges: list[Edge] = []
+    for edge in profile["edges"]:
+        if edge["source"] not in modules or edge["target"] not in modules:
+            continue
+        edge_type = EdgeType(edge["type"])
+        if edge_type is EdgeType.CONDITIONAL:
+            raise Refusal(RefusalCode.ROUTE_EDGE_UNSUPPORTED)
+        edges.append(
+            Edge(
+                source=str(edge["source"]),
+                target=str(edge["target"]),
+                type=edge_type,
+            )
         )
-        for edge in profile["edges"]
-        if edge["source"] in modules and edge["target"] in modules
-    )
+    return tuple(edges)
 
 
 def _extension_node(

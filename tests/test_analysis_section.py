@@ -25,7 +25,7 @@ from test_loop_charges import ESTIMATE
 
 from server.api import app as app_module
 from server.api.app import app, blob_store, methodology_bundle, store_connection
-from server.api.identity import TRUST_SWITCH
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.api.reads import analysis as analysis_read
 from server.api.wire import CLEARS, AnalysisDocument
 from server.boundary_text import BoundaryText
@@ -46,7 +46,9 @@ def client(
     harness: _Harness, empty_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
-    monkeypatch.delenv(TRUST_SWITCH, raising=False)
+    # Tokenless, so no groups header is read: the development switch is how a
+    # test here asserts a global role above the floor.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     app.dependency_overrides[store_connection] = lambda: harness.conn
     app.dependency_overrides[blob_store] = lambda: harness.blobs
     app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
@@ -73,10 +75,10 @@ def _serving(counter: _CountingConnection) -> Callable[[], _CountingConnection]:
     return lambda: counter
 
 
-def _as(user_id: UUID, groups: str | None = None) -> dict[str, str]:
+def _as(user_id: UUID, role: str | None = None) -> dict[str, str]:
     headers = {"x-caos-user": str(user_id)}
-    if groups is not None:
-        headers["x-forwarded-groups"] = groups
+    if role is not None:
+        headers[ROLE_HEADER] = role
     return headers
 
 
@@ -241,6 +243,8 @@ def test_a_record_that_no_longer_binds_its_markdown_refuses_artifact_record_mism
     response = client.get(_analysis(harness.case_id), headers=_as(_reader(harness)))
     harness.conn.rollback()
 
+    # 500 under the owner's D3 split: a record that no longer binds its
+    # projections binds them no better on the next request.
     assert (response.status_code, response.json()) == (
         500,
         _refused(RefusalCode.ARTIFACT_RECORD_MISMATCH),
@@ -270,6 +274,51 @@ def test_unaccepted_nodes_make_analysis_partial_with_a_note(
     pending = [(p.module_id, p.state.value) for p in document.body.pending]
     assert [module for module, _state in pending] == ["CP-L10", "CP-5"]
     assert all(state != "COMPLETE" for _module, state in pending)
+
+
+def test_the_analysis_document_names_the_node_whose_verdict_ended_the_run(
+    client: TestClient, harness: _Harness
+) -> None:
+    """A BLOCKED run's pending list holds the node that *did* run.
+
+    `pending` is recomputed from accepted artifacts, and a validated `Blocked`
+    verdict accepts nothing -- so the node that answered and ended the run sits
+    in the same list as the two that never started. The run document has named
+    it since 4.1i; without the same field here a reader of this page is told
+    only that three nodes have no handoff.
+    """
+    _run(harness, qa_by_module={"CP-L10": "Blocked"})
+    blocking = harness.conn.execute(
+        "SELECT v.attempt_id, a.route_node_id FROM run_blocking_verdicts v"
+        " JOIN run_attempts a USING (attempt_id) WHERE v.run_id = %s",
+        (harness.run_id,),
+    ).fetchone()
+    harness.conn.rollback()
+    assert blocking is not None, "the fixture run ended on a validated verdict"
+
+    document = _document(client, harness, _analysis(harness.case_id))
+
+    body = document.body
+    assert body.displayed_run_status == "BLOCKED"
+    assert body.blocked_by is not None
+    assert body.blocked_by.module_id == "CP-L10"
+    assert body.blocked_by.route_node_id == str(blocking[1])
+    assert body.blocked_by.attempt_id == UUID(str(blocking[0]))
+    # The node it names is one of the nodes with no handoff, which is what lets
+    # a reader tell the one that answered from the two that never ran.
+    assert body.blocked_by.route_node_id in {p.route_node_id for p in body.pending}
+
+
+def test_a_run_that_is_not_blocked_names_no_blocking_node(
+    client: TestClient, harness: _Harness
+) -> None:
+    """The wire never claims a blocking node that does not exist."""
+    _run(harness)
+
+    body = _document(client, harness, _analysis(harness.case_id)).body
+
+    assert body.displayed_run_status == "COMPLETE"
+    assert body.blocked_by is None
 
 
 def test_run_and_analysis_name_displayed_and_latest_runs_separately(
@@ -364,17 +413,17 @@ def test_analysis_private_404_and_actor_matrix(
     refused = [
         (uuid4(), None, case_id),
         (revoked, None, case_id),
-        (uuid4(), "caos-admins", case_id),
+        (uuid4(), "ADMIN", case_id),
         (members[Standing.READER], None, uuid4()),
         (members[Standing.READER], None, "not-a-case"),
     ]
-    for user, groups, path_case in refused:
-        response = client.get(_analysis(path_case), headers=_as(user, groups))
+    for user, role, path_case in refused:
+        response = client.get(_analysis(path_case), headers=_as(user, role))
         conn.rollback()
         assert (response.status_code, response.json()) == (
             404,
             _refused(RefusalCode.CASE_NOT_FOUND),
-        ), (user, groups, path_case)
+        ), (user, role, path_case)
 
 
 def test_an_anonymous_or_malformed_analysis_request_opens_no_store_connection(

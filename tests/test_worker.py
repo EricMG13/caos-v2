@@ -11,6 +11,7 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
+from typing import cast
 from uuid import UUID
 
 import psycopg
@@ -25,8 +26,10 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine import worker
 from server.engine.route import ResolvedRoute
+from server.engine.runtime import Execution
 from server.engine.worker import (
     WorkerConfig,
+    _Stoppable,
     install_stop_handler,
     module_execution,
     run_worker,
@@ -37,7 +40,7 @@ from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
-from server.store.work import LEASE_SECONDS, enqueue_run
+from server.store.work import LEASE_SECONDS, enqueue_run, worker_states
 
 __all__ = ["blobs", "bundle", "route"]
 
@@ -295,12 +298,49 @@ def test_main_refuses_without_provider_and_price(
     secret = "synthetic-key-never-printed-4c1d"
     monkeypatch.setenv("OPENROUTER_API_KEY", secret)
     monkeypatch.setenv("OPENROUTER_MODEL", "a-model/for-the-test")
-    for price in ("", "a-model/for-the-test,0,1", "other/model,0,0.1,2026-09-13"):
+    for price in ("a-model/for-the-test,0,1", "other/model,0,0.1,2026-09-13"):
         monkeypatch.setenv("CAOS_MODEL_PRICE", price)
         assert worker.main() == 2
         captured = capsys.readouterr()
         assert captured.err == "PROVIDER_NOT_CONFIGURED\n"
         assert secret not in captured.out + captured.err
+
+
+def test_an_unset_price_says_unset_not_misconfigured(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A price that was never set names its variable; a malformed one does not,
+    because the name is a host fact and the value is not printable."""
+
+    def never(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("no store, bundle or call before configuration")
+
+    monkeypatch.setattr(worker, "connect", never)
+    monkeypatch.setattr(worker, "run_worker", never)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-key-never-printed-4c1d")
+    monkeypatch.setenv("OPENROUTER_MODEL", "a-model/for-the-test")
+    monkeypatch.delenv("CAOS_MODEL_PRICE", raising=False)
+
+    assert worker.main() == 2
+    printed = capsys.readouterr().err.strip()
+    assert printed == "PROVIDER_NOT_CONFIGURED CAOS_MODEL_PRICE unset"
+
+    # Set-but-empty reads as unset, here and in the doctor and the store
+    # configuration. The case the earlier test carried before this one replaced
+    # it: without this, only the deleted-variable path is covered.
+    monkeypatch.setenv("CAOS_MODEL_PRICE", "")
+
+    assert worker.main() == 2
+    assert capsys.readouterr().err.strip() == (
+        "PROVIDER_NOT_CONFIGURED CAOS_MODEL_PRICE unset"
+    )
+
+    # A malformed price is misconfiguration, not absence: the code alone, with
+    # no name and nothing of the value.
+    monkeypatch.setenv("CAOS_MODEL_PRICE", "a-model/for-the-test,not-a-number")
+
+    assert worker.main() == 2
+    assert capsys.readouterr().err.strip() == "PROVIDER_NOT_CONFIGURED"
 
 
 def test_price_from_environment_reads_one_dated_price() -> None:
@@ -409,3 +449,242 @@ def test_the_widest_jitter_stays_within_twenty_percent(
     assert worker.pause_seconds(config, 2) <= 2.0 * 1.2
     monkeypatch.setattr("server.engine.worker.secrets.randbelow", lambda _n: 0)
     assert worker.pause_seconds(config, 2) >= 2.0 * 0.8
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [RefusalCode.STORE_UNAVAILABLE, RefusalCode.RUN_NOT_FOUND],
+)
+def test_a_cancel_that_refuses_backs_off_or_parks_but_never_escapes(  # noqa: PLR0913 -- the loop's own fixtures, plus the patch, the capture and the code
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    refused: RefusalCode,
+) -> None:
+    """W4: the two codes `cancel_run` can refuse beside a lost lease, each
+    treated as its own recovery allows.
+
+    `STORE_UNAVAILABLE` heals itself -- released, the lease expires, the run is
+    reclaimed with its cancel still pending and the cancel is retried -- so it
+    takes the loop's back-off; parking it would turn a transient fault into a
+    stop an operator has to requeue by hand. `RUN_NOT_FOUND` has no such
+    recovery, so it parks with its code, because raising it would leave
+    `work_once` holding the claim and the run at the head of every later poll.
+    """
+    run = queued_run(case, route, bundle, blobs)
+    # What `request_cancel` records for a run a worker holds; recorded here
+    # before the claim because this test's `execution_for` stands in for the
+    # fence that would otherwise read it.
+    run.conn.execute(
+        "UPDATE run_work SET cancel_requested_at = now() WHERE run_id = %s",
+        (run.run_id,),
+    )
+    run.conn.commit()
+
+    def cancelling(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
+
+    def refusing(*args: object, **kwargs: object) -> None:
+        raise Refusal(refused)
+
+    monkeypatch.setattr(worker, "cancel_run", refusing)
+
+    def claim() -> UUID | None:
+        return work_once(
+            run.conn,
+            run.blobs,
+            execution_for=cancelling,  # type: ignore[arg-type]
+            config=CONFIG,
+            stopping=Event(),
+        )
+
+    if refused is RefusalCode.STORE_UNAVAILABLE:
+        with pytest.raises(Refusal) as caught:
+            claim()
+        assert caught.value.code is refused
+        # Released, not stopped, and the request that the run be cancelled
+        # survives the release -- which is what makes the retry a retry.
+        assert work_row(run.conn, run.run_id) == ("QUEUED", None, None, True)
+        assert _cancel_requested(run.conn, run.run_id)
+        assert capsys.readouterr().err == ""
+    else:
+        assert claim() == run.run_id, "returned, not raised"
+        assert work_row(run.conn, run.run_id) == (
+            "STOPPED",
+            refused.value,
+            None,
+            True,
+        )
+        assert capsys.readouterr().err.strip().splitlines()[-1] == refused.value
+
+
+def _cancel_requested(conn: StoreConnection, run_id: UUID) -> bool:
+    row = conn.execute(
+        "SELECT cancel_requested_at IS NOT NULL FROM run_work WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    conn.rollback()
+    assert row is not None
+    return bool(row[0])
+
+
+def test_the_worker_says_what_it_is_doing_and_a_backing_off_worker_says_so(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    empty_database: str,
+) -> None:
+    """The half of the heartbeat that lives in the loop rather than the store.
+
+    A worker failing to reach the store is the case the ledger entry names --
+    until now visible in nothing but a log -- so the states it writes have to
+    tell that apart from an idle poll. `WORKING` is said *before* the run is
+    driven, because driving is the part that takes minutes and "went quiet
+    while working" is a different thing to an operator than "went quiet while
+    idle".
+    """
+    run = queued_run(case, route, bundle, blobs)
+
+    def faulty(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+
+    run_worker(
+        CONFIG,
+        execution_for=faulty,  # type: ignore[arg-type]
+        stopping=_Clock(limit=3),
+        conn_factory=lambda: psycopg.connect(empty_database, autocommit=False),
+        blobs=blobs,
+    )
+
+    [state] = worker_states(run.conn)
+    assert (state.worker_id, state.fresh) == ("worker-test", True)
+    # The last word is BACKOFF with a count: the loop faulted and said so.
+    assert state.state == "BACKOFF"
+    assert state.consecutive_faults > 0
+
+
+def test_a_store_that_will_not_take_the_beat_does_not_stop_the_worker(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    empty_database: str,
+) -> None:
+    """A heartbeat is an observation for a person, not a fence. Nothing reads
+    it to decide whether work may proceed, so a beat that will not write must
+    not take the worker down with it -- what answers a failing store is the
+    loop's own fault handling, by trying to claim a run."""
+    queued_run(case, route, bundle, blobs)
+    driven: list[UUID] = []
+
+    def refusing(*args: object, **kwargs: object) -> None:
+        raise psycopg.OperationalError
+
+    def watching(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        driven.append(run_id)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+
+    # A context rather than the fixture: one parameter fewer, and the patch is
+    # visibly scoped to the loop it is meant to affect.
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("server.engine.worker.beat", refusing)
+        assert (
+            run_worker(
+                CONFIG,
+                execution_for=watching,  # type: ignore[arg-type]
+                stopping=_Clock(limit=2),
+                conn_factory=lambda: psycopg.connect(empty_database, autocommit=False),
+                blobs=blobs,
+            )
+            == 0
+        )
+
+    assert driven, "the worker kept claiming runs while its beat was refused"
+
+
+def test_the_worker_hands_the_runtime_a_concurrent_pass_and_a_stoppable_one(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    empty_database: str,
+) -> None:
+    """The regression that shipped and was caught by a confidence review.
+
+    `module_execution` set `per_node` and `work_once` then built a *fresh*
+    `Execution` listing the four fields that line happened to know about, so
+    the concurrent pass was built, tested, documented -- and never reached
+    production. Nothing failed: a dropped field is not a type error and the run
+    still completes, just one node at a time.
+
+    So the assertion is on what the runtime is actually handed. And on both
+    halves, because a factory that survived but produced an unwrapped provider
+    would leave a SIGTERM stopping the sequential loop between nodes and not a
+    concurrent one.
+    """
+    run = queued_run(case, route, bundle, blobs)
+    handed: list[Execution] = []
+
+    def capture(*_args: object, **kwargs: object) -> None:
+        handed.append(cast(Execution, kwargs["execution"]))
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("server.engine.worker.run_route", capture)
+        assert (
+            work_once(
+                run.conn,
+                blobs,
+                execution_for=module_execution(
+                    CanonicalCompletions(run.source_id),
+                    priced(ESTIMATE),
+                    bundle,
+                    blobs,
+                    lambda: psycopg.connect(empty_database, autocommit=False),
+                ),
+                config=CONFIG,
+                stopping=Event(),
+            )
+            == run.run_id
+        )
+
+    [execution] = handed
+    assert execution.per_node is not None, "the worker dropped the concurrent pass"
+    node_conn, provider = execution.per_node()
+    try:
+        assert isinstance(provider, _Stoppable), "a batch node could not be stopped"
+    finally:
+        node_conn.close()
+
+
+def test_a_worker_given_no_connection_factory_drives_runs_sequentially(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+) -> None:
+    """The default every test in this file relies on, asserted once so it is a
+    decision rather than an accident."""
+    run = queued_run(case, route, bundle, blobs)
+    handed: list[Execution] = []
+
+    def capture(*_args: object, **kwargs: object) -> None:
+        handed.append(cast(Execution, kwargs["execution"]))
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("server.engine.worker.run_route", capture)
+        work_once(
+            run.conn,
+            blobs,
+            execution_for=module_execution(
+                CanonicalCompletions(run.source_id), priced(ESTIMATE), bundle, blobs
+            ),
+            config=CONFIG,
+            stopping=Event(),
+        )
+
+    [execution] = handed
+    assert execution.per_node is None

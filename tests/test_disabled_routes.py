@@ -48,7 +48,13 @@ from server.methodology.bundle import Bundle
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.gates import Gate, approve_gate, approved_run_input, execution_input
+from server.store.gates import (
+    Gate,
+    approve_gate,
+    approved_run_input,
+    execution_input,
+    require_adapter_route,
+)
 from server.store.members import Standing, grant
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route
@@ -62,7 +68,10 @@ LITE = (LITE_PROFILE, LITE_SELECTION)
 FULL = ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
 DEEP = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 # Adapter modules only, but no contract test proves this pathway (work item 6).
-PORTFOLIO = (LITE_PROFILE, "LITE_PORTFOLIO_DECISION")
+# It was LITE_PORTFOLIO_DECISION until that pathway gained its contract test
+# (`tests/test_lite_portfolio_route.py`) and was enabled; LITE_RELATIVE_VALUE is
+# the same shape -- CP-0, CP-1C, CP-L10, every one of them an adapter module.
+ALL_ADAPTER = (LITE_PROFILE, "LITE_RELATIVE_VALUE")
 _WORK = ("run_attempts", "budget_reservations", "call_outcomes", "artifacts")
 
 
@@ -78,7 +87,7 @@ class _Counting:
     model: str = MODEL
     calls: list[str] = field(default_factory=list)
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         self.calls.append(module_id)
         raise AssertionError(module_id)
 
@@ -102,7 +111,7 @@ def _no_work(harness: _Harness) -> None:
         assert _count(harness, table) == 0, table
 
 
-@pytest.mark.parametrize("route", [FULL, DEEP, PORTFOLIO], indirect=True)
+@pytest.mark.parametrize("route", [FULL, DEEP, ALL_ADAPTER], indirect=True)
 def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
     harness: _Harness,
 ) -> None:
@@ -135,7 +144,7 @@ def _authority(harness: _Harness) -> tuple[RunInput, ResolvedRoute]:
     return pin, stored
 
 
-@pytest.mark.parametrize("route", [FULL, DEEP, PORTFOLIO], indirect=True)
+@pytest.mark.parametrize("route", [FULL, DEEP, ALL_ADAPTER], indirect=True)
 def test_acceptance_refuses_a_disabled_route(harness: _Harness) -> None:
     attempt = _billed(harness)
     accepted = Accepted(
@@ -247,8 +256,37 @@ def test_readers_refuse_an_artifact_without_its_record(
     assert proof.value.code is RefusalCode.ARTIFACT_RECORD_MISMATCH
     app.dependency_overrides[store_connection] = lambda: harness.conn
     response = _section(client, harness.case_id, harness.run_id, viewer)
+    # 500 under D3: a stripped record is not restored by asking again.
     assert response.status_code == 500
     assert response.json() == {
         "code": "ARTIFACT_RECORD_MISMATCH",
         "clears": CLEARS[RefusalCode.ARTIFACT_RECORD_MISMATCH],
     }
+
+
+@pytest.mark.parametrize("selection", [FULL, DEEP, ALL_ADAPTER])
+def test_require_adapter_route_is_the_one_rule_both_refusal_points_share(
+    selection: tuple[str, str],
+) -> None:
+    """This file's docstring has said the two refusal points share
+    `require_adapter_route` since it was written, and a sentence is not a test:
+    both were driven and the rule itself never was.
+
+    It is pure and takes no connection, which is what lets execution and
+    acceptance apply it identically. The two disabled shapes are distinct on
+    purpose -- `FULL`/`DEEP` carry modules the adapter does not own, while
+    `ALL_ADAPTER` carries only adapter modules on a pathway no contract test
+    proves (work item 6) -- and the same code answers both.
+    """
+    with pytest.raises(Refusal) as refused:
+        require_adapter_route(resolve_route(CATALOG, *selection))
+
+    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
+
+
+def test_require_adapter_route_admits_the_pathway_that_is_enabled() -> None:
+    """Without this the test above would pass against a function that refused
+    every route, which would disable the product rather than the disabled
+    routes."""
+    require_adapter_route(resolve_route(CATALOG, *LITE))  # returns, so it admits

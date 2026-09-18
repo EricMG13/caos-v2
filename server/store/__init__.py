@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import StrEnum
@@ -112,6 +113,44 @@ MIGRATIONS = (
         .with_name("0020_qualification_performed.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0021_blocking_verdicts",
+        Path(__file__)
+        .with_name("0021_blocking_verdicts.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0024_reservation_price",
+        Path(__file__)
+        .with_name("0024_reservation_price.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0025_supersedes",
+        Path(__file__).with_name("0025_supersedes.sql").read_text(encoding="utf-8"),
+    ),
+    # `0022` and `0023` are permanent gaps -- two streams allocated at once and
+    # `0024`/`0025` landed first. Never fill them: ordering is tuple position,
+    # so a migration inserted below the applied head passes on a fresh database
+    # and refuses STORE_SCHEMA_DRIFT only in production (`docs/MIGRATIONS.md`).
+    (
+        "0026_case_members_by_user",
+        Path(__file__)
+        .with_name("0026_case_members_by_user.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0027_evidence_statement_trigger",
+        Path(__file__)
+        .with_name("0027_evidence_statement_trigger.sql")
+        .read_text(encoding="utf-8"),
+    ),
+    (
+        "0028_worker_heartbeats",
+        Path(__file__)
+        .with_name("0028_worker_heartbeats.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
@@ -135,6 +174,13 @@ _HISTORY = (
     " version integer PRIMARY KEY CHECK (version > 0),"
     " name text NOT NULL UNIQUE, digest text NOT NULL,"
     " applied_at timestamptz NOT NULL DEFAULT now())"
+)
+
+
+# The two codes that mean the store itself could not answer, rather than that
+# what it holds disagrees with the declared history.
+_STORE_SILENT = frozenset(
+    {RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_NOT_TRANSACTIONAL}
 )
 
 
@@ -199,8 +245,20 @@ def apply_schema(conn: StoreConnection, *, sql: str = SCHEMA) -> None:
     try:
         _migrate(conn, sql)
         conn.commit()
-    except (Refusal, psycopg.Error):
+    except Refusal as refused:
+        # Only "the store could not answer" keeps its own code. Everything else
+        # a migration refuses -- including a malformed row its own verification
+        # finds, which may be raised from outside this module -- is a drift
+        # finding and says so (`docs/DECISIONS.md` §20a).
         rollback_or_close(conn)
+        if refused.code in _STORE_SILENT:
+            raise
+        raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
+    except psycopg.Error as fault:
+        rollback_or_close(conn)
+        # SQLSTATE is the standard's five-character class code, never text --
+        # but the field is the server's, so the length is this module's.
+        print(f"schema: sqlstate {(fault.sqlstate or '?????')[:5]}", file=sys.stderr)
         raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT) from None
     except BaseException:
         rollback_or_close(conn)

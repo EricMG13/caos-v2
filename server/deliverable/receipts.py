@@ -6,7 +6,7 @@ from uuid import UUID
 from server.blobs import BlobStore
 from server.deliverable.filing import (
     Receipt,
-    _filing_payload,
+    filing_payload,
     receipt_bytes,
     revision_signatures,
 )
@@ -14,7 +14,8 @@ from server.deliverable.revisions import prove_revision
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.audit import audit_head, audit_trail, digest_of, verify_chain
+from server.store.audit import audit_head, audit_trail, verify_chain
+from server.store.commands import payload_digests
 
 
 def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
@@ -26,11 +27,15 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
     run_id: UUID,
     revision_id: UUID,
 ) -> bytes:
-    """Return proven canonical bytes in the caller's authorized, case-locked unit.
+    """Return proven canonical bytes in the caller's authorized read or write unit.
 
-    The caller owns authorization, locking and transaction cleanup, as for
-    `prove_revision`. Historical renderer pins remain valid; live source and
-    saved-payload authority must still prove. Legacy filings without bytes refuse.
+    The caller owns authorization, its own unit and transaction cleanup, as for
+    `prove_revision`: a write caller holds the case lock, the filed Committee
+    section read holds none, so the audit-head comparison below reads across
+    snapshots and a governed write committing mid-read makes it refuse rather
+    than serve bytes it cannot prove. Historical renderer pins remain valid; live
+    source and saved-payload authority must still prove. Legacy filings without
+    bytes refuse.
     """
     row = conn.execute(
         "SELECT r.payload_sha256,p.payload_sha256,p.frozen_by,p.filed_by,"
@@ -79,7 +84,14 @@ def read_filed_receipt(  # noqa: PLR0913 -- proof authority and exact selection
         filed is None
         or filed.action != "DELIVERABLE_FILED"
         or filed.actor_id != filer
-        or filed.payload_sha256 != digest_of(_filing_payload(receipt))
+        or filed.payload_sha256
+        not in payload_digests(
+            conn,
+            scope=case_id,
+            actor_id=filer,
+            payload=filing_payload(receipt),
+            commands=("FILE_DELIVERABLE",),
+        )
         or not verify_chain(conn, case_id)
         or trail[-1].entry_sha256 != audit_head(conn, case_id)
     ):

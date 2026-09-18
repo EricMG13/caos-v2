@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from decimal import Decimal, Inexact, Rounded, localcontext
 from pathlib import Path
 from threading import Event
@@ -32,9 +33,16 @@ from test_run_events import RECORD, approved_nodes
 
 from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
+from server.pricing import ModelPrice
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, budget, connect
-from server.store.budget import CEILING, remaining, reserve, reserved_for
+from server.store.budget import (
+    CEILING,
+    Reservation,
+    remaining,
+    reserve,
+    reserved_for,
+)
 from server.store.cases import lock_case
 from server.store.events import lock_run
 from server.store.runs import (
@@ -51,6 +59,13 @@ from server.store.runs import (
 MODEL = "a-model/for-the-test"
 GENERATION = "gen-for-the-test"
 
+# What these fixtures reserve under when the price is not what they are about:
+# a real dated price, so a row reads back consistently, and fixed so the amount
+# under test is the only thing that varies.
+RESERVED_AT = ModelPrice(
+    MODEL, Decimal("0.0000001"), Decimal("0.000002"), date(2026, 9, 17)
+)
+
 CEILING_FOR_TEST = Decimal("1.00")
 HALF = Decimal("0.60")
 # Acceptance requires a governed run on the real route (Task17d3a).
@@ -58,6 +73,13 @@ NODES = [
     node.route_node_id
     for node in resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION).nodes
 ]
+
+
+def _amount(taken: Reservation | None) -> Decimal | None:
+    """What a reservation set aside, or None when there is none. Since Task 8.2
+    `reserved_for` answers with the price beside the amount; these assertions
+    are about the amount, and the price has its own test above."""
+    return None if taken is None else taken.amount
 
 
 def _run_with_ceiling(conn: StoreConnection, case_id: UUID) -> UUID:
@@ -72,10 +94,10 @@ def test_a_reservation_reduces_what_remains(
     conn.commit()
     attempt_id = start_attempt(conn, run_id, "CP-1")
 
-    reserve(conn, attempt_id, Decimal("0.25"))
+    reserve(conn, attempt_id, Decimal("0.25"), price=RESERVED_AT)
 
     assert remaining(conn, run_id) == Decimal("0.75")
-    assert reserved_for(conn, attempt_id) == Decimal("0.25")
+    assert _amount(reserved_for(conn, attempt_id)) == Decimal("0.25")
 
 
 def test_a_reservation_past_the_ceiling_is_refused_before_it_is_taken(
@@ -87,11 +109,11 @@ def test_a_reservation_past_the_ceiling_is_refused_before_it_is_taken(
     run_id = _run_with_ceiling(conn, case_id)
     conn.commit()
     first = start_attempt(conn, run_id, "CP-1")
-    reserve(conn, first, HALF)
+    reserve(conn, first, HALF, price=RESERVED_AT)
     second = start_attempt(conn, run_id, "CP-2")
 
     with pytest.raises(Refusal) as caught:
-        reserve(conn, second, HALF)
+        reserve(conn, second, HALF, price=RESERVED_AT)
 
     assert caught.value.code is RefusalCode.BUDGET_CEILING_REACHED
     assert remaining(conn, run_id) == CEILING_FOR_TEST - HALF
@@ -107,7 +129,7 @@ def test_a_reservation_of_exactly_what_remains_is_allowed(
     conn.commit()
     attempt_id = start_attempt(conn, run_id, "CP-1")
 
-    reserve(conn, attempt_id, CEILING_FOR_TEST)
+    reserve(conn, attempt_id, CEILING_FOR_TEST, price=RESERVED_AT)
 
     assert remaining(conn, run_id) == Decimal("0")
 
@@ -121,7 +143,7 @@ def test_a_float_reservation_is_refused(case: tuple[StoreConnection, UUID]) -> N
     attempt_id = start_attempt(conn, run_id, "CP-1")
 
     with pytest.raises(Refusal) as caught:
-        reserve(conn, attempt_id, 0.25)  # type: ignore[arg-type]
+        reserve(conn, attempt_id, 0.25, price=RESERVED_AT)  # type: ignore[arg-type]
 
     assert caught.value.code is RefusalCode.MONEY_NOT_DECIMAL
 
@@ -132,7 +154,7 @@ def test_a_reservation_for_an_unknown_attempt_is_refused(
     conn, _case_id = case
 
     with pytest.raises(Refusal) as caught:
-        reserve(conn, uuid4(), Decimal("0.25"))
+        reserve(conn, uuid4(), Decimal("0.25"), price=RESERVED_AT)
 
     assert caught.value.code is RefusalCode.ATTEMPT_NOT_FOUND
 
@@ -150,7 +172,7 @@ def test_crash_after_remote_completion_keeps_its_reservation(
     run_id = _run_with_ceiling(conn, case_id)
     conn.commit()
     attempt_id = start_attempt(conn, run_id, "CP-1")
-    reserve(conn, attempt_id, HALF)
+    reserve(conn, attempt_id, HALF, price=RESERVED_AT)
 
     # The provider completed; the process dies before accepting the artifact.
     with connect(empty_database) as dying:
@@ -165,7 +187,7 @@ def test_crash_after_remote_completion_keeps_its_reservation(
         dying.close()
 
     with connect(empty_database) as restarted:
-        assert reserved_for(restarted, attempt_id) == HALF
+        assert _amount(reserved_for(restarted, attempt_id)) == HALF
         assert remaining(restarted, run_id) == CEILING_FOR_TEST - HALF
 
 
@@ -183,14 +205,14 @@ def test_a_retry_without_provider_idempotency_reserves_again(
     run_id = _run_with_ceiling(conn, case_id)
     conn.commit()
     first = start_attempt(conn, run_id, "CP-1")
-    reserve(conn, first, Decimal("0.30"))
+    reserve(conn, first, Decimal("0.30"), price=RESERVED_AT)
 
     # The call was indeterminate -- PROVIDER_UNAVAILABLE. The node is retried.
     retry = start_attempt(conn, run_id, "CP-1")
-    reserve(conn, retry, Decimal("0.30"))
+    reserve(conn, retry, Decimal("0.30"), price=RESERVED_AT)
 
     assert first != retry, "a retry is a new attempt row, not a reused one"
-    assert reserved_for(conn, first) == Decimal("0.30")
+    assert _amount(reserved_for(conn, first)) == Decimal("0.30")
     assert remaining(conn, run_id) == Decimal("0.40"), "both reservations stand"
 
 
@@ -209,7 +231,7 @@ def test_concurrent_reservations_at_the_ceiling_refuse(
     def take(attempt_id: UUID) -> bool:
         with connect(empty_database) as conn:
             try:
-                reserve(conn, attempt_id, HALF)
+                reserve(conn, attempt_id, HALF, price=RESERVED_AT)
             except Refusal as refusal:
                 assert refusal.code is RefusalCode.BUDGET_CEILING_REACHED
                 return False
@@ -301,7 +323,7 @@ def test_invalid_money_refuses_at_each_store_entrance(
         if entry == "ceiling":
             start_run(conn, owner[0], budget_ceiling=amount)  # type: ignore[arg-type]
         elif entry == "reserve":
-            reserve(conn, attempt, amount)  # type: ignore[arg-type]
+            reserve(conn, attempt, amount, price=RESERVED_AT)  # type: ignore[arg-type]
         else:
             _accept(conn, attempt, amount)  # type: ignore[arg-type]
     assert conn.info.transaction_status is TransactionStatus.IDLE
@@ -320,9 +342,9 @@ def test_native_money_boundaries_round_trip_at_all_entrances(
     conn.commit()
     approved_nodes(conn, run, tmp_path)
     attempt = start_attempt(conn, run, NODES[0])
-    reserve(conn, attempt, amount)
+    reserve(conn, attempt, amount, price=RESERVED_AT)
     _accept(conn, attempt, amount)
-    assert reserved_for(conn, attempt) == amount
+    assert _amount(reserved_for(conn, attempt)) == amount
     assert conn.execute("SELECT amount FROM budget_ledger").fetchone() == (amount,)
     assert conn.execute("SELECT budget_ceiling FROM runs").fetchone() == (amount,)
     assert remaining(conn, run) == 0
@@ -336,18 +358,18 @@ def test_known_charge_raises_exposure_but_never_releases_a_reservation(
     money_run: tuple[StoreConnection, UUID, UUID], estimate: str, charge: str, left: str
 ) -> None:
     conn, run, attempt = money_run
-    reserve(conn, attempt, Decimal(estimate))
+    reserve(conn, attempt, Decimal(estimate), price=RESERVED_AT)
     _accept(conn, attempt, Decimal(charge))
     assert remaining(conn, run) == Decimal(left)
-    assert reserved_for(conn, attempt) == Decimal(estimate)
+    assert _amount(reserved_for(conn, attempt)) == Decimal(estimate)
     next_attempt = start_attempt(conn, run, NODES[1])
     if Decimal(left) < 0:
         with pytest.raises(Refusal, match=r"^BUDGET_CEILING_REACHED$"):
-            reserve(conn, next_attempt, Decimal(0))
+            reserve(conn, next_attempt, Decimal(0), price=RESERVED_AT)
         assert conn.info.transaction_status is TransactionStatus.IDLE
         assert reserved_for(conn, next_attempt) is None
     else:
-        reserve(conn, next_attempt, Decimal(left))
+        reserve(conn, next_attempt, Decimal(left), price=RESERVED_AT)
         assert remaining(conn, run) == 0
 
 
@@ -355,15 +377,15 @@ def test_mixed_historical_exposure_counts_each_attempt_once(
     money_run: tuple[StoreConnection, UUID, UUID],
 ) -> None:
     conn, run, unresolved = money_run
-    reserve(conn, unresolved, Decimal("0.30"))
+    reserve(conn, unresolved, Decimal("0.30"), price=RESERVED_AT)
     retry = start_attempt(conn, run, NODES[0])
-    reserve(conn, retry, Decimal("0.20"))
+    reserve(conn, retry, Decimal("0.20"), price=RESERVED_AT)
     _accept(conn, retry, Decimal("0.40"))
     historical = start_attempt(conn, run, NODES[1])
     _accept(conn, historical, Decimal("0.25"))
     start_attempt(conn, run, NODES[2])
     assert remaining(conn, run) == Decimal("0.05")
-    assert reserved_for(conn, unresolved) == Decimal("0.30")
+    assert _amount(reserved_for(conn, unresolved)) == Decimal("0.30")
     assert reserved_for(conn, historical) is None
 
 
@@ -380,7 +402,12 @@ def test_remaining_is_independent_of_decimal_context(
     with localcontext() as context:
         context.prec = 2
         context.traps[Inexact] = context.traps[Rounded] = True
-        reserve(conn, attempt, Decimal("0.000000000000000000000000000001"))
+        reserve(
+            conn,
+            attempt,
+            Decimal("0.000000000000000000000000000001"),
+            price=RESERVED_AT,
+        )
         _accept(conn, attempt, Decimal("0.000000000000000000000000000002"))
         assert remaining(conn, run) == Decimal("0.999999999999999999999999999999")
 
@@ -391,12 +418,16 @@ def test_same_attempt_never_authorizes_another_spend(
     money_run: tuple[StoreConnection, UUID, UUID], existing: str, amount: str
 ) -> None:
     conn, run, attempt = money_run
-    (reserve if existing == "reservation" else _accept)(conn, attempt, Decimal("0.25"))
+    if existing == "reservation":
+        reserve(conn, attempt, Decimal("0.25"), price=RESERVED_AT)
+    else:
+        _accept(conn, attempt, Decimal("0.25"))
     with pytest.raises(Refusal, match=r"^BUDGET_ALREADY_RESERVED$"):
-        reserve(conn, attempt, Decimal(amount))
+        reserve(conn, attempt, Decimal(amount), price=RESERVED_AT)
     assert conn.info.transaction_status is TransactionStatus.IDLE
     assert remaining(conn, run) == Decimal("0.75")
-    assert reserved_for(conn, attempt) == (
+    taken = reserved_for(conn, attempt)
+    assert (taken.amount if taken else None) == (
         Decimal("0.25") if existing == "reservation" else None
     )
 
@@ -413,7 +444,7 @@ def test_reserve_observes_terminal_transition_after_waiting(
 
         def refused() -> None:
             with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
-                reserve(other, attempt, Decimal("0.25"))
+                reserve(other, attempt, Decimal("0.25"), price=RESERVED_AT)
             assert other.info.transaction_status is TransactionStatus.IDLE
 
         with _blocked(conn, other, refused):
@@ -438,7 +469,7 @@ def test_reservation_holds_order_until_commit(
 
     monkeypatch.setattr(budget, "_remaining", pause)
     with connect(empty_database) as other, ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(reserve, conn, attempt, Decimal("0.25"))
+        first = pool.submit(reserve, conn, attempt, Decimal("0.25"), price=RESERVED_AT)
         try:
             assert ready.wait(3)
             second = pool.submit(block_run, other, run)
@@ -447,7 +478,7 @@ def test_reservation_holds_order_until_commit(
             release.set()
         first.result(timeout=6)
         assert second.result(timeout=6)
-    assert reserved_for(conn, attempt) == Decimal("0.25")
+    assert _amount(reserved_for(conn, attempt)) == Decimal("0.25")
 
 
 @pytest.mark.parametrize(
@@ -498,7 +529,12 @@ def test_reservation_failure_is_atomic_and_releases_locks(
     with pytest.raises(
         KeyboardInterrupt if failure in {"cancel", "broken"} else Refusal
     ) as caught:
-        reserve(conn, uuid4() if failure == "missing" else attempt, Decimal("0.25"))
+        reserve(
+            conn,
+            uuid4() if failure == "missing" else attempt,
+            Decimal("0.25"),
+            price=RESERVED_AT,
+        )
     if isinstance(caught.value, Refusal):
         assert caught.value.code.value == (
             "ATTEMPT_NOT_FOUND" if failure == "missing" else "STORE_UNAVAILABLE"
@@ -542,7 +578,7 @@ def test_validation_respects_transaction_ownership(
     conn.commit()
     conn.execute("INSERT INTO caller_work VALUES (1)")
     with pytest.raises(Refusal, match=r"^MONEY_INVALID$"):
-        reserve(conn, attempt, Decimal("NaN"))
+        reserve(conn, attempt, Decimal("NaN"), price=RESERVED_AT)
     assert conn.info.transaction_status.name == "IDLE"
     assert conn.execute("SELECT * FROM caller_work").fetchall() == []
 
@@ -562,7 +598,7 @@ def test_reserve_revalidates_attempt_owner_after_waiting(
 
         def refused() -> None:
             with pytest.raises(Refusal, match=r"^ATTEMPT_NOT_FOUND$"):
-                reserve(other, attempt, Decimal("0.25"))
+                reserve(other, attempt, Decimal("0.25"), price=RESERVED_AT)
             assert other.info.transaction_status is TransactionStatus.IDLE
 
         with _blocked(conn, other, refused):
@@ -583,7 +619,7 @@ def test_reserve_refuses_transaction_modes_that_cannot_order_money(
     else:
         conn.execute(f"SET TRANSACTION ISOLATION LEVEL {isolation}")
     with pytest.raises(Refusal, match=r"^STORE_NOT_TRANSACTIONAL$"):
-        reserve(conn, attempt, Decimal("0.25"))
+        reserve(conn, attempt, Decimal("0.25"), price=RESERVED_AT)
     assert conn.info.transaction_status is TransactionStatus.IDLE
     assert reserved_for(conn, attempt) is None
 
@@ -596,7 +632,7 @@ def test_concurrent_same_attempt_reserves_only_once(
     def take() -> str:
         with connect(empty_database) as other:
             try:
-                reserve(other, attempt, Decimal("0.25"))
+                reserve(other, attempt, Decimal("0.25"), price=RESERVED_AT)
             except Refusal as refusal:
                 assert other.info.transaction_status is TransactionStatus.IDLE
                 return refusal.code.value
@@ -619,8 +655,60 @@ def test_budget_closed_connection_failure_is_sanitized(
     conn.close()
     with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$"):
         if operation == "reserve":
-            reserve(conn, attempt, Decimal("0.25"))
+            reserve(conn, attempt, Decimal("0.25"), price=RESERVED_AT)
         else:
             (remaining if operation == "remaining" else reserved_for)(
                 conn, run if operation == "remaining" else attempt
             )
+
+
+def test_a_reservation_records_the_dated_price_that_produced_it(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """Completion O09: the row says which price produced the amount (§40).
+
+    The amount alone cannot be read back to a price -- many prices and request
+    sizes reach the same number -- so an auditor asking what a run was priced
+    at had nothing to read. The four columns are that answer, dated.
+    """
+    conn, case_id = case
+    run_id = _run_with_ceiling(conn, case_id)
+    conn.commit()
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    price = ModelPrice(
+        MODEL, Decimal("0.0000001"), Decimal("0.000002"), date(2026, 9, 17)
+    )
+
+    reserve(conn, attempt_id, Decimal("0.25"), price=price)
+
+    taken = reserved_for(conn, attempt_id)
+    assert taken is not None
+    assert taken.amount == Decimal("0.25")
+    assert taken.price == price, "the price is read back as the host wrote it"
+    assert conn.execute(
+        "SELECT price_model, price_input, price_output, price_as_of"
+        " FROM budget_reservations WHERE attempt_id = %s",
+        (attempt_id,),
+    ).fetchone() == (
+        price.model,
+        price.input_per_token,
+        price.output_per_token,
+        price.as_of,
+    )
+
+
+def test_a_reservation_under_a_nameless_price_is_refused(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """A row whose price names no model would answer the audit with 'legacy'."""
+    conn, case_id = case
+    run_id = _run_with_ceiling(conn, case_id)
+    conn.commit()
+    attempt_id = start_attempt(conn, run_id, "CP-1")
+    nameless = ModelPrice("", Decimal("0.1"), Decimal("0.2"), date(2026, 9, 17))
+
+    with pytest.raises(Refusal) as caught:
+        reserve(conn, attempt_id, Decimal("0.25"), price=nameless)
+
+    assert caught.value.code is RefusalCode.PROVIDER_NOT_CONFIGURED
+    assert reserved_for(conn, attempt_id) is None

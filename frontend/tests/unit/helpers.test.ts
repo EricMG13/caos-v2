@@ -8,17 +8,16 @@ import { sectionPath } from "@/app/sections";
 import { OFFLINE_WORDING, UNAVAILABLE_WORDING } from "@/app/transport";
 import { toneOf } from "@/chrome/SeverityMark";
 import { fallbackChrome } from "@/chrome/fallback";
-import { ACTION_UNPLACED, READ_ONLY_API, refusalText } from "@/controls/RefusedControl";
+import { ACTION_UNPLACED, refusalText } from "@/controls/RefusedControl";
+import { scrollArtifact } from "@/controls/scroll";
+import { shortDigest, stamp } from "@/ds/format";
 import { SEV_COLOR, sevSurface, sevVar } from "@/ds/sev";
 import { NODE_SEVERITY, confidenceTier, nodeTone } from "@/sections/analysis/tone";
-import { stepLabel } from "@/sections/committee/FilingLadder";
 import { caseHref } from "@/sections/directory/CaseRegister";
-import { figureCounts, isUncited, kindLabel } from "@/sections/report/RevisionEditor";
-import { shortDigest } from "@/sections/report/text";
 import { severityOf } from "@/sections/run/RouteGraph";
 import { clock } from "@/sections/upload/SourcePack";
-import type { LadderStep } from "@/wire/committee";
-import type { Figure, Paragraph } from "@/wire/report";
+import { sameId } from "@/wire/v1";
+import type { KeyboardEvent } from "react";
 
 describe("severity is shape and hue, never hue alone", () => {
   test("every severity carries a class, and the four node states map onto them", () => {
@@ -116,8 +115,13 @@ describe("the wire contract and the states around it", () => {
   test("an action nothing performs is refused with a reason that is true today", () => {
     expect(ACTION_UNPLACED.code).toBe("ACTION_UNPLACED");
     expect(ACTION_UNPLACED.clears).not.toMatch(/Phase \d|REBUILD_PLAN|backend phase/);
-    // The store calls exist; what is missing is the route to them.
-    expect(ACTION_UNPLACED.clears).toContain(READ_ONLY_API);
+    // Task 12.1 served the last v1 command route, so "the API serves a route
+    // that performs it" and "only the run document and its event stream" are
+    // both false now. What leaves a control unplaced is a section whose own
+    // read judges no such action, and `chrome.actions` is where that
+    // judgement arrives.
+    expect(ACTION_UNPLACED.clears).toContain("chrome.actions");
+    expect(ACTION_UNPLACED.clears).not.toMatch(/serves only|event stream|serves a route/);
   });
 });
 
@@ -136,54 +140,43 @@ describe("the helpers a section reads its own rows with", () => {
   test("a digest is elided in the middle, and a short one is left alone", () => {
     expect(shortDigest("0b582ff0aaaaaaaaaaaaaaaa30df")).toBe("0b582ff0…30df");
     expect(shortDigest("0b582ff0")).toBe("0b582ff0");
+    // Sixteen is the threshold: the short form is thirteen characters, so
+    // eliding anything shorter hides characters and saves nothing.
+    expect(shortDigest("0123456789abcdef")).toBe("0123456789abcdef");
+    expect(shortDigest("0123456789abcdef0")).toBe("01234567…def0");
   });
 
-  test("the clock part of a stamp is the hours and minutes, marked UTC", () => {
+  test("a missing digest reads as the caller's word for it, never as the elision", () => {
+    expect(shortDigest(null)).toBe("—");
+    expect(shortDigest(null, "not pinned")).toBe("not pinned");
+  });
+
+  test("a stamp keeps the date and the minute and drops the seconds; the clock part alone is marked UTC", () => {
+    expect(stamp("2026-09-09T14:30:00Z")).toBe("2026-09-09 14:30Z");
+    expect(stamp("2026-09-09T14:30:00.123456Z")).toBe("2026-09-09 14:30Z");
     expect(clock("2026-09-09T14:30:00Z")).toBe("14:30Z");
   });
 
-  test("a filing step reads as what it is, done or pending", () => {
-    const step = (state: LadderStep["state"]): LadderStep => ({
-      key: "opinion",
-      state,
-      actor: "—",
-      title: "Opinion",
-      detail: "",
-      at: null,
-      refusal: null,
-    });
-    expect(stepLabel(step("done"))).not.toBe("PENDING");
-    expect(stepLabel(step("ref"))).toBe("REFUSED");
-    expect(stepLabel(step("todo"))).toBe("PENDING");
-    expect(stepLabel(step("cur"))).toBe("CURRENT");
-  });
-});
-
-describe("what the report section refuses by name", () => {
-  const figure = (citation: unknown): Figure => ({ citation }) as Figure;
-  const paragraph = (over: Partial<Paragraph>): Paragraph =>
-    ({ kind: "MODULE", figures: [], ...over }) as Paragraph;
-
-  test("a module paragraph names its module; a judgment names itself", () => {
-    expect(kindLabel(paragraph({ kind: "MODULE", module_id: "CP-1" }))).toBe("MODULE · CP-1");
-    expect(kindLabel(paragraph({ kind: "MODULE", module_id: undefined }))).toBe("MODULE · —");
-    expect(kindLabel(paragraph({ kind: "ANALYST_JUDGMENT" }))).toBe("ANALYST_JUDGMENT");
+  test("two ids are the same ignoring case, and two absent ids are the same", () => {
+    expect(sameId("ABC", "abc")).toBe(true);
+    expect(sameId(null, undefined)).toBe(true);
+    expect(sameId("abc", null)).toBe(false);
+    expect(sameId("abc", "abd")).toBe(false);
   });
 
-  test("only a judgment can assert an uncited figure — what freeze refuses", () => {
-    expect(isUncited(paragraph({ kind: "ANALYST_JUDGMENT" }), figure(null))).toBe(true);
-    // A module figure with no citation is the envelope's problem, not this one's.
-    expect(isUncited(paragraph({ kind: "MODULE" }), figure(null))).toBe(false);
-    expect(isUncited(paragraph({ kind: "ANALYST_JUDGMENT" }), figure({}))).toBe(false);
-  });
-
-  test("the counter counts every figure and the uncited among them", () => {
-    expect(
-      figureCounts([
-        paragraph({ kind: "ANALYST_JUDGMENT", figures: [figure(null), figure({})] }),
-        paragraph({ kind: "MODULE", figures: [figure(null)] }),
-      ]),
-    ).toEqual({ total: 3, uncited: 1 });
+  test("an arrow key pans a wide artifact and any other key is left to the browser", () => {
+    const event = (key: string) => {
+      const scrollBy = vi.fn();
+      const preventDefault = vi.fn();
+      const fired = { key, preventDefault, currentTarget: { scrollBy } };
+      scrollArtifact(fired as unknown as KeyboardEvent<HTMLPreElement>);
+      return { scrollBy, preventDefault };
+    };
+    expect(event("ArrowRight").scrollBy).toHaveBeenCalledWith({ left: 40 });
+    expect(event("ArrowLeft").scrollBy).toHaveBeenCalledWith({ left: -40 });
+    const other = event("ArrowDown");
+    expect(other.scrollBy).not.toHaveBeenCalled();
+    expect(other.preventDefault).not.toHaveBeenCalled();
   });
 });
 

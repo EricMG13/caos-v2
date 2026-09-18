@@ -6,6 +6,8 @@ Its archived verifier retains the renderer pin for that build.
 
 from __future__ import annotations
 
+import os
+import secrets
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -62,6 +64,34 @@ def verify_package(archive_bytes: bytes) -> Verification:
 
 
 def write_package(path: Path, archive_bytes: bytes) -> None:
-    """Create once; the filesystem atomically refuses any existing path."""
-    with path.open("xb") as destination:
-        destination.write(archive_bytes)
+    """Publish a package whole, once, or not at all.
+
+    Two properties, and the second is the one this gained. *Once*: a second
+    publication to a live path is refused rather than silently replacing it,
+    which `os.link` gives for the same reason `open("xb")` did -- the
+    filesystem refuses the name, not this code. *Whole*: the bytes are written
+    and fsynced under a temporary name in the **same directory**, then linked
+    into place, so a crash or an I/O failure part-way leaves nothing at the
+    published path. The old `xb` wrote straight there, and a short file at that
+    name was then refused by every correct write that followed it -- a path
+    permanently poisoned by a package nobody could verify.
+
+    The staging name shares the directory because a rename is only atomic
+    within one filesystem, and the directory is fsynced after the link so the
+    *name* is durable and not just its contents: a reader after a power loss
+    must not find an entry pointing at nothing.
+    """
+    staging = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(8)}")
+    try:
+        with staging.open("xb") as destination:
+            destination.write(archive_bytes)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.link(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)

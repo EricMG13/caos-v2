@@ -6,22 +6,31 @@ store rebuilds, this build and the accepted lineage, and nothing is re-anchored
 (§42.4). Each is labelled per §46.3 -- `source_facts` are the host-verified
 citations with withdrawal read live, `model_analysis` is the model's exact
 Markdown, and `host_calculation` is `NONE`. A node without an accepted handoff
-is listed as pending with its recomputed state and makes the document partial.
+is listed as pending with its recomputed state and makes the document partial;
+on a run a validated Blocked verdict ended, `blocked_by` names which of those
+nodes answered, because a Blocked verdict accepts nothing (§68).
 A run of another case, an unknown and a malformed run are one `RUN_NOT_FOUND`.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
-from server.api.reads.upload import READ_REQUIRES, CasePath
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RunQuery,
+    Store,
+    VisibleCase,
+)
 from server.api.wire import (
     AnalysisBody,
     AnalysisDocument,
+    BlockedByView,
     Chrome,
     CitationView,
     HandoffView,
@@ -34,24 +43,33 @@ from server.api.wire import (
 )
 from server.blobs import BlobStore
 from server.deliverable.render import SCREENING_ONLY
-from server.engine.route import NodeResult, NodeState, ResolvedRoute, node_states
+from server.engine.route import (
+    MODEL_MODULE,
+    NodeResult,
+    NodeState,
+    ResolvedRoute,
+    node_states,
+)
 from server.evidence.citations import AnchoredCitation
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_handoff
 from server.methodology.handoff import CanonicalRecord
 from server.methodology.invocation import named_objects
+from server.methodology.verification import AcceptedRow
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.members import satisfies, standing_of
 from server.store.routes import resolved_route
 
 # Fixed: standing; the case title, `now()`, latest run and the displayed run's
 # ownership in one row; the subject; the pinned route (`resolved_route`); the
-# accepted artifacts; the cited sources. Then, per accepted handoff, the host
+# accepted artifacts; the cited sources; the displayed run's own status, which
+# is what tells a run that stopped from one still working, and -- in the same
+# row -- the verdict that ended it. Then, per accepted
+# handoff, the host
 # identity `accepted_handoff` rebuilds (as app's `CANONICAL_READINESS_IO`).
 # Linear in handoffs, so declared for a LITE run of three; measured on one and
 # on three in `tests/test_analysis_section.py`.
-FIXED_IO = 6
+FIXED_IO = 7
 PER_HANDOFF_IO = 10
 LITE_NODES = 3
 IO_BUDGET = FIXED_IO + LITE_NODES * PER_HANDOFF_IO
@@ -59,34 +77,18 @@ IO_BUDGET = FIXED_IO + LITE_NODES * PER_HANDOFF_IO
 router = APIRouter()
 
 
-def run_query(run: str | None = None) -> UUID | None:
-    """The `run` query, or `RUN_NOT_FOUND` for one that names no run. Parsed
-    here, like `case_path`, so a malformed run opens no connection."""
-    if run is None:
-        return None
-    try:
-        return UUID(run)
-    except ValueError:
-        raise Refusal(RefusalCode.RUN_NOT_FOUND) from None
-
-
-RunQuery = Annotated[UUID | None, Depends(run_query)]
-
-
 @router.get("/api/v1/cases/{case_id}/analysis", response_model=AnalysisDocument)
 def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
     actor: Caller,
     case_id: CasePath,
     run: RunQuery,
+    standing: VisibleCase,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
 ) -> AnalysisDocument:
-    """The order of the parameters is load-bearing: identity, the path and the
-    query, then the store."""
-    standing = standing_of(conn, case_id=case_id, user_id=actor.user_id)
-    if standing is None or not satisfies(standing, READ_REQUIRES):
-        raise Refusal(RefusalCode.CASE_NOT_FOUND)
+    """The order of the parameters is load-bearing: identity, the path, the
+    query and the caller's visibility of the case, then the store."""
     row = conn.execute(
         "SELECT title, now(),"
         " (SELECT run_id FROM runs WHERE case_id = c.case_id"
@@ -107,6 +109,25 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
     subject: RunSubjectView | None = None
     notes: list[SectionNote] = []
     route = None if displayed is None else resolved_route(conn, displayed)
+    # Read as the stored string, the way `reads/run.py` reads it: the column
+    # holds exactly the five the wire declares. The blocking verdict rides the
+    # same row rather than a second round trip -- it is one left join against a
+    # table with at most one row per run, and reading it here keeps the
+    # declared budget the shape it was measured in.
+    displayed_status = None
+    blocking: tuple[object, object] | None = None
+    if displayed is not None:
+        found = conn.execute(
+            "SELECT r.status, v.attempt_id, a.route_node_id FROM runs r"
+            " LEFT JOIN run_blocking_verdicts v ON v.run_id = r.run_id"
+            " LEFT JOIN run_attempts a ON a.attempt_id = v.attempt_id"
+            " WHERE r.run_id = %s",
+            (displayed,),
+        ).fetchone()
+        if found is not None:
+            displayed_status = found[0]
+            blocking = None if found[1] is None else (found[1], found[2])
+    blocked_by = None
     if displayed is not None and route is None:
         notes.append(SectionNote.ROUTE_NOT_PINNED)
     elif displayed is not None and route is not None:
@@ -114,6 +135,8 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
         handoffs, pending = _handoffs(conn, blobs, bundle, route, displayed)
         if pending:
             notes.append(SectionNote.HANDOFFS_PENDING)
+        if displayed_status == "BLOCKED" and blocking is not None:
+            blocked_by = _blocked_by(route, blocking)
     return AnalysisDocument(
         chrome=Chrome(
             subject=Subject(case_id=case_id, title=title),
@@ -125,6 +148,8 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
             latest_run_id=latest,
             displayed_run_id=displayed,
             subject=subject,
+            displayed_run_status=displayed_status,
+            blocked_by=blocked_by,
             handoffs=handoffs,
             pending=pending,
         ),
@@ -132,6 +157,24 @@ def read_analysis(  # noqa: PLR0913 -- identity, path, query, then the stores
         observed_empty=displayed is None,
         status="partial" if notes else "complete",
         notes=notes,
+    )
+
+
+def _blocked_by(route: ResolvedRoute, blocking: tuple[object, object]) -> BlockedByView:
+    """The node whose validated Blocked verdict ended this run, as the
+    transition recorded it (§68) -- read, never re-derived, exactly as
+    `reads/run.py` reads it. A node the pinned route does not carry is a store
+    the pins do not describe, refused rather than served under a guessed
+    module.
+    """
+    attempt, node_id = blocking
+    node = next((n for n in route.nodes if n.route_node_id == str(node_id)), None)
+    if node is None:
+        raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
+    return BlockedByView(
+        route_node_id=node.route_node_id,
+        module_id=node.module_id,
+        attempt_id=UUID(str(attempt)),
     )
 
 
@@ -163,8 +206,7 @@ def _handoffs(
     """Accepted handoffs in route order, then every other node with its state.
 
     A row without its record, or whose record no longer binds, refuses
-    `ARTIFACT_RECORD_MISMATCH` (500): the server's own bytes failed, not a
-    store fault worth a retry.
+    `ARTIFACT_RECORD_MISMATCH` (503): the server's own bytes failed.
     """
     rows = {
         str(node): (UUID(str(attempt)), str(artifact), record, created)
@@ -190,11 +232,13 @@ def _handoffs(
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=node.route_node_id,
-            attempt_id=attempt,
-            artifact_sha256=artifact,
-            record_sha256=str(record_sha),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=artifact,
+                record_sha256=str(record_sha),
+            ),
             accepted=pairs,
         )
         read.append((node.route_node_id, str(record_sha), record, markdown, created))
@@ -283,7 +327,7 @@ def _handoff_view(  # noqa: PLR0913 -- one accepted handoff and its lookups
         # Model-authored and rendered as text, never as markup (§46.3).
         model_analysis=markdown.decode("utf-8"),
         host_calculation=(
-            "CP_CF_FORECAST" if projections.module_id == "CP-CF" else "NONE"
+            "CP_CF_FORECAST" if projections.module_id == MODEL_MODULE else "NONE"
         ),
     )
 

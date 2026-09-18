@@ -176,6 +176,45 @@ describe("Analysis", () => {
     for (const node of partial.body.pending) expect(handoffIds.has(node.module_id)).toBe(false);
   });
 
+  test("test_the_pending_list_names_the_node_whose_verdict_ended_the_run", () => {
+    // A Blocked verdict accepts nothing, so the node that answered sits in the
+    // same list as the nodes that never started. Told apart, or the page says
+    // the opposite of what happened about the one node that did run.
+    const [answered, ...never] = partial.body.pending;
+    const blocked: AnalysisDocument = {
+      ...partial,
+      body: {
+        ...partial.body,
+        displayed_run_status: "BLOCKED",
+        blocked_by: {
+          route_node_id: answered!.route_node_id,
+          module_id: answered!.module_id,
+          attempt_id: "00000000-0000-4000-8000-0000000000c1",
+        },
+      },
+    };
+    const { container } = mount(blocked);
+
+    const panel = container.querySelector("[data-pending]")!;
+    expect(panel).toHaveAttribute("data-run-ended", "yes");
+    expect(panel).toHaveTextContent(`the run ended BLOCKED on ${answered!.module_id}`);
+    const named = container.querySelector(`[data-pending-node="${answered!.module_id}"]`)!;
+    expect(named).toHaveAttribute("data-blocking", "yes");
+    expect(named).toHaveTextContent("its verdict ended the run");
+    for (const node of never) {
+      const row = container.querySelector(`[data-pending-node="${node.module_id}"]`)!;
+      expect(row).toHaveAttribute("data-blocking", "no");
+      expect(row).not.toHaveTextContent("its verdict ended the run");
+    }
+  });
+
+  test("a run still working names no blocking node", () => {
+    const { container } = mount(partial);
+    const rows = [...container.querySelectorAll("[data-pending-node]")];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row).toHaveAttribute("data-blocking", "no");
+  });
+
   test("a run with nothing pending says every pinned node has been accepted", () => {
     const { container } = mount(complete);
     expect(complete.body.pending).toEqual([]);
@@ -207,6 +246,8 @@ describe("Analysis", () => {
         latest_run_id: null,
         displayed_run_id: null,
         subject: null,
+        displayed_run_status: null,
+        blocked_by: null,
         handoffs: [],
         pending: [],
       },

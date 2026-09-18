@@ -114,11 +114,21 @@ describe("the chrome", () => {
     expect(opened).toEqual([]);
   });
 
-  test("the book's primary Compare opens its Compare tab", () => {
-    const book = documents().find(([name]) => name === "book.json")![1];
-    const primary = book.chrome.ribbon.actions.find((action) => action.primary);
-    expect(primary).toMatchObject({ label: "Compare", refusal: null, tab: "compare" });
-    expect(book.chrome.tabs.map((tab) => tab.id)).toContain("compare");
+  // "the book's primary Compare opens its Compare tab" stood here, over the
+  // legacy `fixtures/book.json`. Task 12.3 served the Book a v1 document, so
+  // that fixture is now the v1 shape and this file scans only the legacy ones
+  // -- of which Admin's is the last, and its primary action names no tab, so
+  // the rule would have no subject there. The behaviour it
+  // asserted is not lost: the two cases above drive the same Ribbon over a
+  // declared tab and an undeclared one, on a ribbon the test builds rather
+  // than on fixture data. What went with it was the fixture assertion, which
+  // had no subject left.
+
+  test("the legacy fixtures this file scans have not all been served v1", () => {
+    // Every case below walks `documents()`. The day the last legacy fixture is
+    // served a v1 document, each of them passes over nothing, which is a green
+    // suite asserting no behaviour at all.
+    expect(documents().length).toBeGreaterThan(0);
   });
 
   test("every refusal a fixture carries reads as a clause after 'clears when', and names no build phase", () => {

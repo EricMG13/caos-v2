@@ -23,6 +23,13 @@ export interface FactIdentity {
 
 interface Evidence {
   openCitation(citation: Citation, opener: HTMLElement): void;
+  /** Open the metric passport overlay. Its caller is the Book, which adapts
+      a v1 `BookPassport` to this shape in `sections/book/passport.ts`; it had
+      none while the Book was its unavailable shell and was kept for the reason
+      the note in `app/authority.ts` gives. `test_passport_contract`, pinned by
+      name in `tests/test_phase_exits.py`, still renders `MetricPassport`
+      directly, because what it holds is the ten fields rather than the route
+      a caller takes to them. */
   openPassport(passport: Passport, opener: HTMLElement): void;
   openFact(identity: FactIdentity, opener: HTMLElement): void;
   activeChip: string | null;
@@ -81,7 +88,15 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
   // is no longer there, closes it for good rather than hiding it.
   const resolved =
     fact && snapshot && snapshot.key === fact.key ? resolveFact(snapshot, fact.subject) : null;
-  if (fact && !resolved) setFact(null);
+  // Closed on the snapshot that took the citation away, not on every render:
+  // the sentinel is React's own pattern for state derived from a prop, and an
+  // unconditional render-phase write is a re-render loop waiting for a
+  // `resolveFact` that answers differently twice.
+  const [seenSnapshot, setSeenSnapshot] = useState(snapshot);
+  if (snapshot !== seenSnapshot) {
+    setSeenSnapshot(snapshot);
+    if (fact && !resolved) setFact(null);
+  }
   const shown = resolved ? fact : null;
   const value = useMemo(
     () => ({

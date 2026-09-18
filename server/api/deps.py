@@ -1,7 +1,7 @@
-"""The shared request dependencies every section read and `app.py` itself
-declare on their routes: who is asking, the ids the request names, the
-request's store connection, the blob store, and the process's vendored
-methodology bundle.
+"""The shared request dependencies every section read, command and `app.py`
+itself declare on their routes: who is asking, the ids the request names, the
+caller's visibility of the case, the request's store connection, the blob
+store, and the process's vendored methodology bundle.
 
 Moved out of `server/api/app.py` (Task 4.1c) so the section reads under
 `server/api/reads/` can depend on these functions directly instead of each
@@ -26,10 +26,7 @@ dependencies declared after identity and before the store, without opening a
 connection. `visible_case` is the one round trip this module makes: the
 caller's live standing on the path's case, refused as a private
 `CASE_NOT_FOUND` below the reading floor, so an unknown case and a case the
-caller may not read are one answer. Additive for now: existing section reads
-keep their own local id parsers and standing checks until each is moved over
-on its own reviewed change, so this module gaining a definition does not by
-itself change any route's behavior.
+caller may not read are one answer.
 """
 
 from __future__ import annotations
@@ -167,6 +164,22 @@ def run_path(run_id: str) -> UUID:
     return parse_uuid(run_id, RefusalCode.RUN_NOT_FOUND)
 
 
+def source_path(source_id: str) -> UUID:
+    """The path's source id, or the one answer a source nobody may use gets."""
+    return parse_uuid(source_id, RefusalCode.EVIDENCE_NOT_AVAILABLE)
+
+
+def revision_path(revision_id: str) -> UUID:
+    """The path's revision id, or `DELIVERABLE_NOT_FOUND`."""
+    return parse_uuid(revision_id, RefusalCode.DELIVERABLE_NOT_FOUND)
+
+
+def member_path(user_id: str) -> UUID:
+    """The path's member. A subject that is not an identifier is a malformed
+    request, not a missing case: the caller already reads this case."""
+    return parse_uuid(user_id, RefusalCode.REQUEST_INVALID)
+
+
 def run_query(run: str | None = None) -> UUID | None:
     """The `run` query, or `RUN_NOT_FOUND` for one that names no run."""
     return None if run is None else parse_uuid(run, RefusalCode.RUN_NOT_FOUND)
@@ -200,6 +213,9 @@ def visible_case(actor: Caller, case_id: CasePath, conn: Store) -> Standing:
 
 CasePath = Annotated[UUID, Depends(case_path)]
 RunPath = Annotated[UUID, Depends(run_path)]
+SourcePath = Annotated[UUID, Depends(source_path)]
+RevisionPath = Annotated[UUID, Depends(revision_path)]
+MemberPath = Annotated[UUID, Depends(member_path)]
 RunQuery = Annotated[UUID | None, Depends(run_query)]
 RevisionQuery = Annotated[UUID, Depends(revision_query)]
 VisibleCase = Annotated[Standing, Depends(visible_case)]

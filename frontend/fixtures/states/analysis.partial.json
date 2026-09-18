@@ -20,6 +20,8 @@
       "reporting_period": "Q2 2026",
       "analysis_date": "2026-09-09"
     },
+    "displayed_run_status": "COMPLETE",
+    "blocked_by": null,
     "handoffs": [
       {
         "route_node_id": "rn-cp-0",
@@ -149,9 +151,21 @@
       }
     ],
     "pending": [
-      { "route_node_id": "rn-cp-6", "module_id": "CP-6", "state": "RUNNABLE" },
-      { "route_node_id": "rn-cp-6a", "module_id": "CP-6A", "state": "BLOCKED" },
-      { "route_node_id": "rn-cp-7", "module_id": "CP-7", "state": "BLOCKED" }
+      {
+        "route_node_id": "rn-cp-6",
+        "module_id": "CP-6",
+        "state": "RUNNABLE"
+      },
+      {
+        "route_node_id": "rn-cp-6a",
+        "module_id": "CP-6A",
+        "state": "BLOCKED"
+      },
+      {
+        "route_node_id": "rn-cp-7",
+        "module_id": "CP-7",
+        "state": "BLOCKED"
+      }
     ]
   },
   "observed_at": "2026-09-09T14:30:00Z",

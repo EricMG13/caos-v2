@@ -17,23 +17,19 @@ what rests on it (§41.3).
 from __future__ import annotations
 
 import hashlib
-import json
 import threading
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
 from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
-from server.engine.route import ResolvedRoute, RouteNode
+from server.engine.route import MODEL_MODULE, ResolvedRoute, RouteNode
 from server.evidence.citations import (
     AnchoredCitation,
-    Citation,
-    citation_candidates,
     verify_citations,
 )
 from server.methodology.bundle import (
@@ -43,7 +39,6 @@ from server.methodology.bundle import (
     authority_digest,
     delivered_authority,
     delivered_authority_digest,
-    verified_bytes,
 )
 from server.methodology.executor import (
     SKILL,
@@ -61,29 +56,35 @@ from server.methodology.handoff import (
     Projections,
     UpstreamRef,
     parse_response,
-    read_record,
     record_bytes,
     stored_lineage,
     validate_markdown,
 )
 from server.methodology.invocation import (
-    accepted_lineage,
     build_handoff_prompt,
     call_time_identity,
     host_identity,
     prospective_identity,
-    record_authority_matches,
+    request_size,
     upstream_markdown,
-    within_request_ceiling,
 )
 from server.methodology.vendor import (
-    VENDOR_MODULE,
     VendorContract,
+    catalog,
     load_vendor_contract,
+)
+from server.methodology.verification import (
+    AcceptedRow,
+    Step,
+    VendorAuthority,
+    Verified,
+    gate_expects,
+    verify_accepted,
 )
 from server.provider import CompletionProvider, reported_charge
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.budget import reserved_for
 from server.store.outcomes import (
     CallOutcome,
     accepted_rows,
@@ -97,7 +98,6 @@ from server.store.outcomes import (
 from server.store.run_inputs import load_run_input
 from server.store.source_sets import SourceSet, load_source_set
 
-_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 # One compiled contract per manifest: the manifest digests every vendor file.
 _CONTRACTS: dict[str, VendorContract] = {}
 _CONTRACTS_LOCK = threading.Lock()
@@ -124,16 +124,6 @@ def _contract(bundle: Bundle) -> VendorContract:
         return _CONTRACTS[key]
 
 
-def _catalog(bundle: Bundle) -> dict[str, Any]:
-    try:
-        catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
-    except ValueError:
-        catalog = None
-    if not isinstance(catalog, dict):
-        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-    return catalog
-
-
 def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:
     """The exact response body as a blob address (None when there is none), and
     whether a body that exists could not be stored.
@@ -156,6 +146,39 @@ def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:
     with suppress(OSError, Refusal):
         return blobs.put(data), False
     return None, True
+
+
+def _within_reservation(
+    conn: StoreConnection,
+    provider: CompletionProvider,
+    prompt: str,
+    *,
+    attempt_id: UUID,
+) -> None:
+    """Refuse a request this attempt's reservation does not cover (Task 8.2).
+
+    The loop priced the prompt `check_context` built and reserved for it; this
+    unit builds its own under the attempt's own identity. A rebuilt prompt that
+    is larger -- or a configured price that moved between the two -- would
+    otherwise be sent under a reservation too small for it, which is invariant
+    8's "no provider call without a reservation" met only in form. So the
+    reservation is read back with the price it was taken under and the request
+    about to be sent is priced against exactly that price, before the call.
+
+    A missing reservation refuses here as well as in `check_call`: the unit that
+    spends checks it, not only the unit that ordered it.
+    """
+    from server.pricing import priced_request
+
+    measured = request_size(provider, prompt)
+    with execution_reads(conn):
+        taken = reserved_for(conn, attempt_id)
+    if taken is None:
+        raise Refusal(RefusalCode.BUDGET_NOT_RESERVED)
+    if taken.price.model != provider.model:
+        raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
+    if priced_request(taken.price, measured) > taken.amount:
+        raise Refusal(RefusalCode.CONTEXT_OVER_CEILING)
 
 
 def execute_handoff(
@@ -185,16 +208,13 @@ def execute_handoff(
         )
         _stored_identity(conn, assignment, bundle, adapter=adapter)
         identity = _identity(conn, bundle, assignment)
-        context = _context(
-            conn, blobs, bundle, assignment, identity, include_candidates=True
-        )
+        context = _context(conn, blobs, bundle, assignment, identity)
     # The record binds exactly the authority this prompt carries (§45.1).
     carried = delivered_authority(bundle, assignment.module_id)
     # Met before reservation by `check_context`; built again here so the call
     # carries exactly this attempt's identity, and refused again if it moved.
-    prompt = within_request_ceiling(
-        provider, _prompt(bundle, assignment, identity, context, carried)
-    )
+    prompt = _prompt(bundle, assignment, identity, context, carried)
+    _within_reservation(conn, provider, prompt, attempt_id=attempt)
 
     bundle.verify_manifest()
     model = producer_identifier(provider.model, limit=256)
@@ -287,11 +307,11 @@ def _answer(  # noqa: PLR0913 -- one recorded answer, keyword-only
     projections = _unless_blocked(
         lambda: validate_markdown(
             _contract(bundle),
-            _catalog(bundle),
+            catalog(bundle),
             authority.files[SKILL],
             markdown,
             identity=identity,
-            gate_expects=_gate_expects(assignment.route, assignment.module_id),
+            gate_expects=gate_expects(assignment.route, assignment.node),
         )
     )
     # A Blocked verdict ends the run only once its quotes are verified: an
@@ -325,14 +345,17 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
     route: ResolvedRoute,
     node: RouteNode,
     provider: CompletionProvider,
-) -> None:
-    """Build the node's whole prompt before any attempt, reservation or call.
+) -> int:
+    """Build the node's whole prompt before any attempt, reservation or call,
+    and return the request size the call will be priced on.
 
     The pre-call unit `execute_handoff` runs, under `prospective_identity`, so
     every refusal the prompt would raise -- `CONTEXT_OVER_CEILING` on the whole
     request `provider` would send, and a delivered file whose bytes moved -- is
     raised while nothing has been started or set aside (§45.3, invariant 8).
-    Nothing is kept: the attempt's own prompt is rebuilt from its own read unit.
+    The prompt itself is not kept: the attempt's own is rebuilt from its own
+    read unit, and the reservation this measurement produced is what that
+    rebuild is then checked against (Task 8.2).
     """
     assignment = Assignment(node.module_id, run_id, node, route, _NO_ATTEMPT)
     with execution_reads(conn):
@@ -342,11 +365,9 @@ def check_context(  # noqa: PLR0913 -- one node of one run, keyword-only
         identity = prospective_identity(
             conn, bundle, run_id=run_id, route=route, node=node
         )
-        context = _context(
-            conn, blobs, bundle, assignment, identity, include_candidates=True
-        )
+        context = _context(conn, blobs, bundle, assignment, identity)
     authority = delivered_authority(bundle, node.module_id)
-    within_request_ceiling(
+    return request_size(
         provider, _prompt(bundle, assignment, identity, context, authority)
     )
 
@@ -364,7 +385,6 @@ class _Context:
     lineage: tuple[LineageRef, ...]
     # Each direct upstream's anchored citations, from its verified record.
     citations: dict[str, tuple[AnchoredCitation, ...]]
-    candidates: tuple[Citation, ...]
     source_set: SourceSet | None
 
 
@@ -407,14 +427,12 @@ def _assert_originals(blobs: BlobStore, source_set: SourceSet) -> None:
         raise Refusal(refusal)
 
 
-def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
+def _context(
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     assignment: Assignment,
     identity: HostIdentity,
-    *,
-    include_candidates: bool = False,
 ) -> _Context:
     """The delivered evidence, the verified upstream, its whole accepted lineage
     and its citation register, read inside the caller's unit after it checked
@@ -426,24 +444,11 @@ def _context(  # noqa: PLR0913 -- prompt-only candidate work is explicit
     records, lineage = _upstream_records(
         conn, blobs, bundle, assignment, identity.upstream
     )
-    candidates = (
-        citation_candidates(
-            conn,
-            delivered=_by_source(delivered),
-            proposed=tuple(
-                Citation(item.source_id, item.page, item.text.value)
-                for item in delivered
-            ),
-        )
-        if include_candidates
-        else ()
-    )
     return _Context(
         delivered=delivered,
         upstream=upstream_markdown(blobs, identity.upstream),
         lineage=lineage,
         citations={node: record.citations for node, record in records.items()},
-        candidates=candidates,
         source_set=source_set,
     )
 
@@ -475,12 +480,11 @@ def _prompt(
         _contract(bundle),
         identity=identity,
         authority=authority,
-        catalog=_catalog(bundle),
+        catalog=catalog(bundle),
         delivered=context.delivered,
         upstream=context.upstream,
         upstream_citations=context.citations,
         route=assignment.route,
-        citation_candidates=context.candidates,
         source_set=context.source_set,
     )
 
@@ -647,12 +651,17 @@ def blocked_verdict(  # noqa: PLR0913 -- one run's nodes, keyword-only
     run_id: UUID,
     route: ResolvedRoute,
     route_node_ids: Collection[str],
-) -> bool:
-    """Whether the answer `replay_billed` owes first re-derives to Blocked."""
+) -> UUID | None:
+    """The attempt whose answer, the first `replay_billed` owes a verdict on,
+    re-derives to Blocked; None when that answer is anything else, or there is
+    none. The attempt rather than a bool, because the transition that acts on
+    the verdict records which answer it was (`block_run`, §68)."""
     replayed = replay_billed(
         conn, blobs, bundle, run_id=run_id, route=route, route_node_ids=route_node_ids
     )
-    return replayed is not None and replayed.verdict is Verdict.BLOCKED
+    if replayed is None or replayed.verdict is not Verdict.BLOCKED:
+        return None
+    return replayed.attempt_id
 
 
 def _stored_body(blobs: BlobStore, diagnostic_sha256: str) -> str | None:
@@ -702,17 +711,13 @@ def _replayed_answer(
     )
 
 
-def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
+def accepted_projections(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> Projections:
     """An accepted canonical artifact's projections, re-derived and compared.
@@ -727,32 +732,23 @@ def accepted_projections(  # noqa: PLR0913 -- one accepted row, keyword-only
     deliverable use too, so a soft input accepted after its target never makes
     the runtime refuse a record the other readers accept.
     """
-    _record, projections = _verified_accepted(
+    return _verified_accepted(
         conn,
         blobs,
         bundle,
         route,
-        run_id=run_id,
-        route_node_id=route_node_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
         accepted=accepted,
-    )
-    return projections
+    ).projections
 
 
-def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
+def accepted_handoff(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> tuple[bytes, CanonicalRecord]:
     """An accepted canonical artifact's exact Markdown and its verified record.
@@ -763,85 +759,83 @@ def accepted_handoff(  # noqa: PLR0913 -- one accepted row, keyword-only
     Markdown equal the record's (§42.4). Citations are not re-anchored; the
     rectangles are the ones recorded at acceptance.
     """
-    record, _projections = _verified_accepted(
+    verified = _verified_accepted(
         conn,
         blobs,
         bundle,
         route,
-        run_id=run_id,
-        route_node_id=route_node_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
         accepted=accepted,
     )
-    # The bytes just validated, read again digest-checked for the caller.
-    return blobs.get(artifact_sha256), record
+    return verified.markdown, verified.record
 
 
-def _verified_accepted(  # noqa: PLR0913 -- one accepted row, keyword-only
+def _refuse(step: Step) -> RefusalCode | None:
+    """The runtime's codes: `ROUTE_IDENTITY_INVALID` for a row naming no
+    pinned node, `ARTIFACT_RECORD_MISMATCH` for bytes that will not read,
+    `ORCHESTRATION_BUILD_MOVED` as the proof maps it; every other step's own."""
+    return {
+        Step.NODE_NOT_IN_ROUTE: RefusalCode.ROUTE_IDENTITY_INVALID,
+        Step.UNREADABLE: RefusalCode.ARTIFACT_RECORD_MISMATCH,
+        Step.AUTHORITY_MOVED: RefusalCode.ORCHESTRATION_BUILD_MOVED,
+    }.get(step)
+
+
+def _verified_accepted(  # noqa: PLR0913 -- the unit's handles, its row, its pairs
     conn: StoreConnection,
     blobs: BlobStore,
     bundle: Bundle,
     route: ResolvedRoute,
+    row: AcceptedRow,
     *,
-    run_id: UUID,
-    route_node_id: str,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
     accepted: Mapping[str, tuple[str, str | None]] | None,
-) -> tuple[CanonicalRecord, Projections]:
-    """`accepted_projections` with the verified record it read beside them."""
-    node = next((n for n in route.nodes if n.route_node_id == route_node_id), None)
-    if node is None:
-        raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-    record = _accepted_record(
+) -> Verified:
+    """`accepted_projections` with the verified record and bytes it read.
+
+    `ARTIFACT_RECORD_MISMATCH` when the record does not bind (`read_record`)
+    or its lineage is not the accepted chain the store holds now (§45.4);
+    `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
+    build, manifest or authority, as the proof maps it; `validate_markdown`'s
+    own code for a stored handoff that no longer validates;
+    `AUTHORITY_BYTES_MISMATCH` for any file of the module's authority moved on
+    disk. Citations are not re-anchored (§42.4). The frontier keeps the
+    per-manifest authority digest cache. Caller owns the read.
+    """
+    verified = verify_accepted(
         conn,
         blobs,
         bundle,
         route,
-        node,
-        run_id=run_id,
-        attempt_id=attempt_id,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
+        row,
+        vendor=VendorAuthority(_contract(bundle), catalog(bundle)),
         accepted=accepted,
+        verify_authority=False,
+        reanchor=None,
+        refuse=_refuse,
     )
-    identity = record.identity
-    try:
-        markdown = blobs.get(artifact_sha256)
-    except (Refusal, OSError):
-        markdown = None
-    if markdown is None:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    authority = assemble_authority(bundle, node.module_id)
-    projections = validate_markdown(
-        _contract(bundle),
-        _catalog(bundle),
-        authority.files[SKILL],
-        markdown,
-        identity=identity,
-        gate_expects=_gate_expects(route, node.module_id),
-    )
-    if projections != record.projections:
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    if node.module_id == "CP-CF":
-        assignment = Assignment(node.module_id, run_id, node, route, attempt_id)
+    node = next(n for n in route.nodes if n.route_node_id == row.route_node_id)
+    # Every file of the module's authority, verified on disk now: the shared
+    # steps read SKILL.md and compare cached digests, so this is what refuses
+    # a sibling reference file tampered under an unchanged manifest on the
+    # read that serves the frontier, the Run and Analysis documents and the
+    # matrix (§45.1). It is what the parent read paid; the cache costs nothing.
+    assemble_authority(bundle, node.module_id)
+    if node.module_id == MODEL_MODULE:
+        assignment = Assignment(node.module_id, row.run_id, node, route, row.attempt_id)
         _forecast_inputs(
             bundle,
             node.module_id,
-            markdown,
-            _context(conn, blobs, bundle, assignment, identity),
+            verified.markdown,
+            _context(conn, blobs, bundle, assignment, verified.record.identity),
         )
-    return record, projections
+    return verified
 
 
 def _forecast_inputs(
     bundle: Bundle, module: str, markdown: bytes, context: _Context
 ) -> None:
     """The same owner-binding check at acceptance, replay and every accepted read."""
-    if module != "CP-CF":
+    if module != MODEL_MODULE:
         return
     from server.methodology.forecast import (
         validate_driver_mapping,
@@ -866,55 +860,6 @@ def _forecast_inputs(
             for key in ("limitation_flags", "validation_warnings")
         ):
             raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
-
-
-def _accepted_record(  # noqa: PLR0913 -- one accepted row, keyword-only
-    conn: StoreConnection,
-    blobs: BlobStore,
-    bundle: Bundle,
-    route: ResolvedRoute,
-    node: RouteNode,
-    *,
-    run_id: UUID,
-    attempt_id: UUID,
-    artifact_sha256: str,
-    record_sha256: str,
-    accepted: Mapping[str, tuple[str, str | None]] | None,
-) -> CanonicalRecord:
-    """An accepted row's record, bound to its call-time identity and this build.
-
-    `ARTIFACT_RECORD_MISMATCH` when it does not bind (`read_record`) or its
-    lineage is not the accepted chain the store holds now (§45.4);
-    `ORCHESTRATION_BUILD_MOVED` when it was written under another adapter,
-    build, manifest or authority, as the proof maps it. Caller owns the read.
-    """
-    try:
-        stored = blobs.get(record_sha256)
-    except (Refusal, OSError):
-        stored = None
-    identity = call_time_identity(
-        conn,
-        route,
-        host_identity(
-            conn, bundle, run_id=run_id, route=route, node=node, attempt_id=attempt_id
-        ),
-        attempt_id=attempt_id,
-        record=stored,
-    )
-    record = read_record(
-        blobs,
-        artifact_sha256=artifact_sha256,
-        record_sha256=record_sha256,
-        expected=identity,
-    )
-    if not record_authority_matches(record, bundle=bundle, module_id=node.module_id):
-        raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
-    upstream = record.identity.upstream
-    if record.lineage != accepted_lineage(
-        conn, blobs, run_id=run_id, upstream=upstream, accepted=accepted
-    ):
-        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-    return record
 
 
 def _upstream_records(
@@ -952,28 +897,22 @@ def _upstream_records(
         _, attempt, digest, record_sha256 = row
         if record_sha256 is None:
             raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        record, _projections = _verified_accepted(
+        record = _verified_accepted(
             conn,
             blobs,
             bundle,
             assignment.route,
-            run_id=assignment.run_id,
-            route_node_id=ref.route_node_id,
-            attempt_id=attempt,
-            artifact_sha256=digest,
-            record_sha256=record_sha256,
+            AcceptedRow(
+                run_id=assignment.run_id,
+                route_node_id=ref.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=digest,
+                record_sha256=record_sha256,
+            ),
             accepted=accepted,
-        )
+        ).record
         verified[record_sha256] = by_node[ref.route_node_id] = record
     return by_node, stored_lineage(blobs, refs, accepted, verified=verified)
-
-
-def _gate_expects(route: ResolvedRoute, module_id: str) -> frozenset[str]:
-    if module_id != GATE_MODULE:
-        return frozenset()
-    # The vendor T8 cannot name host modules; CP-CF is released by its four
-    # REQUIRED owner/gate edges, after these exact vendor readiness rows.
-    return frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
 
 
 def _identity(

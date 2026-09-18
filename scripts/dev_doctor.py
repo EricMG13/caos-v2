@@ -29,8 +29,10 @@ LIVE_CONFIGURATION = frozenset(
         "CAOS_REQUIRE_PROVIDER",
         # `make dev-worker` and `scripts/qualify.py` read the dated price (§49);
         # absent, the worker refuses PROVIDER_NOT_CONFIGURED before it claims
-        # anything.
+        # anything. The ceiling is read by the live suite alone, not by
+        # anything under `scripts/` or `server/`.
         "CAOS_MODEL_PRICE",
+        "CAOS_LIVE_BUDGET_CEILING",
     }
 )
 # Read by the production image, the site dispatcher and the edge guard only

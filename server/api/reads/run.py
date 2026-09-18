@@ -21,12 +21,21 @@ from fastapi import APIRouter
 
 from server import methodology
 from server.api.commands.availability import RunFacts, run_actions
-from server.api.deps import Blobs, Caller, Methodology, Store
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RunQuery,
+    Store,
+    readable,
+)
 from server.api.identity import Actor
 from server.api.wire import (
     ATTEMPTS_MAX,
     RUNS_MAX,
     AttemptView,
+    BlockedByView,
     Chrome,
     EdgeView,
     GateView,
@@ -51,10 +60,10 @@ from server.engine.route import (
     NodeState,
     ResolvedRoute,
     RouteNode,
+    blockers_from,
     lite_object_unmet,
     node_states,
     readiness_from,
-    route_digest,
     waiting_on,
 )
 from server.engine.runtime import accepted_artifacts
@@ -62,7 +71,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.invocation import named_objects
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection
 from server.store.gates import (
     Gate,
     GateState,
@@ -70,8 +79,8 @@ from server.store.gates import (
     require_adapter_route,
     sources_live,
 )
-from server.store.members import Standing, satisfies
-from server.store.routes import resolved_route
+from server.store.members import Standing
+from server.store.routes import route_pin
 from server.store.run_inputs import load_run_input
 
 # The case, the caller's standing, its live-source count and the store's
@@ -80,6 +89,10 @@ from server.store.run_inputs import load_run_input
 _FIXED_IO = 5
 # The displayed run's `run_work` row (Task 4.2 decision 14).
 WORK_IO = 1
+# The successor link, both ends in one row (§72): the run this one answers and
+# the run that answers it. Read for every displayed run, not only a BLOCKED
+# one -- `supersedes` sits on the successor, whatever its status.
+SUPERSEDES_IO = 1
 # Whether the pinned sources are still live, read once a pin exists.
 LIVE_IO = 1
 # Of those, the accepted artifacts are read only once a route is pinned.
@@ -93,59 +106,69 @@ PINNED_INPUT_IO = 5
 # approver's standing and the live-source check.
 GATE_IO = PINNED_INPUT_IO + 3
 # Before an input is pinned, the input read and each gate's find no row.
-UNPINNED_INPUT_IO = _FIXED_IO + WORK_IO + 1 + len(Gate)
-SECTION_READ_IO = _FIXED_IO + WORK_IO + LIVE_IO + PINNED_INPUT_IO + len(Gate) * GATE_IO
+UNPINNED_INPUT_IO = _FIXED_IO + WORK_IO + SUPERSEDES_IO + 1 + len(Gate)
+SECTION_READ_IO = (
+    _FIXED_IO
+    + WORK_IO
+    + SUPERSEDES_IO
+    + LIVE_IO
+    + PINNED_INPUT_IO
+    + len(Gate) * GATE_IO
+)
 # A canonical readiness row (§42.4) is read from its record under the host
 # identity the store rebuilds: the run input, the pinned route, the attempt's
 # owner and ordinal, the accepted digests, and the call-time narrowing's
 # artifact read. Measured on a LITE run (`tests/test_canonical_readers.py`),
 # per such row. A row without its record refuses `ARTIFACT_RECORD_MISMATCH`
-# (500 -- the server's own bytes, not a store fault worth a retry) at no
-# further cost.
+# (503) at no further cost.
 CANONICAL_READINESS_IO = 10
 # Readiness rows are the gate's and each QA_GATE source's. The catalog carries
 # one QA_GATE (`CP-5 -> CP-6`), so a route holds at most two -- the bound is a
 # constant, not a function of route length.
 READINESS_ROWS = 2
-IO_BUDGET = SECTION_READ_IO + BEYOND_LIST_IO + READINESS_ROWS * CANONICAL_READINESS_IO
-
-# Reading the Run section is reading its case; holding it grants nothing more.
-READ_REQUIRES = Standing.READER
+# The attempt whose validated Blocked verdict ended the run, as the transition
+# recorded it (§68): one row, read only on a BLOCKED run with a pinned route.
+BLOCKED_BY_IO = 1
+IO_BUDGET = (
+    SECTION_READ_IO
+    + BEYOND_LIST_IO
+    + READINESS_ROWS * CANONICAL_READINESS_IO
+    + BLOCKED_BY_IO
+)
 
 router = APIRouter()
 
 
 @router.get("/api/v1/cases/{case_id}/run", response_model=RunSectionDocument)
-def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two ids
-    case_id: str,
+def read_run_section(  # noqa: PLR0913 -- identity, two ids, store, blobs, bundle
     actor: Caller,
+    case_id: CasePath,
+    run: RunQuery,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
-    run: str | None = None,
 ) -> RunSectionDocument:
     """The case's runs and the displayed run with each node's state.
 
-    Both ids are taken as text and read here, after identity: a malformed case
-    is `CASE_NOT_FOUND` and a malformed run `RUN_NOT_FOUND`, never FastAPI's
-    422 quoting the input back.
+    The order of the parameters is load-bearing: identity, then the path and
+    the query, then the store. Both ids are parsed by `deps`, so a malformed
+    case is `CASE_NOT_FOUND` and a malformed run `RUN_NOT_FOUND`, never
+    FastAPI's 422 quoting the input back, and neither opens a connection.
     """
-    case = _uuid(case_id, RefusalCode.CASE_NOT_FOUND)
-    title, standing, live_sources, observed_at = _visible_case(conn, case, actor)
-    wanted = None if run is None else _uuid(run, RefusalCode.RUN_NOT_FOUND)
+    title, standing, live_sources, observed_at = _visible_case(conn, case_id, actor)
 
     rows = conn.execute(
         "SELECT r.run_id, r.status, r.created_at, p.profile_id, p.selection_id"
         " FROM runs r LEFT JOIN run_routes p ON p.run_id = r.run_id"
         " WHERE r.case_id = %s ORDER BY r.created_at DESC, r.run_id DESC LIMIT %s",
-        (case, RUNS_MAX + 1),
+        (case_id, RUNS_MAX + 1),
     ).fetchall()
     notes = [SectionNote.LIST_TRUNCATED] if len(rows) > RUNS_MAX else []
     runs = [_summary(row) for row in rows[:RUNS_MAX]]
-    displayed = runs[0] if wanted is None and runs else None
-    if wanted is not None:
-        displayed = next((s for s in runs if s.run_id == wanted), None)
-        displayed = displayed or _displayed_beyond_the_list(conn, case, wanted)
+    displayed = runs[0] if run is None and runs else None
+    if run is not None:
+        displayed = next((s for s in runs if s.run_id == run), None)
+        displayed = displayed or _displayed_beyond_the_list(conn, case_id, run)
 
     view = facts = None
     if displayed is not None:
@@ -153,12 +176,12 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
         notes.extend(run_notes)
     return RunSectionDocument(
         chrome=Chrome(
-            subject=Subject(case_id=case, title=title),
+            subject=Subject(case_id=case_id, title=title),
             served_role=ServedRole(global_role=actor.role, standing=standing),
             actions=run_actions(actor.role, standing, facts, live_sources),
         ),
         body=RunBody(
-            case_id=case,
+            case_id=case_id,
             latest_run_id=runs[0].run_id if runs else None,
             displayed_run_id=None if displayed is None else displayed.run_id,
             runs=runs,
@@ -175,26 +198,16 @@ def read_run_section(  # noqa: PLR0913 -- identity, store, blobs, bundle, two id
     )
 
 
-def _uuid(value: str, code: RefusalCode) -> UUID:
-    """An id read from the request, or the refusal a missing one gets. Raised
-    outside the `except`, so nothing of the input is chained behind it."""
-    try:
-        parsed: UUID | None = UUID(value)
-    except ValueError:
-        parsed = None
-    if parsed is None:
-        raise Refusal(code)
-    return parsed
-
-
 def _visible_case(
     conn: StoreConnection, case_id: UUID, actor: Actor
 ) -> tuple[str, Standing, int, Any]:
     """The case's title, the caller's live standing, the case's live sources
     and the store's `now()`.
 
-    One query. An unknown case and a case the caller may not read are the same
-    refusal, or the difference between them is the disclosure.
+    One query: the membership join is folded into the projection row, so
+    visibility costs no round trip of its own, and the rule applied to it is
+    `deps.readable`'s. An unknown case and a case the caller may not read are
+    the same refusal, or the difference between them is the disclosure.
     """
     row = conn.execute(
         "SELECT c.title, m.standing, now(),"
@@ -205,9 +218,9 @@ def _visible_case(
         " WHERE c.case_id = %s",
         (actor.user_id, case_id),
     ).fetchone()
-    standing = None if row is None or row[1] is None else Standing(row[1])
-    if row is None or standing is None or not satisfies(standing, READ_REQUIRES):
+    if row is None:  # no such case: the same private answer as no standing
         raise Refusal(RefusalCode.CASE_NOT_FOUND)
+    standing = readable(None if row[1] is None else Standing(row[1]))
     return str(row[0]), standing, int(row[3]), row[2]
 
 
@@ -259,6 +272,7 @@ def _run_view(
             }
         )
     )
+    supersedes, superseded_by = _successor_link(conn, run_id)
     attempts = conn.execute(
         "SELECT a.attempt_id, a.route_node_id, a.ordinal, a.started_at,"
         " f.attempt_id IS NOT NULL FROM run_attempts a"
@@ -267,20 +281,25 @@ def _run_view(
         (run_id, ATTEMPTS_MAX + 1),
     ).fetchall()
     notes = [SectionNote.LIST_TRUNCATED] if len(attempts) > ATTEMPTS_MAX else []
-    route = resolved_route(conn, run_id)
+    pin_of_route = route_pin(conn, run_id)
+    route = None if pin_of_route is None else pin_of_route[0]
     nodes: list[NodeView] = []
+    blocked_by = None
     if route is None:
         notes.append(SectionNote.ROUTE_NOT_PINNED)
     else:
         nodes = _node_views(conn, blobs, bundle, route, summary)
+        if summary.status == RunStatus.BLOCKED:
+            blocked_by = _blocked_by(conn, route, run_id)
     view = RunView(
         run_id=run_id,
         status=summary.status,
         created_at=summary.created_at,
-        # Recomputed from the route just read, not read from its own column: it
-        # is then the digest of the thing this document describes, and a
-        # stored digest that had drifted would show up here.
-        route_digest=None if route is None else route_digest(route),
+        # The digest `route_pin` derived from the route just read, not the one
+        # read from its own column: it is then the digest of the thing this
+        # document describes, and a stored digest that had drifted refuses
+        # there rather than reaching a reader.
+        route_digest=None if pin_of_route is None else pin_of_route[1],
         build_id=None if pin is None else pin.build_id,
         source_set_version=None if pin is None else pin.source_version,
         subject=None
@@ -304,6 +323,9 @@ def _run_view(
             for row in attempts[:ATTEMPTS_MAX]
         ],
         work=work,
+        blocked_by=blocked_by,
+        supersedes=supersedes,
+        superseded_by=superseded_by,
     )
     facts = RunFacts(
         running=summary.status == "RUNNING",
@@ -325,6 +347,56 @@ def _run_view(
         cancel_requested=work is not None and work.cancel_requested,
     )
     return view, facts, list(dict.fromkeys(notes))
+
+
+def _blocked_by(
+    conn: StoreConnection, route: ResolvedRoute, run_id: UUID
+) -> BlockedByView | None:
+    """The node whose validated Blocked verdict ended this run, as the
+    transition recorded it (§68), or None: a run the frontier emptied (§39) has
+    no row, and the document says so by carrying nothing.
+
+    Read, not re-derived -- the store refuses to judge an ended run's answer
+    again (`check_attempt`). The module is resolved through the pinned route,
+    which is immutable; an attempt at a node the route does not carry is a
+    store the pins do not describe, refused as a server fault rather than
+    served under a guessed module.
+    """
+    row = conn.execute(
+        "SELECT v.attempt_id, a.route_node_id FROM run_blocking_verdicts v"
+        " JOIN run_attempts a USING (attempt_id) WHERE v.run_id = %s",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    node = next((n for n in route.nodes if n.route_node_id == str(row[1])), None)
+    if node is None:
+        raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
+    return BlockedByView(
+        route_node_id=node.route_node_id,
+        module_id=node.module_id,
+        attempt_id=UUID(str(row[0])),
+    )
+
+
+def _successor_link(
+    conn: StoreConnection, run_id: UUID
+) -> tuple[UUID | None, UUID | None]:
+    """Both ends of the successor link (§72), read and never derived: the run
+    this one answers, and the one run that answers it. One row -- the partial
+    unique index `runs_one_successor` holds at most one successor, so the join
+    cannot widen the row."""
+    row = conn.execute(
+        "SELECT r.supersedes_run_id, s.run_id FROM runs r"
+        " LEFT JOIN runs s ON s.supersedes_run_id = r.run_id WHERE r.run_id = %s",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    return (
+        None if row[0] is None else UUID(str(row[0])),
+        None if row[1] is None else UUID(str(row[1])),
+    )
 
 
 def _adapter_route(route: ResolvedRoute) -> bool:
@@ -351,8 +423,12 @@ def _node_views(
     # `accepted` already carries CP-0's readiness, so the verdict costs no
     # further round trip.
     readiness = readiness_from(route, accepted)
+    # From the same accepted gate artifact as `readiness`, so no further read.
+    reasons = blockers_from(route, accepted)
     views = (
-        _node_view(route, accepted, node, states, readiness, named)
+        _node_view(
+            route, accepted, node, states, readiness, reasons=reasons, named=named
+        )
         for node in route.nodes
     )
     # Nothing is awaited on a run that is no longer running.
@@ -370,12 +446,12 @@ def node_readiness(  # noqa: PLR0913 -- one node of one run document
     node: RouteNode,
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
+    *,
     named: NamedObjects | None = None,
 ) -> tuple[Sequence[Edge], bool, str | None]:
-    """The unmet edges, `awaiting_gate` and `gate_verdict`: shared by the v1
-    wire (`_node_view` below) and the legacy run document (`server/api/app.py`)
-    until that document is retired. Each wire builds its own `EdgeView` from
-    the raw edges, since the two documents do not share that model.
+    """The unmet edges, `awaiting_gate` and `gate_verdict`: the one computation
+    `_node_view` builds its wire model from, named and covered on its own so a
+    second caller cannot drift from it.
 
     The one QA_GATE in the catalog is `CP-5 -> CP-6`. `awaiting_gate` is true
     while the node waits for the QA source's verdict. Once CP-5 answered
@@ -403,10 +479,12 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
     node: RouteNode,
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
+    *,
+    reasons: Mapping[str, str] | None = None,
     named: NamedObjects | None = None,
 ) -> NodeView:
     unmet, awaiting_gate, gate_verdict = node_readiness(
-        route, accepted, node, states, readiness, named
+        route, accepted, node, states, readiness, named=named
     )
     return NodeView(
         route_node_id=node.route_node_id,
@@ -416,4 +494,8 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
         awaiting_gate=awaiting_gate,
         gate_verdict=gate_verdict,
+        # `.get` on an absent map too: the gate holds a reason only for a
+        # module it did not clear, so absence is "no condition stated" and
+        # never an empty one.
+        gate_reason=(reasons or {}).get(node.module_id),
     )

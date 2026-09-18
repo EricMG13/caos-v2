@@ -1,7 +1,16 @@
 // The one authority machine (IA_SPEC.md 5, "Route replay"). A forwarded slug,
 // a back navigation and a cross-case race are all resolved here against stale
-// responses: a late response for a case the user has left is discarded, and
-// the Book binds one accepted snapshot per compared case. Pure; no I/O.
+// responses: a late response for a case the user has left is discarded. Pure;
+// no I/O.
+//
+// `bind`, `release`, `Binding` and `Authority.bound` are the Book's
+// one-snapshot-per-compared-case rule. They had no production caller while the
+// Book was its unavailable shell and were kept rather than deleted, because
+// `test_book_binds_one_snapshot_per_compared_case` is pinned by name in
+// `tests/test_phase_exits.py` and deleting them would have meant editing a
+// gate to make a gate pass. Task 12.3 gave them their caller back: the Book
+// section binds each credit through `@/app/ledger`, and only the explicit lens
+// switch moves a binding.
 import type { EnabledSection } from "./sections";
 import type { Refusal, Section } from "@/wire";
 import type { EventName, SectionDocument } from "@/wire/v1";
@@ -82,6 +91,16 @@ export const REFETCHES: Readonly<Record<EventName, readonly EnabledSection[]>> =
   filing_changed: ["report", "committee"],
 };
 
+/** Whether any event at all moves this section, which is whether a stream over
+    it is worth holding. Book is portfolio-scoped: no case event names it, so a
+    tail opened over one could only ever hold a worker thread and one of the
+    API's concurrency slots for its whole deadline. */
+export function tailed(section: Section): boolean {
+  return Object.values(REFETCHES).some((sections) =>
+    (sections as readonly string[]).includes(section),
+  );
+}
+
 export function refetches(name: EventName, section: Section): boolean {
   return (REFETCHES[name] as readonly string[]).includes(section);
 }
@@ -104,14 +123,9 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
   const body = doc.body;
   if (section === "run" && "run" in body) return body.run?.run_id ?? "";
   if (section === "analysis" && "handoffs" in body) {
-    // Sorted by code point, not by locale: this string is an identity key, so
-    // the same set of digests must produce the same key everywhere. A bare
-    // `.sort()` is already code-point order, and `localeCompare` would make the
-    // key depend on the reader's locale -- the comparator states which one is
-    // meant (sonar typescript:S2871).
     const records = body.handoffs
       .map((handoff) => handoff.record_sha256)
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      .sort((a, b) => a.localeCompare(b));
     return `${body.displayed_run_id ?? ""}|${records.join(",")}`;
   }
   if (section === "model" && "forecast" in body) {
@@ -123,6 +137,16 @@ export function analyticalIdentity(section: Section, doc: SectionDocument): stri
   }
   if (section === "committee" && "revision_id" in body) {
     return `${body.revision_id}|${body.payload_sha256}`;
+  }
+  if (section === "book" && "basis" in body) {
+    // Every compared credit's snapshot, so a document moving any one of them
+    // waits for Reload rather than replacing figures under a lens still bound
+    // to the old snapshot. Without this the row drew the new digest, the new
+    // figures, and a note saying the comparison had stayed on the old one.
+    const snapshots = body.rows
+      .map((row) => `${row.case_id}=${row.snapshot ?? ""}`)
+      .sort((a, b) => a.localeCompare(b));
+    return snapshots.join(",");
   }
   return null;
 }

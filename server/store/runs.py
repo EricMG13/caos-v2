@@ -24,7 +24,7 @@ import psycopg
 from server import methodology
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
-from server.store import RunStatus, StoreConnection, rollback_or_close
+from server.store import RunStatus, StoreConnection, committed_unit, rollback_or_close
 from server.store.budget import CEILING, validate_spend
 from server.store.cases import lock_case
 from server.store.events import RunEvent, append, lock_run
@@ -37,10 +37,14 @@ from server.store.outcomes import (
     artifact_digests,
     record_outcome,
 )
-from server.store.work import Lease, mark_work_done, require_lease
+from server.store.work import Lease, mark_work_done, require_lease, require_running
 
 # The vendor's `envelope.MAX_ATTEMPT_ORDINAL`: a run folder holds at most 256.
 MAX_ATTEMPT_ORDINAL = 256
+# `0025_supersedes.sql`: the partial unique index that holds one successor per
+# predecessor. A violation is mapped to `RUN_ALREADY_SUPERSEDED` by this name
+# and never by the driver's message.
+ONE_SUCCESSOR_PER_RUN = "runs_one_successor"
 
 
 def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
@@ -54,7 +58,11 @@ def create_case(conn: StoreConnection, title: BoundaryText) -> UUID:
 
 
 def start_run(
-    conn: StoreConnection, case_id: UUID, *, budget_ceiling: Decimal | None = None
+    conn: StoreConnection,
+    case_id: UUID,
+    *,
+    budget_ceiling: Decimal | None = None,
+    supersedes: UUID | None = None,
 ) -> UUID:
     """Start a run against a case. RUNNING is the only state a run starts in.
 
@@ -62,17 +70,58 @@ def start_run(
     that existed for even one attempt without one is invariant 8 with the number
     left out. `server.store.budget.CEILING` is what a caller that names none
     gets.
+
+    `supersedes` names the BLOCKED run of this case the new run answers (§72),
+    written once with the row and never moved. Inside the caller's unit, under
+    the case lock, the target is selected `FOR SHARE` so no transition moves it
+    while the link is written: a run of another case is `RUN_NOT_FOUND`, the
+    same code an unknown run gets, so neither answer tells a caller the other
+    run exists; any status but BLOCKED is `RUN_NOT_BLOCKED`; and a second
+    successor is `RUN_ALREADY_SUPERSEDED`, refused by the partial unique index
+    in the unit that tried to write it. A refusal leaves the unit failed, and
+    the caller rolls it back as it does every other refusal from its unit.
     """
     ceiling = CEILING if budget_ceiling is None else budget_ceiling
     validate_spend(ceiling)
     lock_case(conn, case_id)
+    if supersedes is not None:
+        _require_answerable(conn, case_id, supersedes)
     run_id = uuid4()
-    conn.execute(
-        "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
-        " VALUES (%s, %s, %s, %s)",
-        (run_id, case_id, RunStatus.RUNNING.value, ceiling),
-    )
+    row = (run_id, case_id, RunStatus.RUNNING.value, ceiling)
+    if supersedes is None:
+        # The column is named only when it is written: a database at a
+        # migration prefix before 0025 still starts an ordinary run, which is
+        # what the populated-upgrade tests rely on.
+        conn.execute(
+            "INSERT INTO runs (run_id, case_id, status, budget_ceiling)"
+            " VALUES (%s, %s, %s, %s)",
+            row,
+        )
+        return run_id
+    try:
+        conn.execute(
+            "INSERT INTO runs (run_id, case_id, status, budget_ceiling,"
+            " supersedes_run_id) VALUES (%s, %s, %s, %s, %s)",
+            (*row, supersedes),
+        )
+    except psycopg.errors.UniqueViolation as violation:
+        if violation.diag.constraint_name != ONE_SUCCESSOR_PER_RUN:
+            raise
+        raise Refusal(RefusalCode.RUN_ALREADY_SUPERSEDED) from None
     return run_id
+
+
+def _require_answerable(conn: StoreConnection, case_id: UUID, run_id: UUID) -> None:
+    """The run a successor may answer: this case's, and BLOCKED, held `FOR
+    SHARE` for the rest of the caller's unit."""
+    row = conn.execute(
+        "SELECT status FROM runs WHERE run_id = %s AND case_id = %s FOR SHARE",
+        (run_id, case_id),
+    ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    if RunStatus(row[0]) is not RunStatus.BLOCKED:
+        raise Refusal(RefusalCode.RUN_NOT_BLOCKED)
 
 
 def run_status(conn: StoreConnection, run_id: UUID) -> RunStatus:
@@ -99,11 +148,8 @@ def start_attempt(
     charged against: a crash after a provider completed still has the attempt it
     completed (`docs/DECISIONS.md` §12, adopting CAOS-Final §21 with Phase 4).
     """
-    if lock_run(conn, run_id) is not RunStatus.RUNNING:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
     try:
-        _require_uncancelled(conn, run_id, lease)
+        require_running(conn, run_id, lease)
     except BaseException:
         rollback_or_close(conn)
         raise
@@ -111,6 +157,15 @@ def start_attempt(
         rollback_or_close(conn)
         raise Refusal(RefusalCode.NODE_ALREADY_ACCEPTED)
 
+    with committed_unit(conn):
+        attempt_id = _start(conn, run_id, route_node_id, lease)
+    return attempt_id
+
+
+def _start(
+    conn: StoreConnection, run_id: UUID, route_node_id: str, lease: Lease | None
+) -> UUID:
+    """The attempt row and its event, under the caller's run lock."""
     # Under the run lock, so two starts cannot take one ordinal. Counting rows
     # rather than reading the maximum keeps attempts that predate ordinals.
     counted = conn.execute(
@@ -119,7 +174,6 @@ def start_attempt(
     ).fetchone()
     ordinal = (counted[0] if counted else 0) + 1
     if ordinal > MAX_ATTEMPT_ORDINAL:
-        rollback_or_close(conn)
         raise Refusal(RefusalCode.ATTEMPT_LIMIT_REACHED)
     attempt_id = uuid4()
     conn.execute(
@@ -135,17 +189,7 @@ def start_attempt(
         ),
     )
     append(conn, run_id, RunEvent.ATTEMPT_STARTED)
-    conn.commit()
     return attempt_id
-
-
-def _require_uncancelled(
-    conn: StoreConnection, run_id: UUID, lease: Lease | None
-) -> None:
-    """The fence for new spend: the lease is held and no cancel was requested.
-    The caller holds `lock_run`."""
-    if require_lease(conn, run_id, lease):
-        raise Refusal(RefusalCode.RUN_CANCEL_REQUESTED)
 
 
 def attempt_ordinal(conn: StoreConnection, attempt_id: UUID) -> int:
@@ -190,15 +234,8 @@ def accept_attempt(
     The bill is unfenced; the acceptance is the lease holder's alone, and is
     not gated on a requested cancel (brief 4.3 D3, D4).
     """
-    try:
+    with committed_unit(conn):
         inserted = _accept(conn, attempt_id, accepted, lease)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
     return inserted
 
 
@@ -365,16 +402,23 @@ def block_run(
     *,
     lease: Lease | None = None,
     accepted: frozenset[str] | None = None,
+    verdict: UUID | None = None,
 ) -> bool:
     """End a run whose route has required work nothing can release (§39).
 
     Returns whether this call ended it. No further attempt or reservation is
-    possible; the reason is re-derived from the pins and accepted artifacts.
+    possible. Which nodes are unfinished is re-derived from the pins and the
+    accepted artifacts; *why* the run ended is not re-derivable and is recorded
+    here. `verdict` is the attempt whose validated Blocked answer ended the run,
+    written to `run_blocking_verdicts` in the transaction that ends it (§68) --
+    it must be an attempt of this run, else `ATTEMPT_NOT_FOUND` and nothing
+    moves. None when no node's verdict ended it: an empty frontier with
+    required work unfinished is the route's own rule and names no node.
     With `accepted`, the accepted set re-read under the lock must equal it,
     else `RUN_TERMINAL_STALE`.
     """
     return _transition(
-        conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease, accepted
+        conn, run_id, RunStatus.BLOCKED, RunEvent.RUN_BLOCKED, lease, accepted, verdict
     )
 
 
@@ -400,6 +444,7 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
     event: RunEvent,
     lease: Lease | None,
     accepted: frozenset[str] | None = None,
+    verdict: UUID | None = None,
 ) -> bool:
     """Move a RUNNING run into a terminal status, appending `event` only if the
     move actually happened. Zero rows updated, no event -- the rule that makes a
@@ -407,8 +452,9 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
 
     Under `lock_run`, a run already ended is answered False before the fence; a
     RUNNING run is ended only by its lease holder, and its work row closes in
-    the same transaction (brief 4.3 D3, I8)."""
-    try:
+    the same transaction (brief 4.3 D3, I8). A BLOCKED move with a `verdict`
+    records it in that transaction too, riding the same conditional update."""
+    with committed_unit(conn):
         changed = 0
         if lock_run(conn, run_id) is RunStatus.RUNNING:
             require_lease(conn, run_id, lease)
@@ -420,14 +466,31 @@ def _transition(  # noqa: PLR0913 -- one terminal move and its re-derived decisi
         if changed:
             append(conn, run_id, event)
             mark_work_done(conn, run_id)
-        conn.commit()
-    except psycopg.Error:
-        rollback_or_close(conn)
-        raise Refusal(RefusalCode.STORE_UNAVAILABLE) from None
-    except BaseException:
-        rollback_or_close(conn)
-        raise
+            if verdict is not None:
+                _record_blocking_verdict(conn, run_id, into, verdict)
     return bool(changed)
+
+
+def _record_blocking_verdict(
+    conn: StoreConnection, run_id: UUID, into: RunStatus, verdict: UUID
+) -> None:
+    """Name the attempt whose Blocked answer ended this run, once.
+
+    Only a BLOCKED move carries one, and only an attempt of this run is
+    accepted: the insert selects the attempt through its own run, so a foreign
+    or unknown id writes nothing and refuses `ATTEMPT_NOT_FOUND` -- raised
+    inside the transaction, which the caller then rolls back whole.
+    """
+    if into is not RunStatus.BLOCKED:
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
+    written = conn.execute(
+        "INSERT INTO run_blocking_verdicts (run_id, attempt_id)"
+        " SELECT run_id, attempt_id FROM run_attempts"
+        " WHERE attempt_id = %s AND run_id = %s",
+        (verdict, run_id),
+    ).rowcount
+    if written != 1:
+        raise Refusal(RefusalCode.ATTEMPT_NOT_FOUND)
 
 
 def _require_terminal_decision(

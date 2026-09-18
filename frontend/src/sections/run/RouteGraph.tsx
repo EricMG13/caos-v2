@@ -3,11 +3,11 @@
 // Node states are the bundle's four; edges come from each node's own
 // `waiting_on` (v1 carries no separate edge list — brief 4.1, slice 4.1i).
 import { RouteLegend } from "./RouteLegend";
-import { reasonOf, runningOf } from "./reason";
+import { blockingOf, reasonOf, runningOf, stateWordOf } from "./reason";
 import { SeverityMark } from "@/chrome/SeverityMark";
-import type { AttemptView } from "./types";
+import type { AttemptView, BlockedByView } from "./types";
 import type { EdgeType, NodeState, Severity } from "@/wire";
-import type { NodeView } from "@/wire/v1";
+import type { NodeView, RunView } from "@/wire/v1";
 
 export const NODE_W = 128;
 // Tall enough for the id, the state and two whole lines of reason; at 62 the
@@ -71,7 +71,14 @@ const EDGE_CLASS: Record<EdgeType, string> = {
   CONDITIONAL: "cond",
 };
 
-export function severityOf(node: Pick<NodeView, "state">, running: boolean): Severity {
+/** The tone a node is drawn in. `blocking` is the node whose Blocked verdict
+    ended the run: its state is RUNNABLE, and the tone is the run's. */
+export function severityOf(
+  node: Pick<NodeView, "state">,
+  running: boolean,
+  blocking = false,
+): Severity {
+  if (blocking) return "CRITICAL";
   const by: Record<NodeState, Severity> = {
     COMPLETE: "SUCCESS",
     RUNNABLE: running ? "RUNNING" : "IDLE",
@@ -79,11 +86,6 @@ export function severityOf(node: Pick<NodeView, "state">, running: boolean): Sev
     BLOCKED: "CRITICAL",
   };
   return by[node.state];
-}
-
-function stateWord(node: NodeView, running: boolean): string {
-  if (node.state === "RUNNABLE") return running ? "RUNNABLE · RUNNING" : "RUNNABLE · FRONTIER";
-  return node.state;
 }
 
 interface Segment {
@@ -127,11 +129,15 @@ export function edgesOf(
 export function RouteGraph({
   nodes,
   attempts,
+  status,
+  blockedBy,
   selected,
   onSelect,
 }: {
   nodes: NodeView[];
   attempts: AttemptView[];
+  status: RunView["status"];
+  blockedBy: BlockedByView | null;
   selected: string | null;
   onSelect: (routeNodeId: string) => void;
 }) {
@@ -185,9 +191,10 @@ export function RouteGraph({
           {nodes.map((node) => {
             const placed = at.get(node.route_node_id);
             if (!placed) return null;
-            const running = runningOf(node, attempts);
+            const running = runningOf(node, attempts, status);
+            const blocking = blockingOf(node, blockedBy);
             const on = node.route_node_id === selected;
-            const cls = `node ${node.state.toLowerCase()}${running ? " running" : ""}${node.awaiting_gate ? " gate" : ""}${on ? " sel" : ""}`;
+            const cls = `node ${node.state.toLowerCase()}${running ? " running" : ""}${blocking ? " blocking" : ""}${node.awaiting_gate ? " gate" : ""}${on ? " sel" : ""}`;
             return (
               <button
                 key={node.route_node_id}
@@ -196,16 +203,17 @@ export function RouteGraph({
                 data-node={node.module_id}
                 data-route-node={node.route_node_id}
                 data-state={node.state}
+                data-blocking={blocking ? "yes" : "no"}
                 aria-pressed={on}
                 style={{ left: placed.x, top: placed.y, width: NODE_W, height: NODE_H }}
                 onClick={() => onSelect(node.route_node_id)}
               >
                 <span className="id">{node.module_id}</span>
                 <span className="st">
-                  <SeverityMark severity={severityOf(node, running)} pulse={running} />
-                  {stateWord(node, running)}
+                  <SeverityMark severity={severityOf(node, running, blocking)} pulse={running} />
+                  {stateWordOf(node, status, running, blocking)}
                 </span>
-                <span className="why">{reasonOf(node)}</span>
+                <span className="why">{reasonOf(node, status, blocking)}</span>
               </button>
             );
           })}

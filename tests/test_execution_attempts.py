@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from conftest import _url_for, priced
+from conftest import reserve_at as reserve
 from psycopg.pq import TransactionStatus
 from test_loop_charges import (
     ESTIMATE,
@@ -33,7 +34,6 @@ from server.methodology.runner import ModuleProvider
 from server.provider import OpenRouter
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect
-from server.store.budget import reserve
 from server.store.events import RunEvent, events_of, lock_run
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.runs import (

@@ -1,47 +1,32 @@
-// One metric cell of the book or the comparison: a button that opens the
-// passport with its opener passed. Deviation is a triangle and a stated size;
-// stale is a class on the cell and a date in its title.
-import type { BookCell } from "@/wire/book";
-import type { Passport } from "@/wire";
+// One cell of the book: a button that opens the passport with its opener
+// passed. A cell the projection could not compute shows its typed reason in
+// place of a figure and still carries a passport, because why there is no
+// figure is part of what the passport says.
+import type { BookCell } from "@/wire/v1";
+import { shownValue } from "./passport";
 
 export function MetricCell({
   cell,
-  passport,
-  name,
+  label,
   selected,
   onSelect,
 }: {
   cell: BookCell;
-  passport: Passport | null;
-  /** An accessible name for a cell outside a table; must include the value. */
-  name?: string;
+  label: string;
   selected: boolean;
-  onSelect: (passportId: string, opener: HTMLElement) => void;
+  onSelect: (opener: HTMLElement) => void;
 }) {
-  const notes = [
-    cell.deviation ? `Deviates from the house definition by ${cell.deviation}` : null,
-    cell.stale ? `Stale evidence · ${passport?.evidence_date ?? "date not served"}` : null,
-    passport ? null : "No passport is served for this cell",
-  ].filter((note): note is string => note !== null);
-  const label = name
-    ? `${name}${cell.deviation ? ` · deviates by ${cell.deviation}` : ""}`
-    : undefined;
   return (
     <button
       type="button"
-      className="cellbtn"
-      data-passport-id={cell.passport_id}
-      data-deviation={cell.deviation ?? undefined}
-      data-stale={cell.stale || undefined}
+      className="cellbtn focus-ring"
+      data-cell={cell.column}
+      data-unavailable={cell.unavailable_reason ?? undefined}
       aria-pressed={selected}
-      aria-label={label}
-      title={notes.length ? notes.join(" · ") : undefined}
-      onClick={(event) => onSelect(cell.passport_id, event.currentTarget)}
+      aria-label={`${label} · ${shownValue(cell)}`}
+      onClick={(event) => onSelect(event.currentTarget)}
     >
-      {cell.value}
-      {cell.deviation ? (
-        <span className="defmark" role="img" aria-label={`deviates by ${cell.deviation}`} />
-      ) : null}
+      {shownValue(cell)}
     </button>
   );
 }

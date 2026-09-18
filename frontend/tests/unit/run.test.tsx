@@ -5,8 +5,9 @@
 // by the component that calls it, not by its own name. `actionOf` is
 // imported directly below and given its own small, direct test.
 import { readFileSync } from "node:fs";
-import { fireEvent, render, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { useEffect } from "react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router";
 import { actionOf } from "@/sections/run/controls";
 import { RunSection } from "@/sections/run/RunSection";
 import { COL_GAP, NODE_H, NODE_W, ROW_H, edgesOf, layoutRoute } from "@/sections/run/RouteGraph";
@@ -47,6 +48,47 @@ function withActions(
 ): RunSectionDocument {
   return { ...document, chrome: { ...document.chrome, actions } };
 }
+
+/** The address the section is composed under. `CreateRunControl` writes the
+    new run into it and the workspace reads the run from there, so under a bare
+    router a probe is what stands in for the workspace's own read. */
+let seenAddress = "";
+const address = () => seenAddress;
+
+function Address() {
+  const { search } = useLocation();
+  useEffect(() => {
+    seenAddress = search;
+  }, [search]);
+  return null;
+}
+
+function mountAt(document: RunSectionDocument, path: string) {
+  seenAddress = "";
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <RunSection document={document} tab={null} />
+      <Address />
+    </MemoryRouter>,
+  );
+}
+
+/** A case whose run has yet to be created: the one state that serves the
+    create form on its own. */
+const EMPTY_RUN: RunSectionDocument = withActions(
+  {
+    ...routeNotPinned,
+    body: {
+      case_id: routeNotPinned.body.case_id,
+      latest_run_id: null,
+      displayed_run_id: null,
+      runs: [],
+      run: null,
+      route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
+    },
+  },
+  [{ action: "CREATE_RUN", refusal: null }],
+);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -89,6 +131,39 @@ describe("Run", () => {
     fireEvent.click(restricted);
     const detail = container.querySelector('[data-node-detail="CP-1C"]')!;
     expect(detail.querySelector("[data-gate-verdict]")).toHaveTextContent("READY_WITH_LIMITATIONS");
+  });
+
+  test("test_a_gate_condition_is_shown_beside_the_verdict_it_qualifies", () => {
+    // The fixtures are a run whose gate cleared every module, so every node
+    // carries `gate_reason: null` — which is the case that must render nothing
+    // at all rather than an empty row. The other case is built from the same
+    // document so the two are one comparison.
+    const asked = "The FY2025 audited consolidated statements are not in the pinned set.";
+    const blocked = running.body.run!.nodes.find((node) => node.state === "BLOCKED")!;
+    const conditional: RunSectionDocument = {
+      ...running,
+      body: {
+        ...running.body,
+        run: {
+          ...running.body.run!,
+          nodes: running.body.run!.nodes.map((node) =>
+            node.route_node_id === blocked.route_node_id
+              ? { ...node, gate_verdict: "CONDITIONAL", gate_reason: asked }
+              : node,
+          ),
+        },
+      },
+    };
+
+    const cleared = mount(running);
+    fireEvent.click(cleared.container.querySelector(`button.node[data-node="CP-1C"]`)!);
+    expect(cleared.container.querySelector("[data-gate-reason]")).toBeNull();
+
+    const { container } = mount(conditional);
+    fireEvent.click(container.querySelector(`button.node[data-node="${blocked.module_id}"]`)!);
+    const detail = container.querySelector(`[data-node-detail="${blocked.module_id}"]`)!;
+    expect(detail.querySelector("[data-gate-verdict]")).toHaveTextContent("CONDITIONAL");
+    expect(detail.querySelector("[data-gate-reason]")).toHaveTextContent(asked);
   });
 
   test("test_the_one_qa_gate_reads_as_a_gate", () => {
@@ -364,64 +439,16 @@ describe("Run", () => {
     }
   });
 
-  test("test_create_run_shows_a_success_note_and_refetches_so_a_second_click_is_never_a_silent_duplicate", async () => {
+  test("test_create_run_shows_a_success_note_and_names_the_new_run_in_the_address", async () => {
     const caseId = routeNotPinned.body.case_id;
     const newRunId = "11111111-1111-4111-8111-111111111111";
     const created = { case_id: caseId, run_id: newRunId, route_digest: "f".repeat(64) };
-    const refreshed: RunSectionDocument = {
-      ...routeNotPinned,
-      chrome: { ...routeNotPinned.chrome, actions: [] },
-      body: {
-        case_id: caseId,
-        latest_run_id: newRunId,
-        displayed_run_id: newRunId,
-        runs: [
-          {
-            run_id: newRunId,
-            status: "RUNNING",
-            created_at: "2026-09-14T10:00:00Z",
-            profile_id: "FULL_CREDIT_ASSESSMENT",
-            selection_id: "default",
-          },
-        ],
-        run: { ...routeNotPinned.body.run!, run_id: newRunId },
-        route_choices: [],
-      },
-    };
-    // The refetch is held open deliberately: real network latency separates
-    // the command's own answer from the read that follows it, and asserting
-    // the transient success note is only deterministic if this test controls
-    // that gap itself rather than racing the mock's own resolution.
-    let resolveRefetch!: (response: Response) => void;
-    const refetchResponse = new Promise<Response>((resolve) => {
-      resolveRefetch = resolve;
-    });
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(created, 201))
-      .mockImplementationOnce(() => refetchResponse);
+    const fetchSpy = vi.fn().mockResolvedValueOnce(jsonResponse(created, 201));
     vi.stubGlobal("fetch", fetchSpy);
     try {
-      const empty: RunSectionDocument = withActions(
-        {
-          ...routeNotPinned,
-          body: {
-            case_id: caseId,
-            latest_run_id: null,
-            displayed_run_id: null,
-            runs: [],
-            run: null,
-            route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
-          },
-        },
-        [{ action: "CREATE_RUN", refusal: null }],
-      );
-      const { container } = mount(empty);
+      const { container } = mountAt(EMPTY_RUN, `/run/?case=${caseId}`);
       fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
 
-      // The success note is transient — the refetch it also triggers may
-      // replace this whole branch as soon as it lands — so both checks are
-      // made together, not across a second `await`.
       await waitFor(() => {
         const note = container.querySelector("[data-command-success]");
         expect(note).not.toBeNull();
@@ -434,6 +461,7 @@ describe("Run", () => {
       expect(JSON.parse((createInit as RequestInit).body as string)).toEqual({
         profile_id: "FULL_CREDIT_ASSESSMENT",
         selection_id: "default",
+        supersedes: null,
       });
       expect(
         UUID.test(
@@ -441,15 +469,81 @@ describe("Run", () => {
         ),
       ).toBe(true);
 
-      // One refetch, by the id the server just handed back — the analyst
-      // never has to guess whether the click landed.
-      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
-      const [refetchUrl] = fetchSpy.mock.calls[1]!;
-      expect(refetchUrl).toBe(`/api/v1/cases/${caseId}/run?run=${newRunId}`);
+      // The new run is named in the address, and nothing else reads it back:
+      // the workspace serves the run the address now names, so a GET from here
+      // would either read the wrong run or duplicate that one.
+      await waitFor(() => expect(new URLSearchParams(address()).get("run")).toBe(newRunId));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-      resolveRefetch(jsonResponse(refreshed));
-      await waitFor(() => expect(container.querySelector("[data-run-empty]")).toBeNull());
-      expect(container.querySelector(`[data-run="${newRunId}"]`)).not.toBeNull();
+  // The address is what a reload, a copied link and the workspace's own read
+  // all work from, so creating a run must add the run to it without dropping
+  // anything already there.
+  test("test_creating_a_run_names_it_in_the_address_and_keeps_the_other_parameters", async () => {
+    const caseId = routeNotPinned.body.case_id;
+    const newRunId = "22222222-2222-4222-8222-222222222222";
+    const created = { case_id: caseId, run_id: newRunId, route_digest: "f".repeat(64) };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(created, 201)));
+    try {
+      const { container } = mountAt(
+        EMPTY_RUN,
+        `/run/?case=${caseId}&run=00000000-0000-4000-8000-0000000000aa&tab=route`,
+      );
+      expect(new URLSearchParams(address()).get("run")).not.toBe(newRunId);
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+      await waitFor(() => expect(new URLSearchParams(address()).get("run")).toBe(newRunId));
+      const params = new URLSearchParams(address());
+      expect(params.get("case")).toBe(caseId);
+      expect(params.get("tab")).toBe("route");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // A refetch a command started is always older than a document the workspace
+  // has since served: the slower one must be dropped, not applied.
+  test("test_a_slower_command_refetch_cannot_resurrect_an_older_run_document", async () => {
+    const older = withActions(frames[0]!, [{ action: "CANCEL_RUN", refusal: null }]);
+    const newer = frames[2]!;
+    const receipt = {
+      run_id: older.body.run!.run_id,
+      run_status: "RUNNING",
+      work: { state: "STOPPED", stop_code: null, cancel_requested: false },
+    };
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(receipt))
+      .mockImplementationOnce(() => refetchResponse);
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container, rerender } = mount(older);
+      const cp6 = () => container.querySelector('button.node[data-node="CP-6"]');
+      expect(cp6()).toHaveAttribute("data-state", "RUNNABLE");
+      fireEvent.click(container.querySelector('[data-action="CANCEL_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+
+      // The workspace's own read lands while the command's refetch is still
+      // open: it is the newer document, so it is the one that stands.
+      rerender(
+        <MemoryRouter>
+          <RunSection document={newer} tab={null} />
+        </MemoryRouter>,
+      );
+      expect(cp6()).toHaveAttribute("data-state", "COMPLETE");
+
+      await act(async () => {
+        resolveRefetch(jsonResponse(older));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(cp6()).toHaveAttribute("data-state", "COMPLETE");
+      expect(container.querySelector("[data-refetch-failed]")).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -665,6 +759,182 @@ describe("Run", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  // Through the section, not the helpers: the graph, the detail and the run
+  // panel all read `blocked_by`, and a reader should find the same answer in
+  // each. `rn-cp-6` is the fixture's one RUNNABLE node and holds an unaccepted
+  // attempt, which is exactly the shape a validated Blocked verdict leaves.
+  test("test_a_blocked_run_names_the_node_whose_verdict_ended_it_or_says_no_node_did", () => {
+    const base = running.body.run!;
+    const attempt = base.attempts.find((a) => a.route_node_id === "rn-cp-6" && a.ordinal === 1)!;
+    const byVerdict: RunSectionDocument = {
+      ...running,
+      body: {
+        ...running.body,
+        run: {
+          ...base,
+          status: "BLOCKED",
+          blocked_by: {
+            route_node_id: "rn-cp-6",
+            module_id: "CP-6",
+            attempt_id: attempt.attempt_id,
+          },
+        },
+      },
+    };
+    const { container, unmount } = mount(byVerdict);
+    const node = container.querySelector<HTMLButtonElement>(
+      "button.node[data-route-node='rn-cp-6']",
+    )!;
+    expect(node.getAttribute("data-blocking")).toBe("yes");
+    expect(node.textContent).toContain("BLOCKED THE RUN");
+    expect(node.textContent).toContain("answered Blocked");
+    expect(node.textContent).not.toContain("FRONTIER");
+    expect(node.classList.contains("running")).toBe(false);
+    for (const other of container.querySelectorAll(
+      "button.node:not([data-route-node='rn-cp-6'])",
+    )) {
+      expect(other.getAttribute("data-blocking")).toBe("no");
+    }
+    const panel = container.querySelector("[data-blocked-by]")!;
+    expect(panel.getAttribute("data-blocked-by")).toBe("CP-6");
+    expect(panel.textContent).toBe("CP-6 answered Blocked on attempt 1 · rn-cp-6");
+    fireEvent.click(node);
+    const detail = container.querySelector("[data-node-detail='CP-6']")!;
+    expect(detail.textContent).toContain("answered Blocked · ended the run");
+    expect(detail.textContent).not.toContain("did not run");
+    const rows = container.querySelectorAll("[data-blocking-attempt]");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("BLOCKED · NOT ACCEPTED");
+    unmount();
+
+    // The other way a run ends BLOCKED (§39): no verdict, so no node is named
+    // and the RUNNABLE node simply did not run.
+    const emptied: RunSectionDocument = {
+      ...running,
+      body: { ...running.body, run: { ...base, status: "BLOCKED", blocked_by: null } },
+    };
+    const second = mount(emptied);
+    const idle = second.container.querySelector("button.node[data-route-node='rn-cp-6']")!;
+    expect(idle.getAttribute("data-blocking")).toBe("no");
+    expect(idle.textContent).toContain("DID NOT RUN");
+    expect(second.container.querySelector("[data-blocked-by]")!.textContent).toBe(
+      "no node's verdict — the frontier emptied with required work unfinished",
+    );
+    expect(second.container.querySelectorAll("[data-blocking-attempt]")).toHaveLength(0);
+    second.unmount();
+
+    // A running run has no such line at all.
+    const third = mount(running);
+    expect(third.container.querySelector("[data-blocked-by]")).toBeNull();
+    third.unmount();
+  });
+
+  // The successor link (§72), both ends, in the run panel: a run says which
+  // run it answers, and a run that has been answered says by which. A run with
+  // neither carries no such line, so nothing here renders "none" as a link.
+  test("test_the_run_panel_names_the_run_a_successor_replaces", () => {
+    const base = running.body.run!;
+    const earlier = "00000000-0000-4000-8000-0000000000e1";
+    const later = "00000000-0000-4000-8000-0000000000e2";
+    const successor: RunSectionDocument = {
+      ...running,
+      body: { ...running.body, run: { ...base, supersedes: earlier } },
+    };
+    const first = mount(successor);
+    const supersedes = first.container.querySelector("[data-supersedes]")!;
+    expect(supersedes.textContent).toContain(earlier);
+    expect(supersedes.querySelector("a")!.getAttribute("href")).toContain(`run=${earlier}`);
+    expect(first.container.querySelector("[data-superseded-by]")).toBeNull();
+    first.unmount();
+
+    const answered: RunSectionDocument = {
+      ...running,
+      body: {
+        ...running.body,
+        run: { ...base, status: "BLOCKED", blocked_by: null, superseded_by: later },
+      },
+    };
+    const second = mount(answered);
+    const supersededBy = second.container.querySelector("[data-superseded-by]")!;
+    expect(supersededBy.textContent).toContain(later);
+    expect(supersededBy.querySelector("a")!.getAttribute("href")).toContain(`run=${later}`);
+    expect(second.container.querySelector("[data-supersedes]")).toBeNull();
+    second.unmount();
+
+    const third = mount(running);
+    expect(third.container.querySelector("[data-supersedes]")).toBeNull();
+    expect(third.container.querySelector("[data-superseded-by]")).toBeNull();
+    third.unmount();
+  });
+
+  // A BLOCKED run nobody has answered is what a successor is for: the create
+  // control offers `supersedes` pre-filled with it, the analyst may clear it,
+  // and the body sent carries whatever the field holds. A run already
+  // answered, or one that is not BLOCKED, offers nothing to pre-fill.
+  test("test_a_blocked_run_not_yet_answered_offers_supersedes_prefilled", async () => {
+    const base = running.body.run!;
+    const caseId = running.body.case_id;
+    const choices = [{ profile_id: "LITE_CREDIT_22", selection_id: "LITE_EARNINGS_UPDATE" }];
+    const blocked: RunSectionDocument = withActions(
+      {
+        ...running,
+        body: {
+          ...running.body,
+          route_choices: choices,
+          run: { ...base, status: "BLOCKED", blocked_by: null },
+        },
+      },
+      [{ action: "CREATE_RUN", refusal: null }],
+    );
+    const created = { case_id: caseId, run_id: base.run_id, route_digest: "f".repeat(64) };
+    const fetchSpy = vi.fn().mockResolvedValueOnce(jsonResponse(created, 201));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container, unmount } = mountAt(blocked, `/run/?case=${caseId}`);
+      const field = container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+      expect(field.value).toBe(base.run_id);
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const [, init] = fetchSpy.mock.calls[0]!;
+      expect(JSON.parse((init as RequestInit).body as string).supersedes).toBe(base.run_id);
+      unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const answered: RunSectionDocument = withActions(
+      {
+        ...running,
+        body: {
+          ...running.body,
+          route_choices: choices,
+          run: {
+            ...base,
+            status: "BLOCKED",
+            blocked_by: null,
+            superseded_by: "00000000-0000-4000-8000-0000000000e2",
+          },
+        },
+      },
+      [{ action: "CREATE_RUN", refusal: null }],
+    );
+    const second = mount(answered);
+    const answeredField =
+      second.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+    expect(answeredField.value).toBe("");
+    second.unmount();
+
+    const third = mount(
+      withActions({ ...running, body: { ...running.body, route_choices: choices } }, [
+        { action: "CREATE_RUN", refusal: null },
+      ]),
+    );
+    const runningField =
+      third.container.querySelector<HTMLInputElement>("[data-supersedes-input]")!;
+    expect(runningField.value).toBe("");
+    third.unmount();
   });
 
   test("test_every_enabled_demo_fixture_is_a_valid_v1_document", () => {

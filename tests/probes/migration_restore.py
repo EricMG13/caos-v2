@@ -22,7 +22,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qualification_fixtures import qualification_performed
+from conftest import reserve_at as reserve
+from qualification_fixtures import qualification_performed, record_runs
 from test_frozen_evidence import _insert
 from test_run_inputs import SUBJECT, _prepare, pin_version_one
 from test_store_schema import _catalog, _columns, _legacy, _populate, _records
@@ -41,7 +42,7 @@ from server.qualification.store import (
 from server.qualification.verdict import read_verdict
 from server.refusals import Refusal, RefusalCode
 from server.store import MIGRATIONS, StoreConnection, apply_schema, connect
-from server.store.budget import remaining, reserve
+from server.store.budget import remaining
 from server.store.extraction_integrity import _verify_extractions_v1
 from server.store.gates import Gate, GateApproval, approve_gate, gate_preview
 from server.store.members import Standing, grant
@@ -131,6 +132,7 @@ def _record_qualification(conn: StoreConnection) -> tuple[Evidence, datetime]:
     performed = qualification_performed()
     evidence = performed.evidence
     record_performed(conn, performed)
+    record_runs(conn, performed)
     verdict = read_verdict(
         {
             "provider": evidence.provider + ":" + evidence.model,

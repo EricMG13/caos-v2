@@ -73,6 +73,18 @@ class GlobalRole(StrEnum):
 # in the middle of the enum cannot silently reorder authority.
 _RANK = {GlobalRole.READER: 0, GlobalRole.ANALYST: 1, GlobalRole.ADMIN: 2}
 
+
+def at_least(role: GlobalRole, floor: GlobalRole) -> bool:
+    """Whether `role` ranks at or above `floor`.
+
+    The one comparison a global floor needs, read from `_RANK` rather than
+    from identity, so a role added above the floor later is admitted and one
+    added below it is not -- which `is` against a single member would get
+    wrong in both directions.
+    """
+    return _RANK[role] >= _RANK[floor]
+
+
 # The identity provider's groups, mapped to this system's words. A group absent
 # from here grants nothing -- an unknown group is not an unknown *role*, it is a
 # group about some other system.

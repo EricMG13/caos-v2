@@ -38,30 +38,22 @@ verdict, under the proof's codes.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
 from server.engine.route import ResolvedRoute, RouteNode
-from server.evidence.citations import (
-    AnchoredCitation,
-    Citation,
-    TokenIndex,
-    verify_citations,
-)
-from server.methodology.bundle import Bundle, verified_bytes
+from server.evidence.citations import AnchoredCitation, TokenIndex
+from server.methodology.bundle import Bundle
 from server.methodology.executor import captured_blocks
-from server.methodology.handoff import GATE_MODULE, read_record, validate_markdown
-from server.methodology.invocation import (
-    accepted_lineage,
-    call_time_identity,
-    host_identity,
-    record_authority_matches,
+from server.methodology.verification import (
+    AcceptedRow,
+    PinnedEvidence,
+    Step,
+    load_vendor_authority,
+    verify_accepted,
 )
-from server.methodology.vendor import VENDOR_MODULE, load_vendor_contract
 from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -189,19 +181,20 @@ def _produced_by_its_call(*, recorded: bool, produced: object, called: object) -
         raise Refusal(RefusalCode.CALL_OUTCOME_CONFLICT)
 
 
-def _unless_refused[T](call: Callable[[], T]) -> T | None:
-    """`call`'s answer, or None when it refused.
+# The proof's word for each step of the shared verification; a step it does
+# not name answers `ARTIFACT_RECORD_MISMATCH`, as the docstring below lists.
+_STEP_CODES = {
+    Step.NODE_NOT_IN_ROUTE: RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE,
+    Step.UNREADABLE: RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE,
+    Step.AUTHORITY_MOVED: RefusalCode.ORCHESTRATION_BUILD_MOVED,
+    Step.SOURCE_NOT_PINNED: RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED,
+    Step.CITATION_ANCHOR: RefusalCode.ORCHESTRATION_CITATION_LOST,
+    Step.CITATION_MOVED: RefusalCode.ORCHESTRATION_CITATION_LOST,
+}
 
-    The caller raises its own code outside this handler, so the proof's refusal
-    carries no context and no text from the one it replaced.
-    """
-    try:
-        return call()
-    except Refusal:
-        return None
 
-
-_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
+def _refuse(step: Step) -> RefusalCode:
+    return _STEP_CODES.get(step, RefusalCode.ARTIFACT_RECORD_MISMATCH)
 
 
 class _CanonicalReader:
@@ -218,14 +211,12 @@ class _CanonicalReader:
         delivered: dict[UUID, frozenset[str]],
     ) -> None:
         self.conn, self.blobs, self.bundle = conn, blobs, bundle
-        self.route, self.run_id, self.live = route, run_id, live
-        self.delivered = delivered
+        self.route, self.run_id = route, run_id
         self.pairs: dict[str, tuple[str, str | None]] = {}
         # One reading of the token index for the whole proof: records cluster
         # on the same pages of the same sources.
-        self.index = TokenIndex()
-        self.contract = load_vendor_contract(bundle)
-        self.catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
+        self.evidence = PinnedEvidence(live, delivered, TokenIndex())
+        self.vendor = load_vendor_authority(bundle)
 
     def proven(
         self,
@@ -249,86 +240,28 @@ class _CanonicalReader:
         that is not the accepted chain now (an ancestor's record rewritten
         after its consumer was accepted), the projections.
         """
-        mismatch = Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
         if record_sha256 is None:
-            raise mismatch
-        markdown = _unless_refused(lambda: self.blobs.get(artifact_sha256))
-        stored = _unless_refused(lambda: self.blobs.get(record_sha256))
-        if markdown is None or stored is None:
-            raise Refusal(RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE)
-        bundle, route = self.bundle, self.route
-        host = host_identity(
+            raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+        verified = verify_accepted(
             self.conn,
-            bundle,
-            run_id=self.run_id,
-            route=route,
-            node=node,
-            attempt_id=attempt_id,
-        )
-        expected = call_time_identity(
-            self.conn, route, host, attempt_id=attempt_id, record=stored
-        )
-        record = _unless_refused(
-            lambda: read_record(
-                self.blobs,
+            self.blobs,
+            self.bundle,
+            self.route,
+            AcceptedRow(
+                run_id=self.run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=attempt_id,
                 artifact_sha256=artifact_sha256,
                 record_sha256=record_sha256,
-                expected=expected,
-            )
+            ),
+            vendor=self.vendor,
+            accepted=self.pairs,
+            verify_authority=True,
+            reanchor=self.evidence,
+            refuse=_refuse,
         )
-        if record is None:
-            raise mismatch
-        if not record_authority_matches(
-            record, bundle=bundle, module_id=node.module_id, verify=True
-        ):
-            raise Refusal(RefusalCode.ORCHESTRATION_BUILD_MOVED)
-        upstream = record.identity.upstream
-        lineage = _unless_refused(
-            lambda: accepted_lineage(
-                self.conn,
-                self.blobs,
-                run_id=self.run_id,
-                upstream=upstream,
-                accepted=self.pairs,
-            )
-        )
-        if lineage is None or lineage != record.lineage:
-            raise mismatch
-        skill = verified_bytes(bundle, node.module_id, "SKILL.md")
-        # CP-CF is a host extension, not a vendor navigation row. Its accepted
-        # artifact is proven independently, so T8 must not be asked to name it.
-        gate = frozenset(n.module_id for n in route.nodes) - {GATE_MODULE, "CP-CF"}
-        projections = _unless_refused(
-            lambda: validate_markdown(
-                self.contract,
-                self.catalog,
-                skill,
-                markdown,
-                identity=expected,
-                gate_expects=gate if node.module_id == GATE_MODULE else frozenset(),
-            )
-        )
-        if projections is None or projections != record.projections:
-            raise mismatch
-        requests = []
-        for citation in record.citations:
-            source_id = self.live.get(citation.document_sha256)
-            if source_id is None:
-                raise Refusal(RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED)
-            requests.append(Citation(source_id, citation.page, citation.matched_text))
-        anchored = _unless_refused(
-            lambda: verify_citations(
-                self.conn,
-                delivered=self.delivered,
-                citations=requests,
-                index=self.index,
-            )
-        )
-        # Same quotes, same rectangles, inside the captured blocks; any one
-        # refusal loses the record.
-        if anchored != list(record.citations):
-            raise Refusal(RefusalCode.ORCHESTRATION_CITATION_LOST)
-        return tuple(record.citations)
+        # Re-anchored on the recorded rectangles, so the record's are the proof's.
+        return verified.record.citations
 
 
 def _pinned_digest(conn: StoreConnection, run_id: UUID) -> str:

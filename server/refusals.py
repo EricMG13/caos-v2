@@ -22,6 +22,10 @@ class RefusalCode(StrEnum):
     BLOB_ADDRESS_INVALID = "BLOB_ADDRESS_INVALID"
     RUN_NOT_FOUND = "RUN_NOT_FOUND"
     RUN_NOT_RUNNING = "RUN_NOT_RUNNING"
+    # The successor link (§72): only a BLOCKED run of the same case can be
+    # answered, and by one run.
+    RUN_NOT_BLOCKED = "RUN_NOT_BLOCKED"
+    RUN_ALREADY_SUPERSEDED = "RUN_ALREADY_SUPERSEDED"
     # Phase 4 Task 4.3 (worker lease and terminal decision).
     LEASE_NOT_HELD = "LEASE_NOT_HELD"
     RUN_CANCEL_REQUESTED = "RUN_CANCEL_REQUESTED"
@@ -44,6 +48,8 @@ class RefusalCode(StrEnum):
     PROVIDER_CALL_INVALID = "PROVIDER_CALL_INVALID"
     # A module's whole context exceeds the request bound; nothing is cut (§45.3).
     CONTEXT_OVER_CEILING = "CONTEXT_OVER_CEILING"
+    # One upstream handoff exceeds its own declared section bound; nothing is cut.
+    UPSTREAM_SECTION_OVER_CEILING = "UPSTREAM_SECTION_OVER_CEILING"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
     PROVIDER_OUTPUT_TRUNCATED = "PROVIDER_OUTPUT_TRUNCATED"
     PROVIDER_REFUSED = "PROVIDER_REFUSED"
@@ -90,6 +96,7 @@ class RefusalCode(StrEnum):
     NARRATIVE_FIGURE_UNREFERENCED = "NARRATIVE_FIGURE_UNREFERENCED"
     NARRATIVE_REFERENCE_INVALID = "NARRATIVE_REFERENCE_INVALID"
     DELIVERABLE_UNCITED_FIGURE = "DELIVERABLE_UNCITED_FIGURE"
+    DELIVERABLE_MARKDOWN_UNSUPPORTED = "DELIVERABLE_MARKDOWN_UNSUPPORTED"
     DELIVERABLE_NOT_SIGNED = "DELIVERABLE_NOT_SIGNED"
     DELIVERABLE_NOT_FROZEN = "DELIVERABLE_NOT_FROZEN"
     DELIVERABLE_MOVED_SINCE_SIGNING = "DELIVERABLE_MOVED_SINCE_SIGNING"
@@ -115,6 +122,7 @@ class RefusalCode(StrEnum):
     ROUTE_EXTENSION_OWNER_MISSING = "ROUTE_EXTENSION_OWNER_MISSING"
     ROUTE_HAS_A_CYCLE = "ROUTE_HAS_A_CYCLE"
     ROUTE_DUPLICATE_MODULE = "ROUTE_DUPLICATE_MODULE"
+    ROUTE_EDGE_UNSUPPORTED = "ROUTE_EDGE_UNSUPPORTED"
     ROUTE_ALREADY_PINNED = "ROUTE_ALREADY_PINNED"
     ROUTE_IDENTITY_INVALID = "ROUTE_IDENTITY_INVALID"
     ROUTE_PIN_TOO_LATE = "ROUTE_PIN_TOO_LATE"
@@ -125,6 +133,10 @@ class RefusalCode(StrEnum):
     QUALIFICATION_SET_EMPTY = "QUALIFICATION_SET_EMPTY"
     QUALIFICATION_KEY_UNANSWERABLE = "QUALIFICATION_KEY_UNANSWERABLE"
     QUALIFICATION_SET_AMBIGUOUS = "QUALIFICATION_SET_AMBIGUOUS"
+    # A key that cannot name one answer: a register key whose row key selects
+    # rows rather than a row. Apart from a malformed manifest because the remedy
+    # is different -- name the row, do not fix the file's shape.
+    QUALIFICATION_KEY_AMBIGUOUS = "QUALIFICATION_KEY_AMBIGUOUS"
     QUALIFICATION_RUN_MISSING = "QUALIFICATION_RUN_MISSING"
     QUALIFICATION_SET_FILE_INVALID = "QUALIFICATION_SET_FILE_INVALID"
     QUALIFICATION_SET_PATH_ESCAPES = "QUALIFICATION_SET_PATH_ESCAPES"
@@ -140,10 +152,20 @@ class RefusalCode(StrEnum):
     VERDICT_BINDING_INVALID = "VERDICT_BINDING_INVALID"
     VERDICT_UNDECLARED_FIELD = "VERDICT_UNDECLARED_FIELD"
     VERDICT_EXPIRED = "VERDICT_EXPIRED"
+    # The one-verdict constraint, distinguished from a wrong binding so a
+    # retrying client is not told to correct a document that was right.
+    VERDICT_ALREADY_RECORDED = "VERDICT_ALREADY_RECORDED"
+    # F17's producer: qualification evidence the caller may not sign, or
+    # that the store does not hold. One answer for both, as CASE_NOT_FOUND is.
+    QUALIFICATION_EVIDENCE_NOT_FOUND = "QUALIFICATION_EVIDENCE_NOT_FOUND"
     STORE_SCHEMA_DRIFT = "STORE_SCHEMA_DRIFT"
     STORE_NOT_TRANSACTIONAL = "STORE_NOT_TRANSACTIONAL"
     STORE_NOT_CONFIGURED = "STORE_NOT_CONFIGURED"
     STORE_UNAVAILABLE = "STORE_UNAVAILABLE"
+    # Every stream slot is taken. Transient by the D3 question -- the identical
+    # request later, with nobody doing anything in between, plausibly succeeds,
+    # because a watcher only has to close a tab.
+    STREAM_LIMIT_REACHED = "STREAM_LIMIT_REACHED"
 
 
 class Refusal(Exception):

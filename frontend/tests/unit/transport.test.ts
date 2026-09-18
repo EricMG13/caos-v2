@@ -5,6 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import {
   UNAVAILABLE_WORDING,
+  bodyOf,
   fetchQualification,
   fetchSection,
   qualificationUrl,
@@ -54,6 +55,8 @@ function v1Model(runId = RUN) {
       latest_run_id: runId,
       displayed_run_id: runId,
       subject: null,
+      displayed_run_status: "COMPLETE",
+      blocked_by: null,
       forecast: null,
       unavailable_reason: "NO_ACCEPTED_FORECAST",
     },
@@ -130,6 +133,11 @@ describe("the transport", () => {
   test("a request that never reached the server is offline, with no engine text", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     expect(await fetchSection("analysis", { case: CASE })).toEqual({ kind: "offline" });
+  });
+
+  test("a body that is not JSON reads as null, so a refusal is typed from nothing", async () => {
+    expect(await bodyOf(new Response("<html>", { status: 502 }))).toBeNull();
+    expect(await bodyOf(new Response('{"code":"X"}', { status: 409 }))).toEqual({ code: "X" });
   });
 
   test("an observed 404 is unavailable", async () => {
@@ -274,11 +282,12 @@ describe("the transport", () => {
       "upload",
       "run",
       "analysis",
+      "book",
       "model",
       "report",
       "committee",
     ]);
-    expect(DISABLED).toEqual(["book", "admin"]);
+    expect(DISABLED).toEqual(["admin"]);
     const spy = vi.fn();
     const tail = vi.fn();
     vi.stubGlobal("fetch", spy);
@@ -427,6 +436,17 @@ describe("the transport", () => {
     );
     expect(none.served_role).toEqual({ role: "ANALYST", standing: null });
     expect(none.ribbon.actions).toEqual([]);
+  });
+
+  test("a composed chrome serves every enabled section on the rail, and no other", () => {
+    const chrome = composeChrome(
+      "upload",
+      parseUploadDocument(v1Upload({ global_role: "READER", standing: "READER" })),
+    );
+    const served = chrome.rail.filter((entry) => entry.state === "Served").map((e) => e.section);
+    expect(served).toEqual([...ENABLED_SECTIONS]);
+    expect(chrome.rail.map((entry) => entry.section).sort()).toEqual([...SECTIONS].sort());
+    for (const entry of chrome.rail) expect(entry.count).toBeNull();
   });
 
   test("the rail marks every disabled section unavailable", () => {

@@ -465,7 +465,8 @@ def test_the_real_app_includes_the_command_routers_and_statuses() -> None:
         COMMAND_EXPECTATION_STALE ORCHESTRATION_BUILD_MOVED"""
     for code in conflicts.split():
         assert status[RefusalCode(code)] == 409, code
-    assert RefusalCode.REQUEST_INVALID not in status, "400 is the default"
+    # No default any more: 400 is a value in the table like every other.
+    assert status[RefusalCode.REQUEST_INVALID] == 400
 
 
 def test_case_standing_asks_the_global_role_only_of_a_write(

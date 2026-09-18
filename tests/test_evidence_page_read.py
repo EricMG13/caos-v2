@@ -9,8 +9,11 @@ rectangles in (decisions 7 and 8). Everything unavailable is one
 from __future__ import annotations
 
 import json
+import subprocess  # nosec B404
+import time
+import zlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -26,6 +29,7 @@ from test_pdf_extraction import (
     SECOND_LINE,
     V1_IDENTITY,
     placed_pdf,
+    raw_pdf,
 )
 from test_route_pinning import CATALOG_PATH, PROFILE
 from test_run_inputs import SUBJECT
@@ -37,6 +41,7 @@ from server.engine.route import resolve_route
 from server.evidence import page as page_module
 from server.evidence.citations import anchor_citation
 from server.evidence.extract import (
+    DEFAULT_LIMITS,
     Extractor,
     ExtractorDispatch,
     ExtractorIdentity,
@@ -45,6 +50,7 @@ from server.evidence.extract import (
 )
 from server.evidence.ingest import Document, admit_pack
 from server.evidence.page import read_page
+from server.evidence.pdf import page_frame
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -350,6 +356,64 @@ def test_a_page_over_its_line_bound_is_cut_at_its_bound(
 
     assert read.truncated and len(read.body.lines) == PAGE_LINES_MAX
     assert not page_of(report, report.sources[0]).truncated
+
+
+def _xref_stream_pdf(padding: int) -> bytes:
+    """A PDF whose cross-reference table is a Flate stream padded to inflate by
+    `padding` bytes: reading page boxes alone decodes it."""
+    base = raw_pdf(b"BT /F1 12 Tf 72 700 Td (Hello) Tj ET")
+    body = base[: base.index(b"xref\n")]
+    offsets = [body.index(f"{n} 0 obj".encode()) for n in range(1, 6)]
+    rows = b"\x00" + bytes(4) + (65535).to_bytes(2, "big")
+    for offset in [*offsets, len(body)]:
+        rows += b"\x01" + offset.to_bytes(4, "big") + bytes(2)
+    data = zlib.compress(rows + bytes(padding))
+    stream = (
+        b"6 0 obj\n<< /Type /XRef /Size 7 /W [1 4 2] /Root 1 0 R"
+        b" /Filter /FlateDecode /Length " + str(len(data)).encode() + b" >>\nstream\n"
+    )
+    trailer = b"\nendstream\nendobj\nstartxref\n" + str(len(body)).encode()
+    return body + stream + data + trailer + b"\n%%EOF\n"
+
+
+def test_page_frame_runs_in_the_killed_budgeted_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boxes and `/Rotate` only, in the §47 child: an empty environment, killed
+    at the deadline, and its inflater's budget meets a stream the page tree
+    needs decoded."""
+    spawned: list[tuple[list[str], object]] = []
+    real = subprocess.Popen
+
+    def recorded(args: list[str], **kwargs: object) -> object:
+        spawned.append((args, kwargs.get("env")))
+        return real(args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "Popen", recorded)
+    data = placed_pdf([("Inside", 300, 200)], rotate=90, crop=CROP)
+
+    assert page_frame(data, 1) == pytest.approx((100, 50, 742, 562))
+    assert page_frame(_xref_stream_pdf(0), 1) == pytest.approx((0, 0, 612, 792))
+    assert spawned and all("-I" in a and env == {} for a, env in spawned)
+
+    budget = replace(DEFAULT_LIMITS, max_decoded_bytes=1024 * 1024)
+    refusals = []
+    for document, page, limits, deadline in (
+        (data, 2, DEFAULT_LIMITS, float("inf")),
+        (data, 1, DEFAULT_LIMITS, time.monotonic() - 1),
+        (_xref_stream_pdf(64 * 1024 * 1024), 1, budget, float("inf")),
+    ):
+        with pytest.raises(Refusal) as caught:
+            page_frame(document, page, limits=limits, deadline=deadline)
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+        refusals.append(caught.value.code)
+
+    assert refusals == [
+        RefusalCode.PAGE_NOT_AVAILABLE,
+        RefusalCode.SOURCE_EXTRACTION_TIMEOUT,
+        RefusalCode.SOURCE_TOO_LARGE,
+    ]
+    assert page_module.IO_BUDGET == 1
 
 
 def test_the_page_read_declares_one_round_trip() -> None:

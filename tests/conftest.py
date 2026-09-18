@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from decimal import Decimal
 
     from server.pricing import ModelPrice
+    from server.store import StoreConnection
+    from server.store.work import Lease
 
 REPO = Path(__file__).resolve().parents[1]
 # The gate scripts are executables, not a package; import them by path.
@@ -346,3 +348,22 @@ def every_block(conn: object, *sources: UUID) -> dict[UUID, frozenset[str]]:
     for source, block in rows:
         blocks[UUID(str(source))].add(str(block))
     return {source: frozenset(found) for source, found in blocks.items()}
+
+
+def reserve_at(
+    conn: StoreConnection,
+    attempt_id: UUID,
+    amount: Decimal,
+    *,
+    lease: Lease | None = None,
+) -> None:
+    """Reserve `amount` under a dated price whose worst case is exactly it.
+
+    Most fixtures want budget state rather than a particular price, and since
+    Task 8.2 `reserve` requires the price the amount was computed from. This is
+    that price: `priced(amount)`, so the row reads back consistently. A test
+    about the price itself calls `reserve` with its own.
+    """
+    from server.store.budget import reserve
+
+    reserve(conn, attempt_id, amount, price=priced(amount), lease=lease)

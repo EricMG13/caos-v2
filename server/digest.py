@@ -17,11 +17,17 @@ and nowhere else. `allow_nan=False` refuses `NaN` and `Infinity`, which are
 not JSON and would be a digest over bytes no other reader could parse.
 
 The sites that escape non-ASCII (`server/store/audit.py`,
-`server/deliverable/filing.py`, `server/deliverable/canonical.py`,
-`server/engine/route.py`, `server/store/routes.py`,
-`server/qualification/matrix.py` and `server/qualification/store.py`) are
-deliberately not here: `ensure_ascii` moves the bytes for any non-ASCII
-input, so folding them in would invalidate every digest already stored.
+`server/deliverable/filing.py`, `server/engine/route.py`,
+`server/store/routes.py`, `server/qualification/matrix.py` and
+`server/qualification/store.py`) are deliberately not here: `ensure_ascii`
+moves the bytes for any non-ASCII input, so folding them in would invalidate
+every digest already stored.
+
+Two more sites spell the same four flags out and are still not callers, for a
+different reason -- both use `ensure_ascii=False` already, matching this
+module exactly, but each is pinned against a different constraint.
+`server/deliverable/canonical.py` writes the payload that is signed, so a
+caller change there is a signature-format change and not a refactor.
 `server/calculators/cash_flow.py` is byte-pinned by
 `methodology/skills/HOST_INTEGRITY_v1.json` -- an edit of any kind there
 refuses `AUTHORITY_BYTES_MISMATCH`, so its longhand stays exactly as it is.

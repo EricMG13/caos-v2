@@ -103,11 +103,13 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
     drop: str | None = None,
     body_note: str = "Recorded source p1.",
     readiness: dict[str, str] | None = None,
+    blockers: dict[str, str] | None = None,
 ) -> bytes:
     """A handoff the vendor validators accept for `identity`, then varied.
 
     `fields` replaces the host-owned front matter (a fake provider copies what
-    the prompt handed it); `readiness` sets CP-0's T8 status per pinned module.
+    the prompt handed it); `readiness` sets CP-0's T8 status per pinned module,
+    and `blockers` that row's `Why now / blocker` cell.
     """
     front: dict[str, Any] = {
         **(fields if fields is not None else invocation_fields(CONTRACT, identity)),
@@ -131,7 +133,9 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
             continue
         appendix += "#### " + register + "\n\n"
         if identity.module_id == "CP-0" and register == "T8":
-            appendix += _table(CONTRACT.navigation.NEW_HEADERS, _t8(readiness or {}))
+            appendix += _table(
+                CONTRACT.navigation.NEW_HEADERS, _t8(readiness or {}, blockers or {})
+            )
         else:
             columns = spec["columns"] or ["Evidence"]
             appendix += _table(
@@ -154,7 +158,7 @@ def handoff_markdown(  # noqa: PLR0913 -- one knob per fixture variant
     return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
 
 
-def _t8(readiness: dict[str, str]) -> list[list[str]]:
+def _t8(readiness: dict[str, str], blockers: dict[str, str]) -> list[list[str]]:
     rows = []
     for n, module in enumerate(sorted(PINNED), 1):
         status = readiness.get(module, "READY")
@@ -169,7 +173,7 @@ def _t8(readiness: dict[str, str]) -> list[list[str]]:
                 "Source p1",
                 "Current handoff",
                 status,
-                "Relevant source p1",
+                blockers.get(module, "Relevant source p1"),
             ]
         )
     return rows
@@ -244,6 +248,7 @@ class CanonicalCompletions:
     qa_status: str = "Passed"
     qa_by_module: dict[str, str] = field(default_factory=dict)
     readiness: dict[str, str] = field(default_factory=dict)
+    blockers: dict[str, str] = field(default_factory=dict)
     quotes: tuple[str, ...] = (QUOTE,)
     mutate: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     content: str | None = None
@@ -274,6 +279,7 @@ class CanonicalCompletions:
             fields=fields,
             authored={**AUTHORED[qa], "qa_status": qa},
             readiness=self.readiness,
+            blockers=self.blockers,
             body_note=f"{QUOTE} was recorded. {UNANCHORED} here.",
         )
         self.answers.append(markdown)

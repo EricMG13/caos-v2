@@ -30,10 +30,12 @@ from server.api.reads.run import (
 )
 from server.engine.route import GATE_MODULE, EdgeType, NodeState
 from server.engine.runtime import Execution, run_route
+from server.methodology.canonical import accepted_handoff
 from server.methodology.runner import ModuleProvider
+from server.methodology.verification import AcceptedRow
 from server.qualification.harness import _unrun
 from server.store.members import Standing, grant
-from server.store.outcomes import execution_reads
+from server.store.outcomes import accepted_rows, execution_reads
 
 __all__ = ["harness", "route"]
 
@@ -155,3 +157,44 @@ def test_the_harness_keeps_gate_readiness_on_a_canonical_run(harness: _Harness) 
 def test_the_api_verifies_records_under_the_vendored_bundle() -> None:
     assert methodology_bundle().root == VENDORED_BUNDLE
     assert methodology_bundle() is methodology_bundle()
+
+
+def test_accepted_handoff_returns_the_exact_bytes_the_record_binds(
+    harness: _Harness,
+) -> None:
+    """The seam three readers share -- the Analysis document, the matrix and
+    the forecast -- and which none of them named. `forecast.py`'s own docstring
+    says "callers must first obtain the Markdown with `accepted_handoff`", and
+    a sentence is not a test.
+
+    What it returns is a *pair*, and the pair is the point: the Markdown and
+    the record that binds it, verified together inside the caller's read unit.
+    A reader handed the Markdown alone could not tell whether the record still
+    described it, which is the whole of section 42.4.
+    """
+    _run(harness, CanonicalCompletions(harness.source_id))
+    node = harness.route.nodes[0]
+
+    with execution_reads(harness.conn):
+        rows = {row[0]: row for row in accepted_rows(harness.conn, harness.run_id)}
+        _node, attempt, artifact, record_sha = rows[node.route_node_id]
+        markdown, record = accepted_handoff(
+            harness.conn,
+            harness.blobs,
+            harness.bundle,
+            harness.route,
+            AcceptedRow(
+                run_id=harness.run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=attempt,
+                artifact_sha256=artifact,
+                record_sha256=str(record_sha),
+            ),
+        )
+
+    assert markdown == harness.blobs.get(artifact)
+    # The binding itself: the record names the digest of the bytes returned
+    # beside it, so a reader cannot be handed one node's Markdown under
+    # another node's record.
+    assert record.artifact_sha256 == artifact
+    assert record.adapter_version == "canonical-markdown-v3"

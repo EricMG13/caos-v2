@@ -54,9 +54,12 @@ _WORKSPACE_TEST = re.compile(r"""\b(?:test|it)\(\s*(["'`])(test_[a-z0-9_]+)\1"""
 # alone.
 NOT_YET_REACHED: set[str] = {
     # Phase 5's own exit test ran the retired claims executor on CP-1 of the
-    # FULL route; f-1c already refuses that executor before any call, and f-2b
-    # deletes it itself. It is owed again when Phase 5 extends the canonical
-    # adapter to CP-1.
+    # FULL route (`docs/superpowers/plans/2026-09-13-phase-3-task-3.1-brief.md`,
+    # f-1c note); f-1c already refuses that executor `HANDOFF_MODULE_UNSUPPORTED`
+    # before any call, and f-2b deletes the executor itself, so nothing can pass
+    # this test as written. It is owed again the day Phase 5 extends the
+    # canonical adapter to CP-1 (`docs/DECISIONS.md` §42; `CLAUDE.md` Repair
+    # Phase 3 ledger).
     "test_cp1_produces_canonical_envelope_with_anchored_citations",
     # Phase 12, the handoff: no module payload exists yet, so a register, a
     # critical column and a cited figure are all things no artifact carries.

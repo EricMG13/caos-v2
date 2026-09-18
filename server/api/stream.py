@@ -35,13 +35,15 @@ frame.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Lock
 from time import monotonic, sleep
 from typing import Literal, overload
 from uuid import UUID
 
 from server.api.events import STREAM_NAMES, Marker, parse_marker
 from server.api.wire import EventName
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.audit import actions_after
 from server.store.events import RunEvent
@@ -57,6 +59,75 @@ IO_BUDGET = CONNECT_IO + POLL_IO
 
 # How many run events one poll reads; the next poll continues after the last.
 RUN_PAGE = 500
+
+# How many tails may be open at once, against the image's
+# `--limit-concurrency 32` (`Dockerfile`). Uvicorn counts an open stream like
+# any other request, so without a cap of its own 32 watching tabs refuse the
+# 33rd *ordinary* request with a 503 that says nothing about streams -- the
+# failure lands on a reader who did nothing wrong and names nothing they can
+# act on. Capped below the limit, the pressure is answered where it is caused:
+# the 25th tail is refused `STREAM_LIMIT_REACHED`, and the eight slots left
+# over are what keep the rest of the surface answering.
+#
+# Deliberately not derived from the uvicorn setting at run time. The image's
+# CMD and `make dev-api` start the server with different values, and a cap that
+# silently followed whichever was in force would be a bound no reader could
+# find in the source.
+STREAM_LIMIT = 24
+
+
+@dataclass
+class _Slots:
+    """How many tails are open. Guarded, because uvicorn runs this route in a
+    thread pool and two watchers can arrive at once."""
+
+    lock: Lock = field(default_factory=Lock)
+    open: int = 0
+
+
+SLOTS = _Slots()
+
+
+class StreamSlot:
+    """One held tail slot, given back exactly once however the stream ends.
+
+    One-shot because it is released from two places and neither may double
+    count. The ordinary path is the streaming generator's `finally`, which runs
+    when the tail is delivered, hits its deadline, loses standing, or is closed
+    because the browser went away. The second is a `weakref.finalize` on the
+    generator, for the one case a `finally` cannot reach: **a generator that is
+    never started never unwinds**, so a response built and then never iterated
+    would hold its slot until the process restarted. Measured rather than
+    assumed -- a generator dropped before its first `next()` leaves the counter
+    raised, and that slot is capacity only a restart returns.
+    """
+
+    __slots__ = ("_held", "_slots")
+
+    def __init__(self, slots: _Slots) -> None:
+        self._slots, self._held = slots, True
+
+    def release(self) -> None:
+        with self._slots.lock:
+            if self._held:
+                self._slots.open -= 1
+                self._held = False
+
+
+def take_stream_slot(slots: _Slots = SLOTS, limit: int = STREAM_LIMIT) -> StreamSlot:
+    """Take one of the tail slots, or refuse `STREAM_LIMIT_REACHED`.
+
+    Taken in the route rather than in the generator, because the response does
+    not exist there yet and a refusal can still be an ordinary refusal body
+    with a status and a `Retry-After`. What it hands back is the thing the
+    stream gives up when the tail is over.
+    """
+    with slots.lock:
+        if slots.open >= limit:
+            raise Refusal(RefusalCode.STREAM_LIMIT_REACHED)
+        slots.open += 1
+    return StreamSlot(slots)
+
 
 # The events that end the run half of a stream.
 TERMINAL = frozenset(

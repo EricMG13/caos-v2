@@ -1,5 +1,5 @@
 // One screen. The chrome never changes; only the body does (IA_SPEC.md 1).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useSearchParams } from "react-router";
 import {
   INITIAL,
@@ -9,6 +9,7 @@ import {
   issue,
   navigate,
   refetches,
+  tailed,
   ticket,
   withWithdrawals,
   withdrawalsOf,
@@ -16,9 +17,15 @@ import {
 } from "./authority";
 import { SECTION_LABELS, isEnabledSection } from "./sections";
 import { VisibleSnapshotContext, type VisibleSnapshot } from "./snapshot";
-import { eventsUrl, openTail } from "./sse";
 import { LedgerProvider } from "./ledger";
-import { OFFLINE_WORDING, fetchSection, sectionUrl, type RegionStatus } from "./transport";
+import { eventsUrl, openTail } from "./sse";
+import {
+  OFFLINE_WORDING,
+  fetchSection,
+  sectionUrl,
+  type RegionStatus,
+  type WorkspaceDocument,
+} from "./transport";
 import { SECTION_VIEWS } from "./views";
 import { DecisionBrief } from "@/chrome/DecisionBrief";
 import { Rail } from "@/chrome/Rail";
@@ -99,8 +106,11 @@ export function Workspace({ section }: { section: Section }) {
   const requested =
     sectionUrl(section, { case: caseId, run: runId, revision: revisionId, fixture }) !== null;
   // Everything the reader sees is keyed on the request that produced it, so a
-  // navigation shows `loading` without a render-time state write.
-  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${qualificationEvidence ?? ""}|${fixture ?? ""}`;
+  // navigation shows `loading` without a render-time state write. The
+  // qualification hash is not part of it: it binds global evidence the strip
+  // reads for itself and names no section request, so keying on it would tear
+  // the section down — and its open tail with it — for a label change.
+  const key = `${section}|${caseId ?? ""}|${runId ?? ""}|${revisionId ?? ""}|${fixture ?? ""}`;
   const [held, setHeld] = useState<Keyed<Held> | null>(null);
   const [tabChoice, setTabChoice] = useState<Keyed<string> | null>(null);
   const authority = useRef<Authority>(INITIAL);
@@ -141,10 +151,12 @@ export function Workspace({ section }: { section: Section }) {
       authority.current = issue(authority.current);
     };
 
-    // Directory has no stream. The tail opens before the first fetch so a
-    // fixture stream's frame counter is reset before the document it drives.
+    // A section no event refetches opens no stream -- Directory, and Book,
+    // which is portfolio-scoped and which no case event names. The tail opens
+    // before the first fetch so a fixture stream's frame counter is reset
+    // before the document it drives.
     const tail =
-      caseId && section !== "directory"
+      caseId && tailed(section)
         ? openTail(eventsUrl(caseId, runId, fixture), {
             onEvent: (name) => {
               if (refetches(name, section)) load();
@@ -201,7 +213,15 @@ export function Workspace({ section }: { section: Section }) {
   const chrome = chromeOf(section, status);
   const activeTab =
     (tabChoice?.key === key ? tabChoice.value : null) ?? chrome?.tabs[0]?.id ?? null;
-  const View = SECTION_VIEWS[section];
+  // ponytail: one erasure, here rather than nine in the registry. `section`
+  // is a runtime value, so the lookup yields the union of nine differently
+  // typed views and no document satisfies them all; the registry has already
+  // checked each view against its own document, and a disabled section never
+  // reaches this render with a document to mount.
+  const View = SECTION_VIEWS[section] as ComponentType<{
+    document: WorkspaceDocument;
+    tab: string | null;
+  }>;
   // With no document there is still a section: the bands carry its state.
   const fallback = fallbackChrome(status);
 
@@ -234,9 +254,14 @@ export function Workspace({ section }: { section: Section }) {
           {status.kind === "offline" ? <PageAlert sentence={OFFLINE_WORDING} /> : null}
           <VisibleSnapshotContext.Provider value={snapshot}>
             <EvidenceProvider>
+              {/* The snapshot ledger outlives the documents a section renders,
+                  so it sits above the boundary and the mount key. */}
               <LedgerProvider>
                 <RegionState status={status} onReload={reload}>
                   {(doc) => (
+                    // A render failure is about the document that caused it:
+                    // the next one served clears it, without waiting for a
+                    // navigation to unmount the boundary.
                     <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
                       <View key={mountKey} document={doc} tab={activeTab} />
                     </SectionBoundary>

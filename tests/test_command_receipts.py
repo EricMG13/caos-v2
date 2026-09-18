@@ -21,7 +21,6 @@ from server.store.audit import GovernedAction
 from server.store.commands import (
     NIL_SCOPE,
     CommandResult,
-    StoredReceipt,
     find_receipt,
     record_receipt,
     request_digest,
@@ -154,9 +153,7 @@ def test_record_receipt_inserts_once_and_find_receipt_reads_it_back(
     stored = find_receipt(conn, actor_id=actor, scope=case_id, key=key)
     conn.rollback()
 
-    # The row reads back as the declared type, not as a tuple a caller
-    # unpacks positionally: the field names are the contract the route reads.
-    assert isinstance(stored, StoredReceipt)
+    assert stored is not None
     assert (stored.command, stored.status, stored.receipt) == (
         "START_RUN",
         202,

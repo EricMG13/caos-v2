@@ -18,8 +18,9 @@ lived to record it (`server/store/budget.py`).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
@@ -33,6 +34,7 @@ from server.engine.route import (
     NodeState,
     ResolvedRoute,
     frontier,
+    independent_batch,
     node_states,
 )
 from server.methodology.bundle import Bundle
@@ -45,18 +47,17 @@ from server.methodology.canonical import (
     unexplained_charge,
 )
 from server.methodology.invocation import named_objects
-from server.pricing import ModelPrice, worst_case
+from server.methodology.verification import AcceptedRow
+from server.pricing import ModelPrice, priced_request, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.budget import reserve
+from server.store.budget import ceiling_of, reserve
 from server.store.gates import execution_input
 
 # `artifact_digests` is re-exported: it now lives in the store (no import cycle).
 from server.store.outcomes import (
-    CallOutcome,
     accepted_rows,
     execution_reads,
-    record_outcome,
     record_refusal,
     require_idle,
 )
@@ -100,13 +101,23 @@ class Provider(Protocol):
     @property
     def model(self) -> str: ...
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         """Refuse a context the call could not carry (`CONTEXT_OVER_CEILING`),
-        before the loop starts an attempt or reserves anything (§45.3)."""
+        before the loop starts an attempt or reserves anything (§45.3), and
+        return the size in bytes of the request it would send -- what the
+        reservation is priced on (Task 8.2)."""
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
-    ) -> ProviderResult: ...
+    ) -> ProviderResult:
+        """Call for this reserved attempt and record its own call outcome --
+        the charge, the producer identity and the diagnostic address -- before
+        returning, as `execute_handoff` does the moment the provider answers.
+
+        The loop does not record it a second time: a call that reached the
+        provider must be billed by the unit that made it, because only that
+        unit is still running when the answer arrives (invariant 6).
+        """
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +127,8 @@ class Execution:
     One thing rather than loose arguments, because none is meaningful without
     the others -- a price with no provider reserves against nothing, and a
     provider with no price is a call invariant 8 forbids. Every call reserves
-    `worst_case(price)`, never a caller's guess (F06).
+    `priced_request(price, its own request size)`, never a caller's guess (F06);
+    `worst_case(price)` is the run's admission check (Task 8.2, §40).
     """
 
     provider: Provider
@@ -125,6 +137,18 @@ class Execution:
     # The worker's claim on this run; None is a direct caller (harness, tests),
     # which may drive only a run that was never enqueued (brief 4.3 D3).
     lease: Lease | None = None
+    # How to build the resources one node of a concurrent pass needs, and the
+    # whole of what makes a pass concurrent. `None` -- every direct caller, the
+    # harness and the suite -- keeps the loop exactly sequential, because those
+    # callers drive a run on a connection they own and hold open around it.
+    #
+    # A connection *and* a provider, from one factory, because neither is any
+    # use alone: each node's pre-call unit opens its own transaction under the
+    # case lock, and `ModuleProvider` holds a connection of its own to build
+    # the prompt with. Two nodes on one connection is not concurrency, it is
+    # corruption, and one field rather than two is what stops it being
+    # half-configured.
+    per_node: Callable[[], tuple[StoreConnection, Provider]] | None = None
 
 
 def run_route(
@@ -146,7 +170,7 @@ def run_route(
     # Priced for the configured model, or no attempt at all.
     if execution.price.model != getattr(execution.provider, "model", None):
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
-    worst_case(execution.price)
+    _affordable(conn, run_id, execution.price)
     route = _execution_route(conn, run_id, route, execution.bundle)
     # Read once from verified bundle bytes, handed to the pure engine (§46.1).
     named = named_objects(execution.bundle, route)
@@ -162,6 +186,29 @@ def run_route(
         _drive(
             conn, blobs, run_id=run_id, route=route, execution=execution, named=named
         )
+
+
+def _affordable(conn: StoreConnection, run_id: UUID, price: ModelPrice) -> None:
+    """Refuse a run whose whole ceiling cannot cover one worst-case call.
+
+    Since Task 8.2 each attempt reserves only what its own request costs, so a
+    ceiling below one call's worst case is no longer met by the first
+    reservation -- a run could start spending on a route it could never afford
+    a single full-sized call of. This is where invariant 8 keeps that property.
+
+    It is the run's own ceiling that is read, not what is left of it. Reading
+    `remaining` made the check tighten as the run spent, so a run that finished
+    when it ran continuously was refused `BUDGET_CEILING_REACHED` on resume, one
+    node short, and every retry hit the same refusal -- "resume from accepted
+    attempts, never restart" (invariant 6) broken by a guard for invariant 8.
+    What refuses an operation the run can no longer pay for is `reserve`, under
+    the run row lock, which is where that decision belongs. Found by the Task 8.2
+    acceptance review, which reproduced it on the LITE fixture.
+    """
+    with execution_reads(conn):
+        ceiling = ceiling_of(conn, run_id)
+    if ceiling < worst_case(price):
+        raise Refusal(RefusalCode.BUDGET_CEILING_REACHED)
 
 
 def _refuse_unexplained(
@@ -227,16 +274,16 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
             continue
         if not ready:
             break
-        for route_node_id in ready:
-            if not _run_node(
-                conn,
-                blobs,
-                run_id=run_id,
-                route=route,
-                route_node_id=route_node_id,
-                execution=execution,
-            ):
-                return  # A validated Blocked handoff ended the run BLOCKED.
+        # Not every ready node may run beside every other: `independent_batch`
+        # drops any that is a transitive upstream or downstream of one already
+        # chosen, because an attempt whose input is accepted mid-call is billed
+        # and then refused. What it leaves out is still in the frontier next
+        # pass, which is recomputed from the store like every other pass.
+        batch = independent_batch(route, ready)
+        if not _run_batch(
+            conn, blobs, run_id=run_id, route=route, execution=execution, batch=batch
+        ):
+            return  # A validated Blocked handoff ended the run BLOCKED.
     # §39: success only when every pinned node was accepted; an empty frontier
     # with unfinished required work ends the run blocked.
     with execution_reads(conn):
@@ -248,6 +295,71 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
         complete_run(conn, run_id, lease=execution.lease, accepted=decided)
     else:
         block_run(conn, run_id, lease=execution.lease, accepted=decided)
+
+
+def _run_batch(  # noqa: PLR0913 -- one pass of one run, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    execution: Execution,
+    batch: Sequence[str],
+) -> bool:
+    """Run one frontier batch, concurrently where the caller gave us the means.
+
+    Returns False when a validated Blocked handoff ended the run.
+
+    Sequential unless `execution.per_node` is set **and** the batch has more
+    than one node, so the single-node case -- every LITE route today -- pays no
+    thread and opens no second connection.
+
+    Threads rather than `asyncio` (§80): what a wide frontier waits on is a
+    provider call, and both that socket and psycopg's release the interpreter
+    lock while they block. A `gather` would have bought the same overlap at the
+    price of recolouring 152 store functions and every one of their callers.
+
+    Every node is awaited even after one of them fails. A call already in
+    flight is going to be billed whatever this loop decides, so abandoning its
+    result would pay for an answer nobody reads -- the same reasoning the worker
+    applies to SIGTERM. The first failure is then re-raised, or False returned.
+    """
+    if execution.per_node is None or len(batch) < 2:
+        for route_node_id in batch:
+            if not _run_node(
+                conn,
+                blobs,
+                run_id=run_id,
+                route=route,
+                route_node_id=route_node_id,
+                execution=execution,
+            ):
+                return False
+        return True
+
+    build = execution.per_node
+
+    def one(route_node_id: str) -> bool:
+        node_conn, provider = build()
+        try:
+            return _run_node(
+                node_conn,
+                blobs,
+                run_id=run_id,
+                route=route,
+                route_node_id=route_node_id,
+                execution=replace(execution, provider=provider),
+            )
+        finally:
+            node_conn.close()
+
+    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+        results = [pool.submit(one, route_node_id) for route_node_id in batch]
+        outcomes = [result.exception() or result.result() for result in results]
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    return all(outcomes)
 
 
 def _settle(
@@ -266,7 +378,7 @@ def _settle(
     caller stops and a retry makes one new attempt instead of replaying it.
     """
     if replayed.verdict is Verdict.BLOCKED:
-        block_run(conn, run_id, lease=lease)
+        block_run(conn, run_id, lease=lease, verdict=replayed.attempt_id)
         return False
     outcome = replayed.outcome
     if replayed.verdict is Verdict.REFUSED or outcome is None:
@@ -342,16 +454,19 @@ def accepted_artifacts(
                 blobs,
                 bundle,
                 route,
-                run_id=run_id,
-                route_node_id=node_id,
-                attempt_id=attempt,
-                artifact_sha256=digest,
-                record_sha256=record,
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node_id,
+                    attempt_id=attempt,
+                    artifact_sha256=digest,
+                    record_sha256=record,
+                ),
                 accepted=pairs,
             )
             accepted[node_id] = NodeResult(
                 readiness=tuple(projections.readiness),
                 qa_status=projections.qa_status,
+                blockers=tuple(projections.blockers),
             )
     return accepted
 
@@ -402,10 +517,19 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     # The whole prompt is built and bounded while nothing is started or set
     # aside: an over-ceiling context costs no attempt, reservation or call.
-    execution.provider.check_context(route_node_id, module_id)
+    measured = execution.provider.check_context(route_node_id, module_id)
     lease = execution.lease
     attempt_id = start_attempt(conn, run_id, route_node_id, lease=lease)
-    reserve(conn, attempt_id, worst_case(execution.price), lease=lease)
+    # Priced on the request that was just built and bounded, not on the
+    # transport ceiling: the attempt unit rebuilds the prompt and refuses to
+    # call if its own request costs more than this (`_within_reservation`).
+    reserve(
+        conn,
+        attempt_id,
+        priced_request(execution.price, measured),
+        price=execution.price,
+        lease=lease,
+    )
 
     _execution_route(conn, run_id, route, execution.bundle)
     refused: Refusal | None = None
@@ -432,20 +556,17 @@ def _run_node(  # noqa: PLR0913 -- one node of one run, keyword-only
         )
         return False
 
-    require_idle(conn)
-    # The canonical executor recorded its diagnostic with the call: this is
-    # then an exact replay, and acceptance binds the host record (§42).
-    record_outcome(
-        conn,
-        attempt_id=attempt_id,
-        outcome=CallOutcome(
-            result.charge,
-            result.model,
-            result.generation_id,
-            result.diagnostic_sha256,
-        ),
-    )
     _execution_route(conn, run_id, route, execution.bundle)
+    # ponytail: the executor recorded this outcome with the call, and `_accept`
+    # commits exactly it before it enters `_accept_artifact`, so no accepted
+    # artifact can be unbilled; a record here as well would be a knowing no-op
+    # costing a COMMIT and two row locks. Ceiling: a provider that returns
+    # without having billed its own call loses that call outright to a crash
+    # before acceptance -- `replay_billed` needs the joined ledger row and a
+    # stored body, `unexplained_charge` needs the outcome row, so neither
+    # matches and the node is re-attempted and paid for again with nobody
+    # deciding to. Nothing inside the acceptance unit can reach that window;
+    # only a record adjacent to the call can, which is where this one is.
     accept_attempt(
         conn,
         attempt_id=attempt_id,
@@ -475,7 +596,10 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
 
     The raised code is not trusted: the verdict is re-derived from the stored
     bill and response body by the same `replay_billed` crash recovery uses,
-    and a Blocked claim it does not confirm is an ordinary refusal.
+    and a Blocked claim it does not confirm is an ordinary refusal. The attempt
+    it confirms is what the transition records as the reason (§68): this is
+    the last moment the answer can be judged, since `check_attempt` refuses a
+    replay once the run is no longer RUNNING.
     """
     with execution_reads(conn):
         blocked = blocked_verdict(
@@ -486,9 +610,9 @@ def _end_blocked(  # noqa: PLR0913 -- one node of one run, keyword-only
             route=route,
             route_node_ids=(node,),
         )
-    if not blocked:
+    if blocked is None:
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
-    block_run(conn, run_id, lease=execution.lease)
+    block_run(conn, run_id, lease=execution.lease, verdict=blocked)
 
 
 def _execution_route(

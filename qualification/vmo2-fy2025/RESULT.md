@@ -543,3 +543,231 @@ Three consequences:
 
 No further run was made. Spend on this set to date: `$2.18` across four Terra
 runs and one DeepSeek run.
+
+## Terra with CP-0's own rule restated — 2026-09-16
+
+Run `729b0682-1076-4f7d-8371-2793bf43f3cd`, set
+`a1a70f04ab0aa1b4f46940d6b17131a50909a14521b9a773210bd839695d2bbf`,
+`$0.77497100`. The best run this set has had, and it isolates what is left.
+
+- **Run status `COMPLETE`.** CP-0 did not gate CP-5. All three modules answered
+  on the first attempt: CP-0 `$0.24055425`, CP-L10 `$0.26801425`, CP-5
+  `$0.2664025`. Three artifacts, ten citations, every one re-located.
+- **`ready_met: true`.** The readiness key passed — the first direct evidence
+  that restating `SKILL.md` line 359 in CP-0's final check changes the verdict
+  it writes. Run `62698a60…` put a sequencing condition in a readiness column
+  and ended BLOCKED; this one did not.
+- **`complete` is still false**: `met=1, missed=2`. CP-L10 cited the Adjusted
+  Free Cash Flow limitation — an answer key — and not the goodwill impairment
+  or the borrowing-capacity line.
+
+### What is left is the citation key, and only that
+
+CP-L10 returned five citations from the 93 the host offered: the guidance
+metrics, the entity perimeter, the preliminary-results heading, the AFCF
+limitation, and the £1,645.5 million Cellnex bridge. Sound, relevant evidence
+for a financial-change screen — and a set of five drawn from ninety-three, which
+has to contain three named lines for this set to pass.
+
+Every other failure mode this set has produced is now closed: the reader defect
+(`7a12c6d`), the diagnostic double-bill (`cf6905d`), the gate misuse
+(`a40b2b4`), and the key that named a subordinate clause (`e258422`). What
+remains is the instrument. A citation key measures whether a module's handful of
+length-selected quotes happens to include particular lines; it does not measure
+whether the screen was right, and this run's CP-L10 produced a defensible screen
+while scoring `missed=2`.
+
+The `expects_ready` key added in `1b9c060` is the shape that works, because it
+reads a host projection rather than hoping for a quotation. The same is
+available for `qa_status`, `committee_status`, `confidence_score`,
+`limitation_flags` and CP-0's T8 readiness rows, and the bundle ships a register
+parser for the rest. Until the citation keys are replaced with keys of that
+kind, this set measures the draw rather than the analysis.
+
+Spend on this set to date: `$2.96` across five Terra runs and one DeepSeek run.
+
+## The first signable snapshot — 2026-09-16
+
+Run `42e17048-8b50-48cc-94ff-833d894a68cb`, set
+`0863964bb4dbad8dc8772654311d7b59dfc2810cd08cf6cfdeda6a940ed0db74`,
+`$0.76978275`. **`qualification_performed.complete` is true.**
+
+| | |
+|---|---|
+| Run status | `COMPLETE`, three modules, one attempt each |
+| Proof | 3 artifacts, 8 citations, every one re-located |
+| Citation key | `met=1, missed=0` — the goodwill impairment |
+| `ready_met` | true — CP-0 gated nothing it should not have |
+| `projections_met` | true — every module concluded what the set required |
+
+Charges: CP-0 `$0.231761`, CP-L10 `$0.265523`, CP-5 `$0.27249875`. Database
+`caos_qualify_eaa6ad1a8dc44ecb9171afec00325bc9`; one `qualification_evidence`
+row, and **zero `qualification_verdicts`** — the host has produced a snapshot a
+reviewer may sign, and nobody has signed it. That distinction is the point: a
+verdict is a person's, and `complete` only says the question was answered.
+
+### Verified rather than assumed
+
+The capture written beside this file reports `projections_met: null`, which is
+the capture under-reporting and not the key going unevaluated — `scripts/qualify.py`
+was serialising `ready_met` and not the field added after it, now fixed.
+`complete` treats an undeclared key as passed (`is not False`), so a key that
+silently did nothing would have produced this same `true`. Re-deriving the
+matrix from the store against the set on disk gives `projections_met: True`,
+`ready_met: True`, `proven: True`, `missed: 0`. The signable document stored in
+the database carried the field correctly throughout.
+
+### What made the difference, in order
+
+1. `7a12c6d` — the reader refused typographic quotation marks and was blaming
+   models for it.
+2. `cf6905d` — a billed call whose body could not be stored was billed again.
+3. `a40b2b4` — CP-0's own readiness rule restated in its final check; the gate
+   stopped refusing CP-5 for a sequencing reason its contract forbids.
+4. `e258422` — the borrowing key named a subordinate clause, not the fact.
+5. `1b9c060`, `32bb47f` — keys that read the host's own projections instead of
+   hoping a module's handful of quotes happened to include particular lines.
+
+Four of those five were the host's or the record's, not the models'. The
+citation-only instrument is what hid them: every one of them presented as a
+model failing to find evidence.
+
+Spend on this set to date: `$3.73` across six Terra runs and one DeepSeek run.
+
+## Re-run against build `cdea0c9f` — 2026-09-16
+
+Run `36d87283-ef92-49a2-a2b1-ef5928aaa5d2`, the first against the bundle build
+produced by `docs/DECISIONS.md` §61. `$1.37845425`, the most any single run of
+this set has cost, because `--attempts 3` bought CP-5 two more tries.
+
+CP-0 accepted (`$0.24881325`), CP-L10 accepted (`$0.27359275`). **CP-5 refused
+three times** — `$0.288437`, `$0.29529725`, `$0.272314` — and the run is
+`RUNNING`, stopped `HANDOFF_INCOMPLETE`. `complete` is false.
+
+### Not the bundle edit
+
+`validate_handoff.validate_text` returns no errors on any of the three CP-5
+bodies, so the severity rule added in §61 is not what refused them. The refusal
+is `completeness_check`, which §61 deliberately did not touch. CP-0 and CP-L10
+both passed the new rule, and CP-0 did not gate anything.
+
+### What refused them
+
+CP-5's own completeness contract (`cp-5-evidence-trace-validator/SKILL.md:101`)
+lists `critical_cell_values_casefold` — cell values that disqualify a full run.
+Among them: `insufficient information`, `not calculable from provided
+materials`, `not assessable`, `unavailable`. T5B.5's Claim Status column is
+critical and exempts none of them.
+
+All three attempts wrote exactly those words:
+
+    T5B.5 row 3: critical column 'Claim Status' holds a disqualifying
+    placeholder 'Insufficient Information'
+    T5B.5 row 2: critical column 'Status' holds a disqualifying placeholder
+    'Not Calculable from Provided Materials'
+
+CP-5 traces claims to sources. Handed two earnings releases, it reported that
+some claims could not be calculated from what it was given — which is true, and
+is the answer its own runbook asks for — and the completeness rule refused the
+handoff for saying so. Three times, each one billed.
+
+This is the same shape as everything else found today: the apparatus punishing
+honest restraint. A validator that cannot say "this cannot be verified from the
+provided materials" in a status column can only pass by overstating what the
+evidence supports.
+
+It is also not new. Run `42e17048…`'s CP-5 was accepted because it happened not
+to use those words; the difference between that run and this one is phrasing,
+not rigour. The set's `expects_projection` keys cannot see it either: a refused
+CP-5 produces no artifact, so its conclusion is unreadable and the row reads as
+a run that stopped.
+
+*Upgrade:* `disqualifier_exempt_columns` already exists — T5B.6 exempts
+`Evidence Status` — so the mechanism is there and the question is which of
+CP-5's status columns should carry it. That is a bundle change and needs its own
+authorisation, and it belongs with the `completeness_check.load_contract` half
+that §61 left open.
+
+Spend on this set to date: `$5.11`.
+
+## Build `30222a49` — CP-5 completes, and the last key is a draw
+
+Two runs against the build produced by `docs/DECISIONS.md` §63, which exempted
+T5B.5's `Status` and `Claim Status` from the disqualifying-placeholder rule.
+
+| | Run `c5da2040…` | Run `54ec3752…` |
+|---|---|---|
+| Route | COMPLETE | COMPLETE |
+| Artifacts | 3 | 3 |
+| Citations, all re-located | 4 | 9 |
+| `ready_met` | true | true |
+| `projections_met` | true | true |
+| Citation key | missed | missed |
+| Cost | `$1.04320025` | `$0.80026775` |
+
+**CP-5 is fixed.** It completed in both — in the first on its retry, in the
+second first time — where run `36d87283…` on the previous build was refused
+three times for writing the honest answer. All three of those stored bodies were
+replayed through the amended contract and produce no violation, so this is the
+same defect, measured before and after.
+
+**Every key now passes except one.** Readiness and all four declared conclusions
+are met in both runs. What misses is the single citation key: CP-L10 did not
+quote the `£1,021.7 million` Q4 goodwill impairment. Run `42e17048…` did quote
+it. So across three runs where CP-L10 produced an accepted screen, the material
+figure was surfaced once.
+
+### What that means, and it is not an instrument defect
+
+The earlier citation keys were replaced because they measured the draw. This one
+is different in kind: the Q4 goodwill impairment is *the* material change in the
+period, and a financial-change screen that does not surface it is a weaker
+screen. The key is doing the job an evidence key is for.
+
+So the honest reading of two misses is a finding about the model, not about the
+apparatus: **Terra surfaces the period's material figure inconsistently**, and a
+qualification bar that only passes when it does is the bar working. Lowering it
+to make a run pass would be the exact failure `docs/REPAIR_PLAN.md`'s guardrails
+name.
+
+No `complete` snapshot exists on `30222a49`. The path to one is a run in which
+CP-L10 cites the impairment; on the evidence so far that is roughly one run in
+three, at about `$0.90` each.
+
+Spend on this set to date: `$6.95`.
+
+## A signable snapshot on the current build — 2026-09-16
+
+Run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, build `30222a49`, set
+`0863964b…`, `$0.79558075`. **`qualification_performed.complete` is true, and
+this one is bound to the build the tree carries.**
+
+| | |
+|---|---|
+| Route | COMPLETE, three modules |
+| Proof | 3 artifacts, 11 citations, every one re-located |
+| Citation key | `met=1, missed=0` — CP-L10 quoted the £1,021.7m impairment |
+| `ready_met` | true |
+| `projections_met` | true |
+
+Re-derived from the store against the set on disk rather than read from the
+capture: `proven=True, missed=0, ready_met=True, projections_met=True`. The
+stored row binds set `0863964b…`, build `30222a49…`, provider
+`openrouter/openai/flex/high/65536`, model `openai/gpt-5.6-terra`.
+
+- Database `caos_qualify_5a47243d96774e088f1bfebb6271f2d1`
+- Evidence digest `bb09d8d0bcec1524eabdc426142ef9eae60890be52a58bbf973f321644cd4621`
+- Performed digest `d758a253dba3aed1f88cd325a46c8984d2e0da9189a3027e8f8b4734eb78a7bd`
+
+It took three runs on this build for CP-L10 to surface the material figure,
+which is the finding recorded above and is not changed by this one succeeding.
+A model that quotes the period's largest single item one time in three is what
+the record says; the bar was not moved to meet it.
+
+`qualification_verdicts` is still empty. Nothing in `server/` or `scripts/`
+calls `record_verdict`, so no reviewer can sign — the open half of F17 in
+`docs/DECISIONS.md` §64. The snapshot is signable in the sense that `complete`
+is true and every binding a verdict must match is recorded; what is missing is
+the route by which a person asserts one.
+
+Spend on this set to date: `$7.75` across eleven runs.

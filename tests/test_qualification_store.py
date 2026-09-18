@@ -4,11 +4,12 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from qualification_fixtures import qualification_performed
+from qualification_fixtures import qualification_performed, record_runs
 
 import server.store as store
 from server.qualification.matrix import ExpectedCitation
 from server.qualification.store import (
+    ONE_VERDICT_PER_EVIDENCE,
     Evidence,
     PerformedEvidence,
     current_verdict,
@@ -304,16 +305,43 @@ def test_a_case_whose_gate_refused_a_module_cannot_receive_a_verdict() -> None:
     assert allowed.complete is True
 
 
+def test_a_case_whose_modules_concluded_otherwise_cannot_receive_a_verdict() -> None:
+    """The conclusion key is the one that measures the analysis.
+
+    A citation key asks whether a module's handful of quotes happened to
+    include a line. This asks what it concluded — and a snapshot where a module
+    reached the wrong conclusion is not signable however well it quoted.
+    """
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    wrong = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, projections_met=False),)),
+        ),
+    )
+
+    assert wrong.complete is False
+    right = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(matrix, rows=(replace(row, projections_met=True),)),
+        ),
+    )
+    assert right.complete is True
+
+
 def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
     """A set may declare a refusal as its answer; meeting it is a result.
 
-    Built from a dataclass, and no run this system produces reaches this state:
-    `complete` also requires every run `COMPLETE`, while the validated Blocked
-    gate that would meet an expected refusal ends its run BLOCKED. So this
-    asserts the rule and not the path, which is the vacuous shape the gate
-    scripts exist to catch. Ledgered in `CLAUDE.md`; the fix is to decide where
-    `expected_refusal_met` is fed from, and this test is then rebuilt from a
-    run.
+    This asserts the rule over a hand-built row.
+    `test_a_case_that_declared_the_block_it_expected_is_signable` asserts the
+    path, over a real blocked run, which is what closed the gap this docstring
+    used to describe.
     """
     original = _performed()
     matrix = original.performed.matrix
@@ -340,6 +368,7 @@ def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> 
         performed = _performed()
         evidence = performed.evidence
         record_performed(conn, performed)
+        record_runs(conn, performed)
         reviewer = uuid4()
         record_verdict(
             conn,
@@ -347,4 +376,101 @@ def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> 
             reviewer_id=reviewer,
             verdict=_verdict(now, evidence),
         )
+        assert current_verdict(conn, evidence=evidence, now=now)
+
+
+@pytest.mark.parametrize("recorded", ["another-model", None])
+def test_a_verdict_is_refused_unless_every_run_recorded_the_model_it_names(
+    empty_database: str, recorded: str | None
+) -> None:
+    """`evidence.model` is what the harness configured; `call_outcomes.model`
+    is what the run called (§25). The verdict binds the second."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = _performed()
+        evidence = performed.evidence
+        record_performed(conn, performed)
+        record_runs(conn, performed, model=recorded, outcome=recorded is not None)
+        with pytest.raises(Refusal, match=r"^VERDICT_BINDING_INVALID$"):
+            record_verdict(
+                conn,
+                evidence=evidence,
+                reviewer_id=uuid4(),
+                verdict=_verdict(now, evidence),
+            )
+
+
+def test_the_one_verdict_constraint_is_mapped_by_name_not_by_message(
+    empty_database: str,
+) -> None:
+    """`0019_one_qualification_verdict.sql` is the only unique violation this
+    insert can raise that means "already signed", and it is matched by the
+    constraint name the migration declares."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = _performed()
+        evidence = performed.evidence
+        record_performed(conn, performed)
+        record_runs(conn, performed)
+        record_verdict(
+            conn,
+            evidence=evidence,
+            reviewer_id=uuid4(),
+            verdict=_verdict(now, evidence),
+        )
+        conn.commit()
+        with pytest.raises(Refusal, match=r"^VERDICT_ALREADY_RECORDED$"):
+            record_verdict(
+                conn,
+                evidence=evidence,
+                reviewer_id=uuid4(),
+                verdict=_verdict(now, evidence),
+            )
+        declared = conn.execute(
+            "SELECT conname FROM pg_constraint WHERE conname=%s",
+            (ONE_VERDICT_PER_EVIDENCE,),
+        ).fetchall()
+        conn.rollback()
+        assert declared == [(ONE_VERDICT_PER_EVIDENCE,)]
+
+
+def test_a_set_holding_a_case_that_accepted_nothing_is_still_signable(
+    empty_database: str,
+) -> None:
+    """A deliberately restricted case must not make the whole set unsignable.
+
+    `PerformedEvidence.complete` waives the COMPLETE requirement for a case
+    whose declared refusal was met, and such a run can end BLOCKED at its first
+    node having accepted no artifact at all. The model comparison read
+    `call_outcomes` joined to `artifacts`, so that run contributed no row and
+    "every run confirms the model" refused the snapshot `complete` had just
+    called signable -- reporting a wrong binding when the bindings were right,
+    and poisoning every other case in the set with it.
+
+    The rule is now "no run contradicts, and at least one confirms". Every
+    artifact-bearing run is still checked against the store's fact, so invariant
+    3 is untouched, and a snapshot in which nothing at all was produced still
+    refuses: it names no producer.
+
+    Found by the Completion Phase 8 confidence review, which built the snapshot
+    and reproduced the refusal.
+    """
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        performed = qualification_performed(blocked_label="restricted")
+        evidence = performed.evidence
+        assert performed.complete is True, "the snapshot a reviewer is offered"
+        record_performed(conn, performed)
+        record_runs(conn, performed, accepted_nothing="restricted")
+
+        record_verdict(
+            conn,
+            evidence=evidence,
+            reviewer_id=uuid4(),
+            verdict=_verdict(now, evidence),
+        )
+
         assert current_verdict(conn, evidence=evidence, now=now)

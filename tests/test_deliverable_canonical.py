@@ -16,7 +16,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import CATALOG, CONTRACT, handoff_markdown, skill
-from conftest import every_block
+from conftest import every_block, recorded_statements
+from conftest import reserve_at as reserve
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -30,9 +31,8 @@ from server.deliverable.canonical import (
     verify_frozen,
 )
 from server.deliverable.filing import sign_opinion
-from server.deliverable.host import render_payload as render
 from server.deliverable.package import build_package, verify_package
-from server.deliverable.render import canonical_bound
+from server.deliverable.render import RenderRefused, canonical_bound, render
 from server.deliverable.revisions import read_revision, save_revision
 from server.engine.route import ResolvedRoute, resolve_route
 from server.evidence.citations import Citation, verify_citations
@@ -46,8 +46,8 @@ from server.methodology.canonical import accepted_projections
 from server.methodology.handoff import CanonicalRecord, record_bytes, validate_markdown
 from server.methodology.invocation import accepted_lineage, host_identity
 from server.methodology.vendor import authority_bundle_sha256
+from server.methodology.verification import AcceptedRow
 from server.refusals import Refusal, RefusalCode
-from server.store.budget import reserve
 from server.store.members import Standing, grant
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.runs import Accepted, accept_attempt, start_attempt
@@ -219,6 +219,19 @@ def test_the_payload_is_read_from_the_store_and_round_trips(lite: _Harness) -> N
     assert lite.conn.info.transaction_status.name == "IDLE"
 
 
+def test_freezing_reads_each_source_page_once_and_verifies_authority_bytes(
+    lite: _Harness,
+) -> None:
+    """Three records quoting one page of one source: one `TokenIndex` for the
+    whole payload reads that page, its digest and its line numbering once, not
+    once per node -- the proof's shape (`test_canonical_proof`), which this
+    reader was never given."""
+    with recorded_statements(lite.conn) as statements:
+        assert len(_payload(lite)["artifacts"]) == len(LITE.nodes)
+    reads = ("FROM source_tokens AS tokens", "SELECT DISTINCT line_id")
+    assert [sum(read in s for s in statements) for read in reads] == [1, 1]
+
+
 @pytest.mark.parametrize("blob", [0, 1], ids=["markdown", "record"])
 def test_a_changed_blob_refuses(lite: _Harness, blob: int) -> None:
     digest = _row(lite, "CP-L10")[blob]
@@ -274,11 +287,13 @@ def test_a_soft_input_accepted_after_the_call_does_not_break_the_record(
         harness.blobs,
         harness.bundle,
         harness.route,
-        run_id=harness.run_id,
-        route_node_id=final,
-        attempt_id=row[0],
-        artifact_sha256=row[1],
-        record_sha256=row[2],
+        AcceptedRow(
+            run_id=harness.run_id,
+            route_node_id=final,
+            attempt_id=row[0],
+            artifact_sha256=row[1],
+            record_sha256=row[2],
+        ),
     )
     assert projections.qa_status == record["projections"]["qa_status"]
     harness.conn.rollback()
@@ -415,9 +430,9 @@ def test_the_page_keeps_limitations_labels_screens_and_escapes_model_text(
     }
     assert canonical_bound(artifacts[0]) and not canonical_bound(screened)
     unbound = {**payload, "artifacts": [screened]}
-    with pytest.raises(Refusal) as refused:
+    with pytest.raises(RenderRefused) as refused:
         render(unbound)
-    assert refused.value.code is RefusalCode.DELIVERABLE_PAYLOAD_INVALID
+    assert refused.value.code == "DELIVERABLE_PAYLOAD_INVALID"
 
 
 def test_the_deliverable_labels_source_fact_analysis_and_no_host_calculation(
@@ -436,5 +451,10 @@ def test_the_deliverable_labels_source_fact_analysis_and_no_host_calculation(
     assert facts < analysis < calculation
     assert "<blockquote>" in section[facts:analysis]
     assert "<blockquote>" not in section[analysis:]
-    assert "<pre>" in section[analysis:calculation]
-    assert "<pre>" not in section[:analysis]
+    # The model's Markdown is rendered as the deliverable's closed element set
+    # -- headings and registers, with the host-owned front matter shown whole --
+    # and none of it appears above the label that says who authored it.
+    analysed = section[analysis:calculation]
+    assert '<pre class="front">' in analysed and "<table>" in analysed
+    assert '<h5 data-level="2">Audit Summary</h5>' in analysed
+    assert "<pre" not in section[:analysis]

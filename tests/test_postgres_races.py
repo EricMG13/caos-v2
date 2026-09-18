@@ -24,18 +24,19 @@ from canonical_fixtures import (
     VENDORED,
     CanonicalCompletions,
 )
+from canonical_route_fixtures import RouteCompletions
 from conftest import priced
+from conftest import reserve_at as reserve
 from test_run_events import RECORD, accept_nodes, approved_nodes
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine import runtime
 from server.engine.route import NodeState, ResolvedRoute, resolve_route
-from server.engine.runtime import Execution, ProviderResult, run_route
+from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, apply_schema, connect, runs
-from server.store.budget import reserve
 from server.store.events import RunEvent, events_of
 from server.store.outcomes import check_call, execution_reads
 from server.store.runs import (
@@ -265,6 +266,59 @@ def test_two_connections_completing_one_run_produce_one_terminal_event(
         assert row is not None and row[0] == len(others) + 1, "one charge per node"
         assert run_status(conn, run_id) is RunStatus.COMPLETE
         assert [e.name for e in events_of(conn, run_id)].count("RUN_COMPLETE") == 1
+
+
+def test_two_successors_for_one_blocked_run_commit_one(empty_database: str) -> None:
+    """At most one successor per predecessor (§72), under real contention.
+
+    Two connections each call `start_run` against the same BLOCKED predecessor.
+    They do not meet at the index: `start_run` takes the case lock first
+    (`lock_case`, `FOR UPDATE` on the case row), so the second serialises there
+    and reaches its insert only after the first has committed. The partial unique
+    index `runs_one_successor` is the backstop that then refuses it, inside its
+    own unit, as the typed `RUN_ALREADY_SUPERSEDED` mapped from the index's
+    declared name and never from a driver message. One link is committed; the
+    loser committed nothing.
+
+    The index is not redundant with the lock: drop `runs_one_successor` and both
+    inserts commit, which is what makes this a rule rather than a consequence of
+    the lock ordering. The original docstring described the two connections
+    meeting at the index with both holding `FOR SHARE`, and the Task 10.3
+    acceptance review probed it: with the case lock held elsewhere, the second
+    caller hits `lock_timeout` before any share lock is taken. No host path
+    reaches the insert without the case lock."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Issuer"))
+        blocked = start_run(conn, case_id)
+        conn.commit()
+        assert block_run(conn, blocked)
+    start = Barrier(2)
+
+    def succeed(_: int) -> UUID | RefusalCode:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            try:
+                run_id = start_run(conn, case_id, supersedes=blocked)
+                conn.commit()
+            except Refusal as refusal:
+                return refusal.code
+            return run_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(succeed, range(2)))
+
+    winners = [o for o in outcomes if isinstance(o, UUID)]
+    assert [o for o in outcomes if not isinstance(o, UUID)] == [
+        RefusalCode.RUN_ALREADY_SUPERSEDED
+    ]
+    with connect(empty_database) as conn:
+        rows = conn.execute(
+            "SELECT run_id FROM runs WHERE supersedes_run_id = %s", (blocked,)
+        ).fetchall()
+        assert rows == [(winners[0],)]
+        counted = conn.execute("SELECT count(*) FROM runs").fetchone()
+        assert counted == (2,), "the loser inserted nothing"
 
 
 # -- The lease fence (brief 4.3 D3; interleavings I2-I4, I7, I8, I12) --------
@@ -540,7 +594,15 @@ def test_a_terminal_transition_marks_work_done_in_the_same_transaction(
 
 @dataclass
 class _Reclaiming:
-    """A provider during whose call another worker reclaims the run."""
+    """A provider during whose call another worker reclaims the run.
+
+    It deliberately does not record its own call outcome, unlike every other
+    provider here and unlike `ModuleProvider`, which is what makes the bill
+    this test counts `_accept`'s own record rather than the provider's: since
+    the loop stopped recording, only acceptance can write that row. Read it as
+    a probe of the acceptance unit, never as a template for a new provider --
+    `Provider.execute` requires an implementation to bill its own call.
+    """
 
     url: str
     run_id: UUID
@@ -550,8 +612,9 @@ class _Reclaiming:
     def model(self) -> str:
         return MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        return None
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -864,10 +927,9 @@ class Once(Event):
         return True
 
 if os.environ.get("KILL") == "1":
-    real = runtime.record_outcome
     def killed(*args, **kwargs):
         os.kill(os.getpid(), signal.SIGKILL)
-    runtime.record_outcome = killed
+    runtime.accept_attempt = killed
 
 blobs = BlobStore(Path(os.environ["BLOBS"]))
 bundle = Bundle(VENDORED)
@@ -937,3 +999,295 @@ def test_worker_sigkilled_after_provider_return_restarts_without_a_second_call(
     assert _count(run.conn, "run_attempts", run.run_id) == len(_lite().nodes)
     assert _count(run.conn, "budget_ledger", run.run_id) == len(_lite().nodes)
     assert _events(run.conn, run.run_id, RunEvent.RUN_COMPLETE) == 1
+
+
+def test_a_report_read_never_blocks_a_governed_write_on_its_case(
+    empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C1: GET /report holds no row lock, so a writer's NOWAIT lock succeeds
+    while the read is in progress."""
+    import inspect
+    from typing import cast
+
+    import psycopg
+    from fastapi.testclient import TestClient
+    from test_deliverable_canonical import LITE, _accept
+    from test_execution_freshness import _Harness, harness
+    from test_revision_sections import _get
+    from test_revisions import _save
+
+    from server.api import app as app_module
+    from server.api.app import app, blob_store, methodology_bundle, store_connection
+    from server.api.identity import TRUST_SWITCH
+    from server.api.reads import reports as reports_read
+    from server.deliverable.revisions import prove_revision
+
+    make_harness = cast(
+        Callable[[tuple[StoreConnection, UUID], Path, ResolvedRoute], _Harness],
+        inspect.unwrap(harness),
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Issuer"))
+        conn.commit()
+        held = make_harness((conn, case_id), tmp_path, LITE)
+        for module in ("CP-0", "CP-L10", "CP-5"):
+            _accept(held, module)
+        revision = _save(held)
+        conn.commit()
+
+        probed: list[bool] = []
+        original = cast(Callable[..., object], prove_revision)
+
+        def probing(*args: object, **kwargs: object) -> object:
+            # While the read is inside its unit, a second connection must be able
+            # to take the case lock without waiting.
+            with connect(empty_database) as other:
+                try:
+                    other.execute(
+                        "SELECT case_id FROM cases WHERE case_id = %s"
+                        " FOR UPDATE NOWAIT",
+                        (case_id,),
+                    )
+                    probed.append(True)
+                except psycopg.errors.LockNotAvailable:
+                    probed.append(False)
+                other.rollback()
+            return original(*args, **kwargs)
+
+        monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+        monkeypatch.delenv(TRUST_SWITCH, raising=False)
+        monkeypatch.setattr(reports_read, "prove_revision", probing)
+        app.dependency_overrides[store_connection] = lambda: held.conn
+        app.dependency_overrides[blob_store] = lambda: held.blobs
+        app.dependency_overrides[methodology_bundle] = lambda: held.bundle
+        try:
+            with TestClient(app) as client:
+                body = _get(client, held, revision, "report")
+        finally:
+            app.dependency_overrides.clear()
+    assert body["revision_id"] == str(revision)
+    assert probed == [True]
+
+
+def test_two_saves_against_one_head_commit_one_revision(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """Task 12.1, invariant 5. Both drafts name the head they were composed
+    against; the case lock orders them, and the second sees the first's commit.
+
+    The route functions are called directly, on two connections of their own:
+    what is under test is the unit the command builds, not FastAPI's resolution
+    of its dependencies, which `tests/test_actor_matrix.py` drives.
+    """
+    import inspect
+    from typing import cast
+    from uuid import uuid4
+
+    from test_deliverable_canonical import LITE, _accept
+    from test_execution_freshness import _Harness, harness
+
+    from server.api.commands.deliverable import save as save_command
+    from server.api.commands.members import withdraw as withdraw_command
+    from server.api.identity import Actor, GlobalRole
+    from server.api.wire import SaveRevision, WithdrawSource
+    from server.store.members import Standing, grant
+
+    make_harness = cast(
+        Callable[[tuple[StoreConnection, UUID], Path, ResolvedRoute], _Harness],
+        inspect.unwrap(harness),
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Issuer"))
+        conn.commit()
+        held = make_harness((conn, case_id), tmp_path, LITE)
+        for module in ("CP-0", "CP-L10", "CP-5"):
+            _accept(held, module)
+        writer = uuid4()
+        grant(conn, case_id=case_id, user_id=writer, standing=Standing.WRITER)
+        conn.commit()
+        actor = Actor(user_id=writer, role=GlobalRole.ANALYST)
+        draft = SaveRevision(expected_revision_id=None, narrative=[])
+
+        for stage in ("save", "withdraw"):
+            barrier = Barrier(2)
+
+            def race(_index: int, stage: str = stage, bar: Barrier = barrier) -> str:
+                with connect(empty_database) as other:
+                    bar.wait(10)
+                    try:
+                        if stage == "save":
+                            save_command(
+                                actor=actor,
+                                key=uuid4(),
+                                _standing=Standing.WRITER,
+                                run_id=held.run_id,
+                                body=draft,
+                                case_id=case_id,
+                                conn=other,
+                                blobs=held.blobs,
+                                bundle=held.bundle,
+                            )
+                        else:
+                            withdraw_command(
+                                actor=actor,
+                                key=uuid4(),
+                                _standing=Standing.WRITER,
+                                source_id=held.source_id,
+                                _body=WithdrawSource(),
+                                case_id=case_id,
+                                conn=other,
+                            )
+                    except Refusal as refused:
+                        return refused.code.value
+                    return "OK"
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = sorted(pool.map(race, range(2)))
+            assert outcomes == sorted(
+                {
+                    "save": ["OK", "COMMAND_EXPECTATION_STALE"],
+                    "withdraw": ["OK", "EVIDENCE_NOT_AVAILABLE"],
+                }[stage]
+            ), stage
+
+        saved = conn.execute(
+            "SELECT count(*) FROM deliverable_revisions WHERE run_id=%s",
+            (held.run_id,),
+        ).fetchone()
+        withdrawn = conn.execute(
+            "SELECT count(*) FROM audit_events WHERE action='SOURCE_WITHDRAWN'"
+        ).fetchone()
+        conn.rollback()
+        assert (saved, withdrawn) == ((1,), (1,))
+
+
+@pytest.fixture
+def relative_harness(case: tuple[StoreConnection, UUID], tmp_path: Path) -> object:
+    """The RELATIVE_VALUE run, which is the only enabled route whose frontier
+    is ever wider than one node -- 1, then 2, then 4, then 2 -- and therefore
+    the only place the concurrent pass can be raced at all."""
+    from test_relative_value_route import harness as build
+
+    from server.engine.route import resolve_route
+
+    route = resolve_route(CATALOG, "FULL_CREDIT_32", "RELATIVE_VALUE")
+    return build.__wrapped__(case, tmp_path, route)  # type: ignore[attr-defined]
+
+
+def _relative_provider(harness: object, answers: object) -> Provider:
+    from server.methodology.runner import ModuleProvider
+
+    return ModuleProvider(
+        harness.conn,  # type: ignore[attr-defined]
+        harness.bundle,  # type: ignore[attr-defined]
+        harness.blobs,  # type: ignore[attr-defined]
+        answers,  # type: ignore[arg-type]
+        harness.route,  # type: ignore[attr-defined]
+        harness.run_id,  # type: ignore[attr-defined]
+    )
+
+
+def test_two_workers_on_a_queue_of_two_runs_take_one_each(
+    case: tuple[StoreConnection, UUID], empty_database: str, tmp_path: Path
+) -> None:
+    """Completion Phase 13.2: with work for both, neither worker idles.
+
+    The neighbour above proves two workers cannot claim the *same* run. This
+    proves the other half, and it is the half an operator wants: a queue that
+    handed both pollers the same row and made the loser wait would satisfy
+    every other test in this file while halving the fleet.
+
+    Claims only. What happens *after* a claim -- one accepted artifact per
+    node, one terminal event -- is the neighbour's, which drives a whole run
+    through `work_once`; proving it twice here would need each worker to hold
+    answers for whichever run its claim happened to give it, which measures the
+    fixture rather than the queue.
+    """
+    from test_worker import CONFIG, queued_run
+
+    from server.store.work import claim_run
+
+    blobs = BlobStore(tmp_path / "blobs")
+    queued = {
+        queued_run(case, _lite(), Bundle(VENDORED), blobs).run_id for _ in range(2)
+    }
+    start = Barrier(2)
+
+    def poll(worker: int) -> UUID | None:
+        with connect(empty_database) as conn:
+            start.wait(5)
+            lease = claim_run(
+                conn,
+                worker=BoundaryText.of(f"{CONFIG.worker.value}-{worker}"),
+                lease_seconds=CONFIG.lease_seconds,
+            )
+            return None if lease is None else lease.run_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claimed = list(pool.map(poll, range(2)))
+
+    assert None not in claimed, "a worker idled while there was work for it"
+    assert set(claimed) == queued, "the two workers did not take one run each"
+
+
+def test_two_nodes_of_one_concurrent_pass_each_accept_exactly_once(
+    relative_harness: object,
+) -> None:
+    """The race Completion Phase 13.1 created, proven rather than argued.
+
+    A concurrent pass has two nodes of one run writing through two connections
+    under one lease at the same time. Every guard they meet -- the run row lock
+    the reservation takes, the case lock the pre-call unit takes, the
+    conditional update every event insert rides -- was written for one writer
+    at a time, and `docs/AI_CODE_QUALITY.md` puts concurrency at ~2x in
+    agent-written code with this file named as the control.
+
+    One artifact, one reservation and one ledger row per node is the claim. A
+    run that merely reached COMPLETE would not show it: a doubled reservation
+    is money, and it leaves the run's status untouched.
+    """
+    from server.engine.runtime import Execution, run_route
+    from server.methodology.runner import ModuleProvider
+
+    harness = relative_harness
+    answers = RouteCompletions(harness.source_id)  # type: ignore[attr-defined]
+
+    opened: list[int] = []
+
+    def per_node() -> tuple[StoreConnection, object]:
+        opened.append(1)
+        node_conn = connect(harness.url)  # type: ignore[attr-defined]
+        return node_conn, ModuleProvider(
+            node_conn,
+            harness.bundle,  # type: ignore[attr-defined]
+            harness.blobs,  # type: ignore[attr-defined]
+            answers,
+            harness.route,  # type: ignore[attr-defined]
+            harness.run_id,  # type: ignore[attr-defined]
+        )
+
+    run_route(
+        harness.conn,  # type: ignore[attr-defined]
+        harness.blobs,  # type: ignore[attr-defined]
+        run_id=harness.run_id,  # type: ignore[attr-defined]
+        route=harness.route,  # type: ignore[attr-defined]
+        execution=Execution(
+            _relative_provider(harness, answers),
+            priced(Decimal("0.10")),
+            harness.bundle,  # type: ignore[attr-defined]
+            per_node=per_node,  # type: ignore[arg-type]
+        ),
+    )
+
+    conn, run_id = harness.conn, harness.run_id  # type: ignore[attr-defined]
+    nodes = len(harness.route.nodes)  # type: ignore[attr-defined]
+    # Without this the assertions below would hold just as well over a
+    # sequential run, and this test would quietly stop being a race at all the
+    # day the batch narrowed. A factory call is one node of a concurrent pass.
+    assert len(opened) > 1, "the pass never ran two nodes at once"
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    for table in ("artifacts", "run_attempts", "budget_reservations", "budget_ledger"):
+        assert _count(conn, table, run_id) == nodes, table
+    assert _events(conn, run_id, RunEvent.RUN_COMPLETE) == 1

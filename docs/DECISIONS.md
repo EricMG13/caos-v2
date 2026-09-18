@@ -1241,6 +1241,21 @@ real price for the live model is a user-supplied, dated fact; the byte bound is
 large for a real model against the default ceiling, and pricing the encoded
 request once it is built is the upgrade (CLAUDE.md known gaps).
 
+*Retired in part by Completion Phase 8 Task 8.2 (`0d31a67`, `9c7f161`):* the
+upgrade this entry named is taken. A call no longer reserves `worst_case(price)`;
+it reserves `priced_request(price, request_size(provider, prompt))` over the
+request `check_context` built and bounded, and `canonical._within_reservation`
+re-prices the rebuilt request against the reservation's stored price before the
+call. `worst_case` stays as the run's admission check against its **ceiling**,
+not its remainder. Migration `0024` stores the dated price beside the amount.
+Unchanged: the byte-per-token bound, the reconciliation after the call, and
+"an application price cannot guarantee a vendor bill" -- the reservation's output
+component is still the completion cap at the configured rate, so a vendor billing
+reasoning tokens beyond it still overruns. The price's source remains the owner's
+and is still not decided here. Recorded in place rather than as a new entry
+because this is one clause of §40 becoming untrue, and the Phase 8 confidence
+review found that no later entry said so.
+
 ## 2026-09-13 §41 — The canonical Markdown handoff's identity, storage and citations
 
 (This repository's §41; the inherited table above maps CAOS-Final's own §41.)
@@ -1335,90 +1350,35 @@ must be addressed before validation.
 **Rollback.** Before f-1 each slice reverts alone, and migration 0012 only adds
 a nullable column. After f-1 rollback is a revert of commits, never a switch.
 
-## 2026-09-14 §48 — CI build-speed pass: uv installs, one run per pull request, caches, and parallel tests
+## 2026-09-14 §43 — The suite runs across processes, and CI caches image layers
 
-**Decision.** Eight changes, none touching a required check's name, a
-threshold or a scanner rule:
+**Decision.** Two build-time additions, neither reaching the runtime image:
 
-1. **`push` runs on `main` only.** A branch with an open pull request is
-   checked by its `pull_request` run; a push-triggered run of the same head
-   sat in a different concurrency group and was never cancelled by it.
-2. **The workflow token is `contents: read`** unless a job widens it; only
-   `security` does, to read pull requests for gitleaks.
-3. **One pin per action.** Every job uses `actions/checkout` v7.0.1 and
-   `actions/setup-python` v7.0.0; `frontend`'s `actions/upload-artifact`
-   matches `test`'s, v7.0.1. Each commit-pinned.
-4. **`astral-sh/setup-uv` v10.1.0**, commit-pinned, installs uv 0.12.5 (the
-   version `make venv` already installs with) with its download cache keyed
-   on the job's lock. Every Python job runs `uv pip install --system
-   --require-hashes --only-binary :all:` in place of `pip install`.
-5. **`.mypy_cache`** is cached in the `types` job, keyed on the dev lock.
-6. **Playwright's browsers** are cached in the `frontend` job, keyed on
-   `frontend/package-lock.json`; `--with-deps` still installs the OS
-   libraries the cache does not cover.
-7. **`pytest-xdist==3.8.0`** (bringing `execnet==2.1.2`) joins the
-   development lock, hashed and wheels-only. `make test` and the `test` CI
-   job run `pytest -n auto`. Each worker builds its own migrated template
-   database (below) and every test still mints a uniquely named database, so
-   no worker shares state with another. `test-provider`, the `postgres` job
-   and the live provider suite stay single-process.
-8. **`tests/conftest.py`'s `case` fixture clones a session-scoped, already
-   migrated template database** (`CREATE DATABASE ... TEMPLATE`) instead of
-   applying every migration to a fresh database per test; `case` still calls
-   `apply_schema`, which verifies the clone's recorded migration prefix.
-   `empty_database` stays genuinely empty for every test that does not
-   request `case`.
-9. **`.dockerignore`** limits the `image` job's build context to what the
-   Dockerfile copies (`requirements.txt`, `server/`, `vendor/`), and the
-   `image` job builds with commit-pinned `docker/setup-buildx-action` v4.3.0
-   and `docker/build-push-action` v7.3.0, with `cache-from/to: type=gha`.
-   The image is loaded for Trivy and never pushed.
+1. **`pytest-xdist==3.8.0`** (bringing `execnet==2.1.2`) joins the development
+   lock, hashed and wheels-only. `make test` and the `test` CI job run
+   `pytest -n auto`. Each worker builds its own migrated template and every
+   test still mints a uniquely named database, so no worker shares state with
+   another. `test-fast`, `test-postgres-races`, the `postgres` job and the live
+   provider suite stay single-process. Parametrize ids must be deterministic,
+   since every worker must collect the same tests.
+2. **`docker/setup-buildx-action` v4.3.0 and `docker/build-push-action`
+   v7.3.0**, commit-pinned, build the `image` job's image with
+   `cache-from/to: type=gha` and `load: true`. Nothing is pushed. Local
+   `make image` keeps the plain `docker build`.
 
-**Reason.** Measured locally against a real PostgreSQL: the offline suite ran
-in a fraction of its serial time under `-n auto`, with the coverage floor
-still holding, because most of its wall time is round trips to PostgreSQL
-rather than CPU. A push to a branch with an open pull request started CI
-twice for no reason `cancel-in-progress` could catch. The default workflow
-token may carry write scopes no job needs. Mixed action versions are two
-things to maintain per action, and `pip install` with no cache re-downloaded
-every wheel on every run.
+**Reason.** Measured locally on 2026-09-14 (10 cores): the full suite took
+5:45 serially without coverage and 1:43 with `-n auto` and coverage, 2,199
+passed, 97% coverage, and the Cobertura floor held. The serial run used about
+a third of one CPU: its time is PostgreSQL round trips, which parallel workers
+spread. The image job rebuilt the apt and pip layers on every run.
 
-**Cost.** A test that depended on another test's side effects or on global
-collection order could now fail intermittently under `-n auto`; every worker
-must collect the identical test set, which `pytest-xdist` itself refuses if
-they disagree. The GitHub Actions cache is a mutable input to the image
-build, but every layer it restores is still keyed on the pinned base digest
-and the hashed lock, and Trivy scans the loaded result either way.
+**Cost.** A test that depends on another test's side effects or on global
+ordering can now fail intermittently; none did. The GitHub cache is a mutable
+input to the image build, but every layer it restores is keyed on the pinned
+base digest and hashed lock, and Trivy scans the loaded result either way.
 
-**Rollback.** Each item reverts independently: drop `-n auto` from the two
-call sites (the dependency can stay unused), restore `docker build -t
-caos:ci .` in the `image` job, or drop any one cache block without touching
-the others.
-
-## 2026-09-14 §49 — `.sql` files are excluded from SonarCloud analysis, not run through a Data Dictionary
-
-**Decision.** `sonar.exclusions` in `sonar-project.properties` adds `**/*.sql`
-beside the existing `vendor/**`.
-
-**Reason.** `sonar.sources` lists `scripts` and `server`, and both hold plain
-PostgreSQL DDL: `server/store/schema.sql`, its thirteen numbered migrations,
-and `scripts/dev-init.sql`. SonarCloud's PL/SQL sensor claims `.sql` files by
-extension regardless of dialect, and the analysis logged: "The Data
-Dictionary is not configured for the PLSQL analyzer, which prevents rule(s)
-S3641, S3921, S3651, S3618 from raising issues." A Data Dictionary is an
-imported catalog of Oracle schema metadata (SonarCloud's own PL/SQL docs);
-this project has no Oracle database and nothing that would produce one. The
-four rules cannot fire correctly against non-Oracle SQL even if one were
-supplied, so excluding the files is the fix, not the dictionary the message
-suggests.
-
-**Cost.** Rule-based findings, if SonarCloud ever added a real PostgreSQL
-sensor, would need this exclusion revisited. `test_dependency_pins.py`'s
-class of gate does not cover `sonar-project.properties`, so nothing enforces
-this file's shape in CI; the pre-existing `vendor/**` entry is the same kind
-of unenforced exclusion.
-
-**Rollback.** Drop `,**/*.sql` from the one line.
+**Rollback.** Drop `-n auto` from the two call sites (the dependency can stay
+unused), or restore `docker build -t caos:ci .` in the `image` job.
 
 ## 2026-09-14 §44 — Evidence admission limits, dispatch and PDF geometry
 
@@ -1543,6 +1503,7 @@ threshold, scanner rule or job name changes.
    job's lock. Every Python job runs `uv pip install --system --require-hashes
    --only-binary :all:` into the interpreter `setup-python` provides, in place
    of `pip install` and its cache.
+5. **`.mypy_cache`** is cached in the `types` job, keyed on the dev lock.
 
 **Reason.** A push to a branch with an open pull request started two full
 runs whose refs differ, so `cancel-in-progress` cancelled neither. The
@@ -1552,6 +1513,20 @@ with, and it resolves and installs the same hashed, wheels-only locks faster.
 
 **Rollback.** Revert the workflow commit; nothing outside the workflow
 depends on these changes.
+
+**Addendum, from reconciling with `main`'s independent CI work (18 September
+2026).** `main` wrote its own version of this entry as its own §48, with two
+items this one lacked: the `.mypy_cache` caching folded in above, and a
+separate `sonar.exclusions` change adding `**/*.sql` -- `sonar.sources` lists
+`scripts` and `server`, both holding plain PostgreSQL DDL
+(`server/store/schema.sql`, its numbered migrations,
+`scripts/dev-init.sql`), and SonarCloud's PL/SQL sensor claims `.sql` files by
+extension regardless of dialect: the analysis logged "The Data Dictionary is
+not configured for the PLSQL analyzer," which four rules need and which this
+project, having no Oracle database, cannot supply. Folded into
+`sonar-project.properties` here rather than given its own entry, because it
+is one line beside the existing `vendor/**` exclusion and the same kind of
+unenforced exception.
 
 ## 2026-09-14 §49 — One PostgreSQL worker: a claim per run fenced by a token
 
@@ -1798,7 +1773,9 @@ coordinate space citations were anchored in (invariant 11).
    downstream runs.
 3. **Identity switch rule.** `actor_from_headers` believes `x-caos-role` only
    when the switch is `1` and no edge token is set; otherwise the role comes
-   from groups.
+   from groups. **Superseded by §70.2:** the "otherwise" covered the case with
+   neither set, in which a request's own groups header chose its global role.
+   With no edge token and no switch the role is now READER.
 4. **Header hygiene, both modes.** A repeated identity header, or a name that
    differs from one only by case or `_` for `-`, is 401 `NOT_AUTHENTICATED`.
 5. **Origin, the second half of §51.10.** Under `/api`: an `Origin` outside
@@ -1989,7 +1966,9 @@ signatures or proof that an entire receipt/audit chain was never replaced.
    same Python/zlib build produce identical archive bytes.
 2. **Portable render.** `render.py` imports only standard-library modules and
    raises local `RenderRefused(ValueError)` with its existing code as a string.
-   `host.render_payload` maps this to the existing host `RefusalCode`/`Refusal`,
+   `host.render_payload` (**deleted as dead in §74.5**; nothing in `server/`
+   catches `RenderRefused`, so the guarantee below has no subject left to
+   violate) maps this to the existing host `RefusalCode`/`Refusal`,
    with no exception chain. Its HTML output is unchanged.
 3. **Portable verifier version 1.** `verify(archive: bytes)` returns
    `(bool, str | None)`; malformed input is a fixed failure reason, never an
@@ -2021,14 +2000,13 @@ signatures or proof that an entire receipt/audit chain was never replaced.
    existing path. Two concurrent writers leave one complete winner under
    successful filesystem writes; crash durability is not promised.
 
-**Evidence.** `tests/test_deliverable_package.py` proves isolated `-I -S`
-execution with only a package in the temporary directory, stdlib imports,
-metadata-before-read bounds, duplicate/extra/missing/traversal names,
-encryption/method rejection, compression-ratio rejection, total malformed-input
-handling, concurrent exclusive writes, deterministic members, renderer-pin
-checks, and forged declared lengths/CRC/counts. Existing render, filing and
-LITE route tests remain required; this decision does not enable filing routes.
-
+**Evidence.** `tests/test_deliverable_package.py` covers isolated `-I -S`
+execution, stdlib imports, metadata-before-read bounds, duplicate/extra/
+missing/traversal names, encryption/method rejection, compression-ratio
+rejection, total malformed-input handling, concurrent exclusive writes,
+deterministic members, renderer-pin checks, and forged declared lengths/CRC/
+count failures. Existing render, filing and LITE route tests remain required;
+this decision does not enable filing routes.
 ## 2026-09-14 §56 — Prove the smallest forecast-owner catalog pathway
 
 **Decision.** Phase 5.2a selects `FULL_CREDIT_32` / `RELATIVE_VALUE`, the
@@ -2063,13 +2041,6 @@ authority section; both the manifest and delivered-authority digests still
 bind the original bytes. Invalid ZIP containers and other non-UTF-8 authority
 still refuse. No workbook is executed, extracted or restored as a deliverable;
 the existing whole-request ceiling also bounds the encoded representation.
-**Evidence.** `tests/test_deliverable_package.py` covers isolated `-I -S`
-execution, stdlib imports, metadata-before-read bounds, duplicate/extra/
-missing/traversal names, encryption/method rejection, compression-ratio
-rejection, total malformed-input handling, concurrent exclusive writes,
-deterministic members, renderer-pin checks, and forged declared lengths/CRC/
-count failures. Existing render, filing and LITE route tests remain required;
-this decision does not enable filing routes.
 
 ## 2026-09-14 §57 — Save the host revision before sign, freeze and file
 
@@ -2210,3 +2181,1968 @@ meaning-changing edits and would weaken the pinned canonical contract. The
 model is therefore unqualified; its performed evidence cannot mint a verdict.
 Any future spend must be a separately authorized, materially different
 candidate or protocol experiment.
+
+## 2026-09-16 §61 — Two authorised edits inside the vendored bundle, and the build they produce
+
+Invariant 4 says never edit a file that exists upstream. On 16 September 2026
+the repository's owner authorised two edits to `vendor/deploy-v/`, these and no
+others, after the VMO2 qualification runs (`qualification/vmo2-fy2025/RESULT.md`)
+showed both to be defects in the methodology itself rather than in the host's
+reading of it. This entry is the override, scoped to the two changes below, and
+§13's pin moves to the build they produce. Upstream
+`github.com/EricMG13/Deploy-V@c4d2e356` does not carry either change: the
+vendored tree is now that build plus these two, and the next upstream pull
+either carries them forward or supersedes them with an entry here.
+
+**Change 1 — `CONDITIONAL` is a source condition.** CP-0 defined the verdict
+only by its effect (`exact_command = DO NOT RUN`), and a live run marked CP-5
+`CONDITIONAL` on "CP-L10 must first produce the selected-route analytical
+handoff", ending the route BLOCKED after two modules had been paid for. The rule
+is now stated in each of the three places CP-0 reads it —
+`skills/cp-0-source-readiness/SKILL.md` (the T8 contract),
+`references/REF_CP-0_STEPS.md` (step I, the verdict and rule 4 of the command
+sheet) and `references/CP-0__SourceReadiness__payload.schema.txt` (the
+`recommended_run_commands` rules) — in the same words: `CONDITIONAL` names a
+source, or the prepared representation of one, that the effective-source set
+does not carry; it is discharged only when that named source is supplied and
+CP-0 is re-run; an upstream analytical handoff that has not yet been produced is
+never a readiness ground, because navigation and the catalog's edges sequence
+modules and `readiness` does not. "Or the prepared representation of one" is
+what keeps `CP0_CAPACITY_RESUME_CONTRACT_v1.md` consistent, where readiness
+stays `CONDITIONAL` while a required parse is still running.
+`tests/test_bundle_pin.py::test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read`
+fails the day any of the three copies stops saying so.
+
+**Change 2 — the validator derives the status floor from the findings.**
+`CANON_SHARED.md § CP_CONFIDENCE_SCORE.md` and CP-5A step 11 say any MATERIAL
+finding is at least `Restricted` and any CRITICAL one is `Blocked`, and
+`confidence_score.py` applies exactly that — to counts the module passes it.
+`validate_handoff.py` checked only the score caps given the declared status, so
+a CP-0 declaring `Passed`, `Committee Ready`, 93 over its own
+`SOURCE_GAP | MATERIAL` row was conformant, and a second live CP-0 declared
+`Passed`, 78 over two CRITICAL rows. The validator now reads every unfenced
+pipe table whose column is headed `Severity` (emphasis and backticks stripped,
+case-folded, the header may carry a qualifier), takes a cell that begins with
+one of the canon's three words as a finding, and refuses a CRITICAL finding
+under any status but `Blocked` and a MATERIAL finding under `Passed`. It is a
+floor, never a ceiling: `Restricted` or `Blocked` with no finding row stays the
+module's own stricter call, a fenced table is not a finding, and a column
+headed anything else is not read. Vendor errors go to the host as
+`HANDOFF_MALFORMED`, which is what a `confidence_band` inconsistent with its
+score already is.
+
+**How the edit was made.** The validator was changed once, at the `SHARED`
+owner the bundle declares (`cp-0-source-readiness/scripts/validate_handoff.py`),
+and `verify_package.py --refresh` — the bundle's own procedure for an
+intentional edit — synchronised the 24 byte-identical copies, ran its 52 unit
+tests and 10 helper self-checks, and regenerated `DEPLOY_V_INTEGRITY_v1.json`,
+`DEPLOY_V_MANIFEST.json`, `DEPLOY_V_BASELINE.json`,
+`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json` and the two Copilot memory prompts. The
+host loads only the `cp-os-credit-os` copy (`server/methodology/vendor.py`),
+but the refresh refuses "shared implementation drift", so editing one copy was
+never an option. Build id
+`cdea0c9fbb046321fdd6d0fb526b6bc74cf4c9e9e2ea4b381f1c4a61081e9d22`; the
+manifest's own SHA-256 is
+`087bbdf8421aca31cac4e04adf3c85d779cc4822cff748e0715d24a82157b1da`, still
+68,657 bytes, so §35's ceiling reasoning is unchanged. The five host pins that
+compare against the bundle moved with it (`tests/test_bundle_pin.py`,
+`tests/test_methodology_bundle.py`, `tests/test_qualification_matrix.py`,
+`tests/test_loop_charges.py`, `tests/test_canonical_proof.py`), and
+`tests/test_delivered_authority.py` re-measures CP-0's delivered authority at
+145,928 bytes, 1,061 more than at `a43cb903` — exactly the three prose additions.
+
+**What it costs.** Every run pinned to `a43cb903` — including the VMO2 runs
+`RESULT.md` rests on — now refuses `ORCHESTRATION_BUILD_MOVED` on re-proof.
+That is the Phase 10 gap read strictly and the fail-closed direction: their
+artifacts, charges and citations stand as recorded, and their proofs are no
+longer re-derivable against this tree. A qualification set's digest covers
+documents, keys and route selection, not the build, so sets are unaffected.
+
+**Decided against, here.** `completeness_check.load_contract` reads only the
+`critical_cell_*` disqualifiers and never `frontmatter_limitation_flags`,
+`frontmatter_validation_warnings` or `document_substrings_casefold`. That is a
+second rule with its own semantics — envelope flags that name a fixture as not
+a current golden, and whole-document substrings — which
+`server/methodology/handoff.py` already records as a host gap; it is not the
+canon's severity rule, and folding it in would make one authorised edit into
+two. It stays open, with its own entry the day it is authorised. The bundle's
+own `tests/` were not extended, being upstream files outside the
+authorisation; the named tests live in the host suite
+(`tests/test_canonical_handoff.py`, `tests/test_bundle_pin.py`).
+`CANON_SHARED.md` is untouched: the rule was already there, unenforced.
+
+## 2026-09-16 §62 — Phase 6 accepted by the owner, with the gap stated
+
+The owner accepted Phase 6 on 16 September 2026 and deferred CP-5 until the
+other modules are deployed. This entry records that decision and exactly what it
+does and does not assert, because `docs/REPAIR_PLAN.md` Phase 6's exit checks
+are not all met and a later reader must not mistake acceptance for satisfaction.
+
+**What is true.** A complete `make check` is green: lint, mypy over 227 files,
+2899 tests, 21 race tests, bandit, pip-audit, gitleaks, the frontend half, the
+image half under pinned Trivy 0.70.0, and the production smoke stack on three
+engines. Seven authorised live runs were performed against a real provider and
+every one of them is recorded in `qualification/vmo2-fy2025/RESULT.md` with its
+charges, generation ids and outcome. Run `42e17048-8b50-48cc-94ff-833d894a68cb`
+produced the first `qualification_performed.complete` snapshot: route COMPLETE,
+three artifacts, eight citations all re-located, the citation key met, the
+readiness key met, every declared conclusion met.
+
+**What is not true, and is being accepted anyway.**
+
+1. **No verdict exists.** `qualification_verdicts` is empty in every run
+   database. Phase 6 item 3 wants an authenticated review verdict over exact
+   performed evidence; nobody has signed one. Nothing in this repository may
+   describe any build, model or pathway as QUALIFIED.
+2. **The one complete snapshot is pinned to a retired build.** It was performed
+   under `a43cb903`; §61 moved the bundle to `cdea0c9f`, so that run refuses
+   `ORCHESTRATION_BUILD_MOVED` on re-proof. There is no complete snapshot on the
+   build the tree now carries.
+3. **CP-5 does not currently complete on this corpus.** Run `36d87283…` refused
+   it three times for writing "insufficient information" and "not calculable
+   from provided materials" in a column its own contract calls critical — the
+   honest answer, refused. Deferred by this decision, not solved.
+4. **Phase 6 item 4 wants qualification on every route intended to be
+   advertised.** One pathway, `LITE_CREDIT_22 / LITE_EARNINGS_UPDATE`, has been
+   run. The other seventeen have not.
+
+**What the deferral commits to.** CP-5 is revisited once the other modules are
+deployed. The mechanism is known and recorded in `CLAUDE.md`:
+`disqualifier_exempt_columns` already exists and T5B.6 uses it, so the question
+is which of CP-5's status columns should carry it. That is a bundle change and
+needs its own authorisation under §61's precedent.
+
+**Standing constraint.** This entry is an acceptance of a phase, not a
+qualification of a build. The guardrail in `docs/REPAIR_PLAN.md` — no shipping
+unqualified pathways behind a generic success label — is unaffected by it, and
+any surface that reports qualification status must continue to report that
+there is none.
+
+## 2026-09-16 §63 — CP-5 may say a claim is not calculable: T5B.5's status columns exempted
+
+§62 deferred CP-5 until the other modules were deployed. On 16 September 2026
+the owner instructed that its completion be resolved now, which supersedes that
+deferral, and authorised **one** further edit to `vendor/deploy-v/` under §61's
+precedent — this one and no other. Upstream `github.com/EricMG13/Deploy-V@c4d2e356`
+does not carry it; the vendored tree is that build plus §61's two changes plus
+this one, and the next upstream pull either carries all three forward or
+supersedes them with an entry here. The edit and the pins it moves landed in
+`bb47f12`; this entry is the record that was still owed when that commit was
+made.
+
+**The change.** In `skills/cp-5-evidence-trace-validator/SKILL.md`, register
+T5B.5's `disqualifier_exempt_columns` moves from `none` to `Status; Claim
+Status`. Nothing else in the file, and nothing else in the bundle, changes.
+
+**Why.** `full_run_disqualifiers.critical_cell_values_casefold` lists
+`insufficient information`, `not calculable from provided materials`, `not
+assessable` and `unavailable`, and every column of T5B.5 — the calculation and
+assumption register — was critical with none exempt. T5B.5 is where CP-5
+reproduces a calculation and records what became of it, so "not calculable" in
+its `Status` column is the answer the runbook asks for when the sources carry
+none. Run `36d87283-ef92-49a2-a2b1-ef5928aaa5d2` refused CP-5 three times,
+each billed, with exactly `T5B.5 row 3: critical column 'Claim Status' holds a
+disqualifying placeholder 'Insufficient Information'` (attempts 1 and 2) and
+`T5B.5 row 2/3: critical column 'Status' holds a disqualifying placeholder
+'Not Calculable from Provided Materials'` (attempt 3). In each refused row the
+seven substantive columns were filled — the item, where it is used, the inputs,
+the formula or the reason there is none, the confidence, the credit relevance
+and the source trace — and the only cells that tripped the rule were the two
+that state the claim's standing. Handed two earnings releases, CP-5 said that
+covenant leverage is not calculable without the executed debt definitions and
+was refused for saying so; a validator that cannot write that there can pass
+only by overstating what the evidence supports. The precedent is in the same
+contract: T5.2 exempts `Evidence Status`, T5B.3 exempts `Classification` and
+`Claim Status`, T5B.6 exempts `Classification` — each the column that records
+the state of a thing rather than the thing.
+
+**Proved, not assumed.** The three refused bodies are retained in the run's
+blob root (`caos-qualify-9r7nyozi`, the `diagnostic_sha256` values in
+`qualification/vmo2-fy2025/v3-run7-capture.json`). Replayed through the
+bundle's own `completeness_check.check(skill_text, body, "CP-5")` — the call
+`server/methodology/handoff.py` makes — against the SKILL.md at `449750c` they
+produce one, one and two violations, the messages above verbatim; against the
+edited SKILL.md all three produce none. The same body with a placeholder moved
+into a substantive T5B.5 cell is still refused (`TBD` in `Formula or Logic`,
+`Unavailable` in `Source Trace`, `[Insufficient Information]` in `Item`), a
+T5B.5 with its rows removed is refused for having none, and `Not Assessable` in
+T5B.4's `Source Quality` — an unexempted register — is refused. No provider was
+called; the replay is against the checker and cost nothing.
+`tests/test_bundle_pin.py::test_cp5_exempts_only_its_status_columns_from_the_disqualifiers`
+holds the contract: exactly those two columns exempt, all nine still critical,
+the four phrases still in the blocklist, and a placeholder in any of the seven
+substantive columns of the LITE fixture's CP-5 handoff refused by name.
+
+**Judged and not widened.** Every one of the seventeen registers was read for a
+status-shaped critical column with the same problem. T5.1's `QA Status` and
+`Envelope / Headings Status` describe upstream handoffs that exist and take
+the QA vocabulary, T5.9's `Status` is an issue's open/closed state, and T5B.3's
+`Citation Present?` is a yes/no — none can honestly hold one of the four
+phrases. Two could: T5B.3's `Traceability Status` and T5B.7's `Assessment`,
+where "not assessable" is a plausible honest answer. Neither has been observed
+failing, and exempting a column on a hypothesis is how an exemption becomes the
+register; they stay critical, and the day a run refuses one of them for the
+honest answer is the day it gets its own line here.
+
+**What it costs.** An exempt column skips both the value blocklist and the
+substring rule, and the empty string is in the blocklist — so an empty `Status`
+or `Claim Status` cell now passes where it was refused before. That is exactly
+the property T5.2's, T5B.3's and T5B.6's exemptions already have, and the seven
+substantive columns still refuse an empty cell. Every run pinned to `cdea0c9f`
+— `36d87283…` and the re-run `RESULT.md` records against that build — now
+refuses `ORCHESTRATION_BUILD_MOVED` on re-proof, as §61 did to the runs before
+it. No live run has yet been made on the new build.
+
+**How the edit was made.** `verify_package.py --refresh` — the bundle's own
+procedure for an intentional edit — ran its 52 unit tests (2 skipped) and 10
+helper self-checks and regenerated `DEPLOY_V_INTEGRITY_v1.json`,
+`DEPLOY_V_MANIFEST.json`, `DEPLOY_V_BASELINE.json`,
+`CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json` and the two Copilot memory prompts; the
+only content that moved is CP-5's entry, 23,285 to 23,301 bytes. Build id
+`30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18`. The
+manifest the host verifies at rest is `DEPLOY_V_INTEGRITY_v1.json`
+(`server/methodology/bundle.py::MANIFEST_NAME`); its SHA-256 is now
+`8ccc8ed035745b5fb3a18d1176f0bfbbbc2c7e337357bbf25828c3611f3d110e`, still
+68,657 bytes, so §35's ceiling reasoning is unchanged. The six host pins moved
+with it: `tests/test_bundle_pin.py` (`BUILD_ID`), `tests/test_methodology_bundle.py`
+(build id and manifest digest), `tests/test_qualification_matrix.py`,
+`tests/test_loop_charges.py`, `tests/test_canonical_proof.py`, and
+`tests/test_delivered_authority.py`, which re-measures CP-5's delivered
+authority at 165,548 bytes — the sixteen bytes of the edit. `docs/REPAIR_PLAN.md`
+line 40 still names `cdea0c9f`; that file is the owner's and is not edited
+here.
+
+**Decided against, here.** Widening to the two candidate columns above, for
+the reason given. The `completeness_check.load_contract` half §61 left open —
+the frontmatter and document-substring disqualifiers the host never reads —
+is a different rule and stays open. The bundle's own `tests/` were not
+extended, being upstream files outside the authorisation; the named test lives
+in the host suite.
+
+## 2026-09-16 §64 — The three repair-plan findings that had no trace, traced
+
+`docs/REPAIR_PLAN.md` Phase 6's exit check wants each F01-F18 finding linked to
+its regression and fix. F05, F07 and F17 appeared nowhere in this tree outside
+the plan: the work was done under other names and the F-numbers were never
+carried into a commit message or a test. Two are finished and were merely
+unlabelled; the third is finished in part and its remainder is stated here
+rather than left to be rediscovered.
+
+**F05 — governed writes have two concurrency holes. Fixed; §32, `f4ff307`.**
+`server/store/audit.py::governed_write` takes `lock_case` before `_lock_head`
+and before `_require_standing`, and `members.py::grant/revoke` take the same
+lock, so a revocation and a governed write have one commit order and two first
+writes on a case serialise on the case row rather than on an absent audit head.
+A raw `UniqueViolation` is now `STORE_UNAVAILABLE` with rollback. The
+regressions are in `tests/test_case_ordering.py`, which proves real two-connection
+blocking through `pg_blocking_pids` and fails if the waiter never blocks:
+`test_membership_change_first_refuses_waiting_approval[revoke|downgrade]` for the
+first hole, `test_two_first_approvals_serialize` for the second.
+
+**F07 — PDF admission and word extraction are incorrect. Fixed; §44, §47,
+`83fe083`, `e292238`.** `server/evidence/pdf.py::_runs` ends a run on pdfminer's
+virtual whitespace, so `A B` no longer extracts as `AB`
+(`tests/test_pdf_extraction.py::test_words_separated_by_positioning_are_separate_tokens`,
+which returns `["AlphaBeta"]` if reverted). `extract.py::dispatch_by_content`
+reads the bytes rather than the name
+(`tests/test_extractor_dispatch.py::test_a_pdf_named_txt_is_still_read_as_pdf`,
+and at the harness boundary
+`tests/test_qualification_prepare.py::test_the_harness_admits_pdfs_through_the_pdf_extractor`).
+Encrypted and unreadable documents get typed codes, and rectangles are
+top-left in displayed space at every quarter turn
+(`test_rotated_page_rectangles_are_top_left_in_displayed_space`).
+
+**F17 — qualification can certify the wrong identity. Fixed in part.**
+
+- *Run-to-case binding:* `harness.py::_eligible` re-reads the pinned `RunInput`
+  and refuses `RUN_INPUT_INVALID` unless title, ceiling, profile, selection,
+  research, model-extension presence and the pinned source-set members all match
+  the case; `perform` binds provider and model identity.
+  `tests/test_qualification_execution.py::test_real_approved_input_transplants_are_refused`
+  substitutes each of ten bindings in turn and requires a refusal with no prompt
+  sent. Fixed, `1f86f02` and `f95e8ba`.
+- *Verdict time:* `read_verdict` refuses a naive `now` and a future
+  `decided_at`. Fixed, `373ee07`; `tests/test_qualification.py`.
+- *Preflight before spend:* `prepare` resolves every route and builds every
+  label before the first `create_case`
+  (`test_whole_set_pure_defects_leave_no_setup`). Fixed.
+- *Unbounded on-disk reads:* fixed today. `on_disk.py::_bounded_bytes` stats the
+  path, refuses anything that is not a regular file, and refuses a document
+  larger than `admit_pack`'s own ceiling before reading it -- so a multi-gigabyte
+  document is not read into memory to be rejected afterwards, and a FIFO at a
+  declared path no longer blocks the loader.
+- *No authenticated producer:* **open.** `record_verdict` exists, is bound and is
+  tested, and `server/api/reads/qualification.py` serves the consumer, but
+  nothing in `server/` or `scripts/` calls it and `reviewer_id` is a
+  caller-supplied UUID with no OIDC derivation. This is why §62 records that
+  `qualification_verdicts` is empty everywhere: there is no route by which a
+  reviewer can sign. Recorded in `CLAUDE.md` as the open half.
+- *Caller-dependent binding:* `build_matrix` still accepts any `runs` mapping and
+  checks only label presence; the binding lives in `_eligible`, its only caller.
+  Recorded in `CLAUDE.md`.
+
+## 2026-09-16 §65 — A reviewer can sign a verdict; the host still cannot call itself qualified
+
+F17's open half (§64) is closed by `server/api/commands/qualification.py`:
+`POST /api/v1/qualification/{evidence_sha256}/verdict`. Before this there was no
+route by which a person asserted a verdict, which is why §62 recorded
+`qualification_verdicts` empty everywhere and the final check listed it first.
+
+The body is the reviewer's six-binding document (`SignVerdict`, closed at the
+wire), and `read_verdict` remains its only reader, judged against the store's
+clock — so the moments travel as text and what the document *means*, a naive or
+future `decided_at` or a passed expiry, is decided in one place rather than
+twice. `reviewer_id` is `Actor.user_id` as the edge derived it, from OIDC groups
+in production and from the trusted header only in development, and from nowhere
+else; it is not a field of the request, and a body naming one is an undeclared
+field refused before a connection opens.
+
+The floor is `ADMIN`, by `at_least` over `_RANK`. A verdict is the first
+authority in this system that is genuinely account-wide: every other write by an
+`ANALYST` also requires standing on the case, and here there is no case for
+standing to attach to, so the global role would be the sole authority and the
+lowest writing rank has never been sufficient alone. Below the floor, and for
+evidence the store does not hold, the answer is one private 404
+(`QUALIFICATION_EVIDENCE_NOT_FOUND`), so a caller cannot probe which evidence
+digests exist — the same shape the read route gives a `READER`.
+
+`record_verdict`'s bindings — provider against the host-recorded `provider:model`,
+set digest, build, and `complete` — are not repeated here, only mapped to the
+wire. The write is one transaction and a refusal rolls it back.
+
+**What this does not assert.** Nothing here lets the system call itself
+qualified. The route records a person's assertion over evidence the harness
+already produced and `record_verdict` already binds, and the label a reader sees
+is still `current_verdict` re-validating that document. Two limits were recorded
+here and both are closed by Completion Phase 8 Task 8.3 (`cf3d805`): a second
+signature is now `VERDICT_ALREADY_RECORDED` at 409, mapped by the one-verdict
+constraint's declared name, and the write records a `command_requests` receipt
+under the nil scope in the verdict's own transaction, with the evidence digest in
+the request digest so one key replayed against other evidence is an idempotency
+conflict rather than that evidence's receipt. The same task added a binding this
+entry did not have: a verdict must name a model the runs recorded, which is
+"no run contradicts and one confirms" rather than "every run confirms", because a
+signable snapshot may hold a case whose declared refusal was met and whose run
+accepted nothing. *Retired in place, for the reason under §40 above.* Verified
+against a
+throwaway clone of the retained `caos_qualify_5a47243d…`; that database still
+holds no verdict, because signing the evidence behind a final check is the
+reviewer's act and not this change's.
+
+## 2026-09-16 §66 — The frontmatter disqualifiers stay unenforced, and why
+
+§61 fixed one half of the completeness contract and left the other open:
+`completeness_check.load_contract` reads only the `critical_cell_*`
+disqualifiers, never `frontmatter_limitation_flags`,
+`frontmatter_validation_warnings` or `document_substrings_casefold`, which every
+`SKILL.md` declares. It was listed in `docs/FINAL_CHECK.md` as owed. It was
+implemented, measured, and **rejected**; this entry is the rejection, because a
+declared rule nobody enforces needs a reason recorded as much as a rule that
+changes.
+
+**What the change did.** It read all three lists, from `full_run_disqualifiers`
+and CP-L10's `screening_run_disqualifiers`, and reported a handoff declaring one
+of those flags — or carrying one of those substrings in its unfenced text — as a
+completeness violation, which the host maps to `HANDOFF_INCOMPLETE`.
+
+**Why it was rejected.** Replayed against all 25 real handoff bodies this
+repository has retained, it newly refuses **seven**: CP-0 and CP-L10 from runs
+`33ca320e`, `729b0682`, `42e17048` and `54ec3752`. Every one of them for the
+same reason — `limitation_flags` declaring `SOURCE_LIMITED_NOT_COMMITTEE_READY`.
+Two of the seven are the accepted artifacts of `42e17048`, the first complete
+qualification snapshot this project produced.
+
+That flag is *true* of this corpus. Two earnings releases are source-limited and
+are not committee ready, and a module saying so is doing its job. Refusing a
+handoff for an honest declaration about its own evidence is exactly the defect
+§63 had just repaired in CP-5, where "not calculable from provided materials"
+was refused in the same spirit. The bundle's list conflates a **fixture** marker
+(`INTEGRATION_FIXTURE_ONLY`, `PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN`,
+`SYNTHETIC_FORWARD_ASSUMPTIONS`) with a **thin-evidence** marker
+(`SOURCE_LIMITED_NOT_COMMITTEE_READY`); only the first is a completeness
+question. Honouring the list whole refuses honest work, and honouring it in part
+would be the host choosing which of the bundle's declared rules count, which
+invariant 4 forbids.
+
+**And the rule is already enforced, in the right place.** `limitation_flags` is
+projected by `server/methodology/handoff.py::Projections` and is one of
+`matrix.PROJECTION_FIELDS`, so a qualification key can assert on it directly —
+visible to a reader, checkable by a set, and no refusal. A flag that says "not
+committee ready" belongs in what a reader is told, not in whether the document
+parses.
+
+**What stays open.** The conflation is the bundle's, and the honest fix is
+upstream: split the fixture markers from the evidence-status markers so the
+first can be enforced and the second projected. Recorded in `CLAUDE.md` as a
+gap against the bundle rather than against this host.
+
+**Corroboration.** The one `document_substrings_casefold` hit across every
+retained body was a CP-5 describing an upstream as "LITE, preliminary and
+source-limited" — an accurate description of another module's output, which is
+the same conflation seen from the other side.
+
+## 2026-09-16 §67 — The insufficient-evidence case is demonstrated through the built UI
+
+`docs/REPAIR_PLAN.md` Phase 6 asks that "a real PDF case and a deliberately
+restricted/insufficient-evidence case are demonstrated through the
+production-built UI". The PDF half was met by the journey's mixed text-and-PDF
+pack and its citation-highlight check. The second half was not, and a test named
+for the reader-role RESTRICTED state of the qualification strip was easy to
+mistake for it — that is a permission state, not a run whose evidence was thin.
+
+`frontend/tests/journey/journey.spec.ts` now carries *"journey: an
+insufficient-evidence run ends BLOCKED and is shown as such, not as success"*.
+It admits a deliberately thin pack, pins the input, takes both gates, starts the
+run, and waits for the route's own rule to end it: the fake provider returns a
+validated `Blocked` QA verdict, so the run ends BLOCKED by
+`runtime._end_blocked` rather than by an error. It then asserts what a person
+sees — the run page reads BLOCKED and **not** COMPLETE, while the two upstream
+nodes that did produce artifacts read COMPLETE.
+
+That last pair of assertions is the point. A blocked run must not be presented
+as a finished one, and must not be presented as a failure either: the modules
+that answered did answer. Under `make smoke-production` it runs against the
+production image through the real edge on all three engines — 15 journey tests
+each, where there were 14.
+
+The case is a one-note pack with no covenant certificate
+(`tests/journey/pack.py::insufficient_pack`), and the journey worker keys its
+answer on the evidence the run pinned rather than on a flag: that document's
+digest gets the Blocked verdict, the certificate's gets `Passed`. So the case is
+about the evidence, one worker serves both journeys on one stack, and no model
+is called.
+
+**Driving it found what reading had not.** The exit check is met — the status
+cell, the case register's tag and the handoff count are honest, and those are
+what the test asserts. But `node_states` is recomputed from accepted artifacts
+alone, and a validated Blocked accepts nothing, so CP-5 comes back `RUNNABLE`
+and the workspace draws it pulsing "in the frontier" beside a `Status` of
+BLOCKED; and the analysis document carries no run status at all, so that page is
+indistinguishable from a run still in flight. Nothing on either page names the
+verdict. Those two are recorded in `CLAUDE.md`'s Phase 9 ledger with their
+upgrade — the run document carrying the blocking node, the analysis document the
+run status — and are deliberately left unasserted rather than asserted as though
+they were correct. A test that asserted them would pin the misleading behaviour
+in place.
+
+## 2026-09-16 §68 — Why a run ended BLOCKED is recorded by the transition, not re-derived
+
+**Context.** Two commits made a BLOCKED run *look* blocked: nothing is drawn
+running on an ended run (`093828f`), and the analysis page says the run ended
+rather than "pending" (`78b1e61`). Neither page said *why*. On the
+insufficient-evidence journey a reader saw BLOCKED, saw CP-5 "did not run", and
+was left to infer that CP-5 was the cause — which is backwards. CP-5 ran, and
+its answer was a validated `Blocked`. `node_states` is recomputed from accepted
+artifacts (invariant 10) and a Blocked verdict accepts nothing, so the node's
+state is RUNNABLE and always will be. The state is right; it cannot carry the
+cause, and nothing else on the wire did.
+
+**The obvious shape, and why it does not work.** The fact exists at the moment
+the run ends: `runtime._end_blocked` asks `blocked_verdict`, which re-derives
+the verdict from the stored bill and response body through `replay_billed`,
+the same reader crash recovery uses. The first design was for the run document
+to do the same. It cannot. `replay_billed` judges an answer through
+`check_attempt`, which refuses `RUN_NOT_RUNNING` once the run has ended — and
+takes the run's row lock to say so. That is not an accident to be worked
+around: the replay is an execution-path check whose identity comparisons
+(`call_time_identity`, `_assert_originals`, the lineage check) hold the world
+still while the run is live. After the run, a source may be withdrawn
+(invariant 1) or the bundle moved (invariant 4), and a reader that re-derived
+the verdict would refuse the whole document over a fact that had not changed.
+Why a run ended is a fact about the moment it ended, of the same kind as
+`runs.status`, and it belongs beside it.
+
+**Decision.** `block_run` takes `verdict`, the attempt whose validated Blocked
+answer ended the run, and `_transition` writes it to `run_blocking_verdicts`
+(migration `0021_blocking_verdicts.sql`) in the transaction that moves the
+status and appends `RUN_BLOCKED`, riding the same conditional update — zero
+rows moved, nothing recorded. The row is immutable (triggers, as the store's
+other records), at most one per run (the primary key), and only an attempt of
+that run: the insert selects the attempt through its own `run_id`, and
+anything else refuses `ATTEMPT_NOT_FOUND` with the whole transaction rolled
+back, so a run is never ended with a reason that names somebody else's answer.
+Both paths that act on a Blocked verdict record it — the live one
+(`_end_blocked`) and the replayed one (`_settle`, a crash in the commit gap) —
+and `blocked_verdict` returns the attempt rather than a bool, since the caller
+now records which answer it was. The end-of-loop path, §39's empty frontier
+with required work unfinished, records nothing: no node's verdict ended it.
+
+**The wire.** `RunView.blocked_by: BlockedByView | null`, where the view is
+`{route_node_id, module_id, attempt_id}`. Nullable, and the docstring says why:
+a run ends BLOCKED two ways, and the wire must not claim a blocking node when
+the frontier emptied and none exists — the two are different things to a
+reader. `reads/run.py` reads the row only on a BLOCKED run with a pinned route
+(`BLOCKED_BY_IO = 1`, measured in `test_run_section.py`; `IO_BUDGET` moved by
+one), resolves the module through the immutable pinned route, and refuses
+`ORCHESTRATION_NODE_NOT_IN_ROUTE` (503) for a recorded attempt at a node the
+route does not carry — rows this server wrote disagreeing with pins it wrote,
+served as a fault rather than under a guessed module. The verdict's *text* is
+not on the wire. It lives in an unaccepted attempt's body that passed
+validation and not acceptance, and nothing serves un-accepted provider text.
+The pinned key sets, the TypeScript mirror, the committed `schema.json` and
+every fixture carrying a run body moved with it; the seven fixtures carry
+`null`, since none is a BLOCKED run.
+
+**The page.** The graph draws the blocking node `RUNNABLE · BLOCKED THE RUN`
+in the run's own tone (CRITICAL), with the reason `answered Blocked · ended the
+run`; its detail says the same and marks the attempt `BLOCKED · NOT ACCEPTED`
+beside the verdict rather than instead of it; the run panel gains `Blocked by:
+CP-5 answered Blocked on attempt 1 · <node>`, or, on a run the frontier
+emptied, `no node's verdict — the frontier emptied with required work
+unfinished`. Every one of those reads the wire's `blocked_by`; none is inferred
+from an unaccepted attempt, which a node the run never reached holds too. In
+passing, the graph's state word no longer says FRONTIER on an ended run — the
+defect `093828f` fixed in the detail had been left in the state word.
+
+**What this does not do.** The analysis page still lists CP-5 under "Nodes that
+did not run": `AnalysisBody` carries no `blocked_by`, and the Model section
+derives its body from it. Recorded in `CLAUDE.md`'s Phase 9 ledger with the
+upgrade, which is the same field on that body. The stored verdict is served,
+not re-verified, by the reader: what makes it trustworthy is that it was
+written by the transition that had just re-derived it, under the row lock, in
+the same transaction as the status — the same trust `runs.status` itself rests
+on, and no less.
+
+**Tests.** `test_a_validated_blocked_handoff_ends_the_run_blocked_without_retry`
+and the crash-recovery test assert the row names CP-5's attempt on both paths;
+`test_a_blocking_verdict_names_only_an_attempt_of_the_run_it_ends` is the store
+guard; `test_a_node_the_gate_blocked_costs_no_call_and_no_charge` asserts no
+row on the empty frontier;
+`test_the_run_document_names_the_node_whose_blocked_verdict_ended_it` and
+`test_a_run_the_frontier_emptied_names_no_blocking_node` are the document, with
+the IO pinned; the two workspace unit tests cover the helpers and the section;
+and the insufficient-evidence journey asserts the node, the detail, the attempt
+row and the run panel through the production image on three engines.
+
+## 2026-09-17 §69 — Phase 6 signed off, and what that signature is not
+
+The owner signed `docs/FINAL_CHECK.md` on 17 September 2026. §62 had accepted
+the phase with its gaps stated; this is the sign-off over the account of it,
+after the work of 16 September closed four of the seven items, restated two that
+were never work, and left one.
+
+**What it asserts.** That the final check is an accurate account and that its
+items are accepted as stated: a complete green `make check`; eleven authorised
+live runs at `$7.75`, each recorded with its charges and generation ids,
+including the failures; and one `complete` snapshot, run
+`62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`.
+
+**What it does not.** It is not a qualification verdict. A verdict is a signed
+document over exact evidence, bound to provider, set and build, recorded through
+the route §65 built by an authenticated `ADMIN` whose identity the host derives.
+`qualification_verdicts` is empty in every database, including the one holding
+the complete snapshot. No build, model or pathway is QUALIFIED, and signing this
+page did not make one so.
+
+**One item stays open.** One pathway of eighteen is qualified. The other
+seventeen each need an answer key authored from their own documents before their
+run, and several need evidence this corpus does not hold — `CP-4` wants executed
+debt documents, `CP-2D` a cash-flow pack. That is a corpus-and-answer-key
+programme, not a run, and no amount of spending shortens it.
+
+**The signature block is recorded, not derived.** The host vouches for nothing
+in it: the identity is the owner's configured git identity, written down on
+their instruction, and theirs to correct.
+
+## 2026-09-17 §70 — The audit remediation's first wave: a read takes no lock, a tokenless API grants no role, and four boundaries answer in their own words
+
+`docs/reviews/2026-09-17-gemini-audit-adversarial-review.md` re-verified a
+third-party audit against this tree and promoted three findings to critical.
+This entry records the six changes that answer them, and what each one gave up.
+The plan is `docs/superpowers/plans/2026-09-17-audit-remediation.md`.
+
+### 70.1 Section reads never take the case lock
+
+`server/api/reads/reports.py::_read` took `lock_case` — `SELECT … FOR UPDATE`
+on the case row — for the whole of a Report or Committee read, so every
+governed write and every worker transition on that case waited behind a `GET`
+for the length of its live proof: both blobs, the identity rebuild, the vendor
+validator per node, and the re-anchoring of every recorded citation. A read is
+not a governed write. It commits nothing, it appends no audit event, and no
+reader of the store can tell the lock was ever held. It is removed, with the
+second `standing_of` that existed only to re-read standing after waiting on it.
+
+**What replaces it, stated precisely, because the first draft of this entry
+overclaimed.** The served payload is digest-bound on *both* paths, by two
+different comparisons in two modules: `reports.py` compares
+`sha256(prove_revision(...))` against the revision row's `payload_sha256` for a
+frozen revision, and `server/deliverable/receipts.py` makes the same comparison
+for a filed one, which the frozen path never reaches. A mixed-snapshot
+derivation can only produce bytes that *differ*, so the failure direction is
+refusal, never a wrong document. The Committee publication envelope — state,
+signers, freezer, filer — is covered by no digest at all; it is protected
+instead by single-statement reads and fail-closed cross-checks, and no ordering
+serves an internally inconsistent envelope. A filing landing after the
+publication read serves `frozen` for a now-filed revision, which is stale by at
+most the read's length and identical to the read having returned a moment
+earlier.
+
+**Accepted cost.** The audit-head comparison now spans snapshots, so *any*
+governed write on the case committing mid-read — not only a freeze or a filing,
+because `governed_write` appends to the chain unconditionally — makes the read
+refuse `DELIVERABLE_PAYLOAD_INVALID` where it previously waited. The same
+construct exists a second time on the filed path in `receipts.py`. This is
+fail-closed and recoverable: the workspace offers an explicit reload, and a
+re-read succeeds. A revocation can also now commit mid-read, so a caller whose
+membership is revoked during the live proof is still served — which makes this
+read consistent with `analysis.py`, `upload.py` and `run.py`, all of which read
+standing once without a lock and always did.
+
+`IO_BUDGET` falls by three round trips per served path, not two: `lock_case`
+costs its isolation assertion as well as its `FOR UPDATE`, and the duplicate
+standing read is the third. `{"report": 52, "committee": 63, "frozen": 57}`
+becomes `{"report": 49, "committee": 60, "frozen": 54}`, measured against the
+declared-I/O test rather than fitted to it.
+`tests/test_postgres_races.py::test_a_report_read_never_blocks_a_governed_write_on_its_case`
+proves it on two connections: while the read is inside its unit, a second
+connection's `FOR UPDATE NOWAIT` on the case row succeeds. It failed
+`[False] == [True]` against the code this entry replaces.
+
+`read_filed_receipt`'s and `prove_revision`'s docstrings said the caller holds
+the case lock. They now say the caller owns its own unit, that a write caller
+holds the lock and a section read holds none, and that the head comparison is
+therefore a check across snapshots. The first of those docstrings was
+load-bearing: it was the only place saying what made that comparison sound.
+
+### 70.2 A tokenless API believes no groups header — superseding §53.3
+
+§53.3 said `actor_from_headers` believes `x-caos-role` only when the switch is
+`1` and no edge token is set, *"otherwise the role comes from groups"*. That
+"otherwise" included the case with no edge token and no switch, so a process
+started without `CAOS_EDGE_TOKEN` derived a caller's global role from an
+`x-forwarded-groups` request header with no opt-in at all. Any peer that passed
+the loopback and Host checks could assert `caos-admins` and be ADMIN, and
+`x-caos-user` is trusted verbatim in that mode, so the subject came free with
+it. The documented deployment is an authenticating edge that sets both and a
+private listener, and a remote peer is refused before identity — but the switch
+that exists to be the opt-in protected only the third header, which is the
+narrower one.
+
+**The rule now.** With an edge token set, the role comes from groups, as it
+always did, and the switch is never believed whatever it says. With no token,
+the role comes from `x-caos-role` when the switch is `1`, and is READER
+otherwise — never from groups. The token branch is first, so the switch cannot
+win in edge mode. The local developer loop is unaffected: the dev proxy sets
+the subject and role headers and never groups, and `.env.example` already
+carried the switch.
+
+**What survives, which this entry did not say.** The rule fixes the *role*. The
+*subject* is still `x-caos-user` taken verbatim in tokenless mode -- it is
+parsed as a UUID and believed. Writes are closed, because every governed
+command refuses a global READER, but per-case standing resolves from that
+subject, so a peer that passes the loopback and Host checks and knows a
+member's UUID reads that member's cases: sections, the event stream, evidence
+pages and the deliverables. That is read-only and it needs the host itself, not
+the documented image. The plan's deferred table rejects a signed-assertion edge
+on the grounds that "C3's one-line fix removes the only unrecorded hole"; it
+removes the role hole, and this is the one the sentence overlooked. Recorded in
+`CLAUDE.md`'s known gaps at the phase adversarial audit, which found it.
+
+**What this is not.** No test in the tree asserts the new rule over HTTP. The
+HTTP escalation test reads as though it does, and does not: under the switch it
+passed identically before this change. Exactly one test fails if this change is
+reverted, and it is a unit test on `actor_from_headers`. That is acceptable
+because that function is the single funnel — it is the only producer of an
+`Actor`, and the groups header is read for authority nowhere else — but the
+guarantee rests on that structural fact, not on coverage.
+
+Nine existing tests were rewritten, and a tenth in a second round. Four of them
+had been hollowed out rather than broken: they still passed, for reasons their
+names no longer described. Three suites' `caos-admins` row was the only
+remaining proof that a global ADMIN without case standing still gets the
+private 404 on the event stream, the analysis section and evidence pages; under
+the new rule that row became a duplicate of the plain-stranger row, and each
+was restored to assert its property again.
+
+### 70.3 One outcome record per accepted node, less one that is still there
+
+Every accepted node recorded its provider call's outcome three times: in the
+executor immediately after the call, again in the frontier loop, and again
+inside acceptance. The second was a knowing no-op that still cost a `COMMIT`
+and took `cases` and `runs` row-exclusive — twice per accepted node, against
+the lock every governed write on that case needs. It is deleted.
+
+Nothing about recovery moves. The bill, the diagnostic and the single
+`CALL_OUTCOME_RECORDED` event are committed by the executor before the loop
+resumes; `replay_billed` reads exactly those rows; the lease is fenced inside
+`_accept_artifact`; and `CALL_OUTCOME_LEGACY` reaches `_legacy_replay` more
+readily than before, since the deleted call let that refusal escape ahead of
+acceptance. The strongest statement is one of ordering: `_accept` commits the
+bill before `_accept_artifact` is entered, so an unbilled accepted artifact is
+impossible by construction rather than by a provider's good behaviour.
+
+**Two remain, not one, and the heading says so now.** `server/store/runs.py`'s
+`_accept` still records beside the executor's authoritative call. It is not
+free -- it goes through `committed_unit`, `_locked_attempt` and `lock_run`, so
+it costs a `COMMIT` and takes `cases` and `runs` row-exclusive, which is the
+cost W1 complained of. It is kept because it is load-bearing: it is the
+`CALL_OUTCOME_LEGACY` replay detector, and it is what makes the
+bill-before-accept ordering this entry leans on true. So W1 is closed by one
+deletion of three sites, not by reduction to one. Corrected at the phase
+confidence review, which found the heading claiming more than the body.
+
+**What is given up.** The loop no longer enforces that a returned call was
+billed; each `Provider` owes it, and that obligation is now a docstring plus
+its tests. For every implementation that ships it holds structurally -- but not
+for the reason this entry first gave. It said `check_call` refuses a second
+recorder, which is true and is *at-most-once*: it cannot make a provider bill
+at all. What actually holds the obligation is `execute_handoff` calling
+`record_outcome` unconditionally, ahead of every post-call refusal, on a path
+that cannot return with a `None` charge. The conclusion stood; the mechanism
+named did not support it. Corrected at the phase adversarial audit. The cost of a future implementation
+forgetting is not a refusal: a provider that returns without billing and then
+crashes before acceptance leaves no `call_outcomes` row, so neither
+`replay_billed` nor `unexplained_charge` matches, and the node is re-attempted
+and paid for a second time with nobody deciding to. The only upgrade that
+closes that window is a record adjacent to the call; nothing inside the
+acceptance unit can reach it.
+
+### 70.4 A store fault is not drift, and not a parked run
+
+Four boundaries let a raw error or an untyped exception past the typed-refusal
+edge, or gave a distinct failure the wrong name.
+
+`start_attempt` gains the `psycopg.Error` / `BaseException` pair every sibling
+in its file already had. `apply_schema` stops labelling an inner store fault as
+schema drift — but only for the two codes that mean the store could not answer.
+Everything else a migration refuses, including a malformed row that its own
+verification finds and raises from another module, is a drift finding and says
+so, because §20a says schema and PostgreSQL failures carry only that code. The
+worker prints an exception's class and its last frame's file and line instead
+of the class alone, and the PDF child's exit status now reaches the refusal
+path, so an interpreter that died on import is reported to the operator as such
+rather than as a corrupt document. The extraction deadline is computed before
+the child is spawned, so an already-expired deadline costs no interpreter
+start.
+
+The worker does **not** park a cancel that refuses a store fault. That was
+prescribed in the plan and was wrong: `cancel_run` cannot raise a stale
+terminal at all, so the reachable refusal was the transient one, and parking it
+would turn a run that heals itself — released, the lease left to expire, the
+run reclaimed, the cancel retried — into a stop an operator must requeue by
+hand. It takes the back-off the worker already gives that class. `cancel_run`
+refuses three classes and no others: a store fault, `LEASE_NOT_HELD` from its
+lease fence, and `RUN_NOT_FOUND` for a run row that is not there.
+
+Nothing any of these prints can carry document-derived text: a SQLSTATE class,
+a refusal code, an exit status, a file and a line. The frame's filename is a
+host path even for vendored code, which is compiled under a fixed map rather
+than under any name a document or an admitter chose.
+
+### 70.5 Every refusal code has a status
+
+`server/api/app.py` looked up a refusal's HTTP status with a `400` default, so
+75 of the 122 declared codes answered 400 by falling through rather than by
+decision, and the next code added would have joined them silently. The table is
+now total and the lookup is unguarded; a test compares its keys against the
+live enum in both directions. No status moved: the 47 codes that had an entry
+keep it, and the 75 added are 400, which is what they already answered.
+
+This encodes today's behaviour rather than judging it. Several of the added
+codes are store or bundle faults by nature, and whether they should answer 503
+or 500 is a separate decision — one the table now makes answerable in one
+place, with a test that fails the day the set drifts. Twenty-two of the 23
+codes served 503 today are permanent rather than transient, and no
+`Retry-After` is emitted anywhere.
+
+A store outage while a reviewer signs a qualification verdict no longer answers
+400. The duplicate-signature case keeps `VERDICT_BINDING_INVALID`; every other
+driver error on that route is `STORE_UNAVAILABLE`, and the three reads that ran
+outside the handler — the clock, the evidence lookup and the evidence record —
+are inside it.
+
+## 2026-09-17 §71 — The audit remediation's second wave: one citation rule, one query for a run's evidence, one token index
+
+Wave 2 of `docs/superpowers/plans/2026-09-17-audit-remediation.md`, answering
+the second critical finding of
+`docs/reviews/2026-09-17-gemini-audit-adversarial-review.md` and two of its
+warnings. **Every prompt identity in the system moves with 71.1.**
+
+### 71.1 The citation-candidate mechanism is retired, and the prompt states one rule
+
+`citation_candidates` kept the three longest anchorable lines of each page and
+marked every other delivered line `citation_candidate: false`. The final check
+then told the model two things at once: use only lines the host flagged, and
+cite the lines that support the claims you wrote. On a filings page the three
+longest lines are boilerplate, so for numeric evidence those sentences were
+jointly unsatisfiable — the phase-6 confidence review measured 93 flagged lines
+of 1,751 anchorable ones. Nothing enforced the flag: a model that ignored it
+was accepted and a model that obeyed it was refused. The flag also rode inside
+the evidence block that the tag rule tells the model is untrusted text, so a
+document line reading `citation_candidate: true` rendered indistinguishably
+from the host's own.
+
+The function is deleted, not orphaned. `_context` loses its candidate
+parameter and `build_handoff_prompt` is down to nine. `TokenIndex` and
+`verify_citations` are untouched: the candidate filter was the mechanism, the
+anchoring is the invariant.
+
+**The prompt now states the citation rule once.** Before, three host-authored
+statements disagreed about how much of a line to quote and where the quote had
+to appear, and a fourth named the flag. The single rule asks for the complete
+text of one evidence line, unique on its page, repeated verbatim in the body.
+
+That is deliberately **stricter than the host enforces, and the prompt no
+longer claims otherwise.** `verify_citations` accepts any whole-token run that
+is unique on its page and lies within one reading region — a fragment of a
+line, or a run spanning lines inside a region. **Two** enforced constraints the
+prompt does not state: the quote must lie within one reading region; and a
+citation may not be repeated, which `server/methodology/handoff.py`'s transport
+check refuses as `HANDOFF_MALFORMED` before form is judged. This entry first
+counted a third -- that ambiguity is judged over the whole page including
+undelivered lines -- and that one the prompt *does* state, in the words "that
+line must appear exactly once on its cited page". Corrected at the phase
+confidence review. A third constraint, finer and real: uniqueness is of the
+token run, not of the line, so a once-only line whose words also occur as a run
+crossing a line break inside the same region is refused `CITATION_AMBIGUOUS`
+although it satisfies every sentence the prompt states. The instruction makes no claim about strictness in either direction,
+because both the equality it first claimed and the one-sided bound that
+replaced it were false.
+
+**Every host section now opens and closes with a tagged marker**, including the
+gate module's final check, which previously carried none at all. The tag rule
+also now describes the markers the code emits: it used to say markers "end in
+the tag" when in every real marker the tag sits mid-line. The tag itself is
+unchanged — `sha256(front_matter + sections)[:16]`, a digest over content the
+analysed document is itself part of, which is what stops a document embedding a
+marker bearing its own prompt's tag.
+
+**Evidence is grouped.** One `source_id`/`page` header per group replaces three
+metadata lines per delivered block. Per-line overhead falls from about 84 bytes
+to about 2, plus about 57 bytes per page; a prompt's END markers add a fixed
+~250. So the evidence section shrinks for every page with at least one line —
+line *length* was never the variable, the old metadata being constant per block
+— but a prompt whose entire delivered evidence is **four lines or fewer grows**,
+by at most ~225 bytes at one line. No qualification set here is near that: the
+crossover becomes reachable only when per-node evidence selection narrows a
+delivery to a handful of lines, and the measurement is owed then, against the
+delivery row. These figures are arithmetic from the format strings, not two
+measured prompts.
+
+**The accepted trade.** Paying the header once per page means two consecutive
+document lines reading `source_id: …` and `page: …` are the nearest
+header-shaped text for every line that follows, where per-line headers
+contradicted a forgery immediately. It is fail-closed: a mis-paged citation
+refuses `CITATION_NOT_LOCATED` and takes the whole handoff with it, so the cost
+is a billed attempt burned, never a wrong artifact. Markers themselves cannot
+be forged, because of the tag.
+
+**Unmeasured.** No live run has answered this prompt. Whether a real model does
+better under one rule than under four is unknown, and the eleven recorded
+qualification snapshots are not comparable to anything taken from here on.
+
+### 71.2 A run's delivered evidence is one query, and a short read refuses
+
+Building any module's prompt read every delivered block one at a time — a
+six-table join per block, under the case lock — so a pack of twenty thousand
+lines cost twenty thousand round trips per node call. One statement now reads
+them all, proving clause for clause what the per-block join proved: the block
+belongs to a source the run pinned, through the pinned source-set version, and
+the source is still live.
+
+The count check is inside that statement rather than beside it, so the
+comparison and the rows come from one snapshot instead of two under READ
+COMMITTED. It refuses `EVIDENCE_NOT_AVAILABLE` unless the read returns exactly
+the blocks the pin captured — including when it captures none, which is the
+shortest short delivery there is and the case the first implementation let
+through. A store fault on that path answers `STORE_UNAVAILABLE`, which is what
+the delivery path already answered, rather than the evidence code the
+single-block reader used.
+
+`read_run_block` is **deleted**. It had no production caller left once the
+delivery path stopped using it, and keeping it would have left a second,
+independently maintained copy of a six-table join that must stay in step with
+this one. Its tests were not deleted with it: they assert properties of the
+join, which survived, so they were ported onto the batched reader — later
+admission, the four identity comparisons, equal bytes after the pin, argument
+validation before any SQL, owned-unit cleanup, and a case-binding test written
+as what each run delivers rather than as a foreign block refused.
+
+This closes the known-gaps clause that asked for "a batched block query when
+the first large PDF pack measures the hold". It arrived without waiting for the
+measurement. Two near-verbatim twins of this join remain, in the same module
+and in `server/evidence/page.py`.
+
+### 71.3 The deliverable reader shares one token index
+
+Of the three readers that verify accepted artifacts, the one used by the report
+and committee reads re-read the same source pages once per pinned node instead
+of once per run. It now shares a `TokenIndex`, as the proof reader already did.
+The index is per reader instance, not module-global: caching across runs would
+be a correctness bug, and caching three store results does not turn a
+re-derivation into a trust, because uniqueness, delivered-block membership and
+the rectangles are all still computed per citation.
+
+`IO_BUDGET` for those reads falls by six per path, measured. It is the second
+move of that number in one plan — §70.1 removed the case lock from the same
+reads — and the two are unrelated: the first dropped a lock and a duplicate
+standing read, this one deduplicates page reads.
+
+**A new cost, recorded rather than fixed.** The shared index holds tokens for
+every cited page of every node for the whole payload, where each node's index
+was previously collected when its proof returned. A wide route citing many
+pages of a large credit agreement now holds them all at once, on an API request
+path. The proof reader has shared this trade since it gained its own index.
+
+**On liveness, which the implementer's account was silent about.** The reads
+run at READ COMMITTED, so strictly the uncached version could have seen a
+withdrawal committed between the first node and the third and refused, where
+the cached one cannot. Three things bound it: the payload already reads the
+pinned live sources once for the whole unit, so the liveness view was fixed at
+the top of the read and the per-page recheck made the reader inconsistently
+fail-closed rather than reliably so; freezing and withdrawal both take the case
+lock through a governed write, so the governed path is serialised against
+withdrawal; and these reads write nothing, so the worst case is one read
+serving a payload whose source was withdrawn mid-read, with the next read
+refusing. The net is a more consistent snapshot, not a weaker check.
+## 2026-09-17 §72 — A BLOCKED run is answered by a successor, not by a resume
+
+**Context.** §39 called an empty frontier with unfinished required work
+*recoverably* blocked, and `CLAUDE.md`'s ledger carried the upgrade "not a
+resume" beside it without saying what the recovery then was. Two readings were
+possible, and the Completion Phase 7 adversarial audit got both: that a BLOCKED
+run would one day be moved back to RUNNING, and that it never would. §61 settles
+the first half for the case it covers -- a `CONDITIONAL` readiness verdict names
+a source, or the prepared representation of one, that the effective-source set
+does not carry, and is discharged only when that named source is supplied and
+CP-0 is re-run. A run's source set is pinned (`run_inputs.source_version`,
+invariant 1) and its route is pinned and digested (invariant 10). Supplying a
+source makes a new source-set version. So the discharge cannot happen inside the
+run that asked for it: a CAS back to RUNNING would reopen a run under pins that
+cannot change, and the run would then either execute against evidence its own
+pin does not name or refuse for the same reason it refused before.
+
+**Decision (a) -- resume is withdrawn in favour of a link.** Nothing moves a
+BLOCKED run to RUNNING, and nothing is planned to. That withdrawal is decided
+here and holds from here. What records the link instead is
+`runs.supersedes_run_id` (migration `0025_supersedes.sql`): nullable, never a
+run's own id (`runs_never_supersede_self`), at most one successor per
+predecessor by the partial unique index `runs_one_successor`, and written once
+by the insert that makes the successor -- the trigger
+`runs_supersedes_write_once` refuses every UPDATE that would change the column,
+to another run, to null, or from null onto a run after the fact, because a link
+written later would bypass the checks the insert's unit makes. `start_run` takes
+`supersedes` and, inside the caller's unit under the case lock, selects the
+target `FOR SHARE` so no transition moves it while the link is written; it
+refuses `RUN_NOT_FOUND` for a run of another case -- the same code, status and
+clearance an unknown run gets, so neither answer tells a caller the other run
+exists -- `RUN_NOT_BLOCKED` (409) for any status but BLOCKED, and
+`RUN_ALREADY_SUPERSEDED` (409) for the second successor of one predecessor,
+mapped from the index's declared name (`ONE_SUCCESSOR_PER_RUN`) and never from
+a driver message. `POST /api/v1/cases/{case_id}/runs` carries `supersedes` on
+every request, null for an ordinary run -- stated, not defaulted, because every
+v1 request field is required (`test_v1_command_models_are_closed_bounded_and_in_the_committed_schema`)
+-- and the audit payload binds it beside the selection and the route digest.
+`RunView.supersedes` and `RunView.superseded_by` serve both ends, read in one
+row for every displayed run (`SUPERSEDES_IO = 1`; the Run section's
+`IO_BUDGET` moved from 50 to 51, and a successor's `CREATE_RUN` costs one
+statement more than an ordinary run, `SUCCESSOR_RUN_IO`). The run panel names
+each end as a link to that run, and the create-run control offers `supersedes`
+pre-filled with the displayed run when it ended BLOCKED and nothing has
+answered it yet; the analyst may clear it.
+
+**What the control does not know.** The brief asked the offer to be made only
+when the case's current source-set version is newer than the run's pinned one.
+The run document carries no such fact: a source-set version is minted only when
+a run pins its input (`snapshot_in`), so a source admitted after the blocked
+run makes no new version until a successor pins, so the comparison as the brief
+worded it has nothing to read. It is **not built** rather than unbuildable: the
+run read already counts the case's live sources per request, and each version row
+stores its own member count, so "the live sources differ from the pinned set" is
+one more statement at most. Dropped because a prefill is a convenience and the
+control is correct without it, not because the fact is unreachable -- the
+distinction matters, because "cannot" closes a question that "did not" leaves
+open. The control offers the link on the run's status alone. The server checks nothing about the successor's source set either, for
+the reason under "What this does not do" below.
+
+The other half of what a reader needs is *which* source the verdict asked for,
+and that was being dropped: `parse_t8` returns `why_now_or_blocker` for every
+readiness row and `_readiness` kept only `(module_id, readiness)`.
+`Projections.blockers` now carries that cell for each row the gate did not clear
+-- CONDITIONAL or BLOCKED, the vendor's own two non-runnable statuses -- each
+through `BoundaryText` at `MAX_BLOCKER_CHARS` (512) and refused
+`HANDOFF_MALFORMED` past it, with no document text on the refusal (invariant 2).
+`NodeView.gate_reason` is that cell on the node it was written about, null for
+every node the gate cleared or never ruled on, and the node detail shows it as
+the gate's own statement. `matrix.PROJECTION_FIELDS` gains `blockers`, so a
+qualification key can assert which condition a gate stated.
+
+The record format does not move. `Projections` is serialised into the canonical
+record, so adding a field would ordinarily invalidate every stored record the way
+§45.4's v2 invalidated v1 -- and this field is empty for every non-gate record
+and for every gate record of a run that ran. `record_bytes` therefore omits
+`blockers` when it has no rows and `_decoded_record` reads its absence back as
+the empty tuple: one value, one spelling, so `record_bytes(decoded) == data`
+still holds, and `blockers: []` written out explicitly is refused as the
+non-canonical form rather than accepted as a second spelling.
+
+**Decision (b) is not taken here.** Whether a QA `Restricted` may release CP-6 as
+RESTRICTED is the owner's to decide and is recorded as owed. It is a different
+question with a different discharge: the QA_GATE case ends a run BLOCKED with the
+frontier emptied, no source is named and nothing a successor supplies changes the
+verdict -- the discharge there is a human decision under unchanged pins. The
+Repair Phase 2 ledger entry "Only a QA `Passed` releases CP-6" owns that case;
+this entry's withdrawal covers a readiness verdict and nothing else.
+
+**The link, though, is offered on a run's status alone.** This sentence said it
+was offered for the readiness case alone, which the code has never done and which
+the ledger delta beside it contradicted: `start_run` refuses any status but
+BLOCKED and reads nothing else, and the Run section pre-fills the control for a
+BLOCKED run with no successor yet. The host has no cheap fact to narrow on --
+`blocked_by` is `null` for both the readiness-CONDITIONAL case and the QA_GATE
+case, so telling them apart means reading the gate verdicts -- and a successor for
+a QA-blocked run is an ordinary new run an analyst chose, which nothing here
+should refuse. So: the *withdrawal of resume* is scoped to a readiness verdict;
+the *link* is not, and is built for the readiness case rather than restricted to
+it. Corrected by the Task 10.3 acceptance review, which read this sentence
+against `RunSection.tsx` and the store.
+
+**What this does not do.** A successor is an ordinary new run: it resolves and
+pins its own route, pins its own input over the case's sources as they are then,
+and pays for every node again. Nothing carries an accepted artifact across the
+link, and nothing checks that the successor's source set actually contains the
+source the predecessor's verdict named -- the host cannot read a model's prose as
+a source identifier, and inventing a match would be the host asserting a
+readiness ground of its own (invariant 4). The link says which run a run answers;
+whether it answers it is the reader's judgement. `AnalysisBody` carries neither
+field, as it carries no `blocked_by` (Phase 9's ledger entry owns that).
+
+**Tests.** `test_a_conditional_row_projects_its_blocker_text_bounded` and
+`test_a_blocker_cell_past_its_bound_refuses_with_no_document_text` are the
+projection and its bound; `test_blockers_are_read_only_from_the_cp0_artifact` is
+that it is read from the gate and nowhere else;
+`test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty`,
+`test_a_record_carrying_blockers_writes_them_and_reads_them_back` and
+`test_an_explicitly_empty_blocker_list_is_not_the_canonical_form` are the record
+format; `test_a_blocked_run_names_the_source_its_conditional_row_asked_for` is
+the document over a real blocked LITE run;
+the link's own are `test_a_successor_run_links_a_blocked_run_of_its_case` (the
+command, the column, the audit payload's binding, both run documents, and the
+serial `RUN_ALREADY_SUPERSEDED`),
+`test_a_successor_for_a_running_run_or_another_case_is_refused` (`RUN_NOT_BLOCKED`,
+the private 404 as one body for a foreign and an unknown run, nothing inserted,
+no receipt, and the refused request's key still usable) and
+`test_two_successors_for_one_blocked_run_commit_one` (the race on two
+connections, the index refusing the loser inside its own unit);
+`test_a_runs_predecessor_is_written_once_and_is_never_itself` is the trigger
+and the CHECK; `test_each_run_command_meets_its_declared_store_budget` measures
+the successor's extra statement. The workspace's
+`test_a_gate_condition_is_shown_beside_the_verdict_it_qualifies` names the gate
+condition on the node, `test_the_run_panel_names_the_run_a_successor_replaces`
+names both ends of the link in the run panel, and
+`test_a_blocked_run_not_yet_answered_offers_supersedes_prefilled` is the offer.
+
+## 2026-09-17 §73 — The audit remediation's third wave: one commit, one check, one parse, one serialiser, and 1,216 fewer lines of unreachable workspace
+
+Wave 3 of `docs/superpowers/plans/2026-09-17-audit-remediation.md`, answering
+six warnings of
+`docs/reviews/2026-09-17-gemini-audit-adversarial-review.md`. Every task in
+this wave removes a second copy of something rather than adding a mechanism,
+and each entry below says what the single copy gave up.
+
+### 73.1 Only the store package root commits a transaction
+
+Eleven functions under `server/store/` each spelled the same four-arm block:
+call the body, `conn.commit()`, convert `psycopg.Error` to `STORE_UNAVAILABLE`
+with no text, and roll back on any other exception including cancellation.
+Eleven copies of the rule that makes transactional pairing hold is eleven
+chances for one of them to drift. They now call `committed_unit`, one context
+manager in `server/store/__init__.py` with those same four arms.
+
+Eleven and not the seventeen the plan asked for. The other six roll back
+without committing: the same refusal shape wearing a different unit, and
+folding them in would have made the manager mean two things. **After the
+change no module under `server/store/` outside `__init__.py` calls `commit()`
+at all**, which is what makes the claim mechanical rather than a count —
+`test_only_the_store_package_root_commits_a_transaction` asserts it
+recursively against a fourteen-file floor, and names the three legitimate
+callers outside the package in its docstring so nobody widens the scope by
+accident.
+
+**Two arms were unpinned and now are not.** Nothing asserted that the commit
+sits inside the `try`, so moving it below the guard passed every test while
+making a failed commit raise raw driver text out of eleven money and audit
+paths; and the rollback arm was asserted by transaction status rather than by
+effect, so replacing it with a commit also passed. One test each, asserting by
+effect. They could not be one test: at a commit-time fault PostgreSQL has
+already aborted the transaction, so the rollback mutation is unobservable
+there.
+
+`server/store/work.py` gained `require_running`, which folds the run lock and
+the spend fence together. That also changed `start_attempt`'s `RUN_NOT_FOUND`
+path, which previously propagated with the transaction left open.
+
+### 73.2 One ten-step check of an accepted artifact, and the sibling check stays
+
+Three readers verified an accepted canonical artifact independently: the
+orchestration proof, the deliverable payload, and the runtime's accepted read.
+Ten steps each, in the same order, with the same refusal codes — and three
+places for one of them to fall behind. `server/methodology/verification.py`
+now holds `verify_accepted`, and the three are its call sites. Their genuine
+differences survive as parameters rather than being normalised away: whether
+citations are re-anchored against pinned evidence, which vendor authority is
+consulted, and which step the caller stops at.
+
+The refactor moved no assertion in any of the three readers' suites, which is
+the strongest available evidence that behaviour did not move: the only test
+file that changed is the new module's own.
+
+**One reachable code movement, kept and recorded.** A dual fault — a blob that
+will not read together with an attempt the store cannot rebuild — now answers
+the record-mismatch code rather than the older one. Both are refusals, the
+proof already ordered it that way, and nothing in the tree names the old order.
+
+**One defence was dropped in the first draft and restored.** The runtime's
+accepted read reached `SKILL.md` through `assemble_authority`, which as a side
+effect verifies every manifest file of that module; the shared step reads the
+one file. A reference file beside `SKILL.md`, tampered on disk under an
+unchanged manifest with a warm digest cache, would then have gone unrefused on
+the read that serves the frontier, the Run and Analysis documents and the
+matrix — not for the module about to run, whose every delivered byte the prompt
+still reads, but for an **upstream** module's siblings. It is not a hole in
+invariant 4, because a consumer's call does not use an upstream module's
+reference files. It was restored anyway, for a reason worth stating: with
+`verify_authority=False` the digests come from the cache, so the call costs
+exactly what the parent paid. The cheaper read was not cheaper.
+
+The restored call sits after the shared steps rather than at its old position
+before validation, so the record checks keep their precedence. The corner that
+gives up: a tampered sibling together with a Markdown that no longer validates
+answers the validator's code rather than `AUTHORITY_BYTES_MISMATCH`. A dual
+fault, both arms fail-closed.
+
+### 73.3 The readers take a row, not five fields
+
+Six functions across those readers took `run_id`, `route_node_id`,
+`attempt_id`, `artifact_sha256` and `record_sha256` as five positional
+neighbours of the same type. `AcceptedRow` — frozen, slotted — is one
+argument. Eight call sites pass every field by keyword, so the transposition
+risk this shape carried is now structurally absent rather than absent on
+inspection.
+
+The suppression budget did not reach the plan's number and could not:
+ruff's `max-args` ceiling here is five, keyword-only parameters count toward
+it, and raising the ceiling is forbidden. Four `noqa: PLR0913` markers remain
+on functions that carry a unit's handles, its row and its pairs.
+
+The floor moved from `> 100` against exactly 101 files to `>= 80`, because
+this same plan deletes files and an unrelated deletion would otherwise turn the
+budget red. What the budget *counts* changed too, at integration; §73.8.
+
+### 73.4 Identity is declared before the store, in one place
+
+Nine route modules hand-parsed a path id, six enforced case visibility with
+their own spelling of one rule, and five spelled the governed envelope — the
+digest, the governed write, the receipt — inline. `server/api/deps.py` now holds one parse and
+one visibility dependency; the six sites enforce one rule — live standing at or
+above READER, refused `CASE_NOT_FOUND`, before any byte is served — and two
+keep a folded query for I/O reasons.
+
+**The known-gaps entry this looks like it closes is not closed.** "Identity
+before the store rests on parameter order" asks for
+`dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
+puts at the front of the list whatever the parameters say. This task did not do
+that. It regularised the order and added a store-touching dependency that
+cannot be ahead of the actor even if a route declared it first, because its own
+signature resolves the actor before the connection — which makes the property
+hold more robustly while still resting on signature order. All twenty-one
+routes were enumerated individually against that claim. The upgrade clause
+stands.
+
+Four of the nine old parsers leaked the client's input onto the exception's
+`__context__`. The single parse raises outside the `except`, so none does.
+
+**One behaviour change.** `server/api/reads/run.py`'s ordering was irregular,
+so regularising it means a malformed run id is now refused before standing on
+that route. The answer carries no bit about whether the case exists, so it
+discloses nothing; it is recorded because it is a change.
+
+Every `GovernedAction` literal is byte-for-byte unchanged, so stored receipts
+still replay.
+
+### 73.5 One canonical JSON serialiser, and one file that must never use it
+
+Fifteen sites serialised JSON for hashing. Seven now call `server/digest.py`'s
+one helper with the four flags they already shared — `sort_keys`, compact
+separators, `ensure_ascii=False`, `allow_nan=False`. The other seven differ for
+reasons, and are left alone.
+
+The eighth is the reason this entry names the file. `server/calculators/
+cash_flow.py` is a **byte-pinned host extension**: `HOST_INTEGRITY_v1.json`
+pins it at 13,785 bytes under a digest, and any edit refuses
+`AUTHORITY_BYTES_MISMATCH`. Converting it broke the forecast extension, and the
+repair was to revert the file, **not** to regenerate the manifest — the
+manifest's own digest is pinned in `server/methodology/host_pin.py`, and
+`server/engine/route.py` writes it into a frozen route predicate covered by
+`route_digest`, so re-pinning would move every stored route pin carrying CP-CF.
+A host extension is not refactorable in place. That is the cost of pinning it,
+and it is the correct cost.
+
+Thirteen golden digests were computed before any edit and did not move; nine
+were reproduced from scratch in a bare interpreter holding no repository code.
+Three of the pins are blind to the flag they guard because their fixtures are
+all-ASCII; the forecast one matters, because a facility name can carry
+non-ASCII into those bytes.
+
+Four private cross-package imports were made public in passing, `_digest_of`
+and `_reported_charge` among them.
+
+### 73.6 The workspace loses 1,216 lines nothing could reach
+
+A reachability walk from `src/main.tsx` over the static import graph found 76
+reachable files and eight unreachable components — 992 lines — plus a helper
+module and three wire modules reachable only through a barrel export no live
+section imported from. All are deleted, with the test cases that existed only
+to name them. `shortDigest` moved to its intended home in the design system.
+
+`frontend/tests/unit/reachability.test.ts` is what stops the next orphan: it
+walks the same graph and fails on a file under `src/` nothing reaches. It walks
+`.tsx` only while the lint rule beside it walks `.ts` too.
+
+Nine rows of `docs/feature-status.csv` still cite deleted files.
+
+### 73.7 What the integration found that six green branches did not
+
+Recorded because it is the argument for the gate rather than a defect in any
+task. All six branches were independently green and all six overlapped work
+committed on the shared branch while they ran. Git reported four conflicts. It
+also merged **four breakages silently**, with no marker, each caught by lint or
+types over the combination and by nothing else:
+
+one module lost the driver import that another commit's new `except` clause
+needed; two test files named a symbol that a rename had made public; and one
+called a function with the five fields another task had replaced by a row. A
+branch cannot see either of these, because each is a disagreement between two
+commits that were never in the same tree until this merge.
+
+### 73.8 The suppression budget counts positional width, by the owner's decision
+
+Integrating the wave failed the argument-count budget, 53 markers against a
+ceiling of 52 whose own docstring said never to raise it. The rise was real and
+perverse. Two of the wave's suppressions sit on functions that each replaced
+several copies of themselves — the shared verification reader of §73.2, and
+the one governed envelope of §73.4, which five routes had been spelling inline
+while a module-local helper served the rest. The copies were never suppressed,
+so the budget never counted them: about 346 lines of duplication left the tree
+and the number went up by one.
+
+Raising it to 53 would have been a threshold moved to obtain a pass, which the
+engineering contract forbids, so the decision went to the owner. What was
+checked first, because a stale measurement is the rationalisation this rule
+exists to refuse: every one of the 53 markers was parsed and none was stale,
+and `governed` takes a connection plus seven keyword-only arguments against a
+ceiling of five, so no permitted move clears it.
+
+**The owner's decision was to change the unit.** Two candidates were measured
+and rejected before the one adopted. Charging only suppressions that are *not*
+shared — a suppressed function called from three or more other modules counting
+as consolidation rather than width — **rises** here, 47 to 49, because
+consolidating callers drains other helpers' caller counts and pushes three
+pre-existing shared functions across the threshold; it is unstable under the
+refactor it was meant to reward. And any unit defined over raw marker counts
+rises by construction, for the reason above.
+
+What is charged now is a function taking more than five **positional**
+parameters. That is the defect the rule exists for: a caller can transpose two
+same-typed neighbours silently, and cannot when the surplus is keyword-only —
+the exact property §73.3's narrowing established about its eight call sites.
+Clearing a charge by making parameters keyword-only is the fix rather than an
+evasion, which is the property worth having: gaming this metric means repairing
+the hazard.
+
+Positional width is **22 at the wave's base and 22 after it**. The wave added
+no new way to call anything wrongly.
+
+**The criterion that chose between the three is worth more than the unit it
+chose.** Two of the three were gameable in the direction of making the code
+*worse*: the caller-count unit rewarded the consolidation it was built to
+reward the opposite of, and a count of named parameters would have let a
+six-argument function go from charged to clear by becoming `(a, b, *rest)`.
+The surviving unit is the one where gaming it is the fix. A gate should be
+chosen by asking what its cheapest evasion does to the code, and kept only if
+the answer is "improves it".
+
+**The same class of error cost this wave an environment, and is worth the
+comparison.** `.gitignore` excluded `.venv*/` and `node_modules/`, both with a
+trailing slash, which matches a *directory*. An integration worktree reaches
+the interpreter and the packages through symlinks to the main checkout, and a
+symlink is not a directory — so the moment those paths became links the ignore
+stopped covering them, `git add -A` swept them into the tree, and the merge
+wrote the tracked links over the real ones, each resolving to its own path.
+Every pre-commit hook and the whole type gate run through them. The rule
+described the shape it expected rather than the thing it meant to exclude,
+which is what the suppression budget did when it counted annotations instead
+of hazards. Both rules now carry the bare form beside the directory form, and
+no tracked symlink remains in the tree.
+
+Every suppression is still parsed, and a marker ruff would no longer raise
+fails its own assertion, so the keyword rule cannot become a hiding place for a
+stale one. Both arms were mutation-checked. The test's docstring carries the
+old unit, its 52, and both rejected alternatives with their numbers, so the
+next reader does not have to reconstruct any of this.
+
+Two leaks of the counter were closed after the peer session named them, and
+neither moves the number today. A method's receiver is not an argument its
+caller passes, so `self` and `cls` are dropped as ruff drops them; the two
+constructors carrying a marker were each over-charged by one and stay charged
+either way. And `*args` is unbounded positional width that a count of named
+parameters reads as none, so it is charged outright — latent today, and the
+worse of the two, because it would have let a six-argument function go from
+charged to clear by getting strictly worse.
+
+**What the number hides is a finding of its own.** The 22 are not scattered:
+eighteen are under `server/api/` — the command handlers and the section reads
+— at six to nine positional parameters, and twenty-one of the twenty-two
+declare no keyword-only parameter at all. The other four are the proof and
+deliverable constructors, `store/runs.py`'s `_transition` and
+`evidence/page.py`'s `_frame`. The layer has not partially adopted the fix and
+run out of road; the pattern was never reached for. No task in this plan owns
+that layer, so nothing here changes it — it is recorded for the phase audit.
+
+## 2026-09-17 §74 — The audit remediation's fourth wave: an index, a seal checked once, an operator told the name, two shells and the residue
+
+Wave 4 of `docs/superpowers/plans/2026-09-17-audit-remediation.md`, answering
+the plan's remaining notes and one owner decision. Five tasks, each small; two
+of them changed something load-bearing and are the reason this entry is longer
+than its diff deserves.
+
+### 74.1 The directory's membership join has an index (migration 0026)
+
+`case_members`'s primary key leads with `case_id`, so the directory's join on
+the caller's `user_id` was served by scanning every membership row in the
+store. `0026_case_members_by_user` indexes `user_id`, partial on
+`revoked_at IS NULL` because a revoked membership lists nothing, so the index
+holds exactly the rows the directory reads.
+
+**The number this migration does not carry is `0022`.** The plan reserved that
+ordinal for this task, and the concurrent session landed `0024` and `0025` while
+the wave was in flight. `0022` and `0023` are now permanent gaps: `apply_schema`
+verifies an ordered immutable prefix, so a migration inserted below the applied
+head would not verify on any database already past `0025`. They stay gaps rather
+than being recycled, and a reader who notices should find the reason here rather
+than a number that means something different from what its position implies.
+
+The test asserts the plan reaches the index **and** that the condition is on
+`user_id`, because the index name alone would hold for an index of that name on
+any column. What it does not assert is a latency, and it asserts over a proxy
+query rather than the real statement, which carries a subquery, a lateral join
+and an `ORDER BY … LIMIT` under which the planner may legitimately drive from
+`cases` instead. The index is right for the shape this read has at scale; that
+the statement it was added for reaches it is not proven.
+
+### 74.2 The evidence seal is checked once per statement, not once per row (migration 0027)
+
+Admitting a document fired the immutability check of migration `0008` once for
+every row inserted. Measured before deciding, which the task was allowed to stop
+on: the store write for a 100,000-token document took **12.1 s**, six times the
+threshold at which the work was worth doing. `0027` makes the check an
+`AFTER INSERT … FOR EACH STATEMENT` trigger with a transition table, and both
+evidence writers use `COPY`.
+
+| | before | after |
+|---|---|---|
+| store write, 100k tokens | 12.1 s | 4.4 s |
+| seal checks, 10k lines | 30,001 | 2 |
+
+The call count was read from PostgreSQL's own function statistics rather than
+inferred from elapsed time.
+
+**The lock mode changed, and that is the part worth reading twice.** The trigger
+takes `FOR NO KEY UPDATE` where `0008` took `FOR UPDATE`. An `AFTER` trigger runs
+after its own statement's foreign-key check has already taken `FOR KEY SHARE` on
+the same `sources` row, so asking for `FOR UPDATE` is a lock upgrade, and two
+writers of one unsealed source deadlock instead of queueing — observed, before
+the mode was changed, not predicted after.
+
+The claim that nothing is let through was checked by enumerating every writer
+and every lock on a `sources` row from the live schema, and measuring the
+exclusion matrix rather than reading the documentation. Exactly four foreign
+keys reference `sources`. The seal is excluded by **lock order** rather than by
+mode: its own trigger is `BEFORE`, so its `FOR UPDATE` lands first. Withdrawal
+updates a non-key column and so takes an implicit `FOR NO KEY UPDATE`, which
+conflicts. The one exclusion given up is against a bare `FOR KEY SHARE`, which
+only a referencing insert's own check takes, and the one path that could reach
+it needs a committed seal that commits in the same transaction as the evidence.
+
+**That property was guarded in one direction only, and now is not.** The new
+concurrency tests prove the permissive direction, which any weaker lock passes
+automatically; replacing the mode with `FOR KEY SHARE` left every other
+assertion in the file standing. A test now holds an evidence statement open and
+requires a withdrawal of that source to block. It fails under exactly that
+weakening.
+
+**Two costs, recorded rather than fixed.** The statement's rows are materialised
+into a transition tuplestore that can spill past `work_mem`, a cost the row
+trigger did not have, bounded per document by the admission token ceiling. And a
+refusal now arrives after the statement's rows are written rather than before the
+first, so a sealed source's bulk insert writes its rows and discards them where
+it used to refuse at row one. Nothing on the admission path meets that, because
+a document's seal commits in the transaction that writes its evidence.
+
+*Upgrade:* a declared `work_mem` floor for the admission path, the day a document
+large enough to spill is admitted; and nothing for the refusal ordering, which is
+the price of checking once.
+
+### 74.3 An operator is told which variable is missing
+
+Three surfaces under-reported. The development doctor and `.env.example` did not
+name every variable the worker and the edge read, so an operator learned a
+variable existed by meeting its failure. The package verifier exited without
+usage when run with no argument. And the worker reported an unset price as a
+misconfiguration.
+
+The worker now prints the typed code with the **name** of the variable nobody
+set beside it, and never a value — `unset` can only ever hold the empty string or
+the module's own constant. The verifier gained a standard-library argument
+parser; it must stay standard-library only, which an AST test asserts and which
+was confirmed by watching that test fail with a third-party import inserted.
+
+Packages built from here archive the new verifier while older packages keep their
+own. Neither direction changes a verdict: the verifier's own bytes are never read
+into one, only its presence and its size bound, and both directions were measured
+— an old archived verifier over a new package, and a base-era verifier against the
+new host reader, both verifying.
+
+**What the completeness test is not.** It names five variables and would not
+catch a sixth. That is the shape the plan asked for and it should not be read as
+a gate. What does hold structurally is the neighbouring assertion that no
+variable's *value* is ever printed, which iterates the configuration sets
+dynamically and so covers every name added to them, including a real secret.
+
+### 74.4 Book and Admin are the shells the chrome suite already asserted
+
+The owner's decision D2. Both sections are specified and neither ever mounted:
+the section gate excludes them, so the surface never requests a document and the
+unavailable branch returns without invoking its children. 1,216 lines of
+components, helpers and wire modules are deleted, with the tests that existed
+only to name them, and the ledger provider stops wrapping every section. The
+implementation returns from git history the day either section is served.
+
+**Two things were deliberately not deleted, and the reason is a rule about
+gates.** `bind`/`release` in the authority machine, and the metric-passport
+overlay, both lost their only production caller. Both are the subject of a test
+pinned **by name** in the phase-exit gate, whose own docstring says the cheapest
+way to green that assertion would be to re-excuse the name — a gate turned off
+to make a gate pass. Deleting either is therefore a gate edit rather than a
+cleanup, and both sites now say so in a comment, because the next reader is as
+likely to delete them wrongly as to read the Book as served.
+
+An accepted Phase 4 exit-evidence record cites one of the deleted tests under a
+sentence claiming the dormant sections carry their fixes. It is **not** corrected,
+on the precedent this repository already holds for `docs/feature-status.csv`: a
+dated record whose evidence is edited later stops being a record of that date.
+It is carried into the handoff instead.
+
+### 74.5 Residue, and one duplication that is not one
+
+Five small things: a catalog loader spelled twice, a dead wrapper module, a route
+digest recomputed on a read that had already derived it, a lock that raised
+without ending its transaction, and one route serialiser apparently written
+twice.
+
+**The last is not a duplication, and finding that out was the task.** There are
+two byte forms — the digest's and the stored pin's — and they differ
+deliberately in row shape, edge order and predicate handling. **Both are pinned**,
+the stored one by every existing route row that must still read back. So only a
+field list is shared; unifying the forms would be a record-format version with no
+backfill, and was not taken unasked. Both forms were held unchanged by goldens
+computed at the base commit before any edit, and re-verified independently across
+every route the vendored catalog can resolve.
+
+Coercing predicates in the shared helper turned two malformed shapes the stored
+pin refuses into shapes it accepts. Two store-integrity tests named it, and it
+was fixed before the commit rather than after the review.
+
+The plan's instruction to import the catalog loader into a command module was
+**unimplementable**: a test bans that module for every command module. The loader
+lives beside the other vendor readers instead, which narrows the command module's
+import graph rather than widening it.
+
+`lock_run` now ends its transaction before raising, a change to a primitive with
+a dozen callers. Every caller was walked: the refusal propagates from all of
+them, the one that catches it re-raises, and the one that catches and continues
+rolls back first regardless.
+
+### 74.6 What the wave got wrong, and where
+
+Three of the five briefs were wrong, and all three were mine. One named a
+migration ordinal the tree had moved past. One prescribed an import a gate
+forbids. One described two pinned byte forms as one serialiser. None reached the
+tree: each was caught by an implementer doing the instruction as written and
+letting the suite answer, which is the right order and worth saying plainly,
+because the alternative — an implementer silently correcting a brief — leaves
+nobody knowing the plan was wrong.
+
+## 2026-09-17 §75 — A permanent fault answers 500; only a transient one says come back later
+
+Owner decision **D3**, and the reason it is a decision entry rather than a line
+in §70.5 is that **it was never put to the owner until the phase adversarial
+audit found it had not been.** D1 and D2 both reached the owner and are recorded
+(§71.1, §74.4). D3 lived in the plan's own deferred table, and the plan's
+self-review counted warning W5 as covered by "T5/D3". A self-review that counts
+an undecided question as covered is a gate that has stopped measuring. Put to
+the owner on 17 September 2026; decided: split, with `Retry-After`.
+
+### What was there
+
+Twenty-four refusal codes answered 503, **none** answered 500, and
+`Retry-After` appeared nowhere in `server/` or `frontend/src/`. Among the 503s
+were `BLOB_DIGEST_MISMATCH`, `ARTIFACT_RECORD_MISMATCH`, `AUTHORITY_BYTES_MISMATCH`
+and `HANDOFF_MALFORMED` — faults no retry can clear, telling a proxy to come
+back and try again.
+
+§70.5 made the status map total so that every code answered by decision rather
+than by falling through, and deliberately moved nothing. This is the move.
+
+### The classification, and why a near-total move is believed
+
+**One transient, twenty-three permanent.** The rule is one question per code:
+would retrying the identical request later plausibly succeed, with nobody doing
+anything in between? A fault only an *operator* can repair is not transient —
+the client retrying changes nothing.
+
+A rule that moves twenty-three of twenty-four is either a real finding or a rule
+applied without reading, and the two look identical in a diff. It was stopped
+on and re-read, and it is believed because **three records written by other
+hands for other purposes already said the same thing**:
+
+- `CLEARS`, the operator-facing clearance text, says "An operator must …" for
+  **eighteen** of the twenty-four and "Retry when the store answers" for
+  **exactly one**. It is fifteen distinct sentences over those eighteen, not one
+  rule stamped eighteen times, and it varies precisely where `_STATUS` was
+  constant — had the two shared a model, all twenty-four would have read
+  "retry".
+- §71.3, written weeks earlier by a different author, already recorded that
+  "twenty-two of the 23 codes served 503 today are permanent rather than
+  transient". It went uncited by the task and was found by the review.
+
+The finding underneath all three: **the 503 block was a blame judgement wearing
+a time status.** Every code in it meant "this server's fault, not the caller's",
+which is a true statement about *whose* problem it is and says nothing about
+*when* it clears. 5xx was right; 503 was the wrong 5xx.
+
+### Three adjacent entries, three justifications, one status
+
+`ROUTE_IDENTITY_INVALID`, `ROUTE_EDGE_UNSUPPORTED` and `READINESS_INVALID` sat
+together at 503 with three different explanations. The concurrent session that
+added the middle one **self-reported it as misfiled before anyone found it**,
+and described how: it wrote the justification for one answer and filed it under
+the neighbour's. The neighbour was wrong too. All three are permanent, all three
+now state the same time test, and `ROUTE_IDENTITY_INVALID` carries the history
+in a comment because it is the entry the copying started from.
+
+That is worth recording as a mechanism rather than an incident: an entry
+justified by its neighbour inherits the neighbour's error and hides it, because
+the second entry now looks corroborated.
+
+### What this does not fix, stated so the entry does not overclaim
+
+**The contract this establishes is narrower than "503 on the wire means come
+back later."** D3 fixed blame wearing time; it leaves **time wearing blame**
+untouched. Nine codes sit at 400 with retry-shaped clearances —
+`PROVIDER_UNAVAILABLE` says "Retry when the provider answers", `READINESS_INCOMPLETE`
+says "Retry the attempt", `INTERNAL_FAULT` says "Retry; an operator must
+investigate if it persists" — and the new partition test cannot see them,
+because it defines its universe as the codes already at 500 or 503.
+
+`INTERNAL_FAULT` is the sharpest case: it is 400 in `_STATUS` while
+`server/api/edge.py` answers 500 for it, so its only real wire status is
+outside the guard entirely, and nothing asserts the disagreement.
+
+So what holds is the narrower claim: **of the codes this table serves at 5xx,
+503 means come back later and 500 does not.** The 400 side is a separate
+question that has not been asked. *Upgrade:* put the retry-shaped 400s to the
+owner as D3's second half, and reconcile `INTERNAL_FAULT`'s two statuses first,
+because it is both the clearest instance and the one the guard cannot reach.
+
+`HANDOFF_MODULE_UNSUPPORTED` was escalated as possibly-4xx and is not: its 4xx
+twin already exists as `ROUTE_NOT_ENABLED`, 400, with a verbatim identical
+clearance, raised when the caller pins the route. This one is raised after the
+pin exists, on stored state the request cannot re-choose. `HANDOFF_BLOCKED`
+remains a fair question and was left alone.
+
+### Residuals
+
+`RETRY_AFTER_SECONDS` is five seconds. It is the implementer's number, not the
+owner's, and it is a floor for a restarting PostgreSQL rather than a forecast.
+`/api/health` still answers 503 with no `Retry-After` — defensible, since it is
+a probe rather than a refusal and never passes through the refusal body, but the
+wire now reads inconsistently. `STORE_UNAVAILABLE` genuinely spans both classes,
+because `committed_unit` maps every `psycopg.Error` to it including constraint
+violations; it is kept transient on asymmetric cost, and the retry it invites is
+answered from the idempotency receipt on a command that already committed.
+
+## 2026-09-17 §76 — Book is served over accepted CP-CF projections; D2's Book half is superseded
+
+§74.4 reduced Book and Admin to unavailable shells because neither had a
+document to render. Completion Phase 12 Task 12.3 gives Book one.
+
+`GET /api/v1/book` is portfolio-scoped — no case in its path — and its rows are
+the credits the caller holds live standing on, read through `cases_for_member`
+exactly as Directory reads them and bounded at four, which is `docs/IA_SPEC.md`
+4.4's "two to four credits side by side". Each row's cells are values the
+accepted CP-CF projection already carries, re-derived by the Model section's own
+reader rather than by a second one: `accepted_forecast` is extracted from
+`read_model`, live-source check included, because two readers of one accepted
+pair are two answers to a question invariant 3 says the host owns once. The
+host computes no figure and reaches no verdict here.
+
+**The columns are declared in host code** — six of them, the five whose operands
+are the period's own accepted driver row and the EBITDA margin
+`cash_flow_forecast` derives from two of those. That is not a second authority
+beside the bundle: `caos-forecast-v1` is this host's calculator and its shape is
+the host's to state, so invariant 4 is untouched. The debt and cash roll-forward
+and the leverage metrics over it are **not** declared, because their lineage
+reaches every earlier period and a passport naming only the local drivers would
+understate it — which is the failure that matters on a leverage figure. The
+cost is that Book ships without `metrics.net_leverage`, the figure IA_SPEC names
+as a facet, and the honest-ledger entry records it as a gap rather than an
+omission.
+
+**The passport is closed at exactly ten fields**, IA_SPEC 4.4's, pinned in
+`tests/test_wire_contract.py`; an eleventh would be this host asserting
+something the accepted record does not say. That closure has a cost of its own,
+also recorded: every Book cell is a projection and none carries the `PROJECTED`
+marker, because there is no field for one.
+
+**The scenario is the record's own `case`.** The first implementation served the
+literal `NOT_DECLARED` on the stated ground that `caos-forecast-v1` declares no
+scenario. It declares one, under that name: `server/qualification/matrix.py`
+already matches `ExpectedForecast.scenario` against `item["case"]`,
+`MAX_FORECAST_CASES` caps it, and the same document renders it as
+`BookPeriod.case` and as each table's heading. So a credit carrying BASE and
+DOWNSIDE produced two tables whose every cell opened a passport saying neither —
+the one field whose whole job is telling them apart. The section names it, and
+`BookBasis.scenario` says `EVERY_ACCEPTED_CASE`, which is what the comparison
+spans. Found by the Task 12.3 acceptance review, which read the calculator
+rather than the comment above the constant.
+
+Admin stays at its shell and D2's Admin half stands. Book's `bind`/`release`
+and the metric-passport overlay, which §74.4's ledger entry kept because
+deleting a pinned gate's subject is a gate edit, now have their production
+caller back; that entry is struck by the commit that gives them one.
+
+## 2026-09-17 §77 — A per-section bound on an upstream handoff, the line group, and the closed element set
+
+Three behaviour changes landed in Completion Phase 12's wave with no entry of
+their own. The Phase 12 confidence review asked for them, and it is right that
+a new refusal code and a new host policy bound over an accepted, immutable
+artifact belong in the binding record rather than only in a code comment and a
+struck ledger entry.
+
+### 77.1 An upstream handoff is bounded at 32,768 bytes, and the bound answers after identity
+
+`server/methodology/invocation.py` declares `MAX_UPSTREAM_HANDOFF_BYTES` and
+refuses `UPSTREAM_SECTION_OVER_CEILING` when an accepted upstream's Markdown
+exceeds it, in the prompt builder — so before any attempt, reservation or call.
+Until now `MAX_REQUEST_BYTES` refused the whole request and could never say
+*which* part was large.
+
+The number is arithmetic, not a measurement of any handoff, and the arithmetic
+has been corrected once. As first written it summed **raw** lengths and
+compared them against `MAX_REQUEST_BYTES` — which bounds
+`len(json.dumps(request).encode())` with `ensure_ascii=True`, so every
+non-ASCII character costs six bytes and every quote and newline two, and the
+vendored authority is full of em-dashes, section signs and curly quotes. The
+test could therefore have passed while the real encoded request was over the
+ceiling. Found by the Completion Phase 12 adversarial audit.
+
+Measured through `provider.encode_request` instead, over every node of every
+profile with the authority files' real bytes and the fixed host sections
+included, the worst case is **CP-3 at 711,482 encoded bytes against the
+1,048,576 ceiling — 32% of it left** for evidence. The raw-byte version named
+CP-5, which was an artefact of the unit: CP-5 carries the most upstreams, CP-3
+the heavier authority once escaping is paid. What the figure still excludes is
+the citation register, which is explicitly unbounded, and the evidence section
+itself, which is the room the assertion exists to prove is left.
+
+It is a ceiling chosen so that a wide route cannot be refused wholesale for a
+reason nobody can locate, not a figure any real handoff has approached — no
+FULL module has ever produced one, and the only measurement in the tree is a
+448,826-byte CP-0 *request* carrying no upstream at all. Against that, the host
+asks for, accepts, validates, bills and stores a handoff up to `MAX_FILE_BYTES`
+(26,214,400) and refuses to *use* one over 32,768, which is the asymmetry the
+costs below describe.
+
+**The bound answers after the digest comparison, not before it.** The size
+check sits below `sha256(data) != ref.sha256` in `_utf8`'s caller, because the
+host owns identity (invariant 3) and a host policy bound does not get to answer
+ahead of it: bytes that are not the artifact they claim to be are refused as
+that, not as too large.
+
+**Three costs, recorded here because the ledger entry the bound closed did not
+state them.** Nothing bounds a handoff at *acceptance* — `MAX_FILE_BYTES` is
+26,214,400 — so the host will accept a 40 KiB handoff, bill it, and discover at
+the *consumer's* prompt that it cannot use it, which lands the refusal on the
+innocent node. The discharge is a new run, which calls the same model with the
+same prompt and may reproduce the same size. And the operator meets a run
+parked `STOPPED` whose stop code no surface renders, so the two entries compose
+into "the run stopped and nothing says why".
+
+### 77.2 A line past the group width is split, and the packing is re-derived in one direction
+
+`SYSTEM_SPEC.md` §5 asks for one block per line while small and a bounded line
+group once not. The splitting half is built: `GROUP_WIDTH` is `BoundaryText`'s
+own `DEFAULT_LIMIT`, `ingest.line_groups` cuts a line at it, and
+`verify_citations` requires every block a line was split into to have been
+delivered. Before it, a line past 4,096 characters refused the whole pack, so
+one wide table row in a text export meant no document carrying it could be
+admitted.
+
+The width is not a free parameter: anything narrower would re-number documents
+already admitted under this one, whose `source_blocks` rows are immutable and
+whose stored citations name the ids they were given. A cut falls wherever the
+width falls, inside a word if that is where it falls, because cutting at a
+token boundary would make the block count depend on the tokens and force
+anchoring to read every token's text back to learn it.
+
+`citations._line_blocks` re-derives the packing rather than storing a version,
+and does so **in one direction only**: splitting writes more blocks than lines,
+so only a source with more is repacked and checked against its stored count,
+while one with fewer keeps the one-block-a-line reading it was admitted under.
+That asymmetry is load-bearing, not tidiness — the two tests that demonstrate
+`CITATION_NOT_DELIVERED` at all narrow a delivery by deleting a stored block
+with the seal disabled, and reading that state as a disagreement about the rule
+would answer about the host's own derivation where the honest answer is about
+the citation, making the refusal unreachable in the tree.
+
+### 77.3 The deliverable renders a closed element set, and everything else reaches the page as itself
+
+Task 12.4 replaced `<pre>{escape(markdown)}</pre>` with a renderer over the
+twelve prose constructs `ELEMENTS` names, so a register reads as a table. The
+contract is that a construct outside the set has exactly two outcomes: it
+reaches the page as the characters the model wrote, or the block refuses
+`DELIVERABLE_MARKDOWN_UNSUPPORTED` because no faithful rendering of it exists.
+
+**There is no third outcome, and there briefly was.** A line-leading HTML
+comment was consumed and emitted nothing, and code-span contents and
+out-of-order emphasis each dropped characters. A signer's `payload_sha256`
+binds the record's bytes and this render is the only reading of them a
+committee sees, so a construct that vanishes is text bound and unseen — the
+invariant 5 shape read from the other side. Corrected at the Phase 12
+confidence review, together with the gate that could not see it: a tag census
+measures what the page *emits*, and a deleted construct emits no tag.
+
+Consequence recorded when the renderer moved: `renderer_sha256` is stored on a
+filing and compared against the renderer of the day a package is built, so a
+revision filed before a renderer change cannot be packaged verifiably again.
+Unreachable while no route serves a package, and owned by its own ledger entry.
+
+
+## 2026-09-18 §78 — Two declared quote normalisations, tried only after the exact search finds nothing
+
+Completion Phase 10 Task 10.5. `docs/COMPLETION_PLAN.md`'s Phase 10 exit check
+asks that "a letter-spaced heading and a quote ending in a full stop anchor to
+the rectangle a reader sees". Both are refused today, and both for a reason the
+host created rather than one the document did: a quote is split on whitespace
+and every word must equal a token, so a module that ends its sentence with a
+full stop has quoted a word the page does not carry; and pdfminer inserts a
+virtual word break between glyphs tracked past `word_margin` (§44.5), so a
+heading tracked for display comes back one token per letter and the word cannot
+be quoted as itself.
+
+**The order between the two searches is the whole of the safety, and it is what
+makes this a widening rather than a change.** The exact search runs first and is
+untouched. A normalised search runs only where the exact one found *nothing*, so:
+
+- every quote that anchored before this existed anchors to the same rectangles,
+  and every stored record re-verifies — the proof, the deliverable and the
+  runtime all re-anchor and none of them moves;
+- a normalisation can never resolve an ambiguity, because an ambiguous exact
+  match refuses before the second pass is reached;
+- ambiguity is counted over the whole page in the normalised pass too, on the
+  same rule, so two places a normalised quote could be is a refusal and not a
+  choice.
+
+**The two rules.** `EDGE_PUNCTUATION` may differ between the quote's *first and
+last* word and its token — a module writing prose ends a sentence with a full
+stop and wraps a quotation in quotation marks, which is the same trade the
+handoff body check already took for `_QUOTATION`. An interior word must still
+equal its token: forgiving punctuation there would let one quote stand for two
+different sentences of the page. `_joined_tracking` joins each maximal run of
+**single-character** tokens on one line of one region into the word a reader
+sees, with the union of their rectangles.
+
+**Why single characters is the axis and not a convenience.**
+`test_widely_spaced_glyphs_refuse_the_joined_quote` holds that `Alpha` and
+`Beta` kerned apart must not answer a quote of `AlphaBeta`, because that text is
+on no rendered page. Those are tokens of five and four characters, so the
+joining rule cannot reach them, and
+`test_two_widely_spaced_words_still_refuse_their_concatenation` pins that in the
+new rule's own file rather than trusting the old test to notice.
+
+**Scoped to the extractor whose rule split the glyphs.** `TRACKING_EXTRACTORS`
+is `caos.pdfminer` alone. In a plain-text document a single-character token is a
+single-character *word*, and joining those would anchor a concatenation the file
+does not contain. The extractor is read from `source_extractions` in the same
+round trip as the document digest, so no section's declared `IO_BUDGET` moves;
+a source with no extraction row, or an identity this build cannot parse, gets
+the exact search alone — that table's own "no row means UNKNOWN" rule, read
+fail-closed.
+
+**Not versioned in the extractor identity, which is what O19 proposed.** The
+identity records how *tokens* were produced, and these rules change no token: a
+bump would force every source in every database to be re-admitted for a change
+that did not alter a single extraction, and `apply_schema`-style verification
+would then refuse rows that are entirely correct. The version is declared as
+`NORMALISATION_VERSION` beside the rules it names, which is the thing a reader
+asking "which rule anchored this quote" can actually be pointed at. O19's
+repair clause is corrected rather than followed.
+
+**What it does not claim.** Eleven authorized live runs produced no
+`CITATION_NOT_LOCATED` from either cause — the one real typography refusal in
+the record was the quotation-mark case, which `_QUOTATION` closed in a different
+check. So these two rules are the plan's named cases and not a caller's measured
+demand, which is the condition the Phase 2 ledger entry set. That is recorded in
+the ledger rather than smoothed over, together with the residual the joining
+rule buys: a genuine sequence of single-letter words is indistinguishable from
+a tracked word, and a quote of their concatenation anchors over them.
+
+
+## 2026-09-18 §79 — A worker says what it is doing; a stalled queue is not the API's unreadiness
+
+Completion Phase 13.3, the readiness half. The ledger entry: the API's
+`/api/health` probes the store, bundle and blob root it uses, and
+`server/engine/worker.py` serves no listener — so a worker that exited
+`PROVIDER_NOT_CONFIGURED` or is backing off on store faults is visible in its
+exit code and its logs and nowhere else, while a queued run simply waits.
+
+**No listener.** A process that already talks to PostgreSQL every poll does not
+need a second protocol to say it is alive. Migration `0028` adds
+`worker_heartbeats`, one row per worker, upserted: `(worker_id, beat_at, state,
+consecutive_faults)`.
+
+**The one deliberately mutable row in this store, and it says so.** Every other
+table here is immutable by trigger because it carries a governed fact somebody
+may later be held to. A beat is an observation with a shelf life of seconds,
+and keeping each one would grow the table by a row per worker per poll forever
+— the shape `command_requests` already carries a known-gaps entry for. So the
+table is the size of the fleet rather than of the uptime, and no trigger
+defends it. It also grants nothing: the lease in `run_work` is what fences a
+run, and a worker that lies here still cannot write a run it does not hold.
+
+**Three states, closed in the store.** `POLLING`, `WORKING`, `BACKOFF`, as a
+`CHECK` rather than free text, so an operator alerting on `BACKOFF` can trust
+that nothing else writes a different word meaning the same thing. `WORKING` is
+said *before* the run is driven, because driving is the part that takes
+minutes: "went quiet while working" is a different thing to a person than "went
+quiet while idle". `BACKOFF` is said at the point the fault is handled and
+before the connection is dropped — the first draft said it at the *next* poll,
+and a worker looping claim-fault-claim then read `WORKING` for as long as it
+kept failing, which is the exact signal the beat exists to carry.
+
+**Saying so never stops the work.** `_beat` swallows a store fault and rolls
+back. A heartbeat is for a person, not a fence; what answers a failing store is
+the loop's own fault handling, by trying to claim a run, and a store that is
+down cannot record that it is down — the staleness of the last beat says it
+instead.
+
+**A stalled queue does not make the API unready, and this is the load-bearing
+decision.** `HealthDocument` gains `workers`, reported beside the other three
+and deliberately **not** folded into `status`: the API is not the worker, and a
+surface that reported itself unready because a queue was stalled would take
+itself down for a fault it does not have. A load balancer reads `status`; an
+operator alerts on `workers`. `WORKERS_ABSENT` (nothing has ever beaten, so a
+queued run will wait), `WORKERS_STALE` (a worker beat and stopped — the row
+names which), `WORKERS_BACKING_OFF` (every fresh worker is failing to reach the
+store). A fresh worker driving a long run is `OK`, because its run's liveness is
+the lease every fenced write renews, and a second clock on one question is how
+two answers start disagreeing.
+
+**No compose healthcheck, and the reason is not oversight.** The ledger entry
+also asked for one on `compose.smoke.yaml`'s worker. That service runs
+`journey.worker`, a test double; a healthcheck there would measure the double
+and not the product, and the real worker is not in compose at all. It is owed
+the day `server/engine/worker.py` itself runs in a compose stack.
+
+
+## 2026-09-18 §80 — A frontier pass runs its independent nodes at once, on threads, opt-in
+
+Completion Phase 13.1. `docs/REBUILD_PLAN.md` Phase 4 and `SYSTEM_SPEC.md` §4
+both write the loop as `await gather(*(run_node(n) for n in ready))`, and the
+ledger entry says "the loop's shape does not change, only the `for` becomes a
+`gather`". Two of those three claims turn out to be wrong, and this entry is
+what they are replaced by.
+
+**Threads, not `asyncio`.** What a wide frontier waits on is a provider call,
+and both that socket and psycopg's release the interpreter lock while they
+block, so a `ThreadPoolExecutor` over the batch buys the whole of the overlap.
+A `gather` buys the same overlap at the price of recolouring 152 store
+functions and all 48 of their server-side callers, plus the 78 test modules
+that drive them — a change whose blast radius is the entire store for a
+latency win the stdlib already gives. O23's "async store" is therefore
+**declined** rather than deferred: it is not what this exit check needs. What
+would need it is an async *API* holding unpooled connections, which is a
+different problem with its own entry.
+
+**The loop's shape does change, because the frontier is not a safe batch.**
+`frontier` offers every node whose *blocking* inputs are met, and a soft edge
+does not block — so it can offer a node together with one of its own OPTIONAL
+or ADVISORY upstreams. `execute_handoff` binds an attempt to the upstream
+accepted when its prompt was built and refuses when another of its inputs is
+accepted during the call, so running that pair together buys a billed attempt
+that is then thrown away: money spent with nobody choosing to spend it.
+`route.independent_batch` is the rule — greedy in route order over the
+transitive closure of **every** edge type, dropping any node that reaches or is
+reached by one already chosen. Reading only the blocking edges would call the
+one dangerous pair independent, which is the single wrong answer available.
+
+**Invariant 10 is untouched.** The batch is a pure function of the pinned route
+and the frontier, and the frontier is recomputed from the store every pass, so
+the same pins choose the same nodes in the same order. What changes is when
+they run, never which. A node left out of a batch is not deferred or queued: it
+is simply in the next pass's frontier.
+
+**It shipped not reaching production, and the confidence review caught it.**
+`module_execution` set `per_node`, and `work_once` then built a *fresh*
+`Execution` listing the four fields that line happened to know about --
+dropping the fifth. Nothing failed: a dropped field is not a type error, and
+the run still completes, one node at a time. So the concurrent pass was built,
+tested, documented and never reached a worker. It is fixed by `replace`, which
+carries every field including one added tomorrow, and the guard is an assertion
+on what the runtime is actually *handed*
+(`test_the_worker_hands_the_runtime_a_concurrent_pass_and_a_stoppable_one`,
+watched failing with the bug reintroduced). The same fix wraps each per-node
+provider in `_Stoppable`, which the first version also missed: a SIGTERM would
+have stopped the sequential loop between nodes and not a concurrent one.
+
+**Opt-in, through one factory.** `Execution.per_node` returns a store
+connection *and* a provider bound to it, because neither is any use alone — a
+node's pre-call unit opens a transaction under the case lock, and
+`ModuleProvider` reads the store to build its prompt. One field rather than two
+so it cannot be half-configured. `None` — every direct caller, the harness and
+the suite — keeps the loop exactly sequential, which matters because those
+callers drive a run on a connection they own and hold open around it. The
+worker supplies it. A batch of one opens no connection and starts no thread,
+which is every LITE route this build enables.
+
+**The lease is shared across those connections on purpose.** It fences the
+*run*, and every write rechecks the token it was taken under, so two nodes of
+one run writing under one lease is the claim working rather than a hole in it.
+
+**Two nodes of one run cannot deadlock on the locks, and the reason is
+structural rather than a convention anyone has to keep.** `lock_run` takes the
+owner case's lock and *then* the run's, inside itself, so every path in this
+tree acquires them in that order and no cycle can form -- a hazard that would
+otherwise be invisible until a wide route hung in production, because a
+deadlock needs two writers and until now there was one. It is also why the
+concurrency is worth having: the locked stretches are store reads measured in
+milliseconds and they serialise on the case, while `require_idle` holds the
+provider call *outside* any transaction, so what overlaps is the part that
+takes seconds.
+
+**Every node is awaited even after one fails.** A call already in flight will
+be billed whatever the loop decides, so abandoning its result would pay for an
+answer nobody reads — the same reasoning the worker applies to SIGTERM. The
+first failure is then re-raised, or `False` returned for a validated Blocked
+handoff.
+
+**What is proven and what is not.** Proven offline, on `RELATIVE_VALUE` —
+the one enabled route with a wide frontier, which opens 1, then 2, then 4, then
+2 nodes — by asserting that two calls' intervals *intersect*, which is the
+property itself rather than a wall clock that measures the machine as much as
+the loop. Not proven live: no wide route has ever run against a real provider,
+and the routes that have are single-node at every pass, so production behaviour
+for them is unchanged. This is **not** 13.2: one worker still claims one run,
+and the I6 residual — a stale lease holder paying once — is untouched and still
+what a second worker must answer first.

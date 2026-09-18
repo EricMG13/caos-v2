@@ -6,10 +6,10 @@ can lie: this package has no external authenticity or signature trust anchor.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import struct
-import sys
 import zipfile
 import zlib
 from io import BytesIO
@@ -18,7 +18,7 @@ from typing import Any
 
 VERIFIER_VERSION = "1"
 # Updated with render.py; the archived verifier retains its historical pin.
-RENDERER_SHA256 = "a650a50b7db2d2254d0de3109009cb33d42b2d2d67dda41ae0c1897c9616e76e"
+RENDERER_SHA256 = "cae64483764b94d325ad96f2a329ce3271c3772d36e4f02e4c827aa5630a49ad"
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 LIMITS = {
     "payload.json": 32 * 1024 * 1024,
@@ -168,6 +168,10 @@ def verify(archive: bytes) -> tuple[bool, str | None]:
 def main() -> int:
     """Read at most one byte beyond the archive ceiling and print a JSON verdict.
 
+    argparse states the one argument and exits 2 with a usage line when it is
+    absent, so a reader who runs the archived verifier bare is told what it
+    wants instead of meeting an IndexError answered as an unreadable package.
+
     The argument is the package the operator wants checked, on their own
     machine, read with their own authority -- there is no root to confine it to
     and no privilege to escape. This verifier is shipped beside a package
@@ -176,8 +180,14 @@ def main() -> int:
     a directory or a dangling link included, becomes the same safe verdict
     below (sonar pythonsecurity:S8707).
     """
+    parser = argparse.ArgumentParser(
+        prog="verify_package.py",
+        description="Check a deliverable package for internal consistency.",
+    )
+    parser.add_argument("archive", help="path to the package to verify")
     try:
-        with Path(sys.argv[1]).open("rb") as source:  # NOSONAR -- operator's own file
+        archive = parser.parse_args().archive
+        with Path(archive).open("rb") as source:  # NOSONAR -- operator's own file
             result = verify(source.read(MAX_ARCHIVE_BYTES + 1))
     except Exception:  # noqa: BLE001 -- CLI failures use the same safe verdict.
         result = (False, UNREADABLE)

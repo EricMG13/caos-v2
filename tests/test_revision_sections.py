@@ -285,6 +285,14 @@ def test_frozen_actors_must_match_the_saved_events(
     assert response.json()["code"] == "DELIVERABLE_PAYLOAD_INVALID"
 
 
+ACTIONS = (
+    "SAVE_REVISION",
+    "SIGN_OPINION",
+    "FREEZE_DELIVERABLE",
+    "FILE_DELIVERABLE",
+)
+
+
 @pytest.mark.parametrize("section", ["report", "committee"])
 def test_revision_http_actor_matrix_and_declared_io(
     client: TestClient, lite: _Harness, section: str
@@ -297,18 +305,25 @@ def test_revision_http_actor_matrix_and_declared_io(
     grant(lite.conn, case_id=lite.case_id, user_id=revoked, standing=Standing.READER)
     revoke(lite.conn, case_id=lite.case_id, user_id=revoked)
     lite.conn.commit()
+    # Task 12.1: the section offers its four filing controls, and every one of
+    # them is refused here whatever the standing -- these callers assert no
+    # global role, and a global READER may not write however the case sees it.
     for actor in [*readers, uuid4(), revoked]:
         counter = _Counting(lite.conn)
         app.dependency_overrides[store_connection] = lambda: counter  # noqa: B023
         response = client.get(
             _path(lite, receipt.revision_id, section),
-            headers=_as(actor, "caos-admins" if actor not in readers else None),
+            headers=_as(actor, "ADMIN" if actor not in readers else None),
         )
         lite.conn.rollback()
         if actor in readers:
             assert response.status_code == 200, response.json()
             assert counter.executed == IO_BUDGET[section]
-            assert response.json()["chrome"]["actions"] == []
+            offered = {
+                view["action"]: view["refusal"] and view["refusal"]["code"]
+                for view in response.json()["chrome"]["actions"]
+            }
+            assert offered == dict.fromkeys(ACTIONS, "NOT_AUTHORISED")
         else:
             assert response.json()["code"] == "CASE_NOT_FOUND"
             assert counter.executed == 2  # isolation and live standing only

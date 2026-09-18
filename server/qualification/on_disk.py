@@ -51,8 +51,11 @@ from server.boundary_text import BoundaryText
 from server.evidence.extract import DEFAULT_LIMITS
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
+    PROJECTION_FIELDS,
     ExpectedCitation,
     ExpectedForecast,
+    ExpectedProjection,
+    ExpectedRegister,
     ForecastValue,
     QualificationCase,
     QualificationSet,
@@ -84,6 +87,8 @@ _OPTIONAL_CASE_KEYS = frozenset(
         "forecast",
         "expected_refusal",
         "expects_ready",
+        "expects_projection",
+        "expects_register",
         "model_extension",
     }
 )
@@ -112,6 +117,12 @@ _SUBJECT_KEYS = frozenset(
 # The same bound `matrix.py` puts on a label when it digests one. Stated here
 # too because this is where an authored label first arrives.
 _LABEL_LIMIT = 128
+# A manifest names cases; it never carries a document's bytes.
+MAX_MANIFEST_BYTES = 1024 * 1024
+_PROJECTION_KEYS = frozenset({"module_id", "field", "value"})
+_REGISTER_KEYS = frozenset(
+    {"module_id", "register_id", "row_key", "column", "expected"}
+)
 
 
 def load_qualification_set(root: Path) -> QualificationSet:
@@ -180,6 +191,8 @@ def _case(root: Path, entry: object) -> QualificationCase:
         forecast=_forecast(fields.get("forecast")),
         expected_refusal=_refusal(fields.get("expected_refusal")),
         expects_ready=_ready(fields.get("expects_ready")),
+        expects_projection=_projections(fields.get("expects_projection")),
+        expects_register=_registers(fields.get("expects_register")),
         model_extension=_extension(fields.get("model_extension")),
     )
 
@@ -255,6 +268,94 @@ def _forecast(item: object) -> ExpectedForecast | None:
         limitation_flags=_strings(fields, "limitation_flags"),
         readiness=tuple(_pair(value) for value in readiness),
     )
+
+
+def _projections(item: object) -> tuple[ExpectedProjection, ...]:
+    """The host-projected conclusions the case expects, or a refusal.
+
+    The field name is checked here rather than at comparison time: a key naming
+    a field the host does not project would otherwise read as the module having
+    concluded the wrong thing, which is the one failure a key must never have.
+    """
+    if item is None:
+        return ()
+    if not isinstance(item, list) or not item:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    expects = []
+    for value in item:
+        if not isinstance(value, dict) or set(value) != _PROJECTION_KEYS:
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        field = value["field"]
+        if not isinstance(field, str) or field not in PROJECTION_FIELDS:
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        expects.append(
+            ExpectedProjection(
+                module_id=_bounded(value["module_id"]),
+                field=field,
+                value=_bounded(value["value"]),
+            )
+        )
+    if len({(e.module_id, e.field, e.value) for e in expects}) != len(expects):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(expects)
+
+
+def _registers(item: object) -> tuple[ExpectedRegister, ...]:
+    """The register cells the case expects, or a refusal.
+
+    Each row is `{module_id, register_id, row_key, column, expected}`, with
+    `row_key` an object of column to value -- the cells that name the one row,
+    which the digest then covers as a set. Every string is bounded here, because
+    this is where an authored key crosses into pinned state.
+
+    An empty `row_key` is refused with its own code: the file is well formed and
+    the key is not answerable, since "any row of the register" is not one row,
+    and a remedy that says "fix the manifest" would send the author looking at
+    the wrong thing.
+    """
+    if item is None:
+        return ()
+    if not isinstance(item, list) or not item:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    expects = []
+    for value in item:
+        if not isinstance(value, dict) or set(value) != _REGISTER_KEYS:
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        row_key = value["row_key"]
+        if not isinstance(row_key, dict):
+            raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+        if not row_key:
+            raise Refusal(RefusalCode.QUALIFICATION_KEY_AMBIGUOUS)
+        # Sorted on the bounded name, not the authored one, so two manifests
+        # naming the same cells carry the same key whatever the padding.
+        named = tuple(
+            sorted(
+                (_bounded(column), _bounded(cell)) for column, cell in row_key.items()
+            )
+        )
+        if len({column for column, _cell in named}) != len(named):
+            # Two spellings of one column name, bounded to the same string: the
+            # key names a row twice and may name it differently each time.
+            raise Refusal(RefusalCode.QUALIFICATION_KEY_AMBIGUOUS)
+        expects.append(
+            ExpectedRegister(
+                module_id=_bounded(value["module_id"]),
+                register_id=_bounded(value["register_id"]),
+                row_key=named,
+                column=_bounded(value["column"]),
+                expected=_bounded(value["expected"]),
+            )
+        )
+    if len(set(expects)) != len(expects):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return tuple(expects)
+
+
+def _bounded(value: object) -> str:
+    """One string from a declared key, bounded as pinned state must be."""
+    if not isinstance(value, str) or not value.strip():
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    return BoundaryText.of(value.strip(), limit=_LABEL_LIMIT).value
 
 
 def _ready(item: object) -> tuple[str, ...]:

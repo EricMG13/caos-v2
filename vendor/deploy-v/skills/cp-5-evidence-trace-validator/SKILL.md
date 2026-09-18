@@ -171,7 +171,7 @@ conclusions, never shorter reasoning or invented filler.
     - **T5B.5**: structured below
       - **columns**: Item; Where Used; Source Inputs / Assumption; Formula or Logic; Status; Claim Status; Confidence Level; Credit Relevance; Source Trace
       - **critical_columns**: identical to columns
-      - **disqualifier_exempt_columns**: none
+      - **disqualifier_exempt_columns**: Status; Claim Status
       - **minimum_body_rows**: 1
     - **T5B.6**: structured below
       - **columns**: Severity; Conclusion; Issue; Classification; Why It Matters; Required Remediation; Affected Output / Export Record

@@ -977,9 +977,10 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
     empty_database: str, tmp_path: Path
 ) -> None:
     """Every kind of attempt a stopped node can hold, read back from the store."""
+    from conftest import reserve_at as reserve
+
     from server.qualification.harness import _unrun
     from server.store import apply_schema, connect
-    from server.store.budget import reserve
     from server.store.outcomes import CallOutcome, execution_reads, record_outcome
     from server.store.runs import start_attempt
 
@@ -1016,6 +1017,54 @@ def test_unrun_attempts_separate_possible_spend_from_no_call_and_known_charge(
         (False, False, False, None, None),
         (True, True, True, None, None),
     ]
+
+
+def test_a_case_that_declared_the_block_it_expected_is_signable(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """The deliberately restricted case, built from a run rather than a dataclass.
+
+    `docs/REPAIR_PLAN.md` Phase 6 asks for a case whose expected result is that
+    the evidence does not support the work. Until now no run could answer one:
+    `expected_refusal_met` read only the proof's refusal, and a validated
+    Blocked handoff leaves a sound proof and writes no `attempt_refusals` row,
+    while `complete` demanded every run reach COMPLETE -- which a blocked run
+    never does. Both halves are read from the run here.
+    """
+    from server.qualification.store import performed_evidence
+    from server.store import apply_schema, connect
+
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.commit()
+        case = replace(
+            _case("restricted-2026", REPORT),
+            expects=(),
+            expected_refusal=RefusalCode.HANDOFF_BLOCKED,
+        )
+        qualification = QualificationSet(cases=(case,))
+        blobs = BlobStore(tmp_path / "blobs")
+        harness = Harness(
+            bundle=Bundle(root=VENDORED),
+            catalog=CATALOG,
+            completions=_Completions(qa_by_module={"CP-5": "Blocked"}),
+            price=priced(ESTIMATE),
+            ceiling=SET_CEILING,
+        )
+        prepared = prepare(conn, blobs, harness, qualification=qualification)
+        _approve(conn, prepared)
+        performed = perform(
+            conn, blobs, harness, qualification=qualification, prepared=prepared
+        )
+
+        [record] = performed.performed
+        assert record.status is RunStatus.BLOCKED
+        assert performed.matrix is not None
+        [row] = performed.matrix.rows
+        assert row.expected_refusal_met is True, "the run refused as declared"
+
+        snapshot = performed_evidence(prepared=prepared, performed=performed)
+        assert snapshot.complete is True, "a blocked run may answer a blocked key"
 
 
 def test_a_blocked_qa_verdict_ends_the_case_blocked_and_the_matrix_still_scores(

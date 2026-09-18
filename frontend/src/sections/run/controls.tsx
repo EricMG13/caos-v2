@@ -6,7 +6,8 @@
 // commit, so an advisory `null` refusal here is never trusted as the last
 // word. A success is shown, and the caller is handed one refetch to run
 // (`onRefetch`); the control never claims a write took effect on its own say.
-import { useCallback, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
+import { useSearchParams } from "react-router";
 import {
   approveGate,
   cancelRun,
@@ -19,10 +20,12 @@ import {
   type CommandResult,
   type Intent,
 } from "@/app/commands";
+import { OFFLINE_WORDING } from "@/app/transport";
 import { fetchSection } from "@/app/transport";
 import { RefusalNote, RefusedControl } from "@/controls/RefusedControl";
 import type {
   ActionView,
+  CreateRun,
   GateApproved,
   GatePreviewDocument,
   Infer,
@@ -71,9 +74,21 @@ export function useRunRefetch(initial: RunSectionDocument, caseId: string) {
     setSeenInitial(initial);
     setLive(initial);
   }
+  // One sequence over both sources of a document: a refetch applies only while
+  // it is still the latest. An earlier refetch that answers late, or one still
+  // in flight when the workspace serves a fresher document, is dropped rather
+  // than putting an older run back on screen. Bumped in a layout effect, not
+  // in the render above it: a passive effect is scheduled after the commit, so
+  // a refetch resolving in between would still read the superseded sequence.
+  const sequence = useRef(0);
+  useLayoutEffect(() => {
+    sequence.current += 1;
+  }, [initial]);
   const refetch = useCallback(
     (runId: string | null) => {
+      const mine = (sequence.current += 1);
       void fetchSection("run", { case: caseId, run: runId }).then((status) => {
+        if (mine !== sequence.current) return;
         if ("document" in status && isRunSectionDocument(status.document)) {
           setLive(status.document);
           setFailed(false);
@@ -161,16 +176,24 @@ export function CommandOutcome({
       </div>
     );
   }
-  if (result.kind === "refused") return <RefusalNote refusal={result.refusal} />;
+  // Every outcome but success is announced: a refusal a screen reader never
+  // hears is a form that silently did nothing.
+  if (result.kind === "refused") {
+    return (
+      <div className="note crit" role="alert">
+        <RefusalNote refusal={result.refusal} />
+      </div>
+    );
+  }
   if (result.kind === "offline") {
     return (
-      <div className="note" data-command-offline>
-        The request never reached the server. Retrying sends the same key.
+      <div className="note crit" role="alert" data-command-offline>
+        {OFFLINE_WORDING} Retrying sends the same key.
       </div>
     );
   }
   return (
-    <div className="note" data-command-error>
+    <div className="note crit" role="alert" data-command-error>
       RESPONSE_INVALID — the server&apos;s answer did not match the wire.
     </div>
   );
@@ -178,23 +201,39 @@ export function CommandOutcome({
 
 /** A run with no route is useless (brief 4.2, decision 1): select and pin one
     in the same command that creates the run. Available with no displayed
-    run, and again afterwards to start a fresh one. A success refetches the
-    section by the new run id, so the view moves off this form at once and a
-    second press is a plainly new run, never a silent duplicate. */
+    run, and again afterwards to start a fresh one. A success names the new run
+    in the address, and the workspace reads it from there — so the view moves
+    off this form at once, a second press is a plainly new run rather than a
+    silent duplicate, and a reload shows the run the analyst is looking at
+    instead of whatever the old address named. This is the one control that
+    does not hand its caller a refetch: the run it created is not the run the
+    section was mounted for, so re-reading the old address would be the wrong
+    document and re-reading the new one duplicates the read the address change
+    already causes. */
 export function CreateRunControl({
   caseId,
   action,
   choices,
-  onRefetch,
+  supersedes = null,
 }: {
   caseId: string;
   action: ActionView | undefined;
   choices: readonly RouteChoice[];
-  onRefetch: (runId: string | null) => void;
+  /** The BLOCKED run the new run would answer (§72), offered pre-filled
+      when the displayed run ended BLOCKED and nothing has answered it yet.
+      The analyst may clear it: a successor is an ordinary new run that names
+      its predecessor, and the name is the analyst's to give. */
+  supersedes?: string | null;
 }) {
   const [pick, setPick] = useState(0);
+  const [predecessor, setPredecessor] = useState(supersedes ?? "");
+  const [, setParams] = useSearchParams();
   const { pending, result, run } = useCommand<RunCreated>();
   const chosen = choices[pick] ?? null;
+  const named = predecessor.trim();
+  const request: CreateRun | null = chosen
+    ? { ...chosen, supersedes: named === "" ? null : named }
+    : null;
   return (
     <section className="pnl" data-create-run>
       <header>
@@ -219,16 +258,40 @@ export function CreateRunControl({
                 ))}
               </select>
             </label>
+            <label className="fld">
+              Supersedes run
+              <input
+                data-supersedes-input
+                value={predecessor}
+                placeholder="none: an ordinary run"
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setPredecessor(event.target.value)
+                }
+              />
+            </label>
             <RefusedControl
               refusal={action ? action.refusal : null}
               className="rb acc"
               data-action="CREATE_RUN"
               onClick={
-                action && chosen
+                action && request
                   ? () => {
-                      void run(chosen, (intent) => createRun(caseId, chosen, intent)).then(
+                      void run(request, (intent) => createRun(caseId, request, intent)).then(
                         (outcome) => {
-                          if (outcome.kind === "ok") onRefetch(outcome.receipt.run_id);
+                          if (outcome.kind !== "ok") return;
+                          // The address is corrected, not navigated: the
+                          // analyst did not move, the run they are on gained
+                          // a name. `replace` keeps Back at where they came
+                          // from rather than at a case with no run, and every
+                          // other parameter the address carries survives.
+                          setParams(
+                            (current) => {
+                              const next = new URLSearchParams(current);
+                              next.set("run", outcome.receipt.run_id);
+                              return next;
+                            },
+                            { replace: true },
+                          );
                         },
                       );
                     }

@@ -27,7 +27,11 @@ from pydantic.json_schema import models_json_schema
 
 from server.api.identity import GlobalRole
 from server.engine.route import EdgeType, NodeState
-from server.methodology.handoff import MAX_FILE_BYTES, MAX_LINE_BYTES
+from server.methodology.handoff import (
+    MAX_BLOCKER_CHARS,
+    MAX_FILE_BYTES,
+    MAX_LINE_BYTES,
+)
 from server.refusals import RefusalCode
 from server.store.gates import Gate, GateState
 from server.store.members import Standing
@@ -56,10 +60,20 @@ ROUTE_CHOICES_MAX = 16
 PREVIEW_CHARS = MAX_FILE_BYTES  # a gate preview, bounded as a handoff is
 PAGE_LINES_MAX = 2000  # beyond it a page is partial, `LIST_TRUNCATED`
 PAGE_MAX = 500  # a page outside 1..PAGE_MAX is `PAGE_NOT_AVAILABLE`
+MOMENT_CHARS = 64  # an ISO-8601 instant with its offset, as `read_verdict` reads it
+# `server/deliverable/revisions.py`'s own bounds, restated where the wire is
+# what refuses a draft past them.
+NARRATIVE_CHARS = 2000
+NARRATIVE_SPANS = 64
+BOOK_CASES_MAX = 4  # "Two to four credits side by side" (IA_SPEC.md 4.4)
+BOOK_COLUMNS_MAX = 16  # the host-declared columns of the CP-CF projection
+BOOK_PERIODS_MAX = 8  # beyond it a row is partial, `LIST_TRUNCATED`
 
 Id = Annotated[str, Field(max_length=ID_CHARS)]
 Text = Annotated[str, Field(max_length=TEXT_CHARS)]
 Sha256 = Annotated[str, Field(max_length=64, pattern="^[0-9a-f]{64}$")]
+Moment = Annotated[str, Field(max_length=MOMENT_CHARS)]
+Blocker = Annotated[str, Field(max_length=MAX_BLOCKER_CHARS)]
 RunStatus = Literal["RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"]
 WorkState = Literal["QUEUED", "CLAIMED", "STOPPED", "DONE"]  # `run_work.state`
 
@@ -113,12 +127,15 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.BLOB_ADDRESS_INVALID: "An operator must repair the stored address.",
     _C.RUN_NOT_FOUND: "Name a run you may read.",
     _C.RUN_NOT_RUNNING: "Act only on a running run.",
+    _C.RUN_NOT_BLOCKED: "Name a run of this case that ended BLOCKED.",
+    _C.RUN_ALREADY_SUPERSEDED: "Read the successor already recorded for that run.",
     _C.LEASE_NOT_HELD: "Reclaim the lease before acting on the node.",
     _C.RUN_CANCEL_REQUESTED: "Nothing; the run is being cancelled.",
     _C.RUN_NODES_UNACCEPTED: "Accept every pinned node first.",
     _C.RUN_TERMINAL_STALE: "Re-read the run and decide again.",
     _C.ATTEMPT_NOT_FOUND: "An operator must repair the attempt ledger.",
     _C.ATTEMPT_LIMIT_REACHED: "Start a new run.",
+    _C.STREAM_LIMIT_REACHED: "Close a tail already open, or retry shortly.",
     _C.CALL_OUTCOME_INVALID: "Record a well-formed call outcome.",
     _C.CALL_OUTCOME_CONFLICT: "Nothing; a different outcome is already recorded.",
     _C.CALL_OUTCOME_LEGACY: "Start a new run.",
@@ -131,6 +148,9 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.PROVIDER_NOT_CONFIGURED: "An operator must configure the provider.",
     _C.PROVIDER_CALL_INVALID: "Correct the provider call parameters.",
     _C.CONTEXT_OVER_CEILING: "Deliver less context to the module.",
+    _C.UPSTREAM_SECTION_OVER_CEILING: (
+        "Start a new run; an accepted handoff is never shortened."
+    ),
     _C.PROVIDER_UNAVAILABLE: "Retry when the provider answers.",
     _C.PROVIDER_OUTPUT_TRUNCATED: "Retry the attempt.",
     _C.PROVIDER_REFUSED: "Retry the attempt or revise the evidence.",
@@ -178,6 +198,9 @@ CLEARS: Mapping[RefusalCode, str] = {
         "Reference a citation in the accepted revision artifacts."
     ),
     _C.DELIVERABLE_UNCITED_FIGURE: "Cite every figure.",
+    _C.DELIVERABLE_MARKDOWN_UNSUPPORTED: (
+        "Keep the handoff to the elements the deliverable renders."
+    ),
     _C.DELIVERABLE_NOT_SIGNED: "Sign the deliverable first.",
     _C.DELIVERABLE_NOT_FROZEN: "Freeze the deliverable first.",
     _C.DELIVERABLE_MOVED_SINCE_SIGNING: "Review and sign the current revision.",
@@ -202,6 +225,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.ROUTE_EXTENSION_OWNER_MISSING: "Include the extension's owning module.",
     _C.ROUTE_HAS_A_CYCLE: "Select a route without a cycle.",
     _C.ROUTE_DUPLICATE_MODULE: "Select a route naming each module once.",
+    _C.ROUTE_EDGE_UNSUPPORTED: "Nothing until the engine evaluates this edge type.",
     _C.ROUTE_ALREADY_PINNED: "Nothing; the route is already pinned.",
     _C.ROUTE_IDENTITY_INVALID: "An operator must verify the pinned route.",
     _C.ROUTE_PIN_TOO_LATE: "Start a new run.",
@@ -212,6 +236,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.QUALIFICATION_SET_EMPTY: "Add at least one case to the set.",
     _C.QUALIFICATION_KEY_UNANSWERABLE: "Key only modules on the case's route.",
     _C.QUALIFICATION_SET_AMBIGUOUS: "Give each case a distinct identity.",
+    _C.QUALIFICATION_KEY_AMBIGUOUS: "Name one register row in the answer key.",
     _C.QUALIFICATION_RUN_MISSING: "Perform every case in the set.",
     _C.QUALIFICATION_SET_FILE_INVALID: "Correct the set manifest.",
     _C.QUALIFICATION_SET_PATH_ESCAPES: "Keep documents inside the set directory.",
@@ -227,6 +252,8 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.VERDICT_BINDING_INVALID: "Correct the verdict bindings.",
     _C.VERDICT_UNDECLARED_FIELD: "Remove undeclared verdict fields.",
     _C.VERDICT_EXPIRED: "Obtain a current verdict.",
+    _C.VERDICT_ALREADY_RECORDED: "Read the verdict already recorded.",
+    _C.QUALIFICATION_EVIDENCE_NOT_FOUND: "Name qualification evidence you may sign.",
     _C.STORE_SCHEMA_DRIFT: "An operator must reconcile the schema.",
     _C.STORE_NOT_TRANSACTIONAL: "An operator must fix the store connection.",
     _C.STORE_NOT_CONFIGURED: "An operator must configure the store.",
@@ -272,6 +299,14 @@ class ActionName(StrEnum):
     START_RUN = "START_RUN"
     RETRY_RUN = "RETRY_RUN"
     CANCEL_RUN = "CANCEL_RUN"
+    # Task 12.1. Membership is not here: no section serves an Admin panel to
+    # offer it from, and an action no read judges is one this enum would only
+    # claim. Its routes exist and are proven against the commands themselves.
+    WITHDRAW_SOURCE = "WITHDRAW_SOURCE"
+    SAVE_REVISION = "SAVE_REVISION"
+    SIGN_OPINION = "SIGN_OPINION"
+    FREEZE_DELIVERABLE = "FREEZE_DELIVERABLE"
+    FILE_DELIVERABLE = "FILE_DELIVERABLE"
 
 
 class ActionView(BaseModel):
@@ -404,6 +439,15 @@ class NodeView(BaseModel):
     waiting_on: Annotated[list[EdgeView], Field(max_length=ROUTE_NODES_MAX)]
     awaiting_gate: bool
     gate_verdict: Id | None
+    # What the gate wrote beside a verdict it did not clear: the T8 blocker cell
+    # of a CONDITIONAL or BLOCKED readiness row, which is where CP-0 names the
+    # source the effective set does not carry (§61). `None` for every node the
+    # gate cleared, every node it never ruled on, and every run with no accepted
+    # gate artifact -- so the wire says "no condition was stated" by carrying
+    # nothing rather than by carrying an empty string. Model-authored prose,
+    # bounded by the host at `MAX_BLOCKER_CHARS`; it is the reason a reader may
+    # read, never a fact the host asserts.
+    gate_reason: Blocker | None
 
 
 class WorkView(BaseModel):
@@ -425,6 +469,27 @@ class RouteChoice(BaseModel):
     selection_id: Id
 
 
+class BlockedByView(BaseModel):
+    """The node whose validated Blocked verdict ended the run, and the attempt
+    that answered it.
+
+    Recorded by the transition that ended the run, from the verdict the runtime
+    had just re-derived (`block_run`, §68) -- never re-derived here. The answer
+    is an unaccepted attempt's stored body, and the store refuses to judge it
+    again once the run is no longer RUNNING (`check_attempt`), so a reader that
+    tried would be refused; and a replay later would rest on evidence and a
+    bundle that may since have moved. The node's own `state` stays RUNNABLE,
+    because a Blocked verdict accepts nothing: without this a document could
+    only say the node did not run, which is the opposite of what happened.
+    """
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    attempt_id: UUID
+
+
 class RunView(BaseModel):
     """The displayed run. Node states are recomputed, never stored."""
 
@@ -441,6 +506,21 @@ class RunView(BaseModel):
     nodes: Annotated[list[NodeView], Field(max_length=ROUTE_NODES_MAX)]
     attempts: Annotated[list[AttemptView], Field(max_length=ATTEMPTS_MAX)]
     work: WorkView | None
+    # Why the run ended, when a node's verdict is why. `None` on every run that
+    # is not BLOCKED, and on a BLOCKED run no verdict ended: an empty frontier
+    # with required work unfinished (§39) is the route's own rule and names no
+    # node. Nullable so the wire never claims a blocking node that does not
+    # exist -- the two ways a run ends BLOCKED are different things to a reader.
+    blocked_by: BlockedByView | None
+    # The successor link (§72), both ends. `supersedes` is the BLOCKED run of
+    # this case that this run was created to answer, written once by the command
+    # that created it; `superseded_by` is the one run created to answer this
+    # one. Either is `None` for a run that answers nothing or has not been
+    # answered. The link says which run a run answers; whether the successor's
+    # source set carries what the verdict asked for is the reader's judgement,
+    # not a fact the host asserts.
+    supersedes: UUID | None
+    superseded_by: UUID | None
 
 
 class RunBody(BaseModel):
@@ -520,6 +600,17 @@ class AnalysisBody(BaseModel):
     latest_run_id: UUID | None
     displayed_run_id: UUID | None
     subject: RunSubjectView | None
+    # The displayed run's own status. Without it this page cannot tell a run
+    # that stopped from one still working: `pending` is recomputed from accepted
+    # artifacts, so a node the run never reached looks exactly like a node whose
+    # turn has not come. `None` when no run is displayed.
+    displayed_run_status: RunStatus | None
+    # The node whose validated Blocked verdict ended the run, read exactly as
+    # `RunView.blocked_by` is and `None` on the same runs. This page's `pending`
+    # list holds that node, because a Blocked verdict accepts nothing, and
+    # without the name a reader cannot tell the node that answered from the
+    # nodes that never started.
+    blocked_by: BlockedByView | None
     handoffs: Annotated[list[HandoffView], Field(max_length=ROUTE_NODES_MAX)]
     pending: Annotated[list[PendingNode], Field(max_length=ROUTE_NODES_MAX)]
 
@@ -560,14 +651,134 @@ class ModelForecast(BaseModel):
 
 
 class ModelBody(BaseModel):
+    """The accepted forecast, or why there is none.
+
+    `unavailable_reason` says there is no accepted forecast; the two fields
+    beside it say whether one is still coming. A body that carried neither
+    answered "not yet" to a run that had ended, which is the same blindness
+    Analysis carried until `blocked_by` joined it.
+    """
+
     model_config = _CLOSED
 
     case_id: UUID
     latest_run_id: UUID | None
     displayed_run_id: UUID | None
     subject: RunSubjectView | None
+    displayed_run_status: RunStatus | None
+    blocked_by: BlockedByView | None
     forecast: ModelForecast | None
     unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
+
+
+class BookColumn(BaseModel):
+    """One column of the book: a value the accepted projection already carries."""
+
+    model_config = _CLOSED
+
+    key: Id
+    label: Text
+
+
+class BookResearch(BaseModel):
+    """An accepted module artifact of the row's displayed run."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    module_id: Id
+    qa_status: Id
+
+
+class BookPassport(BaseModel):
+    """The ten fields IA_SPEC.md 4.4 says a passport always carries, in its
+    order. Every one is read from the accepted record, the pinned run subject
+    or the host's declaration of its own calculator; none is a judgement about
+    the run. `scenario` is the accepted projection's own `case` -- the name
+    `caos-forecast-v1` gives a scenario, and the one
+    `server/qualification/matrix.py` already reads as `ExpectedForecast.scenario`
+    -- so a base case and a downside are told apart in the field whose only job
+    is to tell them apart."""
+
+    model_config = _CLOSED
+
+    definition: Text
+    period: Text
+    scenario: Text
+    evidence_date: Text
+    computed_at: AwareDatetime
+    snapshot: Sha256
+    method: Text
+    derivation: Text
+    citations: Annotated[list[CitationView], Field(max_length=CITATIONS_MAX)]
+    supporting_research: Annotated[
+        list[BookResearch], Field(max_length=ROUTE_NODES_MAX)
+    ]
+
+
+class BookCell(BaseModel):
+    model_config = _CLOSED
+
+    column: Id
+    value: Annotated[str, Field(max_length=64, pattern=r"^-?[0-9]+(\.[0-9]+)?$")] | None
+    unavailable_reason: Literal["ZERO_OR_NEGATIVE_DENOMINATOR"] | None
+    passport: BookPassport
+
+
+class BookPeriod(BaseModel):
+    model_config = _CLOSED
+
+    case: Text
+    period_id: Text
+    fiscal_year: Text
+    days: Annotated[str, Field(max_length=3, pattern=r"^[0-9]+$")]
+    unavailable_reason: Text | None
+    cells: Annotated[list[BookCell], Field(max_length=BOOK_COLUMNS_MAX)]
+
+
+class BookRow(BaseModel):
+    """One credit, and why it carries no cells when it carries none.
+
+    `unavailable_reason` says no forecast is accepted; `refusal` is the typed
+    refusal this credit's own projection read raised. A refusal on one credit
+    never decides the others, so the book states it here rather than declining
+    the whole portfolio.
+    """
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    title: Text
+    standing: Standing
+    subject: RunSubjectView | None
+    displayed_run_id: UUID | None
+    displayed_run_status: RunStatus | None
+    snapshot: Sha256 | None
+    # The projection's own units. A portfolio that compared credits without
+    # them would put two currencies in one column and say nothing.
+    currency: Annotated[str, Field(max_length=3, pattern="^[A-Z]{3}$")] | None
+    scale: Literal["units", "thousands", "millions", "billions"] | None
+    periods: Annotated[list[BookPeriod], Field(max_length=BOOK_PERIODS_MAX)]
+    unavailable_reason: Literal["NO_ACCEPTED_FORECAST"] | None
+    refusal: RefusalBody | None
+
+
+class BookBasis(BaseModel):
+    """The one basis the comparison is stated on (IA_SPEC.md 4.4)."""
+
+    model_config = _CLOSED
+
+    period: Literal["EVERY_ACCEPTED_PERIOD"]
+    scenario: Literal["EVERY_ACCEPTED_CASE"]
+    accepted_only: Literal[True]
+
+
+class BookBody(BaseModel):
+    model_config = _CLOSED
+
+    basis: BookBasis
+    columns: Annotated[list[BookColumn], Field(max_length=BOOK_COLUMNS_MAX)]
+    rows: Annotated[list[BookRow], Field(max_length=BOOK_CASES_MAX)]
 
 
 class NarrativeFigure(BaseModel):
@@ -583,8 +794,18 @@ class NarrativeFigure(BaseModel):
 class NarrativeSpan(BaseModel):
     model_config = _CLOSED
 
-    text: Annotated[str, Field(max_length=2000)] | None
+    text: Annotated[str, Field(max_length=NARRATIVE_CHARS)] | None
     figure: NarrativeFigure | None
+
+
+class NarrativeFigureRef(BaseModel):
+    """What a draft may say about a figure: which citation of which node. The
+    quote and its coordinates are the host's, read from the accepted record."""
+
+    model_config = _CLOSED
+
+    route_node_id: Id
+    citation_index: Annotated[int, Field(ge=0)]
 
 
 class ReportArtifact(BaseModel):
@@ -697,6 +918,19 @@ class ModelDocument(BaseModel):
     notes: Notes
 
 
+class BookDocument(BaseModel):
+    """Portfolio-scoped: no case in its path, so `chrome.subject` is null."""
+
+    model_config = _CLOSED
+
+    chrome: Chrome
+    body: BookBody
+    observed_at: AwareDatetime
+    observed_empty: bool
+    status: SectionStatus
+    notes: Notes
+
+
 class ReportDocument(BaseModel):
     model_config = _CLOSED
 
@@ -718,6 +952,7 @@ V1_DOCUMENTS: tuple[type[BaseModel], ...] = (
     RunSectionDocument,
     AnalysisDocument,
     ModelDocument,
+    BookDocument,
     ReportDocument,
     CommitteeDocument,
 )
@@ -815,6 +1050,10 @@ class CreateRun(BaseModel):
 
     profile_id: Id
     selection_id: Id
+    # The BLOCKED run of the path's case this run answers (§72), or null for an
+    # ordinary run. Stated on every request, as every request field is: an
+    # absent key is a malformed body, not a default.
+    supersedes: UUID | None
 
 
 class RunCreated(BaseModel):
@@ -895,6 +1134,173 @@ class RunWork(BaseModel):
     work: WorkView
 
 
+class SignVerdict(BaseModel):
+    """A reviewer's verdict document: the six bindings `read_verdict` declares,
+    and nothing else. The shape is closed here; what the document *means* --
+    a naive or future `decided_at`, a passed expiry -- is the reader's to
+    decide, so the moments travel as text and are parsed once, there. The
+    reviewer's identity is not a field: the host derives it from the actor.
+    """
+
+    model_config = _CLOSED
+
+    provider: Id
+    qualification_set_sha256: Sha256
+    build_id: Id
+    decided_at: Moment
+    expires_at: Moment
+    reviewer: Id
+
+
+class VerdictRecorded(BaseModel):
+    """The receipt for a recorded verdict: which evidence, who the host bound
+    it to, and the currency the reviewer declared."""
+
+    model_config = _CLOSED
+
+    evidence_sha256: Sha256
+    reviewer_id: UUID
+    decided_at: AwareDatetime
+    expires_at: AwareDatetime
+
+
+class GrantStanding(BaseModel):
+    """Give or replace one member's standing. The member is named; the actor
+    granting it is derived, and holds ADMIN on the case."""
+
+    model_config = _CLOSED
+
+    user_id: UUID
+    standing: Standing
+
+
+class StandingGranted(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    user_id: UUID
+    standing: Standing
+
+
+class RevokeStanding(BaseModel):
+    """The member is in the path; there is nothing else to say."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class StandingRevoked(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    user_id: UUID
+
+
+class WithdrawSource(BaseModel):
+    """Invariant 1's second half. The source is in the path."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra={"required": []}
+    )
+
+
+class SourceWithdrawn(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    source_id: UUID
+
+
+class NarrativeDraft(BaseModel):
+    """One span a draft offers: prose, or a reference to a citation the host
+    resolves. Exactly one of the two, and a figure names only which citation --
+    the document, page and quote are the host's to fill from the record."""
+
+    model_config = _CLOSED
+
+    text: Annotated[str, Field(max_length=NARRATIVE_CHARS)] | None
+    figure: NarrativeFigureRef | None
+
+
+class SaveRevision(BaseModel):
+    """A draft over one run's accepted artifacts.
+
+    `expected_revision_id` is the latest revision of that run the client had
+    when it composed this draft, null when it saw none: a save that raced
+    another save is refused rather than quietly making a second head.
+    """
+
+    model_config = _CLOSED
+
+    expected_revision_id: UUID | None
+    narrative: Annotated[
+        list[Annotated[list[NarrativeDraft], Field(max_length=NARRATIVE_SPANS)]],
+        Field(max_length=NARRATIVE_SPANS),
+    ]
+
+
+class RevisionSaved(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+
+
+class SignOpinion(BaseModel):
+    """Invariant 5: the signature binds the exact bytes the signer reviewed."""
+
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class OpinionSigned(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    signed_by: UUID
+
+
+class FreezeDeliverable(BaseModel):
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class DeliverableFrozen(BaseModel):
+    model_config = _CLOSED
+
+    case_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    frozen_by: UUID
+
+
+class FileDeliverable(BaseModel):
+    model_config = _CLOSED
+
+    payload_sha256: Sha256
+
+
+class DeliverableFiled(BaseModel):
+    """The filing's own receipt. The detached one -- renderer and filing link --
+    is derived from the audit event this unit writes, so it is read from the
+    Committee section rather than answered here."""
+
+    model_config = _CLOSED
+
+    case_id: UUID
+    run_id: UUID
+    revision_id: UUID
+    payload_sha256: Sha256
+    filed_by: UUID
+
+
 V1_COMMANDS: tuple[type[BaseModel], ...] = (
     CreateCase,
     CaseCreated,
@@ -910,6 +1316,22 @@ V1_COMMANDS: tuple[type[BaseModel], ...] = (
     RetryRun,
     CancelRun,
     RunWork,
+    SignVerdict,
+    VerdictRecorded,
+    GrantStanding,
+    StandingGranted,
+    RevokeStanding,
+    StandingRevoked,
+    WithdrawSource,
+    SourceWithdrawn,
+    SaveRevision,
+    RevisionSaved,
+    SignOpinion,
+    OpinionSigned,
+    FreezeDeliverable,
+    DeliverableFrozen,
+    FileDeliverable,
+    DeliverableFiled,
 )
 
 

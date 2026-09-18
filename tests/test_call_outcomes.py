@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from conftest import reserve_at as reserve
 from psycopg.pq import TransactionStatus
 from test_budget import money_run as _money_run
 from test_case_ordering import _blocked
@@ -14,7 +15,7 @@ from test_store_schema import _records
 
 from server.refusals import Refusal
 from server.store import RunStatus, StoreConnection, connect, outcomes, runs
-from server.store.budget import remaining, reserve, reserved_for
+from server.store.budget import remaining, reserved_for
 from server.store.events import events_of, lock_run
 
 ACCEPTED = runs.Accepted(
@@ -91,7 +92,8 @@ def test_record_outcome_keeps_unknown_exposure_and_known_overrun(
     assert outcomes.record_outcome(conn, attempt_id=attempt, outcome=unknown)
     assert not outcomes.record_outcome(conn, attempt_id=attempt, outcome=unknown)
     assert _counts(conn) == (1, 0, 0)
-    assert reserved_for(conn, attempt) == Decimal("0.30")
+    taken = reserved_for(conn, attempt)
+    assert taken is not None and taken.amount == Decimal("0.30")
     assert remaining(conn, run) == Decimal("0.70")
     other = runs.start_attempt(conn, run, "CP-2")
     reserve(conn, other, Decimal("0.10"))

@@ -16,7 +16,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from canonical_fixtures import (
@@ -25,11 +25,11 @@ from canonical_fixtures import (
     CONTRACT,
     PINNED,
     VENDORED,
+    skill,
     wire,
 )
 from canonical_fixtures import handoff_markdown as _markdown
 from canonical_fixtures import identity as _identity
-from canonical_fixtures import skill as _skill
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, Rect
@@ -52,13 +52,16 @@ from server.methodology.handoff import (
     read_record,
     record_bytes,
     stored_lineage,
+    strict_json,
     validate_markdown,
 )
 from server.methodology.invocation import record_authority_matches
 from server.refusals import Refusal, RefusalCode
 
 SECRET = "Confidential covenant headroom 7.3x"
-SOURCE = UUID("f8e35ea4-c242-4253-b938-96af4cf2688c")
+# Fixed, not uuid4(): it reaches parametrize ids, which pytest-xdist workers
+# must collect identically.
+SOURCE = UUID("6da212c6-65a1-46b3-9e5c-7ed56acccd18")
 DELIVERED = frozenset({SOURCE})
 CP0 = _identity("CP-0")
 CP0_MD = _markdown(CP0, body_note="Recorded source p1. " + SECRET)
@@ -132,7 +135,7 @@ def test_a_malformed_transport_refuses(body: str) -> None:
 
 
 def test_a_citation_of_undelivered_evidence_refuses() -> None:
-    body = wire(CP0_MD, [_citation(source_id="6bf2b5c6-be1f-4ae9-b3e6-1fee90eaa6a4")])
+    body = wire(CP0_MD, [_citation(source_id=str(uuid4()))])
     assert _parse_refused(body) is RefusalCode.CITATION_NOT_DELIVERED
 
 
@@ -143,7 +146,7 @@ def test_a_quote_absent_from_the_markdown_refuses_the_handoff() -> None:
 
 def _record(**changes: object) -> CanonicalRecord:
     projections = validate_markdown(
-        CONTRACT, CATALOG, _skill("CP-0"), CP0_MD, identity=CP0, gate_expects=PINNED
+        CONTRACT, CATALOG, skill("CP-0"), CP0_MD, identity=CP0, gate_expects=PINNED
     )
     values: dict[str, object] = {
         "artifact_sha256": hashlib.sha256(CP0_MD).hexdigest(),
@@ -576,3 +579,82 @@ def test_a_verifying_reader_refuses_a_file_tampered_after_a_cache_hit(
     with pytest.raises(Refusal) as refused:
         record_authority_matches(record, bundle=bundle, module_id="CP-0", verify=True)
     assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+def test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty(
+    tmp_path: Path,
+) -> None:
+    """Task 10.3: `Projections.blockers` did not move the v2 record's bytes.
+
+    A gate that cleared every module -- and every module but the gate, which
+    projects no readiness at all -- writes no `blockers` key, which is the shape
+    every record stored before the field existed has. Reading one back supplies
+    the empty tuple, and re-serialising it gives those same bytes, so the
+    `record_bytes(record) != data` check every reader makes still holds for a
+    record this build did not write.
+    """
+    record = _record()
+    assert record.projections.blockers == ()
+    data = record_bytes(record)
+    assert "blockers" not in json.loads(data)["projections"]
+
+    blobs, artifact, sha = _stored(tmp_path, record)
+    read = read_record(blobs, artifact_sha256=artifact, record_sha256=sha, expected=CP0)
+
+    assert read.projections.blockers == ()
+    assert record_bytes(read) == data
+
+
+def test_a_record_carrying_blockers_writes_them_and_reads_them_back(
+    tmp_path: Path,
+) -> None:
+    """The other spelling: rows present are written, sorted, and round-trip."""
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    conditional = _markdown(
+        CP0,
+        readiness={"CP-5": "CONDITIONAL", "CP-L10": "READY"},
+        blockers={"CP-5": asked},
+    )
+    projections = validate_markdown(
+        CONTRACT, CATALOG, skill("CP-0"), conditional, identity=CP0, gate_expects=PINNED
+    )
+    record = _record(
+        artifact_sha256=hashlib.sha256(conditional).hexdigest(),
+        projections=projections,
+    )
+    data = record_bytes(record)
+    assert json.loads(data)["projections"]["blockers"] == [["CP-5", asked]]
+
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(conditional)
+    read = read_record(
+        blobs, artifact_sha256=artifact, record_sha256=blobs.put(data), expected=CP0
+    )
+
+    assert read.projections.blockers == (("CP-5", asked),)
+    assert record_bytes(read) == data
+
+
+def test_an_explicitly_empty_blocker_list_is_not_the_canonical_form(
+    tmp_path: Path,
+) -> None:
+    """`blockers: []` written out is a second spelling of one value, and the
+    canonical form is the absent key: a record carrying it refuses rather than
+    giving two byte strings for one record."""
+    document = json.loads(record_bytes(_record()))
+    document["projections"]["blockers"] = []
+    data = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    blobs = BlobStore(tmp_path / "blobs")
+    artifact = blobs.put(CP0_MD)
+
+    _mismatch(blobs, artifact, blobs.put(data), CP0)
+
+
+def test_strict_json_refuses_a_duplicate_key_and_a_json_constant() -> None:
+    """The reader every handoff body goes through: one value per key, no NaN."""
+    assert strict_json('{"a":1,"b":[2,3]}') == {"a": 1, "b": [2, 3]}
+    for text in ('{"a":1,"a":2}', '{"a":NaN}', '{"a":Infinity}'):
+        with pytest.raises(ValueError):
+            strict_json(text)

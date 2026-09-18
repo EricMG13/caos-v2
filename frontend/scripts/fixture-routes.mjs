@@ -13,13 +13,14 @@ export const SECTIONS = [
   "admin",
 ];
 
-/** The six sections served in every mode; the other three render `unavailable`
-    with no request (brief 4.1, decision 9). Mirrors src/app/sections.ts. */
+/** The sections served in every mode; Admin renders `unavailable` with no
+    request (brief 4.1, decision 9). Mirrors src/app/sections.ts. */
 export const ENABLED_SECTIONS = [
   "directory",
   "upload",
   "run",
   "analysis",
+  "book",
   "model",
   "report",
   "committee",
@@ -67,6 +68,7 @@ export function sectionRoute(section, fixture = null) {
 
 export const STATE_ROUTES = [
   sectionRoute("directory", "observed-empty"),
+  sectionRoute("book", "observed-empty"),
   sectionRoute("upload", "partial"),
   sectionRoute("analysis", "partial"),
   sectionRoute("analysis", "stale"),

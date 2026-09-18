@@ -5,6 +5,12 @@ exactly once), so either document anchors it; the journey worker cites the PDF,
 which is what puts a rectangle over rendered words in the evidence drawer. The
 PDF is written out by hand, as `tests/test_pdf_extraction.py` writes its
 fixtures, so it needs no library.
+
+`insufficient_pack` is the deliberately insufficient-evidence case
+(`docs/REPAIR_PLAN.md` Phase 6 exit): one earnings note and no covenant
+certificate. It carries the same quote once, so CP-0 and CP-L10 still anchor
+what they cite; what it lacks is what CP-5 blocks on, and the journey worker
+keys its `Blocked` verdict on this document being the evidence pinned.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from canonical_fixtures import QUOTE
 
 TEXT_NAME = "journey-earnings-update.txt"
 PDF_NAME = "journey-covenant-certificate.pdf"
+INSUFFICIENT_NAME = "journey-earnings-note.txt"
 
 TEXT_LINES = (
     "Journey Holdings quarterly earnings update",
@@ -24,6 +31,11 @@ PDF_LINES = (
     "Journey Holdings covenant compliance certificate",
     f"{QUOTE} stood at 1,240 million",
     "Net leverage was within the covenant level",
+)
+INSUFFICIENT_LINES = (
+    "Journey Holdings earnings note",
+    f"{QUOTE} was 1,240 million",
+    "No covenant compliance certificate was delivered for the period",
 )
 
 
@@ -62,3 +74,8 @@ def journey_pack() -> list[tuple[str, bytes]]:
         (TEXT_NAME, ("\n".join(TEXT_LINES) + "\n").encode("utf-8")),
         (PDF_NAME, _pdf(PDF_LINES)),
     ]
+
+
+def insufficient_pack() -> list[tuple[str, bytes]]:
+    """The one-note pack whose evidence does not support the work."""
+    return [(INSUFFICIENT_NAME, ("\n".join(INSUFFICIENT_LINES) + "\n").encode("utf-8"))]

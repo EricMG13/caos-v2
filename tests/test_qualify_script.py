@@ -210,7 +210,15 @@ def test_main_performs_a_full_qualification_set_against_a_real_database(
     out = capsys.readouterr().out
     preamble_line, _, rest = out.partition("\n")
     preamble = json.loads(preamble_line)
-    assert set(preamble) == {"database", "blob_root"}
+    assert set(preamble) == {
+        "database",
+        "blob_root",
+        "price_model",
+        "price_input_per_token",
+        "price_output_per_token",
+        "price_as_of",
+        "price_worst_case_per_call",
+    }
     body = rest.strip("\n")
     document = json.loads(body)
 

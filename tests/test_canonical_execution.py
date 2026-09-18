@@ -26,6 +26,7 @@ from canonical_fixtures import (
     skill,
 )
 from conftest import recorded_statements
+from conftest import reserve_at as reserve
 from test_execution_freshness import (
     _counts,
     _Harness,
@@ -48,7 +49,6 @@ from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
-from server.store.budget import reserve
 from server.store.run_inputs import load_run_input
 from server.store.runs import Accepted, accept_attempt, start_attempt
 from server.store.source_sets import load_source_set

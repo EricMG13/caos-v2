@@ -12,6 +12,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
+from conftest import reserve_at as reserve
 from test_execution_freshness import (
     _DuringCompletion,
     _Harness,
@@ -24,8 +25,12 @@ import server.store as store
 from server.boundary_text import BoundaryText
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
-from server.store.budget import reserve
-from server.store.outcomes import CallOutcome, record_outcome
+from server.store.outcomes import (
+    CallOutcome,
+    accepted_owner,
+    record_outcome,
+    require_idle,
+)
 from server.store.runs import (
     Accepted,
     accept_attempt,
@@ -195,3 +200,51 @@ def test_populated_upgrade_with_duplicate_node_artifacts_refuses_atomically(
             conn.execute("SELECT count(*) FROM store_migrations").fetchone() == versions
         )
         assert conn.execute("SELECT count(*) FROM artifacts").fetchone() == (2,)
+
+
+def test_accepted_owner_names_the_attempt_that_owns_the_nodes_result(
+    harness: _Harness,
+) -> None:
+    """The read every guard in this file goes through, asserted directly
+    rather than only through the guards it serves. The file's own docstring
+    has said so since it was written, and a docstring is not a test: this gate
+    passed on that sentence until `check_tested.py` began resolving references
+    through the AST.
+
+    Joined through the attempt rather than `artifacts.route_node_id`, so an
+    unaccepted node answers `None` and an accepted one answers the attempt
+    that actually paid for it -- not merely some attempt of the run.
+    """
+    node = harness.route.nodes[0].route_node_id
+    assert accepted_owner(harness.conn, harness.run_id, node) is None
+
+    refused, owner = _billed(harness), _billed(harness)
+    assert _accept(harness, owner) is True
+
+    assert accepted_owner(harness.conn, harness.run_id, node) == owner
+    assert owner != refused
+
+
+def test_require_idle_refuses_a_caller_transaction_even_a_read_only_one(
+    harness: _Harness,
+) -> None:
+    """Execution never adopts an active caller transaction. The read-only case
+    is the one worth naming: a caller that has only *read* still holds a
+    snapshot, and running an attempt inside it would pin execution to a view
+    of the store taken before the attempt began.
+    """
+    idle = connect(harness.url)
+    try:
+        require_idle(idle)  # an idle connection passes by returning at all
+
+        idle.execute("SELECT 1")  # a read alone opens the transaction
+        with pytest.raises(Refusal) as caught:
+            require_idle(idle)
+        assert caught.value.code is RefusalCode.STORE_NOT_TRANSACTIONAL
+
+        idle.rollback()
+        idle.autocommit = True
+        with pytest.raises(Refusal, match=r"^STORE_NOT_TRANSACTIONAL$"):
+            require_idle(idle)
+    finally:
+        idle.close()

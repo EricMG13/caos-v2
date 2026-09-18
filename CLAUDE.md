@@ -170,10 +170,660 @@ path, in the same breath as the code that creates it. An empty ledger on a
 system this size means nobody looked.
 
 The phase labels below are historical **rebuild** labels, not current repair
-phase numbers. Entries are not evidence of completion; the handoff and repair
-plan govern present work. Correct a stale entry when its owning task proves
-the replacement behavior. The legacy hook claims are currently unverified
+or completion phase numbers; the four that collide with the phases of
+`docs/COMPLETION_PLAN.md` say "Rebuild Phase N (historical)" outright. Entries
+are not evidence of completion; the handoff and the repair and completion plans
+govern present work. Correct a stale entry when its owning task proves the
+replacement behavior, and strike it in the commit that closes it, naming the
+test: `tests/test_ledger.py` refuses an entry citing a test the suite does not
+define, and an open entry that states no upgrade path. The legacy hook claims are currently unverified
 controls; see the tracked Phase 2 hook prerequisite in the handoff.
+
+**Completion Phase 13.**
+
+- **Every green smoke run logs an unhandled traceback, and it is the test
+  edge's rather than the product's.** Measured on two full three-engine runs:
+  exactly **one** `ERROR: Exception in ASGI application` and **three**
+  `httpx.RemoteProtocolError: peer closed connection without sending complete
+  message body` per engine, on runs that exit 0 with 22 tests passing. The
+  stack is `httpx`/`httpcore` -- the *client* side -- so it is
+  `tests/journey/edge.py` proxying an SSE tail to the API when the browser
+  navigates away from the page holding it, which is an ordinary thing for a
+  browser to do and which the API answers correctly (its own log line is the
+  `INFO` above it). Nothing in `server/` raises here. What it costs is not
+  correctness but attention: a traceback printed on every passing run teaches a
+  reader to scroll past tracebacks, and the next one will be real. It is also
+  why this phase had to diagnose the same exception three separate times before
+  concluding it was benign -- once per engine, against a stream-cap change that
+  could plausibly have caused it. *Upgrade:* the test edge catches the
+  disconnect its own proxy loop is certain to meet and logs one line naming it,
+  so a traceback in a smoke log goes back to meaning something. It is a change
+  to the journey's edge and not to the product, which is why it is an entry
+  rather than a task.
+
+- **The image gate cannot run on a machine whose Trivy has moved off the pin.**
+  `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
+  refuses anything else, which is the pin working: a scanner is only a gate
+  while everyone runs the same one, and a newer Trivy can change both its
+  findings and its report shape, which `scripts/scan_floors.py --trivy` then
+  reads. The development machine was upgraded to 0.72.0 between Completion
+  Phase 12's gate (17 September 2026, which ran `image` green) and Phase 13's,
+  so `make check` now stops there and **never reaches `smoke-production`,
+  which is the step after it**. Nothing is wrong with the tree: every step
+  before `image` is green, and `smoke-production` runs on its own. The gate is
+  parameterised for exactly this -- `TRIVY ?= trivy`, so
+  `make check TRIVY=/path/to/0.70.0/trivy` runs it whole -- and that is the
+  fix rather than moving the pin, which would be changing a gate to get a
+  pass. What it costs is that the phase's own evidence is assembled from
+  `make check` up to `image` plus a separate `make smoke-production`, rather
+  than from one green invocation. *Upgrade:* pin the scanner the way the locks
+  pin everything else -- a hashed, version-exact Trivy the bootstrap installs
+  into the project rather than one the machine happens to carry -- the day a
+  second person has to reproduce this gate. Until then the escape hatch is the
+  answer and this entry is where it is written down.
+
+**Completion Phase 12.**
+
+- **Two filing digest checks cannot fire, and one refusal's clearance cannot
+  discharge its newest cause.** `server/deliverable/filing.py`'s
+  `signatures[0][1] != digest` (`DELIVERABLE_MOVED_SINCE_SIGNING`) and its
+  `any(signed_digest != digest ...)` (`DELIVERABLE_NOT_SIGNED`) compare a
+  signature's `payload_sha256` against the revision's -- but `sign_opinion_in`
+  writes the digest it has just read from the immutable
+  `deliverable_revisions` row, so every signature's digest equals the
+  revision's by construction and neither branch is reachable. What does the
+  work is `_reviewed` in the route, against the digest the *client* sent, which
+  is a different and real check. Two named refusals with no reachable cause
+  read as protection that is not there. Separately,
+  `citations._line_blocks` now raises `EVIDENCE_NOT_AVAILABLE` when the host's
+  own `GROUP_WIDTH` no longer reproduces a stored block count, and that code's
+  clearance is "Pin a live source for the evidence." -- an act the caller can
+  perform and that cannot possibly help, because the fault is the host's
+  packing rule. Same shape as the borrowed `CONTEXT_OVER_CEILING` clearance
+  already recorded, one code over. Both found by the Completion Phase 12
+  adversarial audit. *Upgrade:* delete the two unreachable branches with the
+  commit that gives them a cause, or state in each that the route's check is
+  the live one; and a clearance of its own for the repacking refusal, which is
+  the operator's "re-admit the source under this build" rather than anything a
+  caller can do.
+- **`SAVE_REVISION` is judged on its floor alone, so the surface can offer a
+  save the commit refuses.** `availability.report_actions` judges the other
+  three filing acts against the revision's state and `SAVE_REVISION` against
+  the WRITER floor only, while `FilingControls` posts
+  `expected_revision_id: body.revision_id`. So opening Report at
+  `?revision=<any revision that is not the run's head>` -- an ordinary thing to
+  do, since the Save control sets `?revision` on every save -- renders Save
+  available and answers `COMMAND_EXPECTATION_STALE` on the press. The read
+  already holds the run's head and could say so; every other run-scoped action
+  in that module does the equivalent. It is also the one filing control
+  `tests/test_governed_write_routes.py`'s availability walk skips, which
+  iterates `_FILING[1:]` under a docstring saying it covers every state the
+  chain distinguishes. *Upgrade:* judge `SAVE_REVISION` against the head the
+  read already has, and walk all four.
+
+- **The filing commands' I/O budget is a ceiling, where every other section
+  asserts equality.** `server/api/commands/deliverable.py` declares
+  `IO_BUDGET = 60` and `tests/test_governed_write_routes.py` asserts
+  `0 < counted.executed <= budget`, over measured costs of freeze 55, save 52,
+  filing 16 and signature 14. So the signature command may grow from fourteen
+  round trips to sixty with nothing failing, and two of the four run at a
+  quarter of their declared bound. The four share one envelope and one
+  declaration, which is why a single number covers them; what it costs is the
+  property every section read has, that an unnoticed read fails loudly. This is
+  the same argument the audit-remediation entry makes one screen above about
+  not fitting a budget to the widest shape, applied to a ceiling instead of a
+  raised number. *Upgrade:* a declared budget per command with `==`, the day
+  one of the four grows a read nobody meant to add.
+- **A signer can sign twice, and the detached receipt names one of them.**
+  `deliverable_opinions`' primary key is
+  `(case_id, revision_id, signed_by, signed_at)` and `sign_opinion_in` refuses
+  only a *frozen* revision, while `useCommand` mints a fresh idempotency key
+  for a press following a successful one -- so two presses of Sign are two
+  commands and two rows for one signer. Nothing false is written: the
+  revision's `signed_by` carries the same actor twice and the three-actor rule
+  still counts distinct actors. Two clauses this entry first carried were
+  wrong, and are corrected here rather than quietly: it said the committee read
+  pays one more `payload_digests` round trip, which it does not -- `required`
+  is a set of `(action, actor)` and the lookup is keyed by actor, so a doubled
+  *same* signer costs nothing and only two distinct signers do, which is what
+  the `IO_BUDGET` comment beside it says and what this entry borrowed for a
+  case it does not cover. And it said `file_deliverable_in`'s `Receipt` names
+  the **first** signer: `revision_signatures` orders `signed_at DESC`, so
+  `signatures[0]` is the most **recent** one. The receipt still under-claims
+  rather than misstates, but it under-claims the other way round. Both found by
+  the phase adversarial audit reading the code against the entry. Reachable
+  since the sign route shipped. *Upgrade:* a unique index on
+  `(case_id, revision_id, signed_by)` and a receipt carrying every signature,
+  the day a second signature on one revision is something a reader must see.
+- **A Book passport's evidence date is the analyst's declared reporting
+  period.** `server/api/reads/book.py` fills `evidence_date` from the pinned
+  run subject's `reporting_period`, which a person typed when the run was
+  created -- not a date the host derived from any admitted document. The code
+  says so; the field's name does not, and in a ten-field passport beside
+  `computed_at`, `snapshot` and a host-anchored citation it reads as one more
+  host fact. *Upgrade:* rename it to what it is, or derive it from the
+  documents the projection's operands cite, the day a reader relies on it to
+  date the evidence rather than the case.
+- **The demonstration Book is fully populated for a feature the real system
+  cannot reach.** `frontend/fixtures/book.json` carries two credits with cells,
+  chips and ten-field passports, and `make dev-ui-demo` renders them -- while
+  no run made through the API can carry CP-CF, so the real Book draws a credit
+  list and no table. The fixture is the shape the wire declares and the section
+  will serve; the workbench is explicitly never integration evidence
+  (`docs/DECISIONS.md` §14's rule, restated on every demo surface). But the
+  entries above say the Book's limits "are not things a reader meets now", and
+  a reader of the demonstration meets the opposite: a working portfolio.
+  *Upgrade:* the demo fixture says on the page that no pathway it can be served
+  from produces a forecast, or the model extension becomes requestable and the
+  fixture stops being ahead of the product.
+
+- **No run made through the API can carry CP-CF, so no Book cell and no
+  passport is reachable.** `create_run` resolves the route with no
+  `RouteExtensions` (`server/api/commands/runs.py`) and `CreateRun` carries no
+  field to ask for one (`server/api/wire.py`, `extra="forbid"`), while CP-CF is
+  a host extension appended only by
+  `resolve_route(..., extensions=RouteExtensions(model_extension=True))`
+  (`server/engine/route.py`'s `_model_node`), whose one caller anywhere is the
+  qualification harness. `accepted_forecast` returns `None` without a CP-CF
+  handoff, so every credit is `NO_ACCEPTED_FORECAST`, `periodsOf(rows)` is
+  empty, `BookSection` draws its credit list instead of a comparison table, and
+  there is no `[data-cell]` to open a passport from. **This is not a property of
+  the LITE pathway**: `ADAPTER_ROUTES` enables three pathways and
+  `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's `MODEL_OWNERS`,
+  so it would append CP-CF if anything asked. Completion Phase 12's exit clause
+  "a ten-field passport per cell" therefore rests on `PINNED[wire.BookPassport]`
+  in `tests/test_wire_contract.py`, on `frontend/tests/unit/book.test.tsx` and
+  on `tests/test_book_section.py`, not on the production stack; the journey records the
+  absence deliberately, so the day a cell exists
+  `journey: the Book names every credit of the portfolio on one stated basis`
+  fails and is rewritten to open the passport. Found by the Task 12.5
+  acceptance review, which read the route resolver where the task's own
+  reasoning had stopped one step short and recorded a false reason -- that
+  CP-CF "is not a node of the only route the canonical adapter executes" --
+  which was wrong twice over. *Upgrade:* a declared way for a run to request
+  the model extension, a `model_extension` field on `CreateRun` pinned in the
+  route digest like everything else; or a Book that says in its own document
+  that no pathway it can be served from produces a forecast.
+- **The filing chain cannot be reached from the workspace.** `sectionUrl`
+  answers `null` for **both** `report` and `committee` without a `revision`
+  (`frontend/src/app/transport.ts`), `read_report` refuses
+  `DELIVERABLE_NOT_FOUND` without the row, and the only thing that ever sets
+  `?revision` is `FilingControls`' own post-save `setParams` -- on the section
+  that needs it to load. So a case can never produce its *first* revision
+  through the UI, and with no revision there is nothing to sign, freeze or
+  file: the four governed writes Task 12.1 built and Task 12.2 placed are
+  unreachable by a person using the workspace, and Committee shares the
+  precondition. Every one of them works, proved through the production stack on
+  three engines by `frontend/tests/journey/journey.spec.ts`, which reaches the
+  first save as an authenticated request and asserts the surface is
+  `unavailable` without one -- because there is no press that would make it.
+  The journey citation is worth nothing to a gate: every journey test is titled
+  `journey: ...`, which neither `scripts/ledger_state.py` nor
+  `tests/test_phase_exits.py` can read, so the code paths above are the
+  citation that can be checked. *Upgrade:* a `SAVE_REVISION` control that does
+  not need a revision to exist -- composed from Analysis or Run, its success
+  the thing that first sets `?revision` -- or `report` served without
+  `revision`, answering the run's latest. Either is a task; neither is a change
+  a test may make.
+- **A digit in a draft is refused with a clearance the surface cannot
+  discharge.** `server/deliverable/revisions.py`'s `_span` refuses any ASCII
+  digit in narrative text `NARRATIVE_FIGURE_UNREFERENCED`, whose clearance
+  reads "Insert every financial figure through a validated reference" -- a
+  figure span naming a citation of a verified record, which `FilingControls`
+  cannot compose, as its own comment says. So an author who types a number is
+  told to perform an act the page offers no way to perform. The wire and the
+  store do support it, which the journey shows by saving one figure span over
+  the API and reading it back on the Report surface with the host's own
+  document, page and quote; the refusal itself is rendered in the browser.
+  *Upgrade:* a citation picker on the Report surface; failing that, a clearance
+  that names an act this surface can perform.
+- **Nothing renders a parked run's stop code.** `work.stop_code` is parsed at
+  `frontend/src/wire/v1/documents.ts` and rendered nowhere under
+  `frontend/src`, so an operator meeting a run parked `STOPPED` learns only
+  that Start and Retry are refused, and not that the store said
+  `EVIDENCE_NOT_AVAILABLE` because a captured source was withdrawn. The code is
+  on the wire, typed, and one line from being on screen. Journey-observed
+  rather than read: Task 12.5 polls that field to prove the park happened, from
+  a page that does not show it. Grant and revoke are the same shape one step
+  further on -- both commands have no control anywhere and no entry in
+  `ActionName`, deliberately, because no section serves an Admin panel to offer
+  them from, so the journey drives them as authenticated requests. *Upgrade:*
+  the stop code on the Run section's work panel beside the refused controls,
+  and the membership commands with Completion Phase 13's Admin work.
+- **A worktree outside `/Users` cannot run `make smoke-production`.**
+  `compose.smoke.yaml` bind-mounts `./tests:/app/tests:ro` into
+  `journey-worker`, and Docker Desktop on the development machine shares
+  `/Users` and not `/private/tmp`, so the mount comes up empty and the worker
+  exits `ModuleNotFoundError: No module named 'journey'` -- a failure that
+  names neither the mount nor the path. **Every standing worktree of this build
+  is under `/private/tmp`**, so this recurs for anyone who tries. Task 12.5's
+  assigned worktree was one of them; its three-engine gate was run from a
+  detached mirror worktree under `/Users`, and **the gate evidence is therefore
+  not reproducible from the branch's own worktree**: the mirror is deleted, it
+  used the same fixed ports and the same compose project name as any other
+  agent's smoke stack, and the only link between it and what landed is the
+  sha256 of the two committed files. *Upgrade:* `tests/journey/run.py` refuses
+  a repository root Docker cannot mount, with a code that says so, before it
+  builds anything -- which is also what would stop the next agent losing an
+  hour to it.
+
+- **The Book compares on earnings, not on leverage, and on four credits it did
+  not let you choose.** Read this entry and the two after it against the one
+  above: no run made through the API carries CP-CF, so the cells, chips and
+  passports they describe are what the Book serves **when a forecast exists**,
+  which no API-created run produces today. The limits below are real and will
+  be met the day the model extension is requestable; they are not things a
+  reader meets now. Task 12.3 declares six columns, the five whose operands
+  are the period's own accepted driver row and the EBITDA margin over two of
+  them, because a cell can then name the driver behind it and that driver's
+  evidence. The debt and cash roll-forward and the leverage metrics over them
+  are not declared: `server/calculators/cash_flow.py` chains each period's
+  opening to the previous period's closing, so a passport naming only the local
+  drivers would understate the lineage -- and `metrics.net_leverage` is the
+  figure `docs/IA_SPEC.md` 4.4 names as a facet, so the section ships without
+  the number it is most likely to be opened for. The rows are the caller's
+  newest four credits by `created_at`, `LIST_TRUNCATED` past that, with no way
+  to say which four: a member of thirty compares the four most recently
+  created. Nothing filters, groups or saves a view either; three of IA_SPEC's
+  five grouping keys (sector, rating, vintage, sponsor) and two of its four
+  facets have no source in the store, while `pathway` and `status` do -- they
+  are `profile_id`/`selection_id` and `displayed_run_status`, both already
+  served -- and with four rows the rest buy nothing. *Upgrade:* a declared
+  transitive operand set over the roll-forward, computable from
+  `forecast_inputs` and the same change that lets a leverage cell carry an
+  honest passport; and an explicit selection of which credits are compared, the
+  day a reader asks the Book for leverage or for two credits it did not choose
+  for them. `tests/test_book_section.py` holds the six columns and their
+  passports.
+- **A Book passport names its evidence and draws none of it.**
+  `server/api/reads/book.py` serves each operand's citation from the accepted
+  owner binding, and `CitationView` carries the host's own rectangles -- but
+  `frontend/src/sections/book/passport.ts` adapts it to the passport overlay's
+  older `Citation`, which has no page frame to place a rectangle against, so
+  `bboxes` is `[]` and the drawer names the document, the page and the quote
+  over a blank silhouette. The v1 `SourceDrawer` is the one that fetches a
+  frame, and it resolves a fact against a document carrying `handoffs`, which
+  the Book's does not. Nothing is fabricated and invariant 11 is untouched --
+  the host anchored the quote and still serves the rectangle -- but a reader who
+  opens a chip from the Book sees the quote and not where on the page it sits,
+  where the same quote opened from Analysis shows both. For the same reason
+  every Book cell is a projection and none carries the `PROJECTED` marker:
+  `passport.ts` sets `driver: null`, and the ten-field passport
+  `tests/test_wire_contract.py` pins has no eleventh field for one. The
+  information is there under `derivation` and `citations`; the marker is not.
+  `deviation` is null for a different reason: one calculator owns every column,
+  so two spellings sharing a column cannot arise here rather than being left
+  unchecked. *Upgrade:* open the v1 source drawer from the Book by carrying each
+  citation's `case_id` on its row, the day a reader needs the rectangle from the
+  portfolio rather than from the credit.
+- **The Book's declared I/O is one route shape multiplied by four.**
+  `PER_ROW_IO` is `MODEL_IO - 1`, measured on the ten-node LITE forecast route,
+  and `IO_BUDGET` is `2 + 4 x that` = 598. `read_analysis` costs
+  `7 + 10 x handoffs`, so a `FULL_CREDIT_32` credit costs about 327 and four of
+  them about 1,310 against the declared 598 -- arithmetic rather than a
+  measurement, and unreachable by any request while no pinned route carries
+  CP-CF. The convention is Model's and
+  Analysis' -- both declare the shape they were measured on -- but the Book is
+  the first reader to multiply it, so the gap between the declaration and the
+  widest real request is four times anyone else's. The payload has the same
+  shape of cost: `supporting_research` and each full `matched_text` repeat in
+  every one of up to 192 cells, where every other section carries a citation
+  once; the committed fixture is about 2.4 KB a cell, so a full book is roughly
+  0.5 MB at that density and more with real quotes. Neither figure is measured
+  against a wide route, because no wide route runs today. *Upgrade:* declare the
+  budget from the routes the read actually walked, and carry each citation and
+  each research link once with the cells referring to it, the day a
+  `FULL_CREDIT_32` credit reaches the Book.
+
+**Completion Phase 8.**
+
+- ~~**A register is located by vendor prose, and a key trusts that location.**~~
+  Struck in the commit that closed it, and worth reading as an example of an
+  entry being wrong in the direction that matters. It said the narrowing was
+  "not a divergence from the authority: the vendor's own `check()` reads the
+  same table, so the host and the bundle agree". Both halves were false. The
+  host asked the vendor's locator with a **narrowed** register-id list where
+  the bundle's own `check()` asks with none, and the locator walks the lines
+  above each table nearest-first, breaking on the first line naming any id it
+  was given and keeping the first table it binds -- so the id list decides which
+  table answers. CP-L10 is required to write five registers with identical
+  columns and the same six-row minimum, and its own `SKILL.md` asks it for
+  appendix prose naming the TL10 family, so a handoff could be scored `met` from
+  a sibling register while the honest one said `MISSING`, and an honest handoff's
+  key could miss because the prose named a different sibling first. The entry's
+  reachability claim was wrong for the same reason, and its upgrade deferred the
+  fix to a module "whose registers are optional" when CP-L10's are all required
+  and the divergence was live on the only register key that ships. Closed by
+  asking the locator exactly as the bundle asks it -- no id list --
+  which `tests/test_qualification_matrix.py::test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it`
+  holds by building both readings of one handoff. Found by the Completion Phase 8
+  adversarial audit, which constructed a handoff passing the vendor's own
+  completeness check with zero violations in which the shipped key was met from
+  the wrong register. The confidence review had looked at the same code and
+  recorded it as safe; this is what a second, adversarial gate is for.
+- **Two vendor tests fail on bytecode any concurrent process can write.**
+  `tests/test_vendor_contract.py::test_vendor_loader_leaves_sys_path_untouched`
+  asserts no `__pycache__` under `vendor/deploy-v`, and
+  `tests/test_bundle_pin.py::test_the_bundle_verifies_with_its_own_tool` runs the
+  bundle's own `verify_package.py`, which refuses a tree carrying any. Both are
+  right to: the vendored tree is read-only and `docs/DECISIONS.md` §13 pins its
+  bytes. Neither is isolated from the rest of the machine. This checkout is
+  shared -- a peer session, review agents and the coordinator all run in it -- and
+  any Python process that imports a vendor script through the ordinary machinery
+  leaves bytecode beside the source, after which both tests fail for a cause
+  neither names. It happened twice while retesting Completion Phase 8, and cost
+  an hour: the first diagnosis blamed an agent that had used `-B` throughout and
+  proved it by timestamp, and the second blamed `load_vendor_contract`, which was
+  then shown to write nothing when nothing else is running. The real cause is
+  concurrency, and the evidence for it is that the failure does not reproduce in
+  an otherwise idle checkout. What is *not* in question: nothing in `server/` or
+  `scripts/` reaches a vendor module except through `load_vendor_contract`, which
+  uses `compile`/`exec` and writes no bytecode, and the one place that runs a
+  vendor script as a subprocess already passes `-B`. The seam holds; its test is
+  what is fragile. *Upgrade:* have the two tests clear `__pycache__` under
+  `vendor/` before asserting, so they measure this repository's own behaviour
+  rather than the machine's -- or give each agent its own checkout, which is the
+  standing worktree rule these sessions have been bending by working in one tree.
+- **A key over a duplicated column answers nothing, and that is now true rather
+  than only written down.** The vendor's reader builds a register row as
+  `dict(zip(header, cells))`, so a header naming one column twice collapses to
+  the trailing cell before the host sees anything. `_cell`'s documented rule --
+  "a register whose header names the same column twice answers `None`" -- could
+  therefore never fire, and a shipped key was met by `PARTIAL` in a second
+  `evidence_status` column while the first honestly said `MISSING`. `_cell` now
+  takes the header, where the duplicate is still visible, and
+  `tests/test_qualification_matrix.py::test_a_key_does_not_answer_from_a_duplicated_column`
+  holds it. What remains is that the bundle still collapses the row, so the host
+  refuses to answer where the vendor's own `check()` would read the trailing
+  cell: the two disagree, and the host takes the fail-closed side.
+  *Upgrade:* the bundle's, and it belongs with the other vendor requests -- a
+  duplicate header is a malformed register and the validator should refuse it.
+
+**Audit remediation (2026-09-17).**
+
+- **A revision filed before a renderer change cannot be packaged verifiably
+  again.** `server/deliverable/filing.py` records `renderer_sha256` from the
+  `render.py` of the day the revision was filed; `build_package` embeds the
+  renderer of the day the package is built; and `verify_package._contents`
+  refuses when the receipt's hash and the embedded renderer disagree. So the
+  moment the renderer changes -- as Completion Phase 12 Task 12.4 changed it --
+  every revision filed before it can no longer be turned into a package that
+  verifies. Unreachable today, which is why it is recorded rather than fixed:
+  no route serves a package and `write_package` has no caller outside the
+  suite. It becomes real the day a deliverable export route exists, and it will
+  arrive silently, because the filing that breaks is one nobody is looking at.
+  Found by the Task 12.4 review, which noticed that the task reasoned carefully
+  about not breaking filed deliverables retroactively and stopped one step
+  short of this one. *Upgrade:* verify a package against the renderer its
+  receipt names rather than the one this build holds -- the archived verifier
+  already works that way, which is the whole of §55's design -- or re-render
+  and re-file on a renderer change, which is a governed write and a decision.
+
+- **The committee read's declared I/O is stated for one signer, and a second is
+  reachable.** Task 12.1's filing controls are judged by rebuilding each act's
+  audit payload, and an event a command wrote binds a request digest that is not
+  recomputable from the payload, so `payload_digests` reads back the receipts
+  that actor committed on the case -- one round trip **per actor the section
+  looks for**. `deliverable_opinions` is keyed `(case_id, revision_id,
+  signed_by, signed_at)` and `sign_opinion_in` refuses only a *frozen* revision,
+  so a second approver may sign before the freeze and the frozen committee read
+  then costs 53 where `IO_BUDGET["frozen"]` declares 52 -- asserted with `==`,
+  against fixtures that all carry one signer. Nothing fails today and nothing is
+  wrong on the wire; what is wrong is that a declaration meant to bound a request
+  path is true of one shape of that path. The number is deliberately not raised:
+  `io_budget.py --assert` and the equality test exist to make an unnoticed read
+  fail loudly, and a budget fitted to the widest shape stops measuring the common
+  one -- which is the same move as changing a gate to get a pass, one step
+  removed. Found by the scoped re-review of the C1 fix, which measured both
+  shapes rather than reading the comment. *Upgrade:* declare the budget as a
+  function of the signers the read found, so the assertion measures the shape it
+  ran against, the day a case has a second approver -- or, if the reads are the
+  problem rather than the declaration, one `command_requests` read for every
+  actor at once, which the join already permits.
+
+- **The wire says "come back later" honestly at 5xx and not at 400.** §75 split
+  the twenty-four permanently-failing codes off 503: 500 for a fault no retry
+  clears, 503 with `Retry-After` for the one that a retry does. What it did not
+  touch is the other direction -- nine codes answer **400** carrying
+  retry-shaped clearances (`PROVIDER_UNAVAILABLE`: "Retry when the provider
+  answers"; `READINESS_INCOMPLETE`: "Retry the attempt";
+  `INTERNAL_FAULT`: "Retry; an operator must investigate if it persists"), and
+  `tests/test_api_routes.py`'s partition test cannot see them because it defines
+  its universe as the codes already at 500 or 503. `INTERNAL_FAULT` is the
+  sharpest: `server/api/app.py` maps it to 400 while `server/api/edge.py`
+  answers 500 for it, so its only real wire status sits outside the guard and
+  nothing asserts the disagreement. The contract that holds is therefore the
+  narrow one -- of the codes served at 5xx, 503 means come back later and 500
+  does not -- and a client reading 400 learns nothing about retrying.
+  *Upgrade:* reconcile `INTERNAL_FAULT`'s two statuses, then put the
+  retry-shaped 400s to the owner as D3's second half; the partition test widens
+  to the whole enum on the same day.
+
+- **A tokenless host believes the subject header, so a loopback peer who knows a
+  member's id reads that member's cases.** §70.2 closed C3's *role* hole: with
+  no `CAOS_EDGE_TOKEN` and no trust switch the global role is READER and no
+  header can raise it. The *subject* is unchanged -- `x-caos-user` is parsed as
+  a UUID and believed -- and `server/api/deps.py`'s visibility resolves per-case
+  standing from it, admitting any live standing at or above READER. So a peer
+  that passes the loopback bind and the Host check and knows a member's UUID
+  reads that member's cases in full: the section documents, the event stream,
+  evidence pages including document text, and the report and committee
+  deliverables. Writes are closed -- every governed command refuses a global
+  READER before it reaches the store -- so this is disclosure, not tampering.
+  It needs the host process, which binds loopback only; the documented
+  deployment is an authenticating edge that sets both headers, where the token
+  branch takes over and the groups are the identity provider's. The plan's
+  deferred table rejected a signed-assertion edge partly on the claim that
+  C3's fix "removes the only unrecorded hole", which was true of the role and
+  not of the subject. Found by the phase adversarial audit. *Upgrade:* the
+  signed assertion the two edge entries above already owe, which makes the
+  subject the identity provider's rather than a header's; nothing short of it
+  makes a tokenless host safe to expose, and nothing should expose one.
+
+- **A provider that returns without billing and then crashes is paid twice,
+  with nobody deciding to.** §70.3 deleted the frontier loop's duplicate
+  outcome record, and with it the loop's own enforcement that a returned call
+  was billed. Each `Provider` owes that now, and for every implementation that
+  ships it holds structurally, because `check_call` refuses a second recorder.
+  The cost of a future one forgetting is not a refusal: a provider that returns
+  unbilled and then crashes before acceptance leaves no `call_outcomes` row, so
+  neither `replay_billed` nor `unexplained_charge` matches, the node is
+  re-attempted and the money is spent again without an operator choosing it.
+  What holds the obligation for every implementation that ships is
+  `execute_handoff` recording the outcome unconditionally before any post-call
+  refusal -- not `check_call`, which refuses a *second* recorder and so cannot
+  make a provider bill at all. This entry said `check_call` when it was first
+  written, copied from §70.3, and both were corrected at the phase adversarial
+  audit that read the function.
+  This is the same shape as "A billed call whose diagnostic body cannot be
+  stored is billed again", which was closed by giving the operator the choice;
+  this one has no such arm. The run ceiling bounds it, so it is two charges for
+  one node rather than unbounded. *Upgrade:* a record adjacent to the call --
+  nothing inside the acceptance unit can reach the window, which is why §70.3
+  records it rather than closing it.
+- **The deliverable's shared token index holds every cited page for the whole
+  payload, on a request path.** §71.3 gave the report and committee reads a
+  `TokenIndex` shared across the pinned nodes, which is what took six round
+  trips per served path out of `IO_BUDGET`. Nothing clears it: it holds tokens
+  for every cited page of every node until the reader is collected, where each
+  node's index was previously released when its proof returned. A wide route
+  citing many pages of a large credit agreement now holds them all at once, on
+  an API request rather than in a worker. The proof reader has carried the same
+  trade since it gained its own index. *Upgrade:* a bounded or per-node index
+  the day a real payload's peak memory is measured; nothing today measures it.
+
+- **The evidence seal is checked once per statement, and two costs come with
+  that.** §74.2: migration `0027` makes `0008`'s immutability check an
+  `AFTER INSERT ... FOR EACH STATEMENT` trigger with a transition table, and
+  both evidence writers use `COPY`, so admitting a 100,000-token document runs
+  the check twice instead of 30,001 times and its store write fell from 12.1 s
+  to 4.4 s (`scripts/measure_admission.py`, warm, one machine). First: the
+  statement's rows are materialised into a transition tuplestore that can spill
+  past `work_mem`, a memory and temp-file cost the row trigger did not have --
+  inside the noise on this workload and bounded per document by
+  `AdmissionLimits.max_tokens`. Second: a refusal now arrives *after* the
+  statement's rows are written rather than before the first, so a sealed
+  source's bulk insert writes its rows and discards them where it used to
+  refuse at row one. Nothing on the admission path meets that, because
+  `_admit_one` seals in the transaction that writes. The trigger takes
+  `FOR NO KEY UPDATE` where `0008` took `FOR UPDATE`, because an `AFTER` trigger
+  runs after its own statement's foreign-key check has taken `FOR KEY SHARE` on
+  the same row and two writers upgrading that would deadlock; every writer
+  `0008` excluded, the seal included, is still excluded, and
+  `tests/test_frozen_evidence.py::test_an_uncommitted_evidence_write_blocks_a_withdrawal_of_its_source`
+  holds the exclusion direction that the permissive tests cannot.
+  *Upgrade:* a declared `work_mem` floor for the admission path, the day a
+  document large enough to spill is admitted; none for the refusal ordering,
+  which is the price of checking once.
+- ~~**Two tested islands have no production caller, and deleting them is a gate
+  edit.**~~ Closed by Completion Phase 12 Task 12.3 (§76), which took the
+  upgrade's first arm rather than its second: the section is served, so neither
+  island is deleted and both have their caller back. `BookSection` binds each
+  compared credit through `bind`/`release`, and a Book cell opens the
+  metric-passport overlay through `EvidenceContext.openPassport`. The two tests
+  `tests/test_phase_exits.py` pins by name are untouched and still hold what
+  their names say
+  (`test_book_binds_one_snapshot_per_compared_case`,
+  `test_passport_contract`), which is the point of having pinned them: the
+  names could not be excused to green a tree, so they were still there to be
+  satisfied. The original entry, §74.4: reducing Book and Admin to their
+  unavailable shells left `bind`/`release` in `frontend/src/app/authority.ts`
+  and `EvidenceContext.openPassport` with the metric-passport overlay behind it
+  reachable from no section, so neither could be deleted as cleanup and both
+  sites carried a comment saying so.
+
+**Completion Phase 10.**
+
+- **A run of single-letter words is indistinguishable from a tracked word, so a
+  quote of their concatenation anchors over them.** Task 10.5's joining rule
+  (§78) turns each maximal run of single-character tokens on one line of one
+  region into one word, which is exactly right for a heading tracked past
+  `word_margin` and wrong for a table cell reading `a b c`, where the page
+  shows three words and the quote `abc` now anchors across them. The host
+  cannot tell the two apart from what it stores: pdfminer split both for the
+  same reason, and the gap that would separate them is typography the token
+  index does not record. Three things bound it, and none of them closes it. The
+  rule is reached **only** where the exact search found nothing, so no quote
+  that anchored before meets it. Ambiguity still refuses, counted over the whole
+  page in the normalised pass
+  (`test_a_normalised_match_found_twice_is_ambiguous`). And the rectangle is the
+  union of those letters' own boxes, so a reader who opens the citation sees the
+  highlight over the glyphs the quote names — which is what separates this from
+  the `AlphaBeta` case the tree refuses and must keep refusing, where the
+  rectangle would span two whole words
+  (`test_two_widely_spaced_words_still_refuse_their_concatenation`). So the
+  anchor is *disputable by a reader looking at it*, not invisible, which is the
+  weakest honest claim to make for it. *Upgrade:* a declared inter-glyph gap
+  recorded in the extractor identity, which is the fact that actually separates
+  tracking from spacing — owed the day a real document is mis-anchored this way,
+  and not before, because a threshold chosen without one is a number nobody can
+  check.
+- **The two normalisations answer a specification, not a caller.** Recorded
+  beside the entry above because they were taken together and the reason is the
+  same: `docs/COMPLETION_PLAN.md`'s Phase 10 exit check names a letter-spaced
+  heading and a quote ending in a full stop, and eleven authorized live runs
+  named neither — no `CITATION_NOT_LOCATED` from typography appears anywhere in
+  `qualification/*/RESULT.md`. The Phase 2 ledger entry that owed this work set
+  the opposite condition, "when a real module's real quotes say which
+  normalisations are needed", and it is struck above with that difference stated
+  rather than quietly satisfied. What makes taking them anyway defensible is
+  that both failures are demonstrable in the tree today — the extractor's own
+  suite pins the letter split — rather than hypothesised. What it costs is that
+  the *shape* of the rules is a guess about a caller: `EDGE_PUNCTUATION` is a
+  closed list somebody wrote down, and the day a module is refused for a
+  character outside it, that refusal is this entry.
+  `test_the_declared_normalisations_carry_a_version` is the one thing a reader
+  can point at to say which rules were in force. *Upgrade:* widen the list from
+  the refusal, the day a real run produces one; never from a reading of what a
+  module might write.
+
+- **A run that cannot afford its next node writes an attempt row before it is
+  refused.** `_affordable` reads the run's own ceiling rather than what is left
+  of it, which is what lets a resume finish (the reason is in `runtime.py`). The
+  cost is that a run whose ceiling covers one worst case but whose remainder no
+  longer covers its next priced request is admitted, and the refusal then comes
+  from `reserve` -- after `start_attempt` has committed a row and an
+  `ATTEMPT_STARTED` event. Measured at three `run_route` entries: three attempt
+  rows, three events, no reservation and no provider call. Before the fix that
+  run was refused with no row written. No money guard was lost: `reserve` refuses
+  under the run row lock, invariant 8 holds in the direction that matters, and
+  nothing spends. What is lost is tidiness -- an operator retrying such a run sees
+  its attempt count climb while nothing happens -- bounded by
+  `ATTEMPT_LIMIT_REACHED` at 256 per node and by there being a human between
+  retries. Recorded rather than fixed because the alternative is a second
+  affordability read that decides nothing, and a check whose answer no caller
+  acts on is how a gate starts looking stronger than it is. Found by the Task
+  10.3 acceptance review, which probed it rather than reading it. *Upgrade:* a
+  `remaining` read between `check_context` and `start_attempt` that refuses
+  before the row, the day an operator meets a climbing attempt count on a real
+  run and asks what it means.
+- **A gate record stored before `blockers` existed refuses at every reader if its
+  T8 named a condition.** Task 10.3 added `Projections.blockers` and kept the
+  record format still: `record_bytes` omits the field when it has no rows,
+  `_decoded_record` reads absence back as the empty tuple, an explicit
+  `blockers: []` is refused as a second spelling, and
+  `record_bytes(decoded) == data` holds for every record written before it
+  (`tests/test_handoff_record.py::test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty`).
+  What that does not save is the record whose T8 *does* carry a CONDITIONAL or
+  BLOCKED row. Every reader re-validates the Markdown and compares whole
+  projections -- `canonical.py`, `qualification/proof.py`,
+  `deliverable/canonical.py` -- so the rows now derived are rows the stored
+  record lacks, and the comparison refuses `ARTIFACT_RECORD_MISMATCH`. The class
+  is exactly the runs this feature exists for: a readiness-BLOCKED run's
+  accepted CP-0, stored before this change. Its frontier pass, its run document,
+  its proof and its deliverable all refuse. §72 and the commit that landed it
+  both said the stored records were untouched, which is true of their bytes and
+  false of their readers; the Task 10.3 acceptance review measured the
+  difference. Nothing is repaired in place, because a projection is re-derived
+  and never stored, and rewriting an accepted artifact to match a new derivation
+  is what invariant 3 forbids. *Discharge:* a new run. The pins a successor
+  takes are its own, so a re-run CP-0 writes a record carrying the rows, and
+  `runs.supersedes_run_id` is what says which run it answers. *Upgrade:* a
+  record-format version, the day a stored record must survive a projection the
+  host learned to read after it was written -- the same shape as §45.4's v1 to
+  v2, which had no backfill either.
+
+**Completion Phase 7.**
+
+- **The ledger's own gate reads citations and conventions, not claims.**
+  `tests/test_ledger.py` refuses an entry that cites a test the suite does not
+  define, and an open entry that states no `*Upgrade:*` clause: the two failures
+  here that are mechanical. It cannot read an entry's prose and decide whether
+  the tree still behaves that way, which is the failure that actually happened.
+  Two entries below claimed there was no `qualification_verdicts` table and that
+  a proof was never stored, and both were fluent, cited nothing, and kept their
+  upgrade clause while becoming false. Phrase-based rules were measured against
+  this file and rejected: the best of them flagged three entries, of which one
+  was the real defect and two were correct entries using the same words.
+  *Upgrade:* none that is mechanical. What closes this class is the discipline
+  `docs/COMPLETION_PLAN.md` states in its definition of done, that the entry a
+  task closes is struck in the commit that closes it, naming the test.
+- **The feature-status record is dated evidence, so some of its citations name
+  tests the tree deleted.** `docs/feature-status.csv` carries 248 rows of which
+  206 are dated, 198 of them 2026-09-11, and each row says what was true when it
+  was written. Nine test names it cites are defined nowhere in the suite and
+  nowhere on disk -- `test_a_revision_is_frozen_once`,
+  `test_the_receipt_names_the_signer_of_the_frozen_bytes` and seven more of the
+  filing and revision-signing set, across 14 rows -- because `9bf20b2` wrote them
+  and the repair deleted the code they covered. The Completion Phase 7
+  adversarial audit asked for the citations to be made to resolve. They are
+  deliberately not: a dated row whose evidence is edited later is no longer a
+  record of that date, and rewriting 14 of them would make the file agree with
+  the tree by giving up the one property that makes it worth keeping. So the
+  ledger gate reads this file not at all, and a reader must take a row's date as
+  part of its claim. *Upgrade:* a regenerated inventory emitted from the suite,
+  which this file's own "Regenerate, don't hand-maintain" rule already asks for
+  and which belongs with Completion Phase 13 Task 13.6, the task that generates
+  the release pack from the suite and the store; the dated file is then the
+  archived predecessor rather than the live answer.
+- **The demonstration Admin panel says the health route is not served.**
+  `frontend/fixtures/admin.json` carries `HEALTH` and `GET /api/health` marked
+  not served;
+  `server/api/health.py` has served that route since §53.8. The fixture
+  under-claims, so its assertion still holds and no gate is weakened, but an
+  operator reading the demonstration panel is told a control does not exist when
+  it does. *Upgrade:* correct the fixture and the comment with Completion
+  Phase 12's Admin work, which is the task that owns that panel.
 
 **Repair Phase 5.**
 
@@ -186,11 +836,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   multi-disk containers and trailing bytes refuse within the ZIP32 size bounds.
   *Upgrade:* an authenticated external digest/signature and renderer-version
   registry if archival verification becomes an authenticity service.
-- **Exclusive package creation is not crash durability.** `write_package`
-  uses `xb`, so simultaneous writers cannot overwrite one another, but an I/O
-  failure or crash may leave a partial new file that later writes refuse.
-  It has no fsync or atomic publication protocol. *Upgrade:* staged durable
-  writes and exclusive publication when this library becomes a filing exporter.
+- ~~**Exclusive package creation is not crash durability.**~~ Closed by
+  Completion Phase 13.5, by the upgrade this entry named. `write_package`
+  writes and fsyncs under a temporary name in the same directory -- a rename is
+  atomic only within one filesystem -- then `os.link`s it into place and fsyncs
+  the directory, so the *name* is durable and not just its contents. A failure
+  part-way now leaves nothing at the published path
+  (`test_a_failed_write_leaves_no_file_at_the_destination`, which injects the
+  fault at the fsync and then shows the path is still usable), where the old
+  `xb` could leave a short file that every correct write after it refused --
+  a path permanently poisoned by a package nobody could verify. Exclusivity is
+  unchanged and still the filesystem's, `os.link` in place of `open("xb")`
+  (`test_two_writers_still_cannot_overwrite_one_another`). *Upgrade:* none for
+  durability. What is **not** claimed is fsync's own limit: a filesystem or
+  device that lies about flushing is beyond anything this code can check, and
+  `write_package` still has no caller outside the suite, so the protocol is
+  proven and not yet exercised by a filing exporter.
 
 **Repair Phase 4.**
 
@@ -209,16 +870,37 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   receipts stay; their replay is answered 404 by the visibility check before
   the lookup. *Upgrade:* a dated retention decision and a governed sweep, the
   day the table's size is measured.
-- **The demonstration workbench shows no available command.** The v1
-  fixtures carry `"actions": []`, so every command control in `make
-  dev-ui-demo` renders refused `ACTION_UNPLACED`, and the fixture middleware
-  answers any non-GET under `/api/` 405 `READ_ONLY_DEMO`. `ACTION_UNPLACED`'s
-  clearance (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still
-  says the API serves only the run document and its event stream, which has
-  not been true since §50. Availability is proven against the real API
+- **The demonstration workbench offers one available command, and its answer
+  is one the wire refuses.** ~~The v1 fixtures carry `"actions": []`, so every
+  command control in `make dev-ui-demo` renders refused `ACTION_UNPLACED`~~ --
+  `frontend/fixtures/directory.json` now carries `CREATE_CASE` available, and
+  `test_the_demonstration_directory_offers_one_available_command` drives the
+  published fixture. ~~`ACTION_UNPLACED`'s clearance
+  (`frontend/src/controls/RefusedControl.tsx` `READ_ONLY_API`) still says the
+  API serves only the run document and its event stream, which has not been
+  true since §50.~~ Closed by Task 12.2: `READ_ONLY_API` is deleted, the Ask
+  rail carries its own reason, and the clearance now names what is actually
+  missing -- a section whose read judges the action and names it in
+  `chrome.actions` -- held by
+  `an action nothing performs is refused with a reason that is true today`.
+  What stays open is the other half and a consequence of closing the first.
+  The other six enabled sections' fixtures still carry `"actions": []`, so
+  Upload's withdrawal and Report's four filing controls are demonstrated
+  refused and never available; availability against a real answer is still
+  proven against the real API
   (`test_every_available_action_succeeds_and_every_refused_action_refuses_with_its_code`)
-  and in unit tests, not in the workbench. *Upgrade:* correct the clearance
-  text, and fixture actions when a workbench spec needs an available control.
+  and in unit tests. And the fixture middleware answers any non-GET under
+  `/api/` 405 `READ_ONLY_DEMO`, a code `frontend/src/wire/v1/documents.ts`'s
+  closed `RefusalCode` does not declare, so pressing the one available control
+  renders `RESPONSE_INVALID` rather than the demo's own word. That is the wire
+  strictness rule working -- an undeclared answer is refused whoever sent it --
+  but it is not what a reader expects to be shown, so `NewCase` states it in
+  demo mode before the press rather than after. *Upgrade:* a demonstration API
+  that answers a declared refusal, which means either a `READ_ONLY_DEMO` the
+  server also knows (a wire change, and a code no production path would ever
+  send) or fixture actions refused with a real code; and fixture actions for
+  the remaining sections when a workbench spec needs an available control
+  there.
 
 - **An evidence page holds a read transaction while its frame is extracted.**
   `read_evidence_page` reads standing and the page's lines, then
@@ -253,20 +935,60 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and the test edge (`tests/journey/edge.py`), not in anything the API can
   check. *Upgrade:* the signed assertion above, which makes the groups the
   identity provider's rather than a header's.
-- **The worker has no readiness.** The API's `/api/health` probes the store,
-  bundle and blob root it uses; `server/engine/worker.py` serves no listener,
-  and `compose.smoke.yaml` gives the worker no healthcheck. A worker that
-  exited 2 (`PROVIDER_NOT_CONFIGURED`) or is backing off on store faults is
-  visible only in its exit code and logs, and a queued run simply waits.
-  *Upgrade:* a heartbeat the worker writes and health reads, the day an
-  operator has to alert on a stalled queue.
+- ~~**The worker has no readiness.**~~ Closed by Completion Phase 13.3 (§79),
+  by the upgrade this entry named: migration `0028` adds `worker_heartbeats`,
+  the loop writes `POLLING`/`WORKING`/`BACKOFF` with its consecutive fault
+  count, and `/api/health` reports `workers` beside the other three probes
+  (`test_the_health_probe_reads_the_three_states_a_person_acts_on`,
+  `test_the_worker_says_what_it_is_doing_and_a_backing_off_worker_says_so`).
+  The field is **not** folded into `status`: the API is not the worker, and a
+  surface reporting itself unready because a queue was stalled would take
+  itself down for a fault it does not have
+  (`test_health_is_200_only_when_store_bundle_and_blobs_hold` now asserts both
+  halves). Saying so never stops the work -- a beat that will not write is
+  swallowed
+  (`test_a_store_that_will_not_take_the_beat_does_not_stop_the_worker`).
+  **What is not done, from this entry's own text:** `compose.smoke.yaml` still
+  gives its worker no healthcheck, because that service runs `journey.worker`,
+  a test double, and a healthcheck there would measure the double rather than
+  the product. *Upgrade:* that healthcheck the day `server/engine/worker.py`
+  itself runs in a compose stack; and a worker whose *exit* an operator must
+  see still leaves only an exit code, because a process that has exited cannot
+  beat -- what carries it is the staleness of its last beat, which names the
+  worker but not why it went.
 - **An idle case stream held its thread until the deadline.** Fixed in
   `0db50fa`: each poll now ends in an SSE comment, so a disconnected browser
   releases its worker thread and uvicorn concurrency slot within one
-  `POLL_INTERVAL`. What remains is the poll itself (the Phase 6 entry "A run
+  `POLL_INTERVAL`. ~~What remains is the poll itself (the Phase 6 entry "A run
   tail polls") and `--limit-concurrency 32` counting every open stream: 32
-  watching tabs refuse a 33rd request with 503. *Upgrade:* `LISTEN`/`NOTIFY`
-  and a stream cap below the concurrency limit, the day real watchers measure it.
+  watching tabs refuse a 33rd request with 503.~~ The **cap** half is closed by
+  Completion Phase 13.3: `STREAM_LIMIT = 24` in `server/api/stream.py`, below
+  the image's limit, so the 25th tail is refused `STREAM_LIMIT_REACHED` (503
+  with `Retry-After`, transient by §75's own question -- a watcher only has to
+  close a tab) and the eight slots left over keep the rest of the surface
+  answering. The pressure is now refused where it is caused, rather than
+  landing on an unrelated reader with a 503 naming nothing they can act on
+  (`test_the_twenty_fifth_tail_is_refused_rather_than_the_next_ordinary_request`,
+  which also asserts the cap sits below the Dockerfile's limit so it cannot be
+  raised into uselessness; `test_a_tail_slot_is_returned_however_the_stream_ends`
+  holds the release through all three teardowns).
+  **Its first version leaked a slot, and the leak was invisible to the
+  journey.** The release sat in the streaming generator's `finally`, which
+  covers a tail that ends and one closed mid-flight -- but a generator that is
+  never started never unwinds, so a response built and then never iterated held
+  its slot until the process restarted, and on a *cap* that is capacity nobody
+  gets back. Starlette always starts the body, so 22 journey tests on three
+  engines passed over it without a single 503. Found by probing the three
+  teardowns directly rather than by reading Starlette: `StreamSlot.release` is
+  now one-shot and a `weakref.finalize` on the generator is the net under the
+  case a `finally` cannot reach, with the guard watched failing without it. **The poll itself is untouched** and keeps its own Phase 6
+  entry. *Upgrade:* `LISTEN`/`NOTIFY`, so the poll becomes a fallback rather
+  than the mechanism -- still owed, and still worth doing only when there are
+  enough concurrent watchers to measure it. The cap is also a number nobody has
+  measured: 24 is chosen to leave headroom against 32, not from an observed
+  load, and the day a deployment runs a different `--limit-concurrency` the two
+  have to be reconciled by hand, which the constant says out loud rather than
+  silently following whichever value is in force.
 - **The test edge's session cookie is weaker than the contract's.** Over
   `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
   drops `Secure` and the `__Host-` prefix the contract names and keeps
@@ -274,13 +996,44 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
   TLS material, which this task was not authorized to create.
 - **The production image and journey are proven locally, not in CI.**
-  `make smoke-production` is the last step of `make check`, and no CI
-  job runs it. The journey (slice 4.5e2) runs 13 tests on each of chromium,
-  firefox and webkit, but only the first engine meets the worker's real
-  exit-after-first-accept and the 300 s lease wait: the exit-once marker lives
-  in the shared blob volume, so the later engines restart the worker against
-  a run that has already finished. *Upgrade:* a CI job over the smoke stack
-  (Phase 6), and a per-engine marker if the recovery must be proven per engine.
+  `make smoke-production` is the last step of `make check`, and no CI job runs
+  it. The journey runs 22 tests on each of chromium, firefox and webkit.
+  **This entry used to say only the first engine met the worker's real
+  exit-after-first-accept and the 300 s lease wait, because "the exit-once
+  marker lives in the shared blob volume" -- and that understated the gate.**
+  `tests/journey/run.py`'s `run_project` brings up a stack per engine and its
+  `finally` always runs `compose_down(env)`, which is `down --volumes` and
+  removes the named `smoke-blobs` volume the marker lives in
+  (`JOURNEY_STATE_DIR: /blobs`), so each engine gets a fresh marker and its own
+  crash-once worker -- which the function's own docstring says. Task 12.5's
+  three per-engine durations, 5.7, 5.9 and 6.3 minutes against a 300 s lease
+  wait, are the measurement. Corrected at the Task 12.5 acceptance review,
+  which read the runner; an entry that understates a gate is the same defect as
+  one that overstates it, read the other way round. What remains true is the CI
+  half. *Upgrade:* a CI job over the smoke stack (Phase 6).
+- **A flake in one engine used to cost the other two engines' evidence.**
+  `tests/journey/run.py`'s `main` returned on the first engine's non-zero
+  status, so a single flaky test in chromium ended the gate with firefox and
+  webkit unrun and nobody able to say whether they would have passed. It
+  happened once while Task 12.5's gate was being run, and the re-run of the
+  same commit unchanged was green on all three. Every engine now runs and each
+  reports its own status, with the gate's exit still the first non-zero -- so
+  no failing run passes, and a flake costs one engine's evidence instead of
+  three. What is **not** fixed is the flakiness: two pre-existing tests each
+  flaked once in nine runs -- test 7's page fetch never leaving the browser
+  after the lease wait, and test 1's Create press firing no request -- and
+  `playwright.journey.config.ts` sets `retries: 0`, deliberately, because a
+  retried journey hides exactly this. The new Task 12.5 tests also add about
+  twenty navigations after test 15, each leaving an SSE tail held to
+  `TAIL_DEADLINE` against the API's `--limit-concurrency 32` (the "idle case
+  stream" entry above), and unlike `waitForNode` they carry no `toPass`
+  wrapper. *Upgrade:* diagnose the two flakes from a recorded trace rather than
+  by lengthening a wait. The stream cap this entry also owed has landed
+  (`STREAM_LIMIT = 24`, the entry above), which bounds the tails those
+  navigations leave open -- but it does **not** make the journey greener by
+  itself: twenty-four is still more tails than that sequence opens, so what the
+  cap changes is which request fails when the ceiling is reached, not whether
+  this one reaches it.
 
 **Repair Phase 3.**
 
@@ -305,12 +1058,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   tokens; v1 rows keep their stored identity and bottom-left rectangles, and
   verify and re-anchor as recorded
   (`test_v1_pdf_extractions_still_verify_and_reanchor_as_recorded`) --
-  readmission is how a source gains v2 geometry (§44.4). (b) Slice 3.2c's
-  `word_margin` rule (§44.5) means glyphs spread
-  by `Tc` character tracking beyond `word_margin` -- a heading tracked for
-  display rather than readability -- split into single-letter tokens, so the
-  word cannot be quoted as itself; `test_tracked_glyphs_beyond_word_margin_split_into_letters`
-  pins it. *Upgrade:* quote normalisation, Phase 5.
+  readmission is how a source gains v2 geometry (§44.4). (b) ~~Slice 3.2c's
+  `word_margin` rule (§44.5) means glyphs spread by `Tc` character tracking
+  beyond `word_margin` -- a heading tracked for display rather than
+  readability -- split into single-letter tokens, so the word cannot be quoted
+  as itself.~~ Closed by Completion Phase 10 Task 10.5 (§78): each maximal run
+  of **single-character** tokens on one line of one region joins into the word
+  a reader sees, with the union of their rectangles, and only where the exact
+  search found nothing
+  (`test_a_letter_spaced_heading_anchors_as_the_word_a_reader_sees`). The
+  extractor still splits them, so
+  `test_tracked_glyphs_beyond_word_margin_split_into_letters` is untouched and
+  still says what it says; what changed is what may be quoted of them. *Upgrade:*
+  none for the heading; what the joining rule costs has an entry of its own
+  below.
 - **A word just inside a crop edge can be dropped.** `PdfExtractor`'s
   `drop-outside` crop policy (slice 3.2d) tests membership on pdfminer's full
   glyph box -- the font size, descent included -- not the baseline, so a word
@@ -379,8 +1140,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   gap. Proof is
   re-derived under the bundle and live sources present now: a bundle upgrade
   (as for the proof, Phase 10) or a withdrawn source makes a filed revision
-  refuse verification. The payload needs every pinned node accepted, and the
-  Markdown renders as escaped preformatted text, not formatted Markdown. A soft
+  refuse verification. The payload needs every pinned node accepted.
+  ~~The Markdown renders as escaped preformatted text, not formatted
+  Markdown.~~ Closed by Completion Phase 12 Task 12.4: `render.py`'s
+  `_markdown` renders the closed element set `ELEMENTS` names -- front matter,
+  headings, paragraphs, tables, lists, blockquotes, code blocks, thematic
+  breaks, strong, emphasis and code spans -- escaping every authored character
+  inside them, so a register reads as a table and a raw tag still reaches the
+  page as the characters the model wrote
+  (`tests/test_deliverable_render.py::test_a_handoffs_markdown_reaches_the_page_as_headings_tables_and_lists`,
+  `test_markdown_outside_the_element_set_reaches_the_page_as_itself`,
+  `test_an_identifier_and_an_unpaired_asterisk_are_not_emphasis`). A soft
   upstream ref may be absent from a record only if that input's artifact was
   accepted after the attempt started (`call_time_identity`); the comparison is
   `artifacts.created_at > run_attempts.started_at`, both transaction-start
@@ -391,8 +1161,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   too: a document captured under several live members resolves to the lowest
   source id when they share one extraction output and to none when they do
   not.
-  *Upgrade:* a Markdown renderer with a closed element set when committee
-  layout needs one.
+  What the renderer added is a refusal of its own: a block with no faithful
+  rendering -- an unterminated fence, a table row that does not fit its header,
+  a list nested past four -- refuses `DELIVERABLE_MARKDOWN_UNSUPPORTED` rather
+  than guessing
+  (`tests/test_deliverable_render.py::test_a_block_with_no_faithful_rendering_is_refused_not_guessed_at`),
+  and a filed revision whose handoff carries one cannot be re-rendered or
+  verified. No stored handoff in this tree carries one, and the direction is
+  the fail-closed one, but the class is new.
+  *Upgrade:* widen `ELEMENTS` for the construct, the day a real handoff meets
+  that refusal; and, for the entry's own title claim, nothing is planned while
+  re-derivation needs the store, the bundle and the live sources the render
+  deliberately does not hold.
 - **A LITE route runs through `run_route`, but only the runtime reads its
   records.** Slice c-5b: `_run_node` replays the executor's outcome with its
   diagnostic and accepts with `record_sha256`; a validated `qa_status: Blocked`
@@ -447,9 +1227,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the adapter is one constant: every reader refuses a row without its record
   `ARTIFACT_RECORD_MISMATCH` (API 503), a stored `claims-json-v1` pin refuses
   `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
-  modules; every route outside that pathway and LITE earnings remains
-  disabled (`ADAPTER_ROUTES`: LITE portfolio decision,
-  CP-0 -> CP-L10, has no contract test) pins and passes its
+  modules; Phase 9 Task 9.1 adds LITE portfolio decision (CP-0 -> CP-L10,
+  `tests/test_lite_portfolio_route.py`); every route outside those three
+  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
@@ -489,20 +1269,44 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   holds only for the bundle and sources present now. *Upgrade:* the proof and
   scoring in one REPEATABLE READ unit, the day a reviewer relies on the matrix
   as one consistent snapshot.
-- **Canonical upstream refs ignore readiness and predicates.**
-  `server/methodology/invocation.py` names every accepted direct input and
-  refuses a blocking one that is missing, as the vendor's
-  `expected_upstream_digests` does, but omits two of its inputs: a CONDITIONAL
-  edge always blocks (no predicate is evaluated, the Phase 3 gap below), and a
-  soft edge whose unaccepted source CP-0 reported READY is omitted where the
-  vendor refuses. The route engine already BLOCKS such a node, so the runtime
-  never asks for its identity. `module_name` is read from the verified catalog
-  at call time rather than pinned. Since slice 3.3c a non-gate node whose
-  upstream carries no direct CP-0 ref refuses `ROUTE_IDENTITY_INVALID` in
-  `host_identity` (§45.5), so before any attempt via `check_context`; the
-  anchor is still derived from that ref, not stored. *Upgrade:* readiness joins
-  the refs from the canonical CP-0 T8 reader c-5b added to the runtime (d-2),
-  and a stored anchor field with Phase 5.
+- **Canonical upstream refs do not read readiness, because the engine already
+  did.** `server/methodology/invocation.py`'s `_upstream` names every accepted
+  direct input and refuses a missing blocking one; the vendor's
+  `expected_upstream_digests` does the same and adds one clause the host does
+  not repeat — it also refuses when a **soft** input is unaccepted and CP-0
+  reported its source READY or READY_WITH_LIMITATIONS. Note what the vendor does
+  there: it raises, and it does not name the input. There is no accepted
+  artifact, so there is no digest for a ref to carry, and "readiness joins the
+  refs" — the upgrade this entry used to state, and O18's first repair clause in
+  `docs/COMPLETION_PLAN.md` — describes something neither side can do. The rule
+  itself is enforced, once, in `server/engine/route.py`'s `_state_for`, which
+  BLOCKS a node with an unmet soft edge whose source is READY on the same
+  predicate the vendor's own `node_states` uses. So the two agree in every state
+  a run can reach: a node reaches `host_identity` only through `frontier`, and
+  `frontier` excludes every node the vendor's clause would refuse. Measured
+  rather than read — over every edge-type assignment, accepted subset, QA status
+  and readiness assignment of a three-module route, 9,888 frontier memberships
+  produced no disagreement; and on the real LITE route with CP-0 accepted
+  declaring CP-L10 READY, the engine puts CP-L10 in the frontier and holds CP-5
+  BLOCKED. `test_the_lite_upstream_follows_the_pinned_edges` builds CP-5's
+  identity in that exact state, and can do so only because it calls
+  `host_identity` directly, past the frontier. What is left is that the
+  agreement rests on nothing written down: `_upstream` does not say it relies on
+  `_state_for`, and `_state_for` does not say anything depends on it. Nor can
+  `_upstream` cheaply re-check: readiness reaches the host through
+  `accepted_artifacts`, which builds each `NodeResult` by calling
+  `accepted_projections` and so `host_identity`, so an identity builder that
+  asked for readiness would be asking the reader that calls it; `host_identity`
+  also takes no `BlobStore`, and each gate row's readiness costs a record blob
+  read and a vendor validator run. *Upgrade:* not a second reading of readiness
+  — that would be a second authority over the rule, which invariant 3 refuses.
+  What closes this is a comment at each of the two rules naming the other, and,
+  the day per-node evidence selection changes `node_states`, a test that the
+  frontier admits no node the vendor's clause refuses — written as the property
+  it is rather than as a case the engine can reach. `module_name` is still read
+  from the verified catalog at call time rather than pinned, and the CP-0 anchor
+  is still derived from the direct CP-0 ref `host_identity` requires (§45.5)
+  rather than stored; both keep their own upgrade with Phase 5.
 - **A record's lineage is re-checked against the accepted rows, not re-proven
   ancestor by ancestor.** Record format v2 (slice 3.3c, §45.4) adds
   `delivered_authority_digest` -- over exactly the `DeliveredAuthority` the
@@ -550,10 +1354,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   what re-anchor it. Citations still anchor only in the consumer's own
   delivered blocks, so a quote found only in upstream text or the register
   refuses `CITATION_NOT_LOCATED`; the register rides inside the request
-  ceiling like every other section and has no bound of its own. *Upgrade:*
-  re-anchoring in the pre-call unit if a consumer ever relies on the register
-  for more than orientation, and a per-section bound with the one "An upstream
-  section is unbounded" owes.
+  ceiling like every other section and has no bound of its own -- which the
+  upstream handoff beside it no longer is: `MAX_UPSTREAM_HANDOFF_BYTES` bounds
+  the handoff and says nothing about the register, and the register is derived
+  from the same record, so a bounded handoff can still carry an unbounded list
+  of its citations. *Upgrade:* re-anchoring in the pre-call unit if a consumer
+  ever relies on the register for more than orientation, and a bound of the
+  register's own -- the struck "An upstream section is unbounded" entry below
+  is what bounded the handoff, and it does not carry this one.
 - **The named-LITE-object boundary is read from `SKILL.md` prose headings, and
   only where a block is keyed to its module.** Slice 3.4b (§46.1): each
   upstream section names its source's catalog
@@ -592,15 +1400,49 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   it too; human QA approval is not consulted in Phase 2.
   *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
   practice wants restricted clearance to proceed.
-- **BLOCKED ends the run; recovery is a new run.** §39 calls an empty frontier
-  with unfinished required work recoverably blocked, and `run_route` now ends
-  such a run `BLOCKED` with one `RUN_BLOCKED` (migration 0010). Nothing moves a
-  BLOCKED run back to RUNNING: every spend guard refuses it and its stream
-  closes. "Recoverable" means nothing failed and the reason is re-derived from
-  the pins and accepted artifacts, not stored. *Upgrade:* a governed resume --
-  a CAS back to RUNNING with its own event, taken by an authorized actor when
-  an input that could release the node has changed -- arrives with Phase 4's
-  commands and worker.
+- **BLOCKED ends the run; recovery is a new run, and the store records which
+  run answers which.** §39 calls an empty frontier with unfinished required work
+  recoverably blocked, and `run_route` ends such a run `BLOCKED` with one
+  `RUN_BLOCKED` (migration 0010). Nothing moves a BLOCKED run back to RUNNING:
+  every spend guard refuses it and its stream closes. "Recoverable" means
+  nothing failed and the reason is re-derived from the pins and accepted
+  artifacts, not stored. §72 withdrew the resume for good, on §61: the
+  CONDITIONAL verdict names a source the effective-source set does not carry,
+  discharged only when that source is supplied and CP-0 is re-run, and under
+  invariants 1 and 10 a run's source set and route are pinned, so the discharge
+  is a new run and a CAS back to RUNNING would reopen a run whose pins cannot
+  change. What records it is `runs.supersedes_run_id` (migration `0025`):
+  written by the insert that makes the successor and refused by trigger on any
+  later change, never a run's own id, at most one successor per predecessor by
+  the partial unique index `runs_one_successor`, served at both ends as
+  `RunView.supersedes` and `RunView.superseded_by`. `start_run` refuses a run of
+  another case with the same private `RUN_NOT_FOUND` an unknown run gets, any
+  status but BLOCKED `RUN_NOT_BLOCKED`, and a second successor
+  `RUN_ALREADY_SUPERSEDED` inside its own unit
+  (`tests/test_run_commands.py::test_a_successor_run_links_a_blocked_run_of_its_case`,
+  `test_a_successor_for_a_running_run_or_another_case_is_refused`,
+  `test_a_runs_predecessor_is_written_once_and_is_never_itself`, and
+  `tests/test_postgres_races.py::test_two_successors_for_one_blocked_run_commit_one`).
+  The T8 blocker cell is projected as `NodeView.gate_reason`, so a reader sees
+  which source the verdict asked for.
+  **Two scopes that are easy to conflate.** The withdrawal of resume covers a
+  readiness verdict and nothing else: a run also ends BLOCKED when the frontier
+  empties against a QA_GATE whose source is not `Passed`, and there the
+  discharge is a human decision under unchanged pins, which the Repair Phase 2
+  entry "Only a QA `Passed` releases CP-6" owns and this entry does not speak
+  for. The **link**, by contrast, is offered on a run's status alone, for both
+  causes: `blocked_by` is `null` in each, so telling them apart would mean
+  reading the gate verdicts, and a successor for a QA-blocked run is an ordinary
+  run an analyst chose. §72 said the link was for the readiness case alone until
+  the Task 10.3 acceptance review read that sentence against the code.
+  What the link does not do: a successor pins its own route and input and pays
+  for every node again, nothing carries an artifact across it, and nothing checks
+  that the successor's source set carries the source the verdict named -- the
+  host cannot read a model's prose as a source identifier, and inventing a match
+  would be a readiness ground of its own (invariant 4). *Upgrade:* a stored
+  anchor for which source a successor supplied, the day a reader wants the host
+  to say whether a successor answered its predecessor rather than only that it
+  claims to.
 - ~~**The terminal decision reads outside the run lock, and the store does not
   check it.**~~ Closed by Phase 4 Task 4.3c (§49.4): `complete_run` refuses
   `RUN_NODES_UNACCEPTED` while a pinned node is unaccepted and `complete_run`/
@@ -626,11 +1468,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   lock.** `_accept_artifact` checks authority and ownership under the lock but
   not the predecessor digests the post-call unit compared; with Phase 2's one
   sequential loop no writer can accept a predecessor in between. The pre-call
-  unit also reads every captured block one query at a time under the case lock,
-  so a large pack holds governed writes on that case for the whole read.
+  unit ~~also reads every captured block one query at a time under the case
+  lock, so a large pack holds governed writes on that case for the whole
+  read~~ -- closed by §71.2: one statement reads them all, and refuses
+  unless it returns exactly the blocks the pin captured.
   *Upgrade:* Phase 4 rechecks upstream digests inside the accept unit (or fences
-  predecessors with the node's lease), and a batched block query when the first
-  large PDF pack measures the hold.
+  predecessors with the node's lease). The batched block query this entry asked
+  for arrived without waiting for a large pack to measure the hold.
 
 **Phase 0.**
 
@@ -644,14 +1488,65 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   is the same defect as a missing one, read the other way round.
 - **`check_tested.py` matches a name as a whole word anywhere in the suite's
   bytes,** docstrings and comments included. It catches the definition no test
-  mentions, not the definition whose test asserts nothing. *Upgrade:* resolve
-  references through the AST once the suite is large enough for the false
-  negatives to matter.
+  mentions, not the definition whose test asserts nothing.
+  **It failed exactly that way on 17 September 2026, and the manner is the
+  point.** Task 8.2 shipped `canonical._within_reservation` -- the guard that
+  stops a rebuilt prompt going out under a reservation too small for it, which is
+  invariant 8's whole claim on that path -- with **no test driving it**. The gate
+  passed because the name appears in a *comment* in `server/engine/runtime.py`
+  explaining what the guard does. So a sentence about the code satisfied the
+  check for the code. The Phase 8 confidence review found it; the test now
+  exists and was watched failing with the guard removed.
+  This is one instance of a class worth naming, because three unrelated ones
+  turned up in one day: **a gate measuring an axis correlated with the hazard
+  rather than the hazard itself.** The suppression budget counted annotations
+  where the hazard is positional width. A block of refusal statuses encoded
+  *blame* where the status means *time*. Two ignore rules described the shape
+  they expected -- a directory, an exact filename -- where they meant a path. And
+  this gate counts mentions where the hazard is untested behaviour. The failure
+  mode is **invisibility**: such a gate does not fail loudly, it passes quietly,
+  and what it should have caught is exactly what nobody is looking at -- so the
+  count of known instances is a lower bound, and none of the four was found by
+  looking for it. Each surfaced when something else broke.
+  The test that separates the class: **ask what the cheapest evasion of a gate
+  does to the code, and keep the gate only if the answer is "it improves it".**
+  This one fails immediately -- the cheapest way to satisfy it is to name the
+  symbol in a comment, which makes the tree worse by leaving prose where a test
+  should be, exactly as happened above.
+  ~~*Upgrade:* resolve references through the AST.~~ **Taken on 18 September
+  2026 (Completion Phase 13.5).** `referenced_names` parses each test and
+  collects bare names, attribute finals, import bindings and the last segment
+  of a dotted identifier path given as a string -- the last because
+  `monkeypatch.setattr("server.store.runs.append", ...)` is a real reference
+  and Python gives it no other spelling, while an English sentence is not a
+  dotted path. A comment, a docstring and prose now satisfy nothing
+  (`test_a_name_that_appears_only_in_a_comment_references_nothing`,
+  `test_a_dotted_path_in_a_string_is_a_reference_and_prose_is_not`).
+  **It found thirteen definitions the byte search had cleared**, several on
+  exactly the evidence this entry describes: `tests/test_accepted_owner.py`'s
+  own docstring said "`accepted_owner` is the store read every guard below goes
+  through" and no test called it; `tests/test_disabled_routes.py`'s said "both
+  refusal points share `require_adapter_route`" and both were driven while the
+  rule never was; `server/evidence/pdf.py`'s `child_main` -- the section 47
+  boundary whose entire purpose is that a traceback would print
+  document-derived text -- had no test at all. Three siblings of an existing
+  path-parser walk (`source_path`, `revision_path`, `member_path`) had been
+  added without being added to it. All thirteen now have tests that drive them.
+  Two structural exemptions are declared rather than discovered: a route
+  handler, detected by its HTTP-method decorator, is reached by its path the
+  way a React component is reached by rendering -- the TypeScript half states
+  the same rule -- and `main` stays exempt as a subprocess entry point.
+  **What remains** is the limit this entry always named: a reference is not an
+  assertion, so a test that imports a symbol and does nothing with it still
+  clears the gate. Coverage is what measures execution, and `scan_floors.py`
+  already does. *Upgrade:* none mechanical -- the honest fix is an assertion
+  reaching the definition, which no static check can see. The axis is now the
+  closest proxy available.
 - **`check_tested.py` sees module-level definitions only.** A method is covered
   through the class that holds it. *Upgrade:* descend into classes when a
   governed path first puts logic on a method.
-- **`check_vocabulary.py` enforces 9 of the 33 synonyms `CONTEXT.md` lists.**
-  The other 24 carry an ordinary technical meaning here — `file`, `state`,
+- **`check_vocabulary.py` enforces 11 of the 34 synonyms `CONTEXT.md` lists.**
+  The other 23 carry an ordinary technical meaning here — `file`, `state`,
   `version`, `response` — and each is exempt with a stated reason in
   `NOT_ENFORCED`. The check refuses to run if `CONTEXT.md` and that list drift
   apart. *Upgrade:* enforce an exempt synonym the day it is actually misused.
@@ -690,7 +1585,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   has no request path. `test_io_budget_read_evidence` is the per-path
   assertion the entry asked for and predates this.
 
-**Phase 10.**
+**Rebuild Phase 10 (historical).**
 
 - **An answer key names citations, not figures.** `ExpectedCitation` is
   `(module_id, document_sha256, matched_text)`, because that is the strongest
@@ -770,16 +1665,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   spend), whether a known charge was billed (a recorded call without one is
   unknown exposure), and the recorded model and generation, read from the store
   and `None` when the call recorded none.
-- **A proof is held and not stored.** `perform` now holds each case's
-  `OrchestrationProof` beside the run id it covers — and only for as long as the
-  caller does. There is no table and no route that serves one, so a proof still
-  cannot be handed to anyone who was not there when the set was performed. That
-  is the right shape while it is re-derived on every ask — a stored proof is a
-  claim about a store that has since moved — and the wrong one as soon as a
-  verdict has to cite the proofs behind it. *Upgrade:* a declared form for the
-  proof beside the set's own (§24), which has landed — so what blocked this is
-  gone and what remains is the work itself: somewhere to put a proof, and a
-  reader that can be handed one.
+- ~~**A proof is held and not stored.**~~ Closed by migration `0020`: each
+  case's proof is serialised into `qualification_performed.performed_json` by
+  `server/qualification/store.py::_performed_document` (`run_id`,
+  `route_digest`, `build_id`, `artifacts`, `citations` and the `anchored` set),
+  and `record_performed` reads the row back for equality before
+  `performed_sha256` binds it, on a table immutable by trigger. A reviewer signs
+  that snapshot, so a proof can now be handed to somebody who was not there when
+  the set was performed. What it is not is a replayable proof: verification is
+  still re-derived against the store and the bundle present now, which the entry
+  "A bundle upgrade invalidates every earlier run's proof" below owns.
 - **Each case's artifacts are read four times.** `run_route`'s last frontier
   pass, the proof `perform` records, `_unrun`'s own pass, and `build_matrix`
   re-deriving the proof (a run is scored from its proof, not by re-reading
@@ -802,16 +1697,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   *now*, not a certificate with a shelf life. *Upgrade:* none while one build is
   vendored at a time; the day two are, the proof takes the build the run was
   pinned to and verifies against that tree.
-- **A verdict is read and not stored.** `read_verdict` refuses a document
-  missing any of the six bindings or past its expiry, and returns a `Verdict`
-  the caller holds; there is no `qualification_verdicts` table and no query that
-  answers "is this build qualified". Nothing consumes a verdict yet, so nothing
-  can read a stale one. The harness is now the caller with a reason to look one
-  up — it holds the matrix and the proofs a verdict would be measured over — and
-  deliberately does not: a signature bound to a `PerformedSet` that lives no
-  longer than the process that built it is a binding nobody can re-check.
-  *Upgrade:* the set's on-disk form has landed (§24), so the verdict stored
-  beside the performed set it names is now the whole of what is left here.
+- ~~**A verdict is read and not stored.**~~ Closed by migration `0018`, which
+  creates `qualification_verdicts` immutable by trigger, and
+  `server/qualification/store.py::record_verdict`, which binds one reviewer
+  decision to the exact evidence row and refuses a mismatched set digest,
+  provider, build or an incomplete snapshot. §65 added the route the assertion is
+  made through, `POST /api/v1/qualification/{evidence_sha256}/verdict`, with
+  `reviewer_id` derived from the authenticated actor;
+  `server/api/reads/qualification.py` serves the consumer. The table is empty in
+  every database because nobody has signed, which is a fact about people rather
+  than about the software; `docs/FINAL_CHECK.md` records it as such.
 - **The provider identity in a verdict is the reviewer's word, not the host's.**
   Invariant 3 says the host owns identity, and here it does not: `provider` is a
   string in a document this repository did not write, and nothing compares it
@@ -829,7 +1724,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   which is a change to `read_verdict`'s callers rather than to `read_verdict`,
   since the document is still the reviewer's to write.
 
-**Phase 9.**
+**Rebuild Phase 9 (historical).**
 
 - **The phase-exit gate reads a workspace test by its literal title.**
   `tests/test_phase_exits.py` now reads `frontend/tests/` as well as `tests/`,
@@ -865,8 +1760,67 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   by, and an authorized evidence page. Withdraw, sign, freeze, file and
   membership grants still have no route, and Book, Model, Report, Committee
   and Admin stay unavailable.
+- ~~**A BLOCKED run draws the node that blocked it as running, and the analysis
+  page cannot tell it from a run in flight.**~~ Closed. The run page no longer
+  does: `reasonOf` and `runningOf` read the
+  run's own status, which the run document already carried, so on an ended
+  run nothing is drawn running and a ready-but-unrun node reads "did not
+  run" instead of "in the frontier". No wire change was needed for that
+  half — the status was there, and reading the node state without it was
+  the defect. The journey now asserts it through the production stack.
+  The analysis page needed the wire change, and has it: `AnalysisBody` carries
+  `displayed_run_status`, so "Pending nodes / not yet accepted" — a claim about
+  what happens next — becomes "Nodes that did not run / the run ended BLOCKED"
+  once there is no next. Both are asserted through the production stack by the
+  insufficient-evidence journey. *Why* the run ended is carried too:
+  `RunView.blocked_by` names the node whose validated Blocked verdict ended it,
+  with its attempt, and is `null` on a run the frontier emptied (§39) — the
+  wire never claims a blocking node that does not exist. It is recorded by
+  `block_run` in the transaction that ends the run, not re-derived by the
+  reader, because the store refuses to judge an ended run's answer again
+  (`docs/DECISIONS.md` §68). The run page says it on the node, in its detail
+  and in the run panel, and the journey asserts all three. The analysis page
+  was the half that remained, and Completion Phase 12 Task 12.4 closed it:
+  `AnalysisBody.blocked_by` is the same `BlockedByView`, read in the same left
+  join as the run's status so the declared budget did not move, and the pending
+  list names that node as what ended the run instead of listing it among the
+  nodes that never started
+  (`tests/test_analysis_section.py::test_the_analysis_document_names_the_node_whose_verdict_ended_the_run`,
+  `test_a_run_that_is_not_blocked_names_no_blocking_node`, and the workspace's
+  `test_the_pending_list_names_the_node_whose_verdict_ended_the_run`). The
+  Model section derives its body from Analysis' and now carries both fields
+  rather than excluding them, so "no accepted forecast" says whether one is
+  still coming
+  (`frontend/tests/unit/model.test.tsx`'s
+  `test_an_absent_forecast_says_whether_the_run_can_still_produce_one`). The
+  original entry, which the same task's change makes historical:
+- ~~**A BLOCKED run draws the node that blocked it as running.**~~ Both wire
+  changes this entry owed have landed -- the analysis document's run status, and
+  the run document's blocking node, which Task 12.4 then gave the analysis
+  document too. Struck with the entry above it and kept verbatim, because it is
+  the record of what the defect looked like before either field existed.
+  `node_states`
+  is recomputed from accepted artifacts alone (invariant 10), and a validated
+  CP-5 `Blocked` accepts nothing: on a run `_end_blocked` has ended, CP-5 has
+  every input met, no artifact and one unaccepted attempt, so the run document
+  carries `state: RUNNABLE` with `gate_verdict: READY`, and the workspace's
+  `runningOf` draws it pulsing "in the frontier" with a tally of `1 RUNNABLE ·
+  0 BLOCKED` beside a `Status` of BLOCKED. The analysis document carries no run
+  status at all, so that page shows `2 ACCEPTED` and CP-5 pending — the same
+  page a run still in flight would show — and nothing on either page names the
+  verdict. The status cell, the case register's tag and the handoff count are
+  honest, and those are what `journey: an insufficient-evidence run ends
+  BLOCKED and is shown as such, not as success` asserts through the production
+  stack; the graph's state for CP-5 and the pending list are left unasserted
+  rather than asserted as expected. Found by driving the case, not by reading.
+  *Upgrade:* `reasonOf` no longer says "in the frontier" on an ended run, which
+  needed no wire change. What is still owed is the analysis document carrying
+  the run status, and — for naming *why* it ended rather than only that it did —
+  the run document carrying which node blocked it, which `blocked_verdict` can
+  supply. Both are wire changes, so a model change and an updated pinned key set
+  each.
 
-**Phase 8.**
+**Rebuild Phase 8 (historical).**
 
 - **Narrative is now structured, but its figure screen is syntactic.** Task
   5.3 stores bounded paragraphs of text and anchored citation references.
@@ -874,8 +1828,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   still require independent human review. Historical string payloads remain
   renderable, but cannot enter the new save API. *Upgrade:* a separately
   specified semantic review if those claims must be machine-checked.
-- **A citation renders without its page when the payload omits one.**
-  `_citation` reads `str(citation.get("page", ""))`, while `matched_text` and
+- ~~**A citation renders without its page when the payload omits one.**~~
+  Closed by Completion Phase 12 Task 12.4: `_page` refuses a page that is
+  absent, not an integer, a bool, or below 1, with the same
+  `DELIVERABLE_PAYLOAD_INVALID` the two fields beside it already raised
+  (`tests/test_deliverable_render.py::test_a_citation_without_a_page_is_refused_like_the_fields_beside_it`).
+  The original entry:
+  `_citation` read `str(citation.get("page", ""))`, while `matched_text` and
   `document_sha256` beside it are refused when absent — so a payload with no
   `page` prints "page " rather than refusing. Unreachable from any real run:
   `AnchoredCitation` (`server/evidence/citations.py`) declares `page` a
@@ -883,11 +1842,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`server/methodology/handoff.py`) serialises it into every stored record, so
   only an external hand-built render payload can carry a citation without one. The
   cost is a cosmetic line on the page rather than a false assurance, which is
-  why it is recorded and not fixed. *Upgrade:* refuse it here too, for
-  consistency with the two fields beside it, the day a payload
-  has any author but this repository.
+  why it was recorded and not fixed until a task owned the renderer beside it.
 
-**Phase 7.**
+**Rebuild Phase 7 (historical).**
 
 - ~~**`_ratio` divides at the process-global `Decimal` context.**~~ Closed by
   repair Task 5.1 (§54): the entire forecast runs in one local precision-38,
@@ -905,7 +1862,104 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**
+- **The bundle's disqualifier list conflates a fixture with thin evidence.**
+  `full_run_disqualifiers` puts `SOURCE_LIMITED_NOT_COMMITTEE_READY` beside
+  `INTEGRATION_FIXTURE_ONLY` and `SYNTHETIC_FORWARD_ASSUMPTIONS`. The first says
+  the evidence is thin, which is true of every honest handoff over this corpus;
+  the others say the document is not real work. `completeness_check` reads
+  neither list, and §66 records why enforcing them as written was implemented,
+  measured and rejected: it refuses seven of the 25 retained real bodies, two of
+  them the accepted artifacts of the only complete snapshot, each for declaring
+  the thin-evidence flag truthfully. Honouring the list whole refuses honest
+  work; honouring part of it would be the host choosing which of the bundle's
+  rules count, which invariant 4 forbids. Meanwhile `limitation_flags` is
+  already projected and already one of `matrix.PROJECTION_FIELDS`, so a
+  qualification key asserts on it today. *Upgrade:* the bundle's, not this
+  host's — split the fixture markers from the evidence-status markers, and the
+  first group can then be enforced as completeness while the second stays a
+  projection. Until that split exists the host enforces neither, deliberately.
+
+- ~~**Two more CP-5 columns may need T5B.5's exemption.**~~ Measured, and they
+  do not. §63 exempted T5B.5's `Status` and `Claim Status`; the review that
+  proposed it flagged `T5B.3 Traceability Status` and `T5B.7 Assessment` as
+  possibly the same shape, on reading rather than on evidence. Every CP-5 body
+  this repository has retained — nine, across every live run including the three
+  that were refused — was parsed for those two columns: **no cell in either
+  holds any of the seven disqualifying phrases.** Where CP-5 records restraint
+  it records it in the two columns already exempt. So the exemption is not owed,
+  and widening it would weaken the disqualifiers for a case nothing has produced.
+  *Upgrade:* none. If a future run is refused on one of those columns the
+  evidence will say so, and the change is then one line with a run behind it
+  rather than a guess.
+
+- ~~**Nothing can sign a verdict.**~~ Closed by
+  `server/api/commands/qualification.py` (`docs/DECISIONS.md` §65):
+  `POST /api/v1/qualification/{evidence_sha256}/verdict` takes the reviewer's
+  six-binding document, reads it with `read_verdict` against the store's
+  clock, and calls `record_verdict` with `reviewer_id` taken from the
+  authenticated `Actor` and from nowhere else — a body naming one is refused
+  as undeclared before a connection opens. The floor is the top global rank
+  (`ADMIN`, by `at_least`), because a verdict is the first authority here that
+  is account-wide rather than case-scoped; below it, and for evidence the store
+  does not hold, the answer is one private 404. What it does not do: nothing
+  here lets the host call itself qualified — the route records a person's
+  assertion over evidence `record_verdict` already bound, and refuses when the
+  snapshot is not `complete` or the bindings do not match. Both of the limits
+  this entry recorded are closed by Task 8.3: the one-verdict constraint is
+  mapped by its declared name to `VERDICT_ALREADY_RECORDED` (409), so a
+  retried request can tell "already signed" from "wrong bindings"
+  (`test_a_second_signature_over_the_same_evidence_is_already_recorded_not_invalid`,
+  `test_the_one_verdict_constraint_is_mapped_by_name_not_by_message`); and the
+  write now records a `command_requests` receipt under the nil scope in the
+  verdict's own transaction, so a replayed request is answered from it
+  (`test_a_replayed_signature_with_the_same_key_is_answered_by_its_receipt`,
+  `test_the_verdict_command_requires_an_idempotency_key`).
+- **The run-to-case binding lives in the matrix's only caller, not the matrix.**
+  `build_matrix` accepts any `runs` mapping and checks only that a label is
+  present; everything that makes a run the case's run — title, ceiling, profile,
+  selection, documents, provider, model — is enforced in `harness._eligible`.
+  Correct today because `perform` is the only path, and the transplant suite
+  proves it there. A second caller gets none of it. *Upgrade:* make
+  `build_matrix` private to the harness, or move the binding into it, the day
+  anything else wants a matrix.
+
+- ~~**CP-5 cannot say a claim is unverifiable in a column its contract calls
+  critical.**~~ Closed by `docs/DECISIONS.md` §63, the owner's second
+  authorised override of invariant 4: T5B.5's `Status` and `Claim Status`
+  now sit in `disqualifier_exempt_columns`, beside T5B.3's `Claim Status`
+  and T5.2's `Evidence Status`, and the three refused bodies of run
+  `36d87283…` replay clean while a placeholder in any of T5B.5's seven
+  substantive columns is still refused
+  (`test_cp5_exempts_only_its_status_columns_from_the_disqualifiers`). The
+  build moved with it, `cdea0c9f` -> `30222a49`. The original entry, for the
+  reader who wants the reason: `cp-5-evidence-trace-validator/SKILL.md` lists `insufficient
+  information`, `not calculable from provided materials`, `not assessable` and
+  `unavailable` among `critical_cell_values_casefold`, and T5B.5's Claim Status
+  column exempts none of them. Run `36d87283…` refused CP-5 three times,
+  `$0.856` of billed attempts, each for writing one of those phrases about a
+  claim two earnings releases genuinely do not support — which is the answer
+  CP-5's own runbook asks it for. A module that traces claims to sources can
+  then pass only by overstating what the evidence carries. Run `42e17048…`'s
+  CP-5 was accepted over the same corpus because it phrased the same restraint
+  differently, so what the rule selects for is wording. The projection keys
+  cannot see it either: a refused CP-5 leaves no artifact, so its conclusion is
+  unreadable and the row reads as a run that stopped. *Upgrade:* the mechanism
+  exists — `disqualifier_exempt_columns`, which T5.2 already uses for
+  `Evidence Status` (the entry as first written credited T5B.6, which exempts
+  `Classification`) — so the question is which of CP-5's status columns should
+  carry it. A bundle change, needing its own authorisation, and it belongs with
+  the `completeness_check.load_contract` half §61 left open.
+  Deferred by the owner on 16 September 2026 (`docs/DECISIONS.md` §62) and
+  resolved by the owner's instruction the same day (§63).
+
+- ~~**`CONDITIONAL` is a CP-0 verdict with no stated meaning and no discharge.**~~
+  Closed by `docs/DECISIONS.md` §61, the owner's authorised override of
+  invariant 4: the verdict now names a source the effective-source set does not
+  carry, says how it is discharged, and says an upstream analytical handoff not
+  yet produced is never a readiness ground — in the same words in all three
+  places CP-0 reads it, with `test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read`
+  failing the day one of them drifts. The build moved with it, `a43cb903` ->
+  `cdea0c9f`. The original entry, for the reader who wants the reason:
   `cp-0-source-readiness/SKILL.md` defines it only as "emit `DO NOT RUN`", and
   nothing there says the condition must be a *source* condition — while line
   359 of the same file says source readiness must not assert whether upstream
@@ -919,8 +1973,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   define the condition as source-only, name its discharge, and say that an
   upstream-handoff dependency is never a readiness ground. What the host may do
   without editing upstream is quote line 359 verbatim in `_GATE_INSTRUCTION`,
-  which restates the bundle rather than adding to it. The set now measures the
-  failure directly through `expects_ready`.
+  which restates the bundle rather than adding to it (done, `a40b2b4`). The set
+  also measures the failure directly through `expects_ready`.
 - **The bundle gates per consumer; the owner's statement of intent does not.**
   Told on 16 September 2026 that CP-0 "only classifies the documents to assess
   which pathways are available", the audit found the vendored methodology says
@@ -957,7 +2011,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   register parser. *Upgrade:* keys of the form
   `(module, register_id, row, column, expected)` over those projections, the
   pattern `ExpectedForecast` already uses.
-- **The host accepts a handoff the vendor's own rule contradicts.**
+- ~~**The host accepts a handoff the vendor's own rule contradicts.**~~ Half
+  closed by `docs/DECISIONS.md` §61: `validate_handoff.py` now reads every
+  unfenced table headed `Severity` and refuses CRITICAL under any status but
+  `Blocked`, MATERIAL under `Passed` — the canon's own rule, which it had never
+  enforced. Verified against the artifact that exposed it: the DeepSeek CP-0
+  declaring `Passed` at 93 over its own MATERIAL row now errors with the body
+  line, and every module of the passing run still validates clean. What is
+  still open is the second half, `completeness_check.load_contract`, which reads
+  only the `critical_cell_*` disqualifiers and never
+  `frontmatter_limitation_flags`, `frontmatter_validation_warnings` or
+  `document_substrings_casefold`. That is a different rule with different
+  semantics and needs its own authorisation and entry. The original, for the
+  reader who wants the reason:
   `validate_text` checks `Restricted -> <=59` and `Blocked -> <=39` and nothing
   the other way, and `completeness_check.load_contract` reads only cell
   disqualifiers, never the `frontmatter_*` ones. So a module may declare a
@@ -968,15 +2034,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   this is the bundle's gap to close -- but a reviewer reading an accepted
   artifact should know the host asserted nothing about it. *Upgrade:* none the
   host may take alone; record it against the bundle.
-- **`expected_refusal` cannot be met by any run this system can produce.**
-  `complete` requires every run `COMPLETE`, and a validated Blocked gate ends a
-  run BLOCKED, so a case declaring the refusal it expects -- the "deliberately
-  restricted case" `docs/REPAIR_PLAN.md` Phase 6 names -- is unsignable however
-  it turns out. `test_a_case_that_met_the_refusal_it_declared_is_complete`
-  passes on a hand-built state, which is exactly the vacuous kind of pass the
-  gate scripts exist to catch. *Upgrade:* decide whether `expected_refusal_met`
-  is fed from `Performed.stopped` and the run's own status rather than from the
-  proof, and give it a test built from a run rather than from a dataclass.
+- ~~**`expected_refusal` cannot be met by any run this system can produce.**~~
+  Closed. It read only the proof's refusal, and a validated Blocked handoff
+  leaves a sound proof and writes no `attempt_refusals` row -- while `complete`
+  demanded every run reach `COMPLETE`, which a blocked run never does. Both
+  halves now read the run: `_refusal_met` takes the proof's refusal, a recorded
+  attempt refusal, or `HANDOFF_BLOCKED` against a run whose own status is
+  BLOCKED; and `complete` exempts a case from the `COMPLETE` requirement when
+  the refusal it declared was met, because declaring a refusal is declaring
+  that the run will not finish. The "deliberately restricted case"
+  `docs/REPAIR_PLAN.md` Phase 6 names is now expressible, and
+  `test_a_case_that_declared_the_block_it_expected_is_signable` proves it over
+  a real blocked run rather than a hand-built dataclass.
 
 - **The VMO2 set measures two of its three modules by key.** CP-0's expectation
   asked `SourceReadiness` for the issuer's current borrowing-capacity
@@ -1054,10 +2123,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   property of a pinned dependency rather than something the code says out loud.
   `test_an_anonymous_request_opens_no_store_connection` counts the dependency's
   calls, so a reorder and a FastAPI that stopped doing this both fail there --
-  which is what makes this a limit rather than a defect. *Upgrade:*
+  which is what makes this a limit rather than a defect. Since §73.4 the order
+  is remembered in one place rather than per route: all twenty-one routes reach
+  the store through shared dependencies in `server/api/deps.py`, and the
+  store-touching one resolves the actor before the connection in its own
+  signature, so it cannot be ahead of identity even where a route declares it
+  first. That makes the property hold more robustly and does **not** discharge
+  this entry, because it still holds by signature order. *Upgrade:* unchanged --
   `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
-  inserts at the front of the list whatever the parameters say; worth taking the
-  day a third route arrives and the order has to be remembered three times.
+  inserts at the front of the list whatever the parameters say. What has gone
+  is the reason to defer it: the order no longer has to be remembered per
+  route, so the change is now one edit per decorator over one known set.
 - **A case stream polls.** `server/api/stream.py`'s `case_tail` re-reads the
   case's audit actions, the run's events and the caller's standing every
   `POLL_INTERVAL` (0.5 s) until `TAIL_DEADLINE` (300 s) or standing is lost,
@@ -1108,21 +2184,57 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the verified catalog at prompt time because `Edge` and the route pin do not
   carry it, so no route digest moved. Retrieval (Phase 5) remains the way to
   send less than the whole set.
-- **A run's price is supplied by its caller, not read from a table.**
-  `docs/DECISIONS.md` §40: every call reserves `pricing.worst_case(price)` --
-  every byte of the largest request (§38) as an input token plus the output cap
-  -- and `run_route` refuses a price for any model but the provider's configured
-  one before an attempt exists. Nothing in the tree says what the live model
-  costs, so `tests/test_live_run.py` still prices it from its flat estimate. The
-  byte bound is severe for a real model: at about $3/M input and $15/M output one
-  call reserves about $3.64, so under the $5 default ceiling a two-node route
-  cannot finish; the qualification harness refuses a set whose route length
-  times that worst case exceeds a run's ceiling before any case is prepared.
-  `ModelPrice.as_of` is carried but not stored beside the reservation, so a
-  reservation row does not say which price produced it. *Upgrade:* a
-  user-confirmed dated price for the configured live model, recorded with the
-  reservation, and pricing the actual encoded request once the prompt is built
-  before the reservation.
+- **A run's price is supplied by its caller; what it buys is now priced and
+  recorded.** `docs/DECISIONS.md` §40: `run_route` refuses a price for any model
+  but the provider's configured one before an attempt exists. Two of the three
+  things this entry asked for are done, by Completion Phase 8 Task 8.2. A
+  reservation is priced on the request that was actually built and bounded --
+  `pricing.priced_request(price, invocation.request_size(provider, prompt))`,
+  input per request byte because a token is at least one byte, output at the
+  completion cap -- rather than on `MAX_REQUEST_BYTES`, so the ~$3.64 worst case
+  that stopped a two-node route finishing under the $5 default ceiling is no
+  longer what is set aside: three LITE nodes now fit one ceiling
+  (`tests/test_loop_charges.py::test_a_small_prompt_reserves_its_priced_cost_not_the_byte_ceiling`).
+  `worst_case` stays the run-ceiling admission check, so invariant 8's "refuse
+  before overspend" is unchanged. And migration `0024` stores the dated price
+  beside the amount (`price_model`, `price_input`, `price_output`,
+  `price_as_of`), so a row reads back to what produced it rather than only to a
+  number
+  (`tests/test_budget.py::test_a_reservation_records_the_dated_price_that_produced_it`);
+  rows written before it say `legacy` and keep their amounts
+  (`tests/test_store_schema.py::test_the_migration_keeps_existing_reservation_amounts`).
+  Pricing the request rather than the ceiling creates a hazard the ceiling hid:
+  the loop prices the prompt `check_context` built, and the attempt unit builds
+  its own again, so a larger rebuild would be sent under too small a
+  reservation. `canonical._within_reservation` re-prices the request about to be
+  sent against the price its reservation was taken under and refuses
+  `CONTEXT_OVER_CEILING` before the provider is reached
+  (`tests/test_loop_charges.py::test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call`,
+  which was watched failing with the guard removed). That guard borrows
+  `CONTEXT_OVER_CEILING`, whose clearance text reads "Deliver less context to the
+  module" -- true of the ceiling check it was written for and misleading here,
+  where the context is unchanged and the reservation no longer covers it. The
+  code is right and the sentence a reader gets is not.
+  **Three things remain, and they are listed together rather than each beside its
+  own paragraph, because an entry carrying an upgrade clause per sentence is one
+  nobody reads to the end of.** First, nothing in the tree says what the live
+  model costs, so `tests/test_live_run.py` still prices it from a flat estimate,
+  and every priced reservation is exact arithmetic over an unconfirmed number.
+  Second, the qualification driver does not see the saving:
+  `server/qualification/harness.py`'s `_affordable` still refuses
+  `QUALIFICATION_SET_OVER_CEILING` when `worst_case(price) x len(route.nodes)`
+  exceeds a run's ceiling, so at Terra's rates three LITE nodes are refused
+  against the $5 default before any case is prepared, and `scripts/qualify.py`
+  admits exactly what it admitted before this task even though `run_route` now
+  finishes such a run. That sentence left the tree in a rewrite and is restored
+  here, which is the failure this ledger's own gate exists to catch, read the
+  other way round. Third, the borrowed clearance above.
+  *Upgrade:* a user-confirmed dated price for the configured live model, which is
+  the owner's to give; the harness's floor priced on measured requests, or per-run
+  ceilings derived from the set's, which is what the Rebuild Phase 10 entry "a
+  qualification run costs real money" already owes; and a refusal code of its own
+  for the reservation check, the day an operator meets it on a real run. The
+  second and third were found by the Task 8.2 acceptance review.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the
@@ -1152,13 +2264,34 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   entirely in which handlers the director holds. *Upgrade:* fold it into the
   `provider` job, which already has a real endpoint on the other end, by asking
   the live provider for a status it will refuse.
-- **The gate's evidence demands are dropped.** A readiness row keeps
-  `module_id`, `readiness_status` and `readiness_effect`; CP-0's schema also
-  declares `evidence_demand` and `active_representation_ids`, which say *which*
-  sources a module needs (`docs/DECISIONS.md` §27). Nothing reads them yet, and
-  every module is still handed every block. *Upgrade:* per-module evidence
-  selection, which is the same change that would let a set with a 541-page
-  credit agreement run at all.
+- **The gate's evidence demands are dropped, and the host cannot read them at
+  all.** A readiness row keeps `module_id` and `readiness` -- **two** fields, not
+  the three this entry used to claim: `readiness_effect` appears nowhere under
+  `server/` and is not a field of the vendor's `Recommendation`. The entry
+  described the JSON payload schema's row as though it were the host's record,
+  which is the error that matters here, because the same confusion is what the
+  repair was specified against. CP-0's *schema* also declares `evidence_demand`,
+  `active_representation_ids` and a `content_to_module_map` (`docs/DECISIONS.md`
+  §27), and those live in `runtime_output` -- which
+  `invocation.py`'s `_FINAL_CHECK` explicitly tells the model **not** to author,
+  naming it among the fields that belong outside canonical front matter. So the
+  host asks CP-0 not to produce the very rows a per-module selection would read,
+  and no accepted record has ever carried one. The two ways to invent the fact
+  both breach invariant 4: all sixteen CP-0 registers declare `columns: none`,
+  so parsing the Markdown means a host table contract the bundle does not state;
+  and T8's fifth column, `Source files to attach`, is validated for row width by
+  the vendor and then discarded -- `parse_t8` reads cells 0,1,2,3,6,7 and never
+  cell 4 -- so keeping it would make the host a second reader of one table that
+  can disagree with the bundle's own. The catalog offers no third way: no
+  `evidence_demand`, `active_representation`, `source_files` or `evidence_class`
+  appears in it. Measured by Completion Phase 10 Task 10.1, which stopped rather
+  than build. *Upgrade:* not per-module selection as specified. It needs one of
+  three things first -- a bundle build whose `Recommendation` carries T8's fifth
+  column, which is the smallest and keeps invariant 4; or a dated decision taking
+  host ownership of a CP-0 register's shape, in the pattern of §61 and §63, which
+  has to answer whether a model-authored register may decide what evidence a
+  *downstream* node can cite; or a selection rule needing no gate row at all,
+  which narrows nothing and closes none of the entries this one is grouped with.
 - ~~**The workspace cannot show the cause yet.**~~ Closed by Phase 4 Task
   4.1i: the v1 `NodeView` carries `gate_verdict` and the Run section's node
   detail and reason (`frontend/src/sections/run/reason.ts`) draw it as the
@@ -1176,45 +2309,102 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   engine's answer.** `_state_for` returns RESTRICTED for a
   READY_WITH_LIMITATIONS module with no unmet edge, and `limitations_of` reports
   soft edges — so it answers `()`, the one condition its own docstring says must
-  not happen. The cause is not lost: the verdict's `readiness_effect` is stored
-  on the gate artifact and is where the state came from, and the run surface
-  carries the status as `NodeView.gate_verdict`. Widening `limitations_of` is
+  not happen. The cause is not lost: the readiness the gate
+  recorded is on the artifact and is where the state came from, and the run
+  surface carries it as `NodeView.gate_verdict`. (This entry said
+  `readiness_effect`, a field the host does not keep -- the same schema-for-record
+  confusion corrected in the evidence-demands entry above.) Widening `limitations_of` is
   the wrong way to add it — the return is `tuple[Edge, ...]`, a verdict is not
   an `Edge`, and every caller would ripple for a field none of them asked for.
   *Upgrade:* the effect travelling with the state, the day a reader works from
   the engine rather than from the run document.
-- **An upstream section is unbounded, but the whole context is refused.** A
-  node's prompt carries every direct predecessor's accepted Markdown whole
-  (`docs/DECISIONS.md` §28), with no per-section cap. Since Task 3.3b the whole
-  prompt -- authority, upstream, evidence -- is built by
-  `canonical.check_context` under `prospective_identity` before
+- ~~**An upstream section is unbounded, but the whole context is refused.**~~
+  Bounded by `invocation.MAX_UPSTREAM_HANDOFF_BYTES` (32,768); the citation
+  register and the evidence section still are not. A node's prompt carries
+  every direct predecessor's accepted Markdown whole (`docs/DECISIONS.md`
+  §28). Since Task 3.3b the whole prompt -- authority, upstream, evidence --
+  is built by `canonical.check_context` under `prospective_identity` before
   `start_attempt`, and one whose whole encoded request
   (`CompletionProvider.request_bytes`: model, parameters and prompt, as the
   provider sends it) exceeds `MAX_REQUEST_BYTES` refuses
   `CONTEXT_OVER_CEILING` with no attempt, reservation or call and nothing
-  truncated (§45.3). The executor rebuilds and re-bounds it under the
-  attempt's own identity, so each call reads its context twice (the pre-call
-  reads, the case lock hold included). That second check runs after the
-  attempt and its reservation exist: in the one sequential loop only a bundle
-  file changed on disk between the two can make it refuse, but with Phase 4's
-  concurrent workers an upstream accepted in between can make the pre-check
-  pass and the re-check refuse with a reservation held (no call is made).
-  *Upgrade:* a declared per-section bound the day a wide route or a large pack
-  comes near the ceiling, and Phase 4's lease fencing the node's inputs
-  between the two checks.
+  truncated (§45.3). What that bound could never say is *which* part was
+  large. It now does for the one this entry named: an accepted upstream
+  handoff past the declared bound refuses `UPSTREAM_SECTION_OVER_CEILING` in
+  the prompt builder, so before any attempt, reservation or call, and it
+  refuses rather than trims -- a silently shortened prompt is a module
+  answering a question nobody asked
+  (`tests/test_handoff_invocation.py::test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt`,
+  and the runtime half, which leaves no attempt, reservation, call or charge
+  for the node it could not prompt,
+  `tests/test_canonical_runtime.py::test_an_over_bound_upstream_section_refuses_before_its_attempt`).
+  The number is declared rather than derived from the ceiling so that a reader
+  can see it, and it is chosen against the measurement this deferral rested
+  on: on the catalog's widest pathway,
+  `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT`, CP-5 carries **16 direct
+  upstreams**, and its own delivered authority is 165,548 bytes, so 16
+  sections at the bound beside that authority still leave `MAX_REQUEST_BYTES`
+  more than a quarter of itself for evidence -- asserted from the vendored
+  catalog and the bundle's own bytes, so a build that widens a node or grows
+  an authority set fails there rather than at the first FULL run
+  (`test_the_declared_section_bound_leaves_the_widest_node_its_authority`).
+  **What it does not buy.** It does not make a wide route fit: the evidence
+  section carries every block of every pinned source, so a FULL CP-5 whose
+  upstreams are each inside the bound can still refuse
+  `CONTEXT_OVER_CEILING`, and what first delivers less is per-node evidence
+  selection (the Phase 5 entry "The gate's evidence demands are dropped"). And
+  the 20 KB-per-handoff figure the 47 % estimate used is an assumption, not a
+  measurement: no FULL module has produced a handoff, and the only real number
+  the tree holds is the 448,826-byte two-document CP-0 request of the VMO2 run
+  (`qualification/vmo2-fy2025/RESULT.md`), which carries no upstream at all.
+  Three sections remain unbounded in their own right -- the upstream citation
+  register (its own entry owes it), the evidence section, and the delivered
+  authority set, which is the bundle's bytes rather than the host's to refuse
+  (invariant 4) and which `tests/test_delivered_authority.py` measures instead.
+  The executor rebuilds and re-bounds the prompt under the attempt's own
+  identity, so each call reads its context twice (the pre-call reads, the case
+  lock hold included). That second check runs after the attempt and its
+  reservation exist: in the one sequential loop only a bundle file changed on
+  disk between the two can make it refuse, but with Phase 4's concurrent
+  workers an upstream accepted in between can make the pre-check pass and the
+  re-check refuse with a reservation held (no call is made).
+  *Upgrade:* Phase 4's lease fencing the node's inputs between the two checks,
+  and a declared bound for the citation register and for the evidence section
+  the day per-node evidence selection has something to select.
 
 **Phase 4.**
 
-- **The frontier's ready nodes run in order, not concurrently.**
-  `docs/REBUILD_PLAN.md` Phase 4 and `SYSTEM_SPEC.md` §4 both write the loop as
-  `await gather(*(run_node(n) for n in ready))`. This build runs them one after
-  another. Nothing about correctness depends on the difference — the frontier is
-  recomputed from the store on every pass either way, and Phase 4's exit tests
-  are about recovery and reservations rather than parallelism — but a wide
-  frontier takes as long as the sum of its nodes instead of the longest one.
-  *Upgrade:* the phase that makes the provider call real (Phase 5) is where the
-  latency starts to matter and where an async store connection has to arrive
-  anyway; the loop's shape does not change, only the `for` becomes a `gather`.
+- ~~**The frontier's ready nodes run in order, not concurrently.**~~ Closed by
+  Completion Phase 13.1 (§80), and two of this entry's own claims were wrong.
+  The loop's shape **does** change: `frontier` offers every node whose
+  *blocking* inputs are met, so it can offer a node beside one of its own soft
+  upstreams, and an attempt whose input is accepted mid-call is billed and then
+  refused — `route.independent_batch` drops such a node from the batch, over the
+  transitive closure of every edge type
+  (`test_a_node_does_not_run_beside_its_own_transitive_upstream`,
+  `test_genuinely_unrelated_nodes_run_together`). And an async store connection
+  did **not** have to arrive: the wait is a provider call, both that socket and
+  psycopg's release the interpreter lock, so a `ThreadPoolExecutor` buys the
+  overlap without recolouring 152 store functions. Proven on `RELATIVE_VALUE`,
+  the one enabled route with a wide frontier, by asserting two calls' intervals
+  intersect rather than by a wall clock
+  (`test_a_wide_frontier_runs_its_independent_nodes_at_the_same_time`, watched
+  failing with the batch forced sequential). Invariant 10 is untouched: the
+  batch is pure over the pinned route, so the same pins take the same path.
+  **What it is not.** It is opt-in — `Execution.per_node`, which only the worker
+  supplies — because the harness and the suite drive a run on a connection they
+  own; a batch of one opens nothing, which is every LITE route this build
+  enables. **The first version of it never reached a worker at all**, and that
+  is worth the sentence: `work_once` rebuilt `Execution` from the four fields
+  that line knew about and silently dropped the fifth, so the pass was built,
+  tested and documented while production stayed sequential. A dropped field is
+  not a type error and the run still completes, so nothing failed — the
+  confidence review found it, `replace` fixes it, and the guard asserts on what
+  the runtime is handed rather than on what the factory returns. It has never run live: no wide route has ever met a real provider,
+  so what is proven is the loop and not the pathway. And it is **not** 13.2 —
+  one worker still claims one run, and the I6 residual is untouched.
+  *Upgrade:* none for latency. What remains is a live wide route, which waits on
+  Phase 11's documents, and the second worker, which must answer I6 first.
 - ~~**The reservation estimate is the caller's number.**~~ Closed by §40:
   `Execution` carries a dated `ModelPrice` bound to the provider's model, and
   each call reserves its worst case. The price's source is the remaining gap,
@@ -1222,18 +2412,45 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 3.**
 
-- **A route's predicates are frozen and never evaluated.** `ResolvedRoute`
-  carries them, `route_digest` covers them, and `server/store/routes.py` writes
-  and reads them back — and no code consults them. `CONDITIONAL` sits in
-  `BLOCKING` beside `REQUIRED`, so a conditional edge blocks unconditionally and
-  its condition decides nothing. That is the fail-closed direction, and the only
-  one available: a condition the host cannot evaluate must not be assumed met,
-  and the predecessor's failure was the opposite — edges that did not enforce
-  what they claimed. But invariant 10's "frozen predicates" are, for now, frozen
-  without yet being predicates, and a reader of the pin could take the presence
-  of a predicate for its enforcement. *Upgrade:* the phase that gives a predicate
-  a grammar and an evaluator, which is the same thing that would make
-  `CONDITIONAL` behave differently from `REQUIRED`.
+- **A route's predicates are frozen and never evaluated, and an edge that would
+  need one is refused.** `ResolvedRoute` carries them, `route_digest` covers
+  them, and `server/store/routes.py` writes and reads them back — and no code
+  consults them. That is the fail-closed direction, and the only one available:
+  a condition the host cannot evaluate must not be assumed met, and the
+  predecessor's failure was the opposite — edges that did not enforce what they
+  claimed. But invariant 10's "frozen predicates" are, for now, frozen without
+  yet being predicates, and a reader of the pin could take the presence of a
+  predicate for its enforcement. What closes the reachable half of that reading
+  is Completion Phase 10 Task 10.2: `_edges_among` refuses
+  `ROUTE_EDGE_UNSUPPORTED` for a `CONDITIONAL` **edge** before the `Edge` is
+  built, so no such route resolves and none can be pinned — where before it
+  would have pinned a route whose target blocks whatever the evidence said. The
+  refusal is scoped to the route, not to the bundle: the membership filter runs
+  first, so a CONDITIONAL edge whose source or target is outside the resolved
+  node set is skipped as any other out-of-route edge is, and a build carrying
+  one off every pathway refuses nothing. That is deliberate — an edge no pin
+  carries misleads no reader of a pin — and it means this guard fires at the
+  first build that puts such an edge **on a resolved route**, not at the first
+  build that declares one anywhere. `CONDITIONAL` stays in `BLOCKING` and stays
+  in the bundle's vocabulary (`CONTEXT.md`): it remains a CP-0 *verdict*, which
+  `tests/test_route_resolution.py::test_a_conditional_verdict_blocks_like_a_blocked_one`
+  still holds, and only an edge of that type is refused. The refusal is a 503:
+  the pinned build's own catalog, not the caller's request, and no profile or
+  pathway a caller could name instead would avoid it. The branch is unreachable
+  on this bundle — the vendored catalog declares 60 REQUIRED, 26 OPTIONAL, 29
+  ADVISORY and one QA_GATE typed edge and **no** CONDITIONAL edge, pinned by
+  `tests/test_bundle_pin.py::test_the_catalog_declares_no_conditional_edge`
+  since `4f06337` and now as a whole census, through the engine and against a
+  mutated copy, by
+  `tests/test_bundle_pin.py::test_the_vendored_catalog_carries_no_edge_this_engine_cannot_evaluate`
+  — so a grammar written for it today would be code for a route that does not
+  exist. `tests/test_route_resolution.py::test_a_profile_with_a_conditional_edge_is_refused_at_resolution`
+  is the guard, and
+  `test_the_four_edge_types_this_engine_evaluates_still_resolve` says the guard
+  is one type rather than a narrowing of the other four. *Upgrade:* an
+  evaluator, owed the day that guard fires — which is also the first day an
+  upstream build carries a real predicate for a grammar to parse, and the day
+  the frozen `predicates` field has something to be read against.
 
 **Phase 2.**
 
@@ -1246,17 +2463,30 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   refused `HANDOFF_MALFORMED` for `“The preliminary` where the quote said
   `The preliminary`. It is the body check only -- `verify_citations` still
   anchors against the document's own tokens exactly, so nothing about what may
-  be cited moved. A module
+  be cited moved. ~~A module
   quoting `USD 1,240.0m.` where the token is `1,240.0m` is refused
-  `CITATION_NOT_LOCATED`. That is the fail-closed direction — a refused citation
-  costs its claim under the retired claims adapter's per-claim refusal (§26,
-  closed with the claims executor in f-2b); on the canonical adapter one
-  unanchored quote refuses the whole handoff (§41.3) — an over-eager match
-  costs a rectangle over text the quote does not contain either way — but it
-  will refuse quotes a reader would call correct.
-  *Upgrade:* Phase 5, when a real module's real quotes say which normalisations
-  are needed; anything decided before then is guesswork about a caller that does
-  not exist.
+  `CITATION_NOT_LOCATED`.~~ Closed by Completion Phase 10 Task 10.5 (§78): the
+  quote's **first and last** word may differ from its token by
+  `EDGE_PUNCTUATION` alone, and only where the exact search found nothing
+  (`test_a_quote_ending_in_a_full_stop_anchors_to_the_words_it_names`). An
+  interior word must still equal its token
+  (`test_interior_punctuation_is_never_stripped`), because forgiving
+  punctuation there would let one quote stand for two different sentences of
+  the page. The direction of the old refusal was the fail-closed one — a
+  refused citation costs its claim under the retired claims adapter's per-claim
+  refusal (§26, closed with the claims executor in f-2b); on the canonical
+  adapter one unanchored quote refuses the whole handoff (§41.3) — and what the
+  widening buys back is that it no longer refuses quotes a reader would call
+  correct. **What did not happen is the condition this entry set.** It said the
+  normalisations were owed only "when a real module's real quotes say which are
+  needed", and no run has said so: eleven authorized live runs produced **no**
+  `CITATION_NOT_LOCATED` from either cause, and the one real typography refusal
+  in the record was the quotation-mark case, which `_QUOTATION` closed in the
+  body check and not here. What authorized these two and no others is
+  `docs/COMPLETION_PLAN.md`'s Phase 10 exit check naming exactly them. A reader
+  should know the rules answer a specification rather than a caller.
+  *Upgrade:* none for these two; the next normalisation waits for the run that
+  asks for it, and the entry below carries what the joining rule cost.
 - **A refused pack can leave blobs behind.** `admit_pack` writes bytes to the
   blob store inside the caller's transaction, and the blob store is a filesystem
   that transaction cannot roll back. The admission command (§51) extracts
@@ -1268,13 +2498,111 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   addressed, immutable, and reused verbatim if the same document is admitted
   again — but nothing collects them. *Upgrade:* a sweep that deletes blobs no
   `sources` row names, the day the store is large enough for the space to matter.
-- **One block per line; the bounded line group is not built.**
-  `SYSTEM_SPEC.md` §5 wants one block per line "while small" and bounded line
-  groups once not. This build always packs a line per block, so a large document
-  produces more blocks than it should. *Upgrade:* the group arrives with the
-  first document big enough to need it, splitting a line at the group width
-  rather than giving it a block of its own. Block ids are zero-padded to six
-  digits, so reading order and `block_id` order agree up to 999,999 lines.
+- **A line is split at the group width; several lines in one block is not
+  built.** `SYSTEM_SPEC.md` §5 wants one block per line "while small", bounded
+  line groups once not, and a line past the group width split at it rather than
+  given a block of its own. The splitting half is built: `GROUP_WIDTH` is
+  `BoundaryText`'s own limit, `ingest.line_groups` cuts a line at it, and
+  `verify_citations` requires every block a line was split into to have been
+  delivered, so a quote crossing the cut needs both sides and a delivery
+  carrying half a split line carries none of it
+  (`test_a_line_wider_than_the_group_is_split_rather_than_refusing_the_pack`,
+  `test_a_quote_crossing_a_group_boundary_needs_every_block_of_its_line`).
+  Before it, a line past 4,096 characters refused the whole pack, so one wide
+  table row in a text export meant no document carrying it could be admitted at
+  all; the CCL 10-K fixture's widest line is 2,502 characters, which is how far
+  that was from a real document. **What it does not buy is the documents it was
+  written for:** the entry below this one records the token ceiling that refuses
+  Boeing's and Ford's 10-K texts before any line is packed, and this change
+  moves neither of them. The width is not a choice: any narrower would
+  re-number documents already admitted under this one, whose `source_blocks`
+  rows are immutable and whose stored citations name the ids they were given
+  (`test_a_document_whose_lines_fit_the_group_is_numbered_one_block_a_line`).
+  A cut falls wherever the width falls, inside a word if that is where it falls,
+  because cutting at a token boundary would make the block count depend on the
+  tokens and force anchoring to read every token's text back to learn it;
+  nothing reads a quote out of a block, so what it costs is a word shown in two
+  pieces. A single word past the width has nowhere to be cut and still refuses
+  `BOUNDARY_TEXT_TOO_LONG` at the door
+  (`test_a_document_the_boundary_refuses_never_reaches_the_pinned_set`). What is
+  **not** built is the other half -- several lines packed into one block -- so a
+  large document still produces more blocks than it should. It is deferred
+  because nothing in reach needs it: the widest document this tree holds is the
+  CCL 10-K at 1,726 lines over 30 pages, and the two VMO2 releases are 1,347 and
+  1,019, against a 500,000 token admission ceiling. It is **not** deferred
+  because it would re-number already-admitted documents, which is what this
+  entry first said and what its own implementation contradicts:
+  `citations._line_blocks` compares a source's stored block count against its
+  line count and recomputes the packing only when they differ, so a source
+  admitted one block a line reads back one block a line under any later rule,
+  without a version column and without a backfill. That discriminator is a
+  derivation rather than a record, so it is checked -- a recomputed total that
+  does not equal the stored count refuses `EVIDENCE_NOT_AVAILABLE`
+  (`test_a_packing_that_disagrees_with_the_stored_blocks_refuses`), because
+  every id past the disagreement would name a row no source carries. It is
+  checked in one direction only: splitting writes **more** blocks than lines,
+  so only a source with more is repacked, and one with fewer -- which no
+  packing produces, and which is reached only by removing a stored block --
+  keeps the one-block-a-line reading
+  (`test_a_source_missing_a_block_still_reads_one_block_a_line`). That
+  asymmetry is not tidiness: the two tests that demonstrate
+  `CITATION_NOT_DELIVERED` at all narrow a delivery by deleting a block with
+  the seal disabled, and reading that as a disagreement about the rule would
+  answer about the host's derivation where the honest answer is about the
+  citation, making the refusal unreachable in the tree. Block ids
+  are zero-padded to six digits, so reading order and `block_id` order agree up
+  to 999,999 **blocks**, which is no longer the same as 999,999 lines.
+  *Upgrade:* the grouping half, the day a document arrives whose block count can
+  be measured to cost something; a stored `source_extractions.format_version`
+  past its `CHECK (format_version = 1)` is owed with it only if the count ever
+  stops distinguishing the two rules.
+- ~~**A single token past the boundary limit refuses the whole pack, and that is
+  what stops the large 10-K texts.**~~ Closed by Completion Phase 13, by the
+  upgrade this entry named and in the place it named -- the extractor, "which is
+  where a token's boundaries are decided". `PlainTextExtractor` declares
+  `max_token_chars` (`BoundaryText`'s own limit, the same number `GROUP_WIDTH`
+  uses) and cuts a longer run there, so a Boeing-sized 71,243-character run
+  admits and the ordinary sentences around it anchor exactly as they would in
+  any other document
+  (`test_a_boeing_sized_run_admits_and_its_neighbours_stay_citable`). Splitting
+  rather than refusing, for the reason the line group splits: a refusal leaves
+  the document unadmissible and every honest word in it uncitable, where a
+  split costs only the artefact. The identity is v3 and v2 rows verify as
+  recorded; readmission is how a source gains the new tokenisation (§44.4).
+  **Three things it costs, each with a test.** The run is quotable only piece by
+  piece, because `matched_text.split()` yields it as one word and no stored
+  token equals it -- it was quotable not at all before, since the document did
+  not admit. A uniform run splits into identical pieces, so quoting one is
+  `CITATION_AMBIGUOUS`, which is the anchoring rule answering correctly rather
+  than the admission failing. And splitting forgives **length and nothing
+  else**: each piece is checked exactly as the whole run was, so an override
+  control in a run of any length still refuses `BOUNDARY_TEXT_INVALID`
+  (`test_a_split_run_is_still_refused_for_what_the_boundary_actually_guards`,
+  written because `tests/test_ingestion.py`'s docstring asserted it before
+  anything checked it). *Upgrade:* the same bound for `PdfExtractor`, which
+  still refuses a run past the limit -- the fail-closed direction, and no
+  document in reach needs it. **This does not admit the 10-Ks by itself**: the
+  texts are still held outside the tree, and `MAX_REQUEST_BYTES` is the second
+  obstacle behind this one. What it does is make them admissible the day they
+  are supplied.
+- **The original entry, for the reader who wants the measurement.** `ingest._prepare` calls
+  `BoundaryText.of(token.text)` on every token before `_blocks` runs, so a
+  4,097-character token refuses `BOUNDARY_TEXT_TOO_LONG` at the door -- before
+  any line is packed, and with nothing the line group can do about it, because a
+  cut inside a token is a cut the token index cannot describe. The line-group
+  review measured both texts this repository was trying to admit: Boeing's holds
+  one token of 71,243 characters and Ford's one of 105,966, so **neither admits
+  on base or on this branch**, and `docs/COMPLETION_PLAN.md`'s O07 is corrected
+  in the same commit for naming `MAX_REQUEST_BYTES` as their first obstacle when
+  they never reach a prompt. The refusal is the fail-closed direction and the
+  extractor's, not the packer's: a "token" that long is an extraction that found
+  no whitespace where a reader sees words, and admitting it would put a
+  megabyte-long unquotable string in the token index under invariant 11's
+  promise that a quote can be re-located. *Upgrade:* the extractor that produced
+  it, which is where a token's boundaries are decided -- a declared maximum token
+  length in the extractor identity, refusing or re-splitting there, the day one
+  of these texts is needed whole rather than as the curated extract the FULL
+  pathways run on today.
 - **The plain-text extractor's rectangles are a fixed-pitch rendering.** A `.txt`
   document has no typography, so `PlainTextExtractor` states its cell size and
   derives rectangles from character positions. It is a real, reproducible
@@ -1294,20 +2622,32 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   databases under one transaction and advisory lock. Backup/restore and the
   no-downgrade rule are recorded in `docs/MIGRATIONS.md` and
   `docs/DECISIONS.md` §20a.
-- **The recorded digest proves the declared schema did not change, not that the
-  database still matches it.** `apply_schema` compares the SHA-256 of
-  `schema.sql` against what was applied; a table altered or dropped outside this
-  code afterwards passes unnoticed. It catches the failure that startup exists to
-  catch — a process meeting a database an older build created — and not
-  tampering. *Upgrade:* apply the declared schema into a scratch namespace and
+- **The recorded digests prove the declared history did not change, not that the
+  database still matches it.** `apply_schema` compares each migration's SHA-256
+  against its `store_migrations` row, and the SHA-256 of the whole ordered
+  `(version, name, digest)` history against `store_schema.applied_digest`. It
+  reads no `information_schema`, so a table altered or dropped outside this code
+  afterwards passes unnoticed. What it catches is a declared history that
+  disagrees with the applied one — edited, reordered, missing, or newer than this
+  build knows — and not tampering, which `docs/DECISIONS.md` §20a says in the
+  same breath as the migration policy: a checksum cannot see a change made to
+  the schema and its metadata together. The older database this entry used to
+  name as the caught case is no longer refused at all; §20a's prefix advancement
+  migrates it. *Upgrade:* apply the declared schema into a scratch namespace and
   diff `information_schema` against the live one, the day a database is edited by
   anything but this function.
-- **`budget_ledger` records a charge and enforces no ceiling.** One charge per
-  attempt is a database fact, but nothing refuses the charge that takes a run
-  past a budget, because invariant 8's reservation belongs to the provider call
-  and there is no provider call yet. *Upgrade:* Phase 4 reserves before the call
-  and reconciles after, and its three named tests
-  (`docs/REBUILD_PLAN.md` Phase 4) are what make the ceiling bite.
+- ~~**`budget_ledger` records a charge and enforces no ceiling.**~~ Closed by the
+  phase its own upgrade path named. `server/store/budget.py::_reserve` refuses
+  `BUDGET_CEILING_REACHED` under the run row lock before any call, and
+  `_remaining` subtracts `greatest(reservations.amount, ledger.amount)` per
+  attempt, so a charge that came in above its reservation consumes the capacity
+  the next reservation is measured against.
+  `tests/test_budget.py::test_a_reservation_past_the_ceiling_is_refused_before_it_is_taken`
+  and `test_concurrent_reservations_at_the_ceiling_refuse` hold it. What cannot
+  be refused is a bill already incurred, which is not this entry's claim and is
+  covered by the Repair Phase 2 entries on indeterminate exposure. Found by the
+  Completion Phase 7 confidence review, which is the reason the entry above this
+  one says the gate cannot read prose.
 - **A blob is read whole into memory and has no size ceiling of its own.**
   `BlobStore.get` still returns `bytes`, with nothing bounding a read but the
   process. What has changed since this entry was written: `admit_pack` now
@@ -1318,7 +2658,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   with. What stays open is `BlobStore.get` itself: a caller reading a blob back
   (or any bytes that reached the store some other way) is still bounded by
   nothing this class declares. *Upgrade:* the ceiling and a streaming read on
-  `BlobStore.get` itself, the day a caller other than admission needs one.
+  `BlobStore.get` itself. **The clause here used to read "the day a caller other
+  than admission needs one", which invites the wrong check**: `server/` holds
+  **ten** non-admission callers -- `evidence/page.py`, `deliverable/receipts.py`
+  and `revisions.py`, `methodology/verification.py`, `handoff.py` (three),
+  `canonical.py` (two) and `invocation.py` -- and a reader who counted them
+  would conclude the condition had fired and build a streaming API across all
+  ten. What actually gates it is narrower: every blob in this store is written
+  by this system and bounded before it is written -- a document by
+  `AdmissionLimits`, a record, diagnostic or payload by the wire -- so the
+  ceiling would today refuse only a corrupted blob or one a future writer put
+  there unbounded. It is owed the day a writer can exceed those bounds, or the
+  day a reader must not hold a whole blob at once -- `evidence/page.py` is the
+  nearest, reading a whole document per request, and it has an entry of its own
+  for that cost.
 - **`BlobStore.path_of` hands out a filesystem path.** It validates the address
   first, so no caller can name a path outside the root, but it does let one
   write to the store without going through `put` and its digest. It is public
@@ -1343,7 +2696,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **caos-v2** (8993 symbols, 22700 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **caos-v2** (10879 symbols, 26894 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

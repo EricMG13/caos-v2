@@ -9,7 +9,7 @@ const RENDER_FAILED = {
   clears: "the section can render the document it was given",
 };
 
-/** `resetOn` is what the failure was about -- the workspace passes the
+/** `resetOn` is what the failure was about — the workspace passes the
     document's `observed_at`. A boundary that latched until it was unmounted
     would keep refusing a document that renders perfectly well, so a changed
     `resetOn` is taken as a new attempt rather than as the same one. */

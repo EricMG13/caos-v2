@@ -197,6 +197,11 @@ def test_model_without_an_accepted_forecast_has_no_computed_values(
     body = _get(client, harness)["body"]
     assert body["forecast"] is None
     assert body["unavailable_reason"] == "NO_ACCEPTED_FORECAST"
+    # "No accepted forecast" is a fact about now, so it travels with the run
+    # state that says whether one is still coming: this run has not ended, and
+    # no verdict has blocked it.
+    assert body["displayed_run_status"] == "RUNNING"
+    assert body["blocked_by"] is None
     assert _get(client, harness)["status"] == "partial"
     foreign_case = create_case(harness.conn, BoundaryText.of("Other case"))
     foreign_run = start_run(harness.conn, foreign_case)
@@ -255,10 +260,10 @@ def test_model_http_actor_matrix_and_declared_io(
     revoke(harness.conn, case_id=harness.case_id, user_id=revoked)
     harness.conn.commit()
     assert client.get(_path(harness)).status_code == 401
-    for who, groups in ((uuid4(), None), (revoked, None), (uuid4(), "caos-admins")):
+    for who, role in ((uuid4(), None), (revoked, None), (uuid4(), "ADMIN")):
         counter = _CountingConnection(harness.conn)
         app.dependency_overrides[store_connection] = _serving(counter)
-        response = client.get(_path(harness), headers=_as(who, groups))
+        response = client.get(_path(harness), headers=_as(who, role))
         harness.conn.rollback()
         assert response.status_code == 404
         assert response.json()["code"] == "CASE_NOT_FOUND"

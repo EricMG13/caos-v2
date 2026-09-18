@@ -17,8 +17,9 @@ import os
 import secrets
 import signal
 import sys
+import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -39,7 +40,15 @@ from server.store import StoreConnection, apply_schema, connect, rollback_or_clo
 from server.store.gates import execution_input
 from server.store.outcomes import execution_reads
 from server.store.runs import cancel_run
-from server.store.work import LEASE_SECONDS, Lease, claim_run, release, stop
+from server.store.work import (
+    LEASE_SECONDS,
+    Lease,
+    WorkerState,
+    beat,
+    claim_run,
+    release,
+    stop,
+)
 
 DATABASE_URL = "CAOS_DATABASE_URL"
 BLOB_ROOT = "CAOS_BLOB_ROOT"
@@ -86,10 +95,10 @@ class _Stoppable:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         if self.stopping.is_set():
             raise _Stopping
-        self.inner.check_context(route_node_id, module_id)
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -98,10 +107,28 @@ class _Stoppable:
 
 
 def module_execution(
-    completions: CompletionProvider, price: ModelPrice, bundle: Bundle, blobs: BlobStore
+    completions: CompletionProvider,
+    price: ModelPrice,
+    bundle: Bundle,
+    blobs: BlobStore,
+    connect_store: Callable[[], StoreConnection] | None = None,
 ) -> ExecutionFor:
     """Each claimed run executes its pinned route through the real module
-    provider, on the worker's connection and under its lease."""
+    provider, on the worker's connection and under its lease.
+
+    `connect_store` is what lets a pass run its independent nodes at once: each
+    gets a connection of its own and a provider bound to it, because a node's
+    pre-call unit opens a transaction under the case lock and `ModuleProvider`
+    reads the store to build its prompt. Omitted -- which is every test that
+    drives this directly -- the loop stays sequential, and it is sequential
+    anyway wherever a frontier offers one node, which is every LITE route this
+    build enables.
+
+    The lease is shared across those connections on purpose: it fences the
+    *run*, and each write checks the token it was taken under, so two nodes of
+    one run writing under one lease is the claim working rather than a hole in
+    it.
+    """
 
     def execution_for(conn: StoreConnection, run_id: UUID, lease: Lease) -> Execution:
         with execution_reads(conn):
@@ -109,9 +136,42 @@ def module_execution(
         provider = ModuleProvider(
             conn, bundle, blobs, completions, route, run_id, lease
         )
-        return Execution(provider, price, bundle, lease=lease)
+
+        per_node: Callable[[], tuple[StoreConnection, Provider]] | None = None
+        if connect_store is not None:
+            connect = connect_store
+
+            def per_node_conn() -> tuple[StoreConnection, Provider]:
+                node_conn = connect()
+                return node_conn, ModuleProvider(
+                    node_conn, bundle, blobs, completions, route, run_id, lease
+                )
+
+            per_node = per_node_conn
+
+        return Execution(provider, price, bundle, lease=lease, per_node=per_node)
 
     return execution_for
+
+
+def _stoppable_nodes(
+    execution: Execution, stopping: Event
+) -> Callable[[], tuple[StoreConnection, Provider]] | None:
+    """The per-node factory, each provider wrapped so a concurrent pass stops.
+
+    Without this a SIGTERM would stop the sequential loop between nodes and not
+    a concurrent one, because `_Stoppable` was only ever put around the
+    execution's own provider -- the nodes of a batch build their own.
+    """
+    build = execution.per_node
+    if build is None:
+        return None
+
+    def stoppable_node() -> tuple[StoreConnection, Provider]:
+        node_conn, provider = build()
+        return node_conn, _Stoppable(provider, stopping)
+
+    return stoppable_node
 
 
 def work_once(
@@ -133,9 +193,13 @@ def work_once(
     lease = claim_run(conn, worker=config.worker, lease_seconds=config.lease_seconds)
     if lease is None:
         return None
+    # Said before the run is driven rather than after it: driving is the part
+    # that takes minutes, and a worker that went quiet *while working* is a
+    # different thing for an operator than one that went quiet while idle.
+    # `claim_run` commits alone, so this beat is its own unit too.
+    _beat(conn, config, "WORKING", 0)
     try:
         execution = execution_for(conn, lease.run_id, lease)
-        stoppable = _Stoppable(execution.provider, stopping)
         with execution_reads(conn):
             _pin, route = execution_input(conn, lease.run_id, execution.bundle)
         run_route(
@@ -143,7 +207,18 @@ def work_once(
             blobs,
             run_id=lease.run_id,
             route=route,
-            execution=Execution(stoppable, execution.price, execution.bundle, lease),
+            # `replace`, not a fresh `Execution` listing the fields this line
+            # happens to know about. It used to be the latter, and when
+            # `per_node` was added the worker silently dropped it -- so the
+            # concurrent pass was built, tested, documented and then never
+            # reached production, because one constructor call four screens
+            # away did not mention it. A field added tomorrow survives this.
+            execution=replace(
+                execution,
+                provider=_Stoppable(execution.provider, stopping),
+                lease=lease,
+                per_node=_stoppable_nodes(execution, stopping),
+            ),
         )
     except _Stopping:
         _settle(conn, lambda: release(conn, lease))
@@ -155,8 +230,11 @@ def work_once(
     except Exception as fault:  # noqa: BLE001 -- neither a refusal nor a store error
         # Parked, not raised: a worker that died holding the claim would find the
         # same run first after every lease expiry and never reach the rest of the
-        # queue. The class alone is written; a message may quote a document.
-        print(type(fault).__name__, file=sys.stderr)
+        # queue. The class and the frame it was raised in are host facts; the
+        # message may quote a document and is never written.
+        frames = traceback.extract_tb(fault.__traceback__)
+        where = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "?"
+        print(f"{type(fault).__name__} at {where}", file=sys.stderr)
         _settle(conn, lambda: stop(conn, lease, RefusalCode.INTERNAL_FAULT))
     return lease.run_id
 
@@ -170,8 +248,25 @@ def _refused(conn: StoreConnection, lease: Lease, refused: Refusal) -> None:
         try:
             cancel_run(conn, lease.run_id, lease=lease)  # commits its own unit
         except Refusal as lost:
-            if lost.code is not RefusalCode.LEASE_NOT_HELD:
-                raise
+            # `cancel_run` refuses three classes and no others: a store
+            # fault (`STORE_UNAVAILABLE` or `STORE_NOT_TRANSACTIONAL`),
+            # `LEASE_NOT_HELD` from its `require_lease` fence, and
+            # `RUN_NOT_FOUND` from `lock_run` for a run row that is not there
+            # (a run already terminal is answered False, not refused). The
+            # store fault heals itself -- released, or failing that left to
+            # expire -- so the run is reclaimed and the cancel retried, the
+            # same back-off the branch below gives that class, and parking it
+            # would turn a transient fault into a stop an operator must
+            # requeue by hand. A missing run has no such recovery, and raising
+            # it would leave `work_once` holding the claim, with the run at
+            # the head of every later poll.
+            unmet = lost.code
+            if unmet in STORE_FAULTS:
+                _settle(conn, lambda: release(conn, lease))
+                raise Refusal(unmet) from None
+            if unmet is not RefusalCode.LEASE_NOT_HELD:
+                print(unmet.value, file=sys.stderr)
+                _settle(conn, lambda: stop(conn, lease, unmet))
     elif code in STORE_FAULTS:
         _settle(conn, lambda: release(conn, lease))
         raise Refusal(code)
@@ -199,6 +294,24 @@ def pause_seconds(config: WorkerConfig, failures: int) -> float:
     return min(base, config.backoff_cap_seconds) * jitter
 
 
+def _beat(
+    conn: StoreConnection, config: WorkerConfig, state: WorkerState, faults: int
+) -> None:
+    """Record this worker's state, and never let saying so stop it working.
+
+    A heartbeat is an observation for a person, not a fence: nothing reads it
+    to decide whether work may proceed. So a store that will not take the beat
+    must not take the worker down with it -- the loop's own fault handling is
+    what answers a store that is failing, and it does that by trying to claim a
+    run, which is the thing that actually matters.
+    """
+    try:
+        beat(conn, worker_id=config.worker.value, state=state, faults=faults)
+        conn.commit()
+    except (psycopg.Error, Refusal):
+        conn.rollback()
+
+
 def run_worker(
     config: WorkerConfig,
     *,
@@ -216,6 +329,7 @@ def run_worker(
             try:
                 if conn is None or conn.closed:
                     conn = conn_factory()
+                _beat(conn, config, "POLLING", failures)
                 claimed = work_once(
                     conn,
                     blobs,
@@ -228,6 +342,16 @@ def run_worker(
                 if isinstance(fault, Refusal) and fault.code not in STORE_FAULTS:
                     raise
                 failures += 1
+                # Said here rather than at the next poll, and before the
+                # connection is dropped. A worker looping claim-fault-claim
+                # would otherwise read `WORKING` -- its last word before the
+                # fault -- for as long as it kept faulting, which is the exact
+                # signal this beat exists to carry. A beat that cannot be
+                # written on a connection that has just failed is no loss: a
+                # store that is down cannot record that it is down, and the
+                # staleness of the last beat says it instead.
+                if conn is not None:
+                    _beat(conn, config, "BACKOFF", failures)
                 _closed(conn)
                 conn = None
             if claimed is None:
@@ -271,21 +395,30 @@ def install_stop_handler(stopping: Event) -> None:
 
 
 def main() -> int:
-    """Configure from the environment, or print only the typed code and exit 2
-    having made no call."""
+    """Configure from the environment, or exit 2 having made no call, printing
+    the typed code -- and, where a variable nobody set is the reason, that
+    variable's name beside it. A name is a host fact; a value is never printed.
+
+    The name is attached beside the handler rather than at the check, so it is
+    correct only while nothing between the check and the price call can raise:
+    today `price_from_environment` refuses an empty value on the next line."""
     stopping = Event()
+    # A variable nobody set is an unset variable, not a misconfigured one. Its
+    # *name* is a host fact and is printed; its contents never are.
+    unset = ""
     try:
         completions = OpenRouter.from_environment()
-        price = price_from_environment(
-            completions.model, os.environ.get(MODEL_PRICE, "")
-        )
+        given = os.environ.get(MODEL_PRICE, "")
+        unset = "" if given else MODEL_PRICE
+        price = price_from_environment(completions.model, given)
         url, root = _store_configuration()
         bundle = Bundle(VENDORED_BUNDLE)
         bundle.verify_manifest()
         with connect(url) as conn:
             apply_schema(conn)
     except Refusal as refused:
-        print(refused.code.value, file=sys.stderr)
+        named = f" {unset} unset" if unset else ""
+        print(f"{refused.code.value}{named}", file=sys.stderr)
         return 2
     except psycopg.Error:
         print(RefusalCode.STORE_UNAVAILABLE.value, file=sys.stderr)
@@ -294,7 +427,11 @@ def main() -> int:
     blobs = BlobStore(Path(root))
     return run_worker(
         WorkerConfig(BoundaryText.of(f"worker-{os.getpid()}")),
-        execution_for=module_execution(completions, price, bundle, blobs),
+        # The same factory the loop uses for its own connection: a concurrent
+        # pass opens one per node and closes it when that node is done.
+        execution_for=module_execution(
+            completions, price, bundle, blobs, lambda: connect(url)
+        ),
         stopping=stopping,
         conn_factory=lambda: connect(url),
         blobs=blobs,

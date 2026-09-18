@@ -34,6 +34,8 @@ _BLOCK_QUERY = (
     " JOIN live_sources USING (source_id)"
     " WHERE blocks.source_id = %s AND blocks.block_id = %s"
 )
+
+
 # Every captured block of one run, in one statement. The run's captured
 # membership is the CTE, and the live chain -- pinned version, live source,
 # stored extraction identity -- is joined onto it, so what the pin captured and

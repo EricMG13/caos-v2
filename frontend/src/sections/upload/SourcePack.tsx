@@ -4,12 +4,9 @@
 // pages or per-row check time -- withdrawal is checked live at every use,
 // and the envelope's own `observed_at` is when this document's check ran
 // (brief 4.1, "Fixture fields dropped rather than faked").
-import type { SourceRow } from "@/wire/v1";
-
-/** `2026-09-09T14:30:00Z` reads `2026-09-09 14:30Z`. */
-export function stamp(iso: string): string {
-  return iso.replace("T", " ").replace(/:\d\d(?:\.\d+)?Z$/, "Z");
-}
+import { WithdrawSource } from "./WithdrawSource";
+import { stamp } from "@/ds/format";
+import type { ActionView, SourceRow } from "@/wire/v1";
 
 /** The clock part alone: `14:30Z`. */
 export function clock(iso: string): string {
@@ -38,7 +35,37 @@ function WithdrawalCell({ row, observedAt }: { row: SourceRow; observedAt: strin
   );
 }
 
-function SourceLine({ row, observedAt }: { row: SourceRow; observedAt: string }) {
+/** The withdrawal a row still has in front of it. A source already out of the
+    live set has none -- the cell beside this one says when it left, and the
+    command would answer `EVIDENCE_NOT_AVAILABLE` -- so the column is empty
+    rather than carrying a refusal this file would have had to invent the
+    clearance for. */
+function WithdrawCell({ row, action, caseId, onWithdrawn }: SourceLineProps) {
+  return (
+    <td data-withdraw-control>
+      {row.withdrawn_at ? (
+        <span className="m">—</span>
+      ) : (
+        <WithdrawSource action={action} caseId={caseId} row={row} onWithdrawn={onWithdrawn} />
+      )}
+    </td>
+  );
+}
+
+interface SourceLineProps {
+  row: SourceRow;
+  action: ActionView | undefined;
+  caseId: string;
+  onWithdrawn: () => void;
+}
+
+function SourceLine({
+  row,
+  observedAt,
+  action,
+  caseId,
+  onWithdrawn,
+}: SourceLineProps & { observedAt: string }) {
   return (
     <tr data-source={row.source_id} className={row.withdrawn_at ? "wd" : undefined}>
       <td className="wrap">{row.filename}</td>
@@ -65,11 +92,24 @@ function SourceLine({ row, observedAt }: { row: SourceRow; observedAt: string })
         )}
       </td>
       <WithdrawalCell row={row} observedAt={observedAt} />
+      <WithdrawCell row={row} action={action} caseId={caseId} onWithdrawn={onWithdrawn} />
     </tr>
   );
 }
 
-export function SourcePack({ rows, observedAt }: { rows: SourceRow[]; observedAt: string }) {
+export function SourcePack({
+  rows,
+  observedAt,
+  action,
+  caseId,
+  onWithdrawn,
+}: {
+  rows: SourceRow[];
+  observedAt: string;
+  action: ActionView | undefined;
+  caseId: string;
+  onWithdrawn: () => void;
+}) {
   return (
     <table className="reg" data-source-pack>
       <thead>
@@ -82,11 +122,19 @@ export function SourcePack({ rows, observedAt }: { rows: SourceRow[]; observedAt
           <th scope="col">Extractor identity</th>
           <th scope="col">Set versions</th>
           <th scope="col">Withdrawal</th>
+          <th scope="col">Withdraw</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => (
-          <SourceLine key={row.source_id} row={row} observedAt={observedAt} />
+          <SourceLine
+            key={row.source_id}
+            row={row}
+            observedAt={observedAt}
+            action={action}
+            caseId={caseId}
+            onWithdrawn={onWithdrawn}
+          />
         ))}
       </tbody>
     </table>

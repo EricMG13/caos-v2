@@ -1,9 +1,11 @@
 __pycache__/
 *.py[cod]
 .venv*/
+.venv*
 # A checkout of this repository is not content of it.
 .claude/worktrees/
 node_modules/
+node_modules
 frontend/dist/
 frontend/dist-demo/
 frontend/playwright-report/
@@ -17,5 +19,9 @@ frontend/a11y-results/
 bandit.json
 /trivy.json
 coverage.xml
-.coverage
+.coverage*
 uv.lock
+# GitNexus writes this from the same index as CLAUDE.md's appended block,
+# so tracking it would mean a diff on every `analyze`. The index itself is
+# excluded in .git/info/exclude; this is the instruction file beside it.
+AGENTS.md

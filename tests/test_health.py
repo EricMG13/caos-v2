@@ -64,6 +64,7 @@ def test_health_is_200_only_when_store_bundle_and_blobs_hold(
             "store": "PROBE_NOT_RUN",
             "bundle": "PROBE_NOT_RUN",
             "blobs": "PROBE_NOT_RUN",
+            "workers": "PROBE_NOT_RUN",
             "checked_at": None,
         },
     )
@@ -73,14 +74,27 @@ def test_health_is_200_only_when_store_bundle_and_blobs_hold(
     status, body, cache = _ask(state)
     assert (status, body["status"], cache) == (200, "ready", "no-store")
     assert (body["store"], body["bundle"], body["blobs"]) == ("OK", "OK", "OK")
+    # Nothing has beaten in this database, and the API is ready anyway: the
+    # API is not the worker. Reporting the surface unready because a queue is
+    # stalled would take the surface down with it.
+    assert body["workers"] == "WORKERS_ABSENT"
     assert datetime.fromisoformat(str(body["checked_at"])).tzinfo is not None
 
-    for failing in health.PROBES:
+    for failing in ("store", "bundle", "blobs"):
         probes = _all("OK")
         probes[failing] = lambda: "PROBE_TIMEOUT"
         one_down = health.ProbeState(probes=probes)
         _round(one_down)
         assert _ask(one_down)[:2][0] == 503, failing
+
+    # The worker probe is reported and never gates readiness, whatever it says.
+    for code in ("PROBE_TIMEOUT", "WORKERS_STALE", "WORKERS_BACKING_OFF"):
+        probes = _all("OK")
+        probes["workers"] = lambda code=code: code  # type: ignore[misc]
+        queue_down = health.ProbeState(probes=probes)
+        _round(queue_down)
+        status, body, _cache = _ask(queue_down)
+        assert (status, body["workers"]) == (200, code)
 
 
 def test_each_failed_probe_names_its_code_and_answers_503(

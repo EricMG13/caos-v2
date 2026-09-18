@@ -14,7 +14,12 @@ from test_filing_chain import _actor, _freeze, _sign
 from test_revisions import _save
 
 from server.blobs import BlobStore
-from server.deliverable.filing import Receipt, file_deliverable, receipt_bytes
+from server.deliverable.filing import (
+    Receipt,
+    file_deliverable,
+    receipt_bytes,
+    revision_signatures,
+)
 from server.deliverable.receipts import read_filed_receipt
 from server.refusals import Refusal
 from server.store import connect
@@ -481,3 +486,18 @@ def test_released_receipt_prefix_refuses_an_ambiguous_receiptless_filing(
         conn.commit()
         with pytest.raises(Refusal, match=r"^STORE_SCHEMA_DRIFT$"):
             store.apply_schema(conn)
+
+
+def test_revision_signatures_names_each_signer_and_what_they_signed(
+    lite: _Harness,
+) -> None:
+    """The reader three callers share: who signed this revision, over which
+    payload digest. A signature over a digest the revision no longer has is
+    what `file_deliverable` refuses, so it must be read, not assumed."""
+    revision = _save(lite)
+    assert revision_signatures(lite.conn, lite.case_id, revision) == []
+    signer = _actor(lite)
+    _sign(lite, revision, signer)
+    signed = revision_signatures(lite.conn, lite.case_id, revision)
+    assert [who for who, _ in signed] == [signer]
+    assert all(len(digest) == 64 for _, digest in signed)

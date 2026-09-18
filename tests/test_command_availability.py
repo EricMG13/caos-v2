@@ -19,8 +19,10 @@ from httpx import Response
 
 from server import methodology
 from server.api.commands.availability import (
+    FilingFacts,
     RunFacts,
     directory_actions,
+    report_actions,
     run_actions,
     upload_actions,
 )
@@ -35,14 +37,18 @@ from server.api.wire import (
 from server.boundary_text import BoundaryText
 from server.refusals import RefusalCode
 from server.store import StoreConnection
-from server.store.gates import sources_live, withdraw_source
+from server.store.gates import sources_live
 from server.store.members import Standing, revoke
 from server.store.work import claim_run, stop
 
 __all__ = ["command_client"]
 
 A = ActionName
-ROUTE = {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"}
+ROUTE = {
+    "profile_id": "LITE_CREDIT_22",
+    "selection_id": "LITE_EARNINGS_UPDATE",
+    "supersedes": None,
+}
 SUBJECT = {
     "issuer_id": "EXAMPLE",
     "issuer_name": "Example Holdings plc",
@@ -141,12 +147,24 @@ def _admit(client: TestClient, case_id: UUID, user: UUID) -> Response:
     return answer
 
 
-def _upload(client: TestClient, case_id: UUID, user: UUID, role: str) -> ActionView:
+def _upload(
+    client: TestClient, case_id: UUID, user: UUID, role: str
+) -> list[ActionView]:
     answer = client.get(
         f"/api/v1/cases/{case_id}/upload", headers=command_headers(user, role=role)
     )
-    [action] = UploadDocument.model_validate(answer.json()).chrome.actions
-    return action
+    return list(UploadDocument.model_validate(answer.json()).chrome.actions)
+
+
+def _withdraw(
+    client: TestClient, case_id: UUID, user: UUID, source_id: object
+) -> Response:
+    answer: Response = client.post(
+        f"/api/v1/cases/{case_id}/sources/{source_id}/withdrawal",
+        headers=command_headers(user),
+        json={},
+    )
+    return answer
 
 
 def _stop_the_claimed_run(conn: StoreConnection) -> None:
@@ -184,12 +202,23 @@ def test_every_available_action_succeeds_and_every_refused_action_refuses_with_i
     assert lead.check(*EVERY_RUN_ACTION)[0].endswith("SOURCE_PACK_EMPTY")
     lead.check(*EVERY_RUN_ACTION)  # the cancelled run refuses everything
 
-    # Upload's one action, for a writer and a reader.
-    assert _upload(command_client, case_id, lead.user, "ANALYST").refusal is None
+    # Upload's two actions, for a writer and a reader. Withdrawal is shown
+    # refused while nothing is live, available once a source is, and each
+    # answer is the code the command gives.
+    admit, withdraw = _upload(command_client, case_id, lead.user, "ANALYST")
+    assert admit.refusal is None
+    assert withdraw.refusal is not None and withdraw.refusal.code == (
+        "EVIDENCE_NOT_AVAILABLE"
+    )
+    assert (
+        _withdraw(command_client, case_id, lead.user, uuid4()).json()["code"]
+        == withdraw.refusal.code
+    )
     assert _admit(command_client, case_id, lead.user).status_code == 201
     reader = member(conn, case_id, Standing.READER)
-    refused = _upload(command_client, case_id, reader, "ANALYST").refusal
-    assert refused is not None and refused.code == "NOT_AUTHORISED"
+    for refused in _upload(command_client, case_id, reader, "ANALYST"):
+        assert refused.refusal is not None
+        assert refused.refusal.code == "NOT_AUTHORISED", refused.action
     assert _admit(command_client, case_id, reader).json()["code"] == "NOT_AUTHORISED"
 
     # A run walked to its queue, stopped, retried and cancelled.
@@ -216,7 +245,9 @@ def test_every_available_action_succeeds_and_every_refused_action_refuses_with_i
     assert lead.check(A.START_RUN)[0].endswith("GATE_APPROVAL_MISMATCH")
     [source] = conn.execute("SELECT source_id FROM sources").fetchall()[0]
     conn.rollback()
-    withdraw_source(conn, case_id=case_id, source_id=source, actor_id=lead.user)
+    _, live = _upload(command_client, case_id, lead.user, "ANALYST")
+    assert live.refusal is None, "one live source: the control is offered"
+    assert _withdraw(command_client, case_id, lead.user, source).status_code == 200
     assert lead.run_id is not None and not sources_live(conn, lead.run_id)
     conn.rollback()
     answers = lead.check(A.APPROVE_RESEARCH_PLAN, A.START_RUN, A.RETRY_RUN)
@@ -319,5 +350,54 @@ def test_the_pure_judgements_follow_each_command_order() -> None:
     # `requeue_run` requeues only a stopped run with no cancel requested.
     assert retry.refusal is not None and retry.refusal.code == "RUN_NOT_STOPPED"
     assert [v.refusal for v in directory_actions(GlobalRole.ADMIN)] == [None]
-    [admit] = upload_actions(GlobalRole.ADMIN, Standing.READER)
+    admit, withdraw = upload_actions(GlobalRole.ADMIN, Standing.READER, 1)
     assert admit.refusal is not None and admit.refusal.code == "NOT_AUTHORISED"
+    assert withdraw.refusal is not None and withdraw.refusal.code == "NOT_AUTHORISED"
+    [_admit, empty] = upload_actions(GlobalRole.ADMIN, Standing.WRITER, 0)
+    assert empty.refusal is not None and empty.refusal.code == "EVIDENCE_NOT_AVAILABLE"
+
+
+def test_the_filing_controls_follow_each_command_order() -> None:
+    """Task 12.1: the four Report actions, judged as their commands judge."""
+    unsigned = FilingFacts(
+        signed=False, frozen=False, filed=False, actor_signed=False, actor_froze=False
+    )
+    judged = {
+        view.action: view.refusal and view.refusal.code
+        for view in report_actions(GlobalRole.ANALYST, Standing.APPROVER, unsigned)
+    }
+    assert judged == {
+        A.SAVE_REVISION: None,
+        A.SIGN_OPINION: None,
+        A.FREEZE_DELIVERABLE: "DELIVERABLE_NOT_SIGNED",
+        A.FILE_DELIVERABLE: "DELIVERABLE_NOT_FROZEN",
+    }
+
+    # The signer is shown neither the freeze nor the filing their own commit
+    # would refuse; a third approver is shown the filing.
+    signer = FilingFacts(
+        signed=True, frozen=True, filed=False, actor_signed=True, actor_froze=False
+    )
+    third = FilingFacts(
+        signed=True, frozen=True, filed=False, actor_signed=False, actor_froze=False
+    )
+    filed = FilingFacts(
+        signed=True, frozen=True, filed=True, actor_signed=False, actor_froze=False
+    )
+    for facts, expected in (
+        (signer, ["DELIVERABLE_ALREADY_FROZEN", "APPROVER_NOT_INDEPENDENT"]),
+        (third, ["DELIVERABLE_ALREADY_FROZEN", None]),
+        (filed, ["DELIVERABLE_ALREADY_FROZEN", "DELIVERABLE_ALREADY_FILED"]),
+    ):
+        views = {
+            view.action: view.refusal and view.refusal.code
+            for view in report_actions(GlobalRole.ANALYST, Standing.APPROVER, facts)
+        }
+        assert [views[A.FREEZE_DELIVERABLE], views[A.FILE_DELIVERABLE]] == expected
+
+    # Below the floor every one of them is the floor's refusal.
+    reader = {
+        view.refusal and view.refusal.code
+        for view in report_actions(GlobalRole.ANALYST, Standing.READER, third)
+    }
+    assert reader == {"NOT_AUTHORISED"}

@@ -34,6 +34,7 @@ from server.api.deps import BLOB_ROOT, DATABASE_URL, VENDORED_BUNDLE, _vendored_
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal
 from server.store import connect, verify_schema
+from server.store.work import worker_states
 
 # The route reads a cached result; the probes' round trips are the loop's.
 IO_BUDGET = 0
@@ -53,6 +54,13 @@ HealthCode = Literal[
     "PROBE_TIMEOUT",
     "PROBE_STALE",
     "PROBE_NOT_RUN",
+    # The worker's own codes. They never make the API `not_ready`: the API is
+    # not the worker, and reporting the surface unready because a queue is
+    # stalled would take the surface down with it. An operator alerts on this
+    # field; a load balancer reads `status`.
+    "WORKERS_ABSENT",
+    "WORKERS_STALE",
+    "WORKERS_BACKING_OFF",
 ]
 type Probe = Callable[[], HealthCode]
 
@@ -64,6 +72,8 @@ class HealthDocument(BaseModel):
     store: HealthCode
     bundle: HealthCode
     blobs: HealthCode
+    # Reported, never folded into `status` -- see `HealthCode`.
+    workers: HealthCode
     checked_at: AwareDatetime | None
 
 
@@ -120,15 +130,56 @@ def probe_blobs() -> HealthCode:
     return "OK"
 
 
+def probe_workers() -> HealthCode:
+    """What the fleet last said about itself, from the store's own clock.
+
+    Three answers a person acts on differently. `WORKERS_ABSENT`: nothing has
+    ever beaten, so a queued run will simply wait. `WORKERS_STALE`: a worker
+    beat and stopped -- the row names which one, and the worker is the thing to
+    go and look at. `WORKERS_BACKING_OFF`: every fresh worker is failing to
+    reach the store, which is the case the ledger entry names and the one that
+    used to be visible in nothing but a log.
+
+    A fresh worker in `WORKING` or `POLLING` is `OK`, including one that has
+    been driving the same long run for minutes: its run's liveness is the lease
+    in `run_work`, which every fenced write renews, and duplicating that
+    judgement here would put two clocks on one question.
+    """
+    url = environ.get(DATABASE_URL)
+    if not url:
+        return "STORE_NOT_CONFIGURED"
+    try:
+        conn = connect(url, connect_timeout=int(PROBE_DEADLINE))
+    except psycopg.Error:
+        return "STORE_UNAVAILABLE"
+    try:
+        conn.execute("SET LOCAL statement_timeout = '2s'")
+        states = worker_states(conn)
+    except psycopg.Error:
+        return "STORE_UNAVAILABLE"
+    finally:
+        conn.close()
+    if not states:
+        return "WORKERS_ABSENT"
+    fresh = [state for state in states if state.fresh]
+    if not fresh:
+        return "WORKERS_STALE"
+    if all(state.state == "BACKOFF" for state in fresh):
+        return "WORKERS_BACKING_OFF"
+    return "OK"
+
+
 PROBES: Mapping[str, Probe] = {
     "store": probe_store,
     "bundle": probe_bundle,
     "blobs": probe_blobs,
+    "workers": probe_workers,
 }
 _FAILED: Mapping[str, HealthCode] = {
     "store": "STORE_UNAVAILABLE",
     "bundle": "BUNDLE_INVALID",
     "blobs": "BLOB_ROOT_UNAVAILABLE",
+    "workers": "STORE_UNAVAILABLE",
 }
 
 
@@ -152,6 +203,7 @@ class ProbeState:
     store: HealthCode = "PROBE_NOT_RUN"
     bundle: HealthCode = "PROBE_NOT_RUN"
     blobs: HealthCode = "PROBE_NOT_RUN"
+    workers: HealthCode = "PROBE_NOT_RUN"
     checked_at: datetime | None = None
     checked: float | None = None
     running: bool = False
@@ -176,10 +228,14 @@ async def probe_once(state: ProbeState) -> None:
         return
     state.running = True
     try:
-        store, bundle, blobs = await asyncio.gather(
-            _one(state, "store"), _one(state, "bundle"), _one(state, "blobs")
+        store, bundle, blobs, workers = await asyncio.gather(
+            _one(state, "store"),
+            _one(state, "bundle"),
+            _one(state, "blobs"),
+            _one(state, "workers"),
         )
         state.store, state.bundle, state.blobs = store, bundle, blobs
+        state.workers = workers
         state.checked_at, state.checked = state.wall(), state.clock()
     finally:
         state.running = False
@@ -195,19 +251,21 @@ async def probe_loop(state: ProbeState) -> None:
 def _document(state: ProbeState | None) -> HealthDocument:
     """What the cached round says now: stale past `STALE_AFTER`."""
     if state is None or state.checked is None:
-        codes: tuple[HealthCode, HealthCode, HealthCode] = ("PROBE_NOT_RUN",) * 3
+        codes: tuple[HealthCode, ...] = ("PROBE_NOT_RUN",) * 4
         checked_at = None
     else:
         checked_at = state.checked_at
         if state.clock() - state.checked > STALE_AFTER:
-            codes = ("PROBE_STALE",) * 3
+            codes = ("PROBE_STALE",) * 4
         else:
-            codes = (state.store, state.bundle, state.blobs)
+            codes = (state.store, state.bundle, state.blobs, state.workers)
     return HealthDocument(
-        status="ready" if codes == ("OK",) * 3 else "not_ready",
+        # The first three only: a stalled queue does not make this API unready.
+        status="ready" if codes[:3] == ("OK",) * 3 else "not_ready",
         store=codes[0],
         bundle=codes[1],
         blobs=codes[2],
+        workers=codes[3],
         checked_at=checked_at,
     )
 

@@ -19,11 +19,16 @@ remaining cases did is the next thing they would ask.
 
 **What an answer key can express, and what it cannot.** A key names citations —
 which quote, from which document, under which module. That is the strongest key
-the canonical envelope can be checked against today, because an envelope carries
-statements and citations and not typed figures (`server/methodology/envelope.py`).
-A key saying "net leverage is 4.2x" has nothing to compare against until the
-envelope carries the figure as a number, which is the known-gaps entry this
-module ships with.
+the canonical handoff's record can be checked against today, because a record
+carries projections and citations and not typed figures. A key saying "net
+leverage is 4.2x" has nothing to compare against until the record carries the
+figure as a number, which is the known-gaps entry this module ships with.
+
+Beside the citations a key may also ask what a module *concluded*
+(`ExpectedProjection`, over the seven fields the host projects) and what it
+*wrote in a named register cell* (`ExpectedRegister`, read through the vendor's
+own register reader). None of the three is the conclusion's soundness, and a
+reviewer still reads the rows.
 
 **A canonical run is scored on its records** (`docs/DECISIONS.md` §42.4), and
 only on what the proof proved: the proof returns the citations it re-anchored
@@ -37,7 +42,8 @@ through it as committee clearance.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import unicodedata
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -45,18 +51,26 @@ from uuid import UUID
 
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import READY, ResolvedRoute, readiness_from
+from server.engine.route import MODEL_MODULE, READY, ResolvedRoute, readiness_from
 from server.engine.runtime import accepted_artifacts
 from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
-from server.methodology.canonical import accepted_handoff
+from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
+from server.methodology.handoff import Projections
+from server.methodology.vendor import load_vendor_contract
+from server.methodology.verification import AcceptedRow
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
-from server.store import StoreConnection
+from server.store import RunStatus, StoreConnection
 from server.store.routes import resolved_route
 from server.store.run_inputs import RunSubject
+from server.store.runs import run_status
 from server.store.source_sets import pinned_live_sources
+
+# A run that declared its refusal must have ended on one. RUNNING and
+# RUNNABLE are not answers; CANCELLED did not answer the question asked.
+_ENDED = frozenset({RunStatus.BLOCKED, RunStatus.FAILED, RunStatus.COMPLETE})
 
 # A case label is authored and reaches a digest; it is a name, not prose.
 _LABEL_LIMIT = 128
@@ -104,6 +118,76 @@ class ExpectedForecast:
 
 
 @dataclass(frozen=True, slots=True)
+class ExpectedProjection:
+    """One host-projected field of one module's accepted handoff.
+
+    A citation key asks whether a module's handful of length-selected quotes
+    happened to include a particular line. This asks what the module concluded:
+    the fields the host re-derives from the accepted Markdown and compares
+    against the stored record (`accepted_projections`), so the answer is the
+    host's reading and not model narrative.
+
+    `value` is compared as a string against a scalar field, and as membership
+    against a list one — one rule for both, because "the screen was Restricted"
+    and "it flagged the missing audited statements" are the same kind of
+    question asked of differently shaped fields. `blockers` is a list of
+    `(module, text)` pairs, and membership there is over the texts: a key asks
+    which condition the gate stated, and `module_id` already says whose handoff
+    is being read (the gate's), so it cannot also say which module the condition
+    was about.
+    """
+
+    module_id: str
+    field: str
+    value: str
+
+
+PROJECTION_FIELDS = frozenset(
+    {
+        "qa_status",
+        "committee_status",
+        "confidence_band",
+        "decision_scope",
+        "limitation_flags",
+        "validation_warnings",
+        "downstream_consumers",
+        # The gate's `(module, why_now_or_blocker)` rows for every module it did
+        # not clear (§61): what the run would need before a successor could run.
+        "blockers",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedRegister:
+    """One cell of one named register of one module's accepted handoff.
+
+    The third question an answer key can ask, and the first that reaches the
+    analysis itself. A citation key asks which quotes a module drew; a
+    projection key asks what its seven host-projected scalars said; this asks
+    what it *wrote in a named register cell* -- a liquidity bridge's figure, a
+    covenant term, a topic's materiality. Those live in the appendix registers
+    the vendor's own contract declares, and the vendor ships the reader
+    (`completeness_check.find_registers`), so the host locates the table by the
+    bundle's rules rather than by a parser of its own (invariant 4).
+
+    `row_key` names the row by its own cells -- `(("topic_id",
+    "LIQUIDITY_MATURITIES"),)` -- rather than by position, because row order is
+    the module's and a key that counted rows would measure the layout. Exactly
+    one row may match: zero and two are both misses, never a guess.
+
+    Authored from the documents, never from a run. A key taken from what a run
+    wrote measures the model against itself.
+    """
+
+    module_id: str
+    register_id: str
+    row_key: tuple[tuple[str, str], ...]
+    column: str
+    expected: str
+
+
+@dataclass(frozen=True, slots=True)
 class QualificationCase:
     """One case of the set: its inputs, its route, and its answer key.
 
@@ -136,9 +220,16 @@ class QualificationCase:
     # module is invisible to a citation key -- the module never runs, so it
     # cites nothing, and every key aimed at it reads as a miss by the model.
     expects_ready: tuple[str, ...] = ()
+    # What the modules concluded, read from the host's own projections. See
+    # `ExpectedProjection`: this is the key that measures the analysis rather
+    # than the draw of quotes that happened to support it.
+    expects_projection: tuple[ExpectedProjection, ...] = ()
     # CP-CF is a host extension, so a forecast key must bind whether it was
     # present rather than silently qualifying the base route.
     model_extension: bool = False
+    # What the modules wrote in their registers. See `ExpectedRegister`: the key
+    # that can ask about a cell the host projects no scalar for.
+    expects_register: tuple[ExpectedRegister, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +256,8 @@ class MatrixRow:
     forecast_met: bool | None
     expected_refusal_met: bool | None
     ready_met: bool | None = None
+    projections_met: bool | None = None
+    registers_met: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +285,9 @@ def qualification_set_digest(qualification: QualificationSet) -> str:
     assert_measurable(qualification)
     canonical = sorted(_digested(case) for case in qualification.cases)
     return sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
     ).hexdigest()
 
 
@@ -245,6 +340,29 @@ def _digested(case: QualificationCase) -> list[object]:
         entry.append(case.expected_refusal.value)
     if case.expects_ready:
         entry.append(sorted(case.expects_ready))
+    if case.expects_projection:
+        entry.append(
+            sorted(
+                [expect.module_id, expect.field, expect.value]
+                for expect in case.expects_projection
+            )
+        )
+    if case.expects_register:
+        entry.append(
+            sorted(
+                [
+                    expect.module_id,
+                    expect.register_id,
+                    # The row key is a set of cell conditions, not a sequence:
+                    # two authors naming the same row in either order name the
+                    # same row, and the digest has to agree with them.
+                    sorted([column, value] for column, value in expect.row_key),
+                    expect.column,
+                    expect.expected,
+                ]
+                for expect in case.expects_register
+            )
+        )
     return entry
 
 
@@ -309,6 +427,17 @@ def _row(
             raise
         refusal = unattributed.code
         cited = set()
+    try:
+        registers_met = _registers_met(conn, blobs, bundle, case=case, run_id=run_id)
+    except Refusal as unreadable:
+        if unreadable.code not in _ROW_REFUSALS:
+            raise
+        # The bundle failing its own integrity check is this row's uncertainty,
+        # not the module's miss. Scoring it `False` said the module wrote the
+        # wrong cell, and a reviewer went hunting the model for a vendored-bytes
+        # fault; `None` says the comparison was not made, which is the truth.
+        refusal = unreadable.code
+        registers_met = None
     met = tuple(expect for expect in case.expects if _matches(expect, cited))
     return MatrixRow(
         case_label=case.label,
@@ -320,9 +449,56 @@ def _row(
             conn, blobs, bundle, case=case, run_id=run_id, proof=proof
         ),
         expected_refusal_met=(
-            None if case.expected_refusal is None else refusal is case.expected_refusal
+            None
+            if case.expected_refusal is None
+            else _refusal_met(conn, run_id, case.expected_refusal, refusal)
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
+        projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
+        registers_met=registers_met,
+    )
+
+
+def _refusal_met(
+    conn: StoreConnection,
+    run_id: UUID,
+    expected: RefusalCode,
+    proof_refusal: RefusalCode | None,
+) -> bool:
+    """Whether the run refused the way its case said it would.
+
+    A case that declares a refusal is declaring how the run ends, and a run
+    ends in one of two places: the proof cannot be taken, or execution stopped
+    and wrote the reason against an attempt. Reading only the first made this
+    key unanswerable by any run the system produces — a deliberately restricted
+    case (`docs/REPAIR_PLAN.md` Phase 6) stops with a refusal recorded and a
+    sound proof over what it did accept, so the proof says nothing and the
+    stored refusal says everything.
+    """
+    if proof_refusal is expected:
+        return True
+    # A validated Blocked handoff is the route's own rule applied, so `_settle`
+    # writes no `attempt_refusals` row for it -- the run's own status is where
+    # that outcome is recorded.
+    if (
+        expected is RefusalCode.HANDOFF_BLOCKED
+        and run_status(conn, run_id) is RunStatus.BLOCKED
+    ):
+        return True
+    # The run has to have *ended*, not merely written the code somewhere. A
+    # recorded refusal on a run still RUNNING or RUNNABLE is a node that failed
+    # and a run that has more to do, and `complete` waives its COMPLETE check
+    # for a met refusal -- so without this, a case could declare a refusal, have
+    # one attempt produce it, and be signable over a run that simply stopped
+    # being driven.
+    if run_status(conn, run_id) not in _ENDED:
+        return False
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM attempt_refusals r JOIN run_attempts t"
+            " USING (attempt_id) WHERE t.run_id = %s AND r.code = %s",
+            (run_id, expected.value),
+        ).fetchone()
     )
 
 
@@ -358,6 +534,271 @@ def _ready_met(
     return all(readiness.get(module) in READY for module in case.expects_ready)
 
 
+def _accepted_rows(
+    conn: StoreConnection, run_id: UUID
+) -> dict[str, tuple[str, str | None]]:
+    """Every accepted node of the run, keyed by route node."""
+    return {
+        str(row[0]): (str(row[1]), None if row[2] is None else str(row[2]))
+        for row in conn.execute(
+            "SELECT t.route_node_id, a.artifact_sha256, a.record_sha256"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s",
+            (run_id,),
+        ).fetchall()
+    }
+
+
+def _matches_projection(projections: Projections, expect: ExpectedProjection) -> bool:
+    """One expectation against the host's re-derived projections."""
+    if expect.field not in PROJECTION_FIELDS:
+        return False
+    found = getattr(projections, expect.field)
+    if isinstance(found, tuple):
+        # A pair-shaped field (`blockers`) is matched on the text it carries,
+        # never on `str(pair)`: a key must not have to spell a tuple's repr.
+        return expect.value in tuple(
+            pair[-1] if isinstance(pair, tuple) else pair for pair in found
+        )
+    return str(found) == expect.value
+
+
+def _projections_met(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+) -> bool | None:
+    """Whether every module concluded what the case says it should have.
+
+    Read through `accepted_projections`, which rebuilds the identity from the
+    store, requires the record to bind this Markdown, and re-parses the
+    projections from the Markdown to compare against the record (§42.4). A
+    module the case names that produced no accepted artifact is a miss, not a
+    skip: the question was asked and the run did not answer it.
+    """
+    if not case.expects_projection:
+        return None
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return False
+    accepted = _accepted_rows(conn, run_id)
+    wanted: dict[str, list[ExpectedProjection]] = {}
+    for expect in case.expects_projection:
+        wanted.setdefault(expect.module_id, []).append(expect)
+    for module_id, expects in wanted.items():
+        node = next((item for item in route.nodes if item.module_id == module_id), None)
+        if node is None:
+            return False
+        rows = conn.execute(
+            "SELECT a.artifact_sha256, a.record_sha256, a.attempt_id"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s AND t.route_node_id = %s",
+            (run_id, node.route_node_id),
+        ).fetchall()
+        if len(rows) != 1 or rows[0][1] is None:
+            return False
+        artifact_sha256, record_sha256, attempt_id = rows[0]
+        try:
+            projections = accepted_projections(
+                conn,
+                blobs,
+                bundle,
+                route,
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node.route_node_id,
+                    attempt_id=UUID(str(attempt_id)),
+                    artifact_sha256=str(artifact_sha256),
+                    record_sha256=str(record_sha256),
+                ),
+                accepted=accepted,
+            )
+        except Refusal:
+            return False
+        if not all(_matches_projection(projections, expect) for expect in expects):
+            return False
+    return True
+
+
+def _normalised_cell(value: str) -> str:
+    """One register cell, column name or expected value, as a key compares them.
+
+    NFC first, because two spellings of the same character are the same cell to
+    a reader and a key authored in one must not miss a handoff written in the
+    other. Then every run of whitespace collapses to one space and the ends are
+    stripped: a Markdown table's cells are padded for alignment and a line may
+    be wrapped, neither of which is the module saying anything different.
+
+    **Case is preserved.** `MATERIAL` and `Material` are different values in
+    every vendor vocabulary that has one, and a comparison that folded case
+    would let a key pass over a cell the bundle's own validators would refuse.
+    """
+    return " ".join(unicodedata.normalize("NFC", value).split())
+
+
+def _cell(
+    row: Mapping[str, str], column: str, header: Sequence[str] | None = None
+) -> str | None:
+    """One row's cell under `column`, normalised, or `None` if it is not there.
+
+    The column name is matched under the same rule as the cell, because a header
+    is padded and wrapped like any other cell. A register whose header names the
+    same column twice answers `None`: the host does not choose between them.
+
+    That last rule needs the header, not the row. The vendor's reader builds a
+    row as `dict(zip(header, cells))`, so two identical header names collapse to
+    the last cell before the host sees anything -- the row then holds one entry
+    and this function used to answer from it, while a person reading the table
+    reads the leftmost namesake. The header is where the duplicate is still
+    visible. Passing it is optional only so a caller testing one row need not
+    build one; every caller that has a register passes it. Found by the
+    Completion Phase 8 confidence review, which built the table and watched a
+    shipped key answer from the trailing column.
+    """
+    wanted = _normalised_cell(column)
+    if header is not None:
+        named = [name for name in header if _normalised_cell(str(name)) == wanted]
+        if len(named) != 1:
+            return None
+    found = [
+        value for name, value in row.items() if _normalised_cell(str(name)) == wanted
+    ]
+    if len(found) != 1:
+        return None
+    return _normalised_cell(str(found[0]))
+
+
+def _matches_register(
+    registers: Mapping[str, tuple[Sequence[str], Sequence[Mapping[str, str]]]],
+    expect: ExpectedRegister,
+) -> bool:
+    """One register expectation against what the vendor's reader found.
+
+    Exactly one row may meet the whole `row_key`. Zero is the register not
+    carrying the row the key asks about; two is the key not naming one row, and
+    picking the first would make the answer depend on the order the module wrote
+    its table in. Both are misses. An empty `row_key` selects nothing here --
+    the loader refuses one, and a Python caller's is not silently read as "any
+    row".
+    """
+    found = registers.get(expect.register_id)
+    if not expect.row_key or not isinstance(found, tuple) or len(found) != 2:
+        # Anything but the reader's `(header, rows)` is not this key's answer:
+        # the host reads the vendor's shape and invents no second one.
+        return False
+    header, rows = found
+    matched = [
+        row
+        for row in rows
+        if isinstance(row, Mapping)
+        if all(
+            _cell(row, column, header) == _normalised_cell(value)
+            for column, value in expect.row_key
+        )
+    ]
+    if len(matched) != 1:
+        return False
+    return _cell(matched[0], expect.column, header) == _normalised_cell(expect.expected)
+
+
+def _registers_met(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+) -> bool | None:
+    """Whether every module wrote what the case says it should have written.
+
+    The Markdown is read through `accepted_handoff`, which binds the record to
+    it, and the registers are located by the vendor's own
+    `completeness_check.find_registers` from this bundle's verified bytes: the
+    host adds no table parser of its own (invariant 4). `None` when the case
+    names none; a module the case names that produced no single accepted
+    artifact, or an artifact that will not read, is a miss and not an exception
+    -- a row survives its own failure.
+    """
+    if not case.expects_register:
+        return None
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return False
+    accepted = _accepted_rows(conn, run_id)
+    # One load for the whole row, not one per module: `load_vendor_contract` has
+    # no cache (`canonical._contract` is the cached reader, and this is not it),
+    # so asking per module recompiled and re-hashed twelve vendor files each
+    # time -- measured at 33 ms and 148 KB per call. And its own refusal is
+    # raised here rather than inside the per-module guard below, because an
+    # `AUTHORITY_BYTES_MISMATCH` is the bundle failing its integrity check, not
+    # the module writing the wrong cell: swallowing it as a miss pointed a
+    # reviewer at the model for a vendored-bytes fault. `build_matrix` turns it
+    # into the row's own refusal. Both found by the Completion Phase 8
+    # adversarial audit, which measured the cache claim and found it false.
+    find_registers = load_vendor_contract(bundle).completeness_check.find_registers
+    wanted: dict[str, list[ExpectedRegister]] = {}
+    for expect in case.expects_register:
+        wanted.setdefault(expect.module_id, []).append(expect)
+    for module_id, expects in wanted.items():
+        node = next((item for item in route.nodes if item.module_id == module_id), None)
+        if node is None:
+            return False
+        rows = conn.execute(
+            "SELECT a.artifact_sha256, a.record_sha256, a.attempt_id"
+            " FROM artifacts a JOIN run_attempts t ON t.attempt_id = a.attempt_id"
+            " WHERE a.run_id = %s AND t.route_node_id = %s",
+            (run_id, node.route_node_id),
+        ).fetchall()
+        if len(rows) != 1 or rows[0][1] is None:
+            return False
+        artifact_sha256, record_sha256, attempt_id = rows[0]
+        try:
+            markdown, _record = accepted_handoff(
+                conn,
+                blobs,
+                bundle,
+                route,
+                AcceptedRow(
+                    run_id=run_id,
+                    route_node_id=node.route_node_id,
+                    attempt_id=UUID(str(attempt_id)),
+                    artifact_sha256=str(artifact_sha256),
+                    record_sha256=str(record_sha256),
+                ),
+                accepted=accepted,
+            )
+            # Asked exactly as the bundle asks it: no `register_ids`, so the
+            # locator uses its own pattern, which is what the vendor's `check()`
+            # effectively reads against. Narrowing the list changed the answer.
+            # The locator walks the few lines above each table nearest-first and
+            # breaks on the first line naming *any* id it was given, keeping the
+            # first table it finds -- so a handoff carrying several registers with
+            # identical columns (CP-L10 writes five, all required, all six-row)
+            # answered a narrowed `TL10.2` from whichever of them the module's own
+            # appendix prose happened to sit above. The host and the bundle then
+            # disagreed about which table the register is, in both directions: a
+            # key met from a sibling table while the honest one said MISSING, and
+            # an honest handoff's key missed because the prose named a different
+            # sibling first. Found by the Completion Phase 8 adversarial audit,
+            # which built a handoff passing the vendor's own completeness check
+            # with zero violations in which the shipped key was met from the
+            # wrong register.
+            registers = find_registers(markdown.decode("utf-8"))
+            if not isinstance(registers, dict):
+                return False
+            met = all(_matches_register(registers, expect) for expect in expects)
+        except (Refusal, ValueError, TypeError, UnicodeDecodeError):
+            # The reader's own faults included: an artifact the host cannot read
+            # is a case it cannot score, never a case that concluded correctly.
+            return False
+        if not met:
+            return False
+    return True
+
+
 def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
     conn: StoreConnection,
     blobs: BlobStore,
@@ -376,7 +817,7 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
     route = resolved_route(conn, run_id)
     if route is None:
         return False
-    node = next((item for item in route.nodes if item.module_id == "CP-CF"), None)
+    node = next((item for item in route.nodes if item.module_id == MODEL_MODULE), None)
     if node is None:
         return False
     rows = conn.execute(
@@ -403,11 +844,13 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=node.route_node_id,
-            attempt_id=UUID(str(attempt_id)),
-            artifact_sha256=str(artifact_sha256),
-            record_sha256=str(record_sha256),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=node.route_node_id,
+                attempt_id=UUID(str(attempt_id)),
+                artifact_sha256=str(artifact_sha256),
+                record_sha256=str(record_sha256),
+            ),
             accepted=accepted,
         )
         result = forecast_projection(markdown)
@@ -477,11 +920,13 @@ def _readiness(
             blobs,
             bundle,
             route,
-            run_id=run_id,
-            route_node_id=gate.route_node_id,
-            attempt_id=UUID(str(row[2])),
-            artifact_sha256=str(row[0]),
-            record_sha256=str(row[1]),
+            AcceptedRow(
+                run_id=run_id,
+                route_node_id=gate.route_node_id,
+                attempt_id=UUID(str(row[2])),
+                artifact_sha256=str(row[0]),
+                record_sha256=str(row[1]),
+            ),
         )
     except (Refusal, ValueError, TypeError):
         return ()
@@ -496,9 +941,17 @@ def _matches(expect: ExpectedCitation, cited: set[tuple[str, str, str]]) -> bool
 
 
 # A row's own uncertainty, not a reason to end the matrix: a pin that no longer
-# reads, or a proven source withdrawn before its quotes were scored.
+# reads, a proven source withdrawn before its quotes were scored, or vendored
+# bytes that no longer match the manifest. The last one is here because the
+# register reader verifies the bundle where the cached validator does not, so it
+# is the one place a tampered vendor script surfaces during scoring -- and it
+# belongs in the row's refusal rather than in its comparison.
 _ROW_REFUSALS = frozenset(
-    {RefusalCode.ROUTE_IDENTITY_INVALID, RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED}
+    {
+        RefusalCode.ROUTE_IDENTITY_INVALID,
+        RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED,
+        RefusalCode.AUTHORITY_BYTES_MISMATCH,
+    }
 )
 
 
@@ -554,6 +1007,8 @@ def assert_measurable(qualification: QualificationSet) -> None:
             and case.forecast is None
             and case.expected_refusal is None
             and not case.expects_ready
+            and not case.expects_projection
+            and not case.expects_register
         )
         or (case.forecast is not None and not case.forecast.values)
         for case in qualification.cases
@@ -564,11 +1019,29 @@ def assert_measurable(qualification: QualificationSet) -> None:
         raise Refusal(RefusalCode.QUALIFICATION_SET_EMPTY)
 
 
+def _register_cell(
+    expect: ExpectedRegister,
+) -> tuple[str, str, tuple[tuple[str, str], ...], str]:
+    """The cell a register key names, without the answer it expects.
+
+    Two keys sharing this and disagreeing on `expected` cannot both be met.
+    """
+    return (expect.module_id, expect.register_id, tuple(expect.row_key), expect.column)
+
+
 def assert_unambiguous(qualification: QualificationSet) -> None:
     """Refuse duplicate case labels or answer keys before either can be scored."""
     labels = [case.label for case in qualification.cases]
     if len(set(labels)) != len(labels) or any(
         len(set(case.expects)) != len(case.expects)
+        or len(set(case.expects_register)) != len(case.expects_register)
+        # Two register keys naming one cell with different answers is a set no
+        # run can meet, and it loads clean if only whole tuples are compared:
+        # the semantic key is the cell, as the forecast check below uses the
+        # value's name rather than the whole value. A reviewer would read
+        # `registers_met: false` and hunt the model.
+        or len({_register_cell(item) for item in case.expects_register})
+        != len(case.expects_register)
         or (
             case.forecast is not None
             and len({value.name for value in case.forecast.values})

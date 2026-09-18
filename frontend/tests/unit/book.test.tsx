@@ -1,272 +1,185 @@
-// Book, /book/ (IA_SPEC.md 4.4): one basis and one bound snapshot per compared
-// case, definition deviation on every affected cell, stale as colour and date,
-// the ten-field passport from any cell.
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fireEvent, render } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { resolve } from "node:path";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { LedgerProvider } from "@/app/ledger";
 import { EvidenceProvider } from "@/evidence/EvidenceContext";
+import { PASSPORT_FIELDS } from "@/wire";
 import { BookSection } from "@/sections/book/BookSection";
-import { PASSPORT_FIELDS, type DocumentOf } from "@/wire";
+import { citationOf, passportOf, shownValue } from "@/sections/book/passport";
+import { tailed } from "@/app/authority";
+import { parseBookDocument, type BookDocument } from "@/wire/v1";
 
-const fixture = JSON.parse(
-  readFileSync(join(__dirname, "../../fixtures/book.json"), "utf8"),
-) as DocumentOf<"book">;
-const empty = JSON.parse(
-  readFileSync(join(__dirname, "../../fixtures/states/book.observed-empty.json"), "utf8"),
-) as DocumentOf<"book">;
+const FIXTURE = resolve(process.cwd(), "fixtures", "book.json");
 
-function renderBook(tab: string | null = null, document: DocumentOf<"book"> = fixture) {
-  const view = render(
-    <MemoryRouter>
-      <LedgerProvider>
-        <EvidenceProvider>
-          <BookSection document={document} tab={tab} />
-        </EvidenceProvider>
-      </LedgerProvider>
-    </MemoryRouter>,
-  );
-  const one = (selector: string): HTMLElement => {
-    const element = view.container.querySelector<HTMLElement>(selector);
-    if (!element) throw new Error(`missing ${selector}`);
-    return element;
-  };
-  const all = (selector: string) => [...view.container.querySelectorAll<HTMLElement>(selector)];
-  return { ...view, one, all };
+function document(): BookDocument {
+  return parseBookDocument(JSON.parse(readFileSync(FIXTURE, "utf8")));
 }
 
-const deviatingCells = (cells: Record<string, { deviation: string | null; passport_id: string }>) =>
-  Object.values(cells).filter((cell) => cell.deviation !== null);
+function mount(doc: BookDocument = document()) {
+  return render(
+    <LedgerProvider>
+      <EvidenceProvider>
+        <BookSection document={doc} tab={null} />
+      </EvidenceProvider>
+    </LedgerProvider>,
+  );
+}
 
-describe("book", () => {
-  test("test_compare_states_one_basis_and_binds_one_snapshot_per_case", () => {
-    const { one, all } = renderBook("compare");
-    const grid = one(".cmpgrid[data-compare]");
-    const { basis } = fixture.body.compare;
-    for (const stated of [basis.period, basis.scenario, "accepted only"]) {
-      expect(grid.dataset["basis"]).toContain(stated);
-      expect(one("[data-basis]").textContent).toContain(stated);
-    }
-    const bound = all("[data-bound-snapshot]");
-    expect(bound.map((cell) => cell.dataset["boundSnapshot"])).toEqual([
-      "snp_cvna_q2_2026",
-      "snp_chtr_q2_2026",
-    ]);
-    expect(bound.map((cell) => cell.dataset["case"])).toEqual([
-      "CASE-2026-CVNA01",
-      "CASE-2026-CHTR03",
-    ]);
-    expect(fixture.body.compare.cases).toHaveLength(2);
-    expect(all(".cmpgrid button.cellbtn[data-passport-id]")).toHaveLength(
-      2 * fixture.body.compare.metrics.length,
+describe("the book", () => {
+  test("the served fixture is the declared v1 shape", () => {
+    const doc = document();
+    expect(doc.body.basis).toEqual({
+      period: "EVERY_ACCEPTED_PERIOD",
+      scenario: "EVERY_ACCEPTED_CASE",
+      accepted_only: true,
+    });
+    expect(doc.body.columns.map((column) => column.key)).toContain("operating.margin");
+  });
+
+  test("a credit is one row per accepted period, on its own units", () => {
+    mount();
+    const table = screen.getByRole("table", { name: /BASE · FY2026/ });
+    const row = within(table).getByRole("row", { name: /Carvana/ });
+    expect(within(row).getByRole("button", { name: /EBITDA margin.*0\.2000/ })).toBeVisible();
+    expect(row).toHaveTextContent("USD · millions");
+  });
+
+  test("a credit with no accepted forecast says so and shows no figure", () => {
+    mount();
+    const table = screen.getByRole("table", { name: /BASE · FY2026/ });
+    const row = within(table).getByRole("row", { name: /Terra Firma/ });
+    expect(row).toHaveTextContent("NO_ACCEPTED_FORECAST");
+    expect(row).toHaveTextContent("the run ended BLOCKED");
+    expect(within(row).queryAllByRole("button")).toEqual([]);
+  });
+
+  test("selecting a cell opens the passport with its ten fields", () => {
+    mount();
+    fireEvent.click(screen.getAllByRole("button", { name: /EBITDA margin.*0\.2000/ })[0]!);
+    const dialog = screen.getByRole("dialog");
+    const fields = [...dialog.querySelectorAll("[data-passport] > [data-passport-field]")].map(
+      (element) => element.getAttribute("data-passport-field"),
     );
+    for (const field of PASSPORT_FIELDS) expect(fields).toContain(field);
+    expect(dialog).toHaveTextContent("operating.ebitda / operating.revenue");
+    expect(dialog).toHaveTextContent("cash_flow_forecast · VERIFIED");
+    // The scenario the record names, so a base case and a downside are told
+    // apart in the passport rather than both reading NOT_DECLARED.
+    expect(dialog).toHaveTextContent("Scenario");
+    expect(dialog).toHaveTextContent("BASE");
+    expect(within(dialog).getByText("USD millions")).toBeVisible();
   });
 
-  test("test_definition_deviation_is_marked_on_every_affected_cell", () => {
-    const affected = fixture.body.rows.filter((row) => deviatingCells(row.cells).length > 0);
-    expect(affected.length).toBeGreaterThanOrEqual(1);
-    const table = renderBook();
-    for (const row of affected) {
-      const shown = table.one(`tr[data-case="${row.case_id}"]`);
-      expect(shown.dataset["deviates"]).toBe("true");
-      expect(shown.querySelector("td.l .defmark")).not.toBeNull();
-      for (const cell of deviatingCells(row.cells)) {
-        const button = shown.querySelector<HTMLElement>(
-          `button.cellbtn[data-passport-id="${cell.passport_id}"]`,
-        );
-        expect(button?.querySelector(".defmark")).not.toBeNull();
-        expect(button?.title).toContain(cell.deviation ?? "");
-        expect(button?.dataset["deviation"]).toBe(cell.deviation);
-      }
-    }
-    table.unmount();
-    const compare = renderBook("compare");
-    const compared = fixture.body.compare.cases.flatMap((entry) => deviatingCells(entry.cells));
-    expect(compared.length).toBeGreaterThanOrEqual(1);
-    for (const cell of compared) {
-      const button = compare.one(`.cmpgrid button.cellbtn[data-passport-id="${cell.passport_id}"]`);
-      expect(button.querySelector(".defmark")).not.toBeNull();
-      expect(button.title).toContain(cell.deviation ?? "");
-      expect(compare.one(`[data-deviation-note="${cell.passport_id}"]`).textContent).toContain(
-        cell.deviation ?? "",
-      );
-    }
-  });
-
-  test("test_stale_is_colour_and_date", () => {
-    const stale = fixture.body.rows.filter((row) => row.freshness.state === "stale");
-    expect(stale.length).toBeGreaterThanOrEqual(1);
-    const { one } = renderBook();
-    for (const row of stale) {
-      const shown = one(`tr[data-case="${row.case_id}"]`);
-      const staleCells = Object.values(row.cells).filter((cell) => cell.stale);
-      expect(staleCells.length).toBeGreaterThan(0);
-      for (const cell of staleCells) {
-        const button = shown.querySelector<HTMLElement>(
-          `button[data-passport-id="${cell.passport_id}"]`,
-        );
-        expect(button?.closest("td")?.classList.contains("stale")).toBe(true);
-        expect(button?.title).toContain(row.freshness.date);
-      }
-      const date = shown.querySelector<HTMLTimeElement>("td.stale time");
-      expect(date?.getAttribute("datetime")).toBe(row.freshness.date);
-      expect(shown.textContent).toContain("STALE");
-    }
-    const current = fixture.body.rows.find((row) => row.freshness.state === "current");
-    expect(one(`tr[data-case="${current?.case_id}"]`).querySelector("td.stale")).toBeNull();
-  });
-
-  test("test_selecting_a_cell_opens_the_passport", () => {
-    const { one } = renderBook();
-    fireEvent.click(one('button.cellbtn[data-passport-id="cvna.net_leverage"]'));
-    const passport = document.querySelector("[data-passport]");
-    expect(passport).not.toBeNull();
-    const fields = [...(passport?.querySelectorAll("[data-passport-field]") ?? [])]
-      .map((field) => (field as HTMLElement).dataset["passportField"])
-      .filter((field) => (PASSPORT_FIELDS as readonly string[]).includes(field ?? ""));
-    expect(fields).toHaveLength(10);
-    expect(fields).toEqual([...PASSPORT_FIELDS]);
-    // An actual cell has no driver.
-    expect(fixture.body.passports["cvna.net_leverage"]?.driver).toBeNull();
-    expect(passport?.querySelector('[data-passport-field="driver"]')).toBeNull();
-  });
-
-  test("facets are real checkbox groups and filter what was served", () => {
-    const { all, one } = renderBook();
-    const options = fixture.body.facets.flatMap((facet) => facet.options);
-    const boxes = all("fieldset.facet input[type='checkbox']");
-    expect(boxes).toHaveLength(options.length);
-    for (const box of boxes) expect(box.closest("label")?.textContent).not.toBe("");
-    expect(all("fieldset.facet legend").map((legend) => legend.textContent)).toEqual(
-      fixture.body.facets.map((facet) => facet.label),
-    );
-    expect(all("table.cases[data-book] tr[data-case]")).toHaveLength(fixture.body.rows.length);
-    fireEvent.click(one("input[data-facet-option='BLOCKED']"));
-    expect(all("tr[data-case]")).toHaveLength(fixture.body.rows.length - 1);
-    expect(one("[data-book-panel]").querySelector('tr[data-case="CASE-2026-FLYYQ04"]')).toBeNull();
-  });
-
-  test("grouping keys are pressed pills that regroup the rows", () => {
-    const { all, one } = renderBook();
-    const pills = all("button.pill[data-group-key]");
-    expect(pills.map((pill) => pill.dataset["groupKey"])).toEqual(fixture.body.grouping.keys);
+  test("a refused cell value shows its typed reason, never a blank", () => {
+    const doc = document();
+    const cell = doc.body.rows[0]!.periods[0]!.cells[0]!;
+    expect(shownValue(cell)).toBe("500.000000");
     expect(
-      one(`button.pill[data-group-key="${fixture.body.grouping.active}"]`).getAttribute(
-        "aria-pressed",
-      ),
-    ).toBe("true");
-    expect(all("tr.grp").length).toBeGreaterThan(0);
-    fireEvent.click(one('button.pill[data-group-key="pathway"]'));
-    expect(one('button.pill[data-group-key="pathway"]').getAttribute("aria-pressed")).toBe("true");
-    expect(
-      one(`button.pill[data-group-key="${fixture.body.grouping.active}"]`).getAttribute(
-        "aria-pressed",
-      ),
-    ).toBe("false");
-    expect(one("table.cases[data-book]").dataset["groupedBy"]).toBe("pathway");
-    expect(all("tr.grp").map((group) => group.textContent)).toContain("FULL_CREDIT_32 · 3 credits");
+      shownValue({
+        ...cell,
+        value: null,
+        unavailable_reason: "ZERO_OR_NEGATIVE_DENOMINATOR",
+      }),
+    ).toBe("ZERO_OR_NEGATIVE_DENOMINATOR");
+    expect(shownValue({ ...cell, value: null })).toBe("NOT SERVED");
   });
 
-  test("saved views carry their scope label; every cell is a passport button", () => {
-    const { all } = renderBook();
-    const scopes = all("[data-saved-view] [data-scope]").map((tag) => tag.textContent);
-    expect(scopes).toEqual(fixture.body.saved_views.map((view) => view.scope));
-    for (const scope of scopes) {
-      expect(["THIS BROWSER", "ANALYST PROFILE", "WORKSPACE"]).toContain(scope);
+  test("a passport citation names its document, page and quote and claims no rectangle", () => {
+    const doc = document();
+    const row = doc.body.rows[0]!;
+    const cell = row.periods[0]!.cells[0]!;
+    const [fact] = cell.passport.citations;
+    const citation = citationOf(fact!, doc.observed_at);
+    expect(citation.chip).toBe("issuer-pack.txt p.1");
+    // The Book serves no page frame, so no rectangle is claimed for one.
+    expect(citation.bboxes).toEqual([]);
+    // The revenue cell cites the revenue driver: a passport whose stated
+    // derivation and cited line disagree is the dishonesty this section exists
+    // to prevent, and the fixture used to carry one.
+    expect(citation.matched_text).toContain("/drivers/0/revenue");
+
+    const passport = passportOf(row, doc.body.columns[0]!, cell, doc.observed_at);
+    expect(passport.label).toBe("Carvana Co. · Revenue");
+    expect(passport.unit).toBe("USD millions");
+    // One calculator, one spelling: nothing here deviates, and no cell is a
+    // projection with a driver the derivation does not already name.
+    expect(passport.deviation).toBeNull();
+    expect(passport.driver).toBeNull();
+    expect(passport.supporting_research.map((link) => link.module_id)).toContain("CP-2G");
+  });
+
+  // `test_book_binds_one_snapshot_per_compared_case` is the pure-function
+  // half, in `authority.test.ts`, and is the name `tests/test_phase_exits.py`
+  // pins. This is the same rule through the section that now calls it.
+  test("the lens stays on the snapshot a credit is bound to until it is switched", () => {
+    const doc = document();
+    const { rerender } = mount(doc);
+    const moved: BookDocument = {
+      ...doc,
+      body: {
+        ...doc.body,
+        rows: doc.body.rows.map((row) =>
+          row.snapshot === null ? row : { ...row, snapshot: "f".repeat(64) },
+        ),
+      },
+    };
+    // The same ledger, a later document naming another snapshot for credits
+    // already bound: the lens does not move on its own, and each bound credit
+    // says so on its own row.
+    rerender(
+      <LedgerProvider>
+        <EvidenceProvider>
+          <BookSection document={moved} tab={null} />
+        </EvidenceProvider>
+      </LedgerProvider>,
+    );
+    const bound = doc.body.rows.filter((row) => row.snapshot !== null);
+    expect(bound.length).toBeGreaterThan(1);
+    for (const row of bound) {
+      const note = window.document.querySelector(`[data-lens-refused="${row.case_id}"]`);
+      expect(note, row.case_id).not.toBeNull();
+      expect(note).toHaveTextContent(row.snapshot!);
     }
-    const cells = all("table.cases[data-book] button.cellbtn[data-passport-id]");
-    expect(cells).toHaveLength(fixture.body.rows.length * fixture.body.columns.length);
-    for (const cell of cells) {
-      expect(fixture.body.passports[cell.dataset["passportId"] ?? ""]).toBeDefined();
+    // Only the explicit switch moves it.
+    fireEvent.click(screen.getAllByRole("button", { name: "Switch the lens" })[0]!);
+    expect(window.document.querySelector(`[data-lens-refused="${bound[0]!.case_id}"]`)).toBeNull();
+  });
+
+  test("every credit is named when none of them has a forecast to compare", () => {
+    // The ordinary state, not an edge: CP-CF runs only on
+    // `FULL_CREDIT_32/RELATIVE_VALUE`, so every credit of a case on a LITE
+    // route is `NO_ACCEPTED_FORECAST`. The page used to draw a credit count
+    // over nothing at all and say why for none of them.
+    const doc = document();
+    const unrun: BookDocument = {
+      ...doc,
+      body: {
+        ...doc.body,
+        rows: doc.body.rows.map((row) => ({
+          ...row,
+          periods: [],
+          snapshot: null,
+          unavailable_reason: "NO_ACCEPTED_FORECAST" as const,
+        })),
+      },
+    };
+    mount(unrun);
+
+    for (const row of unrun.body.rows) {
+      expect(screen.getByText(row.title)).toBeVisible();
     }
+    // And why, for each of them, rather than a bare list of titles.
+    expect(screen.getAllByText(/NO_ACCEPTED_FORECAST/).length).toBe(unrun.body.rows.length);
   });
 
-  test("an observed-empty book renders nothing as a row and infers nothing", () => {
-    expect(empty.observed_empty).toBe(true);
-    expect(empty.body.rows).toHaveLength(0);
-    expect(empty.body.compare.cases).toHaveLength(0);
-    const table = renderBook(null, empty);
-    expect(table.all("tr[data-case]")).toHaveLength(0);
-    expect(table.one("[data-book-panel]").textContent).toContain(
-      "Nothing is inferred from silence",
-    );
-    table.unmount();
-    const compare = renderBook("compare", empty);
-    expect(compare.all("[data-bound-snapshot]")).toHaveLength(0);
-    expect(compare.one("[data-compare-panel]").textContent).toContain("No credit is compared");
-  });
-});
-
-describe("the snapshot binding", () => {
-  test("a later document carrying a different snapshot for a bound case is refused until the lens is switched", () => {
-    const view = render(
-      <MemoryRouter>
-        <LedgerProvider>
-          <EvidenceProvider>
-            <BookSection document={fixture} tab="compare" />
-          </EvidenceProvider>
-        </LedgerProvider>
-      </MemoryRouter>,
-    );
-    expect(view.container.querySelector("[data-refusal='SNAPSHOT_MISMATCH']")).toBeNull();
-    const moved = structuredClone(fixture);
-    const chtr = moved.body.compare.cases.find((entry) => entry.case_id === "CASE-2026-CHTR03")!;
-    chtr.snapshot = "snp_chtr_q3_2026";
-    moved.observed_at = "2026-09-10T09:00:00Z";
-    view.rerender(
-      <MemoryRouter>
-        <LedgerProvider>
-          <EvidenceProvider>
-            <BookSection document={moved} tab="compare" />
-          </EvidenceProvider>
-        </LedgerProvider>
-      </MemoryRouter>,
-    );
-    const refusal = view.container.querySelector("[data-refusal='SNAPSHOT_MISMATCH']");
-    expect(refusal).not.toBeNull();
-    expect(refusal).toHaveTextContent(/snp_chtr_q2_2026/);
-    // The other case is untouched, and the refused case's cells are not rendered as figures.
-    expect(view.container.querySelectorAll("[data-refusal='SNAPSHOT_MISMATCH']")).toHaveLength(1);
-    fireEvent.click(view.getByRole("button", { name: /Switch lens to snp_chtr_q3_2026/ }));
-    expect(view.container.querySelector("[data-refusal='SNAPSHOT_MISMATCH']")).toBeNull();
-    expect(view.container.querySelector("[data-case='CASE-2026-CHTR03']")).toHaveAttribute(
-      "data-bound-snapshot",
-      "snp_chtr_q3_2026",
-    );
-  });
-
-  test("test_book_notes_show_no_value_from_a_refused_snapshot", () => {
-    // F13: once a case's lens is refused (its served snapshot no longer
-    // matches the bound one), no value from that refused snapshot may reach
-    // the deviation notes below the grid.
-    const view = render(
-      <MemoryRouter>
-        <LedgerProvider>
-          <EvidenceProvider>
-            <BookSection document={fixture} tab="compare" />
-          </EvidenceProvider>
-        </LedgerProvider>
-      </MemoryRouter>,
-    );
-    const moved = structuredClone(fixture);
-    const chtr = moved.body.compare.cases.find((entry) => entry.case_id === "CASE-2026-CHTR03")!;
-    // The refused snapshot's own net_leverage cell now carries a distinctive
-    // value that must never surface anywhere once the lens is refused.
-    chtr.cells["net_leverage"]!.value = "99.9x";
-    chtr.snapshot = "snp_chtr_q3_2026";
-    moved.observed_at = "2026-09-10T09:00:00Z";
-    view.rerender(
-      <MemoryRouter>
-        <LedgerProvider>
-          <EvidenceProvider>
-            <BookSection document={moved} tab="compare" />
-          </EvidenceProvider>
-        </LedgerProvider>
-      </MemoryRouter>,
-    );
-    expect(view.container.querySelector("[data-refusal='SNAPSHOT_MISMATCH']")).not.toBeNull();
-    expect(view.container.textContent).not.toContain("99.9x");
-    expect(view.container.querySelector("[data-deviation-note='chtr.net_leverage']")).toBeNull();
+  test("no case event names the book, so it holds no stream", () => {
+    // `tailed` is what `Workspace` asks before opening a per-case SSE tail. A
+    // tail over Book could never usefully fire -- `REFETCHES` maps no event to
+    // it -- and would hold a worker thread and one of the API's 32
+    // concurrency slots for its whole deadline.
+    expect(tailed("book")).toBe(false);
+    expect(tailed("directory")).toBe(false);
+    expect(tailed("analysis")).toBe(true);
+    expect(tailed("committee")).toBe(true);
   });
 });

@@ -129,10 +129,16 @@ export const bool: Shape<boolean> = {
   toSchema: () => ({ type: "boolean" }),
 };
 
-export function literal<const V extends string>(expected: V): Shape<V> {
+// A boolean literal as well as a string one: the Book's basis declares
+// `accepted_only` as the constant `true`, which is a claim about what the
+// section reads rather than a flag a body may vary.
+export function literal<const V extends string | boolean>(expected: V): Shape<V> {
   return {
     check: (value, path): value is V => value === expected || refuse(path),
-    toSchema: () => ({ type: "string", const: expected }),
+    toSchema: () => ({
+      type: typeof expected === "string" ? "string" : "boolean",
+      const: expected,
+    }),
   };
 }
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -39,7 +40,7 @@ from server.refusals import Refusal, RefusalCode
 from server.store import SCHEMA, RunStatus, StoreConnection, apply_schema, connect
 from server.store.routes import resolved_route
 from server.store.run_inputs import RunInput, load_run_input
-from server.store.runs import create_case, run_status, start_run
+from server.store.runs import block_run, create_case, run_status, start_run
 
 # A declared schema that differs from the repository's by one table -- the shape
 # a later build has when it adds one, and the shape `IF NOT EXISTS` hides.
@@ -104,6 +105,58 @@ def test_the_declared_schema_holds_a_case_and_its_run(empty_database: str) -> No
         conn.commit()
 
         assert run_status(conn, run_id) is RunStatus.RUNNING
+
+
+def test_a_runs_predecessor_is_written_once_and_is_never_itself(
+    empty_database: str,
+) -> None:
+    """`0025_supersedes` (§72): the link is written by the insert that makes
+    the successor and by nothing after it. An UPDATE that would move it -- to
+    another run, to null, or from null onto a run -- is refused by trigger, so
+    a privileged edit cannot re-point which run a run answers; and a run can
+    never name itself. Every refusal leaves the link exactly as the insert
+    wrote it."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        case_id = create_case(conn, BoundaryText.of("Acme 2026 refinancing"))
+        first, other = start_run(conn, case_id), start_run(conn, case_id)
+        conn.commit()
+        assert block_run(conn, first) and block_run(conn, other)
+        successor = start_run(conn, case_id, supersedes=first)
+        conn.commit()
+
+        moves = [
+            (
+                "UPDATE runs SET supersedes_run_id = %s WHERE run_id = %s",
+                (other, successor),
+            ),
+            (
+                "UPDATE runs SET supersedes_run_id = NULL WHERE run_id = %s",
+                (successor,),
+            ),
+            (
+                "UPDATE runs SET supersedes_run_id = %s WHERE run_id = %s",
+                (other, first),
+            ),
+        ]
+        for statement, params in moves:
+            with pytest.raises(psycopg.errors.RaiseException):
+                conn.execute(statement, params)
+            conn.rollback()
+        with pytest.raises(psycopg.errors.CheckViolation):
+            own = uuid4()
+            conn.execute(
+                "INSERT INTO runs (run_id, case_id, status, budget_ceiling,"
+                " supersedes_run_id) VALUES (%s, %s, 'RUNNING', 1, %s)",
+                (own, case_id, own),
+            )
+        conn.rollback()
+
+        links = conn.execute(
+            "SELECT run_id, supersedes_run_id FROM runs WHERE supersedes_run_id"
+            " IS NOT NULL"
+        ).fetchall()
+        assert links == [(successor, first)]
 
 
 def test_every_run_status_is_one_the_database_accepts(empty_database: str) -> None:
@@ -223,11 +276,26 @@ def _populate(conn: StoreConnection, blobs: BlobStore) -> str:
         "INSERT INTO budget_ledger (attempt_id, run_id, amount) VALUES (%s, %s, 0.25)",
         (attempt_id, run_id),
     )
-    conn.execute(
-        "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
-        " VALUES (%s, %s, 0.50)",
-        (attempt_id, run_id),
-    )
+    # The price columns arrive with `0024_reservation_price`, and this helper
+    # populates both a legacy database (before them) and a migrated one (after,
+    # where they are NOT NULL with no default). Name them when they exist.
+    priced = conn.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_name ="
+        " 'budget_reservations' AND column_name = 'price_model'"
+    ).fetchone()
+    if priced is None:
+        conn.execute(
+            "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
+            " VALUES (%s, %s, 0.50)",
+            (attempt_id, run_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO budget_reservations (attempt_id, run_id, amount,"
+            " price_model, price_input, price_output, price_as_of)"
+            " VALUES (%s, %s, 0.50, 'synthetic/model', 0, 0.000002, '2026-09-17')",
+            (attempt_id, run_id),
+        )
     conn.execute(
         "INSERT INTO run_routes"
         " (run_id, profile_id, selection_id, route_digest, resolved)"
@@ -787,6 +855,11 @@ def known_prefix(
         "UPDATE source_extractions SET extractor_identity = '{'",
         "UPDATE source_extractions SET extractor_identity ="
         " replace(extractor_identity, 'caos.plain-text', 'retired.writer')",
+        # `canonical()` refuses this one itself, with a code of its own that
+        # `_verify_extractions_v1` does not catch: a malformed row a migration's
+        # verification finds is still a drift finding at the boot boundary.
+        "UPDATE source_extractions SET extractor_identity ="
+        ' \'{"name": "", "version": "1", "config": {}}\'',
     ],
 )
 def test_corrupt_known_upgrade_refuses_without_any_change(
@@ -1169,3 +1242,121 @@ def test_command_requests_are_keyed_bounded_and_immutable(
         conn.rollback()
     assert conn.execute("SELECT count(*) FROM command_requests").fetchone() == (1,)
     conn.rollback()
+
+
+@pytest.mark.parametrize(
+    "raised,expected",
+    [
+        (RefusalCode.STORE_UNAVAILABLE, RefusalCode.STORE_UNAVAILABLE),
+        (RefusalCode.STORE_NOT_TRANSACTIONAL, RefusalCode.STORE_NOT_TRANSACTIONAL),
+        (RefusalCode.SOURCE_IDENTITY_INVALID, RefusalCode.STORE_SCHEMA_DRIFT),
+        (RefusalCode.BOUNDARY_TEXT_INVALID, RefusalCode.STORE_SCHEMA_DRIFT),
+    ],
+)
+def test_apply_schema_keeps_a_store_fault_and_flattens_every_other_refusal(
+    empty_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    raised: RefusalCode,
+    expected: RefusalCode,
+) -> None:
+    """W6: a store that could not answer is not a database built from another
+    schema, and saying `STORE_SCHEMA_DRIFT` sends an operator to the migration
+    history for a fault that is not there. Everything else a migration refuses
+    -- including a malformed row its own verification finds, which raises codes
+    from outside this module -- is a drift finding and keeps saying so
+    (`docs/DECISIONS.md` §20a)."""
+
+    def refusing(conn: StoreConnection, sql: str) -> None:
+        raise Refusal(raised)
+
+    monkeypatch.setattr(store, "_migrate", refusing)
+    with connect(empty_database) as conn, pytest.raises(Refusal) as caught:
+        apply_schema(conn)
+
+    assert caught.value.code is expected
+
+
+def test_the_migration_keeps_existing_reservation_amounts(
+    empty_database: str, tmp_path: Path
+) -> None:
+    """`0024_reservation_price` adds the four price columns to rows that have
+    no price to record. The amounts are the money and must not move; the
+    migration defaults say plainly that these rows predate the columns.
+    """
+    with connect(empty_database) as conn:
+        _legacy(conn)
+        _populate(conn, BlobStore(tmp_path))
+        conn.commit()
+        before = conn.execute(
+            "SELECT attempt_id, amount FROM budget_reservations ORDER BY attempt_id"
+        ).fetchall()
+        assert before, "a scanner that scanned nothing is a failure"
+
+        apply_schema(conn)
+
+        assert (
+            conn.execute(
+                "SELECT attempt_id, amount FROM budget_reservations ORDER BY attempt_id"
+            ).fetchall()
+            == before
+        )
+        assert conn.execute(
+            "SELECT DISTINCT price_model, price_input, price_output, price_as_of"
+            " FROM budget_reservations"
+        ).fetchall() == [("legacy", Decimal(0), Decimal(0), date(1970, 1, 1))]
+        # The defaults migrated the rows that existed; they do not stand in for
+        # a price a new reservation failed to name.
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            conn.execute(
+                "INSERT INTO budget_reservations (attempt_id, run_id, amount)"
+                " SELECT %s, run_id, 0.10 FROM budget_reservations LIMIT 1",
+                (uuid4(),),
+            )
+        conn.rollback()
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("price_model", ""),
+        ("price_input", "-1"),
+        ("price_output", "NaN"),
+        ("price_input", "Infinity"),
+    ],
+)
+def test_a_reservation_price_outside_its_constraint_refuses(
+    empty_database: str, tmp_path: Path, column: str, value: str
+) -> None:
+    """A stored price that names no model, or is not finite and nonnegative,
+    would be unreadable as the fact the column exists to hold."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _populate(conn, BlobStore(tmp_path))
+        given: object = value if column == "price_model" else Decimal(value)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(f"UPDATE budget_reservations SET {column} = %s", (given,))
+        conn.rollback()
+
+
+def test_the_directory_listing_uses_an_index_on_case_members(
+    empty_database: str,
+) -> None:
+    """`cases_for_member` joins from `case_members` on the caller's user id, so the
+    membership side of that join needs an index of its own: the primary key
+    leads with `case_id` and cannot serve it."""
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        conn.execute("SET enable_seqscan = off")
+        plan = "\n".join(
+            r[0]
+            for r in conn.execute(
+                "EXPLAIN SELECT c.case_id FROM case_members m"
+                " JOIN cases c ON c.case_id = m.case_id"
+                " WHERE m.user_id = %s AND m.revoked_at IS NULL",
+                (uuid4(),),
+            ).fetchall()
+        )
+    assert "case_members_by_user" in plan, plan
+    # The name alone would hold for an index of that name on any column;
+    # the condition is what pins it as a lookup on `user_id`.
+    assert "Index Cond: (user_id =" in plan, plan

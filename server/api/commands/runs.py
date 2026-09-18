@@ -9,21 +9,21 @@ re-derives the preview under the case and run locks (`release_gate_in`).
 
 from __future__ import annotations
 
-import json
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from server.api.commands._request import (
+    CommandRequest,
     Key,
-    command_response,
+    governed,
     json_body,
     require_case_approver,
     require_case_reader,
     require_case_writer,
 )
-from server.api.deps import Caller, Methodology, Store
+from server.api.deps import Caller, CasePath, Methodology, RunPath, Store
 from server.api.wire import (
     ApproveGate,
     CreateRun,
@@ -34,13 +34,11 @@ from server.api.wire import (
     RunInputPinned,
 )
 from server.engine.route import resolve_route, route_digest
-from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.handoff import ADAPTER_ROUTES
-from server.methodology.vendor import VENDOR_MODULE
+from server.methodology.vendor import catalog
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.audit import GovernedAction
-from server.store.commands import request_digest, run_command
 from server.store.gates import (
     Gate,
     GateApproval,
@@ -60,6 +58,8 @@ REPLAY_IO = 2  # standing, receipt lookup
 UNIT_IO = 8  # case lock, chain head, standing, receipt check; receipt, audit x2
 # `start_run` 3; `pin_route_in` 12 (run lock, route, attempts, insert, event 5).
 CREATE_RUN_IO = REPLAY_IO + UNIT_IO + 15
+# A successor (§72) selects the run it answers `FOR SHARE` before the insert.
+SUCCESSOR_RUN_IO = CREATE_RUN_IO + 1
 # Ownership 1; `snapshot_in` over an earlier, different set 8;
 # `pin_run_input_in` 16 (run lock, owner, set 2, route, pin, attempts, insert,
 # event 5).
@@ -70,9 +70,8 @@ PINNED_INPUT_IO = 5
 PREVIEW_IO = PINNED_INPUT_IO + 2  # standing; ownership, pin and clock
 # Ownership 1; `release_gate_in`: run lock, preview, live sources, upsert.
 APPROVE_IO = REPLAY_IO + UNIT_IO + 1 + 4 + PINNED_INPUT_IO + 2
-IO_BUDGET = max(CREATE_RUN_IO, PIN_INPUT_IO, PREVIEW_IO, APPROVE_IO)
+IO_BUDGET = max(SUCCESSOR_RUN_IO, PIN_INPUT_IO, PREVIEW_IO, APPROVE_IO)
 
-_CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 _GATES = {"source-set": Gate.SOURCE_SET, "research-plan": Gate.RESEARCH_PLAN}
 
 router = APIRouter()
@@ -92,12 +91,8 @@ def path_gate(request: Request) -> Gate:
 
 PathGate = Annotated[Gate, Depends(path_gate)]
 
-
-def _run_id(value: str) -> UUID:
-    try:
-        return UUID(value)
-    except ValueError:
-        raise Refusal(RefusalCode.RUN_NOT_FOUND) from None
+# `run_id: RunPath` is declared after `_standing` on every route that takes
+# one: the run id is read after visibility, so a stranger learns nothing.
 
 
 def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID) -> tuple[bool, Any]:
@@ -115,51 +110,40 @@ def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID) -> tuple[bool
     return bool(row[0]), row[1]
 
 
-def _catalog(bundle: Bundle) -> dict[str, Any]:
-    try:
-        catalog = json.loads(verified_bytes(bundle, VENDOR_MODULE, _CATALOG))
-    except ValueError:
-        catalog = None
-    if not isinstance(catalog, dict):
-        raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
-    return catalog
-
-
 @router.post("/api/v1/cases/{case_id}/runs")
 def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bundle
     actor: Caller,
     key: Key,
     _standing: Writer,
     body: Annotated[CreateRun, Depends(json_body(CreateRun))],
-    case_id: UUID,
+    case_id: CasePath,
     conn: Store,
     bundle: Methodology,
 ) -> Response:
     """A run with its route resolved from the verified catalog and pinned.
 
     A pair outside `ADAPTER_ROUTES` is refused before the catalog is read. The
-    audit payload binds the selection and route digest; the run id is in the
-    receipt committed beside it under the same `request_sha256`.
+    audit payload binds the selection, the run this one answers (`supersedes`,
+    §72, null for an ordinary run) and the route digest; the run id is in the
+    receipt committed beside it under the same `request_sha256`. The link's own
+    checks are `start_run`'s, inside the unit.
     """
     if (body.profile_id, body.selection_id) not in ADAPTER_ROUTES:
         raise Refusal(RefusalCode.ROUTE_NOT_ENABLED)
-    route = resolve_route(_catalog(bundle), body.profile_id, body.selection_id)
+    route = resolve_route(catalog(bundle), body.profile_id, body.selection_id)
     require_adapter_route(route)
     selection = body.model_dump(mode="json")
 
     def write(unit: StoreConnection) -> tuple[int, RunCreated]:
-        run_id = start_run(unit, case_id)
+        run_id = start_run(unit, case_id, supersedes=body.supersedes)
         pinned = pin_route_in(unit, run_id, route)
         return 201, RunCreated(case_id=case_id, run_id=run_id, route_digest=pinned)
 
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command="CREATE_RUN",
-        request_sha256=request_digest(
-            "CREATE_RUN", case_id=case_id, run_id=None, gate=None, body=selection
-        ),
+        request=CommandRequest("CREATE_RUN", case_id, None, None, selection),
         action=GovernedAction(
             case_id=case_id,
             actor_id=actor.user_id,
@@ -168,8 +152,8 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
             payload={**selection, "route_digest": route_digest(route)},
         ),
         write=write,
+        model=RunCreated,
     )
-    return command_response(result, RunCreated)
 
 
 @router.post("/api/v1/cases/{case_id}/runs/{run_id}/input")
@@ -177,9 +161,9 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
     actor: Caller,
     key: Key,
     _standing: Writer,
+    run: RunPath,
     body: Annotated[PinRunInput, Depends(json_body(PinRunInput))],
-    case_id: UUID,
-    run_id: str,
+    case_id: CasePath,
     conn: Store,
     bundle: Methodology,
 ) -> Response:
@@ -189,7 +173,6 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
     A run whose input is already pinned is a conflict before any snapshot: a
     new key is a new intent, and a replay is the same key's receipt.
     """
-    run = _run_id(run_id)
     subject = RunSubject(**body.subject.model_dump())
     if not valid_subject(subject):
         raise Refusal(RefusalCode.REQUEST_INVALID)
@@ -205,17 +188,12 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
             input_fingerprint=pin.input_fingerprint,
         )
 
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command="PIN_RUN_INPUT",
-        request_sha256=request_digest(
-            "PIN_RUN_INPUT",
-            case_id=case_id,
-            run_id=run,
-            gate=None,
-            body=body.model_dump(mode="json"),
+        request=CommandRequest(
+            "PIN_RUN_INPUT", case_id, run, None, body.model_dump(mode="json")
         ),
         action=GovernedAction(
             case_id=case_id,
@@ -225,8 +203,8 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
             payload={"run_id": str(run), "build_id": bundle.build_id},
         ),
         write=write,
+        model=RunInputPinned,
     )
-    return command_response(result, RunInputPinned)
 
 
 @router.get(
@@ -237,15 +215,14 @@ def read_gate_preview(
     _actor: Caller,
     gate: PathGate,
     _standing: Reader,
-    case_id: UUID,
-    run_id: str,
+    run: RunPath,
+    case_id: CasePath,
     conn: Store,
 ) -> GatePreviewDocument:
     """The exact content an approver is shown and the digests to submit.
 
     Reading it records nothing and releases nothing; approval re-derives it.
     """
-    run = _run_id(run_id)
     pinned, observed_at = _owned_run(conn, case_id, run)
     if not pinned:
         raise Refusal(RefusalCode.RUN_INPUT_NOT_PINNED)
@@ -266,14 +243,13 @@ def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
     gate: PathGate,
     key: Key,
     _standing: Approver,
+    run: RunPath,
     body: Annotated[ApproveGate, Depends(json_body(ApproveGate))],
-    case_id: UUID,
-    run_id: str,
+    case_id: CasePath,
     conn: Store,
 ) -> Response:
     """Release one gate over the preview the approver submits, re-derived
     under the case and run locks at commit."""
-    run = _run_id(run_id)
     approval = GateApproval(
         run_id=run,
         gate=gate,
@@ -293,17 +269,12 @@ def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
             input_fingerprint=body.input_fingerprint,
         )
 
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command="APPROVE_GATE",
-        request_sha256=request_digest(
-            "APPROVE_GATE",
-            case_id=case_id,
-            run_id=run,
-            gate=gate.value,
-            body=body.model_dump(mode="json"),
+        request=CommandRequest(
+            "APPROVE_GATE", case_id, run, gate.value, body.model_dump(mode="json")
         ),
         action=GovernedAction(
             case_id=case_id,
@@ -318,5 +289,5 @@ def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
             },
         ),
         write=write,
+        model=GateApproved,
     )
-    return command_response(result, GateApproved)

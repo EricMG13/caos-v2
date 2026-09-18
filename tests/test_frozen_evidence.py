@@ -262,3 +262,142 @@ def test_second_seal_failure_rolls_back_entire_pack(
     conn.rollback()
     for table in ("sources", "source_blocks", "source_tokens", "source_extractions"):
         assert conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
+
+
+def _insert_trigger_function(conn: StoreConnection, table: str) -> str:
+    """The function the INSERT trigger on `table` runs, named by the catalog.
+
+    Read rather than written down, so this asks what the store does about a
+    bulk insert and not what a particular migration called the function.
+    """
+    row = conn.execute(
+        "SELECT t.tgfoid::regprocedure::text FROM pg_trigger t"
+        " WHERE t.tgrelid = %s::regclass AND NOT t.tgisinternal"
+        " AND (t.tgtype & 4) <> 0",
+        (table,),
+    ).fetchone()
+    assert row is not None
+    return str(row[0])
+
+
+def _calls(conn: StoreConnection, procedure: str) -> int:
+    """How often this transaction has run `procedure`. Needs `track_functions`."""
+    row = conn.execute(
+        "SELECT coalesce(pg_stat_get_xact_function_calls(%s::regprocedure), 0)",
+        (procedure,),
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _lines(count: int) -> bytes:
+    return "\n".join(f"line {number}" for number in range(count)).encode("utf-8")
+
+
+def test_bulk_token_insert_fires_the_seal_check_once_per_statement(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    """One document, two statements, two seal checks -- not one per row.
+
+    The counter is the database's own per-transaction function statistics, so
+    this counts invocations exactly rather than inferring them from wall time.
+    """
+    conn, case_id = case
+    conn.execute("SET track_functions = 'pl'")
+    procedure = _insert_trigger_function(conn, "source_tokens")
+    assert procedure == _insert_trigger_function(conn, "source_blocks")
+    conn.commit()
+
+    before = _calls(conn, procedure)
+    admit_pack(
+        conn,
+        BlobStore(tmp_path),
+        case_id=case_id,
+        documents=[Document(BoundaryText.of("bulk.txt"), _lines(10_000))],
+    )
+    assert _calls(conn, procedure) - before == 2
+    conn.commit()
+    assert conn.execute("SELECT count(*) FROM source_tokens").fetchone() == (20_000,)
+
+
+@pytest.mark.parametrize("path", ["multirow", "copy"])
+def test_a_sealed_source_still_refuses_a_bulk_insert(
+    prepared: Prepared, path: str
+) -> None:
+    """The seal refuses the whole statement, with 0008's own message."""
+    conn, _, _, _, _ = prepared
+    first = list(conn.execute("SELECT * FROM source_tokens LIMIT 1").fetchone() or ())
+    rows = [[*first[:1], 900_000 + ordinal, *first[2:]] for ordinal in range(500)]
+    placeholders = ",".join(f"({','.join('%s' for _ in first)})" for _ in rows)
+    with pytest.raises(psycopg.errors.CheckViolation) as refusal:
+        if path == "copy":
+            with conn.cursor().copy("COPY source_tokens FROM STDIN") as copy:
+                for row in rows:
+                    copy.write_row(row)
+        else:
+            conn.execute(
+                f"INSERT INTO source_tokens VALUES {placeholders}",
+                [value for row in rows for value in row],
+            )
+    assert refusal.value.diag.message_primary == "extracted evidence is sealed"
+    conn.rollback()
+    assert conn.execute("SELECT count(*) FROM source_tokens").fetchone() == (1,)
+
+
+def test_a_bulk_insert_does_not_wait_on_the_foreign_key_lock_of_another_writer(
+    prepared: Prepared, empty_database: str
+) -> None:
+    """The statement trigger locks the parent after its own foreign-key check.
+
+    A second writer of the same unsealed source therefore already holds
+    `FOR KEY SHARE` when the trigger asks for its lock, and two of them
+    upgrading to `FOR UPDATE` would deadlock rather than queue. The trigger
+    takes `FOR NO KEY UPDATE`, which excludes the seal and every other evidence
+    writer and does not conflict with the key share the insert itself took.
+    """
+    conn, _, _, _, _ = prepared
+    source = _parent(conn)
+    conn.commit()
+    conn.execute(
+        "SELECT source_id FROM sources WHERE source_id = %s FOR KEY SHARE", (source,)
+    )
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '2s'")
+        _insert(other, "source_tokens", source)
+        other.commit()
+    assert conn.execute(
+        "SELECT count(*) FROM source_tokens WHERE source_id = %s", (source,)
+    ).fetchone() == (1,)
+
+
+@pytest.mark.parametrize("table", ["source_blocks", "source_tokens"])
+def test_an_uncommitted_evidence_write_blocks_a_withdrawal_of_its_source(
+    prepared: Prepared, empty_database: str, table: str
+) -> None:
+    """The exclusion half of the lock claim, which the permissive test cannot
+    make: a weaker mode passes that one a fortiori.
+
+    `FOR NO KEY UPDATE` gives up exactly one exclusion against `FOR UPDATE` --
+    `FOR KEY SHARE`, which a referencing insert's own foreign-key check takes.
+    Everything that writes a `sources` row must still queue behind an evidence
+    statement in flight. Withdrawal is the reachable one: it updates a non-key
+    column, so it takes an implicit `FOR NO KEY UPDATE` and must wait.
+
+    Replacing the trigger's lock with `FOR KEY SHARE` leaves every other
+    assertion in this file standing and fails here, which is why this test
+    exists rather than a comment.
+    """
+    conn, _, _, _, _ = prepared
+    source = _parent(conn)
+    conn.commit()
+    _insert(conn, table, source)  # in flight: the trigger holds the parent
+
+    with connect(empty_database) as other:
+        other.execute("SET lock_timeout = '800ms'")
+        with pytest.raises(psycopg.errors.LockNotAvailable):
+            other.execute(
+                "UPDATE sources SET withdrawn_at = now() WHERE source_id = %s",
+                (source,),
+            )
+        other.rollback()
+    conn.rollback()

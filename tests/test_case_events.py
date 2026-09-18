@@ -10,10 +10,13 @@ the one each request opens.
 
 from __future__ import annotations
 
+import gc
+import re
 import socket
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+import weakref
+from collections.abc import Callable, Generator, Iterator, Mapping
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -22,13 +25,20 @@ import pytest
 import uvicorn
 
 from server.api import app as app_module
+from server.api import stream, wire
 from server.api.app import app, store_connection
-from server.api.stream import CONNECT_IO, POLL_IO, case_tail
+from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
+from server.api.stream import (
+    CONNECT_IO,
+    POLL_IO,
+    case_tail,
+    take_stream_slot,
+)
 from server.api.wire import CLEARS
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.ingest import Document, admit_pack
-from server.refusals import RefusalCode
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
 from server.store.audit import GovernedAction, actions_after, governed_write
 from server.store.events import RunEvent
@@ -39,6 +49,7 @@ from server.store.runs import create_case, fail_run, start_attempt, start_run
 Frame = dict[str, str]
 Headers = Mapping[str, str] | httpx.Headers
 # Read at collection, before any test patches them.
+REPO = Path(__file__).resolve().parents[1]
 SHIPPED = (app_module.TAIL_DEADLINE, app_module.POLL_INTERVAL)
 
 
@@ -55,6 +66,9 @@ def served(
     test abandons outlives it by much.
     """
     monkeypatch.setenv(app_module.DATABASE_URL, empty_database)
+    # Tokenless, so no groups header is read: the development switch is how a
+    # test here asserts a global role above the floor.
+    monkeypatch.setenv(TRUST_SWITCH, TRUSTED)
     monkeypatch.setattr(app_module, "TAIL_DEADLINE", 0.0)
     monkeypatch.setattr(app_module, "POLL_INTERVAL", 0.02)
     listener = socket.socket()
@@ -82,9 +96,9 @@ def served(
         listener.close()
 
 
-def _as(user: UUID | None, groups: str | None = None) -> dict[str, str]:
+def _as(user: UUID | None, role: str | None = None) -> dict[str, str]:
     headers = {} if user is None else {"x-caos-user": str(user)}
-    return headers if groups is None else {**headers, "x-forwarded-groups": groups}
+    return headers if role is None else {**headers, ROLE_HEADER: role}
 
 
 def _path(case_id: UUID | str, run_id: UUID | str | None = None) -> str:
@@ -191,7 +205,7 @@ def test_case_events_across_anonymous_nonmember_reader_writer_approver_revoked_a
     refused = [
         (_path(case_id), _as(uuid4())),
         (_path(case_id), _as(revoked)),
-        (_path(case_id), _as(uuid4(), "caos-admins")),
+        (_path(case_id), _as(uuid4(), "ADMIN")),
         (_path(uuid4()), _as(members[Standing.ADMIN])),
         (_path("not-a-case"), _as(members[Standing.ADMIN])),
     ]
@@ -625,3 +639,89 @@ def test_the_event_stream_costs_its_declared_budget(
     assert len(log) == 2 + CONNECT_IO + 1 + polls * POLL_IO + named
     assert app_module.EVENTS_IO_BUDGET == 2 + CONNECT_IO + 1 + POLL_IO
     assert app_module.IO_BUDGET == app_module.EVENTS_IO_BUDGET
+
+
+def test_a_tail_slot_is_returned_however_the_stream_ends() -> None:
+    """A leaked slot is capacity only a restart returns, so every way a tail
+    can end has to give it back -- and there are three, not one.
+
+    The `finally` covers a stream that runs out and one closed mid-flight,
+    which is what a browser going away looks like to a generator. It does
+    **not** cover a generator that is never started: a generator that has not
+    reached its first `yield` has nothing to unwind, so its `finally` never
+    runs. That case is measured here rather than reasoned about, because the
+    first version of this code had exactly that hole and the journey could not
+    see it -- Starlette always starts the body, so the leak needed a response
+    that was built and then dropped.
+    """
+    slots = stream._Slots()
+
+    def tail(slot: stream.StreamSlot) -> Generator[int]:
+        try:
+            yield 1
+            yield 2
+        finally:
+            slot.release()
+
+    for ending in ("never started", "closed mid-stream", "run to the end"):
+        slot = take_stream_slot(slots, limit=5)
+        opened = tail(slot)
+        weakref.finalize(opened, slot.release)
+        assert slots.open == 1, ending
+        if ending == "closed mid-stream":
+            next(opened)
+            opened.close()
+        elif ending == "run to the end":
+            list(opened)
+        del opened
+        gc.collect()
+        assert slots.open == 0, ending
+
+
+def test_a_slot_is_given_back_once_even_though_two_things_release_it() -> None:
+    """Both the `finally` and the finalizer run for an ordinary stream, and a
+    counter that took both would drift *upward* in capacity with every tail --
+    a cap that quietly stops capping, which is worse than no cap because it
+    still reads like one."""
+    slots = stream._Slots()
+    slot = take_stream_slot(slots, limit=1)
+
+    slot.release()
+    slot.release()
+    slot.release()
+
+    assert slots.open == 0
+
+
+def test_the_twenty_fifth_tail_is_refused_rather_than_the_next_ordinary_request() -> (
+    None
+):
+    """The defect this closes. Uvicorn counts an open stream like any other
+    request against `--limit-concurrency`, so without a cap of its own the
+    watchers' pressure lands on an unrelated reader, with a 503 that names
+    nothing they can act on. Refused here, it names the streams.
+
+    The cap is asserted to sit *below* the image's limit, because a cap at or
+    above it would leave no headroom and would change nothing.
+    """
+    slots = stream._Slots()
+    for _ in range(stream.STREAM_LIMIT):
+        take_stream_slot(slots)
+
+    with pytest.raises(Refusal) as caught:
+        take_stream_slot(slots)
+
+    assert caught.value.code is RefusalCode.STREAM_LIMIT_REACHED
+    dockerfile = (REPO / "Dockerfile").read_text(encoding="utf-8")
+    [limit] = re.findall(r'"--limit-concurrency", "(\d+)"', dockerfile)
+    assert stream.STREAM_LIMIT < int(limit), "the cap leaves no headroom"
+
+
+def test_a_refused_tail_answers_503_with_a_retry_after_and_its_clearance() -> None:
+    """`STREAM_LIMIT_REACHED` is transient by the D3 question -- the identical
+    request later, with nobody doing anything in between, plausibly succeeds,
+    because a watcher only has to close a tab. So it answers 503 with
+    `Retry-After`, where a fault only an operator can repair answers 500."""
+    assert RefusalCode.STREAM_LIMIT_REACHED in app_module.TRANSIENT
+    assert app_module._STATUS[RefusalCode.STREAM_LIMIT_REACHED] == 503
+    assert wire.CLEARS[RefusalCode.STREAM_LIMIT_REACHED]

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -38,8 +39,11 @@ from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import Bundle
 from server.methodology.handoff import _decoded_record
 from server.methodology.runner import ModuleProvider
+from server.pricing import ModelPrice, priced_request, worst_case
+from server.provider import MAX_REQUEST_BYTES
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
+from server.store.budget import CEILING
 from server.store.events import events_of
 from server.store.routes import pin_route
 from server.store.runs import (
@@ -224,7 +228,7 @@ def test_the_artifact_is_the_handoff_and_the_record_the_host_built(
 
     assert stored.identity.module_id == "CP-0", "the host's module id, not the module's"
     assert stored.artifact_sha256 == artifact
-    assert stored.build_id.startswith("a43cb903")
+    assert stored.build_id.startswith("30222a49")
     assert len(stored.authority_digest) == 64
     [citation] = stored.citations
     assert citation.matched_text == QUOTE and citation.bboxes, "anchored by the host"
@@ -322,6 +326,11 @@ def test_a_node_the_gate_blocked_costs_no_call_and_no_charge(
     assert _charges(conn, run_id) == [REPORTED], "one charge, for the one call"
     assert _reserved(conn, run_id) == [ESTIMATE], "and one reservation behind it"
     assert _attempted(conn, run_id) == [nodes["CP-0"]], "no attempt row at all"
+    # No node's verdict ended this run: the frontier emptied. The store names
+    # nothing, so the wire cannot claim a blocking node that does not exist.
+    assert conn.execute(
+        "SELECT count(*) FROM run_blocking_verdicts WHERE run_id = %s", (run_id,)
+    ).fetchone() == (0,)
     bundle = Bundle(root=VENDORED)
     states = node_states(
         route, accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
@@ -344,3 +353,115 @@ def _attempted(conn: StoreConnection, run_id: UUID) -> list[str]:
         (run_id,),
     ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+# What a real frontier model costs per token: $3/M input, $15/M output. At this
+# price one worst-case call is over $4, which is why a $5 run could not finish
+# a three-node route while every attempt reserved the byte ceiling (§40).
+TERRA = ModelPrice(MODEL, Decimal("0.000003"), Decimal("0.000015"), date(2026, 9, 17))
+
+
+def test_a_small_prompt_reserves_its_priced_cost_not_the_byte_ceiling(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore], route: ResolvedRoute
+) -> None:
+    """Completion O09: the reservation is priced on the request, not on §38.
+
+    `MAX_REQUEST_BYTES` bounds what the transport allows; it is not what this
+    prompt is. A reservation measured on the bytes the provider will actually
+    send is still an upper bound on the call -- a token is at least one byte --
+    and it is the bound that lets three nodes run under one $5 ceiling.
+    """
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id)
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        route=route,
+        run_id=run_id,
+    )
+    run_route(
+        conn,
+        blobs,
+        run_id=run_id,
+        route=route,
+        execution=Execution(provider, TERRA, provider.bundle),
+    )
+
+    assert run_status(conn, run_id) is RunStatus.COMPLETE
+    reserved = _reserved(conn, run_id)
+    assert len(reserved) == len(completions.prompts) == 3
+    # These prompts carry the whole delivered authority, so they are large --
+    # about 210 KB each -- and still a fifth of the transport ceiling, which is
+    # the gap this task stopped paying for.
+    assert max(len(prompt.encode()) for prompt in completions.prompts) < (
+        MAX_REQUEST_BYTES // 4
+    )
+    assert all(amount < Decimal("3.64") for amount in reserved), reserved
+    assert sum(reserved) < CEILING, "three nodes fit one default ceiling"
+    # Exactly the priced cost of the request that was sent, not an estimate.
+    assert reserved == [
+        priced_request(TERRA, len(completions.request_bytes(prompt, json_object=True)))
+        for prompt in completions.prompts
+    ]
+    assert all(amount < worst_case(TERRA) for amount in reserved)
+
+
+def test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call(
+    ready: tuple[StoreConnection, UUID, UUID, BlobStore],
+    route: ResolvedRoute,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completion O09's hazard: the loop prices one prompt, the attempt builds another.
+
+    `check_context` builds and prices the request before `start_attempt`, and the
+    attempt unit builds its own again under that attempt's identity. If the
+    second is larger than the first, the call goes out under a reservation too
+    small for it -- invariant 8's "no provider call without a reservation" met in
+    form and not in substance, which is exactly what pricing the request rather
+    than the transport ceiling could have cost. `_within_reservation` re-prices
+    the request about to be sent against the price its reservation was taken
+    under, so the refusal lands before the provider is reached.
+
+    The second build is made larger here rather than waited for: the one
+    sequential loop cannot produce it today, and a test that can only be written
+    once concurrent workers exist is a test of nothing now.
+    """
+    from server.methodology import canonical
+
+    conn, run_id, source_id, blobs = ready
+    completions = _Completions(source_id)
+    real = canonical._prompt
+    builds = 0
+
+    def padded(*args: object, **kwargs: object) -> str:
+        nonlocal builds
+        builds += 1
+        prompt = real(*args, **kwargs)  # type: ignore[arg-type]
+        # Every build after the priced one grows. A byte would do; a kilobyte
+        # makes the refusal unambiguous at any price this fixture could carry.
+        return prompt if builds == 1 else prompt + ("\n# padding" * 128)
+
+    monkeypatch.setattr(canonical, "_prompt", padded)
+    provider = ModuleProvider(
+        conn=conn,
+        bundle=Bundle(root=VENDORED),
+        blobs=blobs,
+        completions=completions,
+        route=route,
+        run_id=run_id,
+    )
+    with pytest.raises(Refusal, match=r"^CONTEXT_OVER_CEILING$"):
+        run_route(
+            conn,
+            blobs,
+            run_id=run_id,
+            route=route,
+            execution=Execution(provider, TERRA, provider.bundle),
+        )
+
+    assert builds == 2, "the loop priced one prompt and the attempt rebuilt it"
+    assert completions.prompts == [], "the provider was reached"
+    assert conn.execute("SELECT count(*) FROM budget_ledger").fetchone() == (0,)
+    assert conn.execute("SELECT count(*) FROM call_outcomes").fetchone() == (0,)

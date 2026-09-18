@@ -18,6 +18,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
 from conftest import approve_run
@@ -569,6 +570,30 @@ def test_an_unknown_attempt_cannot_complete_a_run(
     assert caught.value.code is RefusalCode.ATTEMPT_NOT_FOUND
     assert run_status(conn, run_id) is RunStatus.RUNNING
     assert _names(conn, run_id) == []
+
+
+def test_start_attempt_turns_a_store_fault_into_a_typed_refusal(
+    run: tuple[StoreConnection, UUID, UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W4: a driver error on the attempt insert must not cross the boundary as
+    itself. `accept_attempt` already types its faults; the row that identifies
+    the work has to type its own, or a worker sees a psycopg class where every
+    other path hands it a code."""
+    conn, _case_id, run_id = run
+    real = conn.execute
+
+    def failing(query: object, *args: object, **kwargs: object) -> object:
+        if isinstance(query, str) and "INSERT INTO run_attempts" in query:
+            raise psycopg.OperationalError("simulated")
+        return real(query, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(conn, "execute", failing)
+
+    with pytest.raises(Refusal) as caught:
+        start_attempt(conn, run_id, "CP-0")
+
+    assert caught.value.code is RefusalCode.STORE_UNAVAILABLE
+    assert caught.value.__cause__ is None
 
 
 def test_lock_run_leaves_no_lock_behind_on_a_missing_run(

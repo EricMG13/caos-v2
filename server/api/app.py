@@ -28,7 +28,8 @@ identity-header hygiene, the Origin check -- before routing or identity.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import weakref
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
 from json import dumps
 from uuid import UUID
@@ -39,29 +40,36 @@ from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.api import health
 from server.api.commands import cases as cases_command
+from server.api.commands import deliverable as deliverable_command
 from server.api.commands import execution as execution_command
+from server.api.commands import members as members_command
+from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
 from server.api.deps import DATABASE_URL as DATABASE_URL
 from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
 from server.api.deps import Blobs as Blobs
 from server.api.deps import Caller as Caller
+from server.api.deps import CasePath as CasePath
 from server.api.deps import Methodology as Methodology
+from server.api.deps import RunQuery as RunQuery
 from server.api.deps import Store as Store
+from server.api.deps import VisibleCase as VisibleCase
 from server.api.deps import _database_url as _database_url
 from server.api.deps import _vendored_bundle as _vendored_bundle
 from server.api.deps import actor_from_request as actor_from_request
 from server.api.deps import blob_store as blob_store
 from server.api.deps import methodology_bundle as methodology_bundle
 from server.api.deps import store_connection as store_connection
-from server.api.edge import EdgeGuard
-from server.api.identity import Actor, actor_from_headers
+from server.api.edge import EdgeGuard, is_api_path, refusal_body
+from server.api.identity import actor_from_headers
 from server.api.reads import analysis as analysis_read
+from server.api.reads import book as book_read
 from server.api.reads import directory as directory_read
 from server.api.reads import evidence as evidence_read
 from server.api.reads import model as model_read
@@ -69,13 +77,15 @@ from server.api.reads import qualification as qualification_read
 from server.api.reads import reports as reports_read
 from server.api.reads import run as run_read
 from server.api.reads import upload as upload_read
-from server.api.reads.analysis import RunQuery
-from server.api.reads.upload import CasePath
-from server.api.stream import CONNECT_IO, POLL_IO, StreamEvent, case_tail
-from server.api.wire import CLEARS, RefusalBody
+from server.api.stream import (
+    CONNECT_IO,
+    POLL_IO,
+    StreamEvent,
+    case_tail,
+    take_stream_slot,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, apply_schema, connect
-from server.store.members import Standing, satisfies, standing_of
 
 # `GET /api/v1/cases/{case_id}/events`, the one path this module serves: the
 # caller's standing and the run's case, the heads, the cursor frame's recheck,
@@ -84,10 +94,6 @@ from server.store.members import Standing, satisfies, standing_of
 # declare their own budgets.
 EVENTS_IO_BUDGET = 2 + CONNECT_IO + 1 + POLL_IO
 IO_BUDGET = EVENTS_IO_BUDGET
-
-# Tailing a case is reading it. Anything the tail shows, a reader of the
-# case may see; holding it grants nothing further.
-READ_REQUIRES = Standing.READER
 
 # §9: a tail closes so the edge can reauthenticate. Five minutes, and it lives
 # here rather than in `stream.py` because it is a property of the connection
@@ -98,36 +104,65 @@ TAIL_DEADLINE = 300.0
 # second (CLAUDE.md known gaps -- `LISTEN`/`NOTIFY` is the upgrade).
 POLL_INTERVAL = 0.5
 
-# The owner's D3 decision (17 September 2026). One status had been carrying
-# two claims: "this is not your request's fault" and "come back later". Only
-# the second is what 503 means on the wire, so a proxy read every server
-# fault as worth retrying, including the ones no amount of retrying reaches.
-# The split asks one question per code -- would the identical request, later,
-# with nobody doing anything in between, plausibly succeed? -- and a fault
-# only an operator can repair answers no, because the client's waiting is not
-# what repairs it.
+# The owner's D3 decision (17 September 2026). One status had been carrying two
+# claims: "this is not your request's fault" and "come back later". Only the
+# second is what 503 means on the wire, so a proxy read every server fault as
+# worth retrying, including the ones no amount of retrying reaches. The split
+# asks one question per code -- would the identical request, later, with nobody
+# doing anything in between, plausibly succeed? -- and a fault only an operator
+# can repair answers no, because the client's waiting is not what repairs it.
 #
-# The store not answering is the whole of the yes side. Everything else here
-# is stored bytes failing verification against what this server itself
-# wrote, or a pinned input the run cannot change.
-#
-# This split covers the codes this route table already names; the wider
-# reconciliation of every other refusal code (most still default to 400
-# below) is its own, separately owned pass -- CLAUDE.md's known-gaps ledger,
-# "The wire says 'come back later' honestly at 5xx and not at 400".
-TRANSIENT = frozenset({RefusalCode.STORE_UNAVAILABLE})
+# The store not answering is the whole of the yes side. Everything else here is
+# stored bytes failing verification against what this server itself wrote, a
+# pinned input the run cannot change, or an operator's repair; each `CLEARS`
+# entry beside them already said as much in words before the status agreed.
+# `STREAM_LIMIT_REACHED` joins it for the same reason and not by analogy: the
+# capacity is released by a watcher closing a tail, so waiting is exactly what
+# repairs it. Nothing an operator does is required.
+TRANSIENT = frozenset({RefusalCode.STORE_UNAVAILABLE, RefusalCode.STREAM_LIMIT_REACHED})
+PERMANENT = frozenset(
+    {
+        RefusalCode.STORE_NOT_CONFIGURED,
+        RefusalCode.STORE_NOT_TRANSACTIONAL,
+        RefusalCode.STORE_SCHEMA_DRIFT,
+        RefusalCode.BLOB_NOT_FOUND,
+        RefusalCode.BLOB_DIGEST_MISMATCH,
+        RefusalCode.BLOB_ADDRESS_INVALID,
+        RefusalCode.READINESS_INVALID,
+        RefusalCode.ROUTE_IDENTITY_INVALID,
+        RefusalCode.ROUTE_EDGE_UNSUPPORTED,
+        RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE,
+        RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE,
+        RefusalCode.ARTIFACT_RECORD_MISMATCH,
+        RefusalCode.RUN_INPUT_INVALID,
+        RefusalCode.SOURCE_IDENTITY_INVALID,
+        RefusalCode.AUTHORITY_BYTES_MISMATCH,
+        RefusalCode.AUTHORITY_MODULE_UNKNOWN,
+        RefusalCode.HANDOFF_MALFORMED,
+        RefusalCode.HANDOFF_BLOCKED,
+        RefusalCode.HANDOFF_IDENTITY_MISMATCH,
+        RefusalCode.HANDOFF_INCOMPLETE,
+        RefusalCode.HANDOFF_UNDECLARED_FIELD,
+        RefusalCode.HANDOFF_MODULE_UNSUPPORTED,
+        RefusalCode.ATTEMPT_NOT_FOUND,
+    }
+)
 # What a transient answer promises, in seconds. A constant rather than a
 # forecast: the host knows nothing about when its store returns, so this is a
 # floor on how often a client may ask again, not a prediction that it will work.
 RETRY_AFTER_SECONDS = 5
 
-# The status for each refusal that can leave a route here. Unauthorised is
-# absent on purpose: it is answered as RUN_NOT_FOUND before it can be raised.
-# The server's own faults are 5xx: it cannot answer, whoever asks, and a 400
-# would tell the caller their request was the problem. Which 5xx is
-# `TRANSIENT` above and its absence below; the numbers here only carry it.
+# The status for every refusal, total over `RefusalCode` the way `CLEARS` is:
+# a code a future route raises must not inherit 400 from a lookup default,
+# because "your request was wrong" is a claim about the caller and nothing
+# chose it. The server's own faults are 5xx: it cannot answer, whoever asks,
+# and a 400 would tell the caller their request was the problem. Which 5xx is
+# `TRANSIENT` and `PERMANENT` above, and those two are the reasoning; the
+# numbers here only carry it.
 _STATUS = {
     RefusalCode.NOT_AUTHENTICATED: 401,
+    # Below the signing floor or not held: one private answer, as for a case.
+    RefusalCode.QUALIFICATION_EVIDENCE_NOT_FOUND: 404,
     RefusalCode.RUN_NOT_FOUND: 404,
     RefusalCode.CASE_NOT_FOUND: 404,
     RefusalCode.DELIVERABLE_NOT_FOUND: 404,
@@ -135,17 +170,35 @@ _STATUS = {
     RefusalCode.PAGE_NOT_AVAILABLE: 404,
     RefusalCode.STORE_NOT_CONFIGURED: 500,
     RefusalCode.STORE_UNAVAILABLE: 503,
+    RefusalCode.STREAM_LIMIT_REACHED: 503,
     RefusalCode.STORE_NOT_TRANSACTIONAL: 500,
     RefusalCode.STORE_SCHEMA_DRIFT: 500,
     RefusalCode.BLOB_NOT_FOUND: 500,
     RefusalCode.BLOB_DIGEST_MISMATCH: 500,
     RefusalCode.BLOB_ADDRESS_INVALID: 500,
     # The gate's map is read out of a stored artifact, so a map the host cannot
-    # bound is bytes this server wrote. Not a store fault: the store answers,
-    # and answers the same bytes to the next reader, so waiting does not fix it.
+    # bound is bytes this server wrote. Not a store fault, which is what this
+    # comment used to call it: the store answers, and answers the same bytes
+    # to the next reader, so waiting is not what fixes it. Its clearance says
+    # an operator must verify the artifact, and that is the discharge.
     RefusalCode.READINESS_INVALID: 500,
+    # The neighbour below was filed at 503 by copying this one, and this one was
+    # wrong too: a route pin whose identity the host cannot rebuild is stored
+    # bytes, and the next read rebuilds the same identity from the same pin. The
+    # two are not distinguishable on the time axis, which is why they now carry
+    # the same status -- the history is here because the copying is how both got
+    # their old one.
     RefusalCode.ROUTE_IDENTITY_INVALID: 500,
+    # A pinned build whose catalog declares an edge type this engine cannot
+    # evaluate: the vendored bytes, not the request. No profile or pathway the
+    # caller could name instead would avoid it, and no later attempt teaches
+    # the engine the type -- which is the whole of why this is 500 and not the
+    # 503 the entry was first written at, under a reading of 503 as blame.
+    RefusalCode.ROUTE_EDGE_UNSUPPORTED: 500,
     RefusalCode.ORCHESTRATION_ARTIFACT_UNREADABLE: 500,
+    # A recorded blocking verdict at a node the pinned route does not carry:
+    # rows this server wrote disagreeing with pins it wrote (§68).
+    RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE: 500,
     # A canonical record that no longer binds its Markdown, pin or bundle is
     # likewise the server's own bytes failing verification.
     RefusalCode.ARTIFACT_RECORD_MISMATCH: 500,
@@ -173,6 +226,8 @@ _STATUS = {
     # The request was sound and the state it expected has moved: a conflict.
     RefusalCode.IDEMPOTENCY_KEY_REUSED: 409,
     RefusalCode.RUN_NOT_RUNNING: 409,
+    RefusalCode.RUN_NOT_BLOCKED: 409,
+    RefusalCode.RUN_ALREADY_SUPERSEDED: 409,
     RefusalCode.GATE_APPROVAL_MISMATCH: 409,
     RefusalCode.EVIDENCE_NOT_AVAILABLE: 409,
     RefusalCode.ROUTE_ALREADY_PINNED: 409,
@@ -185,6 +240,88 @@ _STATUS = {
     RefusalCode.RUN_CANCEL_REQUESTED: 409,
     RefusalCode.COMMAND_EXPECTATION_STALE: 409,
     RefusalCode.ORCHESTRATION_BUILD_MOVED: 409,
+    # Every other code: 400, the status each was already served by the
+    # default this table replaced. The map is total so that a code added
+    # later cannot inherit "your request was wrong" without being read.
+    RefusalCode.BOUNDARY_TEXT_INVALID: 400,
+    RefusalCode.BOUNDARY_TEXT_TOO_LONG: 400,
+    RefusalCode.LEASE_NOT_HELD: 400,
+    RefusalCode.RUN_NODES_UNACCEPTED: 400,
+    RefusalCode.RUN_TERMINAL_STALE: 400,
+    RefusalCode.ATTEMPT_LIMIT_REACHED: 400,
+    RefusalCode.CALL_OUTCOME_INVALID: 400,
+    RefusalCode.CALL_OUTCOME_CONFLICT: 400,
+    RefusalCode.CALL_OUTCOME_LEGACY: 400,
+    RefusalCode.CALL_OUTCOME_UNEXPLAINED: 400,
+    RefusalCode.NODE_ALREADY_ACCEPTED: 400,
+    RefusalCode.MONEY_NOT_DECIMAL: 400,
+    RefusalCode.MONEY_INVALID: 400,
+    RefusalCode.BUDGET_ALREADY_RESERVED: 400,
+    RefusalCode.BUDGET_NOT_RESERVED: 400,
+    RefusalCode.BUDGET_CEILING_REACHED: 400,
+    RefusalCode.PROVIDER_NOT_CONFIGURED: 400,
+    RefusalCode.PROVIDER_CALL_INVALID: 400,
+    RefusalCode.CONTEXT_OVER_CEILING: 400,
+    RefusalCode.UPSTREAM_SECTION_OVER_CEILING: 400,
+    RefusalCode.PROVIDER_UNAVAILABLE: 400,
+    RefusalCode.PROVIDER_OUTPUT_TRUNCATED: 400,
+    RefusalCode.PROVIDER_REFUSED: 400,
+    RefusalCode.PROVIDER_RESPONSE_INVALID: 400,
+    RefusalCode.ENVELOPE_INVALID: 400,
+    RefusalCode.ENVELOPE_UNDECLARED_FIELD: 400,
+    RefusalCode.ENVELOPE_UNCITED_CLAIM: 400,
+    RefusalCode.READINESS_INCOMPLETE: 400,
+    RefusalCode.ENDPOINT_NOT_FOUND: 400,
+    RefusalCode.EDGE_CONFIG_INVALID: 400,
+    RefusalCode.INTERNAL_FAULT: 400,
+    RefusalCode.REQUEST_INVALID: 400,
+    RefusalCode.IDEMPOTENCY_KEY_REQUIRED: 400,
+    RefusalCode.ROUTE_NOT_ENABLED: 400,
+    RefusalCode.METHODOLOGY_INPUT_INVALID: 400,
+    RefusalCode.FORECAST_CHAIN_BROKEN: 400,
+    RefusalCode.FORECAST_RESIDUAL_UNRECONCILED: 400,
+    RefusalCode.FORECAST_DRIVER_NOT_READY: 400,
+    RefusalCode.DELIVERABLE_PAYLOAD_INVALID: 400,
+    RefusalCode.NARRATIVE_FIGURE_UNREFERENCED: 400,
+    RefusalCode.NARRATIVE_REFERENCE_INVALID: 400,
+    RefusalCode.DELIVERABLE_UNCITED_FIGURE: 400,
+    RefusalCode.DELIVERABLE_MARKDOWN_UNSUPPORTED: 400,
+    RefusalCode.DELIVERABLE_NOT_SIGNED: 400,
+    RefusalCode.DELIVERABLE_NOT_FROZEN: 400,
+    RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING: 400,
+    RefusalCode.DELIVERABLE_ALREADY_FILED: 400,
+    RefusalCode.DELIVERABLE_ALREADY_FROZEN: 400,
+    RefusalCode.APPROVER_NOT_INDEPENDENT: 400,
+    RefusalCode.SOURCE_PACK_EMPTY: 400,
+    RefusalCode.SOURCE_NOT_READABLE: 400,
+    RefusalCode.SOURCE_ENCRYPTED: 400,
+    RefusalCode.SOURCE_HAS_NO_TEXT: 400,
+    RefusalCode.SOURCE_EXTRACTION_TIMEOUT: 400,
+    RefusalCode.CITATION_NOT_LOCATED: 400,
+    RefusalCode.CITATION_AMBIGUOUS: 400,
+    RefusalCode.CITATION_NOT_DELIVERED: 400,
+    RefusalCode.ROUTE_PROFILE_UNKNOWN: 400,
+    RefusalCode.ROUTE_SELECTION_UNKNOWN: 400,
+    RefusalCode.ROUTE_EXTENSION_OWNER_MISSING: 400,
+    RefusalCode.ROUTE_HAS_A_CYCLE: 400,
+    RefusalCode.ROUTE_DUPLICATE_MODULE: 400,
+    RefusalCode.QUALIFICATION_SET_EMPTY: 400,
+    RefusalCode.QUALIFICATION_KEY_UNANSWERABLE: 400,
+    RefusalCode.QUALIFICATION_SET_AMBIGUOUS: 400,
+    RefusalCode.QUALIFICATION_KEY_AMBIGUOUS: 400,
+    RefusalCode.QUALIFICATION_RUN_MISSING: 400,
+    RefusalCode.QUALIFICATION_SET_FILE_INVALID: 400,
+    RefusalCode.QUALIFICATION_SET_PATH_ESCAPES: 400,
+    RefusalCode.QUALIFICATION_SET_OVER_CEILING: 400,
+    RefusalCode.ORCHESTRATION_NOTHING_TO_PROVE: 400,
+    RefusalCode.ORCHESTRATION_ROUTE_NOT_PINNED: 400,
+    RefusalCode.ORCHESTRATION_SOURCE_NOT_PINNED: 400,
+    RefusalCode.ORCHESTRATION_CITATION_LOST: 400,
+    RefusalCode.VERDICT_INCOMPLETE: 400,
+    RefusalCode.VERDICT_BINDING_INVALID: 400,
+    RefusalCode.VERDICT_UNDECLARED_FIELD: 400,
+    RefusalCode.VERDICT_EXPIRED: 400,
+    RefusalCode.VERDICT_ALREADY_RECORDED: 409,
 }
 
 
@@ -230,23 +367,32 @@ for _section in (
     run_read,
     analysis_read,
     model_read,
+    book_read,
     qualification_read,
     reports_read,
     evidence_read,
 ):
     app.include_router(_section.router)
 app.include_router(health.router)
-for _commands in (cases_command, runs_command, execution_command):
+for _commands in (
+    cases_command,
+    runs_command,
+    execution_command,
+    qualification_command,
+    members_command,
+    deliverable_command,
+):
     app.include_router(_commands.router)
 
 
 def _body(code: RefusalCode, status: int) -> Response:
-    """The refusal on the wire, and -- for a transient fault only -- when to
-    ask again. The header is keyed on the code rather than the status so the
-    promise and the classification cannot come apart."""
-    return JSONResponse(
+    """The refusal on the wire, and -- for a transient fault only -- when to ask
+    again. The header is keyed on the code rather than on the status so that
+    the promise and the classification cannot come apart."""
+    return Response(
         status_code=status,
-        content=RefusalBody(code=code, clears=CLEARS[code]).model_dump(mode="json"),
+        content=refusal_body(code),
+        media_type="application/json",
         headers=(
             {"retry-after": str(RETRY_AFTER_SECONDS)} if code in TRANSIENT else None
         ),
@@ -257,7 +403,7 @@ def _body(code: RefusalCode, status: int) -> Response:
 def _refused(_request: Request, refusal: Refusal) -> Response:
     """A refusal on the wire: the code, its constant clearance, and no part of
     what caused it."""
-    return _body(refusal.code, _STATUS.get(refusal.code, 400))
+    return _body(refusal.code, _STATUS[refusal.code])
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -268,8 +414,7 @@ async def _undeclared(request: Request, error: StarletteHTTPException) -> Respon
     needs no identity. Outside `/api/`, and for any other status, the default
     stands: that surface is not this contract's.
     """
-    under_api = request.url.path == "/api" or request.url.path.startswith("/api/")
-    if under_api and error.status_code in (404, 405):
+    if is_api_path(request.url.path) and error.status_code in (404, 405):
         return _body(RefusalCode.ENDPOINT_NOT_FOUND, error.status_code)
     return await http_exception_handler(request, error)
 
@@ -305,18 +450,31 @@ async def _malformed_run_id(
 
 @app.get("/api/v1/cases/{case_id}/events")
 def read_case_events(
-    actor: Caller, case_id: CasePath, run: RunQuery, request: Request, conn: Store
+    actor: Caller,
+    case_id: CasePath,
+    run: RunQuery,
+    _standing: VisibleCase,
+    request: Request,
+    conn: Store,
 ) -> StreamingResponse:
     """The case's events as `text/event-stream`, resuming after `Last-Event-ID`.
 
-    The authority read happens here, before the first byte, so an unauthorised
+    The authority read happens before the first byte, so an unauthorised
     watcher gets the private 404 a missing case gets rather than an empty 200.
-    Identity, then the path and query parsers, then the store: the order is
-    what keeps an anonymous or malformed request off a connection.
+    Identity, then the path and query parsers and the case's visibility, then
+    the store: the order is what keeps an anonymous or malformed request off a
+    connection, and standing first means a stranger learns nothing about
+    which runs a case holds.
     """
-    _visible(conn, case_id, run, actor)
-    # Read at request time rather than bound as defaults, so a corrected value
-    # needs no restart (and a test can shorten them).
+    _owned_run(conn, case_id, run)
+    # The slot is taken before the response is built, so a refusal is an
+    # ordinary refusal body with a status and a `Retry-After` -- a 503 the
+    # client can read. Taken *after* the authority read, so a stranger still
+    # learns nothing: a private 404 must not become "the case exists but we are
+    # busy". `stream_slot` releases on every way out of the generator,
+    # `GeneratorExit` included, which is how a browser going away returns its
+    # slot.
+    slot = take_stream_slot()
     events = case_tail(
         conn,
         case_id=case_id,
@@ -327,8 +485,24 @@ def read_case_events(
         poll=POLL_INTERVAL,
         heartbeat=True,
     )
+
+    def framed() -> Iterator[bytes]:
+        try:
+            for event in events:
+                yield _frame(event)
+        finally:
+            slot.release()
+
+    tail = framed()
+    # The safety net for the one case the `finally` above cannot reach: a
+    # generator that is never started never unwinds, so a response built and
+    # then never iterated would hold its slot until the process restarted.
+    # `StreamSlot.release` is one-shot, so whichever of the two runs first is
+    # the one that counts.
+    weakref.finalize(tail, slot.release)
+
     return StreamingResponse(
-        (_frame(event) for event in events),
+        tail,
         media_type="text/event-stream",
         # No store, and no proxy buffering: a tail that arrived in one block
         # when the deadline passed would not be a tail.
@@ -348,17 +522,8 @@ def _frame(event: StreamEvent | None) -> bytes:
     return f"id: {event.id}\nevent: {event.name}\ndata: {dumps({})}\n\n".encode()
 
 
-def _visible(
-    conn: StoreConnection, case_id: UUID, run_id: UUID | None, actor: Actor
-) -> None:
-    """Refuse a case this actor may not read, then a run that is not the case's.
-
-    Standing first: a stranger learns nothing about which runs a case holds.
-    """
-    if not satisfies(
-        standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
-    ):
-        raise Refusal(RefusalCode.CASE_NOT_FOUND)
+def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID | None) -> None:
+    """Refuse a run that is not the case's; no run named is nothing to refuse."""
     if run_id is None:
         return
     row = conn.execute(

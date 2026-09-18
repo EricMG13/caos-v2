@@ -7,7 +7,7 @@ through `run_command` -- state, run event, work row, audit event and receipt
 commit together or not at all (T15).
 
 Start and retry classify inside the unit, under the case and run locks, in
-decision 7's order, so a caller's mistake is a 409 and never the 500 that
+decision 7's order, so a caller's mistake is a 409 and never the 503 that
 `execution_input` would give a foreign pin (T13):
 
 1. No pin: `RUN_INPUT_NOT_PINNED`.
@@ -30,23 +30,23 @@ from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 
 from server import methodology
 from server.api.commands._request import (
+    CommandRequest,
     Key,
-    command_response,
+    governed,
     json_body,
     require_case_writer,
 )
-from server.api.deps import Caller, Methodology, Store
+from server.api.deps import Caller, CasePath, Methodology, RunPath, Store
 from server.api.wire import CancelRun, RetryRun, RunWork, StartRun, WorkView
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.audit import GovernedAction
-from server.store.commands import request_digest, run_command
 from server.store.events import lock_run
 from server.store.gates import execution_input
 from server.store.members import Standing
@@ -64,16 +64,8 @@ router = APIRouter()
 _RUN_PATH = "/api/v1/cases/{case_id}/runs/{run_id}"
 Writer = Annotated[Standing, Depends(require_case_writer)]
 
-
-def _path_run(request: Request) -> UUID:
-    """The path's run id, read after visibility so a stranger learns nothing."""
-    try:
-        return UUID(str(request.path_params["run_id"]))
-    except (KeyError, ValueError):
-        raise Refusal(RefusalCode.RUN_NOT_FOUND) from None
-
-
-RunId = Annotated[UUID, Depends(_path_run)]
+# `run_id: RunPath` is declared after `_standing` on every route here: the
+# run id is read after visibility, so a stranger learns nothing from it.
 
 
 @router.post(f"{_RUN_PATH}/start", status_code=202)
@@ -81,9 +73,9 @@ def start_run(  # noqa: PLR0913 -- decision 2's dependency order
     actor: Caller,
     key: Key,
     _standing: Writer,
-    run_id: RunId,
+    run_id: RunPath,
     body: Annotated[StartRun, Depends(json_body(StartRun))],
-    case_id: UUID,
+    case_id: CasePath,
     conn: Store,
     bundle: Methodology,
 ) -> Response:
@@ -95,9 +87,9 @@ def retry_run(  # noqa: PLR0913 -- decision 2's dependency order
     actor: Caller,
     key: Key,
     _standing: Writer,
-    run_id: RunId,
+    run_id: RunPath,
     body: Annotated[RetryRun, Depends(json_body(RetryRun))],
-    case_id: UUID,
+    case_id: CasePath,
     conn: Store,
     bundle: Methodology,
 ) -> Response:
@@ -109,9 +101,9 @@ def cancel_run(  # noqa: PLR0913 -- decision 2's dependency order
     actor: Caller,
     key: Key,
     _standing: Writer,
-    run_id: RunId,
+    run_id: RunPath,
     body: Annotated[CancelRun, Depends(json_body(CancelRun))],
-    case_id: UUID,
+    case_id: CasePath,
     conn: Store,
 ) -> Response:
     def write(unit: StoreConnection) -> tuple[int, BaseModel]:
@@ -192,22 +184,17 @@ def _command(  # noqa: PLR0913 -- one command's identity and unit, positional
             case_id, actor_id, "RUN_CANCEL_REQUESTED", Standing.WRITER, unit
         ),
     }[command]
-    result = run_command(
+    return governed(
         conn,
         scope=case_id,
         key=key,
-        command=command,
-        request_sha256=request_digest(
-            command,
-            case_id=case_id,
-            run_id=run_id,
-            gate=None,
-            body=body.model_dump(mode="json"),
+        request=CommandRequest(
+            command, case_id, run_id, None, body.model_dump(mode="json")
         ),
         action=action,
         write=write,
+        model=RunWork,
     )
-    return command_response(result, RunWork)
 
 
 def _require_owned(conn: StoreConnection, case_id: UUID, run_id: UUID) -> None:

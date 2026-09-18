@@ -2,39 +2,51 @@
 
 import json
 from hashlib import sha256
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
-from server.api.reads.analysis import RunQuery
-from server.api.reads.upload import READ_REQUIRES, CasePath
+from server.api.commands.availability import FilingFacts, report_actions
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RevisionQuery,
+    RunQuery,
+    Store,
+    readable,
+)
 from server.api.wire import CommitteeDocument, ReportDocument
 from server.deliverable.filing import revision_signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
-from server.store.audit import audit_head, audit_trail, digest_of, verify_chain
-from server.store.cases import lock_case
-from server.store.members import satisfies, standing_of
+from server.store.audit import audit_head, audit_trail, verify_chain
+from server.store.commands import payload_digests
+from server.store.members import standing_of
 from server.store.outcomes import execution_reads
 
-# Three-node LITE: authorization/lock/selection (6), live proof (46).
+# Three-node LITE: isolation/standing/selection (3), live proof (40). No lock:
+# a read takes none, and the payload digest below is the consistency check.
 # Committee adds publication/signatures (2) and three actor/audit proof reads.
 # Filed Committee also adds receipt/audit (5) and saved payload (1).
-IO_BUDGET = {"report": 52, "committee": 63, "frozen": 57}
+# Task 12.1 adds two to each: the publication row and the signatures the
+# section's four filing actions are judged from. Proving a filing act costs one
+# more read per actor it looks for -- the receipts that actor committed on this
+# case, which is how an event written by a command is rebuilt (`payload_digests`)
+# -- so a frozen revision pays two, one signer and its freezer, and a filed one
+# pays a third for its filer.
+# The figures below are therefore stated **for one signer**, which is the only
+# shape any fixture has and no longer the only shape the store allows: the
+# opinions table is keyed per signer and `sign_opinion_in` refuses only a frozen
+# revision, so a second approver may sign before the freeze and costs one more
+# read. Measured at 53 for the frozen path with two signers. Recorded in
+# CLAUDE.md rather than absorbed into the number, because a budget fitted to the
+# widest shape stops measuring the common one.
+IO_BUDGET = {"report": 45, "committee": 59, "frozen": 52}
 router = APIRouter()
-
-
-def revision_query(revision: str | None = None) -> UUID:
-    try:
-        return UUID(revision or "")
-    except ValueError:
-        raise Refusal(RefusalCode.DELIVERABLE_NOT_FOUND) from None
-
-
-RevisionQuery = Annotated[UUID, Depends(revision_query)]
 
 
 @router.get("/api/v1/cases/{case_id}/report", response_model=ReportDocument)
@@ -81,14 +93,10 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
     if run is None:
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     with execution_reads(conn):
-        if not satisfies(
-            standing_of(conn, case_id=case_id, user_id=actor.user_id), READ_REQUIRES
-        ):
-            raise Refusal(RefusalCode.CASE_NOT_FOUND)
-        lock_case(conn, case_id)
-        standing = standing_of(conn, case_id=case_id, user_id=actor.user_id)
-        if not satisfies(standing, READ_REQUIRES):
-            raise Refusal(RefusalCode.CASE_NOT_FOUND)
+        # Read inside the unit rather than as `VisibleCase`: `execution_reads`
+        # adopts no transaction already open, and a standing read before it
+        # would be one.
+        standing = readable(standing_of(conn, case_id=case_id, user_id=actor.user_id))
         row = conn.execute(
             "SELECT payload_sha256,now() FROM deliverable_revisions"
             " WHERE case_id=%s AND run_id=%s AND revision_id=%s",
@@ -121,7 +129,9 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
             chrome=dict(
                 subject=dict(case_id=case_id, title=payload["case_title"]),
                 served_role=dict(global_role=actor.role, standing=standing),
-                actions=[],
+                actions=report_actions(
+                    actor.role, standing, _filing_facts(conn, case_id, revision, actor)
+                ),
             ),
             body={**_body(payload, digest), **publication},
             observed_at=observed_at,
@@ -129,6 +139,32 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
             status="complete",
             notes=[],
         )
+
+
+def _filing_facts(
+    conn: Store, case_id: UUID, revision: UUID, actor: Caller
+) -> FilingFacts:
+    """What the section can say about this revision's filing, and no more.
+
+    Deliberately not `_publication`: that one proves the chain and refuses a
+    revision that is not frozen, which is the state the sign and freeze
+    controls exist for. Availability grants nothing, so it reads the two rows
+    and judges from them.
+    """
+    row = conn.execute(
+        "SELECT frozen_by,filed_by FROM deliverable_publications"
+        " WHERE case_id=%s AND revision_id=%s",
+        (case_id, str(revision)),
+    ).fetchone()
+    signers = {who for who, _ in revision_signatures(conn, case_id, revision)}
+    frozen_by = None if row is None else UUID(str(row[0]))
+    return FilingFacts(
+        signed=bool(signers),
+        frozen=row is not None,
+        filed=row is not None and row[1] is not None,
+        actor_signed=actor.user_id in signers,
+        actor_froze=actor.user_id == frozen_by,
+    )
 
 
 def _publication(
@@ -161,11 +197,33 @@ def _publication(
         or (filer is None and filing_evidence)
     ):
         raise Refusal(RefusalCode.DELIVERABLE_PAYLOAD_INVALID)
-    bound = digest_of({"revision_id": str(revision), "payload_sha256": digest})
+    bound = {"revision_id": str(revision), "payload_sha256": digest}
     trail = audit_trail(conn, case_id)
-    events = {(e.action, e.actor_id) for e in trail if e.payload_sha256 == bound}
     required = {("OPINION_SIGNED", who) for who in signers}
     required.add(("DELIVERABLE_FROZEN", freezer))
+    # One act, two possible writers: a store function called directly binds the
+    # payload as given, a command's envelope adds its request digest. Both are
+    # rebuilt exactly, so neither comparison is looser than the other. Read once
+    # per actor this read is looking for rather than once per entry of a trail
+    # that is the whole case's: only these actors' events can satisfy `required`.
+    accepted = {
+        actor: payload_digests(
+            conn,
+            scope=case_id,
+            actor_id=actor,
+            payload=bound,
+            # The only commands that can have written OPINION_SIGNED or
+            # DELIVERABLE_FROZEN; naming them keeps this read off the rest of
+            # the actor's receipts, which nothing collects.
+            commands=("SIGN_OPINION", "FREEZE_DELIVERABLE"),
+        )
+        for _action, actor in required
+    }
+    events = {
+        (entry.action, entry.actor_id)
+        for entry in trail
+        if entry.payload_sha256 in accepted.get(entry.actor_id, frozenset())
+    }
     if (
         not required <= events
         or not verify_chain(conn, case_id)

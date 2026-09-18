@@ -80,6 +80,27 @@ initial complex blueprint at `max` only when needed, then draft its bounded
 tasks/runbook at `medium`. Audit each drafted plan with one targeted
 `ultrathink` request; that document check is distinct from the phase code gate.
 
+### Model routing (dual-model matrix, adopted 13 September 2026)
+
+The user's `claude_dual_model_reasoning_matrix.md` adds a model axis to the
+modes above. Recorded here so a fresh clone does not depend on a Downloads file.
+
+| Work | Model | Mode |
+|---|---|---|
+| Phase briefs, specs, ADRs, runbooks, slice plans | Opus | `medium` |
+| Plan/trade-off/rollback/race/trust stress test | Opus | `ultrathink` |
+| Mechanical edits: fixture moves, renames, formatting, status | Sonnet | `low` |
+| Ordinary implementation, test retargeting, UI/API wiring, unit tests | Sonnet | `medium` |
+| Implementation touching locks, transactions, money, identity, migrations, canonical verification or authority | Opus | `medium` |
+| Tricky local logic in an otherwise ordinary slice | Sonnet | `ultrathink` |
+| Ordinary per-slice review (scope, tests, readability, style) | Sonnet | `medium` |
+| Ordinary review of a slice in the Opus implementation row above | Opus | `medium` |
+| Whole-phase confidence review and adversarial audit | Opus | `xhigh` |
+
+Overrides kept from the governing goal: no rewrite tournaments, and the phase
+gates stay at actual `xhigh` (the matrix's `max` is not substituted). When a
+slice is mixed, the stricter row decides.
+
 Configure and verify supported effort controls on the installed Claude session
 or reviewer. Record actual model/version/effort at formal checkpoints; a word
 in a prompt is not proof of a setting or a fixed token budget. Do not copy an

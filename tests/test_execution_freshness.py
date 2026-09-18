@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from conftest import _url_for, approve_run, priced
+from conftest import reserve_at as reserve
 from psycopg.pq import TransactionStatus
 from test_loop_charges import (
     ESTIMATE,
@@ -50,7 +51,6 @@ from server.methodology.runner import ModuleProvider
 from server.provider import Completion, CompletionProvider, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection, connect
-from server.store.budget import reserve
 from server.store.events import RunEvent, append, lock_run
 from server.store.gates import (
     Gate,
@@ -246,8 +246,9 @@ class _ArbitraryProvider:
     calls: int = 0
     model: str = MODEL
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        pass
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -261,6 +262,12 @@ class _ArbitraryProvider:
         self.calls += 1
         digest = self.harness.blobs.put(b"arbitrary bytes")
         self.mutate()
+        # A provider bills its own call before returning, as the real one does.
+        record_outcome(
+            self.harness.conn,
+            attempt_id=attempt_id,
+            outcome=CallOutcome(REPORTED, MODEL, "gen-arbitrary"),
+        )
         return ProviderResult(digest, REPORTED, MODEL, "gen-arbitrary")
 
 
@@ -638,6 +645,32 @@ def _reserved(harness: _Harness) -> UUID:
     return attempt
 
 
+def test_the_module_provider_commits_its_bill_before_it_returns(
+    harness: _Harness,
+) -> None:
+    """`Provider.execute`'s contract, on the only implementation that ships.
+
+    The loop no longer records the outcome after the call, so a provider that
+    returned without billing would lose that call to the next crash: nothing
+    would match `replay_billed` or `unexplained_charge`, and the node would be
+    paid for twice. An independent connection is what proves the row is
+    committed by the time `execute` returns, not merely written.
+    """
+    node = harness.route.nodes[0]
+    attempt = _reserved(harness)
+    result = _provider(harness, _Completions(harness.source_id)).execute(
+        node.route_node_id, node.module_id, attempt_id=attempt
+    )
+    assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
+    with connect(harness.url) as observer:
+        outcome = observer.execute(
+            "SELECT model, generation_id, diagnostic_sha256 FROM call_outcomes"
+            " WHERE attempt_id = %s",
+            (attempt,),
+        ).fetchone()
+    assert outcome == (result.model, result.generation_id, result.diagnostic_sha256)
+
+
 def _blob_files(harness: _Harness) -> set[Path]:
     return {path for path in harness.blobs.root.rglob("*") if path.is_file()}
 
@@ -960,8 +993,9 @@ class _Charged:
     charge: Decimal | None
     mutate: Callable[[], None] = lambda: None
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        pass
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        # No prompt is built here, so there are no request bytes to price.
+        return 0
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -969,6 +1003,13 @@ class _Charged:
         assert self.harness.conn.info.transaction_status is TransactionStatus.IDLE
         digest = self.harness.blobs.put(b"arbitrary bytes")
         self.mutate()
+        # A provider bills its own call before returning, as the real one does;
+        # an unknown charge is recorded as unknown exposure, without spend.
+        record_outcome(
+            self.harness.conn,
+            attempt_id=attempt_id,
+            outcome=CallOutcome(self.charge, MODEL, f"gen-{route_node_id}"),
+        )
         return ProviderResult(digest, self.charge, MODEL, f"gen-{route_node_id}")  # type: ignore[arg-type]
 
 

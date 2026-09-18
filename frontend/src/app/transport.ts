@@ -12,6 +12,7 @@ import {
   WireIdentityError,
   WireShapeError,
   parseAnalysisDocument,
+  parseBookDocument,
   parseDirectoryDocument,
   parseModelDocument,
   parsePageDocument,
@@ -22,6 +23,7 @@ import {
   parseRunSectionDocument,
   parseUploadDocument,
   requireIdentity,
+  sameId,
   type PageDocument,
   type QualificationRead,
   type SectionDocument as V1Document,
@@ -57,6 +59,7 @@ export interface SectionQuery {
 
 const V1_PARSERS: Record<EnabledSection, (value: unknown) => V1Document> = {
   directory: parseDirectoryDocument,
+  book: parseBookDocument,
   upload: parseUploadDocument,
   run: parseRunSectionDocument,
   analysis: parseAnalysisDocument,
@@ -88,6 +91,9 @@ export function sectionUrl(section: Section, query: SectionQuery): string | null
   const search = params.toString();
   const suffix = search ? `?${search}` : "";
   if (section === "directory") return `/api/v1/directory${suffix}`;
+  // Book is the portfolio, so it names no case and is served whether or not
+  // one is selected.
+  if (section === "book") return `/api/v1/book${suffix}`;
   if (!query.case) return null;
   if ((section === "report" || section === "committee") && (!query.run || !query.revision)) {
     return null;
@@ -110,7 +116,9 @@ function refusalOf(body: unknown): Refusal {
   }
 }
 
-async function bodyOf(response: Response): Promise<unknown> {
+/** The JSON a response carries, or null when it carries none that parses:
+    a refusal is then typed from nothing rather than from an exception. */
+export async function bodyOf(response: Response): Promise<unknown> {
   try {
     return await response.json();
   } catch {
@@ -132,7 +140,7 @@ function classifyV1(section: EnabledSection, body: unknown, query: SectionQuery)
         ? query.run
         : null;
     requireIdentity(document, {
-      caseId: section === "directory" ? null : (query.case ?? null),
+      caseId: section === "directory" || section === "book" ? null : (query.case ?? null),
       ...(runId ? { runId } : {}),
       ...((section === "report" || section === "committee") && query.revision
         ? { revisionId: query.revision }
@@ -214,7 +222,7 @@ export async function fetchQualification(
   if (!response.ok) return { kind: "error", refusal: refusalOf(await bodyOf(response)) };
   try {
     const document = parseQualificationRead(await bodyOf(response));
-    if (!same(document.evidence_sha256, evidenceSha256)) throw new WireIdentityError();
+    if (!sameId(document.evidence_sha256, evidenceSha256)) throw new WireIdentityError();
     return { kind: "ready", document };
   } catch (error) {
     if (error instanceof WireShapeError || error instanceof WireIdentityError) {
@@ -257,8 +265,6 @@ export function pageUrl(query: PageQuery): string {
   return `/api/v1/cases/${caseId}/runs/${runId}/sources/${sourceId}/pages/${query.page}`;
 }
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-
 /** One page, validated whole and bound to exactly what was requested. */
 export async function fetchPage(query: PageQuery, signal?: AbortSignal): Promise<PageStatus> {
   let response: Response;
@@ -281,9 +287,9 @@ export async function fetchPage(query: PageQuery, signal?: AbortSignal): Promise
   }
   const { body } = document;
   const bound =
-    same(body.case_id, query.caseId) &&
-    same(body.run_id, query.runId) &&
-    same(body.source_id, query.sourceId) &&
+    sameId(body.case_id, query.caseId) &&
+    sameId(body.run_id, query.runId) &&
+    sameId(body.source_id, query.sourceId) &&
     body.page === query.page;
   if (!bound) {
     return {

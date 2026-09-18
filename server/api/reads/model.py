@@ -4,31 +4,36 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
-from server.api.reads.analysis import RunQuery, read_analysis
-from server.api.reads.upload import CasePath
+from server.api.deps import (
+    Blobs,
+    Caller,
+    CasePath,
+    Methodology,
+    RunQuery,
+    Store,
+    VisibleCase,
+)
+from server.api.reads.analysis import read_analysis
 from server.api.wire import (
+    AnalysisBody,
     ModelBody,
     ModelDocument,
     ModelForecast,
     ModelPeriod,
     ModelValue,
 )
+from server.engine.route import MODEL_MODULE
 from server.methodology.forecast import forecast_projection
 from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection
 from server.store.source_sets import pinned_live_sources
 
 # Analysis' ten-node forecast route, including CP-CF's four owner proofs,
-# plus the live source pin. Measured by test_model_http_actor_matrix_and_declared_io.
-# `citation_candidates` (server/evidence/citations.py, "fix: supply
-# anchorable citation candidates") had raised this to 196, but
-# "fix: bind qualification execution profiles" made that verification
-# conditional on `include_candidates` -- true only for a provider call's own
-# prompt build, not for a read. A read's `_context` call passes the default
-# (`include_candidates=False`), so this path no longer pays for it.
-# 193 -> 149: read_run_blocks (server/evidence/read.py) reads every captured
-# block of a node's delivery in one statement instead of one per block.
-IO_BUDGET = 149
+# plus the live source pin. Moves with Analysis' own budget, which this route
+# pays in full before adding to it. Measured by
+# test_model_http_actor_matrix_and_declared_io; 194 before each proof's
+# delivered blocks became one read instead of one per block.
+IO_BUDGET = 150
 router = APIRouter()
 
 
@@ -37,46 +42,61 @@ def read_model(  # noqa: PLR0913 -- authenticated case/run before dependencies
     actor: Caller,
     case_id: CasePath,
     run: RunQuery,
+    standing: VisibleCase,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
 ) -> ModelDocument:
-    analysis = read_analysis(actor, case_id, run, conn, blobs, bundle)
+    analysis = read_analysis(actor, case_id, run, standing, conn, blobs, bundle)
     body = analysis.body
-    accepted = next((h for h in body.handoffs if h.module_id == "CP-CF"), None)
-    forecast = None
-    if accepted is not None and body.displayed_run_id is not None:
-        live = pinned_live_sources(conn, body.displayed_run_id)
-        if any(
-            c.document_sha256 not in live for h in body.handoffs for c in h.source_facts
-        ):
-            raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
-        result = forecast_projection(accepted.model_analysis.encode("utf-8"))
-        forecast = ModelForecast(
-            **accepted.model_dump(
-                include={
-                    "route_node_id",
-                    "artifact_sha256",
-                    "record_sha256",
-                    "accepted_at",
-                    "qa_status",
-                    "limitation_flags",
-                    "validation_warnings",
-                }
-            ),
-            **result["units"],
-            perimeter=result["perimeter"],
-            periods=[_period(row) for row in result["rows"]],
-        )
+    forecast = accepted_forecast(conn, body)
     return ModelDocument(
         **analysis.model_dump(exclude={"body", "status", "observed_empty"}),
         body=ModelBody(
+            # The run's own status and the node that ended it travel with the
+            # forecast: "no accepted forecast" is a fact about now, and only
+            # those two say whether one is still coming. They are Analysis'
+            # own fields, unchanged -- this section derives, it does not judge.
             **body.model_dump(exclude={"handoffs", "pending"}),
             forecast=forecast,
             unavailable_reason="NO_ACCEPTED_FORECAST" if forecast is None else None,
         ),
         observed_empty=forecast is None,
         status="partial" if forecast is None else "complete",
+    )
+
+
+def accepted_forecast(
+    conn: StoreConnection, body: AnalysisBody
+) -> ModelForecast | None:
+    """The run's accepted CP-CF projection, re-derived, or None when there is
+    none. Shared with the Book, which reads the same accepted pair across
+    several credits and must read it the one way this section does.
+    """
+    accepted = next((h for h in body.handoffs if h.module_id == MODEL_MODULE), None)
+    if accepted is None or body.displayed_run_id is None:
+        return None
+    live = pinned_live_sources(conn, body.displayed_run_id)
+    if any(
+        c.document_sha256 not in live for h in body.handoffs for c in h.source_facts
+    ):
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH)
+    result = forecast_projection(accepted.model_analysis.encode("utf-8"))
+    return ModelForecast(
+        **accepted.model_dump(
+            include={
+                "route_node_id",
+                "artifact_sha256",
+                "record_sha256",
+                "accepted_at",
+                "qa_status",
+                "limitation_flags",
+                "validation_warnings",
+            }
+        ),
+        **result["units"],
+        perimeter=result["perimeter"],
+        periods=[_period(row) for row in result["rows"]],
     )
 
 

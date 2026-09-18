@@ -16,6 +16,7 @@ real `ModuleProvider`, answered by `CanonicalCompletions` (Task 3.1 slice e-2).
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -51,7 +52,7 @@ from server.engine.runtime import (
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.bundle import MANIFEST_NAME, Bundle
 from server.methodology.runner import ModuleProvider
-from server.pricing import worst_case
+from server.pricing import ModelPrice, worst_case
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, connect
 from server.store.budget import reserve as reserve_budget
@@ -95,8 +96,8 @@ class _Provider:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -240,6 +241,10 @@ def test_the_fake_provider_satisfies_the_protocol(
     provider: Provider = _started(conn, case_id, route, bundle, blobs).provider()
 
     assert provider.model == "a-model/for-the-test"
+    assert callable(provider.execute)
+    execute_params = list(inspect.signature(provider.execute).parameters)
+    protocol_params = list(inspect.signature(Provider.execute).parameters)[1:]
+    assert execute_params == protocol_params
 
 
 def test_an_unapproved_run_never_reaches_the_provider(
@@ -371,10 +376,11 @@ def test_the_final_pre_call_check_sees_a_late_revocation(
         attempt_id: UUID,
         amount: Decimal,
         *,
+        price: ModelPrice,
         lease: Lease | None = None,
     ) -> None:
         nonlocal reservations
-        original(connection, attempt_id, amount, lease=lease)
+        original(connection, attempt_id, amount, price=price, lease=lease)
         reservations += 1
         if reservations == 2:
             revoke(connection, case_id=case_id, user_id=UUID(str(actor[0])))
@@ -637,9 +643,12 @@ def test_accepted_artifacts_reads_cp0s_payload_and_no_other(
 
     accepted = accepted_artifacts(conn, blobs, route, run.run_id, bundle=bundle)
 
-    assert accepted[_node_id(route, "CP-0")].readiness == (
-        ("CP-5", "READY"),
-        ("CP-L10", "READY"),
+    assert accepted[_node_id(route, "CP-0")] == NodeResult(
+        readiness=(
+            ("CP-5", "READY"),
+            ("CP-L10", "READY"),
+        ),
+        qa_status="Passed",
     )
     assert accepted[_node_id(route, "CP-L10")] == NodeResult()
     assert accepted[_node_id(route, "CP-5")] == NodeResult()
@@ -710,7 +719,7 @@ class _Uncallable:
 
     model: str = "a-model/for-the-test"
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
+    def check_context(self, route_node_id: str, module_id: str) -> int:
         pytest.fail(f"{module_id} was prepared for a second call")
 
     def execute(
@@ -729,8 +738,8 @@ class _DiesAfterItsBill:
     def model(self) -> str:
         return self.inner.model
 
-    def check_context(self, route_node_id: str, module_id: str) -> None:
-        self.inner.check_context(route_node_id, module_id)
+    def check_context(self, route_node_id: str, module_id: str) -> int:
+        return self.inner.check_context(route_node_id, module_id)
 
     def execute(
         self, route_node_id: str, module_id: str, *, attempt_id: UUID
@@ -900,7 +909,7 @@ def test_a_stored_answer_predating_a_later_soft_input_is_explained_not_accepted(
     conn.rollback()
     screen = _node_id(route, "CP-5")
     early = start_attempt(conn, run.run_id, screen)
-    reserve_budget(conn, early, worst_case(priced(ESTIMATE)))
+    reserve_budget(conn, early, worst_case(priced(ESTIMATE)), price=priced(ESTIMATE))
     run.provider().inner.execute(screen, "CP-5", attempt_id=early)
     conn.rollback()
 

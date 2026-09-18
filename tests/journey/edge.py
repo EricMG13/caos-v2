@@ -12,7 +12,7 @@ so the real-stack journey reaches the API the way production would:
   `content-type`, `content-length` and `accept` pass through, with the body;
 - responses stream frame by frame, so SSE is unbuffered, with no read timeout.
 
-`GET /_edge/login?persona=analyst|approver|reader|intruder` stands in for the OIDC
+`GET /_edge/login?persona=analyst|approver|filer|reader|intruder` stands in for the OIDC
 login; any other request without a valid session is answered 401 here and
 never reaches the API. Run with
 `python -m uvicorn --factory journey.edge:from_environment --host 127.0.0.1
@@ -72,6 +72,13 @@ PERSONAS = {
     "approver": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a002"), "caos-analysts"),
     "reader": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a004"), "caos-readers"),
     "intruder": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a003"), "caos-analysts"),
+    # The filing chain needs three independent approvers
+    # (`APPROVER_NOT_INDEPENDENT`), and Task 12.5's journey drives it through
+    # this edge: the analyst signs, the approver freezes, and this third
+    # identity files. Deliberately not the intruder -- that persona's whole
+    # point is holding no standing on the journey's case, and granting it
+    # standing to file would take that proof away from the test above it.
+    "filer": Persona(UUID("6a0e1c2d-0000-4000-8000-00000000a005"), "caos-analysts"),
 }
 
 

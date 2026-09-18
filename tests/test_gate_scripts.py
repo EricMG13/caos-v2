@@ -283,7 +283,89 @@ def test_untested_does_not_accept_a_name_buried_in_a_longer_word(
 ) -> None:
     module = tmp_path / "m.py"
     module.write_text("def run() -> None: ...\n", encoding="utf-8")
-    assert check_tested.untested(module, "the runner runs\n")
+    assert check_tested.untested(module, frozenset({"runner", "runs"}))
+
+
+def test_a_name_that_appears_only_in_a_comment_references_nothing(
+    tmp_path: Path,
+) -> None:
+    """The defect this gate shipped on 17 September 2026. A money-path guard
+    passed with no test driving it because its name appeared in a comment, so
+    a sentence *about* the code satisfied the check *for* the code."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_m.py").write_text(
+        "# _within_reservation re-prices the request\n"
+        '"""and this docstring names within_reservation too."""\n'
+        'assert "a sentence naming within_reservation" == ""\n',
+        encoding="utf-8",
+    )
+
+    assert "within_reservation" not in check_tested.referenced_names(tests_dir)
+
+
+def test_a_dotted_path_in_a_string_is_a_reference_and_prose_is_not(
+    tmp_path: Path,
+) -> None:
+    """`monkeypatch.setattr("server.store.runs.append", ...)` is a real
+    reference and Python gives it no other spelling, so a dotted identifier
+    path is admitted. An English sentence is not a dotted path."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_m.py").write_text(
+        'setattr("server.store.runs.append", None)\n'
+        'note = "we should really test the reconciler here"\n',
+        encoding="utf-8",
+    )
+
+    referenced = check_tested.referenced_names(tests_dir)
+
+    assert "append" in referenced
+    assert "reconciler" not in referenced
+
+
+def test_referenced_names_reads_bare_names_attributes_and_imports(
+    tmp_path: Path,
+) -> None:
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_m.py").write_text(
+        "from server.store import reserve\nimport server.evidence.pdf as pdf\n"
+        "widget.anchor_citation()\nfreeze\n",
+        encoding="utf-8",
+    )
+
+    referenced = check_tested.referenced_names(tests_dir)
+
+    assert {"reserve", "pdf", "anchor_citation", "freeze"} <= referenced
+
+
+def test_a_route_handler_is_covered_by_its_path_not_its_name() -> None:
+    """A route is reached by an HTTP request, the way a React component is
+    reached by rendering -- `frontend/scripts/check-tested.mjs` states the same
+    rule. Demanding a test name it buys an import and no coverage."""
+    source = (
+        "@router.get('/api/v1/book')\ndef read_book(): ...\n"
+        "@lru_cache\ndef cached_thing(): ...\n"
+    )
+
+    assert check_tested.public_definitions(source, "m.py") == [(4, "cached_thing")]
+
+
+def test_a_suite_that_references_nothing_refuses_rather_than_clearing_everything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty reference set would pass every definition in the tree. A reader
+    that read nothing is a failure, which is this repository's standing rule
+    for a scanner and is why the floor exists at all."""
+    module = tmp_path / "m.py"
+    module.write_text("def foo() -> None: ...\n", encoding="utf-8")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_empty.py").write_text("", encoding="utf-8")
+
+    assert check_tested.main([str(module), "--tests", str(tests_dir)]) == 2
+    assert "read nothing is a failure" in capsys.readouterr().err
 
 
 def test_tracked_python_keeps_a_path_containing_a_space(tmp_path: Path) -> None:
@@ -343,7 +425,7 @@ def test_check_tested_main_reports_untested_symbols_and_refuses(
     result = check_tested.main([str(module), "--tests", str(missing_tests_dir)])
 
     assert result == 1
-    assert "'foo' has no test naming it" in capsys.readouterr().out
+    assert "'foo' has no test referencing it" in capsys.readouterr().out
 
 
 def test_check_tested_main_passes_when_every_symbol_is_named(
@@ -629,3 +711,37 @@ def test_the_typescript_half_is_wired_into_the_workspace_lint() -> None:
     package = (REPO / "frontend" / "package.json").read_text(encoding="utf-8")
 
     assert "scripts/check-tested.mjs" in json.loads(package)["scripts"]["lint"]
+
+
+def test_ledger_state_reports_and_refuses_a_contract_with_no_ledger(
+    tmp_path: Path,
+) -> None:
+    """The ledger reader is driven as a script, the way CI drives the others.
+
+    `tests/test_ledger.py` holds the rules; this is the entry point, and its two
+    exit codes are what a job would read: zero for a ledger it could read, two
+    for a contract whose ledger heading has moved or whose ledger is empty.
+    """
+    assert _run("ledger_state.py", "--report").returncode == 0
+
+    empty = tmp_path / "CLAUDE.md"
+    empty.write_text("# No ledger here\n\nnothing.\n", encoding="utf-8")
+    refused = _run("ledger_state.py", "--contract", str(empty))
+    assert refused.returncode == 2
+    assert "ledger" in refused.stderr.lower()
+
+
+def test_undeclared_names_the_module_a_refusal_must_be_acted_on(
+    tmp_path: Path,
+) -> None:
+    """`io_budget --assert` prints a refusal; `undeclared` is the list behind
+    it, named so an operator learns *which* module has no budget rather than
+    that some module has none."""
+    api = tmp_path / "server" / "api"
+    api.mkdir(parents=True)
+    (api / "budgeted.py").write_text(
+        "IO_BUDGET = 3\ndef read_one() -> None: ...\n", encoding="utf-8"
+    )
+    (api / "bare.py").write_text("def read_two() -> None: ...\n", encoding="utf-8")
+
+    assert io_budget.undeclared(api) == [api / "bare.py"]

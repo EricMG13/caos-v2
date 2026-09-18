@@ -18,22 +18,45 @@
         {
           "module_id": "CP-L10",
           "document_sha256": "66055bbb8d27721d07a5e8cb834c9b96a256ada45a0812ea4fb2e7202ee4f64d",
-          "matched_text": "December 2025 borrowing levels, it is anticipated that the full borrowing capacity will continue to"
-        },
-        {
-          "module_id": "CP-L10",
-          "document_sha256": "66055bbb8d27721d07a5e8cb834c9b96a256ada45a0812ea4fb2e7202ee4f64d",
           "matched_text": "In Q4 2025, we recorded a non-cash goodwill impairment of £1,021.7 million primarily related to the impacts of the UK market and"
-        },
-        {
-          "module_id": "CP-L10",
-          "document_sha256": "66055bbb8d27721d07a5e8cb834c9b96a256ada45a0812ea4fb2e7202ee4f64d",
-          "matched_text": "amount. Investors should view Adjusted Free Cash Flow as a supplement to, and not a substitute for, IFRS measures of liquidity included in our"
         }
       ],
       "expects_ready": [
         "CP-L10",
         "CP-5"
+      ],
+      "expects_projection": [
+        {
+          "module_id": "CP-L10",
+          "field": "qa_status",
+          "value": "Restricted"
+        },
+        {
+          "module_id": "CP-L10",
+          "field": "decision_scope",
+          "value": "SCREENING_ONLY"
+        },
+        {
+          "module_id": "CP-0",
+          "field": "qa_status",
+          "value": "Restricted"
+        },
+        {
+          "module_id": "CP-5",
+          "field": "qa_status",
+          "value": "Restricted"
+        }
+      ],
+      "expects_register": [
+        {
+          "module_id": "CP-L10",
+          "register_id": "TL10.2",
+          "row_key": {
+            "topic_id": "LIQUIDITY_MATURITIES"
+          },
+          "column": "evidence_status",
+          "expected": "PARTIAL"
+        }
       ]
     }
   ]

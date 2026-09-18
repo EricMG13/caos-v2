@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from canonical_fixtures import CanonicalCompletions
 from fastapi.testclient import TestClient
 from httpx import Response
 from test_api_routes import (
@@ -28,15 +29,17 @@ from test_api_routes import (
     run,
 )
 from test_canonical_execution import harness, route
+from test_canonical_runtime import _module_provider, _run_route
 from test_execution_freshness import _Harness
 
 from server.api import app as app_module
 from server.api.identity import TRUST_SWITCH
 from server.api.reads import run as run_read
-from server.api.wire import DirectoryDocument, RunSectionDocument
+from server.api.wire import BlockedByView, DirectoryDocument, RunSectionDocument
 from server.boundary_text import BoundaryText
-from server.engine.route import resolve_route
+from server.engine.route import ResolvedRoute, resolve_route, route_digest
 from server.store import StoreConnection
+from server.store import routes as store_routes
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route
 from server.store.runs import create_case, start_run
@@ -138,9 +141,17 @@ def test_a_case_with_no_run_is_observed_empty(
         "displayed_run_id": None,
         "runs": [],
         "run": None,
+        # Every enabled pathway, spelled out rather than derived from
+        # `ADAPTER_ROUTES`: deriving it from the constant the reader already
+        # uses would assert nothing, and enabling a pathway should cost a
+        # deliberate edit here.
         "route_choices": [
             {"profile_id": "FULL_CREDIT_32", "selection_id": "RELATIVE_VALUE"},
             {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"},
+            {
+                "profile_id": "LITE_CREDIT_22",
+                "selection_id": "LITE_PORTFOLIO_DECISION",
+            },
         ],
     }
     actions = {str(view.action): view.refusal for view in document.chrome.actions}
@@ -399,6 +410,66 @@ def test_the_run_section_carries_the_displayed_runs_work_row(
     assert (after.work.state, after.work.cancel_requested) == ("QUEUED", False)
 
 
+def test_the_run_document_names_the_node_whose_blocked_verdict_ended_it(
+    client: TestClient, lite: tuple[_Harness, UUID]
+) -> None:
+    """Why the run ended, not only that it did (§68). CP-5's validated Blocked
+    answer ends the run; its state is still the bundle's, recomputed from
+    accepted artifacts -- RUNNABLE, with the gate's READY beside it -- so the
+    document alone read as "CP-5 did not run", the opposite of what happened.
+    `blocked_by` names the node, its module and the attempt, and that attempt
+    is the one unaccepted row the same document carries for the node."""
+    harness, viewer = lite
+    answers = CanonicalCompletions(harness.source_id, qa_by_module={"CP-5": "Blocked"})
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+    counter = _CountingConnection(harness.conn)
+    app_module.app.dependency_overrides[app_module.store_connection] = lambda: counter
+
+    view = _document(_section(client, harness.case_id, harness.run_id, viewer)).body.run
+
+    assert view is not None and view.status == "BLOCKED"
+    cp5 = next(node for node in view.nodes if node.module_id == "CP-5")
+    assert (cp5.state, cp5.gate_verdict) == ("RUNNABLE", "READY")
+    assert view.blocked_by == BlockedByView(
+        route_node_id=cp5.route_node_id,
+        module_id="CP-5",
+        attempt_id=view.blocked_by.attempt_id if view.blocked_by else uuid4(),
+    )
+    mine = [a for a in view.attempts if a.route_node_id == cp5.route_node_id]
+    assert [(a.attempt_id, a.accepted) for a in mine] == [
+        (view.blocked_by.attempt_id, False)
+    ]
+    # One round trip more than the running LITE run the budget test counts
+    # (its one readiness row is CP-0's), and only on a BLOCKED run: the row is
+    # read, never re-derived.
+    assert counter.executed == (
+        run_read.SECTION_READ_IO
+        + run_read.CANONICAL_READINESS_IO
+        + run_read.BLOCKED_BY_IO
+    )
+    assert counter.executed <= run_read.IO_BUDGET
+
+
+def test_a_run_the_frontier_emptied_names_no_blocking_node(
+    client: TestClient, lite: tuple[_Harness, UUID]
+) -> None:
+    """The other way a run ends BLOCKED (§39): CP-0 says CP-L10 is BLOCKED, so
+    nothing is ready and the route's own rule ends the run with no node asked.
+    No verdict ended it, so the wire carries no blocking node -- it never
+    claims one that does not exist."""
+    harness, viewer = lite
+    _answer(harness, "CP-0", readiness={"CP-L10": "BLOCKED"})
+    answers = CanonicalCompletions(harness.source_id)
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+    assert answers.prompts == [], "nothing was ready, so nobody was asked"
+
+    view = _document(_section(client, harness.case_id, harness.run_id, viewer)).body.run
+
+    assert view is not None and view.status == "BLOCKED"
+    assert view.blocked_by is None
+    assert all(a.accepted for a in view.attempts)
+
+
 def test_the_run_section_request_path_declares_its_store_budget(
     client: TestClient, lite: tuple[_Harness, UUID]
 ) -> None:
@@ -415,3 +486,75 @@ def test_the_run_section_request_path_declares_its_store_budget(
     read = run_read.SECTION_READ_IO + run_read.CANONICAL_READINESS_IO
     assert counter.executed == read
     assert counter.executed <= run_read.IO_BUDGET
+
+
+def test_a_blocked_run_names_the_source_its_conditional_row_asked_for(
+    client: TestClient, lite: tuple[_Harness, UUID]
+) -> None:
+    """Task 10.3: a run the gate blocked says which source would discharge it.
+
+    CP-0 marks CP-5 CONDITIONAL, which under §61 names a source the effective
+    set does not carry. `node_states` BLOCKS CP-5 on the verdict alone, the
+    frontier empties with required work unfinished, and the run ends BLOCKED
+    with no node's verdict to name (`blocked_by` is null, §39). Before this the
+    document carried the verdict word and nothing else, so a reader was told
+    CP-5 was conditional and never on what -- and the discharge is a new run
+    against a supplied source, which nobody can supply without being told which.
+    `gate_reason` is that cell, on the node it was written about and on no
+    other.
+    """
+    asked = "The FY2025 audited consolidated statements are not in the pinned set."
+    harness, viewer = lite
+    answers = CanonicalCompletions(
+        harness.source_id,
+        readiness={"CP-5": "CONDITIONAL"},
+        blockers={"CP-5": asked},
+    )
+    assert _run_route(harness, _module_provider(harness, answers)) is None
+
+    view = _document(_section(client, harness.case_id, harness.run_id, viewer)).body.run
+
+    assert view is not None and (view.status, view.blocked_by) == ("BLOCKED", None)
+    reasons = {
+        node.module_id: (node.gate_verdict, node.gate_reason) for node in view.nodes
+    }
+    assert reasons["CP-5"] == ("CONDITIONAL", asked)
+    assert reasons["CP-L10"] == ("READY", None)
+    # The gate rules on its consumers, never on itself, so it has neither.
+    assert reasons["CP-0"] == (None, None)
+
+
+def test_the_run_document_does_not_recompute_the_route_digest(
+    client: TestClient,
+    case: tuple[StoreConnection, UUID],
+    run: tuple[UUID, UUID],
+    catalog: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The digest the document carries is the one the read already derived.
+
+    `resolved_route` hashes the route it read to check it against the stored
+    column and refuses `ROUTE_IDENTITY_INVALID` when the two disagree, so a
+    second hash in the view could never answer differently -- it only hashed a
+    route the reader had already vouched for. The pin returns its digest now.
+    """
+    conn, case_id = case
+    run_id, viewer = run
+    pinned = pin_route(conn, run_id, resolve_route(catalog, *LITE))
+    digested: list[str] = []
+    hashed = route_digest
+
+    def counted(route: ResolvedRoute) -> str:
+        digested.append(route.selection_id)
+        return hashed(route)
+
+    # Both spellings: the store's reader, and the view that hashed the route a
+    # second time. `raising=False` so the view losing its import is a pass.
+    for module in (store_routes, run_read):
+        monkeypatch.setattr(module, "route_digest", counted, raising=False)
+
+    document = _document(_section(client, case_id, run_id, viewer))
+
+    assert document.body.run is not None
+    assert document.body.run.route_digest == pinned
+    assert digested == [LITE[1]]

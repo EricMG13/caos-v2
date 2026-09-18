@@ -14,9 +14,12 @@ plan's standing rules. The first, identity derivation, is in
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import replace
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -24,25 +27,39 @@ from uuid import UUID, uuid4
 import pytest
 from canonical_fixtures import CanonicalCompletions
 from conftest import route_fault
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from httpx import Response
 from pydantic import BaseModel
+from starlette.types import Message
 from test_canonical_execution import _accept, _node, _run, harness, route
 from test_execution_freshness import _Harness
 
 from server.api import app as app_module
+from server.api import deps
 from server.api.app import (
+    _STATUS,
+    PERMANENT,
+    RETRY_AFTER_SECONDS,
+    TRANSIENT,
     app,
     blob_store,
     methodology_bundle,
     read_case_events,
     store_connection,
 )
+from server.api.commands import _request as request_module
+from server.api.commands import cases as cases_command
+from server.api.commands import execution as execution_command
+from server.api.commands import qualification as qualification_command
+from server.api.commands import runs as runs_command
+from server.api.commands._request import governed
 from server.api.deps import actor_from_request
+from server.api.edge import is_api_path, refusal_body, startup_failed
 from server.api.reads import analysis as analysis_read
+from server.api.reads import book as book_read
 from server.api.reads import directory as directory_read
 from server.api.reads import model as model_read
 from server.api.reads import reports as reports_read
@@ -54,6 +71,7 @@ from server.blobs import BlobStore
 from server.engine.route import (
     EdgeType,
     NodeResult,
+    blockers_from,
     node_states,
     readiness_from,
     resolve_route,
@@ -62,6 +80,7 @@ from server.methodology.bundle import Bundle
 from server.methodology.handoff import _decoded_record, record_bytes
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
+from server.store.commands import request_digest
 from server.store.members import Standing, grant, revoke
 from server.store.routes import pin_route, pinned_route
 from server.store.runs import block_run, start_run
@@ -279,8 +298,10 @@ def test_an_anonymous_request_is_401_whatever_the_store_is_doing(
     refusal about the store. Both shapes of that refusal are asked for, because
     they are separate codes and either would do as the wrong answer: the store
     unconfigured is STORE_NOT_CONFIGURED, the store not answering is
-    STORE_UNAVAILABLE, and 503 tells a caller to come back later when no amount
-    of later will help them.
+    STORE_UNAVAILABLE, and either would have told a caller whose problem was
+    their own silence that the server was at fault. The two no longer share a
+    status: D3 sends the unconfigured store to 500, because coming back later
+    is not what configures it.
     """
     app.dependency_overrides.pop(store_connection)
     if database_url is None:
@@ -400,8 +421,9 @@ def test_a_misconfigured_store_is_a_server_fault_not_a_bad_request(
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 500
+    assert response.status_code == 500  # D3: an operator configures it, not time.
     assert response.json() == _refused("STORE_NOT_CONFIGURED")
+    assert "retry-after" not in response.headers
 
 
 def test_a_store_that_does_not_answer_is_a_server_fault(
@@ -544,6 +566,19 @@ def test_a_stored_gate_record_the_markdown_does_not_bind_is_a_server_fault(
         500,
         _refused("ARTIFACT_RECORD_MISMATCH"),
     )
+    harness.conn.execute(
+        "UPDATE artifacts SET record_sha256 = %s WHERE attempt_id = %s",
+        (harness.blobs.put(record_bytes(lying)), attempt),
+    )
+    harness.conn.commit()
+
+    response = _section(client, harness.case_id, harness.run_id, viewer)
+
+    # 500 under D3: the record is stored bytes, and a later read reads them.
+    assert (response.status_code, response.json()) == (
+        500,
+        _refused("ARTIFACT_RECORD_MISMATCH"),
+    )
 
 
 def _gate_record(harness: _Harness) -> tuple[UUID, str]:
@@ -596,9 +631,12 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     accepted = {cp5: NodeResult(qa_status=qa_status)}
     states = node_states(full, accepted)
     readiness = readiness_from(full, accepted)
+    reasons = blockers_from(full, accepted)
 
     by_module = {
-        node.module_id: _node_view(full, accepted, node, states, readiness)
+        node.module_id: _node_view(
+            full, accepted, node, states, readiness, reasons=reasons
+        )
         for node in full.nodes
     }
 
@@ -669,6 +707,7 @@ def test_an_unreadable_gate_artifact_is_a_typed_server_fault(
 
     response = _section(client, harness.case_id, harness.run_id, viewer)
 
+    # 500 under D3: damaged bytes stay damaged until an operator restores them.
     assert (response.status_code, response.json()) == (
         500,
         _refused("ARTIFACT_RECORD_MISMATCH"),
@@ -716,6 +755,7 @@ def test_the_wire_key_sets_are_pinned() -> None:
         "waiting_on",
         "awaiting_gate",
         "gate_verdict",
+        "gate_reason",
     }
     assert set(EdgeView.model_fields) == {"source", "type"}
     assert set(RefusalBody.model_fields) == {"code", "clears"}
@@ -761,6 +801,83 @@ def test_every_refusal_code_has_a_constant_clearance() -> None:
         assert "{" not in clears and "}" not in clears and "%" not in clears, code
 
 
+def test_every_refusal_code_has_an_explicit_http_status() -> None:
+    """`_STATUS` is total over `RefusalCode`, the way `CLEARS` beside it is.
+
+    A default would make a code added later answer 400 -- "your request was
+    wrong" -- without anyone choosing that, which is how a store fault came to
+    be served as a binding error. Being total, the table is the choice.
+    """
+    assert set(_STATUS) == set(RefusalCode), set(RefusalCode) - set(_STATUS)
+
+
+def test_every_refusal_is_classed_transient_or_permanent_and_none_is_both() -> None:
+    """The owner's D3 split, stated as a partition rather than as two lists that
+    happen to agree with the table.
+
+    A code in neither set could sit at 503 while nobody had asked whether
+    waiting would help, which is the reading of 503 this split exists to end; a
+    code in both would make the answer depend on which membership was consulted
+    first.
+    """
+    assert TRANSIENT & PERMANENT == frozenset()
+    assert (TRANSIENT | PERMANENT) <= set(RefusalCode)
+    served = {code for code, status in _STATUS.items() if status in (500, 503)}
+    assert TRANSIENT | PERMANENT == served
+    assert {_STATUS[code] for code in TRANSIENT} == {503}
+    assert {_STATUS[code] for code in PERMANENT} == {500}
+
+
+def test_a_permanent_fault_answers_500_and_carries_no_retry_after(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """Read off the response, not off the map: an unconfigured store is a fault
+    only an operator can repair, so nothing about coming back later is true of
+    it and the answer must not say so."""
+    _conn, case_id = case
+    app.dependency_overrides[store_connection] = _refusing(
+        RefusalCode.STORE_NOT_CONFIGURED
+    )
+
+    response = _section(client, case_id, None, uuid4())
+
+    assert (response.status_code, response.json()) == (
+        500,
+        _refused("STORE_NOT_CONFIGURED"),
+    )
+    assert "retry-after" not in response.headers
+
+
+def test_a_transient_fault_answers_503_and_names_when_to_retry(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """A store that is not answering is the one fault here that heals with no
+    one doing anything, so it keeps 503 and now says how soon to ask again --
+    an integer count of seconds, which is the form a proxy can act on."""
+    _conn, case_id = case
+    app.dependency_overrides[store_connection] = _refusing(
+        RefusalCode.STORE_UNAVAILABLE
+    )
+
+    response = _section(client, case_id, None, uuid4())
+
+    assert (response.status_code, response.json()) == (
+        503,
+        _refused("STORE_UNAVAILABLE"),
+    )
+    assert int(response.headers["retry-after"]) == RETRY_AFTER_SECONDS
+
+
+def _refusing(code: RefusalCode) -> Callable[[], StoreConnection]:
+    """A store dependency that refuses `code`, so a status can be read off a
+    real response without arranging the fault that produces it."""
+
+    def dependency() -> StoreConnection:
+        raise Refusal(code)
+
+    return dependency
+
+
 def test_an_undeclared_api_path_or_method_answers_endpoint_not_found_in_the_refusal_body(  # noqa: E501 -- the brief's name
     client: TestClient,
 ) -> None:
@@ -800,6 +917,7 @@ def test_the_surface_is_exactly_the_routes_it_declares(
 
     assert declared == {
         "/api/v1/directory": "read_directory",
+        "/api/v1/book": "read_book",
         "/api/v1/cases/{case_id}/upload": "read_upload",
         "/api/v1/cases/{case_id}/run": read_run_section.__name__,
         "/api/v1/cases/{case_id}/analysis": "read_analysis",
@@ -823,17 +941,28 @@ def test_the_surface_is_exactly_the_routes_it_declares(
             "read_gate_preview"
         ),
         "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval": "approve",
+        "/api/v1/qualification/{evidence_sha256}/verdict": "sign_verdict",
+        # Task 12.1: the seven governed writes that had no request path.
+        "/api/v1/cases/{case_id}/members": "grant_standing",
+        "/api/v1/cases/{case_id}/members/{user_id}/revocation": "revoke_standing",
+        "/api/v1/cases/{case_id}/sources/{source_id}/withdrawal": "withdraw",
+        "/api/v1/cases/{case_id}/runs/{run_id}/revisions": "save",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/signature": "sign",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/freeze": "freeze",
+        "/api/v1/cases/{case_id}/revisions/{revision_id}/filing": "file",
     }
 
 
 def test_every_section_read_depends_on_the_shared_dependencies() -> None:
     """Each section route calls the `server.api.deps` functions directly, in
-    the order identity, then any path/query parser, then the store, blobs and
-    bundle -- never a per-module wrapper that resolves them lazily.
+    the order identity, then any path/query parser and the case's visibility,
+    then the store, blobs and bundle -- never a per-module wrapper that
+    resolves them lazily.
 
-    A dependency's own path parser (`case_path`, `run_query`) stays: those are
-    parameter parsers, not copies of `app.py`'s dependencies, so they are
-    named here rather than in `server.api.deps`.
+    The parsers (`case_path`, `run_query`, `revision_query`) and `visible_case`
+    are `server.api.deps`'s too, so a route that took a copy would show here.
+    `visible_case` opens the store, and stays behind identity by its own
+    sub-dependencies whatever position a route gives it.
     """
     routes = {
         route.path: route
@@ -843,6 +972,7 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
             run_read,
             analysis_read,
             model_read,
+            book_read,
             reports_read,
         )
         for route in router.router.routes
@@ -853,13 +983,24 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         for path, route in routes.items()
     }
     assert calls["/api/v1/directory"] == [actor_from_request, store_connection]
+    # The Book is portfolio-scoped: no case in its path, so no `case_path` and
+    # no `visible_case`. Standing is read per credit from the listing instead.
+    assert calls["/api/v1/book"] == [
+        actor_from_request,
+        store_connection,
+        deps.blob_store,
+        deps.methodology_bundle,
+    ]
     assert calls["/api/v1/cases/{case_id}/upload"] == [
         actor_from_request,
-        upload_read.case_path,
+        deps.case_path,
+        deps.visible_case,
         store_connection,
     ]
     assert calls["/api/v1/cases/{case_id}/run"] == [
         actor_from_request,
+        deps.case_path,
+        deps.run_query,
         store_connection,
         blob_store,
         methodology_bundle,
@@ -872,14 +1013,16 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
     )
     assert [d.call for d in events.dependant.dependencies] == [
         actor_from_request,
-        upload_read.case_path,
-        analysis_read.run_query,
+        deps.case_path,
+        deps.run_query,
+        deps.visible_case,
         store_connection,
     ]
     assert calls["/api/v1/cases/{case_id}/analysis"] == [
         actor_from_request,
-        upload_read.case_path,
-        analysis_read.run_query,
+        deps.case_path,
+        deps.run_query,
+        deps.visible_case,
         store_connection,
         blob_store,
         methodology_bundle,
@@ -890,9 +1033,9 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
     )
     report_dependencies = [
         actor_from_request,
-        upload_read.case_path,
-        analysis_read.run_query,
-        reports_read.revision_query,
+        deps.case_path,
+        deps.run_query,
+        deps.revision_query,
         store_connection,
         blob_store,
         methodology_bundle,
@@ -933,6 +1076,7 @@ def test_corrupt_route_is_a_sanitized_store_failure(
         conn.execute("UPDATE run_routes SET route_digest = 'synthetic-corruption'")
     conn.commit()
     response = _section(client, case_id, run_id, viewer)
+    # 500 under D3: the pin is immutable, so the next read resolves it the same.
     assert response.status_code == 500
     assert response.json() == _refused("ROUTE_IDENTITY_INVALID")
 
@@ -1007,3 +1151,205 @@ class _CountingConnection:
     def execute(self, *args: object, **kwargs: object) -> object:
         self.executed += 1
         return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
+
+
+def test_no_route_module_parses_a_path_uuid_by_hand() -> None:
+    """Every id a route reads off the path, the query or a header is parsed by
+    one of `server.api.deps`'s parsers, so the refusal a malformed id gets is
+    decided in one place. `identity.py` is the boundary beneath `deps` (which
+    imports it): its subject header refuses `NOT_AUTHENTICATED`, and it cannot
+    import the module that depends on it."""
+    api = Path(__file__).resolve().parents[1] / "server" / "api"
+    hand_rolled = sorted(
+        str(path.relative_to(api))
+        for path in api.rglob("*.py")
+        if path.name not in ("deps.py", "identity.py")
+        and "ValueError" in path.read_text(encoding="utf-8")
+        and "UUID(" in path.read_text(encoding="utf-8")
+    )
+    assert hand_rolled == [], hand_rolled
+
+
+def test_the_shared_parsers_refuse_in_the_declared_body_and_chain_nothing() -> None:
+    """One parser per id, each refusing the code its route answers, with the
+    input -- the ValueError quotes it -- chained behind none of them."""
+    cases: list[tuple[Callable[[], object], RefusalCode]] = [
+        (lambda: deps.case_path("not-a-case"), RefusalCode.CASE_NOT_FOUND),
+        (lambda: deps.run_path("not-a-run"), RefusalCode.RUN_NOT_FOUND),
+        (lambda: deps.run_query("not-a-run"), RefusalCode.RUN_NOT_FOUND),
+        (lambda: deps.revision_query(None), RefusalCode.DELIVERABLE_NOT_FOUND),
+        (lambda: deps.revision_query("x"), RefusalCode.DELIVERABLE_NOT_FOUND),
+        # The three path siblings, each answering a different code on purpose:
+        # a source nobody may use and a revision that is not there are private
+        # 404s, while a malformed member subject is a malformed *request* --
+        # the caller already reads this case, so hiding it would say nothing.
+        (
+            lambda: deps.source_path("not-a-source"),
+            RefusalCode.EVIDENCE_NOT_AVAILABLE,
+        ),
+        (
+            lambda: deps.revision_path("not-a-revision"),
+            RefusalCode.DELIVERABLE_NOT_FOUND,
+        ),
+        (lambda: deps.member_path("not-a-member"), RefusalCode.REQUEST_INVALID),
+        (
+            lambda: deps.parse_uuid("", RefusalCode.PAGE_NOT_AVAILABLE),
+            RefusalCode.PAGE_NOT_AVAILABLE,
+        ),
+    ]
+    for parse, code in cases:
+        with pytest.raises(Refusal) as caught:
+            parse()
+        assert caught.value.code is code
+        assert caught.value.__cause__ is None and caught.value.__context__ is None
+    known = uuid4()
+    assert deps.case_path(str(known)) == deps.run_path(str(known)) == known
+    assert deps.run_query(None) is None
+    assert deps.run_query(str(known)) == deps.revision_query(str(known)) == known
+    assert deps.source_path(str(known)) == known
+    assert deps.revision_path(str(known)) == deps.member_path(str(known)) == known
+
+
+def test_case_visibility_is_one_rule_wherever_the_standing_was_read() -> None:
+    """`readable` is the floor every case read applies -- `visible_case` to the
+    standing it reads on its own, the Run and evidence reads to the standing
+    their projection row carries -- so a stranger, a revoked member and an
+    unknown case are the same private answer everywhere."""
+    for standing in Standing:
+        assert deps.readable(standing) is standing
+    with pytest.raises(Refusal) as caught:
+        deps.readable(None)
+    assert caught.value.code is RefusalCode.CASE_NOT_FOUND
+    assert deps.READ_REQUIRES is Standing.READER
+
+
+def test_a_stranger_with_a_malformed_run_is_answered_about_the_case(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """`run_path` is declared after the standing dependency on every command
+    route that takes a run, so the run id is parsed only once the case is
+    visible: a stranger learns nothing from a malformed run id, and a member
+    gets `RUN_NOT_FOUND`. The gate preview is the route with no write floor."""
+    conn, case_id = case
+    member = uuid4()
+    grant(conn, case_id=case_id, user_id=member, standing=Standing.READER)
+    conn.commit()
+    path = f"/api/v1/cases/{case_id}/runs/not-a-run/gates/source-set/preview"
+
+    stranger = client.get(path, headers=_as(uuid4()))
+    seen = client.get(path, headers=_as(member))
+
+    assert (stranger.status_code, stranger.json()) == (404, _refused("CASE_NOT_FOUND"))
+    assert (seen.status_code, seen.json()) == (404, _refused("RUN_NOT_FOUND"))
+
+
+def test_every_case_command_ends_in_the_governed_envelope() -> None:
+    """`governed` (digest, `run_command`, receipt) is the one envelope; the
+    command modules no longer spell it out. A verdict is the exception: it has
+    no case to scope, so its one transaction is its own (§65)."""
+    for module in (cases_command, runs_command, execution_command):
+        source = Path(str(module.__file__)).read_text(encoding="utf-8")
+        assert "run_command(" not in source, module.__name__
+        assert "governed(" in source, module.__name__
+    verdict = Path(str(qualification_command.__file__)).read_text(encoding="utf-8")
+    assert "governed(" not in verdict
+    request = request_module.CommandRequest("CREATE_RUN", None, None, None, {"a": 1})
+    assert request.digest() == request_digest(
+        "CREATE_RUN", case_id=None, run_id=None, gate=None, body={"a": 1}
+    )
+
+
+def test_the_gateway_helpers_answer_the_same_for_the_guard_and_the_app() -> None:
+    """`is_api_path`, `refusal_body` and `startup_failed` are the guard's, the
+    dispatcher's and the app's one answer each."""
+    assert [is_api_path(p) for p in ("/api", "/api/", "/api/v1/x", "/apix", "/")] == [
+        True,
+        True,
+        True,
+        False,
+        False,
+    ]
+    body = refusal_body(RefusalCode.ENDPOINT_NOT_FOUND)
+    assert RefusalBody.model_validate_json(body) == RefusalBody(
+        code=RefusalCode.ENDPOINT_NOT_FOUND,
+        clears=CLEARS[RefusalCode.ENDPOINT_NOT_FOUND],
+    )
+    assert app_module._body(RefusalCode.ENDPOINT_NOT_FOUND, 404).body == body
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "lifespan.startup"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    asyncio.run(startup_failed(receive, send))
+    assert sent == [
+        {
+            "type": "lifespan.startup.failed",
+            "message": RefusalCode.EDGE_CONFIG_INVALID.value,
+        }
+    ]
+
+
+def test_an_unknown_gate_slug_is_routings_own_404_before_any_connection() -> None:
+    """`path_gate` maps the path's slug to a `Gate` and raises a bare
+    `HTTPException` for anything else -- deliberately not a `Refusal`, because
+    a slug the router does not carry is a route that does not exist, answered
+    before an idempotency key or a store connection is asked for. The two
+    declared slugs are asserted beside it so a rename cannot pass by making
+    every slug unknown."""
+    from starlette.requests import Request
+
+    from server.api.commands.runs import path_gate
+    from server.store.gates import Gate
+
+    def _request(slug: str) -> Request:
+        return Request({"type": "http", "path_params": {"gate": slug}})
+
+    assert path_gate(_request("source-set")) is Gate.SOURCE_SET
+    assert path_gate(_request("research-plan")) is Gate.RESEARCH_PLAN
+
+    with pytest.raises(HTTPException) as caught:
+        path_gate(_request("no-such-gate"))
+
+    assert caught.value.status_code == 404
+
+
+def test_every_governed_write_goes_through_the_one_envelope() -> None:
+    """`governed` is where the digest, the replay under the key, the case lock
+    and the receipt's validation against its declared model are wired together.
+    A command that reached `run_command` itself would get the unit and skip
+    `command_response`, so its answer would never be checked against the model
+    it declares -- and nothing else in the tree would notice.
+
+    Written as the shape of the hand-rolled-parser test above, and for the same
+    reason: what must not exist cannot be proved by testing what does.
+    `qualification.py` is the stated exception and calls neither -- its write is
+    `record_verdict` in its own transaction, which its docstring says out loud.
+    """
+    commands = Path(__file__).resolve().parents[1] / "server" / "api" / "commands"
+    callers = sorted(
+        path.name
+        for path in commands.rglob("*.py")
+        if re.search(r"^\s*(?:\w+ = )?run_command\(", path.read_text("utf-8"), re.M)
+    )
+    assert callers == ["_request.py"], callers
+
+    # A module that declares a *write* route, by the decorator rather than by
+    # its name: `availability.py` sits here and declares none, and a module
+    # added tomorrow must be judged on what it serves, not on what it is called.
+    writes = re.compile(r"@router\.(?:post|put|patch|delete)\(")
+    declaring = sorted(
+        path.name
+        for path in commands.rglob("*.py")
+        if writes.search(path.read_text("utf-8"))
+    )
+    assert declaring, "no module declares a write route; the reader read nothing"
+    for name in declaring:
+        if name == "qualification.py":
+            continue  # the stated exception; its own docstring says why
+        module = import_module(f"server.api.commands.{name[:-3]}")
+        # The object, not the spelling: a module that defined its own helper
+        # called `governed` would satisfy a text search and bypass the envelope.
+        assert getattr(module, "governed", None) is governed, name
