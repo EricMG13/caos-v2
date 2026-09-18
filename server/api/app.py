@@ -28,6 +28,7 @@ identity-header hygiene, the Origin check -- before routing or identity.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
 from json import dumps
@@ -81,7 +82,6 @@ from server.api.stream import (
     POLL_IO,
     StreamEvent,
     case_tail,
-    release_stream_slot,
     take_stream_slot,
 )
 from server.refusals import Refusal, RefusalCode
@@ -474,7 +474,7 @@ def read_case_events(
     # busy". `stream_slot` releases on every way out of the generator,
     # `GeneratorExit` included, which is how a browser going away returns its
     # slot.
-    take_stream_slot()
+    slot = take_stream_slot()
     events = case_tail(
         conn,
         case_id=case_id,
@@ -491,10 +491,18 @@ def read_case_events(
             for event in events:
                 yield _frame(event)
         finally:
-            release_stream_slot()
+            slot.release()
+
+    tail = framed()
+    # The safety net for the one case the `finally` above cannot reach: a
+    # generator that is never started never unwinds, so a response built and
+    # then never iterated would hold its slot until the process restarted.
+    # `StreamSlot.release` is one-shot, so whichever of the two runs first is
+    # the one that counts.
+    weakref.finalize(tail, slot.release)
 
     return StreamingResponse(
-        framed(),
+        tail,
         media_type="text/event-stream",
         # No store, and no proxy buffering: a tail that arrived in one block
         # when the deadline passed would not be a tail.

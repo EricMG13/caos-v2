@@ -4105,6 +4105,17 @@ which is every LITE route this build enables.
 *run*, and every write rechecks the token it was taken under, so two nodes of
 one run writing under one lease is the claim working rather than a hole in it.
 
+**Two nodes of one run cannot deadlock on the locks, and the reason is
+structural rather than a convention anyone has to keep.** `lock_run` takes the
+owner case's lock and *then* the run's, inside itself, so every path in this
+tree acquires them in that order and no cycle can form -- a hazard that would
+otherwise be invisible until a wide route hung in production, because a
+deadlock needs two writers and until now there was one. It is also why the
+concurrency is worth having: the locked stretches are store reads measured in
+milliseconds and they serialise on the case, while `require_idle` holds the
+provider call *outside* any transaction, so what overlaps is the part that
+takes seconds.
+
 **Every node is awaited even after one fails.** A call already in flight will
 be billed whatever the loop decides, so abandoning its result would pay for an
 answer nobody reads — the same reasoning the worker applies to SIGTERM. The

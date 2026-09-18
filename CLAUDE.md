@@ -951,8 +951,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`test_the_twenty_fifth_tail_is_refused_rather_than_the_next_ordinary_request`,
   which also asserts the cap sits below the Dockerfile's limit so it cannot be
   raised into uselessness; `test_a_tail_slot_is_returned_however_the_stream_ends`
-  holds the release through `GeneratorExit`, which is how a browser going away
-  returns its slot). **The poll itself is untouched** and keeps its own Phase 6
+  holds the release through all three teardowns).
+  **Its first version leaked a slot, and the leak was invisible to the
+  journey.** The release sat in the streaming generator's `finally`, which
+  covers a tail that ends and one closed mid-flight -- but a generator that is
+  never started never unwinds, so a response built and then never iterated held
+  its slot until the process restarted, and on a *cap* that is capacity nobody
+  gets back. Starlette always starts the body, so 22 journey tests on three
+  engines passed over it without a single 503. Found by probing the three
+  teardowns directly rather than by reading Starlette: `StreamSlot.release` is
+  now one-shot and a `weakref.finalize` on the generator is the net under the
+  case a `finally` cannot reach, with the guard watched failing without it. **The poll itself is untouched** and keeps its own Phase 6
   entry. *Upgrade:* `LISTEN`/`NOTIFY`, so the poll becomes a fallback rather
   than the mechanism -- still owed, and still worth doing only when there are
   enough concurrent watchers to measure it. The cap is also a number nobody has

@@ -10,10 +10,12 @@ the one each request opens.
 
 from __future__ import annotations
 
+import gc
 import re
 import socket
 import threading
 import time
+import weakref
 from collections.abc import Callable, Generator, Iterator, Mapping
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -30,7 +32,6 @@ from server.api.stream import (
     CONNECT_IO,
     POLL_IO,
     case_tail,
-    release_stream_slot,
     take_stream_slot,
 )
 from server.api.wire import CLEARS
@@ -641,30 +642,53 @@ def test_the_event_stream_costs_its_declared_budget(
 
 
 def test_a_tail_slot_is_returned_however_the_stream_ends() -> None:
-    """A leaked slot is capacity only a restart returns, so the release sits in
-    a `finally` and not at the end of the happy path. A tail ends at its
-    deadline, on lost standing, or because the browser went away -- which
-    reaches the generator as a `GeneratorExit`, the case a `return` at the
-    bottom would miss entirely."""
+    """A leaked slot is capacity only a restart returns, so every way a tail
+    can end has to give it back -- and there are three, not one.
+
+    The `finally` covers a stream that runs out and one closed mid-flight,
+    which is what a browser going away looks like to a generator. It does
+    **not** cover a generator that is never started: a generator that has not
+    reached its first `yield` has nothing to unwind, so its `finally` never
+    runs. That case is measured here rather than reasoned about, because the
+    first version of this code had exactly that hole and the journey could not
+    see it -- Starlette always starts the body, so the leak needed a response
+    that was built and then dropped.
+    """
     slots = stream._Slots()
 
-    take_stream_slot(slots, limit=1)
-    assert slots.open == 1
-    release_stream_slot(slots)
-    assert slots.open == 0
-
-    def tail() -> Generator[int]:
-        take_stream_slot(slots, limit=1)
+    def tail(slot: stream.StreamSlot) -> Generator[int]:
         try:
             yield 1
             yield 2
         finally:
-            release_stream_slot(slots)
+            slot.release()
 
-    abandoned = tail()
-    next(abandoned)
-    assert slots.open == 1
-    abandoned.close()  # the browser going away, mid-stream
+    for ending in ("never started", "closed mid-stream", "run to the end"):
+        slot = take_stream_slot(slots, limit=5)
+        opened = tail(slot)
+        weakref.finalize(opened, slot.release)
+        assert slots.open == 1, ending
+        if ending == "closed mid-stream":
+            next(opened)
+            opened.close()
+        elif ending == "run to the end":
+            list(opened)
+        del opened
+        gc.collect()
+        assert slots.open == 0, ending
+
+
+def test_a_slot_is_given_back_once_even_though_two_things_release_it() -> None:
+    """Both the `finally` and the finalizer run for an ordinary stream, and a
+    counter that took both would drift *upward* in capacity with every tail --
+    a cap that quietly stops capping, which is worse than no cap because it
+    still reads like one."""
+    slots = stream._Slots()
+    slot = take_stream_slot(slots, limit=1)
+
+    slot.release()
+    slot.release()
+    slot.release()
 
     assert slots.open == 0
 

@@ -88,31 +88,45 @@ class _Slots:
 SLOTS = _Slots()
 
 
-def take_stream_slot(slots: _Slots = SLOTS, limit: int = STREAM_LIMIT) -> None:
+class StreamSlot:
+    """One held tail slot, given back exactly once however the stream ends.
+
+    One-shot because it is released from two places and neither may double
+    count. The ordinary path is the streaming generator's `finally`, which runs
+    when the tail is delivered, hits its deadline, loses standing, or is closed
+    because the browser went away. The second is a `weakref.finalize` on the
+    generator, for the one case a `finally` cannot reach: **a generator that is
+    never started never unwinds**, so a response built and then never iterated
+    would hold its slot until the process restarted. Measured rather than
+    assumed -- a generator dropped before its first `next()` leaves the counter
+    raised, and that slot is capacity only a restart returns.
+    """
+
+    __slots__ = ("_held", "_slots")
+
+    def __init__(self, slots: _Slots) -> None:
+        self._slots, self._held = slots, True
+
+    def release(self) -> None:
+        with self._slots.lock:
+            if self._held:
+                self._slots.open -= 1
+                self._held = False
+
+
+def take_stream_slot(slots: _Slots = SLOTS, limit: int = STREAM_LIMIT) -> StreamSlot:
     """Take one of the tail slots, or refuse `STREAM_LIMIT_REACHED`.
 
-    An explicit pair rather than a context manager, because the two halves
-    happen in different places: the slot is taken in the route, before the
-    response exists, so a refusal is an ordinary refusal body with a status and
-    a `Retry-After`; it is released inside the generator that streams, which is
-    the only thing that knows when the tail is over.
+    Taken in the route rather than in the generator, because the response does
+    not exist there yet and a refusal can still be an ordinary refusal body
+    with a status and a `Retry-After`. What it hands back is the thing the
+    stream gives up when the tail is over.
     """
     with slots.lock:
         if slots.open >= limit:
             raise Refusal(RefusalCode.STREAM_LIMIT_REACHED)
         slots.open += 1
-
-
-def release_stream_slot(slots: _Slots = SLOTS) -> None:
-    """Give a tail slot back, however the stream ended.
-
-    Called from a `finally`, never from the end of the happy path: a tail ends
-    at its deadline, on lost standing, or because the browser went away, which
-    reaches the generator as a `GeneratorExit`. A slot leaked on any of those
-    is capacity that only a restart returns.
-    """
-    with slots.lock:
-        slots.open -= 1
+    return StreamSlot(slots)
 
 
 # The events that end the run half of a stream.
