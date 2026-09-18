@@ -134,11 +134,12 @@ with `gitnexus status`.
 One image runs as two containers: the API
 (`server.api.site:application`, serving `/api` and the static export from one
 origin) and the worker (`python -m server.engine.worker`). It expects an
-authenticating edge in front of it that sets `x-caos-user`,
-`x-forwarded-groups` and the shared `x-caos-edge-token`; the contract is in
-`server/api/edge.py` and `docs/DECISIONS.md` §53. In edge mode the API needs
-`CAOS_EDGE_TOKEN` (at least 32 bytes), `CAOS_PUBLIC_ORIGIN`, and no
-`CAOS_TRUST_ROLE_HEADER`, or it refuses to start. Started without a token, it
+authenticating edge in front of it that sets one `x-caos-edge-assertion` per
+request -- an HMAC over the subject, groups, method, target, time and a
+nonce under the deployment's key; the contract is in `server/api/edge.py`
+and `docs/DECISIONS.md` §53 and §93. In edge mode the API needs
+`CAOS_EDGE_TOKEN` (the key, at least 32 bytes), `CAOS_PUBLIC_ORIGIN`, and no
+`CAOS_TRUST_ROLE_HEADER`, or it refuses to start. Started without a key, it
 answers only `GET /api/health`, and grants READER to whoever reaches it: with
 no edge in front, `x-forwarded-groups` is nobody's assertion and is not read,
 so only the development switch can name a role above the floor.

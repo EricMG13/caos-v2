@@ -282,6 +282,71 @@ jobs:
           exit-code: "1"
           version: v0.70.0
 
+  smoke:
+    # `make smoke-production` in CI (docs/DECISIONS.md section 93, closing
+    # the ledger's "proven locally, not in CI"): the production image booted
+    # on its own database, the image suite, then the real-browser journey on
+    # chromium, firefox and webkit through the TLS test edge, each engine on
+    # a disposable stack. About 25 minutes, so it runs on a push to main, on
+    # the nightly schedule and on dispatch -- never per pull request. The two
+    # commands are the Makefile target's own, run here rather than through
+    # `make` so the image built once by buildx (and cached in GitHub's cache
+    # like the image job's) is the one booted, instead of a second build.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.14"}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+      # --only-binary :all: — see the lint job above.
+      - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # --ignore-scripts and the pinned Playwright binary, as the frontend job.
+      - run: npm ci --ignore-scripts
+        working-directory: frontend
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+      - run: ./node_modules/.bin/playwright install --with-deps
+        working-directory: frontend
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          tags: caos:ci
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The image suite: `CAOS_REQUIRE_IMAGE=1` makes a missing image a failure.
+      - run: pytest --no-cov -m production_image tests/test_production_image.py
+        env:
+          IMAGE: caos:ci
+          CAOS_REQUIRE_IMAGE: "1"
+      # The journey: each engine gets its own stack and its own crash-once
+      # worker; the TLS edge's certificate is minted into the run's temporary
+      # directory with the runner's own openssl. No provider credential is set.
+      - run: python tests/journey/run.py
+        env:
+          IMAGE: caos:ci
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: journey-evidence
+          path: frontend/test-results/
+          if-no-files-found: ignore
+
   security:
     # Python pinned deliberately. bandit 1.7.10 reaches for ast.Constant.s,
     # which newer interpreters do not provide: under 3.14 it skips every file

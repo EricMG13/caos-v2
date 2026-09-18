@@ -61,7 +61,11 @@ const ISSUER_NAME = "Journey Holdings";
 const REPORTING_PERIOD = "FY2026 Q2";
 const ANALYSIS_DATE = "2026-09-14";
 const ROUTE_NODES = ["CP-0", "CP-L10", "CP-5"] as const;
-const EDGE_ORIGIN = "http://127.0.0.1:18080";
+// TLS: the same origin `tests/journey/run.py` starts the edge on and the
+// API is told is public; a context made by hand below accepts the run's
+// throwaway certificate the way the config's `use` does for the fixtures.
+const EDGE_ORIGIN = "https://127.0.0.1:18080";
+const EDGE_CONTEXT = { baseURL: EDGE_ORIGIN, ignoreHTTPSErrors: true } as const;
 
 interface PackFile {
   name: string;
@@ -158,7 +162,7 @@ async function contextAs(
   browser: Browser,
   persona: PersonaName,
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ baseURL: EDGE_ORIGIN });
+  const context = await browser.newContext(EDGE_CONTEXT);
   const page = await context.newPage();
   await loginAs(page, persona);
   return { context, page };
@@ -413,7 +417,7 @@ test.describe.serial("journey", () => {
   let payloadSha256 = "";
 
   test.beforeAll(async ({ browser }) => {
-    page = await browser.newPage();
+    page = await browser.newPage(EDGE_CONTEXT);
     await loginAs(page, "analyst");
     // Fails in seconds, not the full test timeout, when the edge or the API
     // is misconfigured (a stale edge token, a port collision with a leftover
@@ -638,7 +642,7 @@ test.describe.serial("journey", () => {
   test("journey: a reader sees qualification as restricted beside the real PDF evidence", async ({
     browser,
   }) => {
-    const readerContext = await browser.newContext({ baseURL: EDGE_ORIGIN });
+    const readerContext = await browser.newContext(EDGE_CONTEXT);
     const reader = await readerContext.newPage();
     await loginAs(reader, "reader");
 
@@ -889,7 +893,7 @@ test.describe.serial("journey", () => {
     // edge's session cookie is one name per context, and logging in as
     // "intruder" here must never clobber the analyst session every other
     // test in this file depends on.
-    const intruderContext = await browser.newContext({ baseURL: EDGE_ORIGIN });
+    const intruderContext = await browser.newContext(EDGE_CONTEXT);
     const intruder = await intruderContext.newPage();
     await loginAs(intruder, "intruder");
     const response = await intruder.request.get(`/api/v1/cases/${caseId}/analysis?run=${runId}`, {
@@ -916,7 +920,7 @@ test.describe.serial("journey", () => {
     // own context, the same way the intruder persona above does. It carries
     // no cookie, so the "no session" 401 the edge answers with is exactly
     // the point: this attacker page never had the analyst's session either.
-    const attackerContext = await browser.newContext();
+    const attackerContext = await browser.newContext({ ignoreHTTPSErrors: true });
     try {
       const attacker = await attackerContext.newPage();
       await attacker.goto(foreign.url);

@@ -1,16 +1,24 @@
 """The journey's test edge: a reverse proxy that plays the operator's OIDC edge.
 
-It implements the brief's edge contract (Task 4.5 decision 2) and nothing more,
-so the real-stack journey reaches the API the way production would:
+It implements the brief's edge contract (Task 4.5 decision 2, and §93's
+signed assertion) and nothing more, so the real-stack journey reaches the API
+the way production would:
 
-- inbound `x-caos-user`, `x-forwarded-groups`, `x-caos-role` and
-  `x-caos-edge-token`, every header whose name contains `_`, and the cookie
-  header (its own session cookie; the API issues and reads none) are dropped;
-- exactly one `x-caos-user`, `x-forwarded-groups` and `x-caos-edge-token` are
-  set from the logged-in persona and the configured token;
 - only `origin`, `sec-fetch-*`, `idempotency-key`, `last-event-id`,
-  `content-type`, `content-length` and `accept` pass through, with the body;
+  `content-type`, `content-length` and `accept` pass through, with the body --
+  so inbound `x-caos-user`, `x-forwarded-groups`, `x-caos-role`,
+  `x-caos-edge-assertion`, every header whose name contains `_`, and the
+  cookie header (its own session cookie; the API issues and reads none) are
+  dropped by construction, never by a deny list;
+- exactly one `x-caos-edge-assertion` is set, signed under the configured key
+  over the logged-in persona's subject and groups, this request's method and
+  raw target, the current second and a fresh nonce -- a retried connect signs
+  again, so no nonce is ever sent twice;
 - responses stream frame by frame, so SSE is unbuffered, with no read timeout.
+
+It serves TLS (`tests/journey/run.py` mints a throwaway certificate per run),
+so its session cookie is the contract's: `__Host-` prefixed, `Secure`,
+`HttpOnly`, `SameSite=Lax`.
 
 An event stream is certain to be cut -- the browser navigates away from the
 page tailing it, the API's tail deadline or the stack's teardown closes it --
@@ -21,11 +29,12 @@ quietly -- a cut JSON body presented as complete would be an answer nobody
 sent -- and any other failure still raises. A browser that has gone is logged
 the same way whatever it was reading, since nobody is left to mislead.
 
-`GET /_edge/login?persona=analyst|approver|filer|reader|intruder` stands in for the OIDC
-login; any other request without a valid session is answered 401 here and
-never reaches the API. Run with
+`GET /_edge/login?persona=analyst|approver|filer|reader|intruder` stands in for
+the OIDC login; any other request without a valid session is answered 401
+here and never reaches the API. Run with
 `python -m uvicorn --factory journey.edge:from_environment --host 127.0.0.1
---port 18080` and `JOURNEY_UPSTREAM` / `CAOS_EDGE_TOKEN` set.
+--port 18080 --ssl-keyfile ... --ssl-certfile ...` and `JOURNEY_UPSTREAM` /
+`CAOS_EDGE_TOKEN` set.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ import asyncio
 import logging
 import os
 import secrets
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from uuid import UUID
@@ -44,11 +54,12 @@ from starlette.requests import ClientDisconnect, Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-SESSION_COOKIE = "caos_edge_session"
+from server.api.edge import EDGE_ASSERTION_HEADER, NONCE_HEX_CHARS, sign_assertion
+
+SESSION_COOKIE = "__Host-caos_edge_session"
 LOGIN_PATH = "/_edge/login"
-EDGE_TOKEN_HEADER = "x-caos-edge-token"
 UPSTREAM_ENV = "JOURNEY_UPSTREAM"
-TOKEN_ENV = "CAOS_EDGE_TOKEN"
+KEY_ENV = "CAOS_EDGE_TOKEN"
 # How long a GET waits for an unreachable upstream (a restarting API) before
 # the edge answers 502, as an operator's proxy retries a refused connect.
 UPSTREAM_WAIT_SECONDS = 30.0
@@ -95,21 +106,30 @@ PERSONAS = {
 }
 
 
+def assertion_for(request: Request, persona: Persona, key: bytes) -> str:
+    """This request's assertion: the persona, the method and raw target, now,
+    and a nonce minted here and nowhere else."""
+    return sign_assertion(
+        key,
+        subject=str(persona.user_id),
+        groups=persona.groups.split(","),
+        method=request.method,
+        target=raw_target(request),
+        issued_at=int(time.time()),
+        nonce=secrets.token_hex(NONCE_HEX_CHARS // 2),
+    )
+
+
 def forwarded_headers(
-    request: Request, persona: Persona, token: str
+    request: Request, persona: Persona, key: bytes
 ) -> list[tuple[str, str]]:
-    """The allow-listed client headers, then exactly one of each identity header."""
+    """The allow-listed client headers, then exactly one signed assertion."""
     kept = [
         (name, value)
         for name, value in request.headers.items()
         if "_" not in name and (name in PASSED or name.startswith("sec-fetch-"))
     ]
-    return [
-        *kept,
-        ("x-caos-user", str(persona.user_id)),
-        ("x-forwarded-groups", persona.groups),
-        (EDGE_TOKEN_HEADER, token),
-    ]
+    return [*kept, (EDGE_ASSERTION_HEADER, assertion_for(request, persona, key))]
 
 
 def raw_target(request: Request) -> str:
@@ -175,7 +195,8 @@ async def send_upstream(
     """Send upstream; a GET waits out a refused connect (a restarting API).
 
     Only a connect that never reached the API is retried, so nothing is sent
-    twice, and an unsafe method is never retried.
+    twice, and an unsafe method is never retried. `build` is called per
+    attempt, so each carries its own nonce and second.
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + (UPSTREAM_WAIT_SECONDS if retry else 0.0)
@@ -189,10 +210,11 @@ async def send_upstream(
 
 
 def make_edge(
-    upstream: str, token: str, *, transport: httpx.AsyncBaseTransport | None = None
+    upstream: str, key: str, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> ASGIApp:
-    """The edge in front of `upstream`, proving itself with `token`."""
+    """The edge in front of `upstream`, signing each request under `key`."""
     sessions: dict[str, Persona] = {}
+    signing_key = key.encode()
     client = httpx.AsyncClient(
         base_url=upstream,
         transport=transport,
@@ -207,11 +229,16 @@ def make_edge(
         session = secrets.token_urlsafe(32)
         sessions[session] = persona
         answer = PlainTextResponse("logged in")
-        # Recorded deviation (brief decision 11): over http://127.0.0.1 the
-        # cookie cannot be `Secure`, so it also drops the `__Host-` prefix the
-        # production contract names. HttpOnly and SameSite=Lax are kept.
+        # The contract's cookie (decision 2): `__Host-` needs Secure, path=/
+        # and no domain, which the TLS edge `tests/journey/run.py` starts can
+        # now satisfy.
         answer.set_cookie(
-            SESSION_COOKIE, session, httponly=True, samesite="lax", path="/"
+            SESSION_COOKIE,
+            session,
+            secure=True,
+            httponly=True,
+            samesite="lax",
+            path="/",
         )
         return answer
 
@@ -223,7 +250,7 @@ def make_edge(
             return client.build_request(
                 request.method,
                 target,
-                headers=forwarded_headers(request, persona, token),
+                headers=forwarded_headers(request, persona, signing_key),
                 content=body or None,
             )
 
@@ -259,5 +286,5 @@ def make_edge(
 
 
 def from_environment() -> ASGIApp:
-    """The uvicorn factory: upstream and token from the environment."""
-    return make_edge(os.environ[UPSTREAM_ENV], os.environ[TOKEN_ENV])
+    """The uvicorn factory: upstream and key from the environment."""
+    return make_edge(os.environ[UPSTREAM_ENV], os.environ[KEY_ENV])

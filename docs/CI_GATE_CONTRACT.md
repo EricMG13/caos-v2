@@ -65,6 +65,11 @@ the exact eventual PR head; local checks do not post those statuses.
 - Image build, Trivy scan coverage and no fixable HIGH/CRITICAL findings.
   `image` is not in the hosted required-check list but remains a workflow and
   plan obligation.
+- The `smoke` job (§93) builds the image once, runs the image suite and the
+  three-engine real-browser journey through the TLS test edge, on a push to
+  `main`, the schedule and dispatch -- never per pull request, since it takes
+  about twenty-five minutes. It is not in the hosted required-check list;
+  `make smoke-production` remains the local half of the same proof.
 - Live provider job is scheduled/dispatched, never on push/PR. It requires the
   secret `OPENROUTER_API_KEY` plus repository variables `OPENROUTER_MODEL`,
   optional `OPENROUTER_PROVIDER` and `OPENROUTER_REASONING_EFFORT`,

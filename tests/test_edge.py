@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import time
 from collections.abc import Iterator
 from uuid import uuid4
 
@@ -20,7 +21,7 @@ from starlette.types import Receive, Scope, Send
 
 from server.api.app import app
 from server.api.edge import (
-    EDGE_TOKEN_HEADER,
+    EDGE_ASSERTION_HEADER,
     PUBLIC_ORIGIN_ENV,
     SECURITY_HEADERS,
     EdgeGuard,
@@ -28,6 +29,7 @@ from server.api.edge import (
     is_api_path,
     refusal_body,
     resolve_mode,
+    sign_assertion,
     startup_failed,
 )
 from server.api.identity import (
@@ -72,17 +74,33 @@ def _names(seen: list[tuple[bytes, bytes]]) -> set[bytes]:
     return {name for name, _ in seen}
 
 
-def test_edge_mode_refuses_a_request_without_the_edge_token_before_routing(
+def _signed(key: str, method: str = "GET", target: str = "/api/v1/cases") -> str:
+    """One assertion under `key` for one request, as the edge would set it
+    (§93); every case here that reaches the app needs its own."""
+    return sign_assertion(
+        key.encode(),
+        subject=str(uuid4()),
+        groups=("caos-analysts",),
+        method=method,
+        target=target,
+        issued_at=int(time.time()),
+        nonce=secrets.token_hex(16),
+    )
+
+
+def test_edge_mode_refuses_a_request_without_an_assertion_before_routing(
     token: str,
 ) -> None:
     recorder, client = _guarded()
-    for headers in ({}, {EDGE_TOKEN_HEADER: token[:-1] + "x"}):
+    wrong_key = _signed(token[:-1] + "x", "POST")
+    for headers in ({}, {EDGE_ASSERTION_HEADER: wrong_key}):
         response = client.post("/api/v1/cases", headers=headers, json={})
         assert response.status_code == 403
         assert response.json()["code"] == RefusalCode.EDGE_NOT_TRUSTED
+    signed = _signed(token)
     doubled = client.get(
         "/api/v1/cases",
-        headers=[(EDGE_TOKEN_HEADER, token), (EDGE_TOKEN_HEADER, token)],
+        headers=[(EDGE_ASSERTION_HEADER, signed), (EDGE_ASSERTION_HEADER, signed)],
     )
     assert doubled.status_code == 403
     assert recorder.seen == []
@@ -93,22 +111,25 @@ def test_edge_mode_refuses_a_request_without_the_edge_token_before_routing(
     assert (real.status_code, real.json()["code"]) == (403, "EDGE_NOT_TRUSTED")
 
     admitted = client.get(
-        "/api/v1/cases", headers={EDGE_TOKEN_HEADER: token, "sec-fetch-site": "none"}
+        "/api/v1/cases",
+        headers={EDGE_ASSERTION_HEADER: _signed(token), "sec-fetch-site": "none"},
     )
     assert admitted.status_code == 200
     assert len(recorder.seen) == 1
 
 
-def test_the_edge_token_never_reaches_the_app_a_log_or_a_refusal(
+def test_the_edge_key_never_reaches_the_app_a_log_or_a_refusal(
     token: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     recorder, client = _guarded()
     caplog.set_level(logging.DEBUG)
-    client.get("/anything", headers={EDGE_TOKEN_HEADER: token})
-    assert EDGE_TOKEN_HEADER.encode() not in _names(recorder.seen[0])
-    wrong = client.get("/anything", headers={EDGE_TOKEN_HEADER: token + "!"})
-    assert token not in wrong.text and token not in str(wrong.headers)
-    assert token not in caplog.text
+    signed = _signed(token, target="/anything")
+    client.get("/anything", headers={EDGE_ASSERTION_HEADER: signed})
+    assert EDGE_ASSERTION_HEADER.encode() not in _names(recorder.seen[0])
+    wrong = client.get("/anything", headers={EDGE_ASSERTION_HEADER: signed + "!"})
+    for secret in (token, signed):
+        assert secret not in wrong.text and secret not in str(wrong.headers)
+        assert secret not in caplog.text
 
 
 def test_health_needs_no_edge_token_and_no_identity(token: str) -> None:
@@ -132,7 +153,7 @@ def test_boot_refuses_the_trust_switch_alongside_an_edge_token(
     assert booted.value.code is RefusalCode.EDGE_CONFIG_INVALID
     # A request under a configuration that would not boot is not trusted.
     response = TestClient(EdgeGuard(Recorder())).get(
-        "/api/v1/cases", headers={EDGE_TOKEN_HEADER: token}
+        "/api/v1/cases", headers={EDGE_ASSERTION_HEADER: _signed(token)}
     )
     assert response.status_code == 403
 
@@ -161,9 +182,9 @@ def test_boot_refuses_a_short_token_or_a_missing_public_origin(
             resolve_mode()
         assert caught.value.code is RefusalCode.EDGE_CONFIG_INVALID
     monkeypatch.setenv(PUBLIC_ORIGIN_ENV, PUBLIC)
-    assert resolve_mode() == EdgeMode(token=long.encode(), public_origin=PUBLIC)
+    assert resolve_mode() == EdgeMode(key=long.encode(), public_origin=PUBLIC)
     monkeypatch.delenv(EDGE_TOKEN_ENV)
-    assert resolve_mode() == EdgeMode(token=None, public_origin=None)
+    assert resolve_mode() == EdgeMode(key=None, public_origin=None)
 
 
 def test_edge_mode_never_believes_the_role_header(
@@ -247,31 +268,38 @@ def test_an_unsafe_api_request_needs_the_public_origin_or_a_same_origin_fetch(
 ) -> None:
     recorder, client = _guarded()
     del client.headers["sec-fetch-site"]
-    edge = {EDGE_TOKEN_HEADER: token}
+
+    def edge(method: str = "POST") -> dict[str, str]:
+        return {EDGE_ASSERTION_HEADER: _signed(token, method)}
+
     refused = [
-        client.post("/api/v1/cases", headers=edge),
-        client.post("/api/v1/cases", headers={**edge, "sec-fetch-site": "none"}),
-        client.post("/api/v1/cases", headers={**edge, "origin": "https://evil.test"}),
-        client.post("/api/v1/cases", headers={**edge, "origin": "null"}),
+        client.post("/api/v1/cases", headers=edge()),
+        client.post("/api/v1/cases", headers={**edge(), "sec-fetch-site": "none"}),
+        client.post("/api/v1/cases", headers={**edge(), "origin": "https://evil.test"}),
+        client.post("/api/v1/cases", headers={**edge(), "origin": "null"}),
         client.post(
             "/api/v1/cases",
             headers={
-                **edge,
+                **edge(),
                 "sec-fetch-site": "same-origin",
                 "origin": "http://127.0.0.1:8000",
             },
         ),
-        client.get("/api/v1/cases", headers={**edge, "origin": "https://evil.test"}),
+        client.get(
+            "/api/v1/cases", headers={**edge("GET"), "origin": "https://evil.test"}
+        ),
     ]
     assert [r.status_code for r in refused] == [403] * len(refused)
     assert {r.json()["code"] for r in refused} == {"ORIGIN_REFUSED"}
     assert recorder.seen == []
 
     admitted = [
-        client.post("/api/v1/cases", headers={**edge, "origin": PUBLIC}),
-        client.post("/api/v1/cases", headers={**edge, "sec-fetch-site": "same-origin"}),
-        client.get("/api/v1/cases", headers={**edge, "sec-fetch-site": "none"}),
-        client.get("/api/v1/cases", headers=edge),
+        client.post("/api/v1/cases", headers={**edge(), "origin": PUBLIC}),
+        client.post(
+            "/api/v1/cases", headers={**edge(), "sec-fetch-site": "same-origin"}
+        ),
+        client.get("/api/v1/cases", headers={**edge("GET"), "sec-fetch-site": "none"}),
+        client.get("/api/v1/cases", headers=edge("GET")),
     ]
     assert all(r.status_code == 200 for r in admitted)
 
@@ -303,14 +331,30 @@ def test_every_response_carries_the_security_headers_and_the_policy(
     csp = SECURITY_HEADERS["content-security-policy"]
     assert "default-src 'none'" in csp and "trusted-types 'none'" in csp
     client = TestClient(app)
+    events = f"/api/v1/cases/{uuid4()}/events"
+    # An assertion whose subject is no identifier: verified by the guard,
+    # refused by identity, so the app answers 401 without a store.
+    nobody = sign_assertion(
+        token.encode(),
+        subject="nobody",
+        groups=(),
+        method="GET",
+        target=events,
+        issued_at=int(time.time()),
+        nonce=secrets.token_hex(16),
+    )
     responses = {
         "refused": client.get("/api/v1/cases"),
         "health": client.get("/api/health"),
-        "unauthenticated": client.get(
-            f"/api/v1/cases/{uuid4()}/events", headers={EDGE_TOKEN_HEADER: token}
+        "unauthenticated": client.get(events, headers={EDGE_ASSERTION_HEADER: nobody}),
+        "not-found": client.get(
+            "/api/v2/nothing",
+            headers={EDGE_ASSERTION_HEADER: _signed(token, target="/api/v2/nothing")},
         ),
-        "not-found": client.get("/api/v2/nothing", headers={EDGE_TOKEN_HEADER: token}),
-        "site": client.get("/index.html", headers={EDGE_TOKEN_HEADER: token}),
+        "site": client.get(
+            "/index.html",
+            headers={EDGE_ASSERTION_HEADER: _signed(token, target="/index.html")},
+        ),
     }
     for label, response in responses.items():
         for name, value in SECURITY_HEADERS.items():
@@ -319,7 +363,10 @@ def test_every_response_carries_the_security_headers_and_the_policy(
         assert responses[label].headers["cache-control"] == "no-store", label
     assert responses["site"].headers["cache-control"] == "no-cache"
     _, recorder_client = _guarded()
-    asset = recorder_client.get("/assets/app.js", headers={EDGE_TOKEN_HEADER: token})
+    asset = recorder_client.get(
+        "/assets/app.js",
+        headers={EDGE_ASSERTION_HEADER: _signed(token, target="/assets/app.js")},
+    )
     assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 

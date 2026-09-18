@@ -1,19 +1,24 @@
 """Who is asking. Derived from what the edge asserted, never from what the client
 claimed about itself.
 
-`SYSTEM_SPEC.md` §8, and `docs/DECISIONS.md` §22. The host sits behind a proxy
-that authenticates the caller and forwards the subject and its groups. Those two
-headers are the whole input, and neither is settable by a browser that reached
-the proxy: a proxy that forwarded a client-supplied `x-forwarded-groups` would be
-misconfigured in a way no code here can detect, which is why the group list is
-the *only* thing this reads in production and the role header is off by default.
+`SYSTEM_SPEC.md` §8, and `docs/DECISIONS.md` §22 and §93. The host sits behind
+a proxy that authenticates the caller and asserts the subject and its groups.
+Those two are the whole input. In edge mode they reach this module as the two
+headers `server/api/edge.py`'s guard **wrote** from the request's verified
+per-request assertion, after removing every identity header the request
+arrived with -- so a proxy that forwarded a client-supplied
+`x-forwarded-groups` unsigned is not a misconfiguration this code cannot
+detect any more: the forwarded header is dropped and the assertion's groups
+are what is read. The group list is the *only* thing this reads in production
+and the role header is off by default.
 
 Which of the two carries the role is the deployment's mode, and the role is
-never a third thing. In edge mode (`CAOS_EDGE_TOKEN` set) the groups decide it,
-because a proxy stood between the client and this process. Without a token the
-groups header proves nothing -- no edge asserted it -- so it is not read at all,
-and the role comes from the role header only while the development switch below
-asks for it. A process configured as neither serves READER, whatever arrives.
+never a third thing. In edge mode (`CAOS_EDGE_TOKEN` set -- the assertion key)
+the groups decide it, because a proxy stood between the client and this
+process and signed what it asserted. Without a key the groups header proves
+nothing -- no edge asserted it -- so it is not read at all, and the role comes
+from the role header only while the development switch below asks for it. A
+process configured as neither serves READER, whatever arrives.
 
 Two things this deliberately does not do.
 
@@ -53,11 +58,13 @@ TRUST_SWITCH = "CAOS_TRUST_ROLE_HEADER"
 TRUSTED = "1"
 
 SUBJECT_HEADER = "x-caos-user"
-GROUPS_HEADER = "x-forwarded-groups"  # edge mode only: the edge's assertion
+GROUPS_HEADER = "x-forwarded-groups"  # edge mode only: written from the assertion
 ROLE_HEADER = "x-caos-role"
-# Edge mode (`server/api/edge.py`): while this is set, the switch above is never
-# believed, whatever it says -- boot refuses the pair, and this is the rule a
-# request meeting the pair anyway still obeys.
+# Edge mode (`server/api/edge.py`): the per-request assertion's HMAC key. While
+# this is set, the switch above is never believed, whatever it says -- boot
+# refuses the pair, and this is the rule a request meeting the pair anyway
+# still obeys. The name predates §93, when the value was a static shared
+# secret; it is kept so no deployment's environment moves.
 EDGE_TOKEN_ENV = "CAOS_EDGE_TOKEN"  # nosec B105 -- a variable name, not a secret
 
 
