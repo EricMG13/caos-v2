@@ -579,6 +579,37 @@ describe("Run", () => {
     expect(cancel).not.toHaveAttribute("aria-disabled");
   });
 
+  // A parked run's stop code is the store's answer to "why is this stopped";
+  // without it an operator sees Start and Retry refused and nothing else.
+  test("test_a_parked_run_names_its_stop_code_beside_the_work_controls", () => {
+    const parkedRun = {
+      ...running.body.run!,
+      work: {
+        state: "STOPPED" as const,
+        stop_code: "EVIDENCE_NOT_AVAILABLE" as const,
+        cancel_requested: false,
+      },
+    };
+    const parked = withActions({ ...running, body: { ...running.body, run: parkedRun } }, [
+      { action: "START_RUN", refusal: { code: "RUN_ALREADY_STARTED", clears: "never" } },
+    ]);
+    const { container } = mount(parked);
+    const panel = container.querySelector("[data-work-controls]")!;
+    const stop = panel.querySelector("[data-stop-code]")!;
+    expect(stop).toHaveAttribute("data-stop-code", "EVIDENCE_NOT_AVAILABLE");
+    // Stated in words, not by colour: the state and the code are both text.
+    expect(stop).toHaveTextContent(/stopped/i);
+    expect(stop).toHaveTextContent("EVIDENCE_NOT_AVAILABLE");
+    // Labelled for assistive technology as what it is.
+    expect(stop).toHaveAccessibleName(/stop code/i);
+
+    const { container: live } = mount(running);
+    expect(live.querySelector("[data-stop-code]")).toBeNull();
+    const cleared = { ...parkedRun, work: { ...parkedRun.work, stop_code: null } };
+    const { container: none } = mount({ ...running, body: { ...running.body, run: cleared } });
+    expect(none.querySelector("[data-stop-code]")).toBeNull();
+  });
+
   test("test_the_preview_text_is_shown_exactly_before_approval", async () => {
     const run = routeNotPinned.body.run!;
     const CONTENT = "RESEARCH PLAN PREVIEW\n\n  - line with leading spaces\n  - and a second\n";

@@ -7,7 +7,9 @@ unauthorised or revoked case is one private `CASE_NOT_FOUND` -- then that the
 run is the case's (`RUN_NOT_FOUND` otherwise). Everything about the source and
 the page, including a page outside 1..`PAGE_MAX` and a malformed source id, is
 the same 404 `PAGE_NOT_AVAILABLE` with no text. Not a section document, so
-no chrome; never cached.
+no chrome; never cached. Standing and the page's rows are read in one read
+unit, which `read_page` ends before the document is read and its frame
+extracted, so no transaction is held across the extraction.
 """
 
 from __future__ import annotations

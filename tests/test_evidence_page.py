@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from psycopg import pq
 from test_evidence_page_read import (
     Pinned,
     blobs,
@@ -31,6 +32,8 @@ from server.api.reads import evidence as evidence_read
 from server.api.wire import CLEARS, PAGE_LINES_MAX, PageDocument, SectionNote
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.evidence import pdf as pdf_module
+from server.evidence.extract import AdmissionLimits
 from server.refusals import RefusalCode
 from server.store import StoreConnection
 from server.store.gates import withdraw_source
@@ -65,10 +68,15 @@ class _CountingConnection:
     def __init__(self, conn: StoreConnection) -> None:
         self._conn = conn
         self.executed = 0
+        self.ended = 0
 
     def execute(self, *args: object, **kwargs: object) -> object:
         self.executed += 1
         return self._conn.execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    def rollback(self) -> None:
+        self.ended += 1
+        self._conn.rollback()
 
 
 def _as(user_id: UUID, role: str | None = None) -> dict[str, str]:
@@ -231,6 +239,9 @@ def test_the_page_read_declares_its_store_budget(
 
     assert _get(client, report, path, reader).status_code == 200
     assert counter.executed == evidence_read.IO_BUDGET == 2
+    # The read unit is ended once, where the connection's own exit would
+    # otherwise have sent its COMMIT, so the round trips do not move.
+    assert counter.ended == 1
 
     opened: list[str] = []
 
@@ -246,3 +257,35 @@ def test_the_page_read_declares_its_store_budget(
     ):
         assert client.get(malformed, headers=_as(reader)).status_code == 404
     assert opened == []
+
+
+def test_no_transaction_is_open_while_the_page_frame_is_extracted(
+    client: TestClient, report: Pinned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store reads end before the document is read and before the §47
+    child runs, so a slow or large PDF holds no read transaction (and no
+    snapshot) on the request's connection while it is extracted."""
+    reader = _member(report, Standing.READER)
+    seen: list[tuple[str, pq.TransactionStatus]] = []
+    real_get, real_frame = BlobStore.get, pdf_module.page_frame
+
+    def watched_get(store: BlobStore, digest: str) -> bytes:
+        seen.append(("blob", report.conn.info.transaction_status))
+        return real_get(store, digest)
+
+    def watched_frame(
+        data: bytes, page: int, *, limits: AdmissionLimits, deadline: float
+    ) -> pdf_module.Frame:
+        seen.append(("frame", report.conn.info.transaction_status))
+        return real_frame(data, page, limits=limits, deadline=deadline)
+
+    monkeypatch.setattr(BlobStore, "get", watched_get)
+    monkeypatch.setattr(pdf_module, "page_frame", watched_frame)
+
+    response = _get(client, report, _path(report, report.sources[0]), reader)
+
+    assert response.status_code == 200
+    assert seen == [
+        ("blob", pq.TransactionStatus.IDLE),
+        ("frame", pq.TransactionStatus.IDLE),
+    ]
