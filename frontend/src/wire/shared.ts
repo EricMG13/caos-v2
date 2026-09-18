@@ -141,7 +141,7 @@ export const PASSPORT_FIELDS = [
   "definition",
   "period",
   "scenario",
-  "evidence_date",
+  "reporting_period",
   "computed_at",
   "snapshot",
   "method",
@@ -173,7 +173,7 @@ export interface Passport {
   definition: string;
   period: string;
   scenario: string;
-  evidence_date: string;
+  reporting_period: string;
   computed_at: string;
   snapshot: string;
   method: string;

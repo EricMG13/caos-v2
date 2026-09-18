@@ -68,6 +68,11 @@ describe("the book", () => {
     expect(dialog).toHaveTextContent("Scenario");
     expect(dialog).toHaveTextContent("BASE");
     expect(within(dialog).getByText("USD millions")).toBeVisible();
+    // The analyst's declared reporting period, labelled as what it is: the
+    // host derives no date from any admitted document.
+    expect(dialog).toHaveTextContent("Reporting period");
+    expect(dialog).not.toHaveTextContent("Evidence date");
+    expect(fields).toContain("reporting_period");
   });
 
   test("a refused cell value shows its typed reason, never a blank", () => {

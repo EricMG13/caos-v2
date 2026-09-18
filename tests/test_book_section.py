@@ -28,6 +28,7 @@ from server.methodology.forecast import forecast_inputs
 from server.refusals import RefusalCode
 from server.store.gates import withdraw_source
 from server.store.members import Standing, grant
+from server.store.run_inputs import load_run_input
 from server.store.runs import create_case
 
 __all__ = ["ForecastCompletions", "client", "forecast_route", "harness", "route"]
@@ -82,6 +83,14 @@ def test_the_book_row_carries_the_accepted_projection_cells_and_their_passports(
     assert passport.scenario == period.case == "BASE"
     assert document.body.basis.scenario == "EVERY_ACCEPTED_CASE"
     assert passport.snapshot == row.snapshot
+    # The analyst's declared reporting period, named as what it is: the host
+    # derives no date from any admitted document, so the field does not claim
+    # to be one.
+    pinned = load_run_input(harness.conn, harness.run_id)
+    harness.conn.rollback()
+    assert pinned is not None and pinned.subject is not None
+    assert passport.reporting_period == pinned.subject.reporting_period
+    assert "evidence_date" not in type(passport).model_fields
     assert passport.method == "cash_flow_forecast · VERIFIED"
     assert passport.derivation == (
         "operating.ebitda / operating.revenue — ebitda = 100, revenue = 500"
