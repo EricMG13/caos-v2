@@ -145,6 +145,12 @@ MIGRATIONS = (
         .with_name("0027_evidence_statement_trigger.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0028_worker_heartbeats",
+        Path(__file__)
+        .with_name("0028_worker_heartbeats.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes

@@ -14,6 +14,8 @@ its audit event and its queue effect commit together or not at all.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal, cast
 from uuid import UUID
 
 from server.boundary_text import BoundaryText
@@ -241,3 +243,73 @@ def mark_work_done(conn: StoreConnection, run_id: UUID) -> None:
 def _require_seconds(seconds: int) -> None:
     if type(seconds) is not int or not 0 < seconds <= 86_400:
         raise Refusal(RefusalCode.CALL_OUTCOME_INVALID)
+
+
+# A beat older than this is not evidence that a worker is alive. Three times
+# the default poll interval, so an ordinary slow poll under load is not a
+# stall: what an operator is being told is "nobody has spoken recently", and
+# crying that once a minute would make the signal worthless.
+WORKER_STALE_AFTER = 30.0
+type WorkerState = Literal["POLLING", "WORKING", "BACKOFF"]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerBeat:
+    """One worker's last word about itself, and whether it is recent enough to
+    believe."""
+
+    worker_id: str
+    state: WorkerState
+    consecutive_faults: int
+    beat_at: datetime
+    fresh: bool
+
+
+def beat(
+    conn: StoreConnection,
+    *,
+    worker_id: str,
+    state: WorkerState,
+    faults: int,
+) -> None:
+    """Record that this worker is alive, and what it is doing.
+
+    One row per worker, overwritten: the table is the size of the fleet rather
+    than of the uptime. `beat_at` is the store's clock and never the worker's,
+    for the reason every other timestamp here is -- a worker with a skewed
+    clock would otherwise read as permanently stale or permanently fresh.
+
+    This is not a fenced write and grants nothing. A worker that beats while
+    holding no lease still cannot write a run, so the worst a wrong beat does
+    is mislead a person.
+    """
+    conn.execute(
+        "INSERT INTO worker_heartbeats (worker_id, beat_at, state,"
+        " consecutive_faults) VALUES (%s, now(), %s, %s)"
+        " ON CONFLICT (worker_id) DO UPDATE SET"
+        " beat_at = now(), state = EXCLUDED.state,"
+        " consecutive_faults = EXCLUDED.consecutive_faults",
+        (BoundaryText.of(worker_id).value, state, faults),
+    )
+
+
+def worker_states(conn: StoreConnection) -> list[WorkerBeat]:
+    """Every worker that has ever beaten, freshness decided by the store's clock.
+
+    A worker that exited leaves its last beat behind, and that row is more use
+    than no row: "worker-a last spoke nine minutes ago, in BACKOFF" names the
+    process to go and look at, where an empty table only says nobody is
+    working.
+    """
+    rows = conn.execute(
+        "SELECT worker_id, state, consecutive_faults, beat_at,"
+        " beat_at > now() - make_interval(secs => %s) FROM worker_heartbeats"
+        " ORDER BY worker_id",
+        (WORKER_STALE_AFTER,),
+    ).fetchall()
+    return [
+        WorkerBeat(
+            str(worker), cast("WorkerState", str(state)), int(faults), when, bool(fresh)
+        )
+        for worker, state, faults, when, fresh in rows
+    ]

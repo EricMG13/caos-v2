@@ -3982,3 +3982,60 @@ demand, which is the condition the Phase 2 ledger entry set. That is recorded in
 the ledger rather than smoothed over, together with the residual the joining
 rule buys: a genuine sequence of single-letter words is indistinguishable from
 a tracked word, and a quote of their concatenation anchors over them.
+
+
+## 2026-09-18 §79 — A worker says what it is doing; a stalled queue is not the API's unreadiness
+
+Completion Phase 13.3, the readiness half. The ledger entry: the API's
+`/api/health` probes the store, bundle and blob root it uses, and
+`server/engine/worker.py` serves no listener — so a worker that exited
+`PROVIDER_NOT_CONFIGURED` or is backing off on store faults is visible in its
+exit code and its logs and nowhere else, while a queued run simply waits.
+
+**No listener.** A process that already talks to PostgreSQL every poll does not
+need a second protocol to say it is alive. Migration `0028` adds
+`worker_heartbeats`, one row per worker, upserted: `(worker_id, beat_at, state,
+consecutive_faults)`.
+
+**The one deliberately mutable row in this store, and it says so.** Every other
+table here is immutable by trigger because it carries a governed fact somebody
+may later be held to. A beat is an observation with a shelf life of seconds,
+and keeping each one would grow the table by a row per worker per poll forever
+— the shape `command_requests` already carries a known-gaps entry for. So the
+table is the size of the fleet rather than of the uptime, and no trigger
+defends it. It also grants nothing: the lease in `run_work` is what fences a
+run, and a worker that lies here still cannot write a run it does not hold.
+
+**Three states, closed in the store.** `POLLING`, `WORKING`, `BACKOFF`, as a
+`CHECK` rather than free text, so an operator alerting on `BACKOFF` can trust
+that nothing else writes a different word meaning the same thing. `WORKING` is
+said *before* the run is driven, because driving is the part that takes
+minutes: "went quiet while working" is a different thing to a person than "went
+quiet while idle". `BACKOFF` is said at the point the fault is handled and
+before the connection is dropped — the first draft said it at the *next* poll,
+and a worker looping claim-fault-claim then read `WORKING` for as long as it
+kept failing, which is the exact signal the beat exists to carry.
+
+**Saying so never stops the work.** `_beat` swallows a store fault and rolls
+back. A heartbeat is for a person, not a fence; what answers a failing store is
+the loop's own fault handling, by trying to claim a run, and a store that is
+down cannot record that it is down — the staleness of the last beat says it
+instead.
+
+**A stalled queue does not make the API unready, and this is the load-bearing
+decision.** `HealthDocument` gains `workers`, reported beside the other three
+and deliberately **not** folded into `status`: the API is not the worker, and a
+surface that reported itself unready because a queue was stalled would take
+itself down for a fault it does not have. A load balancer reads `status`; an
+operator alerts on `workers`. `WORKERS_ABSENT` (nothing has ever beaten, so a
+queued run will wait), `WORKERS_STALE` (a worker beat and stopped — the row
+names which), `WORKERS_BACKING_OFF` (every fresh worker is failing to reach the
+store). A fresh worker driving a long run is `OK`, because its run's liveness is
+the lease every fenced write renews, and a second clock on one question is how
+two answers start disagreeing.
+
+**No compose healthcheck, and the reason is not oversight.** The ledger entry
+also asked for one on `compose.smoke.yaml`'s worker. That service runs
+`journey.worker`, a test double; a healthcheck there would measure the double
+and not the product, and the real worker is not in compose at all. It is owed
+the day `server/engine/worker.py` itself runs in a compose stack.

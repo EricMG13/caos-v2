@@ -37,7 +37,7 @@ from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
-from server.store.work import LEASE_SECONDS, enqueue_run
+from server.store.work import LEASE_SECONDS, enqueue_run, worker_states
 
 __all__ = ["blobs", "bundle", "route"]
 
@@ -526,3 +526,78 @@ def _cancel_requested(conn: StoreConnection, run_id: UUID) -> bool:
     conn.rollback()
     assert row is not None
     return bool(row[0])
+
+
+def test_the_worker_says_what_it_is_doing_and_a_backing_off_worker_says_so(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    empty_database: str,
+) -> None:
+    """The half of the heartbeat that lives in the loop rather than the store.
+
+    A worker failing to reach the store is the case the ledger entry names --
+    until now visible in nothing but a log -- so the states it writes have to
+    tell that apart from an idle poll. `WORKING` is said *before* the run is
+    driven, because driving is the part that takes minutes and "went quiet
+    while working" is a different thing to an operator than "went quiet while
+    idle".
+    """
+    run = queued_run(case, route, bundle, blobs)
+
+    def faulty(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+
+    run_worker(
+        CONFIG,
+        execution_for=faulty,  # type: ignore[arg-type]
+        stopping=_Clock(limit=3),
+        conn_factory=lambda: psycopg.connect(empty_database, autocommit=False),
+        blobs=blobs,
+    )
+
+    [state] = worker_states(run.conn)
+    assert (state.worker_id, state.fresh) == ("worker-test", True)
+    # The last word is BACKOFF with a count: the loop faulted and said so.
+    assert state.state == "BACKOFF"
+    assert state.consecutive_faults > 0
+
+
+def test_a_store_that_will_not_take_the_beat_does_not_stop_the_worker(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    empty_database: str,
+) -> None:
+    """A heartbeat is an observation for a person, not a fence. Nothing reads
+    it to decide whether work may proceed, so a beat that will not write must
+    not take the worker down with it -- what answers a failing store is the
+    loop's own fault handling, by trying to claim a run."""
+    queued_run(case, route, bundle, blobs)
+    driven: list[UUID] = []
+
+    def refusing(*args: object, **kwargs: object) -> None:
+        raise psycopg.OperationalError
+
+    def watching(conn: StoreConnection, run_id: UUID, lease: object) -> object:
+        driven.append(run_id)
+        raise Refusal(RefusalCode.STORE_UNAVAILABLE)
+
+    # A context rather than the fixture: one parameter fewer, and the patch is
+    # visibly scoped to the loop it is meant to affect.
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("server.engine.worker.beat", refusing)
+        assert (
+            run_worker(
+                CONFIG,
+                execution_for=watching,  # type: ignore[arg-type]
+                stopping=_Clock(limit=2),
+                conn_factory=lambda: psycopg.connect(empty_database, autocommit=False),
+                blobs=blobs,
+            )
+            == 0
+        )
+
+    assert driven, "the worker kept claiming runs while its beat was refused"

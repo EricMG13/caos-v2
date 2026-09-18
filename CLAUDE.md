@@ -881,13 +881,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and the test edge (`tests/journey/edge.py`), not in anything the API can
   check. *Upgrade:* the signed assertion above, which makes the groups the
   identity provider's rather than a header's.
-- **The worker has no readiness.** The API's `/api/health` probes the store,
-  bundle and blob root it uses; `server/engine/worker.py` serves no listener,
-  and `compose.smoke.yaml` gives the worker no healthcheck. A worker that
-  exited 2 (`PROVIDER_NOT_CONFIGURED`) or is backing off on store faults is
-  visible only in its exit code and logs, and a queued run simply waits.
-  *Upgrade:* a heartbeat the worker writes and health reads, the day an
-  operator has to alert on a stalled queue.
+- ~~**The worker has no readiness.**~~ Closed by Completion Phase 13.3 (§79),
+  by the upgrade this entry named: migration `0028` adds `worker_heartbeats`,
+  the loop writes `POLLING`/`WORKING`/`BACKOFF` with its consecutive fault
+  count, and `/api/health` reports `workers` beside the other three probes
+  (`test_the_health_probe_reads_the_three_states_a_person_acts_on`,
+  `test_the_worker_says_what_it_is_doing_and_a_backing_off_worker_says_so`).
+  The field is **not** folded into `status`: the API is not the worker, and a
+  surface reporting itself unready because a queue was stalled would take
+  itself down for a fault it does not have
+  (`test_health_is_200_only_when_store_bundle_and_blobs_hold` now asserts both
+  halves). Saying so never stops the work -- a beat that will not write is
+  swallowed
+  (`test_a_store_that_will_not_take_the_beat_does_not_stop_the_worker`).
+  **What is not done, from this entry's own text:** `compose.smoke.yaml` still
+  gives its worker no healthcheck, because that service runs `journey.worker`,
+  a test double, and a healthcheck there would measure the double rather than
+  the product. *Upgrade:* that healthcheck the day `server/engine/worker.py`
+  itself runs in a compose stack; and a worker whose *exit* an operator must
+  see still leaves only an exit code, because a process that has exited cannot
+  beat -- what carries it is the staleness of its last beat, which names the
+  worker but not why it went.
 - **An idle case stream held its thread until the deadline.** Fixed in
   `0db50fa`: each poll now ends in an SSE comment, so a disconnected browser
   releases its worker thread and uvicorn concurrency slot within one

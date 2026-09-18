@@ -40,7 +40,15 @@ from server.store import StoreConnection, apply_schema, connect, rollback_or_clo
 from server.store.gates import execution_input
 from server.store.outcomes import execution_reads
 from server.store.runs import cancel_run
-from server.store.work import LEASE_SECONDS, Lease, claim_run, release, stop
+from server.store.work import (
+    LEASE_SECONDS,
+    Lease,
+    WorkerState,
+    beat,
+    claim_run,
+    release,
+    stop,
+)
 
 DATABASE_URL = "CAOS_DATABASE_URL"
 BLOB_ROOT = "CAOS_BLOB_ROOT"
@@ -134,6 +142,11 @@ def work_once(
     lease = claim_run(conn, worker=config.worker, lease_seconds=config.lease_seconds)
     if lease is None:
         return None
+    # Said before the run is driven rather than after it: driving is the part
+    # that takes minutes, and a worker that went quiet *while working* is a
+    # different thing for an operator than one that went quiet while idle.
+    # `claim_run` commits alone, so this beat is its own unit too.
+    _beat(conn, config, "WORKING", 0)
     try:
         execution = execution_for(conn, lease.run_id, lease)
         stoppable = _Stoppable(execution.provider, stopping)
@@ -220,6 +233,24 @@ def pause_seconds(config: WorkerConfig, failures: int) -> float:
     return min(base, config.backoff_cap_seconds) * jitter
 
 
+def _beat(
+    conn: StoreConnection, config: WorkerConfig, state: WorkerState, faults: int
+) -> None:
+    """Record this worker's state, and never let saying so stop it working.
+
+    A heartbeat is an observation for a person, not a fence: nothing reads it
+    to decide whether work may proceed. So a store that will not take the beat
+    must not take the worker down with it -- the loop's own fault handling is
+    what answers a store that is failing, and it does that by trying to claim a
+    run, which is the thing that actually matters.
+    """
+    try:
+        beat(conn, worker_id=config.worker.value, state=state, faults=faults)
+        conn.commit()
+    except (psycopg.Error, Refusal):
+        conn.rollback()
+
+
 def run_worker(
     config: WorkerConfig,
     *,
@@ -237,6 +268,7 @@ def run_worker(
             try:
                 if conn is None or conn.closed:
                     conn = conn_factory()
+                _beat(conn, config, "POLLING", failures)
                 claimed = work_once(
                     conn,
                     blobs,
@@ -249,6 +281,16 @@ def run_worker(
                 if isinstance(fault, Refusal) and fault.code not in STORE_FAULTS:
                     raise
                 failures += 1
+                # Said here rather than at the next poll, and before the
+                # connection is dropped. A worker looping claim-fault-claim
+                # would otherwise read `WORKING` -- its last word before the
+                # fault -- for as long as it kept faulting, which is the exact
+                # signal this beat exists to carry. A beat that cannot be
+                # written on a connection that has just failed is no loss: a
+                # store that is down cannot record that it is down, and the
+                # staleness of the last beat says it instead.
+                if conn is not None:
+                    _beat(conn, config, "BACKOFF", failures)
                 _closed(conn)
                 conn = None
             if claimed is None:
