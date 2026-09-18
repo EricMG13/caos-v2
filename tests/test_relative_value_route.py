@@ -259,6 +259,7 @@ ENABLED = frozenset(
         SELECTION,
         ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE"),
         ("LITE_CREDIT_22", "LITE_PORTFOLIO_DECISION"),
+        ("LITE_CREDIT_22", "LITE_RELATIVE_VALUE"),
     }
 )
 

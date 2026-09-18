@@ -68,10 +68,12 @@ LITE = (LITE_PROFILE, LITE_SELECTION)
 FULL = ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
 DEEP = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 # Adapter modules only, but no contract test proves this pathway (work item 6).
-# It was LITE_PORTFOLIO_DECISION until that pathway gained its contract test
-# (`tests/test_lite_portfolio_route.py`) and was enabled; LITE_RELATIVE_VALUE is
-# the same shape -- CP-0, CP-1C, CP-L10, every one of them an adapter module.
-ALL_ADAPTER = (LITE_PROFILE, "LITE_RELATIVE_VALUE")
+# It was LITE_PORTFOLIO_DECISION, then LITE_RELATIVE_VALUE, until each gained
+# its contract test (`tests/test_lite_portfolio_route.py`,
+# `tests/test_lite_relative_value_route.py`) and was enabled;
+# FULL_CREDIT_32/MARKET_DISLOCATION is the same shape -- CP-0 and CP-3D, both
+# adapter modules.
+ALL_ADAPTER = ("FULL_CREDIT_32", "MARKET_DISLOCATION")
 _WORK = ("run_attempts", "budget_reservations", "call_outcomes", "artifacts")
 
 
