@@ -318,20 +318,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`tests/test_governed_write_routes.py::test_a_run_with_no_revision_is_served_a_report_that_offers_its_first_save`).
   Committee still requires a named frozen revision. The journey now asserts the
   unsaved Report offers Save and refuses Sign `DELIVERABLE_NOT_FOUND`, and still
-  makes its first save over the API, because that save carries a figure span --
-  which is the digit entry below's, not this one's.
-- **A digit in a draft is refused with a clearance the surface cannot
-  discharge.** `server/deliverable/revisions.py`'s `_span` refuses any ASCII
-  digit in narrative text `NARRATIVE_FIGURE_UNREFERENCED`, whose clearance
-  reads "Insert every financial figure through a validated reference" -- a
-  figure span naming a citation of a verified record, which `FilingControls`
-  cannot compose, as its own comment says. So an author who types a number is
-  told to perform an act the page offers no way to perform. The wire and the
-  store do support it, which the journey shows by saving one figure span over
-  the API and reading it back on the Report surface with the host's own
-  document, page and quote; the refusal itself is rendered in the browser.
-  *Upgrade:* a citation picker on the Report surface; failing that, a clearance
-  that names an act this surface can perform.
+  makes its first save -- figure span included, through the citation picker --
+  on the surface.
+- ~~**A digit in a draft is refused with a clearance the surface cannot
+  discharge.**~~ Closed by the upgrade it named: the Report section's citation
+  picker offers every citation of the served records at its record index and
+  composes the `{route_node_id, citation_index}` figure span the save
+  validates; the host still resolves the document, page and quote, and still
+  refuses a bad reference
+  (`frontend/tests/unit/report-figures.test.tsx`'s
+  `test_a_figure_chosen_in_the_picker_is_saved_as_a_figure_span`). A digit
+  typed as prose is still refused `NARRATIVE_FIGURE_UNREFERENCED`, and its
+  clearance now names an act the surface offers. The journey's first revision,
+  figure span included, is now made on the surface rather than over the API.
 - **Grant and revoke have no control.** ~~Nothing renders a parked run's stop
   code.~~ That half is closed: the Run section's work panel names
   `work.stop_code` beside the refused Start and Retry, in words and labelled
