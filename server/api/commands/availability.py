@@ -81,20 +81,50 @@ class FilingFacts:
     filed: bool
     actor_signed: bool
     actor_froze: bool
+    # The revision is the run's newest. The save posts the served revision as
+    # the head its draft was composed against, so on any other it is refused.
+    head: bool
 
 
 def report_actions(
-    role: GlobalRole, standing: Standing, filing: FilingFacts
+    role: GlobalRole,
+    standing: Standing,
+    filing: FilingFacts | None,
+    underivable: RefusalCode | None = None,
 ) -> list[ActionView]:
     """The Report section's four, in each command's own order (decision 7).
 
     They sit on Report rather than Committee because Committee refuses a
     revision that is not frozen, so it can never offer the sign or the freeze
     that would make it one.
+
+    `filing` is `None` when the run has no saved revision. The save is then the
+    one act that needs none -- it posts no expected head -- and `underivable`
+    is the code the run's payload derivation refused with, which is the save's
+    own answer past its floor. The other three name a revision their commands
+    would not find.
     """
+    writer = _floor(role, standing, Standing.WRITER)
     approver = _floor(role, standing, Standing.APPROVER)
+    if filing is None:
+        missing = [*approver, (True, _C.DELIVERABLE_NOT_FOUND)]
+        derived = [] if underivable is None else [(True, underivable)]
+        return [
+            _view(_A.SAVE_REVISION, [*writer, *derived]),
+            *(
+                _view(action, missing)
+                for action in (
+                    _A.SIGN_OPINION,
+                    _A.FREEZE_DELIVERABLE,
+                    _A.FILE_DELIVERABLE,
+                )
+            ),
+        ]
     return [
-        _view(_A.SAVE_REVISION, _floor(role, standing, Standing.WRITER)),
+        _view(
+            _A.SAVE_REVISION,
+            [*writer, (not filing.head, _C.COMMAND_EXPECTATION_STALE)],
+        ),
         _view(
             _A.SIGN_OPINION,
             [*approver, (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN)],

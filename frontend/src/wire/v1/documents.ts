@@ -351,8 +351,9 @@ const ReportArtifact = object({
 const reportFields = {
   case_id: uuid,
   displayed_run_id: uuid,
-  revision_id: uuid,
-  payload_sha256: hash,
+  // Null only on a Report for a run nothing has been saved from yet.
+  revision_id: nullable(uuid),
+  payload_sha256: nullable(hash),
   case_title: text,
   artifacts: array(ReportArtifact, 256),
   narrative: array(array(NarrativeSpan, 64), 64),
@@ -372,6 +373,8 @@ const FiledReceipt = object({
 });
 const CommitteeBody = object({
   ...reportFields,
+  revision_id: uuid,
+  payload_sha256: hash,
   state: enumOf(["frozen", "filed"]),
   signed_by: array(uuid, 1000),
   frozen_by: uuid,

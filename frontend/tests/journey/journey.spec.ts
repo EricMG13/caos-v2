@@ -1177,18 +1177,22 @@ test.describe.serial("journey", () => {
   });
 
   test("journey: a revision is saved from the run's accepted artifacts and a draft narrative", async () => {
-    // **The workspace has no path to the first save, and this is where that
-    // shows.** `sectionUrl` answers null for report without `?revision`,
-    // `read_report` refuses `DELIVERABLE_NOT_FOUND` without the row, and the
-    // only thing in the workspace that ever sets `?revision` is
-    // `FilingControls`' own post-save `setParams` -- which lives on the
-    // section that cannot be reached. So Report is unavailable here,
+    // Report without `?revision` is the filing chain's front door: a run
+    // nothing has been saved from is served its accepted artifacts and the
+    // save that makes the first revision, with the three acts that need one
+    // refused.
     await page.goto(`/report/?case=${caseId}&run=${runId}`);
-    await expect(page.locator("main#body [data-surface-state='unavailable']")).toHaveCount(1);
-    // and the first revision is made as an authenticated request from this
-    // same browser session, through the real edge, because there is no press
-    // that would make it. Everything after this one call is pressed on the
-    // surface.
+    await expect(page.locator("[data-report-v1]")).toContainText("Not yet saved");
+    await expect(
+      page.locator("[data-filing-controls] [data-action='SAVE_REVISION']"),
+    ).not.toHaveAttribute("data-refusal");
+    await expect(
+      page.locator("[data-filing-controls] [data-action='SIGN_OPINION']"),
+    ).toHaveAttribute("data-refusal", "DELIVERABLE_NOT_FOUND");
+    // The first revision is still made as an authenticated request from this
+    // same browser session, through the real edge, because it carries a
+    // figure span and the surface has no citation picker to compose one.
+    // Everything after this one call is pressed on the surface.
     // The route's own node id, read from the run document rather than spelled
     // out here: a figure names a *route node*, not a module, and CP-0 on this
     // pathway is `RN-LITE_CREDIT_22-LITE_EARNINGS_UPDATE-01-CP-0`.
