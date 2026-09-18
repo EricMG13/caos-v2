@@ -4410,3 +4410,19 @@ the pin" by the upgrade it named.
   checksums file and an edit here, which is the point.
 - **Not changed.** CI keeps `aquasecurity/trivy-action` pinned by commit with
   `version: v0.70.0`; it never ran `make image`.
+
+## 2026-09-18 §91 — The qualification floor is one worst-case call per run
+
+The owner authorized two portfolio runs at $5 each. At the live model's price
+($2 / $12 per million) the harness's floor -- one worst-case call *per node* --
+needed $5.77 for a two-node route and refused before spending, although no node
+has reserved a worst case since Task 8.2. The Phase 5 ledger entry owed this
+upgrade. `harness._affordable` now requires one worst-case call per run, the
+same admission `runtime._affordable` makes; `reserve`, under the run lock,
+refuses the next reservation past the ceiling, and that is what bounds spend.
+
+What it gives up, stated: the old floor (the Phase 5 confidence review's F-1)
+stopped a set whose route could not be finished at worst-case prices. Now such a
+route may start and stop short at `BUDGET_CEILING_REACHED`, having spent at most
+its ceiling -- the amount the owner authorized. Invariant 8 is unchanged: no
+call without a reservation, and no reservation past the ceiling.

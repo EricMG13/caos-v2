@@ -2148,7 +2148,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   exceeds a run's ceiling, so at Terra's rates three LITE nodes are refused
   against the $5 default before any case is prepared, and `scripts/qualify.py`
   admits exactly what it admitted before this task even though `run_route` now
-  finishes such a run. That sentence left the tree in a rewrite and is restored
+  finishes such a run. **Closed by §91:** the floor is one worst-case call
+  per run, the runtime's own admission, so a two-node LITE route at Terra's
+  price is admitted at $5
+  (`tests/test_qualification_prepare.py::test_a_route_whose_nodes_together_exceed_the_ceiling_at_worst_is_admitted`);
+  what it gives up is that a route may stop short at `BUDGET_CEILING_REACHED`
+  having spent at most its ceiling. That sentence left the tree in a rewrite and is restored
   here, which is the failure this ledger's own gate exists to catch, read the
   other way round.
   *Upgrade:* a user-confirmed dated price for the configured live model, which is

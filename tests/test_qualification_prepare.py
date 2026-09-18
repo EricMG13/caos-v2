@@ -93,21 +93,36 @@ def test_aggregate_ceiling_is_exact_under_decimal_context(precision: int) -> Non
 def test_a_price_whose_route_cannot_fit_a_run_is_refused_before_any_case(
     ready: Fixture,
 ) -> None:
-    """Every node reserves one worst case against its run's ceiling, so a
-    three-node route priced above a third of the ceiling would pay for a call it
-    could never finish (the whole-phase confidence review's F-1)."""
+    """A run whose ceiling cannot cover one worst-case call is refused before any
+    case, which is the run's own admission check (`runtime._affordable`) made
+    before preparation. The floor is one call, not one per node (§91): since
+    Task 8.2 a node reserves its own priced request, and `reserve` refuses the
+    next one past the ceiling under the run lock, so the ceiling -- not this
+    floor -- is what bounds the spend."""
     conn, blobs, harness, qualification = ready
-    half = replace(harness, price=priced(CEILING / 3 + Decimal("0.01")))
+    over = replace(harness, price=priced(CEILING + Decimal("0.01")))
     route = resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
     # Exact whatever the ambient precision (the whole-phase audit's W-1).
     with localcontext() as context:
         context.prec = 1
         with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_OVER_CEILING$"):
-            subject._affordable(qualification, half, [route])
+            subject._affordable(qualification, over, [route])
     with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_OVER_CEILING$"):
-        subject.prepare(conn, blobs, half, qualification=qualification)
+        subject.prepare(conn, blobs, over, qualification=qualification)
     assert _count(conn, "SELECT count(*) FROM cases") == 0
-    _unapproved_and_unspent(conn, half)
+    _unapproved_and_unspent(conn, over)
+
+
+def test_a_route_whose_nodes_together_exceed_the_ceiling_at_worst_is_admitted(
+    ready: Fixture,
+) -> None:
+    """Three nodes each priced a third of the ceiling and a cent at worst: the old
+    floor refused this, though no node reserves a worst case any more (§91)."""
+    _conn, _blobs, harness, qualification = ready
+    third = replace(harness, price=priced(CEILING / 3 + Decimal("0.01")))
+    route = resolve_route(CATALOG, LITE_PROFILE, LITE_SELECTION)
+    assert len(route.nodes) >= 3
+    subject._affordable(qualification, third, [route])
 
 
 def test_preparation_uses_an_explicit_run_ceiling(ready: Fixture) -> None:
