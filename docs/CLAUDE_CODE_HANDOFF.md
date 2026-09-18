@@ -18,7 +18,7 @@ contracts.
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **The completion remainder is landed on `completion/remainder`** (record below), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§84. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
+| Current task | **The completion remainder is landed on `completion/remainder`** (record below, three waves), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§87. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
@@ -75,6 +75,45 @@ untrusted evidence block where a document line could forge it -- and
 `tests/test_handoff_invocation.py::test_evidence_is_grouped_by_source_page_with_one_header`
 guards its absence. The reconciliation did not know that; §71.1's addendum now
 says so.
+
+### Waves two and three — 18 September 2026
+
+A second wave of five implementers took the recorded upgrades that carried no
+trigger condition and needed no owner input, and a third took the last one.
+Routing for all three followed the owner's model matrix (§85, §86) under §81's
+caps.
+
+| Slice | What | Decision |
+|---|---|---|
+| F | main's `citation_candidates`, dropped by #323: **found retired** by §71.1 and `12e57b4`, not ported; recorded as a finding | §71.1 addendum |
+| G | `IDENTITY_FIRST` on every store-touching route's decorator, the case event stream included; the census allows no exception | §87 |
+| H | `INTERNAL_FAULT` 500 and permanent at every layer; `EDGE_STATUS` held equal to `_STATUS`; §75's partition over the whole enum; the eight retry-shaped 400s named as the owner's | §87 |
+| I | `RouteChoice.accepts_model_extension` and the Create run checkbox; the demo Book names its one pathway; the demo Admin panel's health route | §87 |
+| J | the journey runner refuses a taken host port; `RESERVATION_BELOW_REQUEST` replaces the borrowed `CONTEXT_OVER_CEILING` | §87 |
+| K | a citation picker on the Report section; the journey's first revision, figure span included, is made on the surface | -- |
+
+**Wave-two acceptance review** (the tracked task-acceptance definition, Opus 5):
+ACCEPT on I and J, ACCEPT WITH FINDINGS on G and H, P3s only, all answered in
+`419ab7b` -- `ENDPOINT_NOT_FOUND` declared 404, the status it is served with,
+watched failing first; a stale census comment; a ledger line narrowed to routes
+reaching the store through `Store`; the final reviewer's definition no longer
+claiming `ultrathink`.
+
+**Final gate at `34865c1`**, one invocation per step, every step exit 0:
+`check-postgres`, lint, types, the offline suite **3,366 passed**, races **26**,
+security, frontend (**264** unit, both builds, the accessibility matrix, **90**
+workbench), and `smoke-production` -- the production-image tests 8 passed and
+the journey **22 passed on each of chromium, firefox and webkit**, no
+`Exception in ASGI application` and no traceback in the log. `make image` is not
+run locally, for the Trivy pin (the Completion Phase 13 ledger entry).
+
+**What is left, and it is all outside this tree.** Every open ledger entry now
+carries either a trigger condition that has not fired or an input only the owner
+or the vendor can give: Phase 13's identity-provider setting, TLS material and
+authorized nightly; Task 10.1's vendor request; Phases 9-11's documents,
+live-run authorization and vendor requests; the owner's D3 second half (the
+eight retry-shaped 400s); and the D2 Book/Admin decision the membership controls
+wait on.
 
 ## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
 
