@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_bundle_pin import VENDOR, clear_vendor_bytecode
 
 from server.methodology.bundle import Bundle
 from server.methodology.vendor import (
@@ -37,6 +38,9 @@ def _import_state() -> tuple[object, ...]:
 
 
 def test_vendor_loader_leaves_sys_path_untouched() -> None:
+    # Another process's bytecode is not this loader's; clearing it first keeps
+    # the assertion below about what `load_vendor_contract` writes.
+    clear_vendor_bytecode(VENDOR)
     before = _import_state()
     contract = load_vendor_contract(Bundle(VENDORED))
     assert _import_state() == before
