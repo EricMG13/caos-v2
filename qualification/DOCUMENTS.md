@@ -50,26 +50,29 @@ a row typed here is a row that fails. -->
 | `ba-debt-documents` | BA | Executed debt documents: indentures, credit agreements, maturity schedules | to_source | CP-4, CP-3C, CP-4C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | — | — | — |
 | `ccl-rating-actions` | CCL | Dated agency rating actions, outlooks, watches and the applicable published criteria | to_source | CP-2H | LITE_DISTRESSED_RESTRUCTURING, LITE_FULL_CREDIT_SCREEN, FULL_CREDIT_ASSESSMENT, DISTRESSED_RESTRUCTURING | — | — | — |
 | `ccl-market-data-extract` | CCL | Dated market-data extract: instrument prices, spreads, curve points with observation timestamps | to_source | CP-3D, CP-3 | MARKET_DISLOCATION, PORTFOLIO_DECISION, RELATIVE_VALUE | — | — | — |
-| `ccl-fy2025-10k-relative-value` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, relative-value set copy) | in_hand | CP-0, CP-L10, CP-1C | LITE_RELATIVE_VALUE | 311896 | yes | `8fa7fceda34be50b…` |
-| `rcl-q4-2025-earnings` | RCL | Royal Caribbean Group, "Royal Caribbean Group Reports 2025 Results, Issues 2026 Guidance" (29 January 2026 earnings release, text extract) | in_hand | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | 41861 | yes | `43005bdbd3a05fd6…` |
-| `nclh-q4-2025-earnings` | NCLH | Norwegian Cruise Line Holdings Q4 and full-year 2025 results (2 March 2026 earnings release, text extract) | in_hand | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | 52268 | yes | `dd9a0eb7211c111b…` |
+| `ccl-fy2025-10k-relative-value` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, relative-value set copy) | to_source | CP-0, CP-L10, CP-1C | LITE_RELATIVE_VALUE | — | — | — |
+| `rcl-q4-2025-earnings` | RCL | Royal Caribbean Group, "Royal Caribbean Group Reports 2025 Results, Issues 2026 Guidance" (29 January 2026 earnings release, text extract) | to_source | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | — | — | — |
+| `nclh-q4-2025-earnings` | NCLH | Norwegian Cruise Line Holdings Q4 and full-year 2025 results (2 March 2026 earnings release, text extract) | to_source | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | — | — | — |
 | `ccl-decision-record` | CCL | A completed decision record at T0: thesis, expectations, dissent, and the decision date | to_author | CP-8 | LITE_DECISION_LEDGER, DECISION_LEDGER | — | — | — |
 | `cp-dr-research-brief` | — | A CP-DR research brief and the supplied evidence its questions need | to_author | CP-DR | LITE_DEEP_RESEARCH, DEEP_RESEARCH | — | — | — |
 | `distressed-disclosure-statement` | — | A distressed issuer's disclosure statement, plan or restructuring support agreement | not_available | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
 | `answer-key-3issuer` | CCL, BA, F | ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer | **key source, never admitted** | — | — | — | — | — |
 <!-- /emitted -->
 
-Eighteen documents: nine `in_hand`, six `to_source`, two `to_author`, one
-`not_available`; plus one key source. Four of the nine in hand are set copies
-of the first three -- the portfolio-screen set's three and the relative-value
-set's 10-K -- which the on-disk loader requires because it refuses a declared
-path resolving outside its set root. The two cruise peer releases
-(`rcl-q4-2025-earnings`, `nclh-q4-2025-earnings`) replace the former
-`cruise-peer-pack` row. The `bytes` and `sha256` columns are
+Eighteen documents: six `in_hand`, nine `to_source`, two `to_author`, one
+`not_available`; plus one key source. Three of the six in hand are set copies
+of the first three -- the portfolio-screen set's three -- which the on-disk
+loader requires because it refuses a declared path resolving outside its set
+root. The two cruise peer releases (`rcl-q4-2025-earnings`,
+`nclh-q4-2025-earnings`) replace the former `cruise-peer-pack` row, and the
+relative-value set's own CCL 10-K copy (`ccl-fy2025-10k-relative-value`) is a
+fourth set copy of that kind -- but all three of the relative-value set's rows
+are `to_source`, not `in_hand`: the raw text pushed the slice that added them
+over the 800-line PR cap, so the owner adds the three files directly at the
+`local_path` each row already names, the way `ba-fy2025-10k` and
+`f-fy2025-10k` were held out before them. The `bytes` and `sha256` columns are
 blank for a document not in the tree: only a file under `qualification/` is
-measured, so the table is the same on every machine. `ba-fy2025-10k` and
-`f-fy2025-10k` are held out of the tree, and their sizes are in their register
-notes and under **Size** below rather than in this table.
+measured, so the table is the same on every machine.
 
 ## Sourcing list for the owner
 
