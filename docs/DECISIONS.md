@@ -4146,3 +4146,22 @@ and the routes that have are single-node at every pass, so production behaviour
 for them is unchanged. This is **not** 13.2: one worker still claims one run,
 and the I6 residual — a stale lease holder paying once — is untouched and still
 what a second worker must answer first.
+
+## 2026-09-18 §81 — No `ultrathink` and no `max`, for any model; `xhigh` is the ceiling
+
+The owner, 18 September 2026: "No more use of ultrathink and Max reasoning for
+any model, cap is xhigh." This overrides every earlier routing record that
+asks for either — the goal prompts, the complementary plans, the task briefs,
+`docs/AGENT_PROMPTS.md` and the review routing of 17 September — without
+editing them, because each is a dated record of what was asked then.
+
+- **Dispatch.** No implementer, reviewer or detector prompt contains
+  `ultrathink`, and no dispatch sets effort `max`. `xhigh` is the most any
+  model is given.
+- **The four tracked review definitions** under `.claude/agents/` already
+  pinned `xhigh`; they no longer tell a review turn to open with `ultrathink`.
+- **What ran before this entry keeps its recorded setting.** Three
+  implementers of the completion remainder (slices A, C and D) were launched
+  earlier the same day with `ultrathink` in their prompts and were not
+  restarted; their reports are evidence about the tree, and the setting is
+  recorded against them rather than re-run.
