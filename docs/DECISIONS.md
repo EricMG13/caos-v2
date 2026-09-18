@@ -3031,6 +3031,14 @@ be forged, because of the tag.
 better under one rule than under four is unknown, and the eleven recorded
 qualification snapshots are not comparable to anything taken from here on.
 
+*Addendum, 18 September 2026.* The reconciliation `04dd605` recorded main's
+`citation_candidates` as not ported and "flagged for separate review". The
+review found it retired here by this entry and `12e57b4`, with
+`test_evidence_is_grouped_by_source_page_with_one_header` guarding its absence,
+so it stays retired and the Model read's `IO_BUDGET` does not return to main's
+196. Bringing it back would need a dated decision overriding this one that first
+answers the flag-forgery and unsatisfiable-rule findings above.
+
 ### 71.2 A run's delivered evidence is one query, and a short read refuses
 
 Building any module's prompt read every delivered block one at a time — a
