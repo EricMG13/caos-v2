@@ -369,6 +369,12 @@ def write_pack(pack: Mapping[str, Any], out: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    # Path-traversal scanners flag `--out` as a generic "user request" source
+    # reaching write_pack's mkdir/write_text sink -- the template does not
+    # know this is argv, not a request body. There is no HTTP boundary here:
+    # this module is a CLI script an operator runs from their own shell
+    # (never imported by server/), so the path is exactly as trusted as any
+    # other argument to a command they typed themselves.
     parser.add_argument("--out", type=Path, default=REPO / "release-pack")
     parser.add_argument(
         "--store",
