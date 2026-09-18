@@ -12,6 +12,15 @@ so the real-stack journey reaches the API the way production would:
   `content-type`, `content-length` and `accept` pass through, with the body;
 - responses stream frame by frame, so SSE is unbuffered, with no read timeout.
 
+An event stream is certain to be cut -- the browser navigates away from the
+page tailing it, the API's tail deadline or the stack's teardown closes it --
+and that is logged as one line naming the class, never as a traceback: an
+unhandled `Exception in ASGI application` on every green run teaches a reader
+to scroll past tracebacks. Only an event stream the upstream cuts ends early
+quietly -- a cut JSON body presented as complete would be an answer nobody
+sent -- and any other failure still raises. A browser that has gone is logged
+the same way whatever it was reading, since nobody is left to mislead.
+
 `GET /_edge/login?persona=analyst|approver|filer|reader|intruder` stands in for the OIDC
 login; any other request without a valid session is answered 401 here and
 never reaches the API. Run with
@@ -22,15 +31,16 @@ never reaches the API. Run with
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import secrets
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from uuid import UUID
 
 import httpx
 from starlette.background import BackgroundTask
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -53,6 +63,9 @@ PASSED = frozenset(
         "accept",
     }
 )
+LOGGER = logging.getLogger("journey.edge")
+EVENT_STREAM = "text/event-stream"
+
 # Hop-by-hop response headers (RFC 9110 §7.6.1) are this hop's, not the client's.
 HOP_BY_HOP = frozenset(
     {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade"}
@@ -116,6 +129,44 @@ def response_headers(answer: httpx.Response) -> dict[str, str]:
         for name, value in answer.headers.multi_items()
         if name.lower() not in HOP_BY_HOP
     }
+
+
+def _cut(target: str, cause: type[BaseException]) -> None:
+    """The one line a cut event stream costs: the class and the target, never
+    the exception's text."""
+    LOGGER.warning("edge: event stream %s ended by %s", target, cause.__name__)
+
+
+def is_event_stream(answer: httpx.Response) -> bool:
+    media: str = answer.headers.get("content-type", "")
+    return media.split(";")[0].strip().lower() == EVENT_STREAM
+
+
+async def relay(answer: httpx.Response, target: str) -> AsyncIterator[bytes]:
+    """The upstream body frame by frame. An event stream the upstream closes
+    mid-body ends here; anything else it raises is raised."""
+    stream = is_event_stream(answer)
+    try:
+        async for frame in answer.aiter_raw():
+            yield frame
+    except httpx.RemoteProtocolError:
+        if not stream:
+            raise
+        _cut(target, httpx.RemoteProtocolError)
+
+
+async def answer_client(
+    response: Response, target: str, scope: Scope, receive: Receive, send: Send
+) -> None:
+    """Send `response`; a browser gone mid-stream ends it with one line."""
+    try:
+        await response(scope, receive, send)
+    except ClientDisconnect:
+        # An ASGI 2.4 server raises into `send` once the browser has gone, and
+        # Starlette turns that into this. Nothing is left to answer.
+        if not isinstance(response, StreamingResponse):
+            raise
+        _cut(target, ClientDisconnect)
 
 
 async def send_upstream(
@@ -184,7 +235,7 @@ def make_edge(
             return PlainTextResponse("upstream unreachable", status_code=502)
         headers = response_headers(answer)
         return StreamingResponse(
-            answer.aiter_raw(),
+            relay(answer, request.url.path),
             status_code=answer.status_code,
             headers=headers,
             background=BackgroundTask(answer.aclose),
@@ -202,7 +253,7 @@ def make_edge(
                 response = PlainTextResponse("no session", status_code=401)
             else:
                 response = await proxy(request, persona)
-        await response(scope, receive, send)
+        await answer_client(response, request.url.path, scope, receive, send)
 
     return app
 
