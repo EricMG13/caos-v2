@@ -16,6 +16,7 @@ import collections
 import copy
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,25 @@ from lite_route_fixtures import realistic_handoff_markdown
 from server.engine import route
 from server.refusals import Refusal, RefusalCode
 
-BUNDLE = Path(__file__).resolve().parents[1] / "vendor" / "deploy-v"
+VENDOR = Path(__file__).resolve().parents[1] / "vendor"
+BUNDLE = VENDOR / "deploy-v"
+
+
+def clear_vendor_bytecode(root: Path) -> int:
+    """Remove every `__pycache__` under `root` that holds only `.pyc` files,
+    returning how many; refuse, removing nothing, if one holds anything else.
+
+    No vendored file is bytecode (`git ls-files vendor` carries none), so this
+    touches only what an interpreter wrote beside the vendored bytes."""
+    caches = sorted(root.rglob("__pycache__"), reverse=True)
+    for cache in caches:
+        foreign = [p for p in cache.rglob("*") if p.is_file() and p.suffix != ".pyc"]
+        assert not foreign, f"not bytecode, not removed: {foreign}"
+    for cache in caches:
+        shutil.rmtree(cache, ignore_errors=True)
+    return len(caches)
+
+
 CATALOG = (
     BUNDLE / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
@@ -201,6 +220,32 @@ def test_the_vendored_catalog_carries_no_edge_this_engine_cannot_evaluate(
     assert refused > 0
 
 
+def test_clearing_vendor_bytecode_removes_only_bytecode(tmp_path: Path) -> None:
+    """The vendored tree is shared by every process in this checkout, and any
+    one importing a vendor script leaves `__pycache__` beside it; the two tests
+    that refuse bytecode clear it first, so they measure this repository's own
+    behaviour and not the machine's. Clearing removes bytecode and nothing
+    else: a vendored byte is never touched (invariant 4)."""
+    tree = tmp_path / "vendor" / "bundle" / "scripts"
+    tree.mkdir(parents=True)
+    script = tree / "tool.py"
+    script.write_text("print(1)\n", encoding="utf-8")
+    cache = tree / "__pycache__"
+    cache.mkdir()
+    (cache / "tool.cpython-314.pyc").write_bytes(b"\x00")
+    (tmp_path / "vendor" / "__pycache__").mkdir()
+
+    assert clear_vendor_bytecode(tmp_path / "vendor") == 2
+    assert not list((tmp_path / "vendor").rglob("__pycache__"))
+    assert script.read_text(encoding="utf-8") == "print(1)\n"
+
+    cache.mkdir()
+    (cache / "notes.txt").write_text("not bytecode", encoding="utf-8")
+    with pytest.raises(AssertionError, match=r"notes\.txt"):
+        clear_vendor_bytecode(tmp_path / "vendor")
+    assert (cache / "notes.txt").is_file()
+
+
 def test_the_bundle_verifies_with_its_own_tool() -> None:
     # A second, independent verifier: the package's own read-only checker must
     # still accept the vendored bytes. `-B` because it refuses a tree that
@@ -208,6 +253,7 @@ def test_the_bundle_verifies_with_its_own_tool() -> None:
     import subprocess
     import sys
 
+    clear_vendor_bytecode(VENDOR)
     result = subprocess.run(
         [sys.executable, "-B", "verify_package.py"],
         cwd=BUNDLE,
