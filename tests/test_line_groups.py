@@ -24,7 +24,7 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.evidence.citations import Citation, verify_citations
 from server.evidence.ingest import GROUP_WIDTH, Document, admit_pack
-from server.refusals import Refusal
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 
 # Six characters a word, so the group boundary falls inside a word rather than
@@ -129,7 +129,10 @@ def test_a_packing_that_disagrees_with_the_stored_blocks_refuses(
     a changed `GROUP_WIDTH` repacks an already-admitted source into a
     different number of blocks, and the ids the recomputation then produces
     are ids admission never wrote. Anchoring against them would ask whether a
-    block that does not exist was delivered. It refuses instead.
+    block that does not exist was delivered. It refuses instead -- with a code
+    of its own, because the fault is the host's packing rule and not the
+    source's liveness: `EVIDENCE_NOT_AVAILABLE`'s clearance, "Pin a live
+    source", names an act that cannot help a source that is live.
     """
     conn, case_id = case
     source_id = _admit(conn, case_id, tmp_path, DOCUMENT)
@@ -138,12 +141,28 @@ def test_a_packing_that_disagrees_with_the_stored_blocks_refuses(
     # recomputed total no longer equals the stored count.
     monkeypatch.setattr("server.evidence.citations.GROUP_WIDTH", GROUP_WIDTH // 4)
 
-    with pytest.raises(Refusal, match=r"^EVIDENCE_NOT_AVAILABLE$"):
+    with pytest.raises(Refusal, match=r"^EVIDENCE_PACKING_MISMATCH$"):
         verify_citations(
             conn,
             delivered={source_id: frozenset({"b000000"})},
             citations=[Citation(source_id, 1, "Annual report of the issuer")],
         )
+
+
+def test_a_packing_mismatch_is_an_operators_fault_with_a_clearance_it_can_act_on() -> (
+    None
+):
+    """The refusal above is the host's rule disagreeing with bytes it wrote, so
+    no caller act clears it and no retry does either: a permanent 500 whose
+    clearance names the one discharge there is, re-admitting the source."""
+    from server.api.app import _STATUS, PERMANENT
+    from server.api.wire import CLEARS
+
+    code = RefusalCode.EVIDENCE_PACKING_MISMATCH
+    assert _STATUS[code] == 500
+    assert code in PERMANENT
+    assert "re-admit" in CLEARS[code].lower()
+    assert CLEARS[code] != CLEARS[RefusalCode.EVIDENCE_NOT_AVAILABLE]
 
 
 def test_a_source_missing_a_block_still_reads_one_block_a_line(

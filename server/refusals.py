@@ -112,6 +112,11 @@ class RefusalCode(StrEnum):
     SOURCE_EXTRACTION_TIMEOUT = "SOURCE_EXTRACTION_TIMEOUT"
     SOURCE_IDENTITY_INVALID = "SOURCE_IDENTITY_INVALID"
     EVIDENCE_NOT_AVAILABLE = "EVIDENCE_NOT_AVAILABLE"
+    # A live source whose stored block count this build's `GROUP_WIDTH` no
+    # longer reproduces: the host's packing rule moved under bytes it wrote.
+    # Distinct from EVIDENCE_NOT_AVAILABLE because pinning a live source cannot
+    # clear it -- the source is live -- and re-admitting it under this build can.
+    EVIDENCE_PACKING_MISMATCH = "EVIDENCE_PACKING_MISMATCH"
     # Phase 4 Task 4.4c: an evidence page the caller may not or cannot read.
     PAGE_NOT_AVAILABLE = "PAGE_NOT_AVAILABLE"
     CITATION_NOT_LOCATED = "CITATION_NOT_LOCATED"

@@ -145,6 +145,7 @@ PERMANENT = frozenset(
         RefusalCode.HANDOFF_UNDECLARED_FIELD,
         RefusalCode.HANDOFF_MODULE_UNSUPPORTED,
         RefusalCode.ATTEMPT_NOT_FOUND,
+        RefusalCode.EVIDENCE_PACKING_MISMATCH,
     }
 )
 # What a transient answer promises, in seconds. A constant rather than a
@@ -215,6 +216,10 @@ _STATUS = {
     RefusalCode.HANDOFF_MODULE_UNSUPPORTED: 500,
     RefusalCode.ATTEMPT_NOT_FOUND: 500,
     RefusalCode.AUTHORITY_MODULE_UNKNOWN: 500,
+    # A stored block count this build's packing rule does not reproduce: bytes
+    # this server wrote read under a rule that has since moved. The same request
+    # later meets the same rows and the same rule; re-admission is the discharge.
+    RefusalCode.EVIDENCE_PACKING_MISMATCH: 500,
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,
