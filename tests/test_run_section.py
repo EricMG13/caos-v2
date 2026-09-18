@@ -164,6 +164,11 @@ def test_a_case_with_no_run_is_observed_empty(
                 "selection_id": "LITE_PORTFOLIO_DECISION",
                 "accepts_model_extension": False,
             },
+            {
+                "profile_id": "LITE_CREDIT_22",
+                "selection_id": "LITE_RELATIVE_VALUE",
+                "accepts_model_extension": False,
+            },
         ],
     }
     actions = {str(view.action): view.refusal for view in document.chrome.actions}
