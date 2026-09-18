@@ -250,6 +250,9 @@ COMMITTED_SET_DIGESTS = {
         "7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c"
     ),
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
+    "vmo2-fy2025-deep-research": (
+        "09807efb1a3d5d40680d1a9d0e054333537781d7bb4013ecd7670323f817fd9b"
+    ),
     "vmo2-fy2025-portfolio": (
         "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
     ),
