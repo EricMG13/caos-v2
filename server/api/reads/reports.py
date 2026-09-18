@@ -1,11 +1,18 @@
-"""Exact saved Report and frozen/filed Committee reads; no write authority."""
+"""Exact saved Report and frozen/filed Committee reads; no write authority.
+
+Report names its revision or not. Named, it is served exactly as Committee
+serves one. Unnamed, it serves the run's head -- the revision a save would be
+composed against -- or, when the run has none, the run's accepted artifacts as
+a save would carry them and the save that makes the first revision. That is
+the filing chain's front door: nothing else in the workspace sets `?revision`.
+"""
 
 import json
 from hashlib import sha256
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from server.api.commands.availability import FilingFacts, report_actions
 from server.api.deps import (
@@ -17,15 +24,18 @@ from server.api.deps import (
     RunQuery,
     Store,
     readable,
+    revision_query,
 )
 from server.api.wire import CommitteeDocument, ReportDocument
+from server.boundary_text import BoundaryText
+from server.deliverable.canonical import Revision, canonical_payload
 from server.deliverable.filing import revision_signatures
 from server.deliverable.receipts import read_filed_receipt
 from server.deliverable.revisions import prove_revision, read_revision
 from server.refusals import Refusal, RefusalCode
 from server.store.audit import audit_head, audit_trail, verify_chain
 from server.store.commands import payload_digests
-from server.store.members import standing_of
+from server.store.members import Standing, standing_of
 from server.store.outcomes import execution_reads
 
 # Three-node LITE: isolation/standing/selection (3), live proof (40). No lock:
@@ -45,8 +55,25 @@ from server.store.outcomes import execution_reads
 # read. Measured at 53 for the frozen path with two signers. Recorded in
 # CLAUDE.md rather than absorbed into the number, because a budget fitted to the
 # widest shape stops measuring the common one.
-IO_BUDGET = {"report": 45, "committee": 59, "frozen": 52}
+# The head a save is judged against rides the revision's own statement, so it
+# costs no round trip. "unsaved" is a run with no revision, measured on the
+# same LITE route: isolation and standing (2), the head (1), the run and its
+# title (1), and the payload derivation a first save would make (38) -- the
+# derivation the saved path proves, less the stored revision's own reads.
+IO_BUDGET = {"report": 45, "committee": 59, "frozen": 52, "unsaved": 42}
 router = APIRouter()
+
+
+def report_revision(revision: str | None = None) -> UUID | None:
+    """Report's `revision` query: absent selects the run's head, or none.
+
+    Present, it is parsed exactly as Committee's, so an empty or malformed one
+    still names no deliverable rather than falling back to the head.
+    """
+    return None if revision is None else revision_query(revision)
+
+
+ReportRevision = Annotated[UUID | None, Depends(report_revision)]
 
 
 @router.get("/api/v1/cases/{case_id}/report", response_model=ReportDocument)
@@ -54,7 +81,7 @@ def read_report(  # noqa: PLR0913 -- caller and parsed selection precede stores
     actor: Caller,
     case_id: CasePath,
     run: RunQuery,
-    revision: RevisionQuery,
+    revision: ReportRevision,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
@@ -83,7 +110,7 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
     actor: Caller,
     case_id: UUID,
     run: UUID | None,
-    revision: UUID,
+    revision: UUID | None,
     conn: Store,
     blobs: Blobs,
     bundle: Methodology,
@@ -97,14 +124,23 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
         # adopts no transaction already open, and a standing read before it
         # would be one.
         standing = readable(standing_of(conn, case_id=case_id, user_id=actor.user_id))
+        # The head is ordered exactly as the save command's `_latest` orders
+        # it, which is what makes "not the head" the save's own refusal.
         row = conn.execute(
-            "SELECT payload_sha256,now() FROM deliverable_revisions"
-            " WHERE case_id=%s AND run_id=%s AND revision_id=%s",
-            (case_id, run, revision),
+            "SELECT r.revision_id,r.payload_sha256,now(),(SELECT h.revision_id"
+            " FROM deliverable_revisions h WHERE h.case_id=r.case_id"
+            " AND h.run_id=r.run_id ORDER BY h.saved_at DESC, h.revision_id DESC"
+            " LIMIT 1) FROM deliverable_revisions r WHERE r.case_id=%s"
+            " AND r.run_id=%s AND (%s::uuid IS NULL OR r.revision_id=%s)"
+            " ORDER BY r.saved_at DESC, r.revision_id DESC LIMIT 1",
+            (case_id, run, revision, revision),
         ).fetchone()
+        if row is None and revision is None:
+            return _unsaved(actor, standing, case_id, run, conn, blobs, bundle)
         if row is None:
             raise Refusal(RefusalCode.DELIVERABLE_NOT_FOUND)
-        digest, observed_at = row
+        selected, digest, observed_at, head = row
+        revision = UUID(str(selected))
         publication = _publication(conn, case_id, revision, digest) if committee else {}
         if publication.get("state") == "filed":
             publication["receipt"] = json.loads(
@@ -130,7 +166,9 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
                 subject=dict(case_id=case_id, title=payload["case_title"]),
                 served_role=dict(global_role=actor.role, standing=standing),
                 actions=report_actions(
-                    actor.role, standing, _filing_facts(conn, case_id, revision, actor)
+                    actor.role,
+                    standing,
+                    _filing_facts(conn, case_id, revision, actor, head=head),
                 ),
             ),
             body={**_body(payload, digest), **publication},
@@ -141,8 +179,69 @@ def _read(  # noqa: PLR0913 -- both documents share one authorization/proof unit
         )
 
 
+def _unsaved(  # noqa: PLR0913 -- the read's caller, selection and stores
+    actor: Caller,
+    standing: Standing,
+    case_id: UUID,
+    run: UUID,
+    conn: Store,
+    blobs: Blobs,
+    bundle: Methodology,
+) -> dict[str, Any]:
+    """A run with no revision: what a first save would carry, and that save.
+
+    The save's commit derives the payload and refuses when it cannot, so the
+    read derives it too and shows the save refused with that code rather than
+    offering one its commit refuses. A refused derivation shows no artifact:
+    nothing it could show was proven. No revision exists, so there is no digest
+    to name and nothing to sign, freeze or file.
+    """
+    row = conn.execute(
+        "SELECT c.title,now() FROM runs r JOIN cases c USING (case_id)"
+        " WHERE r.run_id=%s AND r.case_id=%s",
+        (run, case_id),
+    ).fetchone()
+    if row is None:
+        raise Refusal(RefusalCode.RUN_NOT_FOUND)
+    title, observed_at = str(row[0]), row[1]
+    underivable = None
+    artifacts: list[dict[str, Any]] = []
+    try:
+        # Nothing reads the store after this, so a refusal leaves nothing in
+        # this unit to serve from a transaction it may have spoiled.
+        artifacts = canonical_payload(
+            conn,
+            blobs,
+            bundle,
+            Revision(case_id, run, BoundaryText.of(title), BoundaryText.of("unsaved")),
+            _in_unit=True,
+        )["artifacts"]
+    except Refusal as refusal:
+        underivable = refusal.code
+    payload = dict(
+        case_id=str(case_id),
+        run_id=str(run),
+        revision_id=None,
+        case_title=title,
+        artifacts=artifacts,
+        narrative=[],
+    )
+    return dict(
+        chrome=dict(
+            subject=dict(case_id=case_id, title=title),
+            served_role=dict(global_role=actor.role, standing=standing),
+            actions=report_actions(actor.role, standing, None, underivable),
+        ),
+        body=_body(payload, None),
+        observed_at=observed_at,
+        observed_empty=True,
+        status="complete",
+        notes=[],
+    )
+
+
 def _filing_facts(
-    conn: Store, case_id: UUID, revision: UUID, actor: Caller
+    conn: Store, case_id: UUID, revision: UUID, actor: Caller, *, head: object
 ) -> FilingFacts:
     """What the section can say about this revision's filing, and no more.
 
@@ -164,6 +263,7 @@ def _filing_facts(
         filed=row is not None and row[1] is not None,
         actor_signed=actor.user_id in signers,
         actor_froze=actor.user_id == frozen_by,
+        head=head is not None and UUID(str(head)) == revision,
     )
 
 
@@ -239,7 +339,7 @@ def _publication(
     )
 
 
-def _body(payload: dict[str, Any], digest: str) -> dict[str, Any]:
+def _body(payload: dict[str, Any], digest: str | None) -> dict[str, Any]:
     artifacts = []
     for artifact in payload["artifacts"]:
         projections = json.loads(artifact["record"])["projections"]

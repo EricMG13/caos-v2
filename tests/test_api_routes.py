@@ -1031,7 +1031,7 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         calls["/api/v1/cases/{case_id}/model"]
         == calls["/api/v1/cases/{case_id}/analysis"]
     )
-    report_dependencies = [
+    committee_dependencies = [
         actor_from_request,
         deps.case_path,
         deps.run_query,
@@ -1040,8 +1040,13 @@ def test_every_section_read_depends_on_the_shared_dependencies() -> None:
         blob_store,
         methodology_bundle,
     ]
-    assert calls["/api/v1/cases/{case_id}/report"] == report_dependencies
-    assert calls["/api/v1/cases/{case_id}/committee"] == report_dependencies
+    assert calls["/api/v1/cases/{case_id}/committee"] == committee_dependencies
+    # Report's revision is optional -- absent reads the run's head or offers its
+    # first save -- and is parsed in the same place, before the store.
+    assert calls["/api/v1/cases/{case_id}/report"] == [
+        reports_read.report_revision if dep is deps.revision_query else dep
+        for dep in committee_dependencies
+    ]
 
 
 def test_the_reported_digest_is_the_one_that_was_pinned(
