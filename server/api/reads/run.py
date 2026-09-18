@@ -59,17 +59,20 @@ from server.engine.route import (
     NodeResult,
     NodeState,
     ResolvedRoute,
+    RouteExtensions,
     RouteNode,
     blockers_from,
     lite_object_unmet,
     node_states,
     readiness_from,
+    resolve_route,
     waiting_on,
 )
 from server.engine.runtime import accepted_artifacts
 from server.methodology.bundle import Bundle
 from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.invocation import named_objects
+from server.methodology.vendor import catalog
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.gates import (
@@ -186,10 +189,7 @@ def read_run_section(  # noqa: PLR0913 -- identity, two ids, store, blobs, bundl
             displayed_run_id=None if displayed is None else displayed.run_id,
             runs=runs,
             run=view,
-            route_choices=[
-                RouteChoice(profile_id=profile, selection_id=selection)
-                for profile, selection in sorted(ADAPTER_ROUTES)
-            ],
+            route_choices=_route_choices(bundle),
         ),
         observed_at=observed_at,
         observed_empty=not runs,
@@ -248,6 +248,40 @@ def _displayed_beyond_the_list(
     if row is None:
         raise Refusal(RefusalCode.RUN_NOT_FOUND)
     return _summary(row)
+
+
+def _route_choices(bundle: Bundle) -> list[RouteChoice]:
+    """Every enabled pathway, each saying whether it takes the model extension.
+
+    Asked of the same pure resolution `create_run` performs, with the extension
+    requested, so the surface's offer and the command's answer are one rule and
+    no pathway list is written down twice. Only the owner refusal means "no";
+    any other refusal is the catalog's fault and is not the reader's to hide.
+    """
+    verified = catalog(bundle)
+    choices = []
+    for profile, selection in sorted(ADAPTER_ROUTES):
+        try:
+            resolve_route(
+                verified,
+                profile,
+                selection,
+                extensions=RouteExtensions(model_extension=True),
+            )
+        except Refusal as refusal:
+            if refusal.code is not RefusalCode.ROUTE_EXTENSION_OWNER_MISSING:
+                raise
+            accepts = False
+        else:
+            accepts = True
+        choices.append(
+            RouteChoice(
+                profile_id=profile,
+                selection_id=selection,
+                accepts_model_extension=accepts,
+            )
+        )
+    return choices
 
 
 def _run_view(

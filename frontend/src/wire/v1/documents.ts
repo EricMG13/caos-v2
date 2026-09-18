@@ -153,7 +153,13 @@ const WorkView = object({
   stop_code: nullable(later(() => RefusalCode)),
   cancel_requested: bool,
 });
-const RouteChoice = object({ profile_id: short, selection_id: short });
+// `accepts_model_extension` is the create command's own route resolution
+// asked in advance (§82): advisory, and resolved again at commit.
+const RouteChoice = object({
+  profile_id: short,
+  selection_id: short,
+  accepts_model_extension: bool,
+});
 // The node whose validated Blocked verdict ended the run, as the transition
 // recorded it (§68). Nullable on `RunView`: a run the frontier emptied is
 // BLOCKED with no node to name, and the wire never claims one.

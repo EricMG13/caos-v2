@@ -38,6 +38,7 @@ from server.api.reads import run as run_read
 from server.api.wire import BlockedByView, DirectoryDocument, RunSectionDocument
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, resolve_route, route_digest
+from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store import routes as store_routes
 from server.store.members import Standing, grant, revoke
@@ -145,12 +146,23 @@ def test_a_case_with_no_run_is_observed_empty(
         # `ADAPTER_ROUTES`: deriving it from the constant the reader already
         # uses would assert nothing, and enabling a pathway should cost a
         # deliberate edit here.
+        # `accepts_model_extension` is the create command's own resolution
+        # asked in advance: only RELATIVE_VALUE runs every owner CP-CF reads.
         "route_choices": [
-            {"profile_id": "FULL_CREDIT_32", "selection_id": "RELATIVE_VALUE"},
-            {"profile_id": "LITE_CREDIT_22", "selection_id": "LITE_EARNINGS_UPDATE"},
+            {
+                "profile_id": "FULL_CREDIT_32",
+                "selection_id": "RELATIVE_VALUE",
+                "accepts_model_extension": True,
+            },
+            {
+                "profile_id": "LITE_CREDIT_22",
+                "selection_id": "LITE_EARNINGS_UPDATE",
+                "accepts_model_extension": False,
+            },
             {
                 "profile_id": "LITE_CREDIT_22",
                 "selection_id": "LITE_PORTFOLIO_DECISION",
+                "accepts_model_extension": False,
             },
         ],
     }
@@ -158,6 +170,23 @@ def test_a_case_with_no_run_is_observed_empty(
     assert actions["CREATE_RUN"] is not None  # the header named no writing group
     assert actions["START_RUN"] is not None
     assert actions["START_RUN"].code == "NOT_AUTHORISED"
+
+
+def test_only_the_owner_refusal_withholds_the_model_extension_offer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A choice says "no extension" for the one refusal that means it. Any
+    other refusal from resolution is a fault in the catalog, and reading it as
+    "this route cannot carry CP-CF" would hide that fault behind an offer."""
+
+    def refuse(*_: object, **__: object) -> ResolvedRoute:
+        raise Refusal(RefusalCode.ROUTE_PROFILE_UNKNOWN)
+
+    monkeypatch.setattr(run_read, "catalog", lambda _bundle: {})
+    monkeypatch.setattr(run_read, "resolve_route", refuse)
+    with pytest.raises(Refusal) as refused:
+        run_read._route_choices(object())  # type: ignore[arg-type]
+    assert refused.value.code is RefusalCode.ROUTE_PROFILE_UNKNOWN
 
 
 def test_the_lite_run_carries_its_pinned_input_gates_and_attempts(

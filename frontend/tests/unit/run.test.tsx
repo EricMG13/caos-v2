@@ -84,11 +84,19 @@ const EMPTY_RUN: RunSectionDocument = withActions(
       displayed_run_id: null,
       runs: [],
       run: null,
-      route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
+      route_choices: [
+        {
+          profile_id: "FULL_CREDIT_ASSESSMENT",
+          selection_id: "default",
+          accepts_model_extension: false,
+        },
+      ],
     },
   },
   [{ action: "CREATE_RUN", refusal: null }],
 );
+
+const RUN_B = "11111111-1111-4111-8111-111111111111";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -326,7 +334,13 @@ describe("Run", () => {
           displayed_run_id: null,
           runs: [],
           run: null,
-          route_choices: [{ profile_id: "FULL_CREDIT_ASSESSMENT", selection_id: "default" }],
+          route_choices: [
+            {
+              profile_id: "FULL_CREDIT_ASSESSMENT",
+              selection_id: "default",
+              accepts_model_extension: false,
+            },
+          ],
         },
       },
       [{ action: "CREATE_RUN", refusal: null }],
@@ -338,6 +352,104 @@ describe("Run", () => {
     expect(select.options.length).toBe(1);
     const button = container.querySelector('[data-action="CREATE_RUN"]')!;
     expect(button).not.toHaveAttribute("aria-disabled");
+  });
+
+  // The model extension (§82) is offered on the route the server says can
+  // carry it, sent as the analyst chose it, and stated -- never hidden --
+  // where it cannot be. The offer is advisory: the command resolves again.
+  test("test_the_model_extension_is_sent_as_chosen_on_a_route_that_accepts_it", async () => {
+    const caseId = routeNotPinned.body.case_id;
+    const doc: RunSectionDocument = {
+      ...EMPTY_RUN,
+      body: {
+        ...EMPTY_RUN.body,
+        route_choices: [
+          {
+            profile_id: "FULL_CREDIT_32",
+            selection_id: "RELATIVE_VALUE",
+            accepts_model_extension: true,
+          },
+        ],
+      },
+    };
+    const created = { case_id: caseId, run_id: RUN_B, route_digest: "f".repeat(64) };
+    const fetchSpy = vi.fn().mockResolvedValueOnce(jsonResponse(created, 201));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container, getByLabelText } = mountAt(doc, `/run/?case=${caseId}`);
+      const box = getByLabelText("Include the model extension (CP-CF)") as HTMLInputElement;
+      expect(box.type).toBe("checkbox");
+      expect(box).not.toHaveAttribute("aria-disabled");
+      expect(box.checked).toBe(false);
+      expect(container.querySelector("[data-model-extension-unavailable]")).toBeNull();
+      fireEvent.click(box);
+      expect(box.checked).toBe(true);
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const [, init] = fetchSpy.mock.calls[0]!;
+      // The request is `CreateRun`'s four fields exactly: the choice's own
+      // advisory flag is read, never forwarded (the wire forbids it).
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+        profile_id: "FULL_CREDIT_32",
+        selection_id: "RELATIVE_VALUE",
+        supersedes: null,
+        model_extension: true,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("test_a_route_that_cannot_carry_the_model_extension_says_so_and_sends_false", async () => {
+    const caseId = routeNotPinned.body.case_id;
+    const doc: RunSectionDocument = {
+      ...EMPTY_RUN,
+      body: {
+        ...EMPTY_RUN.body,
+        route_choices: [
+          {
+            profile_id: "FULL_CREDIT_32",
+            selection_id: "RELATIVE_VALUE",
+            accepts_model_extension: true,
+          },
+          {
+            profile_id: "LITE_CREDIT_22",
+            selection_id: "LITE_EARNINGS_UPDATE",
+            accepts_model_extension: false,
+          },
+        ],
+      },
+    };
+    const created = { case_id: caseId, run_id: RUN_B, route_digest: "f".repeat(64) };
+    const fetchSpy = vi.fn().mockResolvedValueOnce(jsonResponse(created, 201));
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { container, getByLabelText } = mountAt(doc, `/run/?case=${caseId}`);
+      const box = getByLabelText("Include the model extension (CP-CF)") as HTMLInputElement;
+      fireEvent.click(box);
+      expect(box.checked).toBe(true);
+      // Choosing a route that cannot carry it clears the offer and says why.
+      fireEvent.change(container.querySelector("[data-route-select]")!, { target: { value: "1" } });
+      expect(box).toHaveAttribute("aria-disabled", "true");
+      expect(box.checked).toBe(false);
+      fireEvent.click(box);
+      expect(box.checked).toBe(false);
+      const why = container.querySelector("[data-model-extension-unavailable]");
+      expect(why).not.toBeNull();
+      expect(why).toHaveTextContent("ROUTE_EXTENSION_OWNER_MISSING");
+      expect(box).toHaveAttribute("aria-describedby", why!.id);
+      // Back on the route that can carry it, it is asked for afresh.
+      fireEvent.change(container.querySelector("[data-route-select]")!, { target: { value: "0" } });
+      expect(box).not.toHaveAttribute("aria-disabled");
+      expect(box.checked).toBe(false);
+      fireEvent.change(container.querySelector("[data-route-select]")!, { target: { value: "1" } });
+      fireEvent.click(container.querySelector('[data-action="CREATE_RUN"]')!);
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const [, init] = fetchSpy.mock.calls[0]!;
+      expect(JSON.parse((init as RequestInit).body as string).model_extension).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test("test_pinning_a_subject_sends_the_run_subject_view_shows_success_then_refetches", async () => {
@@ -908,7 +1020,13 @@ describe("Run", () => {
   test("test_a_blocked_run_not_yet_answered_offers_supersedes_prefilled", async () => {
     const base = running.body.run!;
     const caseId = running.body.case_id;
-    const choices = [{ profile_id: "LITE_CREDIT_22", selection_id: "LITE_EARNINGS_UPDATE" }];
+    const choices = [
+      {
+        profile_id: "LITE_CREDIT_22",
+        selection_id: "LITE_EARNINGS_UPDATE",
+        accepts_model_extension: false,
+      },
+    ];
     const blocked: RunSectionDocument = withActions(
       {
         ...running,

@@ -47,6 +47,7 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from urllib.parse import urlsplit
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -211,8 +212,7 @@ class EdgeGuard:
         scope["caos.edge_guarded"] = True
         guarded = _secured(send, path)
         if refusal is not None:
-            code, status = refusal
-            await _refuse(guarded, code, status)
+            await _refuse(guarded, refusal)
             return
         started = False
 
@@ -229,7 +229,7 @@ class EdgeGuard:
             # would skip the policy. Answer here first; it sees the response
             # started, sends nothing, and still logs the fault.
             if not started:
-                await _refuse(guarded, RefusalCode.INTERNAL_FAULT, 500)
+                await _refuse(guarded, RefusalCode.INTERNAL_FAULT)
             raise
 
     async def _lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -245,22 +245,22 @@ class EdgeGuard:
         scope["caos.edge_guarded"] = True
         await self.app(scope, receive, send)
 
-    def _refusal(self, scope: Scope, path: str) -> tuple[RefusalCode, int] | None:
+    def _refusal(self, scope: Scope, path: str) -> RefusalCode | None:
         method = scope.get("method", "")
         headers: list[tuple[bytes, bytes]] = list(scope.get("headers", []))
         health = path == HEALTH_PATH and method in _SAFE
         try:
             mode = resolve_mode()
         except Refusal:
-            return None if health else (RefusalCode.EDGE_NOT_TRUSTED, 403)
+            return None if health else RefusalCode.EDGE_NOT_TRUSTED
         if health:
             return None
         if not self._trusted(mode, scope, headers):
-            return RefusalCode.EDGE_NOT_TRUSTED, 403
+            return RefusalCode.EDGE_NOT_TRUSTED
         if not _hygienic(headers):
-            return RefusalCode.NOT_AUTHENTICATED, 401
+            return RefusalCode.NOT_AUTHENTICATED
         if is_api_path(path) and not _origin_allowed(mode, method, headers):
-            return RefusalCode.ORIGIN_REFUSED, 403
+            return RefusalCode.ORIGIN_REFUSED
         return None
 
     @staticmethod
@@ -342,8 +342,25 @@ SECURITY_HEADER_PAIRS = tuple(
 SECURITY_HEADERS_BYTES = frozenset(name for name, _ in SECURITY_HEADER_PAIRS)
 
 
-async def _refuse(send: Send, code: RefusalCode, status: int) -> None:
+# Every code the guard answers, with its status. The guard runs before routing
+# and so cannot reach the app's refusal handler, but a code's status must not
+# depend on which layer answered it: each entry here equals `app._STATUS`'s,
+# which `tests/test_api_routes.py` asserts (this module cannot import the app,
+# which imports it). `INTERNAL_FAULT` is the unhandled exception's answer, and
+# it was 500 here while the app served the same code 400 (§75's upgrade).
+EDGE_STATUS: Mapping[RefusalCode, int] = MappingProxyType(
+    {
+        RefusalCode.EDGE_NOT_TRUSTED: 403,
+        RefusalCode.NOT_AUTHENTICATED: 401,
+        RefusalCode.ORIGIN_REFUSED: 403,
+        RefusalCode.INTERNAL_FAULT: 500,
+    }
+)
+
+
+async def _refuse(send: Send, code: RefusalCode) -> None:
     body = refusal_body(code)
+    status = EDGE_STATUS[code]
     await send(
         {
             "type": "http.response.start",

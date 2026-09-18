@@ -146,6 +146,7 @@ PERMANENT = frozenset(
         RefusalCode.HANDOFF_MODULE_UNSUPPORTED,
         RefusalCode.ATTEMPT_NOT_FOUND,
         RefusalCode.EVIDENCE_PACKING_MISMATCH,
+        RefusalCode.INTERNAL_FAULT,
     }
 )
 # What a transient answer promises, in seconds. A constant rather than a
@@ -220,6 +221,14 @@ _STATUS = {
     # this server wrote read under a rule that has since moved. The same request
     # later meets the same rows and the same rule; re-admission is the discharge.
     RefusalCode.EVIDENCE_PACKING_MISMATCH: 500,
+    # An exception this server did not anticipate, or an invariant of its own it
+    # found broken. It was 400 here while the edge guard answered the same code
+    # 500 for an unhandled exception, so its status depended on which layer
+    # caught it (§75's upgrade). Permanent: nothing promises the identical
+    # request later meets different code. Its clearance -- retry, and
+    # investigate if it persists -- stays true, because a 500 forbids no retry;
+    # it only promises none, which is what the absent `Retry-After` says.
+    RefusalCode.INTERNAL_FAULT: 500,
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,
@@ -281,7 +290,6 @@ _STATUS = {
     RefusalCode.READINESS_INCOMPLETE: 400,
     RefusalCode.ENDPOINT_NOT_FOUND: 400,
     RefusalCode.EDGE_CONFIG_INVALID: 400,
-    RefusalCode.INTERNAL_FAULT: 400,
     RefusalCode.REQUEST_INVALID: 400,
     RefusalCode.IDEMPOTENCY_KEY_REQUIRED: 400,
     RefusalCode.ROUTE_NOT_ENABLED: 400,

@@ -67,12 +67,14 @@ Completion Phase 13 ledger entry); hosted CI runs it at the pin. **Smoke at
 `7fe44a8`:** exit 0 -- the production-image tests 8 passed and the journey 22 passed on each of chromium (5.9 min), firefox (6.0 min) and webkit (9.2 min), with no `Exception in ASGI application` and no traceback in the log. An earlier run at this head failed every engine on `EDGE_NOT_TRUSTED`: an orphaned test edge from a smoke run stopped mid-flight still held the edge port; recorded as a ledger entry.
 
 **What was deliberately not built.** Every other 13.3/13.5 item keeps its
-recorded trigger. `main`'s `citation_candidates` feature, declined during the
-#323 reconciliation as out of scope for a conflict resolution, is still not
-ported: it threads through `server/evidence/citations.py`,
-`server/methodology/canonical.py` and `build_handoff_prompt`, changes what a
-module is prompted with, and so changes prompt identity -- a live-run concern,
-not a host-only one. It needs its own brief.
+recorded trigger. `main`'s `citation_candidates` feature, which the #323
+reconciliation left unported and "flagged for separate review", was reviewed
+and **stays retired**: §71.1 and `12e57b4` deleted it on this branch -- the flag
+contradicted the support rule, was enforced by nothing, and sat inside the
+untrusted evidence block where a document line could forge it -- and
+`tests/test_handoff_invocation.py::test_evidence_is_grouped_by_source_page_with_one_header`
+guards its absence. The reconciliation did not know that; §71.1's addendum now
+says so.
 
 ## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
 

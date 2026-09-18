@@ -100,6 +100,16 @@ export function BookSection({ document }: { document: BookDocument; tab: string 
             <dt>Accepted only</dt>
             <dd>{String(body.basis.accepted_only)}</dd>
           </dl>
+          {import.meta.env.MODE === "demo" ? (
+            // The fixture is fuller than any run a workspace press makes by
+            // default; the demonstration says which runs alone can fill it.
+            <p className="note" data-demo-book-note>
+              <b>A forecast reaches the Book only from one kind of run.</b> The figures shown here
+              are demonstration fixtures. The server serves a Book cell only for a run on
+              FULL_CREDIT_32 / RELATIVE_VALUE created with the model extension (CP-CF); a run on any
+              other pathway, or created without the extension, has no accepted forecast to compare.
+            </p>
+          ) : null}
         </div>
       </section>
       {periodsOf(rows).length === 0 && rows.length > 0 ? (
