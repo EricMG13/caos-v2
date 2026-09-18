@@ -23,7 +23,15 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   reporter: process.env.CI ? "line" : "list",
-  use: { baseURL: "http://127.0.0.1:18080", trace: "retain-on-failure" },
+  // TLS under the throwaway self-signed certificate `tests/journey/run.py`
+  // mints per run (docs/DECISIONS.md section 93), which is what lets the
+  // edge's cookie carry `Secure` and the `__Host-` prefix; the browser is
+  // told to accept that one certificate's errors and nothing else changes.
+  use: {
+    baseURL: "https://127.0.0.1:18080",
+    ignoreHTTPSErrors: true,
+    trace: "retain-on-failure",
+  },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },

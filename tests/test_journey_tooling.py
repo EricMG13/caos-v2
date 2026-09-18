@@ -10,8 +10,13 @@ import asyncio
 import logging
 import re
 import socket
+import ssl
+import stat
+import subprocess
 import sys
-from collections.abc import AsyncIterator
+import time
+import urllib.request
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import httpx
@@ -66,6 +71,14 @@ def test_the_shared_prefixes_are_declared_and_overridable(
     )
 
 
+def _fake_playwright(root: Path) -> None:
+    """The pinned binary's path, present: the refusals below are about
+    something else, and a missing binary would answer first."""
+    binary = root / run.PLAYWRIGHT
+    binary.parent.mkdir(parents=True)
+    binary.write_text("", encoding="utf-8")
+
+
 def test_the_orchestrator_refuses_an_unmountable_root_before_building_anything(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -75,6 +88,7 @@ def test_the_orchestrator_refuses_an_unmountable_root_before_building_anything(
     (root / "frontend").mkdir(parents=True)
     (root / run.COMPOSE_FILE).write_text("", encoding="utf-8")
     (root / "frontend" / run.PLAYWRIGHT_CONFIG).write_text("", encoding="utf-8")
+    _fake_playwright(root)
     monkeypatch.setattr(run, "REPO", root)
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv(run.SHARED_ENV, "/nowhere-shared")
@@ -127,6 +141,109 @@ def test_the_runner_checks_every_port_the_stack_publishes_on_the_host() -> None:
     assert run.API_ORIGIN == f"http://{run.API_HOST}:{run.API_PORT}"
 
 
+# The TLS edge (§93). The browser's origin is https, the API is told that
+# origin is public, and the certificate is minted per run and never tracked.
+
+
+def test_the_edge_origin_is_tls_and_the_config_spec_and_api_agree_on_it() -> None:
+    """One string in three places: the runner's `EDGE_ORIGIN` (what the API
+    is told is public), the Playwright config's `baseURL`, and the journey
+    spec's `EDGE_ORIGIN` (the `Origin` its own posts carry). A move in one
+    without the others is `ORIGIN_REFUSED` on every engine."""
+    assert run.EDGE_ORIGIN == f"https://{run.EDGE_HOST}:{run.EDGE_PORT}"
+    config = (run.REPO / "frontend" / run.PLAYWRIGHT_CONFIG).read_text(encoding="utf-8")
+    spec = (run.REPO / "frontend" / "tests" / "journey" / "journey.spec.ts").read_text(
+        encoding="utf-8"
+    )
+    assert f'baseURL: "{run.EDGE_ORIGIN}"' in config
+    assert "ignoreHTTPSErrors: true" in config, "the throwaway certificate"
+    assert f'const EDGE_ORIGIN = "{run.EDGE_ORIGIN}";' in spec
+    assert run._environment()["CAOS_PUBLIC_ORIGIN"] == run.EDGE_ORIGIN
+
+
+def test_the_tls_material_is_minted_per_run_for_the_edge_host_and_kept_private(
+    tmp_path: Path,
+) -> None:
+    """A self-signed certificate whose subjectAltName is the edge's IP, so a
+    client that trusts exactly it verifies the edge by address; a key only
+    this user can read; both under the run's directory and nowhere tracked."""
+    tls = run.mint_tls_material(tmp_path)
+
+    assert tls.certificate.parent == tmp_path and tls.key.parent == tmp_path
+    assert stat.S_IMODE(tls.key.stat().st_mode) == 0o600
+    assert tls.certificate.read_bytes().startswith(b"-----BEGIN CERTIFICATE-----")
+    text = subprocess.run(
+        ["openssl", "x509", "-in", str(tls.certificate), "-noout", "-text"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert f"IP Address:{run.EDGE_HOST}" in text
+    # A verifying client can be built from it: the readiness probe's trust.
+    trust = ssl.create_default_context(cafile=str(tls.certificate))
+    assert trust.verify_mode is ssl.CERT_REQUIRED
+    tracked = subprocess.run(
+        ["git", "-C", str(run.REPO), "ls-files", "--", "*.pem", "*.key", "*.crt"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert tracked == "", "no key material is tracked"
+
+
+def test_the_runner_starts_the_edge_over_tls_and_probes_it_with_its_own_trust(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The uvicorn command names this run's key and certificate, and the
+    readiness probe carries an SSL context built from that certificate
+    rather than one that ignores verification."""
+    tls = run.TlsMaterial(
+        certificate=tmp_path / "edge-cert.pem", key=tmp_path / "edge-key.pem"
+    )
+    started: list[list[str]] = []
+    probed: list[tuple[str, object]] = []
+
+    class _Edge:
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: float) -> None:
+            pass
+
+    def popen(cmd: list[str], **_kwargs: object) -> _Edge:
+        started.append(cmd)
+        return _Edge()
+
+    def urlopen(url: str, *, timeout: float, context: object) -> object:
+        probed.append((url, context))
+        raise OSError  # not listening yet
+
+    # The runner calls these through their modules, so the modules are patched.
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(ssl, "create_default_context", lambda cafile: ("trust", cafile))
+    monkeypatch.setattr(time, "monotonic", _ticking(step=20.0))
+
+    with pytest.raises(TimeoutError):
+        run.start_edge({}, tls)
+
+    [cmd] = started
+    assert cmd[cmd.index("--ssl-keyfile") + 1] == str(tls.key)
+    assert cmd[cmd.index("--ssl-certfile") + 1] == str(tls.certificate)
+    assert probed and all(url == run.EDGE_ORIGIN + "/" for url, _ in probed)
+    assert {context for _, context in probed} == {("trust", str(tls.certificate))}
+
+
+def _ticking(step: float) -> Callable[[], float]:
+    clock = [0.0]
+
+    def now() -> float:
+        clock[0] += step
+        return clock[0]
+
+    return now
+
+
 def test_the_orchestrator_refuses_a_taken_port_before_building_anything(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -136,6 +253,7 @@ def test_the_orchestrator_refuses_a_taken_port_before_building_anything(
     (root / "frontend").mkdir(parents=True)
     (root / run.COMPOSE_FILE).write_text("", encoding="utf-8")
     (root / "frontend" / run.PLAYWRIGHT_CONFIG).write_text("", encoding="utf-8")
+    _fake_playwright(root)
     monkeypatch.setattr(run, "REPO", root)
     monkeypatch.setattr(sys, "platform", "linux")
     built: list[str] = []

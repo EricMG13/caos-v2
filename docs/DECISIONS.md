@@ -4561,6 +4561,79 @@ is per-node evidence selection, a later task under its own decision. Option 2
 of the producers request (five `owned_object`s on CP-L10): it needs a host
 change and says less than the edges do.
 
+## 2026-09-18 §93 — The edge proves each request: a signed assertion, a TLS test edge, and the smoke stack in CI
+
+The owner authorized Task 13.4 on 18 September 2026 ("Tasks 13.4 and 13.6 -
+authorised to apply your recommendations"), closing the Repair Phase 4 ledger
+entries "The edge proves itself with one static shared secret", "The API
+cannot tell whether the edge stripped a client's identity", "The test edge's
+session cookie is weaker than the contract's" and "The production image and
+journey are proven locally, not in CI", and the edge-mode half of the audit
+remediation entry "A tokenless host believes the subject header". Supersedes
+§53.1 and §53.2's static token, and §53.3/§70.2's reading of the groups header
+in edge mode. Standard library only: no dependency, no lock moved.
+
+1. **The assertion.** `CAOS_EDGE_TOKEN` keeps its name and its 32-byte floor
+   and becomes the key of an HMAC-SHA256 the edge computes **per request**,
+   `server/api/edge.py::sign_assertion`: `v1.<payload>.<mac>`, both base64url
+   without padding, the payload the canonical JSON (sorted keys, no
+   whitespace) of the subject, the groups sorted and unique, the method, the
+   raw target (undecoded path and query, exactly what the client sent), an
+   issued-at second and a 16-byte hex nonce; the MAC over a domain tag and
+   those bytes. Sent as one `x-caos-edge-assertion`; `x-caos-edge-token` is
+   gone. The signer lives beside the verifier so the two cannot drift, and
+   the operator's edge implements exactly this string.
+2. **The verifier** (`verify_assertion`) checks the MAC under
+   `hmac.compare_digest` before it parses anything, then the payload's closed
+   shape (every field typed and bounded, groups in canonical order, no comma
+   in a group), the binding to this request's method and target, an age of
+   at most `ASSERTION_MAX_AGE_SECONDS` (30) either side of now -- the edge
+   and the API keep their own clocks -- and a nonce this process has not
+   admitted while it could still verify. `NonceRegister` is bounded
+   (`NONCE_CAPACITY`, 65,536) and **refuses when full** rather than
+   forgetting a nonce early: a full register means far more than the image's
+   own concurrency limit of requests inside one window, and a replay admitted
+   under load is the one thing it exists to refuse. Every failure is the one
+   constant 403 `EDGE_NOT_TRUSTED`; no new `RefusalCode`, no wire change.
+3. **Identity is the assertion's.** On a verified request the guard removes
+   every `x-caos-user`, `x-forwarded-groups` and `x-caos-role` the request
+   carried and writes the first two from the assertion, so `identity.py`
+   reads what it always read and a header a misconfigured proxy forwarded
+   unsigned decides nothing -- the Phase 13 exit check, held by
+   `tests/test_edge_assertion.py::test_a_forged_group_header_is_ignored_whatever_the_proxy_forwarded`.
+   Header hygiene (§53.4) still refuses a doubled or lookalike identity
+   header first, because an appending edge is still evidence of one. Dev mode
+   is unchanged: no key, loopback only, the role header under the switch.
+4. **The test edge signs and serves TLS.** `tests/journey/edge.py` forwards
+   only its allow-list and one assertion -- no identity header at all -- and
+   signs each connect attempt afresh, so no nonce is sent twice.
+   `tests/journey/run.py` mints a one-day self-signed certificate with an IP
+   subjectAltName for `127.0.0.1` into the run's temporary directory with the
+   `openssl` CLI (present on macOS and the ubuntu runners), starts uvicorn
+   under it, and probes readiness with a client that trusts exactly that
+   certificate. The edge's cookie is now the contract's whole
+   `__Host-caos_edge_session; Secure; HttpOnly; SameSite=Lax; Path=/`. The
+   browser's origin is `https://127.0.0.1:18080` in the runner, the Playwright
+   config (`ignoreHTTPSErrors` for the throwaway certificate) and the spec,
+   pinned to one string by
+   `tests/test_journey_tooling.py::test_the_edge_origin_is_tls_and_the_config_spec_and_api_agree_on_it`.
+   No key material is tracked, and the runner now calls the lock's own
+   Playwright binary rather than `npx`.
+5. **CI.** `.github/workflows/ci.yml` gains `smoke`: the image built once by
+   buildx, the image suite under `CAOS_REQUIRE_IMAGE=1`, then
+   `tests/journey/run.py` on three engines -- on a push to `main`, the nightly
+   schedule and dispatch, never per pull request, because it takes about
+   twenty-five minutes. Every action stays pinned by commit.
+
+**What is given up, stated.** The nonce register is one process's memory: the
+image runs one uvicorn worker, and a second process would hold a register of
+its own, so a replay across processes is bounded only by the 30 s window
+(ledger entry under Completion Phase 13). A key rotation still restarts the
+API. The tokenless host still believes the subject header under the
+development switch, which is that mode's purpose; what §93 closes is the
+edge mode, where the subject was a header's word and is now the identity
+provider's, signed.
+
 ## 2026-09-18 §94 — The release pack is emitted from the suite, the tree and the store
 
 The owner authorized Task 13.6 on 18 September 2026 ("authorised to apply your

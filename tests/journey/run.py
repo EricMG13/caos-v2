@@ -1,10 +1,11 @@
 """The real-stack journey, end to end (Task 4.5 decision 11).
 
 Brings the disposable smoke stack up with the journey worker, starts the test
-edge on 127.0.0.1:18080, runs the Playwright journey through it, and always
-takes the stack down with its volumes. The stack and journey files arrive in
-slices 4.5c and 4.5e2; until both exist this refuses with exit 2 and runs
-nothing.
+edge over TLS on 127.0.0.1:18080 -- under a throwaway self-signed certificate
+minted into the run's temporary directory with the `openssl` CLI, never
+committed (§93) -- runs the Playwright journey through it, and always takes the
+stack down with its volumes. The stack and journey files arrive in slices
+4.5c and 4.5e2; until both exist this refuses with exit 2 and runs nothing.
 """
 
 from __future__ import annotations
@@ -12,20 +13,30 @@ from __future__ import annotations
 import os
 import secrets
 import socket
+import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = "compose.smoke.yaml"
 PLAYWRIGHT_CONFIG = "playwright.journey.config.ts"
+# The pinned binary from the lock, never `npx`, which may resolve and fetch a
+# package at run time (the same rule `.github/workflows/ci.yml` states).
+PLAYWRIGHT = Path("frontend") / "node_modules" / ".bin" / "playwright"
 PROJECT = "caos-workbench-smoke"
 API_HOST, API_PORT = "127.0.0.1", 18000  # `compose.smoke.yaml` publishes it
 API_ORIGIN = f"http://{API_HOST}:{API_PORT}"
 EDGE_HOST, EDGE_PORT = "127.0.0.1", 18080
+# The browser's origin: TLS, so the edge's cookie can carry `Secure` and the
+# `__Host-` prefix the contract names. `frontend/playwright.journey.config.ts`
+# and the journey spec say the same string.
+EDGE_ORIGIN = f"https://{EDGE_HOST}:{EDGE_PORT}"
 # Every fixed host port a run binds: the edge this runner starts and the API
 # port the compose file publishes (the smoke database publishes none). An edge
 # orphaned by a stopped run kept 18080 with its old token, the new edge could
@@ -62,11 +73,52 @@ def _environment() -> dict[str, str]:
     }
     env.update(
         CAOS_EDGE_TOKEN=secrets.token_urlsafe(48),
-        CAOS_PUBLIC_ORIGIN=f"http://{EDGE_HOST}:{EDGE_PORT}",
+        CAOS_PUBLIC_ORIGIN=EDGE_ORIGIN,
         JOURNEY_UPSTREAM=API_ORIGIN,
         JOURNEY_EXIT_AFTER_FIRST_ACCEPT="1",
     )
     return env
+
+
+@dataclass(frozen=True, slots=True)
+class TlsMaterial:
+    """One run's throwaway certificate and key, in a directory that is
+    deleted with the run."""
+
+    certificate: Path
+    key: Path
+
+
+def mint_tls_material(directory: Path, host: str = EDGE_HOST) -> TlsMaterial:
+    """A self-signed certificate for `host` (an IP subjectAltName, so a
+    verifying client can pin it) and its key, from the `openssl` CLI that
+    macOS and the ubuntu runners both carry. Valid for one day; the key is
+    readable by this user alone."""
+    certificate, key = directory / "edge-cert.pem", directory / "edge-key.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            f"/CN={host}",
+            "-addext",
+            f"subjectAltName=IP:{host}",
+            "-keyout",
+            str(key),
+            "-out",
+            str(certificate),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    key.chmod(0o600)
+    return TlsMaterial(certificate=certificate, key=key)
 
 
 def compose_up(env: dict[str, str]) -> None:
@@ -94,8 +146,10 @@ def stop_edge(edge: subprocess.Popen[bytes]) -> None:
         edge.wait(timeout=10)
 
 
-def start_edge(env: dict[str, str]) -> subprocess.Popen[bytes]:
-    """The test edge on the host, from the locked uvicorn, with tests on the path."""
+def start_edge(env: dict[str, str], tls: TlsMaterial) -> subprocess.Popen[bytes]:
+    """The test edge on the host, over TLS, from the locked uvicorn, with
+    tests on the path. Readiness is probed by a client that trusts exactly
+    this run's certificate, so a stale edge under another cannot answer it."""
     env = {**env, "PYTHONPATH": os.pathsep.join([str(REPO / "tests"), str(REPO)])}
     edge = subprocess.Popen(
         [
@@ -108,15 +162,19 @@ def start_edge(env: dict[str, str]) -> subprocess.Popen[bytes]:
             EDGE_HOST,
             "--port",
             str(EDGE_PORT),
+            "--ssl-keyfile",
+            str(tls.key),
+            "--ssl-certfile",
+            str(tls.certificate),
             "--no-server-header",
         ],
         env=env,
     )
-    ready_url = f"http://{EDGE_HOST}:{EDGE_PORT}/"
+    trust = ssl.create_default_context(cafile=str(tls.certificate))
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(ready_url, timeout=1):
+            with urllib.request.urlopen(EDGE_ORIGIN + "/", timeout=1, context=trust):
                 return edge
         except urllib.error.HTTPError:
             return edge  # the edge answered (401 without a session)
@@ -127,7 +185,14 @@ def start_edge(env: dict[str, str]) -> subprocess.Popen[bytes]:
 
 
 def run_playwright(env: dict[str, str], project: str) -> int:
-    cmd = ["npx", "playwright", "test", "-c", PLAYWRIGHT_CONFIG, "--project", project]
+    cmd = [
+        str(REPO / PLAYWRIGHT),
+        "test",
+        "-c",
+        PLAYWRIGHT_CONFIG,
+        "--project",
+        project,
+    ]
     return subprocess.run(
         cmd,
         cwd=REPO / "frontend",
@@ -204,22 +269,28 @@ def browser_projects() -> tuple[str, ...]:
 def run_project(project: str) -> int:
     env = _environment()
     edge: subprocess.Popen[bytes] | None = None
-    try:
-        compose_up(env)
-        edge = start_edge(env)
-        return run_playwright(env, project)
-    finally:
+    with tempfile.TemporaryDirectory(prefix="caos-journey-tls-") as scratch:
+        tls = mint_tls_material(Path(scratch))
         try:
-            if edge is not None:
-                stop_edge(edge)
+            compose_up(env)
+            edge = start_edge(env, tls)
+            return run_playwright(env, project)
         finally:
-            compose_down(env)
+            try:
+                if edge is not None:
+                    stop_edge(edge)
+            finally:
+                compose_down(env)
 
 
 def main() -> int:
     missing = [
         path
-        for path in (REPO / COMPOSE_FILE, REPO / "frontend" / PLAYWRIGHT_CONFIG)
+        for path in (
+            REPO / COMPOSE_FILE,
+            REPO / "frontend" / PLAYWRIGHT_CONFIG,
+            REPO / PLAYWRIGHT,
+        )
         if not path.is_file()
     ]
     if missing:

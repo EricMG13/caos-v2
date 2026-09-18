@@ -925,7 +925,10 @@ queue of two runs take one each, and the concurrent pass 13.1 introduced accepts
 each node exactly once. The I6 residual is **not** closed and is what a
 *deployed* second worker still has to answer); `LISTEN`/`NOTIFY`, a stream cap, worker
 readiness, the frame outside the transaction (13.3); the signed identity
-assertion or mTLS, TLS in the smoke stack, the smoke stack in CI (13.4); store
+assertion or mTLS, TLS in the smoke stack, the smoke stack in CI (13.4 --
+**landed 18 September 2026**, §93: a stdlib HMAC assertion per request rather
+than mTLS or a dependency, the edge's TLS material minted per run with
+`openssl`, and a `smoke` CI job on main, schedule and dispatch); store
 hygiene and gate scripts (13.5); the release pack generated from the suite and
 the store, the first authorized nightly, hosted checks verified against the
 candidate on `main` (13.6).

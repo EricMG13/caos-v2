@@ -73,6 +73,7 @@ CLIENT_HEADERS = {
     "x-caos-user": "11111111-1111-4111-8111-111111111111",
     "X-CAOS-ROLE": "ADMIN",
     "x-caos-edge-token": "forged",
+    "x-caos-edge-assertion": "forged",
     "x_caos_user": "11111111-1111-4111-8111-111111111111",
     "x-forwarded-groups": "caos-admins",
     "x-forwarded-for": "203.0.113.9",
