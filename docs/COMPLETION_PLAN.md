@@ -1075,6 +1075,9 @@ authorization -- so the buildable order above delivers no verdict by itself.
    Each is a §61-style entry. A decline is also an answer: it leaves 10.1 with
    the vendor and 11.8 behind it, and the plan should then say so rather than
    carry the task as pending.
+   **Taken 18 September 2026, both declined (§88.2, §88.3):** Task 10.1 and
+   11.8 behind it wait on the vendor, not on the owner; `Restricted` does not
+   release CP-6.
 
 Skipped deliberately: another architecture pass, a generic agent platform, a
 second orchestration layer, workbook or Word output, automatic research, a

@@ -4293,3 +4293,62 @@ audits on Opus, for the two phase gates. Task acceptance stays on Opus 5 at
   `ROUTE_EXTENSION_OWNER_MISSING` makes it false, and any other refusal is
   raised rather than hidden. The Create run form offers the §82 extension where
   it is true. The command still re-checks at commit; the surface grants nothing.
+
+## 2026-09-18 §88 — Three owner decisions: D3's second half, Task 10.1, Task 10.3(b)
+
+The owner, on 18 September 2026: "resume plan to completion, apply your
+recommendations". The plan left three questions to the owner and recorded a
+recommendation, or the fail-closed default, for each. This entry takes them as
+recommended. Each is stated so a later owner decision can reverse it cleanly.
+
+### 88.1 The eight retry-shaped 400s get a status
+
+`RETRY_SHAPED_400_PENDING_OWNER` (§87) is renamed `RETRY_SHAPED_400_DECIDED`
+and becomes a code-to-status mapping rather than a bare set, closing the
+question §75's partition left open on the 4xx side. §75's own question decides
+each: is the identical request cleared by waiting (503, `TRANSIENT`), or does
+it meet the same answer again (500, `PERMANENT`)? `PROVIDER_UNAVAILABLE` is the
+one the provider itself may clear by answering next time, so 503, joining
+`TRANSIENT`. The other seven are an answer the provider already gave --
+truncated, refused, unreadable, or a handoff failing its own contract -- which
+a retry without a new call cannot change, so 500: `PROVIDER_OUTPUT_TRUNCATED`,
+`PROVIDER_REFUSED`, `PROVIDER_RESPONSE_INVALID`, `ENVELOPE_INVALID`,
+`ENVELOPE_UNDECLARED_FIELD`, `ENVELOPE_UNCITED_CLAIM`, `READINESS_INCOMPLETE`.
+None of the eight answers 400 any longer, so `test_no_400_tells_the_caller_to_retry`
+replaces `test_the_retry_shaped_400s_are_named_as_pending_the_owner`: the
+partition test (§75) already covers the whole enum, and this closes the one
+carve-out it left.
+
+No HTTP path raises any of the eight today: the four `PROVIDER_*` codes reach a
+caller as a parked run's `stop_code`, and nothing under `server/` raises the
+three `ENVELOPE_*` codes or `READINESS_INCOMPLETE` since the claims executor was
+deleted (f-2a). They stay in `RefusalCode` because stored rows may name them;
+the statuses are the answer the day a route does raise one.
+
+### 88.2 Task 10.1: the host does not take ownership of a CP-0 register's shape
+
+Declined. Per-node evidence selection stays with the vendor request
+(`docs/requests/2026-09-17-t8-source-files-column.md`). The request's own
+question decides it: narrowing is monotone downward on anchoring, so a
+model-authored register deciding what a downstream node may cite can turn a
+truthful quote of a pinned source into `CITATION_NOT_DELIVERED`, and the host
+cannot tell that from a correct narrowing. Readiness is model-authored too but
+fails closed; selection would fail open on what a later module may prove.
+Invariant 4 is the tie-breaker. So Task 10.1 and Phase 11's Task 11.8 behind it
+are **waiting on the vendor**, not pending an owner decision, and the plan and
+the handoff say so. What does not change: `CONTEXT_OVER_CEILING` still refuses a
+wide route whole rather than truncating it.
+
+### 88.3 Task 10.3(b): only a QA `Passed` releases CP-6
+
+Declined: `Restricted` does not release CP-6 as RESTRICTED. §39 calls restricted
+output usable but not QA-cleared, and the QA status is the module's own verdict,
+which text in the evidence can steer; letting it release the next module would
+make a steerable value an authority. The fail-closed reading `route._unmet`
+already implements stands, with no code change. The discharge of a QA-blocked
+run stays a human decision under unchanged pins, recorded as a successor run
+(§72). The Repair Phase 2 ledger entry keeps its upgrade -- the canonical QA
+record and human QA approval -- and loses its "a dated decision if committee
+practice wants restricted clearance to proceed" clause, which this entry
+answers. The question is not reachable today: no enabled route carries the
+CP-5 -> CP-6 QA_GATE (`ADAPTER_ROUTES`).

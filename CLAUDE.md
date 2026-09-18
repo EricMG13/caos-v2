@@ -509,22 +509,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   problem rather than the declaration, one `command_requests` read for every
   actor at once, which the join already permits.
 
-- **Eight 400s still tell the caller to retry.** ~~The wire says "come back
-  later" honestly at 5xx and not at 400.~~ The half this repository could settle
-  is closed: `INTERNAL_FAULT` answers 500 and is permanent at every layer, the
-  edge guard answers from `EDGE_STATUS`, held equal to the app's `_STATUS`
+- ~~**Eight 400s still tell the caller to retry.**~~ Closed by §88: the owner
+  decided each. `PROVIDER_UNAVAILABLE` is 503 (`TRANSIENT` -- the provider
+  itself may clear it by answering next time); `PROVIDER_OUTPUT_TRUNCATED`,
+  `PROVIDER_REFUSED`, `PROVIDER_RESPONSE_INVALID`, `ENVELOPE_INVALID`,
+  `ENVELOPE_UNDECLARED_FIELD`, `ENVELOPE_UNCITED_CLAIM` and
+  `READINESS_INCOMPLETE` are 500 (`PERMANENT` -- an answer the provider already
+  gave, which a retry without a new call cannot change). `INTERNAL_FAULT`
+  answers 500 and is permanent at every layer, the edge guard answers from
+  `EDGE_STATUS`, held equal to the app's `_STATUS`
   (`tests/test_api_routes.py::test_every_code_the_edge_answers_carries_the_apps_status`,
   `test_an_internal_fault_answers_500_wherever_it_is_raised`), and the partition
-  test covers the whole enum rather than the codes already at 5xx
-  (`test_every_refusal_is_classed_transient_or_permanent_and_none_is_both`). What
-  stays is the owner's half of D3: `PROVIDER_UNAVAILABLE`,
-  `PROVIDER_OUTPUT_TRUNCATED`, `PROVIDER_REFUSED`, `PROVIDER_RESPONSE_INVALID`,
-  `ENVELOPE_INVALID`, `ENVELOPE_UNDECLARED_FIELD`, `ENVELOPE_UNCITED_CLAIM` and
-  `READINESS_INCOMPLETE` answer 400 with a clearance that says retry. They are
-  named, not decided, in `RETRY_SHAPED_400_PENDING_OWNER`, and
-  `test_the_retry_shaped_400s_are_named_as_pending_the_owner` fails for a new
-  one until it is named. *Upgrade:* the owner decides each as a 4xx, 500 or 503,
-  and each leaves the set in the commit that decides it.
+  test covers the whole enum with no carve-out
+  (`test_no_400_tells_the_caller_to_retry`,
+  `test_every_refusal_is_classed_transient_or_permanent_and_none_is_both`).
 
 - **A tokenless host believes the subject header, so a loopback peer who knows a
   member's id reads that member's cases.** §70.2 closed C3's *role* hole: with
@@ -1325,8 +1323,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   CP-6 as RESTRICTED is also defensible from the bundle. The value is the
   module's own verdict, so text in the evidence that steers the model can steer
   it too; human QA approval is not consulted in Phase 2.
-  *Upgrade:* the Phase 3 canonical QA record, and a dated decision if committee
-  practice wants restricted clearance to proceed.
+  §88.3 took the owner's decision: `Restricted` stays blocking, so the
+  defensible alternative reading is declined rather than open.
+  *Upgrade:* the Phase 3 canonical QA record and human QA approval, the day a
+  route carrying the CP-5 -> CP-6 QA_GATE is enabled.
 - **BLOCKED ends the run; recovery is a new run, and the store records which
   run answers which.** §39 calls an empty frontier with unfinished required work
   recoverably blocked, and `run_route` ends such a run `BLOCKED` with one
