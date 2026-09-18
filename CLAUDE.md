@@ -2658,7 +2658,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   with. What stays open is `BlobStore.get` itself: a caller reading a blob back
   (or any bytes that reached the store some other way) is still bounded by
   nothing this class declares. *Upgrade:* the ceiling and a streaming read on
-  `BlobStore.get` itself, the day a caller other than admission needs one.
+  `BlobStore.get` itself. **The clause here used to read "the day a caller other
+  than admission needs one", which invites the wrong check**: `server/` holds
+  **ten** non-admission callers -- `evidence/page.py`, `deliverable/receipts.py`
+  and `revisions.py`, `methodology/verification.py`, `handoff.py` (three),
+  `canonical.py` (two) and `invocation.py` -- and a reader who counted them
+  would conclude the condition had fired and build a streaming API across all
+  ten. What actually gates it is narrower: every blob in this store is written
+  by this system and bounded before it is written -- a document by
+  `AdmissionLimits`, a record, diagnostic or payload by the wire -- so the
+  ceiling would today refuse only a corrupted blob or one a future writer put
+  there unbounded. It is owed the day a writer can exceed those bounds, or the
+  day a reader must not hold a whole blob at once -- `evidence/page.py` is the
+  nearest, reading a whole document per request, and it has an entry of its own
+  for that cost.
 - **`BlobStore.path_of` hands out a filesystem path.** It validates the address
   first, so no caller can name a path outside the root, but it does let one
   write to the store without going through `put` and its digest. It is public
