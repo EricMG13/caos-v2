@@ -65,15 +65,23 @@ def sign_opinion(
 def sign_opinion_in(
     conn: StoreConnection, *, case_id: UUID, actor_id: UUID, revision_id: UUID
 ) -> str:
-    """Sign in the caller's governed transaction; returns the bound digest."""
+    """Sign in the caller's governed transaction; returns the bound digest.
+
+    One signature per signer: a second is refused by the store's own
+    constraint, named here so no other conflict can inherit the code, and
+    `DO NOTHING` so the refusal leaves the governed transaction usable.
+    """
     _, digest = _revision(conn, case_id, revision_id)
     if _frozen(conn, case_id, revision_id) is not None:
         raise Refusal(RefusalCode.DELIVERABLE_ALREADY_FROZEN)
-    conn.execute(
+    signed = conn.execute(
         "INSERT INTO deliverable_opinions"
-        " (revision_id,case_id,payload_sha256,signed_by) VALUES (%s,%s,%s,%s)",
+        " (revision_id,case_id,payload_sha256,signed_by) VALUES (%s,%s,%s,%s)"
+        " ON CONFLICT ON CONSTRAINT one_opinion_per_signer DO NOTHING",
         (str(revision_id), case_id, digest, actor_id),
-    )
+    ).rowcount
+    if not signed:
+        raise Refusal(RefusalCode.DELIVERABLE_ALREADY_SIGNED)
     return digest
 
 

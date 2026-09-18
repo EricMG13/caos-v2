@@ -26,7 +26,7 @@ from server.deliverable.filing import (
     sign_opinion_in,
 )
 from server.deliverable.revisions import save_revision_in
-from server.refusals import Refusal
+from server.refusals import Refusal, RefusalCode
 from server.store import connect
 from server.store.audit import audit_trail
 from server.store.gates import withdraw_source, withdraw_source_in
@@ -73,6 +73,25 @@ def test_signing_binds_the_stored_digest_with_no_caller_digest(lite: _Harness) -
     lite.conn.rollback()
     assert row is not None
     assert row[0] == hashlib.sha256(payload_bytes(_read(lite, revision))).hexdigest()
+
+
+def test_a_signer_cannot_sign_one_revision_twice(lite: _Harness) -> None:
+    """One signature per signer per revision: a second press by the same
+    approver is refused with its own code and writes nothing, while a second,
+    distinct approver still signs."""
+    from server.api.app import _STATUS
+
+    revision = _save(lite)
+    _sign(lite, revision)
+    with pytest.raises(Refusal, match=r"^DELIVERABLE_ALREADY_SIGNED$"):
+        _sign(lite, revision)
+    lite.conn.rollback()
+    cosigner = _actor(lite)
+    _sign(lite, revision, cosigner)
+    signers = [who for who, _ in revision_signatures(lite.conn, lite.case_id, revision)]
+    lite.conn.rollback()
+    assert sorted(signers) == sorted([lite.approver, cosigner])
+    assert _STATUS[RefusalCode.DELIVERABLE_ALREADY_SIGNED] == 409
 
 
 def test_revision_signatures_names_the_signer_and_its_bound_digest(

@@ -97,7 +97,11 @@ def report_actions(
         _view(_A.SAVE_REVISION, _floor(role, standing, Standing.WRITER)),
         _view(
             _A.SIGN_OPINION,
-            [*approver, (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN)],
+            [
+                *approver,
+                (filing.frozen, _C.DELIVERABLE_ALREADY_FROZEN),
+                (filing.actor_signed, _C.DELIVERABLE_ALREADY_SIGNED),
+            ],
         ),
         _view(
             _A.FREEZE_DELIVERABLE,

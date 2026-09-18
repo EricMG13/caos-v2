@@ -243,6 +243,9 @@ _STATUS = {
     RefusalCode.RUN_ALREADY_STARTED: 409,
     RefusalCode.RUN_NOT_STOPPED: 409,
     RefusalCode.RUN_CANCEL_REQUESTED: 409,
+    # One signature per signer per revision (`0029`): the request was sound and
+    # the state already holds it, as VERDICT_ALREADY_RECORDED's is.
+    RefusalCode.DELIVERABLE_ALREADY_SIGNED: 409,
     RefusalCode.COMMAND_EXPECTATION_STALE: 409,
     RefusalCode.ORCHESTRATION_BUILD_MOVED: 409,
     # Every other code: 400, the status each was already served by the
