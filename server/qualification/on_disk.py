@@ -61,7 +61,7 @@ from server.qualification.matrix import (
     QualificationSet,
 )
 from server.refusals import Refusal, RefusalCode
-from server.store.run_inputs import RunSubject, valid_subject
+from server.store.run_inputs import RunSubject, research_text, valid_subject
 
 # The manifest's name inside the set's directory. Named, because "the JSON file
 # in there" is not a declared form.
@@ -91,6 +91,7 @@ _OPTIONAL_CASE_KEYS = frozenset(
         "expects_projection",
         "expects_register",
         "model_extension",
+        "research_brief",
     }
 )
 _EXPECT_KEYS = frozenset({"module_id", "document_sha256", "matched_text"})
@@ -201,6 +202,7 @@ def _case(root: Path, entry: object) -> QualificationCase:
         expects_projection=_projections(fields.get("expects_projection")),
         expects_register=_registers(fields.get("expects_register")),
         model_extension=_extension(fields.get("model_extension")),
+        research_brief=_brief(fields.get("research_brief")),
     )
 
 
@@ -404,6 +406,20 @@ def _extension(item: object) -> bool:
     if type(item) is not bool:
         raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
     return item
+
+
+def _brief(item: object) -> str | None:
+    """A case's research brief, as the canonical text a pin stores. Its shape
+    is the storage bound `research_text` states; whether the vendor accepts it
+    is the pin's question, asked by `prepare` before anything is spent."""
+    if item is None:
+        return None
+    if not isinstance(item, dict):
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
+    try:
+        return research_text(item)
+    except Refusal:
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID) from None
 
 
 def _closed(entry: object, keys: frozenset[str]) -> Mapping[str, Any]:
