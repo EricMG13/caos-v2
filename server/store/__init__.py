@@ -151,6 +151,12 @@ MIGRATIONS = (
         .with_name("0028_worker_heartbeats.sql")
         .read_text(encoding="utf-8"),
     ),
+    (
+        "0029_one_opinion_per_signer",
+        Path(__file__)
+        .with_name("0029_one_opinion_per_signer.sql")
+        .read_text(encoding="utf-8"),
+    ),
 )
 
 # One well-known lock, held for the applying transaction only, so two processes
@@ -297,6 +303,31 @@ def _expected_history() -> list[tuple[int, str, str]]:
     ]
 
 
+def _refuse_unmigratable_rows(
+    conn: StoreConnection, version: int, name: str, applied_count: int
+) -> None:
+    """Refuse `STORE_SCHEMA_DRIFT` before a migration whose rows it cannot
+    decide for: the store holds governed rows only an operator may reconcile."""
+    if (version, name) == (17, "0017_legacy_filing_events") and applied_count == 16:
+        ambiguous = conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM audit_events e"
+            " LEFT JOIN deliverable_receipts r ON r.case_id=e.case_id"
+            " AND r.filed_event_sha256=e.entry_sha256"
+            " WHERE e.action='DELIVERABLE_FILED' AND r.revision_id IS NULL)"
+        ).fetchone()
+        if ambiguous != (False,):
+            raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
+    if name == "0029_one_opinion_per_signer":
+        # A signer who signed one revision twice left two governed rows, each
+        # named by an OPINION_SIGNED event; which to keep is an operator's call.
+        doubled = conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM deliverable_opinions"
+            " GROUP BY case_id, revision_id, signed_by HAVING count(*) > 1)"
+        ).fetchone()
+        if doubled != (False,):
+            raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
+
+
 def _migrate(conn: StoreConnection, sql: str) -> None:
     """Validate the complete applied prefix under the lock before advancing it."""
     if sql != SCHEMA:
@@ -328,15 +359,7 @@ def _migrate(conn: StoreConnection, sql: str) -> None:
             from server.store.extraction_integrity import _verify_extractions_v1
 
             _verify_extractions_v1(conn)
-        if (version, name) == (17, "0017_legacy_filing_events") and applied_count == 16:
-            ambiguous = conn.execute(
-                "SELECT EXISTS (SELECT 1 FROM audit_events e"
-                " LEFT JOIN deliverable_receipts r ON r.case_id=e.case_id"
-                " AND r.filed_event_sha256=e.entry_sha256"
-                " WHERE e.action='DELIVERABLE_FILED' AND r.revision_id IS NULL)"
-            ).fetchone()
-            if ambiguous != (False,):
-                raise Refusal(RefusalCode.STORE_SCHEMA_DRIFT)
+        _refuse_unmigratable_rows(conn, version, name, applied_count)
         if not (legacy and version == 1):
             conn.execute(MIGRATIONS[version - 1][1])
         conn.execute(

@@ -18,15 +18,61 @@ contracts.
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 13's host-only work is landed; the phase is not accepted** (progress record below, head `d2b2d8c`, eleven commits over `4d7af97`). Tasks 13.1, 13.2 and the two 13.5 items whose ledger conditions had fired are in the branch, with Task 10.5 beside them; decisions §78, §79, §80. **It cannot be exited**: 13.4 needs an identity-provider setting and TLS material and 13.6 an authorized nightly, so its two whole-phase gates are deliberately not run -- an exit review certifies an exit. Every other 13.3/13.5 item is deferred by its own recorded trigger condition rather than by effort, and O23's async store is **declined** in §80. Phase 12 is accepted (`5a27ec9`); Phases 7 and 8 are accepted; 9.1, 10.2, 10.3 and now 10.5 are in the branch and 10.4 was answered as a finding. **Task 10.1 stays stopped**: what blocks it is invariant 4, so it is a vendor request. Phases 9, 10 and 11 remain held by three owner inputs and six vendor requests |
+| Current task | **The completion remainder is landed on `completion/remainder`** (record below), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§84. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
-| Delivery backlog | **`main` is behind this branch, not diverged from it** -- measured in [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md) on 18 September 2026. Main's frontier is Phase 7; Phases 8, 9.1, 10.2/10.3/10.5, 12 and 13 are undelivered, 398 files and +45,837/-8,657, of which **34,581 lines are counted by the 800-line pull-request gate -- at least 44 pull requests**. `git cherry` reports 131 of main's commits as missing from this branch and is **wrong**: they are squashed pull requests of this branch's own work, and merging main back produces 215 artificial conflicts. Do not merge main into this branch. Three options and a recommendation are in that file; the choice is the owner's |
+| Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
 Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
+
+## Completion remainder record — 18 September 2026
+
+**Landed on `completion/remainder`, not delivered and not a phase acceptance.**
+Five implementers ran concurrently in isolated worktrees with disjoint files,
+each test-first, each merged by the coordinator after reading its diff. One
+acceptance review over the whole range followed, run read-only on Opus 5 as a
+general agent because the tracked reviewer definitions were not loaded in the
+session; it cannot read its own effort back, and three of the implementers were
+launched with `ultrathink` before §81 withdrew it, which is recorded there.
+
+| Slice | What | Decision |
+|---|---|---|
+| A | Report served without `revision`: the run's head, or the first save's artifacts with `SAVE_REVISION` judged by the save's own derivation; Save refused `COMMAND_EXPECTATION_STALE` off the head; the availability walk covers all four filing controls | §83 |
+| B | The Run section's work panel names a parked run's `stop_code`; the journey asserts it | -- |
+| C | `EVIDENCE_PACKING_MISMATCH` (500) for the repacking refusal; migration `0029` and `DELIVERABLE_ALREADY_SIGNED` (409), one signature per signer; per-command filing I/O budgets held with `==`; the two filing digest checks **kept** as tamper evidence, each given a reachable cause | §84 |
+| D | `CreateRun.model_extension`, required and strict, pinned through the resolved route; refused `ROUTE_EXTENSION_OWNER_MISSING` on every LITE pathway; the Book passport's `evidence_date` renamed `reporting_period` | §82 |
+| E | The evidence page ends its read unit before the frame is extracted; the journey runner refuses a root Docker Desktop cannot mount; the test edge logs a cut event stream as one line; vendor tests clear stray bytecode | -- |
+| -- | No `ultrathink` and no `max` for any model, `xhigh` the ceiling and `high` for Fable 5.1; the four review definitions updated | §81 |
+
+Fifteen `CLAUDE.md` ledger entries were struck or narrowed, each naming the
+test that closed it, and one was added (the busy edge port); the ledger gate
+and the phase-exit gate pass over them.
+
+**Acceptance review:** ACCEPT on C, ACCEPT WITH FINDINGS on A, D and E, no P0–P2.
+Its three P3s are answered: the unsaved Report no longer reports an empty
+observation above real artifacts (`7fe44a8`, watched failing first); §82 named
+the wrong refusal for a pre-change request replayed unchanged, which is
+`400 REQUEST_INVALID`, and now says so; and the smoke-traceback entry is struck
+on the smoke run's own log.
+
+**Gate at `7fe44a8`'s tree less its one-line fix** (`d1cda66`): `check-postgres`,
+lint, types, the offline suite **3,353 passed**, races **26 passed**, security,
+frontend (256 unit, both builds, the accessibility matrix, **90** workbench) --
+every step exit 0. The fix's own suites re-ran green after it. `make image` was
+not run locally: this machine's Trivy is 0.72.0 against the 0.70.0 pin (the
+Completion Phase 13 ledger entry); hosted CI runs it at the pin. **Smoke at
+`7fe44a8`:** exit 0 -- the production-image tests 8 passed and the journey 22 passed on each of chromium (5.9 min), firefox (6.0 min) and webkit (9.2 min), with no `Exception in ASGI application` and no traceback in the log. An earlier run at this head failed every engine on `EDGE_NOT_TRUSTED`: an orphaned test edge from a smoke run stopped mid-flight still held the edge port; recorded as a ledger entry.
+
+**What was deliberately not built.** Every other 13.3/13.5 item keeps its
+recorded trigger. `main`'s `citation_candidates` feature, declined during the
+#323 reconciliation as out of scope for a conflict resolution, is still not
+ported: it threads through `server/evidence/citations.py`,
+`server/methodology/canonical.py` and `build_handoff_prompt`, changes what a
+module is prompted with, and so changes prompt identity -- a live-run concern,
+not a host-only one. It needs its own brief.
 
 ## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
 

@@ -181,25 +181,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 13.**
 
-- **Every green smoke run logs an unhandled traceback, and it is the test
-  edge's rather than the product's.** Measured on two full three-engine runs:
-  exactly **one** `ERROR: Exception in ASGI application` and **three**
-  `httpx.RemoteProtocolError: peer closed connection without sending complete
-  message body` per engine, on runs that exit 0 with 22 tests passing. The
-  stack is `httpx`/`httpcore` -- the *client* side -- so it is
-  `tests/journey/edge.py` proxying an SSE tail to the API when the browser
-  navigates away from the page holding it, which is an ordinary thing for a
-  browser to do and which the API answers correctly (its own log line is the
-  `INFO` above it). Nothing in `server/` raises here. What it costs is not
-  correctness but attention: a traceback printed on every passing run teaches a
-  reader to scroll past tracebacks, and the next one will be real. It is also
-  why this phase had to diagnose the same exception three separate times before
-  concluding it was benign -- once per engine, against a stream-cap change that
-  could plausibly have caused it. *Upgrade:* the test edge catches the
-  disconnect its own proxy loop is certain to meet and logs one line naming it,
-  so a traceback in a smoke log goes back to meaning something. It is a change
-  to the journey's edge and not to the product, which is why it is an entry
-  rather than a task.
+- ~~**Every green smoke run logs an unhandled traceback, and it is the test
+  edge's rather than the product's.**~~ Closed by the upgrade named:
+  `tests/journey/edge.py` catches the disconnect its own proxy loop meets on an
+  event stream -- `httpx.RemoteProtocolError` from the upstream, Starlette's
+  `ClientDisconnect` from the browser -- and logs one line naming its type and
+  path, never its text; a JSON body the upstream cuts still raises
+  (`tests/test_journey_tooling.py::test_an_event_stream_the_upstream_cuts_ends_with_one_line_not_a_traceback`).
+  Measured on the three-engine smoke run at `7fe44a8`: **no** `Exception in
+  ASGI application` and no traceback in the log, three one-line edge notices, 22
+  tests passing on each engine. A traceback in a smoke log means something again.
+
+- **The journey runner does not refuse an edge port already taken.**
+  `tests/journey/run.py` starts the test edge on `127.0.0.1:18080` without first
+  asking whether something holds it. An orphaned edge from a stopped run keeps
+  the port and its old `CAOS_EDGE_TOKEN`, the new stack's browser reaches the
+  orphan, and every engine fails its first test on `EDGE_NOT_TRUSTED` -- a
+  failure that names a trust fault rather than a leftover process. It happened
+  once on 18 September 2026, after a smoke run was stopped mid-flight, and cost
+  one full three-engine run to diagnose. *Upgrade:* refuse before building, as
+  the mount check does, when the edge port is already bound, naming the port and
+  the holder.
 
 - **The image gate cannot run on a machine whose Trivy has moved off the pin.**
   `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
@@ -224,147 +226,101 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 12.**
 
-- **Two filing digest checks cannot fire, and one refusal's clearance cannot
-  discharge its newest cause.** `server/deliverable/filing.py`'s
-  `signatures[0][1] != digest` (`DELIVERABLE_MOVED_SINCE_SIGNING`) and its
-  `any(signed_digest != digest ...)` (`DELIVERABLE_NOT_SIGNED`) compare a
-  signature's `payload_sha256` against the revision's -- but `sign_opinion_in`
-  writes the digest it has just read from the immutable
-  `deliverable_revisions` row, so every signature's digest equals the
-  revision's by construction and neither branch is reachable. What does the
-  work is `_reviewed` in the route, against the digest the *client* sent, which
-  is a different and real check. Two named refusals with no reachable cause
-  read as protection that is not there. Separately,
-  `citations._line_blocks` now raises `EVIDENCE_NOT_AVAILABLE` when the host's
-  own `GROUP_WIDTH` no longer reproduces a stored block count, and that code's
-  clearance is "Pin a live source for the evidence." -- an act the caller can
-  perform and that cannot possibly help, because the fault is the host's
-  packing rule. Same shape as the borrowed `CONTEXT_OVER_CEILING` clearance
-  already recorded, one code over. Both found by the Completion Phase 12
-  adversarial audit. *Upgrade:* delete the two unreachable branches with the
-  commit that gives them a cause, or state in each that the route's check is
-  the live one; and a clearance of its own for the repacking refusal, which is
-  the operator's "re-admit the source under this build" rather than anything a
-  caller can do.
-- **`SAVE_REVISION` is judged on its floor alone, so the surface can offer a
-  save the commit refuses.** `availability.report_actions` judges the other
-  three filing acts against the revision's state and `SAVE_REVISION` against
-  the WRITER floor only, while `FilingControls` posts
-  `expected_revision_id: body.revision_id`. So opening Report at
-  `?revision=<any revision that is not the run's head>` -- an ordinary thing to
-  do, since the Save control sets `?revision` on every save -- renders Save
-  available and answers `COMMAND_EXPECTATION_STALE` on the press. The read
-  already holds the run's head and could say so; every other run-scoped action
-  in that module does the equivalent. It is also the one filing control
-  `tests/test_governed_write_routes.py`'s availability walk skips, which
-  iterates `_FILING[1:]` under a docstring saying it covers every state the
-  chain distinguishes. *Upgrade:* judge `SAVE_REVISION` against the head the
-  read already has, and walk all four.
+- ~~**Two filing digest checks cannot fire, and one refusal's clearance cannot
+  discharge its newest cause.**~~ Closed, and not by the deletion this entry
+  first proposed. The two digest checks in `server/deliverable/filing.py` are
+  **kept**: no path through this code reaches them, but a signature or freeze
+  row altered outside it does, so they are tamper evidence rather than dead
+  branches, and each now has that cause and a test that fails without it
+  (`tests/test_filed_receipts.py::test_freeze_refuses_a_signature_altered_outside_this_code`,
+  `test_filing_refuses_a_freeze_altered_outside_this_code`). `_reviewed` in the
+  route stays the live check against the digest the client sent. The repacking
+  refusal has a code of its own, `EVIDENCE_PACKING_MISMATCH` (500, permanent),
+  whose clearance names the operator's act -- re-admit the source under this
+  build -- rather than one the caller cannot perform
+  (`tests/test_line_groups.py::test_a_packing_mismatch_is_an_operators_fault_with_a_clearance_it_can_act_on`).
+- ~~**`SAVE_REVISION` is judged on its floor alone, so the surface can offer a
+  save the commit refuses.**~~ Closed: the Report read selects the run's head in
+  the revision's own statement, so it costs no round trip, and refuses the save
+  `COMMAND_EXPECTATION_STALE` on any other revision, which is what the commit
+  answers (`tests/test_command_availability.py::test_save_revision_is_judged_against_the_runs_head`).
+  The availability walk covers all four filing controls rather than
+  `_FILING[1:]`
+  (`tests/test_governed_write_routes.py::test_every_filing_control_the_report_shows_answers_as_it_was_shown`).
 
-- **The filing commands' I/O budget is a ceiling, where every other section
-  asserts equality.** `server/api/commands/deliverable.py` declares
-  `IO_BUDGET = 60` and `tests/test_governed_write_routes.py` asserts
-  `0 < counted.executed <= budget`, over measured costs of freeze 55, save 52,
-  filing 16 and signature 14. So the signature command may grow from fourteen
-  round trips to sixty with nothing failing, and two of the four run at a
-  quarter of their declared bound. The four share one envelope and one
-  declaration, which is why a single number covers them; what it costs is the
-  property every section read has, that an unnoticed read fails loudly. This is
-  the same argument the audit-remediation entry makes one screen above about
-  not fitting a budget to the widest shape, applied to a ceiling instead of a
-  raised number. *Upgrade:* a declared budget per command with `==`, the day
-  one of the four grows a read nobody meant to add.
-- **A signer can sign twice, and the detached receipt names one of them.**
-  `deliverable_opinions`' primary key is
-  `(case_id, revision_id, signed_by, signed_at)` and `sign_opinion_in` refuses
-  only a *frozen* revision, while `useCommand` mints a fresh idempotency key
-  for a press following a successful one -- so two presses of Sign are two
-  commands and two rows for one signer. Nothing false is written: the
-  revision's `signed_by` carries the same actor twice and the three-actor rule
-  still counts distinct actors. Two clauses this entry first carried were
-  wrong, and are corrected here rather than quietly: it said the committee read
-  pays one more `payload_digests` round trip, which it does not -- `required`
-  is a set of `(action, actor)` and the lookup is keyed by actor, so a doubled
-  *same* signer costs nothing and only two distinct signers do, which is what
-  the `IO_BUDGET` comment beside it says and what this entry borrowed for a
-  case it does not cover. And it said `file_deliverable_in`'s `Receipt` names
-  the **first** signer: `revision_signatures` orders `signed_at DESC`, so
-  `signatures[0]` is the most **recent** one. The receipt still under-claims
-  rather than misstates, but it under-claims the other way round. Both found by
-  the phase adversarial audit reading the code against the entry. Reachable
-  since the sign route shipped. *Upgrade:* a unique index on
-  `(case_id, revision_id, signed_by)` and a receipt carrying every signature,
-  the day a second signature on one revision is something a reader must see.
-- **A Book passport's evidence date is the analyst's declared reporting
-  period.** `server/api/reads/book.py` fills `evidence_date` from the pinned
-  run subject's `reporting_period`, which a person typed when the run was
-  created -- not a date the host derived from any admitted document. The code
-  says so; the field's name does not, and in a ten-field passport beside
-  `computed_at`, `snapshot` and a host-anchored citation it reads as one more
-  host fact. *Upgrade:* rename it to what it is, or derive it from the
-  documents the projection's operands cite, the day a reader relies on it to
-  date the evidence rather than the case.
-- **The demonstration Book is fully populated for a feature the real system
-  cannot reach.** `frontend/fixtures/book.json` carries two credits with cells,
-  chips and ten-field passports, and `make dev-ui-demo` renders them -- while
-  no run made through the API can carry CP-CF, so the real Book draws a credit
-  list and no table. The fixture is the shape the wire declares and the section
-  will serve; the workbench is explicitly never integration evidence
-  (`docs/DECISIONS.md` §14's rule, restated on every demo surface). But the
-  entries above say the Book's limits "are not things a reader meets now", and
-  a reader of the demonstration meets the opposite: a working portfolio.
-  *Upgrade:* the demo fixture says on the page that no pathway it can be served
-  from produces a forecast, or the model extension becomes requestable and the
-  fixture stops being ahead of the product.
+- ~~**The filing commands' I/O budget is a ceiling, where every other section
+  asserts equality.**~~ Closed: each filing command declares its own budget --
+  save 52, sign 14, freeze 55, file 16 -- asserted with `==`, and the module's
+  `IO_BUDGET` is their maximum for `io_budget.py --assert`
+  (`tests/test_governed_write_routes.py::test_each_new_command_meets_its_declared_store_budget`).
+  The membership commands in the same test still share one ceiling; withdrawal
+  measures 11 against a declared 13.
+- **The detached receipt names one signer.** ~~A signer can sign twice.~~ That
+  half is closed by migration `0029`, a named constraint
+  `one_opinion_per_signer UNIQUE (case_id, revision_id, signed_by)`:
+  `sign_opinion_in` inserts `ON CONFLICT ... DO NOTHING` and refuses
+  `DELIVERABLE_ALREADY_SIGNED` (409) when no row was written, and the Sign
+  control is refused to an approver who has already signed
+  (`tests/test_filing_chain.py::test_a_signer_cannot_sign_one_revision_twice`,
+  `tests/test_store_schema.py::test_migration_0029_holds_one_signature_per_signer_and_revision`).
+  A store already holding a doubled signature refuses the migration
+  `STORE_SCHEMA_DRIFT` rather than deleting a row an `OPINION_SIGNED` event
+  names. What stays is the receipt: `file_deliverable_in`'s `Receipt` carries
+  `signatures[0]`, the most **recent** signer, because carrying every signer
+  moves the pinned `FiledReceipt` keys, unversioned stored receipt blobs and
+  `verify_package`'s three-actor check. It under-claims rather than misstates.
+  *Upgrade:* a receipt carrying every signature, with a receipt format version,
+  the day a second approver on one revision is something a reader must see.
+- ~~**A Book passport's evidence date is the analyst's declared reporting
+  period.**~~ Closed by naming it: the field is `reporting_period` on the wire,
+  in `server/api/reads/book.py`, the passport overlay ("Reporting period") and
+  the demonstration fixture
+  (`tests/test_book_section.py::test_the_book_row_carries_the_accepted_projection_cells_and_their_passports`,
+  which also asserts `evidence_date` is gone). A date derived from the documents
+  a projection's operands cite is not built and nothing claims one.
+  `docs/IA_SPEC.md` still says "Evidence date"; it is the specification's word
+  for a field this build does not serve.
+- **The demonstration Book is fuller than any run the workspace can make.**
+  `frontend/fixtures/book.json` carries two credits with cells, chips and
+  ten-field passports. A run made through the API can now carry CP-CF (the entry
+  below), so the fixture is the shape the product can serve -- but only on
+  `FULL_CREDIT_32/RELATIVE_VALUE`, only through the API, and never yet end to
+  end, so a reader of `make dev-ui-demo` still meets a working portfolio that no
+  press in the workspace produces. *Upgrade:* a workspace control for the model
+  extension, or the demo fixture saying on the page which pathway alone can
+  serve it.
 
-- **No run made through the API can carry CP-CF, so no Book cell and no
-  passport is reachable.** `create_run` resolves the route with no
-  `RouteExtensions` (`server/api/commands/runs.py`) and `CreateRun` carries no
-  field to ask for one (`server/api/wire.py`, `extra="forbid"`), while CP-CF is
-  a host extension appended only by
-  `resolve_route(..., extensions=RouteExtensions(model_extension=True))`
-  (`server/engine/route.py`'s `_model_node`), whose one caller anywhere is the
-  qualification harness. `accepted_forecast` returns `None` without a CP-CF
-  handoff, so every credit is `NO_ACCEPTED_FORECAST`, `periodsOf(rows)` is
-  empty, `BookSection` draws its credit list instead of a comparison table, and
-  there is no `[data-cell]` to open a passport from. **This is not a property of
-  the LITE pathway**: `ADAPTER_ROUTES` enables three pathways and
-  `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's `MODEL_OWNERS`,
-  so it would append CP-CF if anything asked. Completion Phase 12's exit clause
-  "a ten-field passport per cell" therefore rests on `PINNED[wire.BookPassport]`
-  in `tests/test_wire_contract.py`, on `frontend/tests/unit/book.test.tsx` and
-  on `tests/test_book_section.py`, not on the production stack; the journey records the
-  absence deliberately, so the day a cell exists
-  `journey: the Book names every credit of the portfolio on one stated basis`
-  fails and is rewritten to open the passport. Found by the Task 12.5
-  acceptance review, which read the route resolver where the task's own
-  reasoning had stopped one step short and recorded a false reason -- that
-  CP-CF "is not a node of the only route the canonical adapter executes" --
-  which was wrong twice over. *Upgrade:* a declared way for a run to request
-  the model extension, a `model_extension` field on `CreateRun` pinned in the
-  route digest like everything else; or a Book that says in its own document
-  that no pathway it can be served from produces a forecast.
-- **The filing chain cannot be reached from the workspace.** `sectionUrl`
-  answers `null` for **both** `report` and `committee` without a `revision`
-  (`frontend/src/app/transport.ts`), `read_report` refuses
-  `DELIVERABLE_NOT_FOUND` without the row, and the only thing that ever sets
-  `?revision` is `FilingControls`' own post-save `setParams` -- on the section
-  that needs it to load. So a case can never produce its *first* revision
-  through the UI, and with no revision there is nothing to sign, freeze or
-  file: the four governed writes Task 12.1 built and Task 12.2 placed are
-  unreachable by a person using the workspace, and Committee shares the
-  precondition. Every one of them works, proved through the production stack on
-  three engines by `frontend/tests/journey/journey.spec.ts`, which reaches the
-  first save as an authenticated request and asserts the surface is
-  `unavailable` without one -- because there is no press that would make it.
-  The journey citation is worth nothing to a gate: every journey test is titled
-  `journey: ...`, which neither `scripts/ledger_state.py` nor
-  `tests/test_phase_exits.py` can read, so the code paths above are the
-  citation that can be checked. *Upgrade:* a `SAVE_REVISION` control that does
-  not need a revision to exist -- composed from Analysis or Run, its success
-  the thing that first sets `?revision` -- or `report` served without
-  `revision`, answering the run's latest. Either is a task; neither is a change
-  a test may make.
+- **A run can carry CP-CF only through the API, and none has produced one end
+  to end.** ~~No run made through the API can carry CP-CF.~~ Closed as the
+  upgrade named: `CreateRun` states a required strict `model_extension`, which
+  `create_run` passes to `resolve_route`, so CP-CF, its synthesised edges and
+  its predicate sit in the resolved route the digest covers and the pin stores
+  (`tests/test_run_commands.py::test_a_run_may_request_the_model_extension_and_its_pin_carries_cp_cf`,
+  `test_an_extended_run_pins_its_input_and_shows_cp_cf_on_the_run_document`). A
+  pathway missing one of `MODEL_OWNERS` refuses it
+  `ROUTE_EXTENSION_OWNER_MISSING` before anything commits -- every LITE pathway
+  does -- so only `FULL_CREDIT_32/RELATIVE_VALUE` accepts it
+  (`test_the_model_extension_is_refused_on_a_pathway_without_its_owners`).
+  What remains: the workspace's Create run form always sends `false`, and no
+  journey or live run has produced an accepted CP-CF forecast, so Completion
+  Phase 12's per-cell passport still rests on
+  `PINNED[wire.BookPassport]` in `tests/test_wire_contract.py`,
+  `frontend/tests/unit/book.test.tsx` and `tests/test_book_section.py`, and the
+  journey still asserts the absence of a table because its runs are LITE.
+  *Upgrade:* a workspace control for the extension and a journey that creates a
+  RELATIVE_VALUE run with it, the day the smoke stack can drive that route's
+  nine modules.
+- ~~**The filing chain cannot be reached from the workspace.**~~ Closed by the
+  upgrade's second arm: Report is served without `revision`. With revisions it
+  answers the run's head; with none it serves the accepted artifacts a first
+  save would carry, `SAVE_REVISION` offered and judged by the same derivation
+  the save makes (refused with that derivation's code when it cannot be made),
+  and that save's success is what first sets `?revision`
+  (`tests/test_governed_write_routes.py::test_a_run_with_no_revision_is_served_a_report_that_offers_its_first_save`).
+  Committee still requires a named frozen revision. The journey now asserts the
+  unsaved Report offers Save and refuses Sign `DELIVERABLE_NOT_FOUND`, and still
+  makes its first save over the API, because that save carries a figure span --
+  which is the digit entry below's, not this one's.
 - **A digit in a draft is refused with a clearance the surface cannot
   discharge.** `server/deliverable/revisions.py`'s `_span` refuses any ASCII
   digit in narrative text `NARRATIVE_FIGURE_UNREFERENCED`, whose clearance
@@ -377,43 +333,34 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   document, page and quote; the refusal itself is rendered in the browser.
   *Upgrade:* a citation picker on the Report surface; failing that, a clearance
   that names an act this surface can perform.
-- **Nothing renders a parked run's stop code.** `work.stop_code` is parsed at
-  `frontend/src/wire/v1/documents.ts` and rendered nowhere under
-  `frontend/src`, so an operator meeting a run parked `STOPPED` learns only
-  that Start and Retry are refused, and not that the store said
-  `EVIDENCE_NOT_AVAILABLE` because a captured source was withdrawn. The code is
-  on the wire, typed, and one line from being on screen. Journey-observed
-  rather than read: Task 12.5 polls that field to prove the park happened, from
-  a page that does not show it. Grant and revoke are the same shape one step
-  further on -- both commands have no control anywhere and no entry in
-  `ActionName`, deliberately, because no section serves an Admin panel to offer
-  them from, so the journey drives them as authenticated requests. *Upgrade:*
-  the stop code on the Run section's work panel beside the refused controls,
-  and the membership commands with Completion Phase 13's Admin work.
-- **A worktree outside `/Users` cannot run `make smoke-production`.**
-  `compose.smoke.yaml` bind-mounts `./tests:/app/tests:ro` into
-  `journey-worker`, and Docker Desktop on the development machine shares
-  `/Users` and not `/private/tmp`, so the mount comes up empty and the worker
-  exits `ModuleNotFoundError: No module named 'journey'` -- a failure that
-  names neither the mount nor the path. **Every standing worktree of this build
-  is under `/private/tmp`**, so this recurs for anyone who tries. Task 12.5's
-  assigned worktree was one of them; its three-engine gate was run from a
-  detached mirror worktree under `/Users`, and **the gate evidence is therefore
-  not reproducible from the branch's own worktree**: the mirror is deleted, it
-  used the same fixed ports and the same compose project name as any other
-  agent's smoke stack, and the only link between it and what landed is the
-  sha256 of the two committed files. *Upgrade:* `tests/journey/run.py` refuses
-  a repository root Docker cannot mount, with a code that says so, before it
-  builds anything -- which is also what would stop the next agent losing an
-  hour to it.
+- **Grant and revoke have no control.** ~~Nothing renders a parked run's stop
+  code.~~ That half is closed: the Run section's work panel names
+  `work.stop_code` beside the refused Start and Retry, in words and labelled
+  (`frontend/tests/unit/run.test.tsx`'s
+  `test_a_parked_run_names_its_stop_code_beside_the_work_controls`), and the
+  journey asserts it on the parked run. The wire carries the code without a
+  clearance and none is invented. Grant and revoke remain: both commands have no
+  control anywhere and no entry in `ActionName`, deliberately, because no
+  section serves an Admin panel to offer them from, so the journey drives them
+  as authenticated requests. *Upgrade:* the membership commands with Completion
+  Phase 13's Admin work.
+- ~~**A worktree outside `/Users` cannot run `make smoke-production`.**~~
+  Closed by the upgrade named: `tests/journey/run.py` refuses, on macOS and
+  before building anything, a repository root whose `./tests` mount source is
+  outside the Docker-shared prefixes (`/Users` by default,
+  `JOURNEY_DOCKER_SHARED` to override), naming the mount and the path
+  (`tests/test_journey_tooling.py::test_a_macos_root_docker_cannot_mount_is_refused_naming_the_mount`).
+  Linux and CI are never refused. What it cannot repair is history: Task 12.5's
+  three-engine evidence was produced in a deleted mirror worktree and stays
+  unreproducible from that branch's own worktree.
 
 - **The Book compares on earnings, not on leverage, and on four credits it did
   not let you choose.** Read this entry and the two after it against the one
-  above: no run made through the API carries CP-CF, so the cells, chips and
-  passports they describe are what the Book serves **when a forecast exists**,
-  which no API-created run produces today. The limits below are real and will
-  be met the day the model extension is requestable; they are not things a
-  reader meets now. Task 12.3 declares six columns, the five whose operands
+  above: a run carries CP-CF only when created through the API on
+  `FULL_CREDIT_32/RELATIVE_VALUE` with `model_extension`, and none has yet
+  produced a forecast end to end, so the cells, chips and passports they
+  describe are what the Book serves **when a forecast exists**. The limits below
+  are real and are met the first time one does. Task 12.3 declares six columns, the five whose operands
   are the period's own accepted driver row and the EBITDA margin over two of
   them, because a cell can then name the driver behind it and that driver's
   evidence. The debt and cash roll-forward and the leverage metrics over them
@@ -501,29 +448,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   completeness check with zero violations in which the shipped key was met from
   the wrong register. The confidence review had looked at the same code and
   recorded it as safe; this is what a second, adversarial gate is for.
-- **Two vendor tests fail on bytecode any concurrent process can write.**
-  `tests/test_vendor_contract.py::test_vendor_loader_leaves_sys_path_untouched`
-  asserts no `__pycache__` under `vendor/deploy-v`, and
-  `tests/test_bundle_pin.py::test_the_bundle_verifies_with_its_own_tool` runs the
-  bundle's own `verify_package.py`, which refuses a tree carrying any. Both are
-  right to: the vendored tree is read-only and `docs/DECISIONS.md` §13 pins its
-  bytes. Neither is isolated from the rest of the machine. This checkout is
-  shared -- a peer session, review agents and the coordinator all run in it -- and
-  any Python process that imports a vendor script through the ordinary machinery
-  leaves bytecode beside the source, after which both tests fail for a cause
-  neither names. It happened twice while retesting Completion Phase 8, and cost
-  an hour: the first diagnosis blamed an agent that had used `-B` throughout and
-  proved it by timestamp, and the second blamed `load_vendor_contract`, which was
-  then shown to write nothing when nothing else is running. The real cause is
-  concurrency, and the evidence for it is that the failure does not reproduce in
-  an otherwise idle checkout. What is *not* in question: nothing in `server/` or
-  `scripts/` reaches a vendor module except through `load_vendor_contract`, which
-  uses `compile`/`exec` and writes no bytecode, and the one place that runs a
-  vendor script as a subprocess already passes `-B`. The seam holds; its test is
-  what is fragile. *Upgrade:* have the two tests clear `__pycache__` under
-  `vendor/` before asserting, so they measure this repository's own behaviour
-  rather than the machine's -- or give each agent its own checkout, which is the
-  standing worktree rule these sessions have been bending by working in one tree.
+- ~~**Two vendor tests fail on bytecode any concurrent process can write.**~~
+  Closed by the upgrade's first arm: both tests clear `__pycache__` under
+  `vendor/` before asserting, and the helper removes a cache directory only when
+  it holds nothing but `.pyc` files, touching no vendored byte
+  (`tests/test_bundle_pin.py::test_clearing_vendor_bytecode_removes_only_bytecode`).
+  They now measure this repository's behaviour rather than the machine's.
 - **A key over a duplicated column answers nothing, and that is now true rather
   than only written down.** The vendor's reader builds a register row as
   `dict(zip(header, cells))`, so a header naming one column twice collapses to
@@ -902,16 +832,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   the remaining sections when a workbench spec needs an available control
   there.
 
-- **An evidence page holds a read transaction while its frame is extracted.**
-  `read_evidence_page` reads standing and the page's lines, then
-  `server/evidence/page.py` reads the whole document blob and, for a PDF, runs
-  the §47 child for its frame, under the admission deadline (60 s) and decoded
-  budget -- all with the request's read transaction open and its unpooled
-  connection held. Each request pays an interpreter start and a full blob read,
-  and nothing caches a frame, so a reader paging a large PDF repeats both.
-  *Upgrade:* a frame stored at admission beside the extraction, or a cache
-  keyed by `(document_sha256, extractor identity, page)`, and the transaction
-  closed before the child, the day page latency is measured.
+- **An evidence page pays an interpreter start and a full blob read per
+  request.** ~~An evidence page holds a read transaction while its frame is
+  extracted.~~ That half is closed: `read_page` ends the request's read unit
+  once standing and the page's rows are read, before the blob read and the §47
+  child, at no extra round trip
+  (`tests/test_evidence_page.py::test_no_transaction_is_open_while_the_page_frame_is_extracted`).
+  Withdrawal is unaffected: the membership read took no lock, so holding the
+  transaction never excluded a later withdrawal, and what is served afterwards
+  is the stored lines and a frame of four numbers, no document text. Each
+  request still starts an interpreter and reads the whole blob, and nothing
+  caches a frame, so paging a large PDF repeats both. *Upgrade:* a frame stored
+  at admission, or a cache keyed by `(document_sha256, extractor identity,
+  page)`, the day page latency is measured.
 - **The demonstration event stream keeps one process-wide frame counter.**
   `frontend/vite.config.ts`'s fixture stream advances a single `runFrame`
   (and `staleAdvanced`) for the whole dev server, reset when a fresh stream
