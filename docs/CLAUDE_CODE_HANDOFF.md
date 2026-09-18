@@ -47,15 +47,16 @@ launched with `ultrathink` before §81 withdrew it, which is recorded there.
 | E | The evidence page ends its read unit before the frame is extracted; the journey runner refuses a root Docker Desktop cannot mount; the test edge logs a cut event stream as one line; vendor tests clear stray bytecode | -- |
 | -- | No `ultrathink` and no `max` for any model, `xhigh` the ceiling and `high` for Fable 5.1; the four review definitions updated | §81 |
 
-Fourteen `CLAUDE.md` ledger entries were struck or narrowed, each naming the
-test that closed it; the ledger gate and the phase-exit gate pass over them.
+Fifteen `CLAUDE.md` ledger entries were struck or narrowed, each naming the
+test that closed it, and one was added (the busy edge port); the ledger gate
+and the phase-exit gate pass over them.
 
 **Acceptance review:** ACCEPT on C, ACCEPT WITH FINDINGS on A, D and E, no P0–P2.
 Its three P3s are answered: the unsaved Report no longer reports an empty
 observation above real artifacts (`7fe44a8`, watched failing first); §82 named
 the wrong refusal for a pre-change request replayed unchanged, which is
 `400 REQUEST_INVALID`, and now says so; and the smoke-traceback entry is struck
-below on the smoke run's own log.
+on the smoke run's own log.
 
 **Gate at `7fe44a8`'s tree less its one-line fix** (`d1cda66`): `check-postgres`,
 lint, types, the offline suite **3,353 passed**, races **26 passed**, security,
@@ -72,7 +73,6 @@ ported: it threads through `server/evidence/citations.py`,
 `server/methodology/canonical.py` and `build_handoff_prompt`, changes what a
 module is prompted with, and so changes prompt identity -- a live-run concern,
 not a host-only one. It needs its own brief.
-
 
 ## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
 
