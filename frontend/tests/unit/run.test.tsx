@@ -462,6 +462,7 @@ describe("Run", () => {
         profile_id: "FULL_CREDIT_ASSESSMENT",
         selection_id: "default",
         supersedes: null,
+        model_extension: false,
       });
       expect(
         UUID.test(

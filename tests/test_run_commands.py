@@ -17,12 +17,19 @@ from httpx import Response
 
 from server.api import app as app_module
 from server.api.commands import runs as runs_command
-from server.api.deps import store_connection
+from server.api.deps import methodology_bundle, store_connection
 from server.api.reads import run as run_read
 from server.api.wire import CLEARS
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import (
+    MODEL_MODULE,
+    RouteExtensions,
+    resolve_route,
+    route_digest,
+)
 from server.evidence.ingest import Document, admit_pack
+from server.methodology.vendor import catalog
 from server.refusals import RefusalCode
 from server.store import StoreConnection
 from server.store.audit import audit_trail, digest_of
@@ -36,7 +43,7 @@ from server.store.gates import (
     withdraw_source,
 )
 from server.store.members import Standing, grant, revoke
-from server.store.routes import pinned_route
+from server.store.routes import pinned_route, resolved_route
 from server.store.run_inputs import load_run_input
 from server.store.runs import block_run, create_case, fail_run, start_run
 from server.store.source_sets import snapshot_source_set
@@ -47,6 +54,14 @@ ROUTE = {
     "profile_id": "LITE_CREDIT_22",
     "selection_id": "LITE_EARNINGS_UPDATE",
     "supersedes": None,
+    "model_extension": False,
+}
+# The one enabled pathway that runs every owner CP-CF reads (`MODEL_OWNERS`).
+MODEL_ROUTE = {
+    **ROUTE,
+    "profile_id": "FULL_CREDIT_32",
+    "selection_id": "RELATIVE_VALUE",
+    "model_extension": True,
 }
 SUBJECT = {
     "issuer_id": "EXAMPLE",
@@ -148,10 +163,12 @@ def test_only_an_adapter_route_can_be_selected(
     resolved: list[tuple[str, str]] = []
     real = getattr(runs_command, "resolve_route", None)
 
-    def watched(catalog: object, profile: str, selection: str) -> object:
+    def watched(
+        catalog: object, profile: str, selection: str, **kwargs: object
+    ) -> object:
         resolved.append((profile, selection))
         assert real is not None
-        return real(catalog, profile, selection)
+        return real(catalog, profile, selection, **kwargs)
 
     monkeypatch.setattr(runs_command, "resolve_route", watched, raising=False)
     before = _effects(conn)
@@ -160,7 +177,7 @@ def test_only_an_adapter_route_can_be_selected(
         ("LITE_CREDIT_22", "NO_SUCH_PATHWAY"),
         ("NO_SUCH_PROFILE", "LITE_EARNINGS_UPDATE"),
     ]:
-        body = {"profile_id": profile, "selection_id": selection, "supersedes": None}
+        body = {**ROUTE, "profile_id": profile, "selection_id": selection}
         refused = _send(client, _path(case_id), writer, body)
         assert _outcome(refused) == "400 ROUTE_NOT_ENABLED"
     assert resolved == [], "a disabled pair is refused before resolution"
@@ -182,6 +199,92 @@ def test_only_an_adapter_route_can_be_selected(
     [entry] = audit_trail(conn, case_id)
     conn.rollback()
     assert (entry.action, entry.actor_id) == ("RUN_CREATED", writer)
+
+
+def test_a_run_may_request_the_model_extension_and_its_pin_carries_cp_cf(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """The flag is a route-selection input (invariant 10): it changes the
+    resolved node list, so it is inside the digest the pin carries, and the
+    pinned route read back is the route the same selection resolves again."""
+    conn, case_id = case
+    writer = member(conn, case_id)
+    table = catalog(methodology_bundle())
+    extended = resolve_route(
+        table,
+        "FULL_CREDIT_32",
+        "RELATIVE_VALUE",
+        extensions=RouteExtensions(model_extension=True),
+    )
+    plain = resolve_route(table, "FULL_CREDIT_32", "RELATIVE_VALUE")
+
+    created = _send(client, _path(case_id), writer, MODEL_ROUTE)
+    ordinary = _send(
+        client, _path(case_id), writer, {**MODEL_ROUTE, "model_extension": False}
+    )
+
+    assert (created.status_code, ordinary.status_code) == (201, 201), created.text
+    with_model = UUID(created.json()["run_id"])
+    without = UUID(ordinary.json()["run_id"])
+    pinned = resolved_route(conn, with_model)
+    assert pinned == extended
+    assert MODEL_MODULE in [node.module_id for node in pinned.nodes]
+    assert created.json()["route_digest"] == route_digest(extended)
+    assert resolved_route(conn, without) == plain
+    assert (
+        ordinary.json()["route_digest"] == route_digest(plain) != route_digest(extended)
+    )
+    # Resolution is pure: the same selection resolves the same digest again.
+    again = resolve_route(
+        table,
+        "FULL_CREDIT_32",
+        "RELATIVE_VALUE",
+        extensions=RouteExtensions(model_extension=True),
+    )
+    assert route_digest(again) == pinned_route(conn, with_model)
+    trail = audit_trail(conn, case_id)
+    conn.rollback()
+    assert [entry.action for entry in trail] == ["RUN_CREATED", "RUN_CREATED"]
+
+
+def test_the_model_extension_is_refused_on_a_pathway_without_its_owners(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """LITE earnings runs none of CP-1, CP-2G, CP-4: CP-CF would read inputs
+    that are not there, so the selection is refused before anything commits."""
+    conn, case_id = case
+    writer = member(conn, case_id)
+    before = _effects(conn)
+
+    refused = _send(client, _path(case_id), writer, {**ROUTE, "model_extension": True})
+
+    assert _outcome(refused) == "400 ROUTE_EXTENSION_OWNER_MISSING"
+    assert _effects(conn) == before
+
+
+def test_the_model_extension_is_stated_on_every_request(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """An absent key is a malformed body, not a default -- and the flag is part
+    of the request a key binds, so one key cannot create both routes."""
+    conn, case_id = case
+    writer = member(conn, case_id)
+    absent = {k: v for k, v in ROUTE.items() if k != "model_extension"}
+    assert _outcome(_send(client, _path(case_id), writer, absent)) == (
+        "400 REQUEST_INVALID"
+    )
+    for wrong in ("true", 1, None):
+        body = {**MODEL_ROUTE, "model_extension": wrong}
+        assert _outcome(_send(client, _path(case_id), writer, body)) == (
+            "400 REQUEST_INVALID"
+        )
+
+    key = uuid4()
+    first = _send(client, _path(case_id), writer, MODEL_ROUTE, key=key)
+    assert first.status_code == 201, first.text
+    flipped = {**MODEL_ROUTE, "model_extension": False}
+    reused = _send(client, _path(case_id), writer, flipped, key=key)
+    assert _outcome(reused) == "409 IDEMPOTENCY_KEY_REUSED"
 
 
 def _refusal(code: str) -> dict[str, str]:

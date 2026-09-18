@@ -22,7 +22,14 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    TypeAdapter,
+)
 from pydantic.json_schema import models_json_schema
 
 from server.api.identity import GlobalRole
@@ -1054,6 +1061,13 @@ class CreateRun(BaseModel):
     # ordinary run. Stated on every request, as every request field is: an
     # absent key is a malformed body, not a default.
     supersedes: UUID | None
+    # Whether the route carries the host's model extension, CP-CF (§6). A
+    # route-selection input like the pair above: it changes the resolved node
+    # list, so it is inside the route digest the pin carries (invariant 10).
+    # Refused `ROUTE_EXTENSION_OWNER_MISSING` on a pathway that does not run
+    # every artifact owner CP-CF reads. Strict: `"true"` or `1` is a malformed
+    # body, not a coerced yes, because the answer changes what the run pays for.
+    model_extension: StrictBool
 
 
 class RunCreated(BaseModel):
