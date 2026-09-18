@@ -1185,29 +1185,32 @@ test.describe.serial("journey", () => {
     await expect(
       page.locator("[data-filing-controls] [data-action='SIGN_OPINION']"),
     ).toHaveAttribute("data-refusal", "DELIVERABLE_NOT_FOUND");
-    // The first revision is still made as an authenticated request from this
-    // same browser session, through the real edge, because it carries a
-    // figure span and the surface has no citation picker to compose one.
-    // Everything after this one call is pressed on the surface.
+    // The first revision is made on the surface: prose, then a figure span
+    // composed by the citation picker from the served record's citation 0.
     // The route's own node id, read from the run document rather than spelled
     // out here: a figure names a *route node*, not a module, and CP-0 on this
-    // pathway is `RN-LITE_CREDIT_22-LITE_EARNINGS_UPDATE-01-CP-0`.
+    // pathway is `RN-LITE_CREDIT_22-LITE_EARNINGS_UPDATE-01-CP-0`. The host
+    // fills the document, the page and the quote from the record itself.
     const gate = (await readRun(page, caseId, runId))?.nodes.find(
       (node) => node.module_id === "CP-0",
     );
     if (!gate) throw new Error("the run document names no CP-0 node");
-    const first = await postAs(page, `/api/v1/cases/${caseId}/runs/${runId}/revisions`, {
-      expected_revision_id: null,
-      narrative: [
-        [{ text: "The covenant certificate is the register this opinion rests on.", figure: null }],
-        // A figure span: the wire accepts one and the Report surface cannot
-        // compose one, since a figure names a citation of a verified record
-        // and that needs a picker the surface does not have. The host fills
-        // the document, the page and the quote from the record itself.
-        [{ text: null, figure: { route_node_id: gate.route_node_id, citation_index: 0 } }],
-      ],
-    });
-    const firstRevision = (await receipt<{ revision_id: string }>(first, 201)).revision_id;
+    const draft = page.locator("#narrative-draft");
+    await draft.fill("The covenant certificate is the register this opinion rests on.\n");
+    await draft.press("ControlOrMeta+End");
+    await page.locator("#figure-citation").selectOption(`${gate.route_node_id}#0`);
+    await page.locator("[data-figure-picker] button", { hasText: "Insert figure" }).click();
+    await expect(page.locator("[data-draft-figure]")).toHaveCount(1);
+    const [first] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `/api/v1/cases/${caseId}/runs/${runId}/revisions`,
+      ),
+      page.locator("[data-filing-controls] [data-action='SAVE_REVISION']").click(),
+    ]);
+    expect(first.status()).toBe(201);
+    const firstRevision = ((await first.json()) as { revision_id: string }).revision_id;
 
     await page.goto(`/report/?case=${caseId}&run=${runId}&revision=${firstRevision}`);
     const report = page.locator("[data-report-v1]");
@@ -1221,7 +1224,7 @@ test.describe.serial("journey", () => {
     await expect(figure).toContainText(QUOTE);
 
     // A draft carrying an ASCII digit is refused, and the clearance a reader
-    // is given names an act this surface offers no way to perform.
+    // is given names the act the citation picker above performs.
     await page.locator("#narrative-draft").fill(DIGIT_DRAFT);
     await page.locator("[data-filing-controls] [data-action='SAVE_REVISION']").click();
     const refused = page.locator(
