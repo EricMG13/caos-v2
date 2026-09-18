@@ -4269,3 +4269,27 @@ Fable's ceiling; the phase confidence review
 overrides §85's rows that put end-of-phase reviews on Fable and adversarial
 audits on Opus, for the two phase gates. Task acceptance stays on Opus 5 at
 `xhigh`, and the final all-phases review stays on Fable 5.1 at `high`.
+
+## 2026-09-18 §87 — One status per code, identity on every route, the extension offered where it succeeds
+
+- **`INTERNAL_FAULT` is 500 and permanent at every layer.** It was 400 in the
+  app's `_STATUS` and 500 at the edge guard, so its status depended on which
+  layer caught it. The guard now declares its statuses once, `EDGE_STATUS`,
+  asserted equal to the app's. §75's partition test covers the whole
+  `RefusalCode` enum. The eight 400s whose clearance says retry are **named,
+  not decided**, as `RETRY_SHAPED_400_PENDING_OWNER`: that is the owner's half
+  of D3.
+- **`RESERVATION_BELOW_REQUEST`, 500, permanent.** `canonical._within_reservation`
+  no longer borrows `CONTEXT_OVER_CEILING`, whose clearance ("deliver less
+  context") was false there. It is raised before `provider.complete`, so there is
+  no call outcome, and it is not added to `outcomes._NOT_AN_EXPLANATION`,
+  matching `CONTEXT_OVER_CEILING`; behaviour at a billed attempt is unchanged.
+- **Identity on the decorator.** Every store-touching route declares
+  `dependencies=[IDENTITY_FIRST]`, so identity resolves before the store
+  connection whatever order a signature lists them in; the handler's `Caller`
+  is the same per-request cached dependency. `/api/health` takes none by design.
+- **`RouteChoice.accepts_model_extension`.** The Run read computes it by running
+  the create command's own `resolve_route` with the extension requested; only
+  `ROUTE_EXTENSION_OWNER_MISSING` makes it false, and any other refusal is
+  raised rather than hidden. The Create run form offers the §82 extension where
+  it is true. The command still re-checks at commit; the surface grants nothing.

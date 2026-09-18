@@ -192,16 +192,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   ASGI application` and no traceback in the log, three one-line edge notices, 22
   tests passing on each engine. A traceback in a smoke log means something again.
 
-- **The journey runner does not refuse an edge port already taken.**
-  `tests/journey/run.py` starts the test edge on `127.0.0.1:18080` without first
-  asking whether something holds it. An orphaned edge from a stopped run keeps
-  the port and its old `CAOS_EDGE_TOKEN`, the new stack's browser reaches the
-  orphan, and every engine fails its first test on `EDGE_NOT_TRUSTED` -- a
-  failure that names a trust fault rather than a leftover process. It happened
-  once on 18 September 2026, after a smoke run was stopped mid-flight, and cost
-  one full three-engine run to diagnose. *Upgrade:* refuse before building, as
-  the mount check does, when the edge port is already bound, naming the port and
-  the holder.
+- ~~**The journey runner does not refuse an edge port already taken.**~~
+  Closed by the upgrade named: `tests/journey/run.py`'s `port_refusal` checks,
+  before building anything, every host port the stack publishes -- the edge's
+  18080 and the API's 18000 -- binding the way uvicorn does so a port in
+  shutdown is not mistaken for a taken one, and names the port, its purpose and
+  the orphaned-edge cause
+  (`tests/test_journey_tooling.py::test_a_host_port_something_is_listening_on_is_refused_naming_it`,
+  `test_the_runner_checks_every_port_the_stack_publishes_on_the_host`, which
+  reads `compose.smoke.yaml` so the two cannot drift).
 
 - **The image gate cannot run on a machine whose Trivy has moved off the pin.**
   `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
@@ -280,19 +279,16 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   a projection's operands cite is not built and nothing claims one.
   `docs/IA_SPEC.md` still says "Evidence date"; it is the specification's word
   for a field this build does not serve.
-- **The demonstration Book is fuller than any run the workspace can make.**
-  `frontend/fixtures/book.json` carries two credits with cells, chips and
-  ten-field passports. A run made through the API can now carry CP-CF (the entry
-  below), so the fixture is the shape the product can serve -- but only on
-  `FULL_CREDIT_32/RELATIVE_VALUE`, only through the API, and never yet end to
-  end, so a reader of `make dev-ui-demo` still meets a working portfolio that no
-  press in the workspace produces. *Upgrade:* a workspace control for the model
-  extension, or the demo fixture saying on the page which pathway alone can
-  serve it.
+- ~~**The demonstration Book is fuller than any run the workspace can make.**~~
+  Closed: in demonstration mode the Book's Basis panel says a cell is served
+  only for a run on `FULL_CREDIT_32/RELATIVE_VALUE` created with the model
+  extension
+  (`frontend/tests/unit/book.test.tsx`'s `test_the_demonstration_book_names_the_one_pathway_that_can_serve_it`),
+  and the workspace can now create such a run (the entry below).
 
-- **A run can carry CP-CF only through the API, and none has produced one end
-  to end.** ~~No run made through the API can carry CP-CF.~~ Closed as the
-  upgrade named: `CreateRun` states a required strict `model_extension`, which
+- **A run can carry CP-CF from the workspace, and none has produced one end to
+  end.** ~~No run made through the API can carry CP-CF.~~ Closed as the upgrade
+  named: `CreateRun` states a required strict `model_extension`, which
   `create_run` passes to `resolve_route`, so CP-CF, its synthesised edges and
   its predicate sit in the resolved route the digest covers and the pin stores
   (`tests/test_run_commands.py::test_a_run_may_request_the_model_extension_and_its_pin_carries_cp_cf`,
@@ -300,16 +296,19 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   pathway missing one of `MODEL_OWNERS` refuses it
   `ROUTE_EXTENSION_OWNER_MISSING` before anything commits -- every LITE pathway
   does -- so only `FULL_CREDIT_32/RELATIVE_VALUE` accepts it
-  (`test_the_model_extension_is_refused_on_a_pathway_without_its_owners`).
-  What remains: the workspace's Create run form always sends `false`, and no
-  journey or live run has produced an accepted CP-CF forecast, so Completion
-  Phase 12's per-cell passport still rests on
+  (`test_the_model_extension_is_refused_on_a_pathway_without_its_owners`). The
+  Create run form offers it where `RouteChoice.accepts_model_extension` -- the
+  create command's own resolution, run in advance by the Run read -- says it can
+  succeed (`tests/test_run_section.py::test_only_the_owner_refusal_withholds_the_model_extension_offer`,
+  `frontend/tests/unit/run.test.tsx`'s
+  `test_the_model_extension_is_sent_as_chosen_on_a_route_that_accepts_it`).
+  What remains: no journey or live run has produced an accepted CP-CF forecast,
+  so Completion Phase 12's per-cell passport still rests on
   `PINNED[wire.BookPassport]` in `tests/test_wire_contract.py`,
   `frontend/tests/unit/book.test.tsx` and `tests/test_book_section.py`, and the
   journey still asserts the absence of a table because its runs are LITE.
-  *Upgrade:* a workspace control for the extension and a journey that creates a
-  RELATIVE_VALUE run with it, the day the smoke stack can drive that route's
-  nine modules.
+  *Upgrade:* a journey that creates a RELATIVE_VALUE run with the extension, the
+  day the smoke stack can drive that route's nine modules.
 - ~~**The filing chain cannot be reached from the workspace.**~~ Closed by the
   upgrade's second arm: Report is served without `revision`. With revisions it
   answers the run's head; with none it serves the accepted artifacts a first
@@ -511,23 +510,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   problem rather than the declaration, one `command_requests` read for every
   actor at once, which the join already permits.
 
-- **The wire says "come back later" honestly at 5xx and not at 400.** §75 split
-  the twenty-four permanently-failing codes off 503: 500 for a fault no retry
-  clears, 503 with `Retry-After` for the one that a retry does. What it did not
-  touch is the other direction -- nine codes answer **400** carrying
-  retry-shaped clearances (`PROVIDER_UNAVAILABLE`: "Retry when the provider
-  answers"; `READINESS_INCOMPLETE`: "Retry the attempt";
-  `INTERNAL_FAULT`: "Retry; an operator must investigate if it persists"), and
-  `tests/test_api_routes.py`'s partition test cannot see them because it defines
-  its universe as the codes already at 500 or 503. `INTERNAL_FAULT` is the
-  sharpest: `server/api/app.py` maps it to 400 while `server/api/edge.py`
-  answers 500 for it, so its only real wire status sits outside the guard and
-  nothing asserts the disagreement. The contract that holds is therefore the
-  narrow one -- of the codes served at 5xx, 503 means come back later and 500
-  does not -- and a client reading 400 learns nothing about retrying.
-  *Upgrade:* reconcile `INTERNAL_FAULT`'s two statuses, then put the
-  retry-shaped 400s to the owner as D3's second half; the partition test widens
-  to the whole enum on the same day.
+- **Eight 400s still tell the caller to retry.** ~~The wire says "come back
+  later" honestly at 5xx and not at 400.~~ The half this repository could settle
+  is closed: `INTERNAL_FAULT` answers 500 and is permanent at every layer, the
+  edge guard answers from `EDGE_STATUS`, held equal to the app's `_STATUS`
+  (`tests/test_api_routes.py::test_every_code_the_edge_answers_carries_the_apps_status`,
+  `test_an_internal_fault_answers_500_wherever_it_is_raised`), and the partition
+  test covers the whole enum rather than the codes already at 5xx
+  (`test_every_refusal_is_classed_transient_or_permanent_and_none_is_both`). What
+  stays is the owner's half of D3: `PROVIDER_UNAVAILABLE`,
+  `PROVIDER_OUTPUT_TRUNCATED`, `PROVIDER_REFUSED`, `PROVIDER_RESPONSE_INVALID`,
+  `ENVELOPE_INVALID`, `ENVELOPE_UNDECLARED_FIELD`, `ENVELOPE_UNCITED_CLAIM` and
+  `READINESS_INCOMPLETE` answer 400 with a clearance that says retry. They are
+  named, not decided, in `RETRY_SHAPED_400_PENDING_OWNER`, and
+  `test_the_retry_shaped_400s_are_named_as_pending_the_owner` fails for a new
+  one until it is named. *Upgrade:* the owner decides each as a 4xx, 500 or 503,
+  and each leaves the set in the commit that decides it.
 
 - **A tokenless host believes the subject header, so a loopback peer who knows a
   member's id reads that member's cases.** §70.2 closed C3's *role* hole: with
@@ -746,14 +744,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   and which belongs with Completion Phase 13 Task 13.6, the task that generates
   the release pack from the suite and the store; the dated file is then the
   archived predecessor rather than the live answer.
-- **The demonstration Admin panel says the health route is not served.**
-  `frontend/fixtures/admin.json` carries `HEALTH` and `GET /api/health` marked
-  not served;
-  `server/api/health.py` has served that route since §53.8. The fixture
-  under-claims, so its assertion still holds and no gate is weakened, but an
-  operator reading the demonstration panel is told a control does not exist when
-  it does. *Upgrade:* correct the fixture and the comment with Completion
-  Phase 12's Admin work, which is the task that owns that panel.
+- ~~**The demonstration Admin panel says the health route is not served.**~~
+  Closed: `frontend/fixtures/admin.json` names `GET /api/health` as served and
+  shown in no panel, which is what `server/api/health.py` does
+  (`frontend/tests/unit/admin-fixture.test.ts`'s
+  `test_the_demonstration_admin_panel_names_the_health_route_as_served`).
 
 **Repair Phase 5.**
 
@@ -2047,26 +2042,18 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   saying that its string values are not instructions; worth adding the day a
   document is admitted by anyone but this repository's operator.
 
-- **Identity before the store rests on parameter order.** Every section read
-  (`server/api/reads/*.py`, since §50 the retired `read_run`'s successors) and
-  `read_case_events` declare `actor: Caller` ahead of `conn: Store`, and that is
-  the whole of what refuses an anonymous request before a connection is opened:
-  FastAPI builds a route's dependency list in signature order (`get_dependant`)
-  and solves it sequentially (`solve_dependencies`), so the ordering is a
-  property of a pinned dependency rather than something the code says out loud.
-  `test_an_anonymous_request_opens_no_store_connection` counts the dependency's
-  calls, so a reorder and a FastAPI that stopped doing this both fail there --
-  which is what makes this a limit rather than a defect. Since §73.4 the order
-  is remembered in one place rather than per route: all twenty-one routes reach
-  the store through shared dependencies in `server/api/deps.py`, and the
-  store-touching one resolves the actor before the connection in its own
-  signature, so it cannot be ahead of identity even where a route declares it
-  first. That makes the property hold more robustly and does **not** discharge
-  this entry, because it still holds by signature order. *Upgrade:* unchanged --
-  `dependencies=[Depends(actor_from_request)]` on each decorator, which FastAPI
-  inserts at the front of the list whatever the parameters say. What has gone
-  is the reason to defer it: the order no longer has to be remembered per
-  route, so the change is now one edit per decorator over one known set.
+- ~~**Identity before the store rests on parameter order.**~~ Closed by the
+  upgrade it named: every store-touching route -- the section reads, the
+  commands and the case event stream -- declares `dependencies=[IDENTITY_FIRST]`
+  (`Depends(actor_from_request)`, `server/api/deps.py`), which FastAPI solves
+  ahead of any parameter whatever the signature says, and the handler's `Caller`
+  is the same cached dependency, resolved once
+  (`tests/test_identity_first.py::test_identity_is_resolved_before_a_store_declared_ahead_of_it`,
+  `test_the_caller_is_resolved_once_though_it_is_declared_twice`). A new route
+  reaching the store without it fails
+  `test_every_store_touching_route_declares_identity_on_its_decorator`, which
+  allows no exception. `/api/health` takes no identity by design and reaches no
+  store (`test_the_routes_that_take_no_identity_reach_no_store`).
 - **A case stream polls.** `server/api/stream.py`'s `case_tail` re-reads the
   case's audit actions, the run's events and the caller's standing every
   `POLL_INTERVAL` (0.5 s) until `TAIL_DEADLINE` (300 s) or standing is lost,
@@ -2141,14 +2128,14 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   its own again, so a larger rebuild would be sent under too small a
   reservation. `canonical._within_reservation` re-prices the request about to be
   sent against the price its reservation was taken under and refuses
-  `CONTEXT_OVER_CEILING` before the provider is reached
+  `RESERVATION_BELOW_REQUEST` before the provider is reached
   (`tests/test_loop_charges.py::test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call`,
-  which was watched failing with the guard removed). That guard borrows
-  `CONTEXT_OVER_CEILING`, whose clearance text reads "Deliver less context to the
-  module" -- true of the ceiling check it was written for and misleading here,
-  where the context is unchanged and the reservation no longer covers it. The
-  code is right and the sentence a reader gets is not.
-  **Three things remain, and they are listed together rather than each beside its
+  which was watched failing with the guard removed). That refusal is a code of
+  its own, `RESERVATION_BELOW_REQUEST` (500, permanent), whose clearance names a
+  new attempt rather than the "deliver less context" of the
+  `CONTEXT_OVER_CEILING` it used to borrow, which was false here
+  (`tests/test_loop_charges.py::test_a_reservation_below_its_request_answers_a_code_of_its_own`).
+  **Two things remain, and they are listed together rather than each beside its
   own paragraph, because an entry carrying an upgrade clause per sentence is one
   nobody reads to the end of.** First, nothing in the tree says what the live
   model costs, so `tests/test_live_run.py` still prices it from a flat estimate,
@@ -2161,13 +2148,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   admits exactly what it admitted before this task even though `run_route` now
   finishes such a run. That sentence left the tree in a rewrite and is restored
   here, which is the failure this ledger's own gate exists to catch, read the
-  other way round. Third, the borrowed clearance above.
+  other way round.
   *Upgrade:* a user-confirmed dated price for the configured live model, which is
   the owner's to give; the harness's floor priced on measured requests, or per-run
   ceilings derived from the set's, which is what the Rebuild Phase 10 entry "a
-  qualification run costs real money" already owes; and a refusal code of its own
-  for the reservation check, the day an operator meets it on a real run. The
-  second and third were found by the Task 8.2 acceptance review.
+  qualification run costs real money" already owes. The second was found by the
+  Task 8.2 acceptance review.
 - ~~**The `provider` CI job is red until its credential exists.**~~ Closed on
   2026-09-11, when `OPENROUTER_API_KEY` (secret) and `OPENROUTER_MODEL`
   (variable) were set on the repository — outside the tree, which is why the
