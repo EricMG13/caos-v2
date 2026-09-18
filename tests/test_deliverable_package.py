@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import errno
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -426,3 +428,66 @@ def test_a_refused_archive_says_why_and_a_verified_one_has_nothing_to_say() -> N
     assert truncated.verified is False
     assert truncated.reason
     assert isinstance(truncated.reason, str)
+
+
+def test_a_package_is_published_whole_or_not_at_all(tmp_path: Path) -> None:
+    """The ledger entry this closes: `write_package` used `xb`, so two writers
+    could not overwrite one another, but a crash or an I/O failure part-way
+    could leave a short file at the destination that every later write then
+    refuses -- a path that is permanently poisoned by a package nobody can
+    verify.
+
+    Staged and renamed instead: the bytes are written and fsynced to a
+    temporary name in the *same directory* (a rename is only atomic within a
+    filesystem), then linked into place. A reader therefore sees the whole
+    archive or no file, never a prefix of one.
+    """
+    package, data = tmp_path / "filing.zip", _package()
+    write_package(package, data)
+
+    assert package.read_bytes() == data
+    assert verify_package(package.read_bytes()).verified
+    # Nothing is left behind: a staging file that survived would be the same
+    # litter the entry complains about, one name along.
+    assert [p.name for p in tmp_path.iterdir()] == ["filing.zip"]
+
+
+def test_a_failed_write_leaves_no_file_at_the_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that matters. A publication that dies after the bytes are
+    written and before they are in place must leave *nothing* at the published
+    path -- `xb` would otherwise refuse every correct write that followed a
+    truncated one, poisoning the path permanently.
+
+    The failure is injected at the fsync, which is exactly the window the old
+    code had no answer for: the bytes exist somewhere, and the question is
+    whether they exist under the name a reader will open.
+    """
+    package = tmp_path / "filing.zip"
+
+    def dying(_fd: int) -> None:
+        raise OSError(errno.EIO, os.strerror(errno.EIO))
+
+    monkeypatch.setattr(os, "fsync", dying)
+    with pytest.raises(OSError) as caught:
+        write_package(package, _package())
+    assert caught.value.errno == errno.EIO
+    monkeypatch.undo()
+
+    assert not package.exists()
+    assert list(tmp_path.iterdir()) == [], "a staging file was left behind"
+
+    # And the path is still usable, which is the whole point of the change.
+    write_package(package, _package())
+    assert verify_package(package.read_bytes()).verified
+
+
+def test_two_writers_still_cannot_overwrite_one_another(tmp_path: Path) -> None:
+    """The property the old `xb` had and the staged write must keep: a second
+    publication to a live path is refused, never silently replaced."""
+    package = tmp_path / "filing.zip"
+    write_package(package, _package())
+
+    with pytest.raises(FileExistsError):
+        write_package(package, _package())

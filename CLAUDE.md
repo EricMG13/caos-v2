@@ -793,11 +793,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   multi-disk containers and trailing bytes refuse within the ZIP32 size bounds.
   *Upgrade:* an authenticated external digest/signature and renderer-version
   registry if archival verification becomes an authenticity service.
-- **Exclusive package creation is not crash durability.** `write_package`
-  uses `xb`, so simultaneous writers cannot overwrite one another, but an I/O
-  failure or crash may leave a partial new file that later writes refuse.
-  It has no fsync or atomic publication protocol. *Upgrade:* staged durable
-  writes and exclusive publication when this library becomes a filing exporter.
+- ~~**Exclusive package creation is not crash durability.**~~ Closed by
+  Completion Phase 13.5, by the upgrade this entry named. `write_package`
+  writes and fsyncs under a temporary name in the same directory -- a rename is
+  atomic only within one filesystem -- then `os.link`s it into place and fsyncs
+  the directory, so the *name* is durable and not just its contents. A failure
+  part-way now leaves nothing at the published path
+  (`test_a_failed_write_leaves_no_file_at_the_destination`, which injects the
+  fault at the fsync and then shows the path is still usable), where the old
+  `xb` could leave a short file that every correct write after it refused --
+  a path permanently poisoned by a package nobody could verify. Exclusivity is
+  unchanged and still the filesystem's, `os.link` in place of `open("xb")`
+  (`test_two_writers_still_cannot_overwrite_one_another`). *Upgrade:* none for
+  durability. What is **not** claimed is fsync's own limit: a filesystem or
+  device that lies about flushing is beyond anything this code can check, and
+  `write_package` still has no caller outside the suite, so the protocol is
+  proven and not yet exercised by a filing exporter.
 
 **Repair Phase 4.**
 
