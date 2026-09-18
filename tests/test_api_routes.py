@@ -813,26 +813,22 @@ def test_every_refusal_code_has_an_explicit_http_status() -> None:
     assert set(_STATUS) == set(RefusalCode), set(RefusalCode) - set(_STATUS)
 
 
-# The owner's half of D3, named rather than decided. Each of these answers 400
-# -- "your request was wrong" -- while its clearance tells the caller to retry,
-# which is a claim about time wearing a status about blame: the mirror of what
-# §75 fixed on the 5xx side. Whether each is a 4xx, a 500 or a 503 is the
-# owner's question and has not been asked, so the statuses are unchanged; what
-# the set buys is that they are visible, and that a new retry-shaped 400 fails
-# the partition below until someone names it here. `INTERNAL_FAULT` was the
-# ninth and is not pending: it is reconciled to 500 (§75's upgrade).
-RETRY_SHAPED_400_PENDING_OWNER = frozenset(
-    {
-        RefusalCode.PROVIDER_UNAVAILABLE,
-        RefusalCode.PROVIDER_OUTPUT_TRUNCATED,
-        RefusalCode.PROVIDER_REFUSED,
-        RefusalCode.PROVIDER_RESPONSE_INVALID,
-        RefusalCode.ENVELOPE_INVALID,
-        RefusalCode.ENVELOPE_UNDECLARED_FIELD,
-        RefusalCode.ENVELOPE_UNCITED_CLAIM,
-        RefusalCode.READINESS_INCOMPLETE,
-    }
-)
+# The owner's half of D3, decided on 18 September 2026 (§88). Each of these
+# answered 400 -- "your request was wrong" -- while its clearance told the
+# caller to retry: time wearing blame, the mirror of what §75 fixed. §75's one
+# question decides each. The provider not answering is the only one waiting
+# repairs; the other seven are an answer the provider already gave, which the
+# identical request later meets again, and a new attempt is the discharge.
+RETRY_SHAPED_400_DECIDED = {
+    RefusalCode.PROVIDER_UNAVAILABLE: 503,
+    RefusalCode.PROVIDER_OUTPUT_TRUNCATED: 500,
+    RefusalCode.PROVIDER_REFUSED: 500,
+    RefusalCode.PROVIDER_RESPONSE_INVALID: 500,
+    RefusalCode.ENVELOPE_INVALID: 500,
+    RefusalCode.ENVELOPE_UNDECLARED_FIELD: 500,
+    RefusalCode.ENVELOPE_UNCITED_CLAIM: 500,
+    RefusalCode.READINESS_INCOMPLETE: 500,
+}
 
 
 def test_every_refusal_is_classed_transient_or_permanent_and_none_is_both() -> None:
@@ -857,11 +853,11 @@ def test_every_refusal_is_classed_transient_or_permanent_and_none_is_both() -> N
     assert transient == TRANSIENT
 
 
-def test_the_retry_shaped_400s_are_named_as_pending_the_owner() -> None:
-    """A 400 whose clearance says retry is exactly the pending set: a new one
-    fails here until it is named, and one that leaves (the owner decides, or its
-    clearance changes) fails until it is struck -- so the question stays in view
-    rather than being accepted by silence.
+def test_no_400_tells_the_caller_to_retry() -> None:
+    """A 400 whose clearance says retry is a claim about time wearing a status
+    about blame, and none is left: the eight the owner decided (§88) carry the
+    status decided for them, and a new retry-shaped 400 fails here until
+    someone asks §75's question of it.
 
     400 exactly, not all of 4xx: `RUN_NOT_STOPPED`'s "Retry only a stopped run."
     is a precondition on a 409, the status that already means the state moved,
@@ -871,7 +867,11 @@ def test_the_retry_shaped_400s_are_named_as_pending_the_owner() -> None:
         for code, status in _STATUS.items()
         if status == 400 and CLEARS[code].startswith("Retry")
     }
-    assert retry_shaped == RETRY_SHAPED_400_PENDING_OWNER
+    assert retry_shaped == set()
+    assert {code: _STATUS[code] for code in RETRY_SHAPED_400_DECIDED} == (
+        RETRY_SHAPED_400_DECIDED
+    )
+    assert RefusalCode.PROVIDER_UNAVAILABLE in TRANSIENT
 
 
 def test_an_internal_fault_answers_500_wherever_it_is_raised(

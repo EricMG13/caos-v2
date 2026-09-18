@@ -113,14 +113,21 @@ POLL_INTERVAL = 0.5
 # doing anything in between, plausibly succeed? -- and a fault only an operator
 # can repair answers no, because the client's waiting is not what repairs it.
 #
-# The store not answering is the whole of the yes side. Everything else here is
+# The store not answering is the whole of the yes side, with the provider not
+# answering beside it since the owner's second half (§88). Everything else here is
 # stored bytes failing verification against what this server itself wrote, a
 # pinned input the run cannot change, or an operator's repair; each `CLEARS`
 # entry beside them already said as much in words before the status agreed.
 # `STREAM_LIMIT_REACHED` joins it for the same reason and not by analogy: the
 # capacity is released by a watcher closing a tail, so waiting is exactly what
 # repairs it. Nothing an operator does is required.
-TRANSIENT = frozenset({RefusalCode.STORE_UNAVAILABLE, RefusalCode.STREAM_LIMIT_REACHED})
+TRANSIENT = frozenset(
+    {
+        RefusalCode.STORE_UNAVAILABLE,
+        RefusalCode.STREAM_LIMIT_REACHED,
+        RefusalCode.PROVIDER_UNAVAILABLE,
+    }
+)
 PERMANENT = frozenset(
     {
         RefusalCode.STORE_NOT_CONFIGURED,
@@ -149,6 +156,13 @@ PERMANENT = frozenset(
         RefusalCode.EVIDENCE_PACKING_MISMATCH,
         RefusalCode.INTERNAL_FAULT,
         RefusalCode.RESERVATION_BELOW_REQUEST,
+        RefusalCode.PROVIDER_OUTPUT_TRUNCATED,
+        RefusalCode.PROVIDER_REFUSED,
+        RefusalCode.PROVIDER_RESPONSE_INVALID,
+        RefusalCode.ENVELOPE_INVALID,
+        RefusalCode.ENVELOPE_UNDECLARED_FIELD,
+        RefusalCode.ENVELOPE_UNCITED_CLAIM,
+        RefusalCode.READINESS_INCOMPLETE,
     }
 )
 # What a transient answer promises, in seconds. A constant rather than a
@@ -290,14 +304,21 @@ _STATUS = {
     RefusalCode.PROVIDER_CALL_INVALID: 400,
     RefusalCode.CONTEXT_OVER_CEILING: 400,
     RefusalCode.UPSTREAM_SECTION_OVER_CEILING: 400,
-    RefusalCode.PROVIDER_UNAVAILABLE: 400,
-    RefusalCode.PROVIDER_OUTPUT_TRUNCATED: 400,
-    RefusalCode.PROVIDER_REFUSED: 400,
-    RefusalCode.PROVIDER_RESPONSE_INVALID: 400,
-    RefusalCode.ENVELOPE_INVALID: 400,
-    RefusalCode.ENVELOPE_UNDECLARED_FIELD: 400,
-    RefusalCode.ENVELOPE_UNCITED_CLAIM: 400,
-    RefusalCode.READINESS_INCOMPLETE: 400,
+    # The owner's second half of D3 (§88). These answered 400 while their
+    # clearances said retry. The provider not answering is cleared by waiting,
+    # so 503. The rest are an answer the provider already gave -- truncated,
+    # refused, unreadable, or a handoff that fails its contract -- which the
+    # identical request later meets again: not the caller's fault (so not 400)
+    # and not cleared by waiting (so not 503). A new attempt is the discharge,
+    # which is what "Retry the attempt" names.
+    RefusalCode.PROVIDER_UNAVAILABLE: 503,
+    RefusalCode.PROVIDER_OUTPUT_TRUNCATED: 500,
+    RefusalCode.PROVIDER_REFUSED: 500,
+    RefusalCode.PROVIDER_RESPONSE_INVALID: 500,
+    RefusalCode.ENVELOPE_INVALID: 500,
+    RefusalCode.ENVELOPE_UNDECLARED_FIELD: 500,
+    RefusalCode.ENVELOPE_UNCITED_CLAIM: 500,
+    RefusalCode.READINESS_INCOMPLETE: 500,
     RefusalCode.EDGE_CONFIG_INVALID: 400,
     RefusalCode.REQUEST_INVALID: 400,
     RefusalCode.IDEMPOTENCY_KEY_REQUIRED: 400,
