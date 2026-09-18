@@ -4147,7 +4147,7 @@ for them is unchanged. This is **not** 13.2: one worker still claims one run,
 and the I6 residual — a stale lease holder paying once — is untouched and still
 what a second worker must answer first.
 
-## 2026-09-18 §81 — No `ultrathink` and no `max`, for any model; `xhigh` is the ceiling
+## 2026-09-18 §81 — No `ultrathink` and no `max`, for any model; `xhigh` is the ceiling, `high` for Fable 5.1
 
 The owner, 18 September 2026: "No more use of ultrathink and Max reasoning for
 any model, cap is xhigh." This overrides every earlier routing record that
@@ -4158,7 +4158,10 @@ editing them, because each is a dated record of what was asked then.
 - **Dispatch.** No implementer, reviewer or detector prompt contains
   `ultrathink`, and no dispatch sets effort `max`. `xhigh` is the most any
   model is given.
-- **The four tracked review definitions** under `.claude/agents/` already
+- **Fable 5.1 is capped lower, at `high`** — the owner, the same day: "Cap
+  Fable 5.1 to high". The one Fable pin, `.claude/agents/final-phases-reviewer.md`,
+  moves from `xhigh` to `high`.
+- **The three Opus review definitions** under `.claude/agents/` already
   pinned `xhigh`; they no longer tell a review turn to open with `ultrathink`.
 - **What ran before this entry keeps its recorded setting.** Three
   implementers of the completion remainder (slices A, C and D) were launched

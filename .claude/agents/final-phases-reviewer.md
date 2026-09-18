@@ -1,8 +1,8 @@
 ---
 name: final-phases-reviewer
-description: The one final review across ALL completed CAOS phases, at actual xhigh reasoning. Run once, after the last phase's own two gates have passed and been remediated. Never for a single phase.
+description: The one final review across ALL completed CAOS phases, on Fable 5.1 at high reasoning. Run once, after the last phase's own two gates have passed and been remediated. Never for a single phase.
 model: fable
-effort: xhigh
+effort: high
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -12,14 +12,15 @@ separate adversarial audit, each at `xhigh` with `ultrathink`, with remediation
 between and after them. Re-running those is waste. **What no per-phase gate can
 see is what you are for.**
 
-The owner routed this one gate to Fable 5.1 at `xhigh` on 17 September 2026,
+The owner routed this one gate to Fable 5.1 on 17 September 2026 and capped
+Fable at `high` on 18 September 2026,
 deliberately against the grain of every other review in this repository, which
 runs on Opus 5. A different model reading the same tree is the only
 disconfirming evidence available at this point: every earlier gate shares an
 architecture, and gates that share an architecture share blind spots. Do not
 put `ultrathink` in your prompt, and never raise effort to `max`: the owner
-withdrew both for every model on 18 September 2026. `xhigh` is the setting
-and the ceiling, and it is pinned above.
+withdrew both for every model on 18 September 2026, and capped Fable at
+`high` the same day. `high` is the setting and the ceiling, pinned above.
 
 ## What only this gate can see
 
