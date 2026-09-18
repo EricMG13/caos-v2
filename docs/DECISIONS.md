@@ -1503,6 +1503,7 @@ threshold, scanner rule or job name changes.
    job's lock. Every Python job runs `uv pip install --system --require-hashes
    --only-binary :all:` into the interpreter `setup-python` provides, in place
    of `pip install` and its cache.
+5. **`.mypy_cache`** is cached in the `types` job, keyed on the dev lock.
 
 **Reason.** A push to a branch with an open pull request started two full
 runs whose refs differ, so `cancel-in-progress` cancelled neither. The
@@ -1512,6 +1513,20 @@ with, and it resolves and installs the same hashed, wheels-only locks faster.
 
 **Rollback.** Revert the workflow commit; nothing outside the workflow
 depends on these changes.
+
+**Addendum, from reconciling with `main`'s independent CI work (18 September
+2026).** `main` wrote its own version of this entry as its own §48, with two
+items this one lacked: the `.mypy_cache` caching folded in above, and a
+separate `sonar.exclusions` change adding `**/*.sql` -- `sonar.sources` lists
+`scripts` and `server`, both holding plain PostgreSQL DDL
+(`server/store/schema.sql`, its numbered migrations,
+`scripts/dev-init.sql`), and SonarCloud's PL/SQL sensor claims `.sql` files by
+extension regardless of dialect: the analysis logged "The Data Dictionary is
+not configured for the PLSQL analyzer," which four rules need and which this
+project, having no Oracle database, cannot supply. Folded into
+`sonar-project.properties` here rather than given its own entry, because it
+is one line beside the existing `vendor/**` exclusion and the same kind of
+unenforced exception.
 
 ## 2026-09-14 §49 — One PostgreSQL worker: a claim per run fenced by a token
 

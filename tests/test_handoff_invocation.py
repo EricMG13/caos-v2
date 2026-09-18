@@ -65,6 +65,7 @@ from server.methodology.invocation import (
     HOST_PERFORMED_SCRIPTS,
     MAX_UPSTREAM_HANDOFF_BYTES,
     MODULE_AUTHORED_SCRIPTS,
+    _carried_objects,
     allowed_uses,
     build_handoff_prompt,
     host_identity,
@@ -855,6 +856,21 @@ def test_owned_objects_are_the_catalog_artifact_contracts_of_direct_inputs() -> 
     assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
 
 
+def test_conflicting_carried_object_declarations_refuse() -> None:
+    catalog = copy.deepcopy(CATALOG)
+    edge = next(
+        edge
+        for edge in catalog["profiles"]["LITE_CREDIT_22"]["edges"]
+        if (edge["source"], edge["target"]) == ("CP-L10", "CP-5")
+    )
+    catalog["profiles"]["LITE_CREDIT_22"]["edges"].append(
+        {**edge, "accepted_object_id": "different_object"}
+    )
+    with pytest.raises(Refusal) as refused:
+        _carried_objects(catalog, "LITE_CREDIT_22")
+    assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+
+
 def test_the_lite_compatibility_block_is_read_from_verified_vendor_bytes() -> None:
     """The requirement comes from the module's own block, for the profile it
     names; a module without one has none, and a malformed block refuses."""
@@ -911,6 +927,17 @@ def test_allowed_uses_are_the_pinned_edges_catalog_labels() -> None:
             allowed_uses(catalog, LITE_ROUTE, "CP-5")
         assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
         assert refused.value.__context__ is None
+
+    malformed = copy.deepcopy(CATALOG)
+    next(
+        edge
+        for edge in malformed["profiles"]["LITE_CREDIT_22"]["edges"]
+        if (edge["source"], edge["target"]) == ("CP-L10", "CP-5")
+    )["allowed_use"] = []
+    with pytest.raises(Refusal) as refused:
+        allowed_uses(malformed, LITE_ROUTE, "CP-5")
+    assert refused.value.code is RefusalCode.ROUTE_IDENTITY_INVALID
+    assert refused.value.__context__ is None
 
 
 def test_the_prospective_identity_is_the_next_attempts_but_its_ordinal(

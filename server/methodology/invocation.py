@@ -565,6 +565,13 @@ def allowed_uses(
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
     uses: dict[str, set[object]] = {}
     for source, edge_target, use in edges:
+        if not (
+            isinstance(source, str)
+            and isinstance(edge_target, str)
+            and isinstance(use, str)
+            and use
+        ):
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
         if edge_target == target and (source, edge_target) in pinned:
             uses.setdefault(source, set()).add(use)
     if any(
@@ -746,6 +753,11 @@ def _carried_objects(
         for _, value in pairs
     ):
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    seen: dict[tuple[str, str], object] = {}
+    for key, value in pairs:
+        if key in seen and seen[key] != value:
+            raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+        seen[key] = value
     carried.update((key, value) for key, value in pairs if value is not None)
     return carried
 

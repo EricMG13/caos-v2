@@ -171,6 +171,14 @@ def main() -> int:
     argparse states the one argument and exits 2 with a usage line when it is
     absent, so a reader who runs the archived verifier bare is told what it
     wants instead of meeting an IndexError answered as an unreadable package.
+
+    The argument is the package the operator wants checked, on their own
+    machine, read with their own authority -- there is no root to confine it to
+    and no privilege to escape. This verifier is shipped beside a package
+    precisely so it runs wherever that package is (§55), so a path bound would
+    defeat what it is for rather than protect anything. Anything unreadable,
+    a directory or a dangling link included, becomes the same safe verdict
+    below (sonar pythonsecurity:S8707).
     """
     parser = argparse.ArgumentParser(
         prog="verify_package.py",
@@ -178,7 +186,8 @@ def main() -> int:
     )
     parser.add_argument("archive", help="path to the package to verify")
     try:
-        with Path(parser.parse_args().archive).open("rb") as source:
+        archive = parser.parse_args().archive
+        with Path(archive).open("rb") as source:  # NOSONAR -- operator's own file
             result = verify(source.read(MAX_ARCHIVE_BYTES + 1))
     except Exception:  # noqa: BLE001 -- CLI failures use the same safe verdict.
         result = (False, UNREADABLE)

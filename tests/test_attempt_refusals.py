@@ -7,13 +7,18 @@ and never for a code that describes the store, the run or its fence.
 
 from __future__ import annotations
 
+from typing import cast
+from uuid import uuid4
+
+import psycopg
 import pytest
 from canonical_fixtures import CATALOG, LITE_PROFILE, LITE_SELECTION
 from test_accepted_owner import _billed
 from test_execution_freshness import _Harness, harness
 
 from server.engine.route import ResolvedRoute, resolve_route
-from server.refusals import RefusalCode
+from server.refusals import Refusal, RefusalCode
+from server.store import StoreConnection, outcomes
 from server.store.outcomes import record_refusal
 from server.store.runs import start_attempt
 
@@ -65,4 +70,53 @@ def test_an_attempt_without_a_recorded_call_is_not_explained(
     assert not record_refusal(
         harness.conn, attempt_id=attempt, code=RefusalCode.CITATION_NOT_LOCATED
     )
+    assert _refusals(harness) == []
+
+
+def test_a_code_that_is_not_a_refusal_code_is_refused_before_the_store() -> None:
+    """The explanation is a typed code, never a caller's string: refused before
+    a connection is touched, which is why this one needs no harness."""
+    with pytest.raises(Refusal, match=r"^CALL_OUTCOME_INVALID$"):
+        record_refusal(
+            cast("StoreConnection", None),
+            attempt_id=uuid4(),
+            code=cast("RefusalCode", "CITATION_NOT_LOCATED"),
+        )
+
+
+def test_a_store_fault_leaves_no_transaction_and_types_the_refusal(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fault under the lock is a typed store refusal with nothing written, and
+    the connection is not left holding the caller's transaction open."""
+    attempt = _billed(harness)
+
+    def broken(conn: object, attempt_id: object) -> tuple[object, ...]:
+        raise psycopg.OperationalError("synthetic")
+
+    monkeypatch.setattr(outcomes, "_locked_attempt", broken)
+    with pytest.raises(Refusal, match=r"^STORE_UNAVAILABLE$"):
+        record_refusal(
+            harness.conn, attempt_id=attempt, code=RefusalCode.CITATION_NOT_LOCATED
+        )
+    monkeypatch.undo()
+    assert _refusals(harness) == []
+
+
+def test_a_refusal_under_the_lock_travels_out_with_its_own_code(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Everything that is not a store fault keeps its own code — the cleanup arm
+    rolls back and re-raises rather than retyping what it did not cause."""
+    attempt = _billed(harness)
+
+    def broken(conn: object, attempt_id: object) -> tuple[object, ...]:
+        raise Refusal(RefusalCode.RUN_NOT_RUNNING)
+
+    monkeypatch.setattr(outcomes, "_locked_attempt", broken)
+    with pytest.raises(Refusal, match=r"^RUN_NOT_RUNNING$"):
+        record_refusal(
+            harness.conn, attempt_id=attempt, code=RefusalCode.CITATION_NOT_LOCATED
+        )
+    monkeypatch.undo()
     assert _refusals(harness) == []

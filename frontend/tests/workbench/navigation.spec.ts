@@ -21,7 +21,11 @@ test("command-K opens nothing", async ({ page }) => {
 
 test("a pre-v2 slug forwards with its query intact and history replaced", async ({ page }) => {
   await page.goto("/directory/");
-  await page.goto("/deepdive/?case=CASE-2026-CVNA01");
+  // `commit`, not the default `load`: the slug forwards itself as soon as the
+  // document runs, so waiting for the load event of a page that is already
+  // being replaced is a race. WebKit lost it twice under CI load, timing out
+  // in `goto` at 30s. The assertion below polls, so nothing is given up.
+  await page.goto("/deepdive/?case=CASE-2026-CVNA01", { waitUntil: "commit" });
   await expect(page).toHaveURL(/\/analysis\/\?case=CASE-2026-CVNA01$/);
   await page.goBack();
   // The forward replaced history: back lands on the entry before the slug.

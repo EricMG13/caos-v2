@@ -344,6 +344,165 @@ def test_an_ordinary_flate_page_still_extracts_in_the_child() -> None:
     assert caught.value.code is RefusalCode.SOURCE_NOT_READABLE
 
 
+def test_a_malformed_child_answer_is_not_readable() -> None:
+    with pytest.raises(Refusal) as caught:
+        pdf_module._answer(b"not json", 0)
+
+    assert caught.value.code is RefusalCode.SOURCE_NOT_READABLE
+
+
+def test_walk_pages_can_return_tokens_in_process() -> None:
+    tokens = walk_pages(
+        raw_pdf(_page("Direct walk")), limits=DEFAULT_LIMITS, deadline=float("inf")
+    )
+
+    assert [token.text for token in tokens] == ["Direct", "walk"]
+
+
+def test_walk_pages_refuses_a_past_deadline_in_process() -> None:
+    with pytest.raises(Refusal) as caught:
+        walk_pages(raw_pdf(_page("Late")), limits=DEFAULT_LIMITS, deadline=0.0)
+
+    assert caught.value.code is RefusalCode.SOURCE_EXTRACTION_TIMEOUT
+
+
+def test_walk_pages_skips_a_page_with_no_visible_crop() -> None:
+    tokens = walk_pages(
+        raw_pdf(_page("Hidden"), page=b"/CropBox [700 0 900 792]"),
+        limits=DEFAULT_LIMITS,
+        deadline=float("inf"),
+    )
+
+    assert tokens == []
+
+
+def test_walk_pages_refuses_tokens_past_the_ceiling_in_process() -> None:
+    with pytest.raises(Refusal) as caught:
+        walk_pages(
+            raw_pdf(_page("Alpha Beta Gamma")),
+            limits=_limits(max_tokens=1),
+            deadline=float("inf"),
+        )
+
+    assert caught.value.code is RefusalCode.SOURCE_TOO_LARGE
+
+
+def test_the_child_entrypoint_writes_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = Token("Alpha", 1, 2, 3, 4.0, 5.0, 6.0, 7.0)
+
+    def walked(data: bytes, *, limits: AdmissionLimits, deadline: float) -> list[Token]:
+        assert data == b"pdf bytes"
+        assert limits == DEFAULT_LIMITS
+        assert deadline == float("inf")
+        return [token]
+
+    monkeypatch.setattr(pdf_module, "walk_pages", walked)
+
+    assert _child_answer(monkeypatch, b"pdf bytes") == {
+        "tokens": [["Alpha", 1, 2, 3, 4.0, 5.0, 6.0, 7.0]]
+    }
+
+
+def _encryption_error() -> BaseException:
+    from pdfminer.pdfdocument import PDFEncryptionError
+
+    return PDFEncryptionError("encrypted")
+
+
+@pytest.mark.parametrize(
+    ("raised", "code"),
+    [
+        pytest.param(
+            Refusal(RefusalCode.SOURCE_EXTRACTION_TIMEOUT),
+            RefusalCode.SOURCE_EXTRACTION_TIMEOUT,
+            id="refusal",
+        ),
+        pytest.param(
+            pdf_module._Inflated(), RefusalCode.SOURCE_TOO_LARGE, id="inflated"
+        ),
+        pytest.param(MemoryError(), RefusalCode.SOURCE_TOO_LARGE, id="memory"),
+        pytest.param(_encryption_error(), RefusalCode.SOURCE_ENCRYPTED, id="encrypted"),
+        pytest.param(
+            RuntimeError("private bytes"), RefusalCode.SOURCE_NOT_READABLE, id="other"
+        ),
+    ],
+)
+def test_the_child_entrypoint_writes_only_public_refusal_codes(
+    monkeypatch: pytest.MonkeyPatch, raised: BaseException, code: RefusalCode
+) -> None:
+    def walked(data: bytes, *, limits: AdmissionLimits, deadline: float) -> list[Token]:
+        raise raised
+
+    monkeypatch.setattr(pdf_module, "walk_pages", walked)
+
+    assert _child_answer(monkeypatch, b"pdf bytes") == {"refused": code}
+
+
+def test_the_child_entrypoint_honours_the_inflater_overrun_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def walked(data: bytes, *, limits: AdmissionLimits, deadline: float) -> list[Token]:
+        import pdfminer.pdftypes
+
+        pdfminer.pdftypes.zlib.exceeded = True  # type: ignore[attr-defined]
+        return [Token("Ignored", 1, 0, 0, 0.0, 0.0, 1.0, 1.0)]
+
+    monkeypatch.setattr(pdf_module, "walk_pages", walked)
+
+    assert _child_answer(monkeypatch, b"pdf bytes") == {
+        "refused": RefusalCode.SOURCE_TOO_LARGE
+    }
+
+
+def test_the_child_inflater_keeps_one_decoded_byte_budget() -> None:
+    inflater = pdf_module._Inflater(16)
+
+    assert inflater.decompress(zlib.compress(b"small")) == b"small"
+    stream = inflater.decompressobj()
+    assert stream.decompress(zlib.compress(b" bytes")) == b" bytes"
+
+    stream = inflater.decompressobj()
+    with pytest.raises(pdf_module._Inflated):
+        stream.decompress(zlib.compress(b"too much data"))
+    assert inflater.exceeded is True
+
+
+def test_the_child_inflater_preserves_zlib_incomplete_stream_errors() -> None:
+    inflater = pdf_module._Inflater(16)
+
+    with pytest.raises(zlib.error):
+        inflater.decompress(zlib.compress(b"small")[:3])
+    assert inflater.exceeded is False
+
+
+def _child_answer(monkeypatch: pytest.MonkeyPatch, data: bytes) -> dict[str, object]:
+    import json
+    import sys
+    from dataclasses import asdict
+    from io import BytesIO
+    from types import SimpleNamespace
+
+    import pdfminer.pdftypes
+
+    payload = json.dumps(
+        {"limits": asdict(DEFAULT_LIMITS), "deadline": float("inf")}
+    ).encode()
+    stdin = SimpleNamespace(buffer=BytesIO(payload + b"\n" + data))
+    out = BytesIO()
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(sys, "stdout", SimpleNamespace(buffer=out))
+    zlib_module = pdfminer.pdftypes.zlib  # type: ignore[attr-defined]
+    try:
+        pdf_module.child_main()
+    finally:
+        pdfminer.pdftypes.zlib = zlib_module  # type: ignore[attr-defined]
+    loaded = json.loads(out.getvalue())
+    assert isinstance(loaded, dict)
+    return cast(dict[str, object], loaded)
+
+
 def test_one_line_past_the_token_ceiling_stops_building_tokens(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

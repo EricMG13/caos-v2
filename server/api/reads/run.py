@@ -13,7 +13,7 @@ and the accepted artifacts, never stored; each carries the reason for it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -53,6 +53,7 @@ from server.api.wire import (
 )
 from server.blobs import BlobStore
 from server.engine.route import (
+    Edge,
     EdgeType,
     NamedObjects,
     NodeResult,
@@ -425,7 +426,9 @@ def _node_views(
     # From the same accepted gate artifact as `readiness`, so no further read.
     reasons = blockers_from(route, accepted)
     views = (
-        _node_view(route, accepted, node, states, readiness, reasons, named)
+        _node_view(
+            route, accepted, node, states, readiness, reasons=reasons, named=named
+        )
         for node in route.nodes
     )
     # Nothing is awaited on a run that is no longer running.
@@ -437,15 +440,24 @@ def _node_views(
     ]
 
 
-def _node_view(  # noqa: PLR0913 -- one node of one run document
+def node_readiness(  # noqa: PLR0913 -- one node of one run document
     route: ResolvedRoute,
     accepted: Mapping[str, NodeResult],
     node: RouteNode,
     states: Mapping[str, NodeState],
     readiness: Mapping[str, str],
-    reasons: Mapping[str, str],
+    *,
     named: NamedObjects | None = None,
-) -> NodeView:
+) -> tuple[Sequence[Edge], bool, str | None]:
+    """The unmet edges, `awaiting_gate` and `gate_verdict`: the one computation
+    `_node_view` builds its wire model from, named and covered on its own so a
+    second caller cannot drift from it.
+
+    The one QA_GATE in the catalog is `CP-5 -> CP-6`. `awaiting_gate` is true
+    while the node waits for the QA source's verdict. Once CP-5 answered
+    anything but `Passed`, nothing is awaited: the node is BLOCKED by that
+    verdict and the unmet edges still name it (F03).
+    """
     done = states[node.route_node_id] is NodeState.COMPLETE
     unmet = () if done else waiting_on(route, accepted, node.route_node_id)
     if not done and named is not None and node.module_id in named.accepted_ids:
@@ -453,24 +465,37 @@ def _node_view(  # noqa: PLR0913 -- one node of one run document
         extra = lite_object_unmet(route, accepted, node.module_id, named)
         unmet = (*unmet, *(edge for edge in extra if edge not in unmet))
     answered = {n.module_id for n in route.nodes if n.route_node_id in accepted}
+    awaiting_gate = any(
+        edge.type is EdgeType.QA_GATE and edge.source not in answered for edge in unmet
+    )
+    # `.get`, not `[]`: a module the gate has not ruled on has no verdict
+    # rather than a false one, and None is that absence on the wire.
+    return unmet, awaiting_gate, readiness.get(node.module_id)
+
+
+def _node_view(  # noqa: PLR0913 -- one node of one run document
+    route: ResolvedRoute,
+    accepted: Mapping[str, NodeResult],
+    node: RouteNode,
+    states: Mapping[str, NodeState],
+    readiness: Mapping[str, str],
+    *,
+    reasons: Mapping[str, str] | None = None,
+    named: NamedObjects | None = None,
+) -> NodeView:
+    unmet, awaiting_gate, gate_verdict = node_readiness(
+        route, accepted, node, states, readiness, named=named
+    )
     return NodeView(
         route_node_id=node.route_node_id,
         module_id=node.module_id,
         stage=node.stage,
         state=states[node.route_node_id],
         waiting_on=[EdgeView(source=edge.source, type=edge.type) for edge in unmet],
-        # The one QA_GATE in the catalog is `CP-5 -> CP-6`. True while the node
-        # waits for the QA source's verdict. Once CP-5 answered anything but
-        # `Passed`, nothing is awaited: the node is BLOCKED by that verdict and
-        # `waiting_on` still names the edge (F03).
-        awaiting_gate=any(
-            edge.type is EdgeType.QA_GATE and edge.source not in answered
-            for edge in unmet
-        ),
-        # `.get`, not `[]`: a module the gate has not ruled on has no verdict
-        # rather than a false one, and None is that absence on the wire.
-        gate_verdict=readiness.get(node.module_id),
-        # `.get` again: the gate holds a reason only for a module it did not
-        # clear, so absence is "no condition stated" and never an empty one.
-        gate_reason=reasons.get(node.module_id),
+        awaiting_gate=awaiting_gate,
+        gate_verdict=gate_verdict,
+        # `.get` on an absent map too: the gate holds a reason only for a
+        # module it did not clear, so absence is "no condition stated" and
+        # never an empty one.
+        gate_reason=(reasons or {}).get(node.module_id),
     )

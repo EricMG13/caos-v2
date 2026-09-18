@@ -67,6 +67,9 @@ from server.store.run_inputs import RunSubject, valid_subject
 # in there" is not a declared form.
 MANIFEST = "qualification.json"
 
+# A manifest names cases; it never carries a document's bytes.
+MAX_MANIFEST_BYTES = 1024 * 1024
+
 # The keys each declared object carries, and nothing else. Closed both ways for
 # the reason every wire model here is (`CLAUDE.md`, wire strictness): a key this
 # loader ignores is a statement the author believed they had made.

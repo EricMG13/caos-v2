@@ -205,6 +205,15 @@ def test_a_disk_set_binds_a_forecast_key_and_host_extension(tmp_path: Path) -> N
     )
 
 
+def test_a_disk_set_binds_a_readiness_key(tmp_path: Path) -> None:
+    manifest = _manifest()
+    first = manifest["cases"][0]  # type: ignore[index]
+    first["expects_ready"] = ["CP-1", "CP-2"]
+
+    [case] = load_qualification_set(_write(tmp_path, manifest)).cases[:1]
+    assert case.expects_ready == ("CP-1", "CP-2")
+
+
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
     """The one refusal here that is about safety rather than shape.
 
@@ -257,6 +266,11 @@ def test_a_manifest_that_is_not_the_declared_shape_is_refused(
         {"cases": [{**_manifest()["cases"][0], "expects": [{"module_id": "CP-0"}]}]},  # type: ignore[index]
         {"cases": [{**_manifest()["cases"][0], "label": ""}]},  # type: ignore[index]
         {"cases": [{**_manifest()["cases"][0], "undeclared": 1}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": []}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": "CP-0"}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": [""]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": [1]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_ready": ["CP-0", "CP-0"]}]},  # type: ignore[index]
         ["not a mapping"],
     ]
 
@@ -443,6 +457,68 @@ def test_a_manifest_that_is_not_json_is_refused(tmp_path: Path) -> None:
     """Bytes that will not parse say nothing about a set."""
     root = _write(tmp_path / "set", _manifest())
     (root / MANIFEST).write_text("{ not json", encoding="utf-8")
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_manifest_larger_than_its_bound_is_refused_before_reading(
+    tmp_path: Path,
+) -> None:
+    """A manifest names cases; it never needs to carry a document's worth of bytes.
+
+    Refused by size, before `json.loads` ever sees the bytes -- the same
+    fail-closed shape `admit_pack` gives a document, applied to the file that
+    names them.
+    """
+    from server.qualification.on_disk import MAX_MANIFEST_BYTES
+
+    root = _write(tmp_path / "set", _manifest())
+    oversized = "{" + " " * MAX_MANIFEST_BYTES + "}"
+    (root / MANIFEST).write_text(oversized, encoding="utf-8")
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_document_larger_than_admit_packs_own_limit_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A document too large for `admit_pack` is refused at load, not read first.
+
+    `_document` shares the exact ceiling `admit_pack` applies at admission, so a
+    set that would be refused there does not pay to read an oversized file into
+    memory here only to have it refused a moment later.
+    """
+    from server.evidence.extract import DEFAULT_LIMITS
+
+    root = _write(tmp_path / "set", _manifest())
+    big_document = root / "documents" / "acme-2026" / "report.txt"
+    with big_document.open("wb") as handle:
+        handle.seek(DEFAULT_LIMITS.max_document_bytes)
+        handle.write(b"\0")
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(root)
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+def test_a_document_path_naming_a_directory_is_refused(tmp_path: Path) -> None:
+    """A declared document that is not a regular file reads no bytes at all.
+
+    A directory is not a FIFO, but it is the one non-regular case this suite
+    can create without an actual named pipe -- both fail `Path.is_file()` the
+    same way, before `read_bytes` would ever block or fail differently.
+    """
+    root = _write(tmp_path / "set", _manifest())
+    document = root / "documents" / "acme-2026" / "report.txt"
+    document.unlink()
+    document.mkdir()
 
     with pytest.raises(Refusal) as refused:
         load_qualification_set(root)

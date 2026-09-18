@@ -898,3 +898,36 @@ def test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it() -> None:
     assert narrowed["TL10.2"][1][0]["evidence_status"] == "PARTIAL"
     # The host must ask the first question. `_registers_met` passes no id list;
     # this is the reason, and the pair above is what changes if that regresses.
+
+
+def test_ready_met_is_none_when_a_case_names_no_module(ran: Ran) -> None:
+    """The common case: a key about citations, not about the gate."""
+    [row] = _matrix(ran, QualificationSet(cases=(_one_case(ran),))).rows
+    assert row.ready_met is None
+
+
+def test_ready_met_is_true_when_every_named_module_ran(ran: Ran) -> None:
+    """CP-0's own readiness verdict names the modules it gates, not itself --
+    CP-L10 ran and was accepted, so a case naming it reads as ready."""
+    case = replace(_one_case(ran), expects_ready=("CP-L10",))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.ready_met is True
+
+
+def test_ready_met_is_false_when_the_route_is_unpinned(ran: Ran) -> None:
+    """A route the host can no longer read answers no readiness question.
+
+    Same fault `test_a_row_carries_the_refusal_rather_than_ending_the_matrix`
+    uses -- `_ready_met` reads `resolved_route` directly and cannot be told
+    the run once had one.
+    """
+    with route_fault(ran.conn):
+        ran.conn.execute("ALTER TABLE run_inputs DISABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_inputs WHERE run_id = %s", (ran.run_id,))
+        ran.conn.execute("ALTER TABLE run_inputs ENABLE TRIGGER input_immutable")
+        ran.conn.execute("DELETE FROM run_routes WHERE run_id = %s", (ran.run_id,))
+    ran.conn.commit()
+
+    case = replace(_one_case(ran), expects_ready=("CP-0",))
+    [row] = _matrix(ran, QualificationSet(cases=(case,))).rows
+    assert row.ready_met is False

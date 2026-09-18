@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
@@ -20,18 +21,32 @@ EXCLUSIONS = (
     ":!frontend/fixtures/**",
 )
 
+# A git revision: branch, tag, or hex SHA, optionally with the ~/^/@ suffixes
+# git itself accepts. Anchored full-match, not a blocklist: a base that is
+# not entirely this shape is refused before it reaches argv, rather than
+# only a base shaped like a known-bad option.
+SAFE_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/~^@-]*")
+
 
 def changed_lines(base: str) -> int:
     git = shutil.which("git")
     if git is None:
         raise FileNotFoundError("git")
-    # No shell: the caller's base is one opaque argv value.
+    # No shell: the caller's base is one opaque argv value. Command argument
+    # injection (distinct from shell injection) is still possible without a
+    # shell -- a base git could read as an option rather than a revision,
+    # e.g. "--upload-pack=...". An anchored allowlist match is what refuses
+    # that shape before base ever reaches argv.
+    if not SAFE_REVISION.fullmatch(base):
+        message = f"PR_BASE is not a plain git revision: {base!r}"
+        raise ValueError(message)
     subprocess.run(  # nosec B603
         [git, "rev-parse", "--verify", f"{base}^{{commit}}"],
         check=True,
         stdout=subprocess.DEVNULL,
     )
-    # Fixed command and pathspec, again without a shell.
+    # Fixed command and pathspec; the base is already refused above if it
+    # could be read as an option, so the revision range is safe unquoted.
     result = subprocess.run(  # nosec B603
         [git, "diff", "--numstat", f"{base}...HEAD", "--", ".", *EXCLUSIONS],
         check=True,
@@ -52,7 +67,7 @@ def main() -> int:
         return 2
     try:
         count = changed_lines(sys.argv[1])
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
         print(f"cannot diff caller-supplied base {sys.argv[1]}", file=sys.stderr)
         return 2
     print(f"changed lines: {count}")

@@ -414,3 +414,81 @@ def test_page_frame_runs_in_the_killed_budgeted_child(
         RefusalCode.SOURCE_TOO_LARGE,
     ]
     assert page_module.IO_BUDGET == 1
+
+
+def test_the_page_read_declares_one_round_trip() -> None:
+    """`page_frame` and its budgeted child are covered in
+    `tests/test_pdf_page_frame.py`; what belongs here is the read's own budget."""
+    assert page_module.IO_BUDGET == 1
+
+
+# The identity and frame helpers refuse before any store or extractor is
+# reached, so they are driven directly: every one is a fail-closed path whose
+# only observable is the typed code it raises (invariant 2).
+
+_TEXT_CONFIG: dict[str, Any] = {
+    "cell_width": 6.0,
+    "cell_height": 12.0,
+    "margin": 18.0,
+    "lines_per_page": 2,
+    "coordinates": page_module.TEXT_COORDINATES,
+}
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "not json at all",
+        "[]",
+        '{"version": "1", "config": {}}',
+        '{"name": 1, "version": "1", "config": {}}',
+        '{"name": "caos.pdfminer", "version": "1", "config": []}',
+    ],
+)
+def test_a_stored_identity_that_is_not_the_declared_shape_is_refused(
+    stored: str,
+) -> None:
+    with pytest.raises(Refusal, match=r"^SOURCE_IDENTITY_INVALID$"):
+        page_module._identity(stored)
+
+
+@pytest.mark.parametrize("value", [None, "1", float("nan"), -1, 0])
+def test_a_cell_size_that_is_not_a_positive_finite_number_is_refused(
+    value: object,
+) -> None:
+    with pytest.raises(Refusal, match=r"^SOURCE_IDENTITY_INVALID$"):
+        page_module._positive(value)
+    # Zero is a margin and never a cell size, which is the whole of `zero`.
+    assert value != 0 or page_module._positive(value, zero=True) == 0.0
+
+
+@pytest.mark.parametrize(
+    "over",
+    [{"lines_per_page": 0}, {"lines_per_page": "2"}, {"coordinates": "elsewhere"}],
+)
+def test_a_text_frame_refuses_a_configuration_it_cannot_draw_in(
+    over: dict[str, Any],
+) -> None:
+    with pytest.raises(Refusal, match=r"^SOURCE_IDENTITY_INVALID$"):
+        page_module._text_frame({**_TEXT_CONFIG, **over}, b"one\ntwo\n", 1)
+
+
+@pytest.mark.parametrize("data,page", [(b"\xff\xfe not utf-8", 1), (b"one\n", 9)])
+def test_a_text_page_with_no_lines_is_unavailable_rather_than_empty(
+    data: bytes, page: int
+) -> None:
+    with pytest.raises(Refusal, match=r"^PAGE_NOT_AVAILABLE$"):
+        page_module._text_frame(_TEXT_CONFIG, data, page)
+
+
+def test_a_text_frame_is_as_wide_as_its_widest_line_and_as_tall_as_its_rows() -> None:
+    frame = page_module._text_frame(_TEXT_CONFIG, b"ab\nabcd\nignored\n", 1)
+    # 2 margins + 4 cells wide, 2 margins + 2 rows tall, origin at the top left;
+    # the third line belongs to page 2 rather than to this frame's width.
+    assert (frame.x0, frame.y0, frame.x1, frame.y1, frame.y_axis) == (
+        0.0,
+        0.0,
+        2 * 18.0 + 4 * 6.0,
+        2 * 18.0 + 2 * 12.0,
+        "down",
+    )
