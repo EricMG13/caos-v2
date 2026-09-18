@@ -22,7 +22,14 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    TypeAdapter,
+)
 from pydantic.json_schema import models_json_schema
 
 from server.api.identity import GlobalRole
@@ -698,14 +705,16 @@ class BookPassport(BaseModel):
     `caos-forecast-v1` gives a scenario, and the one
     `server/qualification/matrix.py` already reads as `ExpectedForecast.scenario`
     -- so a base case and a downside are told apart in the field whose only job
-    is to tell them apart."""
+    is to tell them apart. IA_SPEC's "evidence date" is served as
+    `reporting_period`, the analyst's declared period from the pinned subject,
+    because the host derives no date from any admitted document."""
 
     model_config = _CLOSED
 
     definition: Text
     period: Text
     scenario: Text
-    evidence_date: Text
+    reporting_period: Text
     computed_at: AwareDatetime
     snapshot: Sha256
     method: Text
@@ -1054,6 +1063,13 @@ class CreateRun(BaseModel):
     # ordinary run. Stated on every request, as every request field is: an
     # absent key is a malformed body, not a default.
     supersedes: UUID | None
+    # Whether the route carries the host's model extension, CP-CF (§6). A
+    # route-selection input like the pair above: it changes the resolved node
+    # list, so it is inside the route digest the pin carries (invariant 10).
+    # Refused `ROUTE_EXTENSION_OWNER_MISSING` on a pathway that does not run
+    # every artifact owner CP-CF reads. Strict: `"true"` or `1` is a malformed
+    # body, not a coerced yes, because the answer changes what the run pays for.
+    model_extension: StrictBool
 
 
 class RunCreated(BaseModel):

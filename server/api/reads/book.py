@@ -207,7 +207,7 @@ class _Lineage:
     facts: dict[str, list[CitationView]]
     research: list[BookResearch]
     forecast: ModelForecast
-    evidence_date: str
+    reporting_period: str
 
 
 def _row(
@@ -297,9 +297,11 @@ def _periods(analysis: AnalysisBody, forecast: ModelForecast) -> list[BookPeriod
             for h in analysis.handoffs
         ],
         forecast=forecast,
-        # The pinned subject's reporting period is the window the evidence
-        # covers; the host holds no date of a document's own and names none.
-        evidence_date=(
+        # The pinned subject's reporting period, which the analyst declared
+        # when the run was created. Named as that rather than as IA_SPEC 4.4's
+        # "evidence date": the host derives no date from any admitted document,
+        # so a field claiming one would be a host fact it does not hold.
+        reporting_period=(
             analysis.subject.reporting_period if analysis.subject else "NOT_DECLARED"
         ),
     )
@@ -347,7 +349,7 @@ def _cell(
             definition=column.definition,
             period=f"{period.period_id} · FY{period.fiscal_year} · {period.days} days",
             scenario=period.case,
-            evidence_date=lineage.evidence_date,
+            reporting_period=lineage.reporting_period,
             computed_at=lineage.forecast.accepted_at,
             snapshot=lineage.forecast.record_sha256,
             method=METHOD,

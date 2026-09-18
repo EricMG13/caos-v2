@@ -277,7 +277,7 @@ const BookPassport = object({
   definition: text,
   period: text,
   scenario: text,
-  evidence_date: text,
+  reporting_period: text,
   computed_at: datetime,
   snapshot: hash,
   method: text,

@@ -33,7 +33,7 @@ from server.api.wire import (
     RunCreated,
     RunInputPinned,
 )
-from server.engine.route import resolve_route, route_digest
+from server.engine.route import RouteExtensions, resolve_route, route_digest
 from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.vendor import catalog
 from server.refusals import Refusal, RefusalCode
@@ -122,15 +122,22 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
 ) -> Response:
     """A run with its route resolved from the verified catalog and pinned.
 
-    A pair outside `ADAPTER_ROUTES` is refused before the catalog is read. The
-    audit payload binds the selection, the run this one answers (`supersedes`,
-    §72, null for an ordinary run) and the route digest; the run id is in the
-    receipt committed beside it under the same `request_sha256`. The link's own
-    checks are `start_run`'s, inside the unit.
+    A pair outside `ADAPTER_ROUTES` is refused before the catalog is read.
+    `model_extension` appends CP-CF, and resolution refuses it
+    `ROUTE_EXTENSION_OWNER_MISSING` on a pathway missing an owner it reads. The
+    audit payload binds the selection (the flag included), the run this one
+    answers (`supersedes`, §72, null for an ordinary run) and the route digest;
+    the run id is in the receipt committed beside it under the same
+    `request_sha256`. The link's own checks are `start_run`'s, inside the unit.
     """
     if (body.profile_id, body.selection_id) not in ADAPTER_ROUTES:
         raise Refusal(RefusalCode.ROUTE_NOT_ENABLED)
-    route = resolve_route(catalog(bundle), body.profile_id, body.selection_id)
+    route = resolve_route(
+        catalog(bundle),
+        body.profile_id,
+        body.selection_id,
+        extensions=RouteExtensions(model_extension=body.model_extension),
+    )
     require_adapter_route(route)
     selection = body.model_dump(mode="json")
 
