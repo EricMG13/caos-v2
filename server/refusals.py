@@ -50,6 +50,9 @@ class RefusalCode(StrEnum):
     CONTEXT_OVER_CEILING = "CONTEXT_OVER_CEILING"
     # One upstream handoff exceeds its own declared section bound; nothing is cut.
     UPSTREAM_SECTION_OVER_CEILING = "UPSTREAM_SECTION_OVER_CEILING"
+    # The request an attempt is about to send prices above what that attempt
+    # reserved: the context is unchanged, the reservation no longer covers it.
+    RESERVATION_BELOW_REQUEST = "RESERVATION_BELOW_REQUEST"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
     PROVIDER_OUTPUT_TRUNCATED = "PROVIDER_OUTPUT_TRUNCATED"
     PROVIDER_REFUSED = "PROVIDER_REFUSED"

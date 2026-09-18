@@ -147,6 +147,7 @@ PERMANENT = frozenset(
         RefusalCode.ATTEMPT_NOT_FOUND,
         RefusalCode.EVIDENCE_PACKING_MISMATCH,
         RefusalCode.INTERNAL_FAULT,
+        RefusalCode.RESERVATION_BELOW_REQUEST,
     }
 )
 # What a transient answer promises, in seconds. A constant rather than a
@@ -229,6 +230,11 @@ _STATUS = {
     # investigate if it persists -- stays true, because a 500 forbids no retry;
     # it only promises none, which is what the absent `Retry-After` says.
     RefusalCode.INTERNAL_FAULT: 500,
+    # The attempt's own reservation below the request the host rebuilt for it:
+    # the host disagreeing with itself, not the caller's request (so not 400),
+    # and the same attempt meets the same reservation later (so not 503). A new
+    # attempt, which reserves for what it sends, is the discharge.
+    RefusalCode.RESERVATION_BELOW_REQUEST: 500,
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,

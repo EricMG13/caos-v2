@@ -178,7 +178,7 @@ def _within_reservation(
     if taken.price.model != provider.model:
         raise Refusal(RefusalCode.PROVIDER_NOT_CONFIGURED)
     if priced_request(taken.price, measured) > taken.amount:
-        raise Refusal(RefusalCode.CONTEXT_OVER_CEILING)
+        raise Refusal(RefusalCode.RESERVATION_BELOW_REQUEST)
 
 
 def execute_handoff(

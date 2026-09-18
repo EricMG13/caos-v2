@@ -940,7 +940,7 @@ def test_a_request_costing_more_than_was_reserved_refuses_before_the_call(
             execution=Execution(provider, _PRICED_INPUT, harness.bundle),
         )
 
-    assert caught.value.code is RefusalCode.CONTEXT_OVER_CEILING
+    assert caught.value.code is RefusalCode.RESERVATION_BELOW_REQUEST
     assert answers.prompts == [], "nothing reached the provider"
     assert _counts(harness)[1] == [], "and nothing was charged"
     # The reservation stands: nothing is released (`server/store/budget.py`).
