@@ -19,7 +19,7 @@ import signal
 import sys
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -155,6 +155,26 @@ def module_execution(
     return execution_for
 
 
+def _stoppable_nodes(
+    execution: Execution, stopping: Event
+) -> Callable[[], tuple[StoreConnection, Provider]] | None:
+    """The per-node factory, each provider wrapped so a concurrent pass stops.
+
+    Without this a SIGTERM would stop the sequential loop between nodes and not
+    a concurrent one, because `_Stoppable` was only ever put around the
+    execution's own provider -- the nodes of a batch build their own.
+    """
+    build = execution.per_node
+    if build is None:
+        return None
+
+    def stoppable_node() -> tuple[StoreConnection, Provider]:
+        node_conn, provider = build()
+        return node_conn, _Stoppable(provider, stopping)
+
+    return stoppable_node
+
+
 def work_once(
     conn: StoreConnection,
     blobs: BlobStore,
@@ -181,7 +201,6 @@ def work_once(
     _beat(conn, config, "WORKING", 0)
     try:
         execution = execution_for(conn, lease.run_id, lease)
-        stoppable = _Stoppable(execution.provider, stopping)
         with execution_reads(conn):
             _pin, route = execution_input(conn, lease.run_id, execution.bundle)
         run_route(
@@ -189,7 +208,18 @@ def work_once(
             blobs,
             run_id=lease.run_id,
             route=route,
-            execution=Execution(stoppable, execution.price, execution.bundle, lease),
+            # `replace`, not a fresh `Execution` listing the fields this line
+            # happens to know about. It used to be the latter, and when
+            # `per_node` was added the worker silently dropped it -- so the
+            # concurrent pass was built, tested, documented and then never
+            # reached production, because one constructor call four screens
+            # away did not mention it. A field added tomorrow survives this.
+            execution=replace(
+                execution,
+                provider=_Stoppable(execution.provider, stopping),
+                lease=lease,
+                per_node=_stoppable_nodes(execution, stopping),
+            ),
         )
     except _Stopping:
         _settle(conn, lambda: release(conn, lease))

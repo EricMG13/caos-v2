@@ -11,6 +11,7 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
+from typing import cast
 from uuid import UUID
 
 import psycopg
@@ -25,8 +26,10 @@ from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine import worker
 from server.engine.route import ResolvedRoute
+from server.engine.runtime import Execution
 from server.engine.worker import (
     WorkerConfig,
+    _Stoppable,
     install_stop_handler,
     module_execution,
     run_worker,
@@ -601,3 +604,87 @@ def test_a_store_that_will_not_take_the_beat_does_not_stop_the_worker(
         )
 
     assert driven, "the worker kept claiming runs while its beat was refused"
+
+
+def test_the_worker_hands_the_runtime_a_concurrent_pass_and_a_stoppable_one(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    empty_database: str,
+) -> None:
+    """The regression that shipped and was caught by a confidence review.
+
+    `module_execution` set `per_node` and `work_once` then built a *fresh*
+    `Execution` listing the four fields that line happened to know about, so
+    the concurrent pass was built, tested, documented -- and never reached
+    production. Nothing failed: a dropped field is not a type error and the run
+    still completes, just one node at a time.
+
+    So the assertion is on what the runtime is actually handed. And on both
+    halves, because a factory that survived but produced an unwrapped provider
+    would leave a SIGTERM stopping the sequential loop between nodes and not a
+    concurrent one.
+    """
+    run = queued_run(case, route, bundle, blobs)
+    handed: list[Execution] = []
+
+    def capture(*_args: object, **kwargs: object) -> None:
+        handed.append(cast(Execution, kwargs["execution"]))
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("server.engine.worker.run_route", capture)
+        assert (
+            work_once(
+                run.conn,
+                blobs,
+                execution_for=module_execution(
+                    CanonicalCompletions(run.source_id),
+                    priced(ESTIMATE),
+                    bundle,
+                    blobs,
+                    lambda: psycopg.connect(empty_database, autocommit=False),
+                ),
+                config=CONFIG,
+                stopping=Event(),
+            )
+            == run.run_id
+        )
+
+    [execution] = handed
+    assert execution.per_node is not None, "the worker dropped the concurrent pass"
+    node_conn, provider = execution.per_node()
+    try:
+        assert isinstance(provider, _Stoppable), "a batch node could not be stopped"
+    finally:
+        node_conn.close()
+
+
+def test_a_worker_given_no_connection_factory_drives_runs_sequentially(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+) -> None:
+    """The default every test in this file relies on, asserted once so it is a
+    decision rather than an accident."""
+    run = queued_run(case, route, bundle, blobs)
+    handed: list[Execution] = []
+
+    def capture(*_args: object, **kwargs: object) -> None:
+        handed.append(cast(Execution, kwargs["execution"]))
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("server.engine.worker.run_route", capture)
+        work_once(
+            run.conn,
+            blobs,
+            execution_for=module_execution(
+                CanonicalCompletions(run.source_id), priced(ESTIMATE), bundle, blobs
+            ),
+            config=CONFIG,
+            stopping=Event(),
+        )
+
+    [execution] = handed
+    assert execution.per_node is None

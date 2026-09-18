@@ -4078,6 +4078,19 @@ the same pins choose the same nodes in the same order. What changes is when
 they run, never which. A node left out of a batch is not deferred or queued: it
 is simply in the next pass's frontier.
 
+**It shipped not reaching production, and the confidence review caught it.**
+`module_execution` set `per_node`, and `work_once` then built a *fresh*
+`Execution` listing the four fields that line happened to know about --
+dropping the fifth. Nothing failed: a dropped field is not a type error, and
+the run still completes, one node at a time. So the concurrent pass was built,
+tested, documented and never reached a worker. It is fixed by `replace`, which
+carries every field including one added tomorrow, and the guard is an assertion
+on what the runtime is actually *handed*
+(`test_the_worker_hands_the_runtime_a_concurrent_pass_and_a_stoppable_one`,
+watched failing with the bug reintroduced). The same fix wraps each per-node
+provider in `_Stoppable`, which the first version also missed: a SIGTERM would
+have stopped the sequential loop between nodes and not a concurrent one.
+
 **Opt-in, through one factory.** `Execution.per_node` returns a store
 connection *and* a provider bound to it, because neither is any use alone — a
 node's pre-call unit opens a transaction under the case lock, and

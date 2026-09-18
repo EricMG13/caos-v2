@@ -2342,7 +2342,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   **What it is not.** It is opt-in — `Execution.per_node`, which only the worker
   supplies — because the harness and the suite drive a run on a connection they
   own; a batch of one opens nothing, which is every LITE route this build
-  enables. It has never run live: no wide route has ever met a real provider,
+  enables. **The first version of it never reached a worker at all**, and that
+  is worth the sentence: `work_once` rebuilt `Execution` from the four fields
+  that line knew about and silently dropped the fifth, so the pass was built,
+  tested and documented while production stayed sequential. A dropped field is
+  not a type error and the run still completes, so nothing failed — the
+  confidence review found it, `replace` fixes it, and the guard asserts on what
+  the runtime is handed rather than on what the factory returns. It has never run live: no wide route has ever met a real provider,
   so what is proven is the loop and not the pathway. And it is **not** 13.2 —
   one worker still claims one run, and the I6 residual is untouched.
   *Upgrade:* none for latency. What remains is a live wide route, which waits on
