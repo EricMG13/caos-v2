@@ -40,6 +40,7 @@ from server.api.commands._request import (
     require_case_writer,
 )
 from server.api.deps import (
+    IDENTITY_FIRST,
     Blobs,
     Caller,
     CasePath,
@@ -159,7 +160,11 @@ def _reviewed(
     return UUID(str(row[0]))
 
 
-@router.post("/api/v1/cases/{case_id}/runs/{run_id}/revisions", status_code=201)
+@router.post(
+    "/api/v1/cases/{case_id}/runs/{run_id}/revisions",
+    status_code=201,
+    dependencies=[IDENTITY_FIRST],
+)
 def save(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     *,  # keyword-only: the order below is still the one FastAPI solves in
     actor: Caller,
@@ -220,7 +225,7 @@ def save(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     )
 
 
-@router.post(f"{_REVISION}/signature")
+@router.post(f"{_REVISION}/signature", dependencies=[IDENTITY_FIRST])
 def sign(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     *,  # keyword-only: the order below is still the one FastAPI solves in
     actor: Caller,
@@ -262,7 +267,7 @@ def sign(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     )
 
 
-@router.post(f"{_REVISION}/freeze")
+@router.post(f"{_REVISION}/freeze", dependencies=[IDENTITY_FIRST])
 def freeze(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     *,  # keyword-only: the order below is still the one FastAPI solves in
     actor: Caller,
@@ -311,7 +316,7 @@ def freeze(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     )
 
 
-@router.post(f"{_REVISION}/filing")
+@router.post(f"{_REVISION}/filing", dependencies=[IDENTITY_FIRST])
 def file(  # noqa: PLR0913 -- decision 2's dependency order, keyword-only
     *,  # keyword-only: the order below is still the one FastAPI solves in
     actor: Caller,

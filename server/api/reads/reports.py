@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 
 from server.api.commands.availability import FilingFacts, report_actions
 from server.api.deps import (
+    IDENTITY_FIRST,
     Blobs,
     Caller,
     CasePath,
@@ -76,7 +77,11 @@ def report_revision(revision: str | None = None) -> UUID | None:
 ReportRevision = Annotated[UUID | None, Depends(report_revision)]
 
 
-@router.get("/api/v1/cases/{case_id}/report", response_model=ReportDocument)
+@router.get(
+    "/api/v1/cases/{case_id}/report",
+    response_model=ReportDocument,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_report(  # noqa: PLR0913 -- caller and parsed selection precede stores
     actor: Caller,
     case_id: CasePath,
@@ -91,7 +96,11 @@ def read_report(  # noqa: PLR0913 -- caller and parsed selection precede stores
     )
 
 
-@router.get("/api/v1/cases/{case_id}/committee", response_model=CommitteeDocument)
+@router.get(
+    "/api/v1/cases/{case_id}/committee",
+    response_model=CommitteeDocument,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_committee(  # noqa: PLR0913 -- same selection, with frozen/receipt proof
     actor: Caller,
     case_id: CasePath,

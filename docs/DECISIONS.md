@@ -4235,3 +4235,61 @@ commit answers; the head rides the revision's own statement at no round trip.
   them unreachable and proposed deleting them. They are unreachable through this
   code and reachable through a row altered outside it, so they are kept as
   tamper evidence, each with a test that gives it that cause.
+
+## 2026-09-18 §85 — The owner's model matrix routes every dispatch
+
+The owner, 18 September 2026, supplied a model-and-effort matrix and asked that
+it govern all work. It supersedes the 17 September split (Sonnet detects, Opus
+implements and reviews) and sits inside §81's caps.
+
+| Model | Effort | Role |
+|---|---|---|
+| Sonnet 5 | `low` | configs, pre-commit rules, docstrings, regex, simple fixtures |
+| Sonnet 5 | `medium` | routine endpoints, UI and wire integration, bug fixes, PR drafting |
+| Sonnet 5 | `xhigh` | localized complex refactors and transformations |
+| Opus 5 | `medium` | critical-path endpoints, deterministic calculation, strict diff size |
+| Opus 5 | `high` | races, state transitions, spend reconciliation, row locking |
+| Opus 5 | `xhigh` | adversarial audits, pre-merge security review, race verification |
+| Fable 5.1 | `low`/`medium` | long-horizon autonomous passes, phased plan execution |
+| Fable 5.1 | `high` | architecture, governance, end-of-phase reviews |
+
+In this repository: the phase confidence review moves to Fable 5.1 at `high`
+(`.claude/agents/phase-confidence-reviewer.md`), so a phase's two gates are read
+by two models; the phase adversarial audit and task acceptance stay on Opus 5 at
+`xhigh`; the final all-phases review stays on Fable 5.1 at `high`. Work already
+dispatched keeps its recorded model.
+
+## 2026-09-18 §86 — Fable 5.1 audits adversarially; Opus 5 reviews for confidence
+
+The owner, amending §85 the same day: "Switch fable does adversarial review and
+opus does confidence review." The phase adversarial audit
+(`.claude/agents/phase-adversarial-auditor.md`) runs on Fable 5.1 at `high`,
+Fable's ceiling; the phase confidence review
+(`.claude/agents/phase-confidence-reviewer.md`) runs on Opus 5 at `xhigh`. This
+overrides §85's rows that put end-of-phase reviews on Fable and adversarial
+audits on Opus, for the two phase gates. Task acceptance stays on Opus 5 at
+`xhigh`, and the final all-phases review stays on Fable 5.1 at `high`.
+
+## 2026-09-18 §87 — One status per code, identity on every route, the extension offered where it succeeds
+
+- **`INTERNAL_FAULT` is 500 and permanent at every layer.** It was 400 in the
+  app's `_STATUS` and 500 at the edge guard, so its status depended on which
+  layer caught it. The guard now declares its statuses once, `EDGE_STATUS`,
+  asserted equal to the app's. §75's partition test covers the whole
+  `RefusalCode` enum. The eight 400s whose clearance says retry are **named,
+  not decided**, as `RETRY_SHAPED_400_PENDING_OWNER`: that is the owner's half
+  of D3.
+- **`RESERVATION_BELOW_REQUEST`, 500, permanent.** `canonical._within_reservation`
+  no longer borrows `CONTEXT_OVER_CEILING`, whose clearance ("deliver less
+  context") was false there. It is raised before `provider.complete`, so there is
+  no call outcome, and it is not added to `outcomes._NOT_AN_EXPLANATION`,
+  matching `CONTEXT_OVER_CEILING`; behaviour at a billed attempt is unchanged.
+- **Identity on the decorator.** Every store-touching route declares
+  `dependencies=[IDENTITY_FIRST]`, so identity resolves before the store
+  connection whatever order a signature lists them in; the handler's `Caller`
+  is the same per-request cached dependency. `/api/health` takes none by design.
+- **`RouteChoice.accepts_model_extension`.** The Run read computes it by running
+  the create command's own `resolve_route` with the extension requested; only
+  `ROUTE_EXTENSION_OWNER_MISSING` makes it false, and any other refusal is
+  raised rather than hidden. The Create run form offers the §82 extension where
+  it is true. The command still re-checks at commit; the surface grants nothing.

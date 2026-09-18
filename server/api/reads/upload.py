@@ -12,7 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from server.api.commands.availability import upload_actions
-from server.api.deps import Caller, CasePath, Store, VisibleCase
+from server.api.deps import IDENTITY_FIRST, Caller, CasePath, Store, VisibleCase
 from server.api.wire import (
     SOURCES_MAX,
     Chrome,
@@ -35,7 +35,11 @@ IO_BUDGET = 4
 router = APIRouter()
 
 
-@router.get("/api/v1/cases/{case_id}/upload", response_model=UploadDocument)
+@router.get(
+    "/api/v1/cases/{case_id}/upload",
+    response_model=UploadDocument,
+    dependencies=[IDENTITY_FIRST],
+)
 def read_upload(
     actor: Caller, case_id: CasePath, standing: VisibleCase, conn: Store
 ) -> UploadDocument:

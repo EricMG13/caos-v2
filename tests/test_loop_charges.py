@@ -408,6 +408,25 @@ def test_a_small_prompt_reserves_its_priced_cost_not_the_byte_ceiling(
     assert all(amount < worst_case(TERRA) for amount in reserved)
 
 
+def test_a_reservation_below_its_request_answers_a_code_of_its_own() -> None:
+    """The context is unchanged; the reservation no longer covers it. Borrowing
+    `CONTEXT_OVER_CEILING` told the reader "Deliver less context to the module",
+    an act that is neither possible here nor what is wrong. The host's own
+    reservation disagreeing with the host's own rebuilt request is not the
+    caller's request being wrong (400), and the same attempt meets the same
+    reservation later (not 503): a permanent 500 whose clearance is a new
+    attempt, which reserves for the request it sends."""
+    from server.api.app import _STATUS, PERMANENT
+    from server.api.wire import CLEARS
+
+    code = RefusalCode.RESERVATION_BELOW_REQUEST
+    assert _STATUS[code] == 500
+    assert code in PERMANENT
+    assert CLEARS[code] != CLEARS[RefusalCode.CONTEXT_OVER_CEILING]
+    assert "context" not in CLEARS[code].lower()
+    assert "attempt" in CLEARS[code].lower()
+
+
 def test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call(
     ready: tuple[StoreConnection, UUID, UUID, BlobStore],
     route: ResolvedRoute,
@@ -452,7 +471,7 @@ def test_a_prompt_rebuilt_larger_than_the_one_priced_is_refused_before_the_call(
         route=route,
         run_id=run_id,
     )
-    with pytest.raises(Refusal, match=r"^CONTEXT_OVER_CEILING$"):
+    with pytest.raises(Refusal, match=r"^RESERVATION_BELOW_REQUEST$"):
         run_route(
             conn,
             blobs,

@@ -158,6 +158,10 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.UPSTREAM_SECTION_OVER_CEILING: (
         "Start a new run; an accepted handoff is never shortened."
     ),
+    _C.RESERVATION_BELOW_REQUEST: (
+        "Retry the attempt; a new one reserves for the request it sends. "
+        "An operator must investigate if it recurs."
+    ),
     _C.PROVIDER_UNAVAILABLE: "Retry when the provider answers.",
     _C.PROVIDER_OUTPUT_TRUNCATED: "Retry the attempt.",
     _C.PROVIDER_REFUSED: "Retry the attempt or revise the evidence.",

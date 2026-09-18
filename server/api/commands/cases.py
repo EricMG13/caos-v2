@@ -44,7 +44,7 @@ from server.api.commands._request import (
     json_body,
     require_case_writer,
 )
-from server.api.deps import Blobs, Caller, CasePath, Store
+from server.api.deps import IDENTITY_FIRST, Blobs, Caller, CasePath, Store
 from server.api.identity import Actor, GlobalRole
 from server.api.wire import TITLE_CHARS, CaseCreated, CreateCase, SourcesAdmitted
 from server.boundary_text import BoundaryText
@@ -83,7 +83,7 @@ def _require_global_writer(actor: Caller) -> Actor:
     return actor
 
 
-@router.post("/api/v1/cases", status_code=201)
+@router.post("/api/v1/cases", status_code=201, dependencies=[IDENTITY_FIRST])
 def create_case_command(
     actor: Caller,
     key: Key,
@@ -191,7 +191,9 @@ def _bounded(receive: Receive, declared: int) -> Receive:
     return bounded
 
 
-@router.post("/api/v1/cases/{case_id}/sources", status_code=201)
+@router.post(
+    "/api/v1/cases/{case_id}/sources", status_code=201, dependencies=[IDENTITY_FIRST]
+)
 def admit_sources(  # noqa: PLR0913 -- decision 2's dependency order, one per step
     actor: Caller,
     _declared: Annotated[int, Depends(_upload_envelope)],

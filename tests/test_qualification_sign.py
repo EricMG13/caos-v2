@@ -408,7 +408,11 @@ def test_an_anonymous_signing_request_opens_no_store_connection(
     calls = [d.call for d in declared]
     assert calls.index(require_reviewer) < calls.index(store_connection)
     assert calls.index(evidence_path) < calls.index(store_connection)
-    assert [d.call for d in declared[0].dependencies] == [actor_from_request]
+    # Identity is declared on the decorator, ahead of every parameter, and the
+    # reviewer floor resolves the same (cached) actor behind it.
+    assert calls[0] is actor_from_request
+    reviewer = declared[calls.index(require_reviewer)]
+    assert [d.call for d in reviewer.dependencies] == [actor_from_request]
 
 
 def test_a_body_carrying_reviewer_id_is_refused_as_undeclared(

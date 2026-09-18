@@ -23,7 +23,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter
 
-from server.api.deps import Blobs, Caller, Methodology, Store
+from server.api.deps import IDENTITY_FIRST, Blobs, Caller, Methodology, Store
 from server.api.identity import Actor
 from server.api.reads.analysis import read_analysis
 from server.api.reads.model import IO_BUDGET as MODEL_IO
@@ -153,7 +153,7 @@ COLUMNS: tuple[_Column, ...] = (
 )
 
 
-@router.get("/api/v1/book", response_model=BookDocument)
+@router.get("/api/v1/book", response_model=BookDocument, dependencies=[IDENTITY_FIRST])
 def read_book(
     actor: Caller, conn: Store, blobs: Blobs, bundle: Methodology
 ) -> BookDocument:

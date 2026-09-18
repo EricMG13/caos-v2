@@ -29,7 +29,14 @@ from server.api.commands._request import (
     require_case_admin,
     require_case_writer,
 )
-from server.api.deps import Caller, CasePath, MemberPath, SourcePath, Store
+from server.api.deps import (
+    IDENTITY_FIRST,
+    Caller,
+    CasePath,
+    MemberPath,
+    SourcePath,
+    Store,
+)
 from server.api.wire import (
     GrantStanding,
     RevokeStanding,
@@ -56,7 +63,9 @@ Writer = Annotated[Standing, Depends(require_case_writer)]
 Admin = Annotated[Standing, Depends(require_case_admin)]
 
 
-@router.post("/api/v1/cases/{case_id}/members", status_code=201)
+@router.post(
+    "/api/v1/cases/{case_id}/members", status_code=201, dependencies=[IDENTITY_FIRST]
+)
 def grant_standing(
     actor: Caller,
     *,
@@ -99,7 +108,10 @@ def grant_standing(
     )
 
 
-@router.post("/api/v1/cases/{case_id}/members/{user_id}/revocation")
+@router.post(
+    "/api/v1/cases/{case_id}/members/{user_id}/revocation",
+    dependencies=[IDENTITY_FIRST],
+)
 def revoke_standing(
     actor: Caller,
     *,
@@ -139,7 +151,10 @@ def revoke_standing(
     )
 
 
-@router.post("/api/v1/cases/{case_id}/sources/{source_id}/withdrawal")
+@router.post(
+    "/api/v1/cases/{case_id}/sources/{source_id}/withdrawal",
+    dependencies=[IDENTITY_FIRST],
+)
 def withdraw(
     actor: Caller,
     *,

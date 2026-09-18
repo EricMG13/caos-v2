@@ -23,7 +23,14 @@ from server.api.commands._request import (
     require_case_reader,
     require_case_writer,
 )
-from server.api.deps import Caller, CasePath, Methodology, RunPath, Store
+from server.api.deps import (
+    IDENTITY_FIRST,
+    Caller,
+    CasePath,
+    Methodology,
+    RunPath,
+    Store,
+)
 from server.api.wire import (
     ApproveGate,
     CreateRun,
@@ -110,7 +117,7 @@ def _owned_run(conn: StoreConnection, case_id: UUID, run_id: UUID) -> tuple[bool
     return bool(row[0]), row[1]
 
 
-@router.post("/api/v1/cases/{case_id}/runs")
+@router.post("/api/v1/cases/{case_id}/runs", dependencies=[IDENTITY_FIRST])
 def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bundle
     actor: Caller,
     key: Key,
@@ -163,7 +170,9 @@ def create_run(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bun
     )
 
 
-@router.post("/api/v1/cases/{case_id}/runs/{run_id}/input")
+@router.post(
+    "/api/v1/cases/{case_id}/runs/{run_id}/input", dependencies=[IDENTITY_FIRST]
+)
 def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bundle
     actor: Caller,
     key: Key,
@@ -217,6 +226,7 @@ def pin_input(  # noqa: PLR0913 -- identity, key, floor, body, path, store, bund
 @router.get(
     "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/preview",
     response_model=GatePreviewDocument,
+    dependencies=[IDENTITY_FIRST],
 )
 def read_gate_preview(
     _actor: Caller,
@@ -244,7 +254,10 @@ def read_gate_preview(
     )
 
 
-@router.post("/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval")
+@router.post(
+    "/api/v1/cases/{case_id}/runs/{run_id}/gates/{gate}/approval",
+    dependencies=[IDENTITY_FIRST],
+)
 def approve(  # noqa: PLR0913 -- identity, gate, key, floor, body, path, store
     actor: Caller,
     gate: PathGate,

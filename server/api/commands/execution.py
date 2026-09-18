@@ -41,7 +41,14 @@ from server.api.commands._request import (
     json_body,
     require_case_writer,
 )
-from server.api.deps import Caller, CasePath, Methodology, RunPath, Store
+from server.api.deps import (
+    IDENTITY_FIRST,
+    Caller,
+    CasePath,
+    Methodology,
+    RunPath,
+    Store,
+)
 from server.api.wire import CancelRun, RetryRun, RunWork, StartRun, WorkView
 from server.methodology.bundle import Bundle
 from server.refusals import Refusal, RefusalCode
@@ -68,7 +75,7 @@ Writer = Annotated[Standing, Depends(require_case_writer)]
 # run id is read after visibility, so a stranger learns nothing from it.
 
 
-@router.post(f"{_RUN_PATH}/start", status_code=202)
+@router.post(f"{_RUN_PATH}/start", status_code=202, dependencies=[IDENTITY_FIRST])
 def start_run(  # noqa: PLR0913 -- decision 2's dependency order
     actor: Caller,
     key: Key,
@@ -82,7 +89,7 @@ def start_run(  # noqa: PLR0913 -- decision 2's dependency order
     return _queue(conn, actor.user_id, case_id, run_id, key, body, bundle)
 
 
-@router.post(f"{_RUN_PATH}/retry", status_code=202)
+@router.post(f"{_RUN_PATH}/retry", status_code=202, dependencies=[IDENTITY_FIRST])
 def retry_run(  # noqa: PLR0913 -- decision 2's dependency order
     actor: Caller,
     key: Key,
@@ -96,7 +103,7 @@ def retry_run(  # noqa: PLR0913 -- decision 2's dependency order
     return _queue(conn, actor.user_id, case_id, run_id, key, body, bundle)
 
 
-@router.post(f"{_RUN_PATH}/cancel", status_code=202)
+@router.post(f"{_RUN_PATH}/cancel", status_code=202, dependencies=[IDENTITY_FIRST])
 def cancel_run(  # noqa: PLR0913 -- decision 2's dependency order
     actor: Caller,
     key: Key,

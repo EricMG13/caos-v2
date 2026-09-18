@@ -95,9 +95,10 @@ def blob_store() -> BlobStore:
 def actor_from_request(request: Request) -> Actor:
     """Who is asking. A dependency rather than a line in a route body.
 
-    FastAPI builds a route's dependency list in the order its parameters declare
-    them and solves it sequentially, so declaring this one before `Store` is
-    what keeps identity ahead of the connection. Two things rest on that. An
+    Every store-touching route declares it on its decorator as
+    `IDENTITY_FIRST`, which FastAPI solves before any parameter dependency, so
+    identity is ahead of the connection whatever order a signature names them
+    in. Two things rest on that. An
     anonymous request is refused without opening one -- a connection is per
     request and unpooled, and asking in a loop costs the asker nothing. And the
     answer to a stranger does not depend on the store being reachable: a process
@@ -126,6 +127,14 @@ def methodology_bundle() -> Bundle:
 def _vendored_bundle() -> Bundle:
     return Bundle(VENDORED_BUNDLE)
 
+
+# Declared on every store-touching route's decorator, `dependencies=
+# [IDENTITY_FIRST]`. FastAPI inserts decorator-level dependencies at the front
+# of a route's list whatever its parameters say, so identity is solved before
+# any connection even on a signature that names `Store` first. The handler's
+# own `Caller` is the same dependency to the per-request cache, so the actor
+# is read once (`tests/test_identity_first.py`).
+IDENTITY_FIRST = Depends(actor_from_request)
 
 Caller = Annotated[Actor, Depends(actor_from_request)]
 Store = Annotated[StoreConnection, Depends(store_connection)]

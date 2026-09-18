@@ -52,6 +52,7 @@ from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.deps import BLOB_ROOT as BLOB_ROOT
 from server.api.deps import DATABASE_URL as DATABASE_URL
+from server.api.deps import IDENTITY_FIRST
 from server.api.deps import VENDORED_BUNDLE as VENDORED_BUNDLE
 from server.api.deps import Blobs as Blobs
 from server.api.deps import Caller as Caller
@@ -147,6 +148,7 @@ PERMANENT = frozenset(
         RefusalCode.ATTEMPT_NOT_FOUND,
         RefusalCode.EVIDENCE_PACKING_MISMATCH,
         RefusalCode.INTERNAL_FAULT,
+        RefusalCode.RESERVATION_BELOW_REQUEST,
     }
 )
 # What a transient answer promises, in seconds. A constant rather than a
@@ -229,6 +231,11 @@ _STATUS = {
     # investigate if it persists -- stays true, because a 500 forbids no retry;
     # it only promises none, which is what the absent `Retry-After` says.
     RefusalCode.INTERNAL_FAULT: 500,
+    # The attempt's own reservation below the request the host rebuilt for it:
+    # the host disagreeing with itself, not the caller's request (so not 400),
+    # and the same attempt meets the same reservation later (so not 503). A new
+    # attempt, which reserves for what it sends, is the discharge.
+    RefusalCode.RESERVATION_BELOW_REQUEST: 500,
     # Commands (Task 4.2 decision 8). A member below a command's floor is told
     # so; a stranger never reaches this, being answered CASE_NOT_FOUND first.
     RefusalCode.NOT_AUTHORISED: 403,
@@ -464,7 +471,7 @@ async def _malformed_run_id(
     return _refused(request, Refusal(code))
 
 
-@app.get("/api/v1/cases/{case_id}/events")
+@app.get("/api/v1/cases/{case_id}/events", dependencies=[IDENTITY_FIRST])
 def read_case_events(
     actor: Caller,
     case_id: CasePath,
