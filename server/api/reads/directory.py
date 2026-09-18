@@ -10,14 +10,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from server.api.commands.availability import directory_actions
+from server.api.commands.availability import directory_actions, membership_actions
 from server.api.deps import IDENTITY_FIRST, Caller, Store
 from server.api.wire import (
     CASES_MAX,
+    MEMBERS_MAX,
     CaseRow,
     Chrome,
     DirectoryBody,
     DirectoryDocument,
+    MemberRow,
     RunSummary,
     SectionNote,
     ServedRole,
@@ -25,7 +27,8 @@ from server.api.wire import (
 from server.store.members import cases_for_member
 
 # The store's `now()` and the one listing query (`cases_for_member` reads the
-# source count and latest run laterally), whatever the number of cases.
+# source count, latest run and an administered case's members laterally),
+# whatever the number of cases.
 # Measured in `tests/test_directory_upload_sections.py`.
 IO_BUDGET = 2
 
@@ -39,8 +42,16 @@ def read_directory(actor: Caller, conn: Store) -> DirectoryDocument:
     """`actor` is declared before `conn`: an anonymous request is refused
     before a connection opens."""
     [observed_at] = conn.execute("SELECT now()").fetchall()[0]
-    listed = cases_for_member(conn, user_id=actor.user_id, limit=CASES_MAX + 1)
-    truncated = len(listed) > CASES_MAX
+    listed = cases_for_member(
+        conn,
+        user_id=actor.user_id,
+        limit=CASES_MAX + 1,
+        members_limit=MEMBERS_MAX + 1,
+    )
+    truncated = len(listed) > CASES_MAX or any(
+        row.members is not None and len(row.members) > MEMBERS_MAX
+        for row in listed[:CASES_MAX]
+    )
     return DirectoryDocument(
         chrome=Chrome(
             subject=None,
@@ -64,6 +75,13 @@ def read_directory(actor: Caller, conn: Store) -> DirectoryDocument:
                         profile_id=row.latest_run.profile_id,
                         selection_id=row.latest_run.selection_id,
                     ),
+                    members=None
+                    if row.members is None
+                    else [
+                        MemberRow(user_id=member, standing=held)
+                        for member, held in row.members[:MEMBERS_MAX]
+                    ],
+                    actions=membership_actions(actor.role, row.standing),
                 )
                 for row in listed[:CASES_MAX]
             ]

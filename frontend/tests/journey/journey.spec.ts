@@ -167,9 +167,9 @@ async function contextAs(
 /** One governed POST from a logged-in page's own session, carrying exactly
     what the workspace's own `fetch` carries: the intent key, and the
     same-origin markers the edge guard demands of an unsafe method (decision
-    5). Used where the workspace has no control to press -- the membership
-    commands, which `ActionName` deliberately does not carry, and the *first*
-    save, which no path in the workspace can reach (see that test's comment). */
+    5). Used where a test needs a precondition rather than a control's proof
+    -- the approvers' standing ahead of the freeze -- and to show a command
+    refusing what its control would have refused. */
 function postAs(page: Page, url: string, data: object) {
   return page.request.post(url, {
     data,
@@ -1122,20 +1122,15 @@ test.describe.serial("journey", () => {
   test("journey: standing is granted, and a revoked member's read is answered 404", async ({
     browser,
   }) => {
-    // The two membership commands have no control anywhere in the workspace
-    // and no entry in `ActionName` -- deliberately, because no section serves
-    // an Admin panel to offer them from -- so they are driven here as
-    // authenticated requests from the analyst's own browser session, through
-    // the real edge. What that proves is the route, the edge's identity, the
-    // ADMIN floor and what the grant and the revocation do to a reader's
-    // reads; what it cannot prove is a control, because there is none.
-    await receipt(
-      await postAs(page, `/api/v1/cases/${caseId}/members`, {
-        user_id: READER_USER_ID,
-        standing: "READER",
-      }),
-      201,
-    );
+    // O21: membership is pressed on the Directory's Case access panel, by the
+    // analyst who created the case and so administers it. What the grant and
+    // the revocation then do to a reader's reads is asserted through the edge.
+    await page.goto("/directory/");
+    const access = page.locator(`[data-access='${caseId}']`);
+    await access.getByLabel("Member id").fill(READER_USER_ID);
+    await access.getByLabel("Standing").selectOption("READER");
+    await access.getByRole("button", { name: "Grant standing" }).click();
+    await expect(access.locator(`[data-member='${READER_USER_ID}']`)).toContainText("READER");
 
     const reader = await contextAs(browser, "reader");
     try {
@@ -1149,10 +1144,8 @@ test.describe.serial("journey", () => {
       );
       await expect(reader.page.getByText(QUOTE).first()).toBeVisible();
 
-      await receipt(
-        await postAs(page, `/api/v1/cases/${caseId}/members/${READER_USER_ID}/revocation`, {}),
-        200,
-      );
+      await access.getByRole("button", { name: `Revoke ${READER_USER_ID}` }).click();
+      await expect(access.locator(`[data-member='${READER_USER_ID}']`)).toHaveCount(0);
 
       // A revoked member is answered exactly as a stranger is (CLAUDE.md
       // "Auth edge": unknown and unauthorized both 404), and the section they

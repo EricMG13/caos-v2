@@ -29,7 +29,7 @@ const TITLE_MAX = 256;
     decision 12). Reuses `sectionUrl` and the v1 parser rather than the
     section-status classifier in `@/app/transport`, whose union of the v1
     documents this control has no reason to narrow. */
-async function refetchDirectory(): Promise<DirectoryDocument | null> {
+export async function refetchDirectory(): Promise<DirectoryDocument | null> {
   const url = sectionUrl("directory", {});
   if (!url) return null;
   let response: Response;

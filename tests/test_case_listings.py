@@ -84,7 +84,7 @@ def test_cases_for_member_costs_one_query_whatever_the_case_count(
     conn.commit()
     counter = _CountingConnection(conn)
 
-    listed = cases_for_member(counter, user_id=user, limit=10)  # type: ignore[arg-type]
+    listed = cases_for_member(counter, user_id=user, limit=10, members_limit=0)  # type: ignore[arg-type]
 
     assert len(listed) == 5
     assert all(row.latest_run is not None for row in listed)
@@ -104,7 +104,7 @@ def test_store_listings_are_typed_rows(
     conn.commit()
     snapshot_source_set(conn, case_id)
 
-    [listing] = cases_for_member(conn, user_id=user, limit=1)
+    [listing] = cases_for_member(conn, user_id=user, limit=1, members_limit=0)
     listed = case_sources(conn, case_id=case_id, limit=10)
 
     assert isinstance(listing, CaseListing)

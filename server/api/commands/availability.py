@@ -45,6 +45,13 @@ def directory_actions(role: GlobalRole) -> list[ActionView]:
     return [_view(_A.CREATE_CASE, [(role is GlobalRole.READER, _C.NOT_AUTHORISED)])]
 
 
+def membership_actions(role: GlobalRole, standing: Standing) -> list[ActionView]:
+    """Grant and revoke on one case: both commands take the ADMIN floor. Which
+    member is named is the command's to refuse at commit."""
+    admin = _floor(role, standing, Standing.ADMIN)
+    return [_view(_A.GRANT_STANDING, admin), _view(_A.REVOKE_STANDING, admin)]
+
+
 def upload_actions(
     role: GlobalRole, standing: Standing, live_sources: int
 ) -> list[ActionView]:

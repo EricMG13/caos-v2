@@ -430,7 +430,8 @@ stale. Repair: five commands, controls, availability, the journey.
 
 **O21 — Book and Admin are unavailable [P2, Phase 12].** Book from the shell
 D2 leaves, over accepted CP-CF projections; Admin stays unavailable
-(`IA_SPEC.md` §4.9); membership surfaces in Directory.
+(`IA_SPEC.md` §4.9); membership surfaces in Directory. **Membership landed 18 September 2026 (§89)**, on Directory's Case access
+panel.
 
 **O22 — The analysis page cannot name what blocked the run; Markdown renders
 as text; a citation without a page prints "page " [P2, Phase 12].**
