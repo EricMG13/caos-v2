@@ -213,6 +213,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.DELIVERABLE_MOVED_SINCE_SIGNING: "Review and sign the current revision.",
     _C.DELIVERABLE_ALREADY_FILED: "Nothing; the deliverable is filed.",
     _C.DELIVERABLE_ALREADY_FROZEN: "Nothing; the deliverable is frozen.",
+    _C.DELIVERABLE_ALREADY_SIGNED: "Nothing; you have signed this revision.",
     _C.APPROVER_NOT_INDEPENDENT: "Ask an approver who did not author it.",
     _C.CASE_NOT_FOUND: "Name a case you may read.",
     _C.SOURCE_PACK_EMPTY: "Supply at least one document.",
@@ -223,6 +224,9 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.SOURCE_EXTRACTION_TIMEOUT: "Supply a simpler document.",
     _C.SOURCE_IDENTITY_INVALID: "Readmit the document.",
     _C.EVIDENCE_NOT_AVAILABLE: "Pin a live source for the evidence.",
+    _C.EVIDENCE_PACKING_MISMATCH: (
+        "An operator must re-admit the source under this build."
+    ),
     _C.PAGE_NOT_AVAILABLE: "Name a page of a live source pinned to this run.",
     _C.CITATION_NOT_LOCATED: "Quote whole tokens from delivered evidence.",
     _C.CITATION_AMBIGUOUS: "Quote enough text to locate it once.",

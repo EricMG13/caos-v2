@@ -65,15 +65,23 @@ def sign_opinion(
 def sign_opinion_in(
     conn: StoreConnection, *, case_id: UUID, actor_id: UUID, revision_id: UUID
 ) -> str:
-    """Sign in the caller's governed transaction; returns the bound digest."""
+    """Sign in the caller's governed transaction; returns the bound digest.
+
+    One signature per signer: a second is refused by the store's own
+    constraint, named here so no other conflict can inherit the code, and
+    `DO NOTHING` so the refusal leaves the governed transaction usable.
+    """
     _, digest = _revision(conn, case_id, revision_id)
     if _frozen(conn, case_id, revision_id) is not None:
         raise Refusal(RefusalCode.DELIVERABLE_ALREADY_FROZEN)
-    conn.execute(
+    signed = conn.execute(
         "INSERT INTO deliverable_opinions"
-        " (revision_id,case_id,payload_sha256,signed_by) VALUES (%s,%s,%s,%s)",
+        " (revision_id,case_id,payload_sha256,signed_by) VALUES (%s,%s,%s,%s)"
+        " ON CONFLICT ON CONSTRAINT one_opinion_per_signer DO NOTHING",
         (str(revision_id), case_id, digest, actor_id),
-    )
+    ).rowcount
+    if not signed:
+        raise Refusal(RefusalCode.DELIVERABLE_ALREADY_SIGNED)
     return digest
 
 
@@ -126,6 +134,12 @@ def freeze_in(  # noqa: PLR0913 -- exact revision and authority for its re-proof
     signatures = revision_signatures(conn, case_id, revision_id)
     if not signatures:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_SIGNED)
+    # Tamper evidence, not the review check. `sign_opinion_in` writes the digest
+    # it has just read from the immutable revision row, so through this code a
+    # signature always binds it; this fires only on a row altered outside it
+    # (`test_freeze_refuses_a_signature_altered_outside_this_code`). What a
+    # signer actually reviewed is the route's `_reviewed`, against the digest
+    # the client sent -- that is the live check.
     if signatures[0][1] != digest:
         raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
     if actor_id in {who for who, _ in signatures}:
@@ -189,6 +203,13 @@ def file_deliverable_in(
     if frozen is None:
         raise Refusal(RefusalCode.DELIVERABLE_NOT_FROZEN)
     frozen_by, frozen_digest = frozen
+    # The two digest comparisons below are tamper evidence, for the reason
+    # `freeze_in` states: the freeze and every signature were written from the
+    # immutable revision row this reads, so through this code they equal it and
+    # only a row altered outside it reaches either refusal
+    # (`test_filing_rechecks_every_signer_and_freezer_independence`,
+    # `test_filing_refuses_a_freeze_altered_outside_this_code`). The live check
+    # is the route's `_reviewed`, against the digest the client sent.
     if frozen_digest != digest:
         raise Refusal(RefusalCode.DELIVERABLE_MOVED_SINCE_SIGNING)
     signatures = revision_signatures(conn, case_id, revision_id)

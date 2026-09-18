@@ -327,6 +327,36 @@ def test_filing_rechecks_every_signer_and_freezer_independence(
         )
 
 
+def test_freeze_refuses_a_signature_altered_outside_this_code(
+    lite: _Harness,
+) -> None:
+    """`freeze_in`'s signature digest check is tamper evidence: signing through
+    this code always binds the revision's digest, so only a row altered outside
+    it -- here with triggers bypassed -- can disagree, and the freeze refuses."""
+    revision = _save(lite)
+    _sign(lite, revision)
+    _corrupt(lite, "UPDATE deliverable_opinions SET payload_sha256=%s", "f" * 64)
+    with pytest.raises(Refusal, match=r"^DELIVERABLE_MOVED_SINCE_SIGNING$"):
+        _freeze(lite, revision)
+
+
+def test_filing_refuses_a_freeze_altered_outside_this_code(lite: _Harness) -> None:
+    """The freeze's digest is the revision's by construction; a publication row
+    altered outside this code is the one thing that makes filing disagree."""
+    revision = _save(lite)
+    _sign(lite, revision)
+    _freeze(lite, revision)
+    _corrupt(lite, "UPDATE deliverable_publications SET payload_sha256=%s", "f" * 64)
+    with pytest.raises(Refusal, match=r"^DELIVERABLE_MOVED_SINCE_SIGNING$"):
+        file_deliverable(
+            lite.conn,
+            lite.blobs,
+            case_id=lite.case_id,
+            actor_id=_actor(lite),
+            revision_id=revision,
+        )
+
+
 def test_receipt_row_failure_rolls_back_even_after_blob_and_audit_writes(
     lite: _Harness,
     monkeypatch: pytest.MonkeyPatch,
