@@ -277,7 +277,7 @@ const BookPassport = object({
   definition: text,
   period: text,
   scenario: text,
-  evidence_date: text,
+  reporting_period: text,
   computed_at: datetime,
   snapshot: hash,
   method: text,
@@ -351,8 +351,9 @@ const ReportArtifact = object({
 const reportFields = {
   case_id: uuid,
   displayed_run_id: uuid,
-  revision_id: uuid,
-  payload_sha256: hash,
+  // Null only on a Report for a run nothing has been saved from yet.
+  revision_id: nullable(uuid),
+  payload_sha256: nullable(hash),
   case_title: text,
   artifacts: array(ReportArtifact, 256),
   narrative: array(array(NarrativeSpan, 64), 64),
@@ -372,6 +373,8 @@ const FiledReceipt = object({
 });
 const CommitteeBody = object({
   ...reportFields,
+  revision_id: uuid,
+  payload_sha256: hash,
   state: enumOf(["frozen", "filed"]),
   signed_by: array(uuid, 1000),
   frozen_by: uuid,
@@ -500,6 +503,7 @@ const RefusalCode = enumOf([
   "DELIVERABLE_MOVED_SINCE_SIGNING",
   "DELIVERABLE_ALREADY_FILED",
   "DELIVERABLE_ALREADY_FROZEN",
+  "DELIVERABLE_ALREADY_SIGNED",
   "APPROVER_NOT_INDEPENDENT",
   "CASE_NOT_FOUND",
   "SOURCE_PACK_EMPTY",
@@ -510,6 +514,7 @@ const RefusalCode = enumOf([
   "SOURCE_EXTRACTION_TIMEOUT",
   "SOURCE_IDENTITY_INVALID",
   "EVIDENCE_NOT_AVAILABLE",
+  "EVIDENCE_PACKING_MISMATCH",
   "PAGE_NOT_AVAILABLE",
   "CITATION_NOT_LOCATED",
   "CITATION_AMBIGUOUS",

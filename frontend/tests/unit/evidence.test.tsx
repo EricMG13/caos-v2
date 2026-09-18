@@ -23,7 +23,7 @@ const ACTUAL: Passport = {
   definition: "Net debt over LTM adjusted EBITDA, per the indenture definition",
   period: "LTM to 2026-06-30",
   scenario: "Base",
-  evidence_date: "2026-08-04",
+  reporting_period: "Q2 2026",
   computed_at: "2026-09-09T14:30:00Z",
   snapshot: "snp_cvna_q2_2026",
   method: "leverage_ratio · verified",

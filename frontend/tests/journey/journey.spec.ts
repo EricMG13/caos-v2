@@ -1065,11 +1065,11 @@ test.describe.serial("journey", () => {
           { timeout: 180_000, intervals: [2_000] },
         )
         .toBe("EVIDENCE_NOT_AVAILABLE");
-      // No section renders `work.stop_code` -- it is on the wire and on no
-      // surface -- so the line above reads the run document this browser
-      // session is served, through the real edge. What the surface *does* say
-      // is that nothing more can happen here: start and retry carry the same
-      // code the command answers, and no node of this run was ever accepted.
+      // The line above reads the run document this browser session is served,
+      // through the real edge; the Run section's work panel names the same
+      // code, asserted below. The surface also says nothing more can happen
+      // here: start and retry carry the same code the command answers, and no
+      // node of this run was ever accepted.
       const parked = await readRun(other.page, withdrawalCase, withdrawalRun);
       expect(parked?.status).toBe("RUNNING");
       expect(parked?.nodes.map((node) => node.state)).not.toContain("COMPLETE");
@@ -1080,6 +1080,10 @@ test.describe.serial("journey", () => {
       // surface shows is the order of `availability.py`'s queue, not a fact
       // about the withdrawal; asserting the exact code there would pin a list
       // order and go red on an unrelated reorder.
+      await expect(other.page.locator("[data-work-controls] [data-stop-code]")).toHaveAttribute(
+        "data-stop-code",
+        "EVIDENCE_NOT_AVAILABLE",
+      );
       await expect(
         other.page.locator("[data-work-controls] [data-action='RETRY_RUN']"),
       ).toHaveAttribute("data-refusal", "EVIDENCE_NOT_AVAILABLE");
@@ -1173,18 +1177,22 @@ test.describe.serial("journey", () => {
   });
 
   test("journey: a revision is saved from the run's accepted artifacts and a draft narrative", async () => {
-    // **The workspace has no path to the first save, and this is where that
-    // shows.** `sectionUrl` answers null for report without `?revision`,
-    // `read_report` refuses `DELIVERABLE_NOT_FOUND` without the row, and the
-    // only thing in the workspace that ever sets `?revision` is
-    // `FilingControls`' own post-save `setParams` -- which lives on the
-    // section that cannot be reached. So Report is unavailable here,
+    // Report without `?revision` is the filing chain's front door: a run
+    // nothing has been saved from is served its accepted artifacts and the
+    // save that makes the first revision, with the three acts that need one
+    // refused.
     await page.goto(`/report/?case=${caseId}&run=${runId}`);
-    await expect(page.locator("main#body [data-surface-state='unavailable']")).toHaveCount(1);
-    // and the first revision is made as an authenticated request from this
-    // same browser session, through the real edge, because there is no press
-    // that would make it. Everything after this one call is pressed on the
-    // surface.
+    await expect(page.locator("[data-report-v1]")).toContainText("Not yet saved");
+    await expect(
+      page.locator("[data-filing-controls] [data-action='SAVE_REVISION']"),
+    ).not.toHaveAttribute("data-refusal");
+    await expect(
+      page.locator("[data-filing-controls] [data-action='SIGN_OPINION']"),
+    ).toHaveAttribute("data-refusal", "DELIVERABLE_NOT_FOUND");
+    // The first revision is still made as an authenticated request from this
+    // same browser session, through the real edge, because it carries a
+    // figure span and the surface has no citation picker to compose one.
+    // Everything after this one call is pressed on the surface.
     // The route's own node id, read from the run document rather than spelled
     // out here: a figure names a *route node*, not a module, and CP-0 on this
     // pathway is `RN-LITE_CREDIT_22-LITE_EARNINGS_UPDATE-01-CP-0`.
@@ -1398,16 +1406,11 @@ test.describe.serial("journey", () => {
 
   test("journey: the Book names every credit of the portfolio on one stated basis", async () => {
     // What the Book can be driven to on this stack, and what it cannot.
-    // `read_book` fills a credit's cells from the accepted CP-CF projection,
-    // and no run made through the API can carry CP-CF on any pathway:
-    // `create_run` resolves the route with no `RouteExtensions`
-    // (`server/api/commands/runs.py`) and `CreateRun` carries no field to ask
-    // for one, while CP-CF is a host extension appended only by
-    // `resolve_route(..., extensions=RouteExtensions(model_extension=True))`,
-    // whose one caller is the qualification harness. Not a property of the
-    // LITE route: `ADAPTER_ROUTES` enables three pathways and
-    // `FULL_CREDIT_32/RELATIVE_VALUE` carries every one of CP-CF's
-    // `MODEL_OWNERS`, so it would append CP-CF if anything asked. So every
+    // `read_book` fills a credit's cells from the accepted CP-CF projection.
+    // `CreateRun.model_extension` can pin CP-CF, but only on
+    // `FULL_CREDIT_32/RELATIVE_VALUE` (LITE pathways refuse it
+    // `ROUTE_EXTENSION_OWNER_MISSING`), the workspace offers no control for it,
+    // and this journey's runs are LITE, created with it `false`. So every
     // credit here is
     // `NO_ACCEPTED_FORECAST`, no period is served, no comparison table is
     // drawn and no cell exists to open a passport from. The ten-field

@@ -226,6 +226,17 @@ describe("the transport", () => {
     }
   });
 
+  test("test_a_report_without_a_revision_is_requested_for_the_runs_head_or_first_save", () => {
+    // The filing chain's front door: nothing else sets `?revision`, so a
+    // Report that needed one to load could never produce the first.
+    vi.stubEnv("MODE", "production");
+    expect(sectionUrl("report", { case: CASE, run: RUN })).toBe(
+      `/api/v1/cases/${CASE}/report?run=${RUN}`,
+    );
+    expect(sectionUrl("report", { case: CASE })).toBeNull();
+    vi.unstubAllEnvs();
+  });
+
   test("test_section_urls_are_versioned_case_scoped_and_carry_no_fixture_outside_demo", () => {
     vi.stubEnv("MODE", "production");
     expect(sectionUrl("directory", { fixture: "reader" })).toBe("/api/v1/directory");
@@ -246,6 +257,7 @@ describe("the transport", () => {
       );
     }
     expect(sectionUrl("run", { case: "a/b?c" })).toBe("/api/v1/cases/a%2Fb%3Fc/run");
+    expect(sectionUrl("committee", { case: CASE, run: RUN })).toBeNull();
     // A caseless case section, or a disabled section, has no URL at all.
     for (const section of ["upload", "run", "analysis", "model", "report", "committee"] as const) {
       expect(sectionUrl(section, { run: RUN })).toBeNull();
@@ -329,7 +341,7 @@ describe("the transport", () => {
     expect(parseModelDocument(v1Model()).body.displayed_run_id).toBe(RUN);
   });
 
-  test("Report requires and binds the exact case, run and revision", async () => {
+  test("Report requires the case and run and binds the revision it names", async () => {
     const mismatches = [
       v1Report({ caseId: OTHER_CASE }),
       v1Report({ runId: OTHER_CASE }),
@@ -337,8 +349,9 @@ describe("the transport", () => {
     ];
     const spy = vi.fn(async () => new Response(JSON.stringify(mismatches.shift())));
     vi.stubGlobal("fetch", spy);
+    // A Report with no revision named is requested -- the run's head, or its
+    // first save -- so only a missing case or run sends nothing.
     for (const query of [
-      { case: CASE, run: RUN },
       { case: CASE, revision: REVISION },
       { run: RUN, revision: REVISION },
     ]) {

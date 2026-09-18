@@ -48,6 +48,7 @@ ROUTE = {
     "profile_id": "LITE_CREDIT_22",
     "selection_id": "LITE_EARNINGS_UPDATE",
     "supersedes": None,
+    "model_extension": False,
 }
 SUBJECT = {
     "issuer_id": "EXAMPLE",
@@ -360,7 +361,12 @@ def test_the_pure_judgements_follow_each_command_order() -> None:
 def test_the_filing_controls_follow_each_command_order() -> None:
     """Task 12.1: the four Report actions, judged as their commands judge."""
     unsigned = FilingFacts(
-        signed=False, frozen=False, filed=False, actor_signed=False, actor_froze=False
+        signed=False,
+        frozen=False,
+        filed=False,
+        actor_signed=False,
+        actor_froze=False,
+        head=True,
     )
     judged = {
         view.action: view.refusal and view.refusal.code
@@ -376,13 +382,28 @@ def test_the_filing_controls_follow_each_command_order() -> None:
     # The signer is shown neither the freeze nor the filing their own commit
     # would refuse; a third approver is shown the filing.
     signer = FilingFacts(
-        signed=True, frozen=True, filed=False, actor_signed=True, actor_froze=False
+        signed=True,
+        frozen=True,
+        filed=False,
+        actor_signed=True,
+        actor_froze=False,
+        head=True,
     )
     third = FilingFacts(
-        signed=True, frozen=True, filed=False, actor_signed=False, actor_froze=False
+        signed=True,
+        frozen=True,
+        filed=False,
+        actor_signed=False,
+        actor_froze=False,
+        head=True,
     )
     filed = FilingFacts(
-        signed=True, frozen=True, filed=True, actor_signed=False, actor_froze=False
+        signed=True,
+        frozen=True,
+        filed=True,
+        actor_signed=False,
+        actor_froze=False,
+        head=True,
     )
     for facts, expected in (
         (signer, ["DELIVERABLE_ALREADY_FROZEN", "APPROVER_NOT_INDEPENDENT"]),
@@ -401,3 +422,49 @@ def test_the_filing_controls_follow_each_command_order() -> None:
         for view in report_actions(GlobalRole.ANALYST, Standing.READER, third)
     }
     assert reader == {"NOT_AUTHORISED"}
+
+
+def test_save_revision_is_judged_against_the_runs_head() -> None:
+    """The save posts the served revision as the head it was composed against,
+    so a revision that is no longer the head offers a save its commit refuses
+    `COMMAND_EXPECTATION_STALE` -- shown refused with that code instead."""
+    superseded = FilingFacts(
+        signed=False,
+        frozen=False,
+        filed=False,
+        actor_signed=False,
+        actor_froze=False,
+        head=False,
+    )
+    [save, *_] = report_actions(GlobalRole.ANALYST, Standing.WRITER, superseded)
+    assert save.refusal is not None
+    assert save.refusal.code == "COMMAND_EXPECTATION_STALE"
+
+
+def test_a_run_with_no_revision_offers_its_first_save_and_nothing_else() -> None:
+    """No revision saved: the save needs none, and the other three name one
+    their command would not find. A save the run cannot derive is refused with
+    the derivation's own code, which is the one its commit answers."""
+    judged = {
+        view.action: view.refusal and view.refusal.code
+        for view in report_actions(GlobalRole.ANALYST, Standing.APPROVER, None)
+    }
+    assert judged == {
+        A.SAVE_REVISION: None,
+        A.SIGN_OPINION: "DELIVERABLE_NOT_FOUND",
+        A.FREEZE_DELIVERABLE: "DELIVERABLE_NOT_FOUND",
+        A.FILE_DELIVERABLE: "DELIVERABLE_NOT_FOUND",
+    }
+    [save, *_] = report_actions(
+        GlobalRole.ANALYST,
+        Standing.WRITER,
+        None,
+        underivable=RefusalCode.DELIVERABLE_PAYLOAD_INVALID,
+    )
+    assert save.refusal is not None
+    assert save.refusal.code == "DELIVERABLE_PAYLOAD_INVALID"
+    below = {
+        view.refusal and view.refusal.code
+        for view in report_actions(GlobalRole.READER, Standing.ADMIN, None)
+    }
+    assert below == {"NOT_AUTHORISED"}

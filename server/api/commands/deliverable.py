@@ -73,16 +73,18 @@ from server.store import StoreConnection
 from server.store.audit import GovernedAction
 from server.store.members import Standing
 
-# A bound, not a pin, and the measurement asserts it as one
-# (`tests/test_governed_write_routes.py`). Measured over LITE's three nodes:
-# freeze 55, save 52, filing 16, signature 14. Freeze and save are the two that
-# matter and they cost the same thing -- `prove_revision` and
-# `canonical_payload` each re-derive the whole payload inside the unit, which is
-# the work `server/api/reads/reports.py` budgets at 45 for the same run -- so
-# both scale with the route's node count and this ceiling is stated for a route
-# of that shape. A reader must not take it for the count any one command makes,
-# and a wider route is what first raises it.
-IO_BUDGET = 60
+# Statements per success path, each asserted with `==` by
+# `tests/test_governed_write_routes.py`, measured over LITE's three nodes. Save
+# and freeze are the two that scale: `canonical_payload` and `prove_revision`
+# each re-derive the whole payload inside the unit -- the work
+# `server/api/reads/reports.py` budgets at 45 for the same run -- so both are
+# stated for a route of that shape and a wider route is what first moves them.
+# Signature and filing read only the revision's chain rows, so they do not.
+SAVE_IO = 52
+SIGN_IO = 14
+FREEZE_IO = 55
+FILE_IO = 16
+IO_BUDGET = max(SAVE_IO, SIGN_IO, FREEZE_IO, FILE_IO)
 
 _REVISION = "/api/v1/cases/{case_id}/revisions/{revision_id}"
 

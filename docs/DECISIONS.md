@@ -4146,3 +4146,82 @@ and the routes that have are single-node at every pass, so production behaviour
 for them is unchanged. This is **not** 13.2: one worker still claims one run,
 and the I6 residual — a stale lease holder paying once — is untouched and still
 what a second worker must answer first.
+
+## 2026-09-18 §81 — No `ultrathink` and no `max`, for any model; `xhigh` is the ceiling, `high` for Fable 5.1
+
+The owner, 18 September 2026: "No more use of ultrathink and Max reasoning for
+any model, cap is xhigh." This overrides every earlier routing record that
+asks for either — the goal prompts, the complementary plans, the task briefs,
+`docs/AGENT_PROMPTS.md` and the review routing of 17 September — without
+editing them, because each is a dated record of what was asked then.
+
+- **Dispatch.** No implementer, reviewer or detector prompt contains
+  `ultrathink`, and no dispatch sets effort `max`. `xhigh` is the most any
+  model is given.
+- **Fable 5.1 is capped lower, at `high`** — the owner, the same day: "Cap
+  Fable 5.1 to high". The one Fable pin, `.claude/agents/final-phases-reviewer.md`,
+  moves from `xhigh` to `high`.
+- **The three Opus review definitions** under `.claude/agents/` already
+  pinned `xhigh`; they no longer tell a review turn to open with `ultrathink`.
+- **What ran before this entry keeps its recorded setting.** Three
+  implementers of the completion remainder (slices A, C and D) were launched
+  earlier the same day with `ultrathink` in their prompts and were not
+  restarted; their reports are evidence about the tree, and the setting is
+  recorded against them rather than re-run.
+
+## 2026-09-18 §82 — A run states whether it carries the model extension
+
+`CreateRun` gains a required `model_extension: StrictBool`. `create_run` passes
+it to `resolve_route` as `RouteExtensions(model_extension=...)`, so CP-CF, its
+synthesised REQUIRED edges and its `host_manifest_sha256` predicate are part of
+the resolved route that `route_digest` covers and `server/store/routes.py`
+pins. It is a route-*selection* input (invariant 10), carried by the node list,
+edges and predicate rather than by a stored column, so no migration. Required
+rather than defaulted because every v1 request field is (a missing key is a
+malformed body), so the workspace's Create run form sends `false`; the
+extension is API-only for now. A pathway missing any of CP-CF's `MODEL_OWNERS`
+refuses it `ROUTE_EXTENSION_OWNER_MISSING` (400) before anything commits — every
+LITE pathway does, and `FULL_CREDIT_32/RELATIVE_VALUE` is the one enabled
+pathway that accepts it. The flag is in the request digest, so a receipt made
+before this change and replayed under its key digests differently and is
+refused `IDEMPOTENCY_KEY_REUSED`, which is the honest answer. The Book
+passport's `evidence_date` is renamed `reporting_period`, because it is the
+analyst's declared period and never a date the host derived.
+
+## 2026-09-18 §83 — Report is served without a revision
+
+`GET /api/v1/cases/{case}/report` no longer requires `revision`. Named, it is
+served exactly as before. Unnamed, it answers the run's head revision, or, when
+the run has none, the accepted artifacts a first save would carry, with
+`SAVE_REVISION` available and judged by the same `canonical_payload`
+derivation the save makes — refused with that derivation's own code when it
+cannot be made — and sign, freeze and file refused `DELIVERABLE_NOT_FOUND`. The
+first save's success is what sets `?revision`, which is the filing chain's only
+front door in the workspace. `ReportBody.revision_id` and `payload_sha256` are
+nullable for that one state; `CommitteeBody` redeclares both required, and
+Committee still needs a named frozen revision. On a named revision that is not
+the head, `SAVE_REVISION` is refused `COMMAND_EXPECTATION_STALE`, the code its
+commit answers; the head rides the revision's own statement at no round trip.
+`IO_BUDGET["unsaved"] = 42`, measured on the LITE route and asserted with `==`.
+
+## 2026-09-18 §84 — Two refusal codes and migration `0029`
+
+- **`EVIDENCE_PACKING_MISMATCH`, 500, permanent.** Raised by
+  `citations._line_blocks` when the host's packing rule no longer reproduces a
+  source's stored block count. It replaces `EVIDENCE_NOT_AVAILABLE` there,
+  whose clearance ("pin a live source") the caller could not discharge; its own
+  names the operator's act, re-admitting the source under this build. Like the
+  code it replaces it is not in `outcomes._NOT_AN_EXPLANATION`, so behaviour at
+  a billed attempt is unchanged.
+- **`DELIVERABLE_ALREADY_SIGNED`, 409.** Migration `0029` adds the named
+  constraint `one_opinion_per_signer UNIQUE (case_id, revision_id, signed_by)`;
+  `sign_opinion_in` inserts `ON CONFLICT ON CONSTRAINT ... DO NOTHING` and
+  refuses when no row was written, leaving the transaction usable. A store that
+  already holds a doubled signature refuses the migration `STORE_SCHEMA_DRIFT`
+  before the DDL, in the pattern `0017` set, and deletes nothing: each row is
+  evidence an `OPINION_SIGNED` audit event names. `0029` is the 27th entry of
+  the ordered prefix because of the `0022`/`0023` gaps.
+- **The two filing digest checks stay.** The Completion Phase 12 audit called
+  them unreachable and proposed deleting them. They are unreachable through this
+  code and reachable through a row altered outside it, so they are kept as
+  tamper evidence, each with a test that gives it that cause.

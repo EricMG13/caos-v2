@@ -102,6 +102,9 @@ class RefusalCode(StrEnum):
     DELIVERABLE_MOVED_SINCE_SIGNING = "DELIVERABLE_MOVED_SINCE_SIGNING"
     DELIVERABLE_ALREADY_FILED = "DELIVERABLE_ALREADY_FILED"
     DELIVERABLE_ALREADY_FROZEN = "DELIVERABLE_ALREADY_FROZEN"
+    # `0029_one_opinion_per_signer`: this approver has already signed this
+    # revision. Its own code so a second press is not read as a wrong binding.
+    DELIVERABLE_ALREADY_SIGNED = "DELIVERABLE_ALREADY_SIGNED"
     APPROVER_NOT_INDEPENDENT = "APPROVER_NOT_INDEPENDENT"
     CASE_NOT_FOUND = "CASE_NOT_FOUND"
     SOURCE_PACK_EMPTY = "SOURCE_PACK_EMPTY"
@@ -112,6 +115,11 @@ class RefusalCode(StrEnum):
     SOURCE_EXTRACTION_TIMEOUT = "SOURCE_EXTRACTION_TIMEOUT"
     SOURCE_IDENTITY_INVALID = "SOURCE_IDENTITY_INVALID"
     EVIDENCE_NOT_AVAILABLE = "EVIDENCE_NOT_AVAILABLE"
+    # A live source whose stored block count this build's `GROUP_WIDTH` no
+    # longer reproduces: the host's packing rule moved under bytes it wrote.
+    # Distinct from EVIDENCE_NOT_AVAILABLE because pinning a live source cannot
+    # clear it -- the source is live -- and re-admitting it under this build can.
+    EVIDENCE_PACKING_MISMATCH = "EVIDENCE_PACKING_MISMATCH"
     # Phase 4 Task 4.4c: an evidence page the caller may not or cannot read.
     PAGE_NOT_AVAILABLE = "PAGE_NOT_AVAILABLE"
     CITATION_NOT_LOCATED = "CITATION_NOT_LOCATED"

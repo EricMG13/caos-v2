@@ -22,7 +22,14 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    TypeAdapter,
+)
 from pydantic.json_schema import models_json_schema
 
 from server.api.identity import GlobalRole
@@ -206,6 +213,7 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.DELIVERABLE_MOVED_SINCE_SIGNING: "Review and sign the current revision.",
     _C.DELIVERABLE_ALREADY_FILED: "Nothing; the deliverable is filed.",
     _C.DELIVERABLE_ALREADY_FROZEN: "Nothing; the deliverable is frozen.",
+    _C.DELIVERABLE_ALREADY_SIGNED: "Nothing; you have signed this revision.",
     _C.APPROVER_NOT_INDEPENDENT: "Ask an approver who did not author it.",
     _C.CASE_NOT_FOUND: "Name a case you may read.",
     _C.SOURCE_PACK_EMPTY: "Supply at least one document.",
@@ -216,6 +224,9 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.SOURCE_EXTRACTION_TIMEOUT: "Supply a simpler document.",
     _C.SOURCE_IDENTITY_INVALID: "Readmit the document.",
     _C.EVIDENCE_NOT_AVAILABLE: "Pin a live source for the evidence.",
+    _C.EVIDENCE_PACKING_MISMATCH: (
+        "An operator must re-admit the source under this build."
+    ),
     _C.PAGE_NOT_AVAILABLE: "Name a page of a live source pinned to this run.",
     _C.CITATION_NOT_LOCATED: "Quote whole tokens from delivered evidence.",
     _C.CITATION_AMBIGUOUS: "Quote enough text to locate it once.",
@@ -698,14 +709,16 @@ class BookPassport(BaseModel):
     `caos-forecast-v1` gives a scenario, and the one
     `server/qualification/matrix.py` already reads as `ExpectedForecast.scenario`
     -- so a base case and a downside are told apart in the field whose only job
-    is to tell them apart."""
+    is to tell them apart. IA_SPEC's "evidence date" is served as
+    `reporting_period`, the analyst's declared period from the pinned subject,
+    because the host derives no date from any admitted document."""
 
     model_config = _CLOSED
 
     definition: Text
     period: Text
     scenario: Text
-    evidence_date: Text
+    reporting_period: Text
     computed_at: AwareDatetime
     snapshot: Sha256
     method: Text
@@ -828,8 +841,11 @@ class ReportBody(BaseModel):
 
     case_id: UUID
     displayed_run_id: UUID
-    revision_id: UUID
-    payload_sha256: Sha256
+    # Both null on the one Report with no revision: a run nothing has been
+    # saved from, served with the artifacts a first save would carry. Committee
+    # serves only a frozen revision and redeclares both required.
+    revision_id: UUID | None
+    payload_sha256: Sha256 | None
     case_title: Text
     artifacts: Annotated[list[ReportArtifact], Field(max_length=ROUTE_NODES_MAX)]
     narrative: Annotated[
@@ -852,6 +868,8 @@ class FiledReceipt(BaseModel):
 
 
 class CommitteeBody(ReportBody):
+    revision_id: UUID
+    payload_sha256: Sha256
     state: Literal["frozen", "filed"]
     signed_by: Annotated[list[UUID], Field(max_length=1000)]
     frozen_by: UUID
@@ -1054,6 +1072,13 @@ class CreateRun(BaseModel):
     # ordinary run. Stated on every request, as every request field is: an
     # absent key is a malformed body, not a default.
     supersedes: UUID | None
+    # Whether the route carries the host's model extension, CP-CF (§6). A
+    # route-selection input like the pair above: it changes the resolved node
+    # list, so it is inside the route digest the pin carries (invariant 10).
+    # Refused `ROUTE_EXTENSION_OWNER_MISSING` on a pathway that does not run
+    # every artifact owner CP-CF reads. Strict: `"true"` or `1` is a malformed
+    # body, not a coerced yes, because the answer changes what the run pays for.
+    model_extension: StrictBool
 
 
 class RunCreated(BaseModel):

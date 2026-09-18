@@ -133,7 +133,8 @@ def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
             with ThreadPoolExecutor(max_workers=4) as pool:
                 outcomes = list(pool.map(race, range(4)))
             expected = {
-                "sign": ["OK", "OK"],
+                # One approver signing twice at once: `0029` keeps one.
+                "sign": ["OK", "DELIVERABLE_ALREADY_SIGNED"],
                 "freeze": ["OK", "DELIVERABLE_ALREADY_FROZEN"],
                 "file": ["OK", "DELIVERABLE_ALREADY_FILED"],
             }[stage]
@@ -142,7 +143,8 @@ def test_concurrent_sign_freeze_and_file_across_two_cases_keep_one_chain_each(
         for held, revision, _, _ in cases:
             actions = [entry.action for entry in audit_trail(conn, held.case_id)]
             assert (
-                actions.count("DELIVERABLE_FROZEN")
+                actions.count("OPINION_SIGNED")
+                == actions.count("DELIVERABLE_FROZEN")
                 == actions.count("DELIVERABLE_FILED")
                 == 1
             )

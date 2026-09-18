@@ -14,6 +14,17 @@ rectangles are crop-relative with y down (§44.3), a v1 row's are pdfminer's
 layout space with y up (§44.4), and a `caos.plain-text` row's are the cells of
 its recorded fixed pitch. PDF frames come from the §47 child.
 
+The store is read first and the read unit is ended before the document is
+read or the child is run, so an extraction that takes seconds holds no
+transaction or snapshot on the request's connection. That costs invariant 1
+nothing. The membership row is a plain read with no lock, so a withdrawal
+committed after it was never excluded by holding the transaction open: the
+check is the read's, at the instant of the read, whether the extraction runs
+inside that unit or after it. What is served after it is the stored lines that
+read returned and a frame -- four numbers and an axis, no document text --
+derived from bytes that are content-addressed and re-verified against the pin
+by `BlobStore.get`, so nothing the extraction produces depends on the store.
+
 Everything unavailable -- not pinned, withdrawn, re-extracted, a page the
 document does not have, bytes that no longer hash to the pin, a child that
 refused -- is one `PAGE_NOT_AVAILABLE`, raised outside any `except` so no
@@ -103,8 +114,9 @@ def read_page(  # noqa: PLR0913 -- the store, the blobs and one page's four ids
     limits: AdmissionLimits = DEFAULT_LIMITS,
 ) -> PageRead:
     """Page `page` of `source_id` as the run `run_id` of `case_id` pinned it,
-    or `PAGE_NOT_AVAILABLE`. Authorisation is the caller's; the caller owns
-    the read transaction."""
+    or `PAGE_NOT_AVAILABLE`. Authorisation is the caller's, and must be read
+    before this is called: this ends the caller's read unit once the page's
+    rows are fetched, before the document is read or its frame extracted."""
     if (
         any(not isinstance(value, UUID) for value in (case_id, run_id, source_id))
         or type(page) is not int
@@ -112,6 +124,10 @@ def read_page(  # noqa: PLR0913 -- the store, the blobs and one page's four ids
     ):
         raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     rows = _rows(conn, (case_id, run_id, source_id, page))
+    # A read unit: rolling it back sends what the connection's exit would
+    # have sent as COMMIT, so this costs no round trip the budget does not
+    # already pay, and the blob read and the child below run with none open.
+    conn.rollback()
     if not rows:
         raise Refusal(RefusalCode.PAGE_NOT_AVAILABLE)
     (document, identity) = (str(rows[0][0]), str(rows[0][1]))

@@ -23,7 +23,7 @@ from command_fixtures import command_client, command_headers, member
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from httpx import Response
-from test_deliverable_canonical import harness, lite, route
+from test_deliverable_canonical import _accept, harness, lite, route
 from test_execution_freshness import _Harness
 from test_revisions import _save
 from test_run_commands import _Counting
@@ -32,6 +32,8 @@ from server.api.app import app, methodology_bundle, store_connection
 from server.api.commands import deliverable, members
 from server.api.commands._request import require_case_admin
 from server.api.deps import actor_from_request
+from server.api.reads import reports as reports_read
+from server.boundary_text import BoundaryText
 from server.deliverable.filing import Receipt, filing_payload, sign_opinion
 from server.refusals import Refusal
 from server.store import StoreConnection, connect
@@ -43,6 +45,7 @@ from server.store.commands import (
     record_receipt,
 )
 from server.store.members import Standing, standing_of
+from server.store.runs import create_case, start_run
 
 __all__ = ["command_client", "harness", "lite", "route"]
 
@@ -461,7 +464,12 @@ def test_every_filing_control_the_report_shows_answers_as_it_was_shown(
     """Step 5's gate for this section: a control shown available succeeds and a
     control shown refused refuses with exactly the code shown -- walked over
     every state the chain distinguishes, judged by the document read
-    immediately before each command is sent."""
+    immediately before each command is sent.
+
+    All four, the save included: the first save below is made at the head and
+    succeeds, and every later one is shown the revision it superseded, so the
+    walk holds both the save that is offered and the one refused
+    `COMMAND_EXPECTATION_STALE`."""
     signer, freezer, filer = (_approver(lite) for _ in range(3))
     revision = _save(lite)
 
@@ -474,18 +482,18 @@ def test_every_filing_control_the_report_shows_answers_as_it_was_shown(
             assert answer.json()["code"] == shown, (action, answer.text)
 
     # Unsigned: freeze and file are refused, the sign is not.
-    for action in _FILING[1:]:
+    for action in _FILING:
         walk(freezer, action)
     walk(signer, "SIGN_OPINION")
     # Signed: the signer is offered neither the freeze nor the filing.
-    for action in _FILING[1:]:
+    for action in _FILING:
         walk(signer, action)
     walk(freezer, "FREEZE_DELIVERABLE")
     # Frozen: the signer and the freezer are refused the filing; a third is not.
     for actor in (signer, freezer, filer):
         walk(actor, "FILE_DELIVERABLE")
     # Filed: every one of the three is refused, each with its own code.
-    for action in _FILING[1:]:
+    for action in _FILING:
         walk(filer, action)
     # And a member below the floor is refused every one of them.
     reader = member(lite.conn, lite.case_id, Standing.READER)
@@ -494,15 +502,120 @@ def test_every_filing_control_the_report_shows_answers_as_it_was_shown(
     }
 
 
+def _unsaved(client: TestClient, lite: _Harness, actor: UUID) -> Response:
+    """The Report for the run with no revision named, as the workspace opens it."""
+    answer: Response = client.get(
+        f"{_case(lite)}/report?run={lite.run_id}", headers=command_headers(actor)
+    )
+    return answer
+
+
+def _judged(document: dict[str, Any]) -> dict[str, str | None]:
+    return {
+        view["action"]: view["refusal"] and view["refusal"]["code"]
+        for view in document["chrome"]["actions"]
+    }
+
+
+def test_a_run_with_no_revision_is_served_a_report_that_offers_its_first_save(
+    filing_client: TestClient, lite: _Harness
+) -> None:
+    """The filing chain's front door. Without a revision the Report names the
+    run's accepted artifacts as a save would carry them and offers the save
+    that makes the first revision; after it, the same address serves the head.
+    """
+    conn = lite.conn
+    approver = _approver(lite)
+    counted = _Counting(conn)
+    app.dependency_overrides[store_connection] = lambda: counted
+
+    first = _unsaved(filing_client, lite, approver)
+
+    assert first.status_code == 200, first.text
+    assert counted.executed == reports_read.IO_BUDGET["unsaved"]
+    document = first.json()
+    body = document["body"]
+    assert document["observed_empty"] is True
+    assert (body["revision_id"], body["payload_sha256"], body["narrative"]) == (
+        None,
+        None,
+        [],
+    )
+    assert body["displayed_run_id"] == str(lite.run_id)
+    assert [a["route_node_id"] for a in body["artifacts"]] == [
+        n.route_node_id for n in lite.route.nodes
+    ]
+    assert _judged(document) == {
+        "SAVE_REVISION": None,
+        "SIGN_OPINION": "DELIVERABLE_NOT_FOUND",
+        "FREEZE_DELIVERABLE": "DELIVERABLE_NOT_FOUND",
+        "FILE_DELIVERABLE": "DELIVERABLE_NOT_FOUND",
+    }
+
+    saved = _post(
+        filing_client,
+        f"{_case(lite)}/runs/{lite.run_id}/revisions",
+        approver,
+        {"expected_revision_id": body["revision_id"], "narrative": []},
+    )
+
+    assert saved.status_code == 201, saved.text
+    head = _unsaved(filing_client, lite, approver).json()
+    assert head["body"]["revision_id"] == saved.json()["revision_id"]
+    assert head["observed_empty"] is False
+    assert _judged(head)["SAVE_REVISION"] is None
+    assert _judged(head)["SIGN_OPINION"] is None
+
+
+def test_a_first_save_the_run_cannot_derive_is_shown_refused_with_its_code(
+    command_client: TestClient, harness: _Harness
+) -> None:
+    """A run with a pinned node unaccepted cannot be saved, and the Report says
+    so with the code the save answers rather than offering it. It serves no
+    artifact either: nothing it could show has been proven."""
+    app.dependency_overrides[methodology_bundle] = lambda: harness.bundle
+    _accept(harness, "CP-0")
+    writer = member(harness.conn, harness.case_id, Standing.WRITER)
+
+    document = _unsaved(command_client, harness, writer)
+
+    assert document.status_code == 200, document.text
+    assert document.json()["body"]["artifacts"] == []
+    shown = _judged(document.json())["SAVE_REVISION"]
+    assert shown == "DELIVERABLE_PAYLOAD_INVALID"
+    answer = _post(
+        command_client,
+        f"{_case(harness)}/runs/{harness.run_id}/revisions",
+        writer,
+        {"expected_revision_id": None, "narrative": []},
+    )
+    assert answer.json()["code"] == shown
+
+
+def test_a_report_without_a_revision_is_private_to_the_runs_case(
+    filing_client: TestClient, lite: _Harness
+) -> None:
+    """No revision named, the run is what is selected, so an unknown run and a
+    run of another case get the one answer a run section gives either."""
+    approver = _approver(lite)
+    other = create_case(lite.conn, BoundaryText.of("Other case"))
+    foreign = start_run(lite.conn, other)
+    lite.conn.commit()
+    for run in (uuid4(), foreign, None):
+        path = f"{_case(lite)}/report" + ("" if run is None else f"?run={run}")
+        answer = filing_client.get(path, headers=command_headers(approver))
+        assert answer.status_code == 404, answer.text
+        assert answer.json()["code"] == "RUN_NOT_FOUND"
+
+
 def test_each_new_command_meets_its_declared_store_budget(
     filing_client: TestClient, lite: _Harness
 ) -> None:
-    """The declared `IO_BUDGET` is measured, and measured on every command.
+    """Each filing command's declared cost is measured, and met exactly.
 
     Freeze is measured beside save because it pays the same price: `freeze_in`
     re-proves the revision under the lock, which is the whole payload
-    derivation again, so "the ceiling the costliest command stays under" is a
-    claim about two commands and not one.
+    derivation again. The membership commands still share one ceiling.
 
     The withdrawal is sent last on purpose: it takes the run's one source out
     of the live set, and every later derivation of this run's payload would
@@ -519,31 +632,36 @@ def test_each_new_command_meets_its_declared_store_budget(
     admin = member(conn, case_id, Standing.ADMIN)
     target = member(conn, case_id, Standing.READER)
 
-    sent = [
+    # The filing commands each declare their own cost and are held to it
+    # exactly, as every section read is: a ceiling shared by four commands let
+    # the signature grow from fourteen round trips to sixty unnoticed.
+    exact = [
         (
-            deliverable.IO_BUDGET,
+            deliverable.SAVE_IO,
             f"{_case(lite)}/runs/{lite.run_id}/revisions",
             writer,
             {"expected_revision_id": str(revision), "narrative": []},
         ),
         (
-            deliverable.IO_BUDGET,
+            deliverable.SIGN_IO,
             f"{_case(lite)}/revisions/{revision}/signature",
             signer,
             {"payload_sha256": digest},
         ),
         (
-            deliverable.IO_BUDGET,
+            deliverable.FREEZE_IO,
             f"{_case(lite)}/revisions/{revision}/freeze",
             freezer,
             {"payload_sha256": digest},
         ),
         (
-            deliverable.IO_BUDGET,
+            deliverable.FILE_IO,
             f"{_case(lite)}/revisions/{revision}/filing",
             filer,
             {"payload_sha256": digest},
         ),
+    ]
+    bounded = [
         (
             members.IO_BUDGET,
             f"{_case(lite)}/members",
@@ -558,11 +676,21 @@ def test_each_new_command_meets_its_declared_store_budget(
             {},
         ),
     ]
-    for budget, path, actor, body in sent:
-        counted.executed = 0
-        answer = filing_client.post(path, headers=command_headers(actor), json=body)
-        assert answer.status_code in (200, 201), (path, answer.text)
-        assert 0 < counted.executed <= budget, (path, counted.executed)
+    for held_exactly, sent in ((True, exact), (False, bounded)):
+        for budget, path, actor, body in sent:
+            counted.executed = 0
+            answer = filing_client.post(path, headers=command_headers(actor), json=body)
+            assert answer.status_code in (200, 201), (path, answer.text)
+            if held_exactly:
+                assert counted.executed == budget, (path, counted.executed)
+            else:
+                assert 0 < counted.executed <= budget, (path, counted.executed)
+    assert deliverable.IO_BUDGET == max(
+        deliverable.SAVE_IO,
+        deliverable.SIGN_IO,
+        deliverable.FREEZE_IO,
+        deliverable.FILE_IO,
+    )
 
 
 def _chain_over_http(client: TestClient, lite: _Harness) -> tuple[UUID, UUID]:

@@ -334,8 +334,10 @@ def _line_blocks(conn: StoreConnection, source_id: UUID) -> dict[int, tuple[str,
         # seals extracted evidence -- so the rule has: this source was packed
         # under a different `GROUP_WIDTH`. Every id past the disagreement names
         # a row no source carries, and asking whether such a block was delivered
-        # answers about the citation when the fault is the host's own reading.
-        raise Refusal(RefusalCode.EVIDENCE_NOT_AVAILABLE)
+        # answers about the citation when the fault is the host's own reading --
+        # which is why the code is its own: the source is live, so "pin a live
+        # source" cannot clear it, and re-admission under this build can.
+        raise Refusal(RefusalCode.EVIDENCE_PACKING_MISMATCH)
     return block_ids_by_line(counts)
 
 
@@ -354,7 +356,7 @@ def _group_counts(conn: StoreConnection, source_id: UUID) -> dict[int, int]:
 
     `line_groups` normalises to NFC before it measures, and this counts the
     stored characters instead. Where the two disagree the totals disagree, and
-    `_line_blocks`'s `sum(counts) != stored` guard refuses `EVIDENCE_NOT_AVAILABLE`
+    `_line_blocks`'s `sum(counts) != stored` guard refuses `EVIDENCE_PACKING_MISMATCH`
     rather than handing out an id no row carries -- so a normalisation that
     changes a length is loud, not silent.
     """

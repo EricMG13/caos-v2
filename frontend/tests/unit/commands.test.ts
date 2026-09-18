@@ -103,6 +103,7 @@ describe("the command transport", () => {
       profile_id: "FULL_CREDIT_ASSESSMENT",
       selection_id: "S1",
       supersedes: null,
+      model_extension: false,
     });
     expect(fetchSpy.mock.calls[1]![0]).toBe(`/api/v1/cases/${CASE}/runs`);
     expect(fetchSpy.mock.calls[1]![1].method).toBe("POST");
@@ -111,6 +112,7 @@ describe("the command transport", () => {
         profile_id: "FULL_CREDIT_ASSESSMENT",
         selection_id: "S1",
         supersedes: null,
+        model_extension: false,
       }),
     );
 
