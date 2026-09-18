@@ -237,7 +237,7 @@ export function Workspace({ section }: { section: Section }) {
               <LedgerProvider>
                 <RegionState status={status} onReload={reload}>
                   {(doc) => (
-                    <SectionBoundary key={mountKey}>
+                    <SectionBoundary key={mountKey} resetOn={doc.observed_at}>
                       <View key={mountKey} document={doc} tab={activeTab} />
                     </SectionBoundary>
                   )}
