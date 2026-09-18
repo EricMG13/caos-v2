@@ -18,7 +18,7 @@ contracts.
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **The completion remainder is landed on `completion/remainder`** (record below, three waves), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§87. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
+| Current task | **Owner decisions §88 and membership §89 on `completion/owner-decisions`** (record under "Owner decisions and membership"). Before that: **the completion remainder is landed on `completion/remainder`** (record below, three waves), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§87. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
@@ -111,9 +111,31 @@ run locally, for the Trivy pin (the Completion Phase 13 ledger entry).
 carries either a trigger condition that has not fired or an input only the owner
 or the vendor can give: Phase 13's identity-provider setting, TLS material and
 authorized nightly; Task 10.1's vendor request; Phases 9-11's documents,
-live-run authorization and vendor requests; the owner's D3 second half (the
-eight retry-shaped 400s); and the D2 Book/Admin decision the membership controls
-wait on.
+live-run authorization and vendor requests. The owner's D3 second half and the
+membership controls were then taken -- next section.
+
+### Owner decisions and membership — 18 September 2026
+
+Branch `completion/owner-decisions` over `79c7f3e`. The owner: "resume plan to
+completion, apply your recommendations".
+
+| Commit | What | Decision |
+|---|---|---|
+| `88a32be` | the eight retry-shaped 400s: `PROVIDER_UNAVAILABLE` 503 transient, the other seven 500 permanent; Task 10.1 declined to the vendor; Task 10.3(b) declined, only QA `Passed` releases CP-6 | §88 |
+| `ae3f418`, `afb2cc7` | grant and revoke on Directory's Case access panel (O21); `CaseRow.members` served to the case's ADMIN only, `CaseRow.actions`; the journey presses both | §89 |
+
+**Acceptance review** (tracked definition, Opus 5 `xhigh`): §88 ACCEPT WITH
+FINDINGS; §89 REJECT as landed on one P1 -- the journey's `getByLabel("Standing")`
+also matched the Grant button's `aria-label`, a strict-mode violation on every
+engine that unit tests could not see. Fixed with a role query, together with
+its P3s: each case a named group, the Book's listing serving `members=None`
+rather than an empty tuple, §88 saying whose recommendation the statuses were
+and that 503 licenses no worker retry, and §89 and the ledger recording the
+64-member bound and the widened tokenless-host disclosure.
+
+**Nothing buildable remains in the plan.** What is left is only what the section
+above names: documents, live-run authorization, an identity-provider setting,
+TLS material and vendor answers.
 
 ## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
 

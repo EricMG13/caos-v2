@@ -84,7 +84,7 @@ def test_cases_for_member_costs_one_query_whatever_the_case_count(
     conn.commit()
     counter = _CountingConnection(conn)
 
-    listed = cases_for_member(counter, user_id=user, limit=10, members_limit=0)  # type: ignore[arg-type]
+    listed = cases_for_member(counter, user_id=user, limit=10)  # type: ignore[arg-type]
 
     assert len(listed) == 5
     assert all(row.latest_run is not None for row in listed)
@@ -104,7 +104,7 @@ def test_store_listings_are_typed_rows(
     conn.commit()
     snapshot_source_set(conn, case_id)
 
-    [listing] = cases_for_member(conn, user_id=user, limit=1, members_limit=0)
+    [listing] = cases_for_member(conn, user_id=user, limit=1)
     listed = case_sources(conn, case_id=case_id, limit=10)
 
     assert isinstance(listing, CaseListing)
@@ -121,3 +121,21 @@ def test_store_listings_are_typed_rows(
     assert all(isinstance(source, CaseSource) for source in listed.sources)
     assert [type(v) for v in listed.set_versions] == [CaseSetVersion]
     assert listed.sources[0].set_versions == (1,)
+
+
+def test_a_listing_that_asks_for_no_members_serves_none_not_empty(
+    case: tuple[StoreConnection, UUID],
+) -> None:
+    """The Book lists without `members_limit`: an ADMIN row then says "not
+    served" (`None`), never "no members" (an empty tuple), which is the
+    distinction `CaseRow.members` carries on the wire."""
+    conn, case_id = case
+    user = uuid4()
+    grant(conn, case_id=case_id, user_id=user, standing=Standing.ADMIN)
+    conn.commit()
+
+    [unasked] = cases_for_member(conn, user_id=user, limit=1)
+    [asked] = cases_for_member(conn, user_id=user, limit=1, members_limit=5)
+
+    assert unasked.members is None
+    assert asked.members == ((user, Standing.ADMIN),)

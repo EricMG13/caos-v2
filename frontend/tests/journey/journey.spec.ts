@@ -1127,8 +1127,10 @@ test.describe.serial("journey", () => {
     // the revocation then do to a reader's reads is asserted through the edge.
     await page.goto("/directory/");
     const access = page.locator(`[data-access='${caseId}']`);
-    await access.getByLabel("Member id").fill(READER_USER_ID);
-    await access.getByLabel("Standing").selectOption("READER");
+    await access.getByLabel("Member id", { exact: true }).fill(READER_USER_ID);
+    // A role query, not `getByLabel`: Playwright's label match is a substring
+    // and also reads `aria-label`, so "Standing" would match the Grant button.
+    await access.getByRole("combobox", { name: "Standing", exact: true }).selectOption("READER");
     await access.getByRole("button", { name: "Grant standing" }).click();
     await expect(access.locator(`[data-member='${READER_USER_ID}']`)).toContainText("READER");
 

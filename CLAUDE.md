@@ -347,6 +347,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `test_a_case_administrator_grants_and_revokes_from_case_access`). The
   journey grants and revokes on the surface. The member is named by id, since
   the host holds no directory of people to pick from.
+- **A case past 64 live members cannot be managed whole from the surface.**
+  §89's `MEMBERS_MAX` cuts the list Directory serves an administrator, and the
+  document says `partial` without naming which row was cut, so a member past
+  the bound has no Revoke control; the command still answers for them
+  (`tests/test_directory_upload_sections.py::test_a_member_list_past_its_bound_is_truncated_with_a_note`).
+  *Upgrade:* a per-case member read with its own paging, the day a case has a
+  sixty-fifth member.
 - ~~**A worktree outside `/Users` cannot run `make smoke-production`.**~~
   Closed by the upgrade named: `tests/journey/run.py` refuses, on macOS and
   before building anything, a repository root whose `./tests` mount source is
@@ -538,7 +545,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   that passes the loopback bind and the Host check and knows a member's UUID
   reads that member's cases in full: the section documents, the event stream,
   evidence pages including document text, and the report and committee
-  deliverables. Writes are closed -- every governed command refuses a global
+  deliverables. Since §89 an ADMIN's Directory also names every co-member's id,
+  so one administrator's id yields every co-member's, and so their cases. Writes are closed -- every governed command refuses a global
   READER before it reaches the store -- so this is disclosure, not tampering.
   It needs the host process, which binds loopback only; the documented
   deployment is an authenticating edge that sets both headers, where the token

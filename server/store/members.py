@@ -111,39 +111,53 @@ class CaseListing:
     standing: Standing
     live_sources: int
     latest_run: RunListing | None
-    # The case's live members, only where the listed user is its ADMIN; at
-    # most `members_limit`, so a caller asking one past its bound can tell a
-    # truncated list from a full one.
+    # The case's live members, only where the listed user is its ADMIN and the
+    # caller asked for them; at most `members_limit`, so a caller asking one
+    # past its bound can tell a truncated list from a full one.
     members: tuple[tuple[UUID, Standing], ...] | None
 
 
 def cases_for_member(
-    conn: StoreConnection, *, user_id: UUID, limit: int, members_limit: int
+    conn: StoreConnection,
+    *,
+    user_id: UUID,
+    limit: int,
+    members_limit: int | None = None,
 ) -> list[CaseListing]:
     """The cases `user_id` holds live standing on, newest first, at most `limit`.
 
     One query whatever the case count: the source count, the latest run and an
-    administered case's members are lateral reads, not a query per row. A
+    administered case's members are subqueries, not a query per row. A
     revoked membership lists nothing, and a global role is not consulted --
     standing is per case. Caller owns the read transaction.
     """
-    rows = conn.execute(
-        "SELECT c.case_id, c.title, c.created_at, m.standing,"
-        " (SELECT count(*) FROM live_sources s WHERE s.case_id = c.case_id),"
-        " r.run_id, r.status, r.created_at, rr.profile_id, rr.selection_id,"
-        " CASE WHEN m.standing = 'ADMIN' THEN (SELECT coalesce(json_agg("
+    # Without `members_limit` no member is read and every row's `members` is
+    # `None`, "not served" -- never an empty tuple, which would say "none".
+    members = (
+        "NULL"
+        if members_limit is None
+        else "CASE WHEN m.standing = 'ADMIN' THEN (SELECT coalesce(json_agg("
         "  json_build_array(x.user_id, x.standing) ORDER BY x.user_id), '[]')"
         "  FROM (SELECT o.user_id, o.standing FROM case_members o"
         "   WHERE o.case_id = c.case_id AND o.revoked_at IS NULL"
         "   ORDER BY o.user_id LIMIT %s) x) END"
-        " FROM case_members m JOIN cases c ON c.case_id = m.case_id"
+    )
+    params = (
+        (user_id, limit) if members_limit is None else (members_limit, user_id, limit)
+    )
+    rows = conn.execute(
+        "SELECT c.case_id, c.title, c.created_at, m.standing,"
+        " (SELECT count(*) FROM live_sources s WHERE s.case_id = c.case_id),"
+        " r.run_id, r.status, r.created_at, rr.profile_id, rr.selection_id, "
+        + members
+        + " FROM case_members m JOIN cases c ON c.case_id = m.case_id"
         " LEFT JOIN LATERAL (SELECT run_id, status, created_at FROM runs"
         "  WHERE runs.case_id = c.case_id"
         "  ORDER BY created_at DESC, run_id DESC LIMIT 1) r ON true"
         " LEFT JOIN run_routes rr ON rr.run_id = r.run_id"
         " WHERE m.user_id = %s AND m.revoked_at IS NULL"
         " ORDER BY c.created_at DESC, c.case_id DESC LIMIT %s",
-        (members_limit, user_id, limit),
+        params,
     ).fetchall()
     return [
         CaseListing(
