@@ -201,7 +201,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     Chrome: frozenset({"subject", "served_role", "actions"}),
     ActionView: frozenset({"action", "refusal"}),
     WorkView: frozenset({"state", "stop_code", "cancel_requested"}),
-    RouteChoice: frozenset({"profile_id", "selection_id"}),
+    RouteChoice: frozenset({"profile_id", "selection_id", "accepts_model_extension"}),
     DirectoryDocument: ENVELOPE,
     UploadDocument: ENVELOPE,
     RunSectionDocument: ENVELOPE,

@@ -472,12 +472,20 @@ class WorkView(BaseModel):
 
 
 class RouteChoice(BaseModel):
-    """A (profile, selection) pair the adapter executes (`ADAPTER_ROUTES`)."""
+    """A (profile, selection) pair the adapter executes (`ADAPTER_ROUTES`).
+
+    `accepts_model_extension` is the create command's own route resolution
+    asked in advance: true where the pathway runs every owner CP-CF reads, so
+    a `CreateRun` asking for the extension would not be refused
+    `ROUTE_EXTENSION_OWNER_MISSING`. Advisory like every availability the
+    surface draws -- the command resolves again at commit and is the answer.
+    """
 
     model_config = _CLOSED
 
     profile_id: Id
     selection_id: Id
+    accepts_model_extension: StrictBool
 
 
 class BlockedByView(BaseModel):

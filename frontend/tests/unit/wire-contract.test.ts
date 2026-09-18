@@ -342,7 +342,13 @@ function runSection(): { [key: string]: Json } {
         supersedes: null,
         superseded_by: null,
       },
-      route_choices: [{ profile_id: "LITE_CREDIT_22", selection_id: "LITE_EARNINGS_UPDATE" }],
+      route_choices: [
+        {
+          profile_id: "LITE_CREDIT_22",
+          selection_id: "LITE_EARNINGS_UPDATE",
+          accepts_model_extension: false,
+        },
+      ],
     },
     SUBJECT,
   );

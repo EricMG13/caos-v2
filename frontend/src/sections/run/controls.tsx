@@ -228,14 +228,23 @@ export function CreateRunControl({
 }) {
   const [pick, setPick] = useState(0);
   const [predecessor, setPredecessor] = useState(supersedes ?? "");
+  const [extension, setExtension] = useState(false);
   const [, setParams] = useSearchParams();
   const { pending, result, run } = useCommand<RunCreated>();
+  const extensionWhy = useId();
   const chosen = choices[pick] ?? null;
   const named = predecessor.trim();
+  // The choice says whether its route can carry CP-CF (the server's own
+  // resolution, asked in advance); the command resolves again at commit, so
+  // this only keeps the form from offering a press it knows is refused.
+  const accepts = chosen?.accepts_model_extension ?? false;
   const request: CreateRun | null = chosen
-    ? // The model extension is requestable over the API only: this form
-      // offers no control for it yet, so it states the ordinary answer.
-      { ...chosen, supersedes: named === "" ? null : named, model_extension: false }
+    ? {
+        profile_id: chosen.profile_id,
+        selection_id: chosen.selection_id,
+        supersedes: named === "" ? null : named,
+        model_extension: accepts && extension,
+      }
     : null;
   return (
     <section className="pnl" data-create-run>
@@ -250,9 +259,12 @@ export function CreateRunControl({
               <select
                 data-route-select
                 value={pick}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                  setPick(Number(event.target.value))
-                }
+                onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                  // A new route is a new question: the extension is asked
+                  // for again rather than carried over from the last route.
+                  setPick(Number(event.target.value));
+                  setExtension(false);
+                }}
               >
                 {choices.map((choice, index) => (
                   <option key={`${choice.profile_id}:${choice.selection_id}`} value={index}>
@@ -272,6 +284,27 @@ export function CreateRunControl({
                 }
               />
             </label>
+            <label className="fopt">
+              <input
+                type="checkbox"
+                data-model-extension
+                checked={accepts && extension}
+                // Refused, not removed: it stays focusable and says why
+                // (IA_SPEC.md 2), and a press on it changes nothing.
+                aria-disabled={accepts ? undefined : true}
+                aria-describedby={accepts ? undefined : extensionWhy}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  if (accepts) setExtension(event.target.checked);
+                }}
+              />
+              Include the model extension (CP-CF)
+            </label>
+            {accepts ? null : (
+              <div className="note" id={extensionWhy} data-model-extension-unavailable>
+                This route does not run every module CP-CF reads, so the server refuses the
+                extension on it (ROUTE_EXTENSION_OWNER_MISSING).
+              </div>
+            )}
             <RefusedControl
               refusal={action ? action.refusal : null}
               className="rb acc"
