@@ -224,6 +224,9 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.SOURCE_EXTRACTION_TIMEOUT: "Supply a simpler document.",
     _C.SOURCE_IDENTITY_INVALID: "Readmit the document.",
     _C.EVIDENCE_NOT_AVAILABLE: "Pin a live source for the evidence.",
+    _C.EVIDENCE_PACKING_MISMATCH: (
+        "An operator must re-admit the source under this build."
+    ),
     _C.PAGE_NOT_AVAILABLE: "Name a page of a live source pinned to this run.",
     _C.CITATION_NOT_LOCATED: "Quote whole tokens from delivered evidence.",
     _C.CITATION_AMBIGUOUS: "Quote enough text to locate it once.",
