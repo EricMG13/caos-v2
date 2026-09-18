@@ -1,5 +1,25 @@
 # The delivery backlog — measured 18 September 2026
 
+> **Superseded in its central claim, 18 September 2026, later the same day.**
+> This file says main is "mostly behind" this branch. Measured against the
+> merge itself rather than against file lists, that is wrong. `git merge-tree`
+> of `delivery/task-21` into `gh-origin/main` (`9b9b584`) conflicts in **195
+> files**, `delivery/phase-12` in 211, and `HEAD` in 218. For each conflicted
+> file, the test was whether main's blob appears anywhere in this branch's own
+> history of that file. **125 pass**: main holds an older state of our own
+> file, and our version wins without argument. **70 do not**: main has content
+> this branch never had. They sit in the core, including `server/api/edge.py`,
+> `deps.py` and `app.py`, `server/store/__init__.py`,
+> `server/methodology/canonical.py` and `handoff.py`, CI and the Dockerfile.
+> In each sampled case both sides changed the file by a similar amount since
+> the merge base. Main's own stream, the `deploy/*` pull requests #312 to
+> #320, has been refactoring those same files: de-privatised helpers,
+> `committed_unit`, the extracted edge helpers. **None of the snapshot pull
+> requests below can merge as they stand.** Delivery now needs one deliberate
+> reconciliation of the two streams, with the `deploy/*` stream paused while
+> it happens. The 70 real conflicts are a task, with the full gate after it,
+> not a side effect of opening a pull request.
+
 `codex/execute-repair-plan` is `abb509e`; `main` is `971c69f`. This file records
 what main is missing, how it was measured, and what the options cost. It is a
 record for the owner, who alone performs delivery: nothing in this repository
