@@ -908,7 +908,12 @@ nobody reads the clause as satisfied:
 
 **Fixes:** O23–O26.
 
-**Work:** async store and the frontier's `gather` (13.1); second-worker
+**Work:** ~~async store and~~ the frontier's concurrent pass (13.1 -- **landed
+18 September 2026**, §80: threads rather than `gather`, and the async store
+**declined** rather than deferred, because the wait is a provider call and both
+that socket and psycopg's release the interpreter lock; what the exit check
+needed instead was `independent_batch`, a rule the spec does not state);
+second-worker
 safety in the race suite (13.2); `LISTEN`/`NOTIFY`, a stream cap, worker
 readiness, the frame outside the transaction (13.3); the signed identity
 assertion or mTLS, TLS in the smoke stack, the smoke stack in CI (13.4); store

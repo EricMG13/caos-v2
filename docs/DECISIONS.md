@@ -4039,3 +4039,71 @@ also asked for one on `compose.smoke.yaml`'s worker. That service runs
 `journey.worker`, a test double; a healthcheck there would measure the double
 and not the product, and the real worker is not in compose at all. It is owed
 the day `server/engine/worker.py` itself runs in a compose stack.
+
+
+## 2026-09-18 §80 — A frontier pass runs its independent nodes at once, on threads, opt-in
+
+Completion Phase 13.1. `docs/REBUILD_PLAN.md` Phase 4 and `SYSTEM_SPEC.md` §4
+both write the loop as `await gather(*(run_node(n) for n in ready))`, and the
+ledger entry says "the loop's shape does not change, only the `for` becomes a
+`gather`". Two of those three claims turn out to be wrong, and this entry is
+what they are replaced by.
+
+**Threads, not `asyncio`.** What a wide frontier waits on is a provider call,
+and both that socket and psycopg's release the interpreter lock while they
+block, so a `ThreadPoolExecutor` over the batch buys the whole of the overlap.
+A `gather` buys the same overlap at the price of recolouring 152 store
+functions and all 48 of their server-side callers, plus the 78 test modules
+that drive them — a change whose blast radius is the entire store for a
+latency win the stdlib already gives. O23's "async store" is therefore
+**declined** rather than deferred: it is not what this exit check needs. What
+would need it is an async *API* holding unpooled connections, which is a
+different problem with its own entry.
+
+**The loop's shape does change, because the frontier is not a safe batch.**
+`frontier` offers every node whose *blocking* inputs are met, and a soft edge
+does not block — so it can offer a node together with one of its own OPTIONAL
+or ADVISORY upstreams. `execute_handoff` binds an attempt to the upstream
+accepted when its prompt was built and refuses when another of its inputs is
+accepted during the call, so running that pair together buys a billed attempt
+that is then thrown away: money spent with nobody choosing to spend it.
+`route.independent_batch` is the rule — greedy in route order over the
+transitive closure of **every** edge type, dropping any node that reaches or is
+reached by one already chosen. Reading only the blocking edges would call the
+one dangerous pair independent, which is the single wrong answer available.
+
+**Invariant 10 is untouched.** The batch is a pure function of the pinned route
+and the frontier, and the frontier is recomputed from the store every pass, so
+the same pins choose the same nodes in the same order. What changes is when
+they run, never which. A node left out of a batch is not deferred or queued: it
+is simply in the next pass's frontier.
+
+**Opt-in, through one factory.** `Execution.per_node` returns a store
+connection *and* a provider bound to it, because neither is any use alone — a
+node's pre-call unit opens a transaction under the case lock, and
+`ModuleProvider` reads the store to build its prompt. One field rather than two
+so it cannot be half-configured. `None` — every direct caller, the harness and
+the suite — keeps the loop exactly sequential, which matters because those
+callers drive a run on a connection they own and hold open around it. The
+worker supplies it. A batch of one opens no connection and starts no thread,
+which is every LITE route this build enables.
+
+**The lease is shared across those connections on purpose.** It fences the
+*run*, and every write rechecks the token it was taken under, so two nodes of
+one run writing under one lease is the claim working rather than a hole in it.
+
+**Every node is awaited even after one fails.** A call already in flight will
+be billed whatever the loop decides, so abandoning its result would pay for an
+answer nobody reads — the same reasoning the worker applies to SIGTERM. The
+first failure is then re-raised, or `False` returned for a validated Blocked
+handoff.
+
+**What is proven and what is not.** Proven offline, on `RELATIVE_VALUE` —
+the one enabled route with a wide frontier, which opens 1, then 2, then 4, then
+2 nodes — by asserting that two calls' intervals *intersect*, which is the
+property itself rather than a wall clock that measures the machine as much as
+the loop. Not proven live: no wide route has ever run against a real provider,
+and the routes that have are single-node at every pass, so production behaviour
+for them is unchanged. This is **not** 13.2: one worker still claims one run,
+and the I6 residual — a stale lease holder paying once — is untouched and still
+what a second worker must answer first.

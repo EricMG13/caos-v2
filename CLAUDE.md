@@ -2322,16 +2322,31 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 4.**
 
-- **The frontier's ready nodes run in order, not concurrently.**
-  `docs/REBUILD_PLAN.md` Phase 4 and `SYSTEM_SPEC.md` §4 both write the loop as
-  `await gather(*(run_node(n) for n in ready))`. This build runs them one after
-  another. Nothing about correctness depends on the difference — the frontier is
-  recomputed from the store on every pass either way, and Phase 4's exit tests
-  are about recovery and reservations rather than parallelism — but a wide
-  frontier takes as long as the sum of its nodes instead of the longest one.
-  *Upgrade:* the phase that makes the provider call real (Phase 5) is where the
-  latency starts to matter and where an async store connection has to arrive
-  anyway; the loop's shape does not change, only the `for` becomes a `gather`.
+- ~~**The frontier's ready nodes run in order, not concurrently.**~~ Closed by
+  Completion Phase 13.1 (§80), and two of this entry's own claims were wrong.
+  The loop's shape **does** change: `frontier` offers every node whose
+  *blocking* inputs are met, so it can offer a node beside one of its own soft
+  upstreams, and an attempt whose input is accepted mid-call is billed and then
+  refused — `route.independent_batch` drops such a node from the batch, over the
+  transitive closure of every edge type
+  (`test_a_node_does_not_run_beside_its_own_transitive_upstream`,
+  `test_genuinely_unrelated_nodes_run_together`). And an async store connection
+  did **not** have to arrive: the wait is a provider call, both that socket and
+  psycopg's release the interpreter lock, so a `ThreadPoolExecutor` buys the
+  overlap without recolouring 152 store functions. Proven on `RELATIVE_VALUE`,
+  the one enabled route with a wide frontier, by asserting two calls' intervals
+  intersect rather than by a wall clock
+  (`test_a_wide_frontier_runs_its_independent_nodes_at_the_same_time`, watched
+  failing with the batch forced sequential). Invariant 10 is untouched: the
+  batch is pure over the pinned route, so the same pins take the same path.
+  **What it is not.** It is opt-in — `Execution.per_node`, which only the worker
+  supplies — because the harness and the suite drive a run on a connection they
+  own; a batch of one opens nothing, which is every LITE route this build
+  enables. It has never run live: no wide route has ever met a real provider,
+  so what is proven is the loop and not the pathway. And it is **not** 13.2 —
+  one worker still claims one run, and the I6 residual is untouched.
+  *Upgrade:* none for latency. What remains is a live wide route, which waits on
+  Phase 11's documents, and the second worker, which must answer I6 first.
 - ~~**The reservation estimate is the caller's number.**~~ Closed by §40:
   `Execution` carries a dated `ModelPrice` bound to the provider's model, and
   each call reserves its worst case. The price's source is the remaining gap,

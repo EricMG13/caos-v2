@@ -25,10 +25,11 @@ from server.boundary_text import BoundaryText
 from server.deliverable.canonical import canonical_payload
 from server.deliverable.render import render
 from server.engine.route import ResolvedRoute, resolve_route
-from server.engine.runtime import Execution, run_route
+from server.engine.runtime import Execution, Provider, run_route
 from server.evidence.ingest import Document, admit_pack
 from server.methodology.handoff import ADAPTER_ROUTES
-from server.provider import MAX_REQUEST_BYTES
+from server.methodology.runner import ModuleProvider
+from server.provider import MAX_REQUEST_BYTES, Completion
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import RefusalCode
 from server.store import StoreConnection
@@ -275,3 +276,111 @@ def test_relative_value_is_the_only_newly_enabled_route(harness: _Harness) -> No
     )
     assert answers.prompts == []
     assert _counts(harness) == (0, [], 0, 0, 0)
+
+
+def test_a_wide_frontier_runs_its_independent_nodes_at_the_same_time(
+    harness: _Harness,
+) -> None:
+    """Completion Phase 13.1's exit check, on the one enabled route that has a
+    wide frontier: RELATIVE_VALUE opens 1, then 2, then 4, then 2 nodes.
+
+    Overlap is asserted directly rather than inferred from the wall clock. A
+    duration assertion measures the machine as much as the loop, and on a busy
+    one it either passes for the wrong reason or fails for it; two calls whose
+    intervals intersect is the property itself, and it is true or false
+    whatever the machine is doing.
+
+    Nothing about *which* nodes run changes -- the same route, the same
+    acceptance, the same order of choice -- so invariant 10 is untouched. What
+    changes is that four of them no longer wait for each other.
+    """
+    from threading import Lock
+    from time import monotonic, sleep
+
+    from server.store import connect
+
+    spans: list[tuple[float, float]] = []
+    guard = Lock()
+    answers = RouteCompletions(harness.source_id)
+    inner = answers.complete
+
+    def slow(prompt: str, *, json_object: bool = False) -> Completion:
+        began = monotonic()
+        sleep(0.25)  # long enough that an overlap is unambiguous
+        answer = inner(prompt, json_object=json_object)
+        with guard:
+            spans.append((began, monotonic()))
+        return answer
+
+    answers.complete = slow  # type: ignore[method-assign]
+
+    def per_node() -> tuple[StoreConnection, Provider]:
+        node_conn = connect(harness.url)
+        return node_conn, ModuleProvider(
+            node_conn,
+            harness.bundle,
+            harness.blobs,
+            answers,
+            harness.route,
+            harness.run_id,
+        )
+
+    run_route(
+        harness.conn,
+        harness.blobs,
+        run_id=harness.run_id,
+        route=harness.route,
+        execution=Execution(
+            _module_provider(harness, answers),
+            priced(ESTIMATE),
+            harness.bundle,
+            per_node=per_node,
+        ),
+    )
+
+    assert _status(harness) == "COMPLETE"
+    assert len(spans) == len(harness.route.nodes)
+    overlapping = [
+        (one, two)
+        for index, one in enumerate(spans)
+        for two in spans[index + 1 :]
+        if one[0] < two[1] and two[0] < one[1]
+    ]
+    assert overlapping, "every call ran alone; the pass was sequential"
+
+
+def test_without_a_per_node_factory_the_pass_is_exactly_sequential(
+    harness: _Harness,
+) -> None:
+    """The default, and every caller that is not the worker: the harness and
+    the suite drive a run on a connection they own and hold open around it, so
+    the loop must not open a second one behind their back. Without this the
+    test above would pass against a loop that was concurrent unconditionally,
+    which is a different and much riskier change."""
+    from threading import Lock
+    from time import monotonic, sleep
+
+    spans: list[tuple[float, float]] = []
+    guard = Lock()
+    answers = RouteCompletions(harness.source_id)
+    inner = answers.complete
+
+    def timed(prompt: str, *, json_object: bool = False) -> Completion:
+        began = monotonic()
+        sleep(0.05)
+        answer = inner(prompt, json_object=json_object)
+        with guard:
+            spans.append((began, monotonic()))
+        return answer
+
+    answers.complete = timed  # type: ignore[method-assign]
+
+    _run_route(harness, _module_provider(harness, answers))
+
+    assert _status(harness) == "COMPLETE"
+    assert not [
+        (one, two)
+        for index, one in enumerate(spans)
+        for two in spans[index + 1 :]
+        if one[0] < two[1] and two[0] < one[1]
+    ], "a caller that supplied no factory had its run made concurrent anyway"

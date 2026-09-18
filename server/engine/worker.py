@@ -107,10 +107,28 @@ class _Stoppable:
 
 
 def module_execution(
-    completions: CompletionProvider, price: ModelPrice, bundle: Bundle, blobs: BlobStore
+    completions: CompletionProvider,
+    price: ModelPrice,
+    bundle: Bundle,
+    blobs: BlobStore,
+    connect_store: Callable[[], StoreConnection] | None = None,
 ) -> ExecutionFor:
     """Each claimed run executes its pinned route through the real module
-    provider, on the worker's connection and under its lease."""
+    provider, on the worker's connection and under its lease.
+
+    `connect_store` is what lets a pass run its independent nodes at once: each
+    gets a connection of its own and a provider bound to it, because a node's
+    pre-call unit opens a transaction under the case lock and `ModuleProvider`
+    reads the store to build its prompt. Omitted -- which is every test that
+    drives this directly -- the loop stays sequential, and it is sequential
+    anyway wherever a frontier offers one node, which is every LITE route this
+    build enables.
+
+    The lease is shared across those connections on purpose: it fences the
+    *run*, and each write checks the token it was taken under, so two nodes of
+    one run writing under one lease is the claim working rather than a hole in
+    it.
+    """
 
     def execution_for(conn: StoreConnection, run_id: UUID, lease: Lease) -> Execution:
         with execution_reads(conn):
@@ -118,7 +136,21 @@ def module_execution(
         provider = ModuleProvider(
             conn, bundle, blobs, completions, route, run_id, lease
         )
-        return Execution(provider, price, bundle, lease=lease)
+
+        def per_node() -> tuple[StoreConnection, Provider]:
+            assert connect_store is not None  # only reachable when it is set
+            node_conn = connect_store()
+            return node_conn, ModuleProvider(
+                node_conn, bundle, blobs, completions, route, run_id, lease
+            )
+
+        return Execution(
+            provider,
+            price,
+            bundle,
+            lease=lease,
+            per_node=per_node if connect_store else None,
+        )
 
     return execution_for
 
@@ -366,7 +398,11 @@ def main() -> int:
     blobs = BlobStore(Path(root))
     return run_worker(
         WorkerConfig(BoundaryText.of(f"worker-{os.getpid()}")),
-        execution_for=module_execution(completions, price, bundle, blobs),
+        # The same factory the loop uses for its own connection: a concurrent
+        # pass opens one per node and closes it when that node is done.
+        execution_for=module_execution(
+            completions, price, bundle, blobs, lambda: connect(url)
+        ),
         stopping=stopping,
         conn_factory=lambda: connect(url),
         blobs=blobs,

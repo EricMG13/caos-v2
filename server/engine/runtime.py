@@ -18,8 +18,9 @@ lived to record it (`server/store/budget.py`).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
@@ -33,6 +34,7 @@ from server.engine.route import (
     NodeState,
     ResolvedRoute,
     frontier,
+    independent_batch,
     node_states,
 )
 from server.methodology.bundle import Bundle
@@ -135,6 +137,18 @@ class Execution:
     # The worker's claim on this run; None is a direct caller (harness, tests),
     # which may drive only a run that was never enqueued (brief 4.3 D3).
     lease: Lease | None = None
+    # How to build the resources one node of a concurrent pass needs, and the
+    # whole of what makes a pass concurrent. `None` -- every direct caller, the
+    # harness and the suite -- keeps the loop exactly sequential, because those
+    # callers drive a run on a connection they own and hold open around it.
+    #
+    # A connection *and* a provider, from one factory, because neither is any
+    # use alone: each node's pre-call unit opens its own transaction under the
+    # case lock, and `ModuleProvider` holds a connection of its own to build
+    # the prompt with. Two nodes on one connection is not concurrency, it is
+    # corruption, and one field rather than two is what stops it being
+    # half-configured.
+    per_node: Callable[[], tuple[StoreConnection, Provider]] | None = None
 
 
 def run_route(
@@ -260,16 +274,16 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
             continue
         if not ready:
             break
-        for route_node_id in ready:
-            if not _run_node(
-                conn,
-                blobs,
-                run_id=run_id,
-                route=route,
-                route_node_id=route_node_id,
-                execution=execution,
-            ):
-                return  # A validated Blocked handoff ended the run BLOCKED.
+        # Not every ready node may run beside every other: `independent_batch`
+        # drops any that is a transitive upstream or downstream of one already
+        # chosen, because an attempt whose input is accepted mid-call is billed
+        # and then refused. What it leaves out is still in the frontier next
+        # pass, which is recomputed from the store like every other pass.
+        batch = independent_batch(route, ready)
+        if not _run_batch(
+            conn, blobs, run_id=run_id, route=route, execution=execution, batch=batch
+        ):
+            return  # A validated Blocked handoff ended the run BLOCKED.
     # §39: success only when every pinned node was accepted; an empty frontier
     # with unfinished required work ends the run blocked.
     with execution_reads(conn):
@@ -281,6 +295,71 @@ def _drive(  # noqa: PLR0913 -- one run, keyword-only
         complete_run(conn, run_id, lease=execution.lease, accepted=decided)
     else:
         block_run(conn, run_id, lease=execution.lease, accepted=decided)
+
+
+def _run_batch(  # noqa: PLR0913 -- one pass of one run, keyword-only
+    conn: StoreConnection,
+    blobs: BlobStore,
+    *,
+    run_id: UUID,
+    route: ResolvedRoute,
+    execution: Execution,
+    batch: Sequence[str],
+) -> bool:
+    """Run one frontier batch, concurrently where the caller gave us the means.
+
+    Returns False when a validated Blocked handoff ended the run.
+
+    Sequential unless `execution.per_node` is set **and** the batch has more
+    than one node, so the single-node case -- every LITE route today -- pays no
+    thread and opens no second connection.
+
+    Threads rather than `asyncio` (§80): what a wide frontier waits on is a
+    provider call, and both that socket and psycopg's release the interpreter
+    lock while they block. A `gather` would have bought the same overlap at the
+    price of recolouring 152 store functions and every one of their callers.
+
+    Every node is awaited even after one of them fails. A call already in
+    flight is going to be billed whatever this loop decides, so abandoning its
+    result would pay for an answer nobody reads -- the same reasoning the worker
+    applies to SIGTERM. The first failure is then re-raised, or False returned.
+    """
+    if execution.per_node is None or len(batch) < 2:
+        for route_node_id in batch:
+            if not _run_node(
+                conn,
+                blobs,
+                run_id=run_id,
+                route=route,
+                route_node_id=route_node_id,
+                execution=execution,
+            ):
+                return False
+        return True
+
+    build = execution.per_node
+
+    def one(route_node_id: str) -> bool:
+        node_conn, provider = build()
+        try:
+            return _run_node(
+                node_conn,
+                blobs,
+                run_id=run_id,
+                route=route,
+                route_node_id=route_node_id,
+                execution=replace(execution, provider=provider),
+            )
+        finally:
+            node_conn.close()
+
+    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+        results = [pool.submit(one, route_node_id) for route_node_id in batch]
+        outcomes = [result.exception() or result.result() for result in results]
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    return all(outcomes)
 
 
 def _settle(
