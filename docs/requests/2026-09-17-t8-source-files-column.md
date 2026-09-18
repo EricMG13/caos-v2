@@ -1,7 +1,11 @@
 # Vendor change request — carry T8's `Source files to attach` into `Recommendation`
 
-**Date:** 17 September 2026. **Status:** awaiting the vendor, or a dated
-authorization in the pattern of `docs/DECISIONS.md` §61 and §63.
+**Date:** 17 September 2026. **Status (2026-09-18):** done in build
+`62a94ccd` under the owner's authorisation (`docs/DECISIONS.md` §92,
+`docs/VENDOR_CHANGES.md`): the vendor's `Recommendation` carries
+`source_files_to_attach` and `parse_t8` keeps the column
+(`tests/test_bundle_pin.py::test_the_t8_parser_keeps_the_source_files_column`).
+The host reads nothing new; per-node evidence selection stays a later task.
 
 **Asks for:** the bundle's own T8 parser to keep the column it already
 validates, so the host can read a per-module evidence demand without inventing

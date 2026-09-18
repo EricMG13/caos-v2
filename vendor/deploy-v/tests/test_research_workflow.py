@@ -55,7 +55,7 @@ def author(snapshot, module_id, *, brief=None, unresolved=False):
         contract=load_contract((ROOT/module['skill_md']).read_text(),module_id)
         for reg,spec in contract['registers'].items():
             cols=spec['columns'] or ['Evidence']
-            appendix+='#### '+reg+'\n\n'+table(cols,[['Recorded source p1']*len(cols)]*max(1,spec['minimum_body_rows']))+'\n'
+            appendix+='#### '+reg+'\n\n'+table(cols,base.conforming_rows(reg,spec,contract))+'\n'
         for tid in contract['unconditional_stable_tables']:
             appendix+='<!-- table-id: '+tid+' -->\n'+table(['source_locator'],[['Source p1']])+'\n'
         if result.get('research_adoption_rows'):

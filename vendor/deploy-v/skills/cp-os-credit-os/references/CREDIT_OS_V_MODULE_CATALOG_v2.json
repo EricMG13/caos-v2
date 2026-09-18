@@ -2537,6 +2537,8 @@
           "type": "REQUIRED"
         },
         {
+          "accepted_object_id": "lite_fundamental_credit_screen",
+          "allowed_use": "SCREENING_ONLY",
           "source": "CP-L10",
           "target": "CP-2A",
           "type": "REQUIRED"
@@ -2547,6 +2549,8 @@
           "type": "REQUIRED"
         },
         {
+          "accepted_object_id": "lite_liquidity_sensitivity_screen",
+          "allowed_use": "SCREENING_ONLY",
           "source": "CP-L10",
           "target": "CP-3C",
           "type": "REQUIRED"

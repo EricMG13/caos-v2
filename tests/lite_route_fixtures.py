@@ -35,6 +35,7 @@ from canonical_fixtures import (
     PINNED,
     QUOTE,
     RUN,
+    conforming_rows,
     fields_from_prompt,
     identity,
     skill,
@@ -377,9 +378,11 @@ def _register_rows(
         return cp5_t53_rows(conflict_text=knobs.conflict_text)
     if ident.module_id == "CP-5" and register_id == "T5B.6":
         return cp5_t5b6_rows(qa_status=knobs.qa_status)
-    columns = spec["columns"] or ["Evidence"]
     quote = knobs.quotes[0] if knobs.quotes else QUOTE
-    return [[quote] * len(columns)] * max(1, spec["minimum_body_rows"])
+    rules = CONTRACT.completeness_check.load_contract(
+        skill(ident.module_id).decode(), ident.module_id
+    )
+    return conforming_rows(register_id, spec, rules, lambda _c, _n: quote)
 
 
 def realistic_handoff_markdown(

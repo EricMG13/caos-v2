@@ -62,7 +62,9 @@ RESTRICTED = {
     "qa_status": "Restricted",
     "confidence_score": 55,
     "confidence_band": "Low",
-    "committee_status": "Committee Ready",
+    # A screening-only pathway never permits `Committee Ready` (§92); the
+    # page still labels every LITE record a screen whatever status it wrote.
+    "committee_status": "Requires More Work",
     "limitation_flags": ["Interim period only"],
 }
 
@@ -415,9 +417,9 @@ def test_the_page_keeps_limitations_labels_screens_and_escapes_model_text(
     text = page.decode()
     assert "QA status: Restricted" in text
     assert "<li>Interim period only</li>" in text
-    # Every LITE record is a screen, the one that says Committee Ready included.
+    # Every LITE record is a screen, whatever committee status it wrote.
     assert text.count("SCREENING ONLY: a screen, not committee clearance") == 3
-    assert "Committee status as written: Committee Ready" in text
+    assert "Committee status as written: Requires More Work" in text
     assert "<b>held</b>" not in text and "&lt;b&gt;held&lt;/b&gt; &amp; noted." in text
     assert f"<blockquote>{QUOTE}</blockquote>" in text
     assert "page 1" in text

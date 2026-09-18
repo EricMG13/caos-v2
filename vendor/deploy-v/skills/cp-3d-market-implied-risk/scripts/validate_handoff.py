@@ -76,6 +76,14 @@ COMMITTEE_STATUSES = {
     "Restricted",
     "Blocked",
 }
+# CANON_SHARED.md § CP_CANONICAL_STATUS_TAXONOMY.txt, D2 by scope: the committee
+# statuses a pathway's `decision_scope` permits. A screening-only run is a
+# screen, never committee clearance, whatever the module's own reading of its
+# evidence; a full decision requires a new FULL run.
+COMMITTEE_STATUSES_BY_SCOPE = {
+    "FULL": frozenset(COMMITTEE_STATUSES),
+    "SCREENING_ONLY": frozenset(COMMITTEE_STATUSES - {"Committee Ready"}),
+}
 
 MODULE_ID_RE = re.compile(r"^CP-(?:\d+[A-Z]?|[A-Z][A-Z0-9-]*)$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -722,7 +730,9 @@ def _validate_string_list(field: str, value: Any, errors: list[str]) -> None:
             errors.append(f"{field}[{index}] must be a non-empty string")
 
 
-def _validate_fields(fields: dict[str, Any], body: str) -> list[str]:
+def _validate_fields(
+    fields: dict[str, Any], body: str, decision_scope: str | None = None
+) -> list[str]:
     errors: list[str] = []
     module_id = fields.get("module_id")
     profile_fields = CP_DR_FIELDS if module_id == "CP-DR" else ISSUER_FIELDS
@@ -855,6 +865,15 @@ def _validate_fields(fields: dict[str, Any], body: str) -> list[str]:
     committee_status = fields.get("committee_status")
     if committee_status is not None and committee_status not in COMMITTEE_STATUSES:
         errors.append("committee_status is not a canonical enum value")
+    elif decision_scope is not None:
+        permitted = COMMITTEE_STATUSES_BY_SCOPE.get(decision_scope)
+        if permitted is None:
+            errors.append(f"decision_scope {decision_scope!r} is not a declared scope")
+        elif committee_status is not None and committee_status not in permitted:
+            errors.append(
+                f"committee_status {committee_status!r} is not permitted under "
+                f"decision_scope {decision_scope}"
+            )
 
     for field in ("limitation_flags", "validation_warnings", "downstream_consumers"):
         if field in fields:
@@ -902,15 +921,20 @@ def validate_text(
     expected_module: str | None = None,
     expected_run_id: str | None = None,
     expected_period: str | None = None,
+    decision_scope: str | None = None,
 ) -> ValidationResult:
-    """Validate handoff text, its optional filename, and expected identity values."""
+    """Validate handoff text, its optional filename, and expected identity values.
+
+    ``decision_scope`` is the pathway's catalog scope; when given, the declared
+    ``committee_status`` must be one that scope permits (COMMITTEE_STATUSES_BY_SCOPE).
+    """
 
     try:
         fields, body = _parse_frontmatter(text)
     except FrontmatterError as exc:
         return ValidationResult((str(exc),), (), None)
 
-    errors = _validate_fields(fields, body)
+    errors = _validate_fields(fields, body, decision_scope)
     presentation_warnings = _presentation_warnings(body, fields) if not errors else ()
     if errors:
         return ValidationResult(tuple(errors), (), fields, presentation_warnings)

@@ -886,10 +886,21 @@ def test_the_lite_compatibility_block_is_read_from_verified_vendor_bytes() -> No
         }
     )
     assert lite_object_requirement(cp5, "CP-5", "FULL_CREDIT_32") is None
-    # No block, another boundary with `none`, an unkeyed prose heading.
-    for module_id in ("CP-L10", "CP-6", "CP-8", "CP-3C"):
+    # No block, another boundary with `none`.
+    for module_id in ("CP-L10", "CP-6", "CP-8"):
         other_skill = verified_bytes(BUNDLE, module_id, "SKILL.md")
         assert lite_object_requirement(other_skill, module_id, "LITE_CREDIT_22") is None
+    # CP-3C's heading was unkeyed prose the host could not read until §92
+    # keyed it (request 2026-09-17-lite-producers); it now names the three
+    # objects the vendor's execution profiles declare for it.
+    cp3c = verified_bytes(BUNDLE, "CP-3C", "SKILL.md")
+    assert lite_object_requirement(cp3c, "CP-3C", "LITE_CREDIT_22") == frozenset(
+        {
+            "lite_liquidity_sensitivity_screen",
+            "lite_market_recovery_opportunity_screen",
+            "lite_legal_structure_capacity_screen",
+        }
+    )
     # CP-5A's block beside it is not CP-5's.
     other = cp5.replace(b"## LITE profile compatibility \xe2\x80\x94 CP-5A", b"## Gone")
     assert lite_object_requirement(other, "CP-5", "LITE_CREDIT_22") == ids
@@ -1105,16 +1116,25 @@ def test_a_node_receives_its_direct_predecessors_accepted_claims(
 
 
 @pytest.mark.parametrize(
-    "selection", ["LITE_FULL_CREDIT_SCREEN", "LITE_DISTRESSED_RESTRUCTURING"]
+    "selection",
+    [
+        "LITE_FULL_CREDIT_SCREEN",
+        "LITE_DISTRESSED_RESTRUCTURING",
+        "LITE_COVENANT_REFINANCING",
+    ],
 )
 def test_an_edge_carried_object_meets_the_boundary_on_other_lite_routes(
     selection: str,
 ) -> None:
     """CP-L10 owns one object but its edges carry others (e.g. to CP-2H): a
-    module accepting a carried object is not held forever (§46.1 review)."""
+    module accepting a carried object is not held forever (§46.1 review).
+    Since §92 every consumer on these routes retains a boundary the route
+    can meet -- CP-2A and CP-3C included, whose edges now carry an object."""
     route = resolve_route(CATALOG, "LITE_CREDIT_22", selection)
     named = named_objects(BUNDLE, route)
     assert named.accepted_ids, "the route must exercise the boundary"
+    consumers = {n.module_id for n in route.nodes if n.module_id in named.accepted_ids}
+    assert consumers >= {"CP-2A", "CP-3C"} & {n.module_id for n in route.nodes}
     accepted: dict[str, NodeResult] = {}
     while True:
         states = node_states(route, accepted, named)

@@ -45,6 +45,18 @@ def test_ci_cancels_superseded_runs() -> None:
     assert "cancel-in-progress: true" in text
 
 
+def test_the_size_job_delegates_to_the_canonical_script() -> None:
+    """The `size` job once reimplemented `check_pr_size.py`'s pathspec inline,
+    with `**/vendor/**` where the script's own comment explains why that must
+    be root-anchored `vendor/**` -- `**/vendor/**` does not match a bundle at
+    the repo root, so the job counted 8,840 vendor-bundle lines a correctly
+    authorised rebuild (§92) never should have. Delegating to the one script
+    keeps CI and a local run measuring the same thing."""
+    jobs = _jobs(CI_YAML.read_text(encoding="utf-8"))
+    assert "check_pr_size.py" in jobs["size"]
+    assert "**/vendor/**" not in jobs["size"]
+
+
 def test_every_install_is_wheels_only() -> None:
     """--require-hashes pins which bytes arrive. It does not stop those bytes
     being a source distribution, and a source distribution's setup.py runs at

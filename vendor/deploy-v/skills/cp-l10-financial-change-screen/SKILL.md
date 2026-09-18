@@ -56,9 +56,13 @@ This is a complete V-native screening run for its own schema. It is not a shorte
   - **full_run_disqualifiers**: structured below
     - **critical_cell_substrings_casefold**: obtain the complete underwriting source pack; quantitative threshold not available in provided materials; retained cp-model integration sources do not supply
     - **critical_cell_values_casefold**: ; [insufficient information]; insufficient information; n/a; not assessable; not calculable from provided materials; tbd; unavailable; unknown
-    - **document_substrings_casefold**: full-underwriting source set not retained; integration fixture; not a current analytical golden; retained cp-model integration source; source-limited; synthetic test input
-    - **frontmatter_limitation_flags**: INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SOURCE_LIMITED_NOT_COMMITTEE_READY; SYNTHETIC_FORWARD_ASSUMPTIONS
-    - **frontmatter_validation_warnings**: FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED; INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+    - **fixture_document_substrings_casefold**: integration fixture; not a current analytical golden; retained cp-model integration source; synthetic test input
+    - **fixture_limitation_flags**: INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SYNTHETIC_FORWARD_ASSUMPTIONS
+    - **fixture_validation_warnings**: INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+  - **projected_evidence_limitations**: structured below
+    - **document_substrings_casefold**: full-underwriting source set not retained; source-limited
+    - **frontmatter_limitation_flags**: SOURCE_LIMITED_NOT_COMMITTEE_READY
+    - **frontmatter_validation_warnings**: FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED
   - **payload_contract**: structured below
     - **payload_schema_path**: ./references/CP-L10__lite_financial_change_screen__payload.schema.txt
     - **required_payload_fields**: structured below
@@ -179,9 +183,9 @@ This is a complete V-native screening run for its own schema. It is not a shorte
       - **disqualifier_exempt_columns**: none
       - **minimum_body_rows**: 1
   - **screening_run_disqualifiers**: structured below
-    - **document_substrings_casefold**: contract_fixture_only; synthetic contract evidence only
-    - **frontmatter_limitation_flags**: CONTRACT_FIXTURE_ONLY
-    - **frontmatter_validation_warnings**: SYNTHETIC_FIXTURE
+    - **fixture_document_substrings_casefold**: contract_fixture_only; synthetic contract evidence only
+    - **fixture_limitation_flags**: CONTRACT_FIXTURE_ONLY
+    - **fixture_validation_warnings**: SYNTHETIC_FIXTURE
   - **semantic_rules**: structured below
     - structured item
       - **columns**: topic_id
@@ -393,12 +397,19 @@ Lead with the screen conclusion, strongest support, primary pressure, and monito
       - obtain the complete underwriting source pack; quantitative threshold not available in provided materials; retained cp-model integration sources do not supply
     - **critical_cell_values_casefold**: structured below
       - ; [insufficient information]; insufficient information; n/a; not assessable; not calculable from provided materials; tbd; unavailable; unknown
+    - **fixture_document_substrings_casefold**: structured below
+      - integration fixture; not a current analytical golden; retained cp-model integration source; synthetic test input
+    - **fixture_limitation_flags**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SYNTHETIC_FORWARD_ASSUMPTIONS
+    - **fixture_validation_warnings**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+  - **projected_evidence_limitations**: structured below
     - **document_substrings_casefold**: structured below
-      - full-underwriting source set not retained; integration fixture; not a current analytical golden; retained cp-model integration source; source-limited; synthetic test input
+      - full-underwriting source set not retained; source-limited
     - **frontmatter_limitation_flags**: structured below
-      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SOURCE_LIMITED_NOT_COMMITTEE_READY; SYNTHETIC_FORWARD_ASSUMPTIONS
+      - SOURCE_LIMITED_NOT_COMMITTEE_READY
     - **frontmatter_validation_warnings**: structured below
-      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED; INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED
   - **payload_contract**: structured below
     - **payload_schema_path**: ./references/CP-L20__lite_fundamental_credit_screen__payload.schema.txt
     - **required_payload_fields**: structured below
@@ -421,11 +432,11 @@ Lead with the screen conclusion, strongest support, primary pressure, and monito
       - BUSINESS_DURABILITY; MARGIN_FCF_RESILIENCE; LEVERAGE_REFINANCING_CONTEXT; GOVERNANCE_SPONSOR_BEHAVIOR; FINANCIAL_POLICY_CAPITAL_ALLOCATION; ESG_TRANSITION
   - **required_registers**: merged into the host's `## Output profile` above; not restated here
   - **screening_run_disqualifiers**: structured below
-    - **document_substrings_casefold**: structured below
+    - **fixture_document_substrings_casefold**: structured below
       - contract_fixture_only; synthetic contract evidence only
-    - **frontmatter_limitation_flags**: structured below
+    - **fixture_limitation_flags**: structured below
       - CONTRACT_FIXTURE_ONLY
-    - **frontmatter_validation_warnings**: structured below
+    - **fixture_validation_warnings**: structured below
       - SYNTHETIC_FIXTURE
   - **semantic_rules**: structured below
     - structured item
@@ -576,12 +587,19 @@ Lead with the directional screen, liquidity support, primary sensitivity, breakp
       - obtain the complete underwriting source pack; quantitative threshold not available in provided materials; retained cp-model integration sources do not supply
     - **critical_cell_values_casefold**: structured below
       - ; [insufficient information]; insufficient information; n/a; not assessable; not calculable from provided materials; tbd; unavailable; unknown
+    - **fixture_document_substrings_casefold**: structured below
+      - integration fixture; not a current analytical golden; retained cp-model integration source; synthetic test input
+    - **fixture_limitation_flags**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SYNTHETIC_FORWARD_ASSUMPTIONS
+    - **fixture_validation_warnings**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+  - **projected_evidence_limitations**: structured below
     - **document_substrings_casefold**: structured below
-      - full-underwriting source set not retained; integration fixture; not a current analytical golden; retained cp-model integration source; source-limited; synthetic test input
+      - full-underwriting source set not retained; source-limited
     - **frontmatter_limitation_flags**: structured below
-      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SOURCE_LIMITED_NOT_COMMITTEE_READY; SYNTHETIC_FORWARD_ASSUMPTIONS
+      - SOURCE_LIMITED_NOT_COMMITTEE_READY
     - **frontmatter_validation_warnings**: structured below
-      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED; INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED
   - **payload_contract**: structured below
     - **payload_schema_path**: ./references/CP-L23__lite_liquidity_sensitivity_screen__payload.schema.txt
     - **required_payload_fields**: structured below
@@ -604,11 +622,11 @@ Lead with the directional screen, liquidity support, primary sensitivity, breakp
       - ACCESSIBLE_LIQUIDITY_USES; WORKING_CAPITAL_CAPEX_CASH_BURN; RATES_HEDGES; FX_COMMODITY_INFLATION; BASE_DOWNSIDE_TRAJECTORY; BREAKPOINTS_REFINANCING
   - **required_registers**: merged into the host's `## Output profile` above; not restated here
   - **screening_run_disqualifiers**: structured below
-    - **document_substrings_casefold**: structured below
+    - **fixture_document_substrings_casefold**: structured below
       - contract_fixture_only; synthetic contract evidence only
-    - **frontmatter_limitation_flags**: structured below
+    - **fixture_limitation_flags**: structured below
       - CONTRACT_FIXTURE_ONLY
-    - **frontmatter_validation_warnings**: structured below
+    - **fixture_validation_warnings**: structured below
       - SYNTHETIC_FIXTURE
   - **semantic_rules**: structured below
     - structured item
@@ -759,12 +777,19 @@ Lead with the screening posture, dated compensation signal, primary protection i
       - obtain the complete underwriting source pack; quantitative threshold not available in provided materials; retained cp-model integration sources do not supply
     - **critical_cell_values_casefold**: structured below
       - ; [insufficient information]; insufficient information; n/a; not assessable; not calculable from provided materials; tbd; unavailable; unknown
+    - **fixture_document_substrings_casefold**: structured below
+      - integration fixture; not a current analytical golden; retained cp-model integration source; synthetic test input
+    - **fixture_limitation_flags**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SYNTHETIC_FORWARD_ASSUMPTIONS
+    - **fixture_validation_warnings**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+  - **projected_evidence_limitations**: structured below
     - **document_substrings_casefold**: structured below
-      - full-underwriting source set not retained; integration fixture; not a current analytical golden; retained cp-model integration source; source-limited; synthetic test input
+      - full-underwriting source set not retained; source-limited
     - **frontmatter_limitation_flags**: structured below
-      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SOURCE_LIMITED_NOT_COMMITTEE_READY; SYNTHETIC_FORWARD_ASSUMPTIONS
+      - SOURCE_LIMITED_NOT_COMMITTEE_READY
     - **frontmatter_validation_warnings**: structured below
-      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED; INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED
   - **payload_contract**: structured below
     - **payload_schema_path**: ./references/CP-L30__lite_market_recovery_opportunity_screen__payload.schema.txt
     - **required_payload_fields**: structured below
@@ -787,11 +812,11 @@ Lead with the screening posture, dated compensation signal, primary protection i
       - DATED_MARKET_SNAPSHOT; CURVE_COMPARABLE_COMPENSATION; LIQUIDITY_TECHNICALS; STRUCTURAL_RECOVERY_PROTECTION; DOWNSIDE_LME_EXPOSURE; INTEGRATED_SCREENING_POSTURE
   - **required_registers**: merged into the host's `## Output profile` above; not restated here
   - **screening_run_disqualifiers**: structured below
-    - **document_substrings_casefold**: structured below
+    - **fixture_document_substrings_casefold**: structured below
       - contract_fixture_only; synthetic contract evidence only
-    - **frontmatter_limitation_flags**: structured below
+    - **fixture_limitation_flags**: structured below
       - CONTRACT_FIXTURE_ONLY
-    - **frontmatter_validation_warnings**: structured below
+    - **fixture_validation_warnings**: structured below
       - SYNTHETIC_FIXTURE
   - **semantic_rules**: structured below
     - structured item
@@ -942,12 +967,19 @@ Lead with document readiness, primary creditor concern, missing controlling evid
       - obtain the complete underwriting source pack; quantitative threshold not available in provided materials; retained cp-model integration sources do not supply
     - **critical_cell_values_casefold**: structured below
       - ; [insufficient information]; insufficient information; n/a; not assessable; not calculable from provided materials; tbd; unavailable; unknown
+    - **fixture_document_substrings_casefold**: structured below
+      - integration fixture; not a current analytical golden; retained cp-model integration source; synthetic test input
+    - **fixture_limitation_flags**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SYNTHETIC_FORWARD_ASSUMPTIONS
+    - **fixture_validation_warnings**: structured below
+      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+  - **projected_evidence_limitations**: structured below
     - **document_substrings_casefold**: structured below
-      - full-underwriting source set not retained; integration fixture; not a current analytical golden; retained cp-model integration source; source-limited; synthetic test input
+      - full-underwriting source set not retained; source-limited
     - **frontmatter_limitation_flags**: structured below
-      - INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN; SOURCE_LIMITED_NOT_COMMITTEE_READY; SYNTHETIC_FORWARD_ASSUMPTIONS
+      - SOURCE_LIMITED_NOT_COMMITTEE_READY
     - **frontmatter_validation_warnings**: structured below
-      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED; INTEGRATION_FIXTURE_ONLY; PRESENTATION_FIXTURE; TEST_ONLY_FORECAST_ASSUMPTIONS
+      - FULL_UNDERWRITING_SOURCE_SET_NOT_RETAINED
   - **payload_contract**: structured below
     - **payload_schema_path**: ./references/CP-L40__lite_legal_structure_capacity_screen__payload.schema.txt
     - **required_payload_fields**: structured below
@@ -970,11 +1002,11 @@ Lead with document readiness, primary creditor concern, missing controlling evid
       - CONTROLLING_DOCUMENT_AVAILABILITY; PROTECTION_WEAKNESS_FLAGS; ENTITY_GUARANTEE_COLLATERAL; LEAKAGE_PRIMING_FLAGS; CAPACITY_AVAILABILITY; PRESSURE_POINT_UPGRADE_PRIORITY
   - **required_registers**: merged into the host's `## Output profile` above; not restated here
   - **screening_run_disqualifiers**: structured below
-    - **document_substrings_casefold**: structured below
+    - **fixture_document_substrings_casefold**: structured below
       - contract_fixture_only; synthetic contract evidence only
-    - **frontmatter_limitation_flags**: structured below
+    - **fixture_limitation_flags**: structured below
       - CONTRACT_FIXTURE_ONLY
-    - **frontmatter_validation_warnings**: structured below
+    - **fixture_validation_warnings**: structured below
       - SYNTHETIC_FIXTURE
   - **semantic_rules**: structured below
     - structured item

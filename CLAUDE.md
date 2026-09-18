@@ -1071,19 +1071,35 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   pool if start-up cost shows, and the harness admitting through
   `prepare_pack`.
 
-- **Three vendor rules have no Python implementation and are not enforced.**
-  `server/methodology/handoff.py` calls the vendor's own validators, and the
-  vendor ships no code for `semantic_rules`, `document_substrings_casefold` or
-  the LITE pathways' `required_payload_fields` (§46.5).
-  Reimplementing them would make the host a second conformance authority
-  beside the bundle (invariant 4). The catalog declares each LITE pathway
-  `decision_scope: SCREENING_ONLY` but maps no `committee_status` to it, so a
-  LITE handoff saying `Committee Ready` validates; the host projects the scope
-  beside the status and invents no refusal. *Upgrade:* enforce each rule the
-  day the vendor ships it, or by a dated decision that the host owns it. The
-  deliverable (d-4) labels a screening-only record a screen whatever its
-  committee status; the proof (d-2) and the matrix (d-3b) report no status a
-  record projects, so neither has anything to label.
+- ~~**Three vendor rules have no Python implementation and are not enforced.**~~
+  Closed by `docs/DECISIONS.md` §92, the way the entry's upgrade asked: the
+  bundle ships them, at its `SHARED` owner, and the host calls them.
+  `semantic_rules` -- all five kinds the profiles declare -- and the fixture
+  half of `document_substrings_casefold` are enforced by the vendor's own
+  `completeness_check`
+  (`tests/test_bundle_pin.py::test_the_vendor_enforces_cp_l10s_semantic_rules`,
+  `test_the_fixture_markers_are_split_from_the_thin_evidence_marker`), and
+  `validate_handoff.py` maps each `decision_scope` to the committee statuses
+  it permits, so a LITE handoff saying `Committee Ready` is refused
+  `HANDOFF_MALFORMED` by the bundle's rule
+  (`test_screening_only_never_permits_committee_ready`,
+  `tests/test_canonical_handoff.py::test_a_screening_only_handoff_may_not_say_committee_ready`).
+  `required_payload_fields` is shipped as `check_payload` and has the entry
+  below. The deliverable (d-4) still labels a screening-only record a screen
+  whatever its committee status, which is now a label over a status the
+  vendor has already bounded.
+- **The payload-field rule is shipped and unreachable.** §92 put
+  `completeness_check.check_payload` in the bundle, judging a JSON payload's
+  `runtime_output` against the profile's `required_payload_fields`
+  (`tests/test_bundle_pin.py::test_the_vendor_checks_a_lite_payloads_required_fields`).
+  The canonical adapter never receives a payload: `invocation._FINAL_CHECK`
+  tells the model not to author `runtime_output`, and a handoff is one
+  Markdown file, so the host has nothing to hand the rule and calls it for no
+  run. It is callable through the verified contract and enforced on nothing,
+  which is stated here so nobody reads "shipped" as "enforced". *Upgrade:* the
+  day the adapter carries a payload beside the Markdown -- the same day T8's
+  `runtime_output` rows would become readable -- `validate_markdown`'s
+  caller hands it the payload and this entry closes on that test.
 - **The canonical deliverable proves the store at freeze and verification, not
   continuously.** `server/deliverable/canonical.py` re-derives the payload --
   both blobs, identity, projections, rectangles -- when it is built, frozen and
@@ -1329,16 +1345,25 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `AUTHORITY_BYTES_MISMATCH`. The runtime, `read_run` and the harness's
   `_unrun` pass it, and the run document names the edges that could meet it in
   `waiting_on`. A boundary no input on the pinned route offers is not enforced
-  (holding the node forever would be a host-invented graph): on
+  (holding the node forever would be a host-invented graph). ~~On
   `LITE_FULL_CREDIT_SCREEN` CP-2A accepts `lite_fundamental_credit_screen`,
-  which no catalog module owns or carries, so the host does not hold it there;
-  those routes are refused `HANDOFF_MODULE_UNSUPPORTED` before any attempt
-  today. CP-3C's unkeyed prose heading is not read, although the vendor's
-  execution-profiles JSON declares its boundary.
-  `named_objects` re-reads the bundle bytes per run and per `read_run`.
+  which no catalog module owns or carries, so the host does not hold it there.
+  CP-3C's unkeyed prose heading is not read, although the vendor's
+  execution-profiles JSON declares its boundary.~~ Both closed by
+  `docs/DECISIONS.md` §92: the `CP-L10 -> CP-2A` and `CP-L10 -> CP-3C` edges
+  carry an accepted object and CP-3C's block is keyed, naming the three
+  objects the execution profiles declare
+  (`tests/test_bundle_pin.py::test_every_lite_edge_into_a_named_object_consumer_declares_the_object_it_carries`),
+  so every consumer on the three held routes now retains a boundary its route
+  can meet
+  (`tests/test_handoff_invocation.py::test_an_edge_carried_object_meets_the_boundary_on_other_lite_routes`).
+  Those routes are still refused `HANDOFF_MODULE_UNSUPPORTED` before any
+  attempt: what §92 removed is the boundary reason, not the adapter one.
+  `named_objects` re-reads the bundle bytes per run and per `read_run`, and
+  the execution-profiles JSON is still read by a test rather than by the host.
   *Upgrade:* read the structured `CP_DEPLOY_V_EXECUTION_PROFILES_v1.json`
-  declaration beside the block (refusing disagreement), and a vendor owner for
-  every accepted object before those routes are enabled (Phase 5).
+  declaration beside the block (refusing disagreement), the day a second
+  consumer's block and profile row are found to disagree.
 
 **Repair Phase 2.**
 
@@ -1816,22 +1841,29 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Phase 6.**
 
-- **The bundle's disqualifier list conflates a fixture with thin evidence.**
-  `full_run_disqualifiers` puts `SOURCE_LIMITED_NOT_COMMITTEE_READY` beside
+- ~~**The bundle's disqualifier list conflates a fixture with thin evidence.**~~
+  Closed by `docs/DECISIONS.md` §92, by the upgrade this entry named and in
+  the bundle rather than the host: every `SKILL.md` now declares `fixture_*`
+  lists under its disqualifiers and a `projected_evidence_limitations` block
+  beside them, the vendor's own `completeness_check` enforces the fixture
+  lists -- a front-matter fixture flag or warning, or a fixture substring in
+  the unfenced document, is `HANDOFF_INCOMPLETE` -- and enforces nothing on the
+  projected ones, which stay what a reader and a key see
+  (`tests/test_bundle_pin.py::test_the_fixture_markers_are_split_from_the_thin_evidence_marker`).
+  By §66's own measurement none of the 25 retained bodies carries a fixture
+  marker, so the split refuses none of them; those bodies sit in a retired
+  blob root outside the tree, so that is derived from §66's record, not
+  re-run. The original entry, for the reader who wants the reason:
+  `full_run_disqualifiers` put `SOURCE_LIMITED_NOT_COMMITTEE_READY` beside
   `INTEGRATION_FIXTURE_ONLY` and `SYNTHETIC_FORWARD_ASSUMPTIONS`. The first says
   the evidence is thin, which is true of every honest handoff over this corpus;
-  the others say the document is not real work. `completeness_check` reads
+  the others say the document is not real work. `completeness_check` read
   neither list, and §66 records why enforcing them as written was implemented,
-  measured and rejected: it refuses seven of the 25 retained real bodies, two of
+  measured and rejected: it refused seven of the 25 retained real bodies, two of
   them the accepted artifacts of the only complete snapshot, each for declaring
-  the thin-evidence flag truthfully. Honouring the list whole refuses honest
-  work; honouring part of it would be the host choosing which of the bundle's
-  rules count, which invariant 4 forbids. Meanwhile `limitation_flags` is
-  already projected and already one of `matrix.PROJECTION_FIELDS`, so a
-  qualification key asserts on it today. *Upgrade:* the bundle's, not this
-  host's — split the fixture markers from the evidence-status markers, and the
-  first group can then be enforced as completeness while the second stays a
-  projection. Until that split exists the host enforces neither, deliberately.
+  the thin-evidence flag truthfully. Honouring the list whole refused honest
+  work; honouring part of it would have been the host choosing which of the
+  bundle's rules count, which invariant 4 forbids.
 
 - ~~**Two more CP-5 columns may need T5B.5's exemption.**~~ Measured, and they
   do not. §63 exempted T5B.5's `Status` and `Claim Status`; the review that
@@ -1929,18 +1961,20 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   without editing upstream is quote line 359 verbatim in `_GATE_INSTRUCTION`,
   which restates the bundle rather than adding to it (done, `a40b2b4`). The set
   also measures the failure directly through `expects_ready`.
-- **The bundle gates per consumer; the owner's statement of intent does not.**
-  Told on 16 September 2026 that CP-0 "only classifies the documents to assess
-  which pathways are available", the audit found the vendored methodology says
-  otherwise: `SKILL.md` §331 requires readiness "against the evidence demand of
-  each proposed downstream module", §349 a verdict per consumer, §357 `DO NOT
-  RUN` for CONDITIONAL and BLOCKED, and `CANON_SHARED.md` §632 "CP-0 determines
-  readiness". The vendor's own scripts refuse a non-ready module. So the host
-  enforcing it is invariant 4 working, and a host that stopped would be
-  dropping a constraint the bundle states. *Upgrade:* a dated decision entry
-  saying which governs. If the intent is policy, it is a bundle change and a
-  new build, not a host change — this entry exists so nobody closes the gap by
-  quietly weakening `route.py`.
+- ~~**The bundle gates per consumer; the owner's statement of intent does not.**~~
+  Closed by the dated decision this entry asked for, `docs/DECISIONS.md` §92
+  item 6: the bundle governs, CP-0 gates each consumer, and no vendor file
+  moved for it. `route.py` is untouched and still runs a node only on a
+  `READY` or `READY_WITH_LIMITATIONS` verdict
+  (`tests/test_route_resolution.py::test_a_conditional_verdict_blocks_like_a_blocked_one`).
+  The original entry: told on 16 September 2026 that CP-0 "only classifies the
+  documents to assess which pathways are available", the audit found the
+  vendored methodology says otherwise: `SKILL.md` §331 requires readiness
+  "against the evidence demand of each proposed downstream module", §349 a
+  verdict per consumer, §357 `DO NOT RUN` for CONDITIONAL and BLOCKED, and
+  `CANON_SHARED.md` §632 "CP-0 determines readiness". The vendor's own scripts
+  refuse a non-ready module. So the host enforcing it is invariant 4 working,
+  and a host that stopped would be dropping a constraint the bundle states.
 
 - **The borrowing-capacity key names a subordinate clause, not the fact.** One
   block per line (§5's group is unbuilt), so the sentence on Q4 page 4 is three
@@ -1971,13 +2005,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `Blocked`, MATERIAL under `Passed` — the canon's own rule, which it had never
   enforced. Verified against the artifact that exposed it: the DeepSeek CP-0
   declaring `Passed` at 93 over its own MATERIAL row now errors with the body
-  line, and every module of the passing run still validates clean. What is
-  still open is the second half, `completeness_check.load_contract`, which reads
-  only the `critical_cell_*` disqualifiers and never
-  `frontmatter_limitation_flags`, `frontmatter_validation_warnings` or
-  `document_substrings_casefold`. That is a different rule with different
-  semantics and needs its own authorisation and entry. The original, for the
-  reader who wants the reason:
+  line, and every module of the passing run still validates clean. The second
+  half, `completeness_check.load_contract` reading only the `critical_cell_*`
+  disqualifiers and never the front-matter or document lists, was a different
+  rule with different semantics and waited for its own authorisation; §92 gave
+  it one, with the fixture markers split from the thin-evidence markers first
+  (`tests/test_bundle_pin.py::test_the_fixture_markers_are_split_from_the_thin_evidence_marker`).
+  The original, for the reader who wants the reason:
   `validate_text` checks `Restricted -> <=59` and `Blocked -> <=39` and nothing
   the other way, and `completeness_check.load_contract` reads only cell
   disqualifiers, never the `frontmatter_*` ones. So a module may declare a
@@ -2235,13 +2269,17 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   can disagree with the bundle's own. The catalog offers no third way: no
   `evidence_demand`, `active_representation`, `source_files` or `evidence_class`
   appears in it. Measured by Completion Phase 10 Task 10.1, which stopped rather
-  than build. *Upgrade:* not per-module selection as specified. It needs one of
-  three things first -- a bundle build whose `Recommendation` carries T8's fifth
-  column, which is the smallest and keeps invariant 4; or a dated decision taking
-  host ownership of a CP-0 register's shape, in the pattern of §61 and §63, which
-  has to answer whether a model-authored register may decide what evidence a
-  *downstream* node can cite; or a selection rule needing no gate row at all,
-  which narrows nothing and closes none of the entries this one is grouped with.
+  than build. **The first of the three things below is now done**: build
+  `62a94ccd` (`docs/DECISIONS.md` §92) makes the vendor's `Recommendation`
+  carry T8's fifth column as `source_files_to_attach`, so the demand has one
+  reader and it is the bundle's
+  (`tests/test_bundle_pin.py::test_the_t8_parser_keeps_the_source_files_column`).
+  The host still reads nothing of it -- `Projections` keeps `(module_id,
+  readiness)` -- because the second half of the same question is unanswered:
+  whether a model-authored register may decide what evidence a *downstream*
+  node can cite. *Upgrade:* per-node evidence selection reading
+  `source_files_to_attach`, under a dated decision that answers that question
+  -- which is now the only thing between the column and a narrower delivery.
 - ~~**The workspace cannot show the cause yet.**~~ Closed by Phase 4 Task
   4.1i: the v1 `NodeView` carries `gate_verdict` and the Run section's node
   detail and reason (`frontend/src/sections/run/reason.ts`) draw it as the

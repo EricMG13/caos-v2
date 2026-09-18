@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -19,6 +20,7 @@ from canonical_fixtures import (
     CATALOG,
     CONTRACT,
     RUN,
+    conforming_rows,
     fields_from_prompt,
     skill,
     wire,
@@ -281,15 +283,18 @@ def _cp3d() -> dict[str, list[list[str]]]:
 
 def _cp2() -> dict[str, list[list[str]]]:
     return {
+        # `Direction` is the vendor's own enum (Positive | Negative | Mixed) and
+        # the register must carry both a support and a risk (§92).
         "T2.10": [
-            [str(i), driver, evidence, mechanic, implication, "negative", "Medium"]
-            for i, driver, evidence, mechanic, implication in (
+            [str(i), driver, evidence, mechanic, implication, direction, "Medium"]
+            for i, driver, evidence, mechanic, implication, direction in (
                 (
                     1,
                     "Earnings shock",
                     "downside growth minus 10 percent",
                     "lower EBITDA",
                     "leverage rises",
+                    "Negative",
                 ),
                 (
                     2,
@@ -297,6 +302,7 @@ def _cp2() -> dict[str, list[list[str]]]:
                     "term loan matures 2030",
                     "cash required at maturity",
                     "monitor access to finance",
+                    "Positive",
                 ),
             )
         ]
@@ -304,6 +310,8 @@ def _cp2() -> dict[str, list[list[str]]]:
 
 
 def _cp2g() -> dict[str, list[list[str]]]:
+    # `class` is the vendor's enum and the register must carry a BASE and a
+    # DOWNSIDE case (`cp2g.requires_downside_case`, §92).
     return {
         "T2H.3": [
             [
@@ -313,10 +321,21 @@ def _cp2g() -> dict[str, list[list[str]]]:
                 "FY2026",
                 "0.05",
                 "PERCENT_DECIMAL",
-                "analyst assumption",
+                "analyst_judgment",
                 "issuer-pack p1",
                 "stated base case",
-            ]
+            ],
+            [
+                "A-DOWNSIDE-2026-growth",
+                "revenue_growth",
+                "DOWNSIDE",
+                "FY2026",
+                "-0.10",
+                "PERCENT_DECIMAL",
+                "analyst_judgment",
+                "issuer-pack p1",
+                "downside growth minus 10 percent",
+            ],
         ]
     }
 
@@ -358,6 +377,12 @@ class HandoffKnobs:
     omit_register: str | None = None
     readiness: dict[str, str] = field(default_factory=dict)
     quote: str | None = None
+
+
+def _bounded_cell(ident: HostIdentity) -> Callable[[str, int], str]:
+    """The explicitly bounded finding a register cell carries for `ident`."""
+    quote = QUOTES[ident.module_id]
+    return lambda column, _n: f"{column}: {quote}; extract only"
 
 
 def canonical_markdown(ident: HostIdentity, knobs: HandoffKnobs | None = None) -> bytes:
@@ -404,14 +429,9 @@ def canonical_markdown(ident: HostIdentity, knobs: HandoffKnobs | None = None) -
                 for i, m in enumerate(OWNERS, 1)
             ]
         if rows is None:
-            # Explicitly bounded findings for the remaining appendix fields.
-            rows = [
-                [
-                    f"{column}: {QUOTES[ident.module_id]}; extract only"
-                    for column in columns
-                ]
-                for _ in range(max(1, spec["minimum_body_rows"]))
-            ]
+            # Explicitly bounded findings for the remaining appendix fields,
+            # shaped to the profile's own semantic rules.
+            rows = conforming_rows(register, spec, rules, _bounded_cell(ident))
         appendix += "#### " + register + "\n\n" + _table(columns, rows)
     stable_registers = dict(
         zip(

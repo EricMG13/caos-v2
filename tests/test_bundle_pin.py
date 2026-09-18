@@ -20,7 +20,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from canonical_fixtures import CONTRACT, identity, upstream_ref
+from canonical_fixtures import CONTRACT, handoff_markdown, identity, upstream_ref
 from lite_route_fixtures import realistic_handoff_markdown
 
 from server.engine import route
@@ -51,7 +51,7 @@ CATALOG = (
 
 # docs/DECISIONS.md §61, which moved the §13 pin. A run pinned to one build
 # never executes under another.
-BUILD_ID = "30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18"
+BUILD_ID = "62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c"
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -334,3 +334,282 @@ def test_cp5_exempts_only_its_status_columns_from_the_disqualifiers() -> None:
             f"T5B.5 row 1: critical column '{column}' holds a disqualifying "
             f"placeholder '{T5B5_PLACEHOLDER}'"
         ]
+
+
+# `docs/DECISIONS.md` §92: the owner's authorised build carrying the six
+# 2026-09-17 vendor requests. Each test below drives the bundle's own code
+# through the verified contract, so the host still reads and invents nothing.
+CANON = "CANON_SHARED.md"
+CP0_SKILL = "skills/cp-0-source-readiness/SKILL.md"
+L10_SKILL = "skills/cp-l10-financial-change-screen/SKILL.md"
+CP3C_SKILL = "skills/cp-3c-refinancing-lme-risk/SKILL.md"
+FIXTURE_FLAGS = {
+    "INTEGRATION_FIXTURE_ONLY",
+    "PRESENTATION_FIXTURE_NOT_CURRENT_GOLDEN",
+    "SYNTHETIC_FORWARD_ASSUMPTIONS",
+}
+THIN_EVIDENCE_FLAG = "SOURCE_LIMITED_NOT_COMMITTEE_READY"
+
+
+def _t8_table(headers: tuple[str, ...], rows: list[list[str]]) -> str:
+    head = "| " + " | ".join(headers) + " |\n| " + " | ".join("---" for _ in headers)
+    return head + " |\n" + "".join("| " + " | ".join(r) + " |\n" for r in rows)
+
+
+def test_the_t8_parser_keeps_the_source_files_column(
+    catalog: dict[str, object],
+) -> None:
+    """Request 2026-09-17-t8-source-files-column: `Recommendation` carries T8's
+    fifth column, which the vendor validated for width and then dropped, so a
+    per-module evidence demand has one reader -- the bundle's."""
+    nav = CONTRACT.navigation
+    validated = nav.validate_catalog(catalog)
+    rows = nav.parse_t8(
+        realistic_handoff_markdown(identity("CP-0")).decode(), validated
+    )
+    assert {row.source_files_to_attach for row in rows} == {"Source p1"}
+    assert {row.module_id for row in rows} == {"CP-L10", "CP-5"}
+
+    legacy = _t8_table(
+        nav.LEGACY_HEADERS,
+        [
+            [
+                "1",
+                "CP-L10",
+                "Run CP-L10",
+                "Q3 and Q4 releases",
+                "None",
+                "READY",
+                "Now.",
+            ],
+            [
+                "2",
+                "CP-5",
+                "Run CP-5",
+                "Audited statements",
+                "CP-L10",
+                "BLOCKED",
+                "Gap.",
+            ],
+        ],
+    )
+    parsed = nav.parse_t8("## Analysis\n\n" + legacy, validated)
+    assert [row.source_files_to_attach for row in parsed] == [
+        "Q3 and Q4 releases",
+        "Audited statements",
+    ]
+    assert [row.readiness for row in parsed] == ["READY", "BLOCKED"]
+
+
+def _profiles_with_disqualifiers() -> list[tuple[str, str]]:
+    """Every `(SKILL.md, module_id)` whose output profile declares the split."""
+    found = []
+    for path in sorted(BUNDLE.glob("skills/*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        for module_id in CONTRACT.completeness_check.profile_bodies(text):
+            if module_id is None:
+                continue
+            rules = CONTRACT.completeness_check.load_contract(text, module_id)
+            if rules["fixture_flags"] or rules["evidence_flags"]:
+                found.append((str(path.relative_to(BUNDLE)), module_id))
+    return found
+
+
+def test_the_fixture_markers_are_split_from_the_thin_evidence_marker() -> None:
+    """Request 2026-09-17-disqualifier-marker-split (§66): a fixture marker is a
+    completeness disqualifier and the bundle's checker enforces it; the
+    thin-evidence marker is a projected limitation and refuses nothing."""
+    declared = _profiles_with_disqualifiers()
+    assert len(declared) >= 21, declared
+    for relative, module_id in declared:
+        rules = CONTRACT.completeness_check.load_contract(
+            (BUNDLE / relative).read_text(encoding="utf-8"), module_id
+        )
+        assert THIN_EVIDENCE_FLAG not in rules["fixture_flags"], (relative, module_id)
+        assert "source-limited" not in rules["fixture_substrings"], (
+            relative,
+            module_id,
+        )
+        assert not set(rules["fixture_flags"]) & set(rules["evidence_flags"])
+    cp0 = CONTRACT.completeness_check.load_contract(
+        (BUNDLE / CP0_SKILL).read_text(encoding="utf-8"), "CP-0"
+    )
+    assert set(cp0["fixture_flags"]) == FIXTURE_FLAGS
+    assert cp0["evidence_flags"] == [THIN_EVIDENCE_FLAG]
+    assert "source-limited" in cp0["evidence_substrings"]
+    assert "integration fixture" in cp0["fixture_substrings"]
+
+    skill = (BUNDLE / CP0_SKILL).read_text(encoding="utf-8")
+    check = CONTRACT.completeness_check.check
+    honest = handoff_markdown(
+        identity("CP-0"),
+        authored={"limitation_flags": [THIN_EVIDENCE_FLAG]},
+        body_note="The two releases are source-limited; see the gaps register.",
+    ).decode()
+    assert check(skill, honest, "CP-0")[0] == []
+    for flag in sorted(FIXTURE_FLAGS):
+        fixture = handoff_markdown(
+            identity("CP-0"), authored={"limitation_flags": [flag]}
+        ).decode()
+        assert check(skill, fixture, "CP-0")[0] == [
+            f"limitation_flags declares the fixture marker {flag!r}"
+        ]
+    warned = handoff_markdown(
+        identity("CP-0"), authored={"validation_warnings": ["PRESENTATION_FIXTURE"]}
+    ).decode()
+    assert check(skill, warned, "CP-0")[0] == [
+        "validation_warnings declares the fixture marker 'PRESENTATION_FIXTURE'"
+    ]
+    marked = handoff_markdown(
+        identity("CP-0"), body_note="Built from an Integration Fixture pack."
+    ).decode()
+    assert check(skill, marked, "CP-0")[0] == [
+        "document contains the fixture marker text 'integration fixture'"
+    ]
+
+
+def test_screening_only_never_permits_committee_ready() -> None:
+    """Request 2026-09-17-lite-scope-status: the validator maps each
+    `decision_scope` to the committee statuses it permits, and the canon says
+    the same; a caller that names no scope gets the bare enum as before."""
+    vendor = CONTRACT.validate_handoff
+    every = frozenset(vendor.COMMITTEE_STATUSES)
+    assert vendor.COMMITTEE_STATUSES_BY_SCOPE == {
+        "FULL": every,
+        "SCREENING_ONLY": every - {"Committee Ready"},
+    }
+    canon = (BUNDLE / CANON).read_text(encoding="utf-8")
+    assert "SCREENING_ONLY never permits Committee Ready" in canon
+
+    cp0 = realistic_handoff_markdown(identity("CP-0"))
+    l10 = identity("CP-L10", upstream=(upstream_ref(identity("CP-0"), cp0),))
+    markdown = handoff_markdown(l10, authored={"committee_status": "Committee Ready"})
+    text = markdown.decode()
+    assert vendor.validate_text(text).errors == ()
+    assert vendor.validate_text(text, decision_scope="FULL").errors == ()
+    screened = vendor.validate_text(text, decision_scope="SCREENING_ONLY")
+    assert screened.errors == (
+        "committee_status 'Committee Ready' is not permitted under "
+        "decision_scope SCREENING_ONLY",
+    )
+    unknown = vendor.validate_text(text, decision_scope="PARTIAL")
+    assert unknown.errors == ("decision_scope 'PARTIAL' is not a declared scope",)
+    draft = handoff_markdown(l10).decode()
+    assert vendor.validate_text(draft, decision_scope="SCREENING_ONLY").errors == ()
+
+
+def test_every_lite_edge_into_a_named_object_consumer_declares_the_object_it_carries(
+    catalog: dict[str, object],
+) -> None:
+    """Request 2026-09-17-lite-producers, option 1: each `CP-L10` edge whose
+    target retains `NAMED_LITE_OBJECT_ACCEPTED` names one accepted object the
+    source's handoff carries, and CP-3C's block is keyed so the host reads it."""
+    from server.methodology.invocation import lite_object_requirement
+
+    profiles = catalog["profiles"]
+    modules = catalog["modules"]
+    assert isinstance(profiles, dict) and isinstance(modules, list)
+    edges = [
+        edge
+        for edge in profiles["LITE_CREDIT_22"]["edges"]
+        if edge["source"] == "CP-L10"
+    ]
+    assert len(edges) >= 5
+    declared: set[str] = set()
+    for edge in edges:
+        target = str(edge["target"])
+        skill_md = next(m["skill_md"] for m in modules if m["module_id"] == target)
+        accepted = lite_object_requirement(
+            (BUNDLE / skill_md).read_bytes(), target, "LITE_CREDIT_22"
+        )
+        if accepted is None:
+            continue
+        declared.add(target)
+        assert edge.get("accepted_object_id") in accepted, edge
+        assert isinstance(edge.get("allowed_use"), str) and edge["allowed_use"], edge
+    # The two edges §92 added carry the same declared use as their siblings.
+    assert declared >= {"CP-2A", "CP-3C", "CP-2H", "CP-4C"}, declared
+    added = {e["target"]: e for e in edges if e["target"] in {"CP-2A", "CP-3C"}}
+    assert added["CP-2A"]["accepted_object_id"] == "lite_fundamental_credit_screen"
+    assert added["CP-3C"]["accepted_object_id"] == "lite_liquidity_sensitivity_screen"
+    assert {e["allowed_use"] for e in added.values()} == {"SCREENING_ONLY"}
+    profiles_json = _load(BUNDLE / "CP_DEPLOY_V_EXECUTION_PROFILES_v1.json")
+    compatibility = profiles_json["retained_lite_capabilities"]
+    assert isinstance(compatibility, list)
+    row = next(r for r in compatibility if r["module_id"] == "CP-3C")
+    keyed = lite_object_requirement(
+        (BUNDLE / CP3C_SKILL).read_bytes(), "CP-3C", "LITE_CREDIT_22"
+    )
+    assert keyed is not None
+    assert set(row["accepted_lite_object_ids"]) == set(keyed)
+
+
+def _l10_handoff() -> str:
+    cp0 = realistic_handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), cp0)
+    return realistic_handoff_markdown(identity("CP-L10", upstream=(ref,))).decode()
+
+
+def _with_register_cell(
+    markdown: str, register: str, row: int, column: str, value: str
+) -> str:
+    """The fixture's `register` body row `row` (1-based) with one cell replaced."""
+    start = markdown.index(f"#### {register}\n")
+    lines = markdown[start:].split("\n")
+    columns = [cell.strip() for cell in lines[2].strip().strip("|").split("|")]
+    cells = [cell.strip() for cell in lines[3 + row].strip().strip("|").split("|")]
+    cells[columns.index(column)] = value
+    lines[3 + row] = "| " + " | ".join(cells) + " |"
+    return markdown[:start] + "\n".join(lines)
+
+
+def test_the_vendor_enforces_cp_l10s_semantic_rules() -> None:
+    """Request 2026-09-17-unshipped-rules, rule 1: `semantic_rules` are read
+    from the profile and enforced by the bundle's checker, so a duplicated or
+    missing topic id and a screen without its OVERALL row are violations."""
+    skill = (BUNDLE / L10_SKILL).read_text(encoding="utf-8")
+    rules = CONTRACT.completeness_check.load_contract(skill, "CP-L10")
+    assert [rule["rule_id"] for rule in rules["semantic_rules"]] == [
+        "cp_l10.topic_ids_unique",
+        "cp_l10.topic_ids_complete",
+        "cp_l10.overall_screen_present",
+    ]
+    check = CONTRACT.completeness_check.check
+    handoff = _l10_handoff()
+    assert check(skill, handoff, "CP-L10")[0] == []
+
+    doubled = _with_register_cell(handoff, "TL10.2", 2, "topic_id", "SOURCE_BASIS")
+    assert check(skill, doubled, "CP-L10")[0] == [
+        "TL10.2: cp_l10.topic_ids_unique -- column 'topic_id' repeats 'SOURCE_BASIS'",
+        "TL10.2: cp_l10.topic_ids_complete -- column 'topic_id' lacks "
+        "'EARNINGS_MARGIN_CHANGE'",
+    ]
+    lowered = _with_register_cell(handoff, "TL10.3", 1, "screen_item", "overall")
+    assert check(skill, lowered, "CP-L10")[0] == [
+        "TL10.3: cp_l10.overall_screen_present -- column 'screen_item' lacks 'OVERALL'"
+    ]
+
+
+def test_the_vendor_checks_a_lite_payloads_required_fields() -> None:
+    """Request 2026-09-17-unshipped-rules, rule 3: `required_payload_fields`
+    are read from the profile and a payload's `runtime_output` is checked
+    against them by the bundle. The canonical adapter holds no payload, so the
+    host has nothing to hand it today (§92)."""
+    skill = (BUNDLE / L10_SKILL).read_text(encoding="utf-8")
+    rules = CONTRACT.completeness_check.load_contract(skill, "CP-L10")
+    fields = rules["required_payload_fields"]
+    assert len(fields) == 13 and fields[0] == "cross_topic_synthesis"
+    runtime: dict[str, str] = dict.fromkeys(fields, "x")
+    payload: dict[str, object] = {"module_id": "CP-L10", "runtime_output": runtime}
+    check_payload = CONTRACT.completeness_check.check_payload
+    assert check_payload(skill, payload, "CP-L10") == []
+    del runtime["upgrade_plan"]
+    assert check_payload(skill, payload, "CP-L10") == [
+        "runtime_output lacks the required payload field 'upgrade_plan'"
+    ]
+    assert check_payload(skill, {"module_id": "CP-L10"}, "CP-L10") == [
+        "payload has no runtime_output object"
+    ]
+    cp0 = (BUNDLE / CP0_SKILL).read_text(encoding="utf-8")
+    load_contract = CONTRACT.completeness_check.load_contract
+    assert load_contract(cp0, "CP-0")["required_payload_fields"] == []

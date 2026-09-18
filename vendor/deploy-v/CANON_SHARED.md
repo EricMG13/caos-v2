@@ -323,6 +323,7 @@ SEC4 HARD STOPS: Upstream unavailable->Blocked+UPSTREAM_DEPENDENCY_MISSING. CP-2
 CP CANONICAL STATUS TAXONOMY (NEW, resolves E1)
 D1 QA: Not Reviewed | Passed | Restricted | Blocked
 D2 COMMITTEE: Committee Ready | Draft Only | Requires More Work | Insufficient Information | Restricted | Blocked
+D2 BY SCOPE: decision_scope FULL permits every D2 value; SCREENING_ONLY never permits Committee Ready (a screen is not committee clearance; a full decision requires a new FULL run). validate_handoff.py refuses a status outside the pathway's scope.
 D3 CALCULATION: Supported | Derived | Implied | Provisional | Not Available | Not Comparable | Not Calculable | Insufficient Information
 D4 SOURCE QUALITY: Primary-Verified | Primary-Unverified | Secondary-Reputable | Secondary-Unverified | Tertiary | User-Provided | Not Available
 D5 VALIDATION: Passed | Restricted | Blocked | Not Executed

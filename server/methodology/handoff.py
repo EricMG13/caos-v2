@@ -349,17 +349,21 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     handoff refuses `HANDOFF_BLOCKED` only once it is proven to be this
     invocation's, so the caller can record it as a diagnostic outcome.
 
-    `skill` is the module's verified `SKILL.md`. Not implemented here, and
-    recorded as gaps: the vendor's `semantic_rules` and
-    `document_substrings_casefold`. The pathway's `decision_scope` is projected,
-    not reconciled with `committee_status`, which the vendor does not map.
+    `skill` is the module's verified `SKILL.md`. Since §92 the vendor's own
+    checker enforces its `semantic_rules` and fixture markers, and its
+    validator refuses a `committee_status` the pathway's `decision_scope` does
+    not permit -- the host hands it the scope it already reads from the
+    catalog and adds no rule of its own. The vendor's
+    `required_payload_fields` judge a JSON payload the canonical adapter
+    never receives, so nothing here calls `check_payload`.
     """
     if identity.module_id not in ADAPTER_MODULES:
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
     text = _text(markdown)
+    scope = _decision_scope(catalog, identity)
     result = _or_refuse(
         RefusalCode.HANDOFF_MALFORMED,
-        lambda: contract.validate_handoff.validate_text(text),
+        lambda: contract.validate_handoff.validate_text(text, decision_scope=scope),
     )
     if result.errors or result.fields is None:
         raise Refusal(RefusalCode.HANDOFF_MALFORMED)
@@ -410,7 +414,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
         downstream_consumers=tuple(fields["downstream_consumers"]),
         readiness=readiness,
         blockers=blockers,
-        decision_scope=_decision_scope(catalog, identity),
+        decision_scope=scope,
     )
 
 

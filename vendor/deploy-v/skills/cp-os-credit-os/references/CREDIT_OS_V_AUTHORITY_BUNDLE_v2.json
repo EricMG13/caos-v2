@@ -1,6 +1,6 @@
 {
   "authority": "CREDIT_OS_V_AUTHORITY_BUNDLE_v2",
-  "authority_bundle_sha256": "47fec65f45dfce5ac566f4d2cc9eae1413d5ff8443442501e9f0c30ad9e8ac02",
+  "authority_bundle_sha256": "e3d0f8b2b8893ddddbd3fca9bba46cd9e1a5db540a4ca81ff184e31e49590b93",
   "available_profiles": [
     "FULL_CREDIT_32",
     "LITE_CREDIT_22"
@@ -109,7 +109,7 @@
     "resolved_catalog": {
       "path": "Co-Pilot Agents/CP-OS/references/deploy_v/CREDIT_OS_V_MODULE_CATALOG_v2.json",
       "runtime_required": true,
-      "sha256": "64144b710607f29837df6a3223d65e0065ad7a36a53f3605de7ce0829612aefe"
+      "sha256": "a115d38c3926ae17514b236595bf349c3416c1e996a17964ce88fca35cbf117e"
     },
     "runtime_lifecycle_contract": {
       "path": "Co-Pilot Agents/CP-OS/references/deploy_v/CREDIT_OS_V_RUNTIME_AND_LIFECYCLE_v2.md",
@@ -144,7 +144,7 @@
   },
   "local_rebuild": {
     "method": "verify_package.py --rebuild-authorities; unavailable upstream provenance retained",
-    "previous_authority_bundle_sha256": "694665ec52ae56fbebeda4dedd4b17a65717cd0de0dfe5c570ec59228918e24e"
+    "previous_authority_bundle_sha256": "47fec65f45dfce5ac566f4d2cc9eae1413d5ff8443442501e9f0c30ad9e8ac02"
   },
   "schema_version": "1.0",
   "target_profile": null

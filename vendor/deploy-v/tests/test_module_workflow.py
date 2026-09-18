@@ -25,6 +25,31 @@ def table(columns, rows):
     return '| '+' | '.join(columns)+' |\n| '+' | '.join('---' for _ in columns)+' |\n'+''.join('| '+' | '.join(row)+' |\n' for row in rows)+'\n'
 
 
+def conforming_rows(reg, spec, contract, fill='Recorded source p1'):
+    """Body rows satisfying the profile's own semantic_rules for `reg`: exact and
+    required values once each, allowed values only, unique columns distinct."""
+    cols=spec['columns'] or ['Evidence']
+    mine=[r for r in contract['semantic_rules'] if r.get('register_id')==reg]
+    exact={r['column']:r['values'] for r in mine if r['rule']=='exact_values'}
+    required={r['column']:r['values'] for r in mine if r['rule']=='required_values'}
+    # An enum may permit a value the placeholder blocklist refuses in a critical column.
+    allowed={r['column']:[v for v in r['values'] if v.casefold() not in contract['blocklist']] for r in mine if r['rule']=='allowed_values'}
+    unique={c for r in mine if r['rule']=='unique_columns' for c in r['columns']}
+    count=max([max(1,spec['minimum_body_rows']),*(len(v) for v in required.values())])
+    if exact:count=max(len(v) for v in exact.values())
+    rows=[]
+    for n in range(count):
+        row=[]
+        for col in cols:
+            if col in exact:cell=exact[col][n]
+            elif col in required and n<len(required[col]):cell=required[col][n]
+            elif col in allowed:cell=allowed[col][0]
+            else:cell=f'{fill} {n+1}' if col in unique else fill
+            row.append(cell)
+        rows.append(row)
+    return rows
+
+
 def yaml_fields(fields):
     # The restricted parser deliberately rejects JSON-style quoted mapping keys.
     lines=[]
@@ -65,7 +90,7 @@ def artifact(module_id, route, accepted, records, recommendations, omit_prefix=N
             appendix+=table(navigation.NEW_HEADERS,rows)
         else:
             cols=spec['columns'] or ['Evidence']
-            appendix+=table(cols,[['Recorded source p1']*len(cols)]*max(1,spec['minimum_body_rows']))
+            appendix+=table(cols,conforming_rows(reg,spec,contract))
     for tid in contract['unconditional_stable_tables']:
         appendix+='<!-- table-id: '+tid+' -->\n'+table(['source_locator'],[['Source p1']])
     body=''.join('## '+h+'\n\n'+(appendix if h=='Analysis' else 'Recorded source p1.\n\n') for h in CANONICAL_HEADINGS)

@@ -35,10 +35,12 @@ CANON = "../../CANON_SHARED.md"
 LITE_BASE = "../../CP_DEPLOY_V_LITE_MODULE_PAYLOAD_BASE_v1.schema.txt"
 # Measured at build a43cb903 (brief, "Current state"); CP-0 re-measured at
 # cdea0c9f, whose three CP-0 texts grew by 1,061 bytes (docs/DECISIONS.md §61);
-# CP-5 re-measured at 30222a49, whose SKILL.md grew by 16 bytes (§63).
+# CP-5 re-measured at 30222a49, whose SKILL.md grew by 16 bytes (§63); all
+# three re-measured at 62a94ccd (§92), where every SKILL.md's marker lists were
+# split into their two classes and CANON_SHARED.md gained the D2-by-scope line.
 # The ceiling below keeps authority a minor share of one request, leaving room
 # for evidence.
-MEASURED = {"CP-0": 145_928, "CP-L10": 198_465, "CP-5": 165_548}
+MEASURED = {"CP-0": 146_605, "CP-L10": 199_898, "CP-5": 165_973}
 AUTHORITY_SHARE_OF_REQUEST = 0.25
 FOLDERS = {
     "CP-0": "cp-0-source-readiness",

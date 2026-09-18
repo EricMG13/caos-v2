@@ -260,11 +260,26 @@ def test_carriage_returns_are_refused() -> None:
 
 
 def test_a_screening_pathway_projects_its_scope() -> None:
-    ready = {"committee_status": "Committee Ready"}
+    restricted = {"committee_status": "Restricted"}
     assert (
-        _validate(L10, _markdown(L10, authored=ready)).decision_scope
+        _validate(L10, _markdown(L10, authored=restricted)).decision_scope
         == "SCREENING_ONLY"
     )
+
+
+def test_a_screening_only_handoff_may_not_say_committee_ready() -> None:
+    """§92 (request 2026-09-17-lite-scope-status): the vendor maps each
+    `decision_scope` to the committee statuses it permits, and the host hands
+    it the pathway's scope. Run `ff71c457…`'s CP-0 said `Committee Ready` on a
+    screening-only route and was accepted; the same body is now refused
+    `HANDOFF_MALFORMED`, by the bundle's rule and not by one the host added."""
+    ready = {"committee_status": "Committee Ready"}
+    for ident in (CP0, L10):
+        refused = _refused(ident, _markdown(ident, authored=ready))
+        assert refused.code is RefusalCode.HANDOFF_MALFORMED, ident.module_id
+        assert refused.__context__ is None and refused.__cause__ is None
+    for status in ("Draft Only", "Requires More Work", "Restricted"):
+        _validate(L10, _markdown(L10, authored={"committee_status": status}))
 
 
 def test_a_scalar_that_parses_as_another_type_is_a_mismatch() -> None:
