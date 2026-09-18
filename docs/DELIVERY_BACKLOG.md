@@ -112,6 +112,45 @@ The `size` job in `.github/workflows/ci.yml` runs `if: github.event_name ==
 'pull_request'`. It is a policy about how pull requests are reviewed, not a
 correctness gate, and it does not run on a direct push.
 
+## Deliver by gated snapshot, not by file-set
+
+Tried and abandoned, so nobody tries it twice: **reconstructing a phase as a
+file-set does not work.** A `delivery/phase-8` branch was built off main by
+taking Phase 8's owned files at their head state. It did not import --
+`matrix.py` needs `server/methodology/verification.py`, which main lacks. Adding
+that, its tests then needed `qualification/documents.json`; then the **vendored
+bundle**, because main is on build `a43cb903` and the register keys need
+`30222a49`, the build §61 and §63 moved it to; then `methodology/vendor.py`;
+then the rest of `server/methodology/`, at which point the closure was still
+expanding into the engine and the store. The worktree was removed.
+
+The tree is cohesive, which is a virtue in the code and a cost in delivery.
+What the experiment *did* establish is that the modules Phase 8 reaches carry
+**no commits since Phase 8's own acceptance**, so a cut at that point is
+semantically clean even though a file-set cut is not.
+
+So deliver **commits, not file-sets**. Each of these is a real commit that
+already carries an acceptance record and a green `make check`, and each PR's
+base is the previous one's head:
+
+| # | base -> head | what | counted by the gate |
+|---|---|---|---|
+| 1 | `main` -> `7e60121` | Completion Phases 7 and 8 | 23,319 |
+| 2 | `7e60121` -> `29b2208` | Task 21 / §75, the 500-503 split | **265** |
+| 3 | `29b2208` -> `4d7af97` | Completion Phase 12, accepted | 8,360 |
+| 4 | `4d7af97` -> `HEAD` | Completion Phase 13 and Task 10.5 | 3,638 |
+
+Only #2 fits the 800-line gate. The other three are the over-cap case, and each
+has the thing that justifies it: an acceptance record naming its gates. **#1 is
+the hard one** and it is hard because main is behind by much more than Phase 8 --
+it is the accumulated remainder of everything the squashed pull requests did not
+carry.
+
+One ordering constraint, found the same way: **the vendored bundle must move
+first or with #1.** Phase 8's register keys read registers through the bundle,
+and on build `a43cb903` they answer `registers_met=False`. `vendor/**` is
+excluded from the size gate, so that part costs nothing against it.
+
 ## Three options, with what each costs
 
 1. **Forty-four stacked pull requests.** Honours the gate as written. It is
