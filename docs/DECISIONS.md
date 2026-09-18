@@ -4827,3 +4827,21 @@ this change it failed on five of them. No CP-DR record was ever accepted, so
 the change to CP-DR's delivered digest invalidates nothing. A re-run of the set
 is expected to reach a dossier the validator can judge on its content. Whether
 the model answers it conformingly is still the model's.
+
+## 2026-09-18 §102 — Every source says how its evidence was delivered
+
+§98 labelled a page-mapped source `evidence_delivery: PAGE_MAP` and left a
+whole source unlabelled. On build `78c24be4` the VMO2 portfolio run's CP-0
+(run `cf5464dd…`) read the new vendor rule 8 -- which is about page maps -- onto
+two earnings releases the host had delivered whole, triaged both
+`PARSE_TARGETED`, called them unvalidated, and blocked CP-L10; the same set's
+CP-0 on the previous build had judged them `PASS_THROUGH` and CP-L10 ready. The
+investigation found the host section otherwise unchanged, so this was the model
+misapplying our own new rule, not a missing fact.
+
+Every source in `HOST SOURCE PREPARATION` now carries `evidence_delivery`:
+`PAGE_MAP` with its map fields, or `WHOLE`. It changes CP-0's prompt bytes for
+every run from here on; no accepted record binds those bytes (a record binds its
+delivered authority, which is unchanged), so nothing already accepted moves.
+Whether it prevents the misreading is a live question the next run answers.
+`tests/test_page_selection.py::test_a_source_within_the_gate_bound_reaches_cp0_whole_and_says_so`.

@@ -987,8 +987,9 @@ def _source_preparation_section(
 ) -> str:
     """CP-0's verified source provenance, deliberately outside evidence.
 
-    A source shown as its page map (§98) says so beside its identity, and one
-    note says what the map is; a pin with none renders exactly as before.
+    Every source says how its evidence was delivered (§102): `PAGE_MAP` with
+    its map fields (§98), and one note on what a map is; otherwise `WHOLE`, so
+    CP-0 never reads the page-map rule onto a source it was handed entire.
     """
     if source_set is None:
         return ""
@@ -1018,7 +1019,7 @@ def _source_preparation_section(
             | (
                 {"evidence_delivery": "PAGE_MAP", **maps[member.source_id]}
                 if member.source_id in maps
-                else {}
+                else {"evidence_delivery": "WHOLE"}
             )
             for member in source_set.members
         ],
