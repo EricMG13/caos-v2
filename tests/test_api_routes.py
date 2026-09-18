@@ -14,6 +14,7 @@ plan's standing rules. The first, identity derivation, is in
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import re
@@ -39,6 +40,7 @@ from test_execution_freshness import _Harness
 
 from server.api import app as app_module
 from server.api import deps
+from server.api import edge as edge_module
 from server.api.app import (
     _STATUS,
     PERMANENT,
@@ -57,7 +59,7 @@ from server.api.commands import qualification as qualification_command
 from server.api.commands import runs as runs_command
 from server.api.commands._request import governed
 from server.api.deps import actor_from_request
-from server.api.edge import is_api_path, refusal_body, startup_failed
+from server.api.edge import EDGE_STATUS, is_api_path, refusal_body, startup_failed
 from server.api.reads import analysis as analysis_read
 from server.api.reads import book as book_read
 from server.api.reads import directory as directory_read
@@ -811,21 +813,111 @@ def test_every_refusal_code_has_an_explicit_http_status() -> None:
     assert set(_STATUS) == set(RefusalCode), set(RefusalCode) - set(_STATUS)
 
 
-def test_every_refusal_is_classed_transient_or_permanent_and_none_is_both() -> None:
-    """The owner's D3 split, stated as a partition rather than as two lists that
-    happen to agree with the table.
+# The owner's half of D3, named rather than decided. Each of these answers 400
+# -- "your request was wrong" -- while its clearance tells the caller to retry,
+# which is a claim about time wearing a status about blame: the mirror of what
+# §75 fixed on the 5xx side. Whether each is a 4xx, a 500 or a 503 is the
+# owner's question and has not been asked, so the statuses are unchanged; what
+# the set buys is that they are visible, and that a new retry-shaped 400 fails
+# the partition below until someone names it here. `INTERNAL_FAULT` was the
+# ninth and is not pending: it is reconciled to 500 (§75's upgrade).
+RETRY_SHAPED_400_PENDING_OWNER = frozenset(
+    {
+        RefusalCode.PROVIDER_UNAVAILABLE,
+        RefusalCode.PROVIDER_OUTPUT_TRUNCATED,
+        RefusalCode.PROVIDER_REFUSED,
+        RefusalCode.PROVIDER_RESPONSE_INVALID,
+        RefusalCode.ENVELOPE_INVALID,
+        RefusalCode.ENVELOPE_UNDECLARED_FIELD,
+        RefusalCode.ENVELOPE_UNCITED_CLAIM,
+        RefusalCode.READINESS_INCOMPLETE,
+    }
+)
 
-    A code in neither set could sit at 503 while nobody had asked whether
-    waiting would help, which is the reading of 503 this split exists to end; a
-    code in both would make the answer depend on which membership was consulted
-    first.
+
+def test_every_refusal_is_classed_transient_or_permanent_and_none_is_both() -> None:
+    """The owner's D3 split, stated as a partition of the whole enum rather than
+    of the codes that already happened to answer 5xx.
+
+    Every code is exactly one of: a client refusal (4xx), a permanent server
+    fault (500, `PERMANENT`), or a transient one (503, `TRANSIENT`, the only
+    class that says come back later). A code in neither server set could sit at
+    5xx while nobody had asked whether waiting would help; a code in both would
+    make the answer depend on which membership was consulted first. The first
+    version of this test took its universe from the codes already at 500 or 503,
+    so `INTERNAL_FAULT` at 400 was invisible to it.
     """
     assert TRANSIENT & PERMANENT == frozenset()
-    assert (TRANSIENT | PERMANENT) <= set(RefusalCode)
-    served = {code for code, status in _STATUS.items() if status in (500, 503)}
-    assert TRANSIENT | PERMANENT == served
-    assert {_STATUS[code] for code in TRANSIENT} == {503}
-    assert {_STATUS[code] for code in PERMANENT} == {500}
+    client = {code for code, status in _STATUS.items() if 400 <= status < 500}
+    permanent = {code for code, status in _STATUS.items() if status == 500}
+    transient = {code for code, status in _STATUS.items() if status == 503}
+    assert client | permanent | transient == set(RefusalCode)
+    assert len(client) + len(permanent) + len(transient) == len(RefusalCode)
+    assert permanent == PERMANENT
+    assert transient == TRANSIENT
+
+
+def test_the_retry_shaped_400s_are_named_as_pending_the_owner() -> None:
+    """A 400 whose clearance says retry is exactly the pending set: a new one
+    fails here until it is named, and one that leaves (the owner decides, or its
+    clearance changes) fails until it is struck -- so the question stays in view
+    rather than being accepted by silence.
+
+    400 exactly, not all of 4xx: `RUN_NOT_STOPPED`'s "Retry only a stopped run."
+    is a precondition on a 409, the status that already means the state moved,
+    and is no claim about waiting."""
+    retry_shaped = {
+        code
+        for code, status in _STATUS.items()
+        if status == 400 and CLEARS[code].startswith("Retry")
+    }
+    assert retry_shaped == RETRY_SHAPED_400_PENDING_OWNER
+
+
+def test_an_internal_fault_answers_500_wherever_it_is_raised(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """The guard answered an unhandled exception 500 while a route raising
+    `Refusal(INTERNAL_FAULT)` -- `server/store/commands.py` does -- answered
+    400, so one code had two statuses. It is a fault in this server that no
+    waiting is promised to clear: 500, no `Retry-After`, and its clearance
+    still true, since retrying is permitted and investigating is the discharge."""
+    _conn, case_id = case
+    app.dependency_overrides[store_connection] = _refusing(RefusalCode.INTERNAL_FAULT)
+
+    response = _section(client, case_id, None, uuid4())
+
+    assert (response.status_code, response.json()) == (
+        500,
+        _refused("INTERNAL_FAULT"),
+    )
+    assert "retry-after" not in response.headers
+    assert RefusalCode.INTERNAL_FAULT in PERMANENT
+
+
+def test_every_code_the_edge_answers_carries_the_apps_status() -> None:
+    """The guard answers before routing, so it cannot use the app's handler and
+    declares its own statuses. They must be the app's: a code whose status
+    depended on which layer answered is how `INTERNAL_FAULT` came to be 500 at
+    the edge and 400 behind it with nothing noticing.
+
+    The second half reads every `RefusalCode` the guard's module names, so a
+    code answered with a status that bypassed `EDGE_STATUS` fails here.
+    `EDGE_CONFIG_INVALID` is the one exception: it is raised as a `Refusal` and
+    sent as a lifespan failure, never answered by the guard over HTTP.
+    """
+    assert EDGE_STATUS.items() <= _STATUS.items()
+    tree = ast.parse(Path(edge_module.__file__).read_text(encoding="utf-8"))
+    named = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "RefusalCode"
+    }
+    answered = {code.name for code in EDGE_STATUS}
+    assert named == answered | {RefusalCode.EDGE_CONFIG_INVALID.name}
+    assert len(answered) == 4
 
 
 def test_a_permanent_fault_answers_500_and_carries_no_retry_after(
