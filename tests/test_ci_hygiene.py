@@ -127,7 +127,7 @@ def test_make_image_runs_the_exact_ci_trivy_gate() -> None:
     text = MAKEFILE.read_text(encoding="utf-8")
 
     assert "IMAGE ?= caos-workbench:local" in text
-    assert "TRIVY ?= trivy" in text
+    assert "TRIVY ?= $(TRIVY_DIR)/trivy" in text
     assert "TRIVY_VERSION := 0.70.0" in text
     assert 'docker build -t "$(IMAGE)" .' in text
     assert "--severity HIGH,CRITICAL --ignore-unfixed" in text
