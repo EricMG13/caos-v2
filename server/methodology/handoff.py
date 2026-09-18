@@ -50,6 +50,7 @@ ADAPTER_MODULES = frozenset(
         "CP-2G",
         "CP-3",
         MODEL_MODULE,
+        "CP-8",
     }
 )
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
