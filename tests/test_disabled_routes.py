@@ -289,4 +289,4 @@ def test_require_adapter_route_admits_the_pathway_that_is_enabled() -> None:
     """Without this the test above would pass against a function that refused
     every route, which would disable the product rather than the disabled
     routes."""
-    assert require_adapter_route(resolve_route(CATALOG, *LITE)) is None
+    require_adapter_route(resolve_route(CATALOG, *LITE))  # returns, so it admits

@@ -734,9 +734,12 @@ def _drive_child(header: dict[str, object], data: bytes) -> dict[str, object]:
     clean refusal.
     """
     stdin, stdout = io.BytesIO(json.dumps(header).encode() + b"\n" + data), io.BytesIO()
-    with (
-        mock.patch.object(pdf.sys, "stdin", mock.Mock(buffer=stdin)),
-        mock.patch.object(pdf.sys, "stdout", mock.Mock(buffer=stdout)),
+    # Patched by path rather than by reaching through the module: `sys` is an
+    # import of `pdf`, not part of its declared surface, and asking for it as
+    # an attribute is the kind of reach a re-export rule is right to refuse.
+    with mock.patch(
+        "server.evidence.pdf.sys",
+        mock.Mock(stdin=mock.Mock(buffer=stdin), stdout=mock.Mock(buffer=stdout)),
     ):
         pdf.child_main()
     return cast(dict[str, object], json.loads(stdout.getvalue()))
@@ -780,9 +783,9 @@ def test_the_extraction_child_refuses_a_header_it_cannot_read() -> None:
     """A malformed header is the parent's fault rather than the document's, and
     it still leaves by the same door: a code, never an exception."""
     stdin, stdout = io.BytesIO(b"{not json}\n"), io.BytesIO()
-    with (
-        mock.patch.object(pdf.sys, "stdin", mock.Mock(buffer=stdin)),
-        mock.patch.object(pdf.sys, "stdout", mock.Mock(buffer=stdout)),
+    with mock.patch(
+        "server.evidence.pdf.sys",
+        mock.Mock(stdin=mock.Mock(buffer=stdin), stdout=mock.Mock(buffer=stdout)),
     ):
         pdf.child_main()
 

@@ -30,8 +30,9 @@ from server.api.reads.run import (
 )
 from server.engine.route import GATE_MODULE, EdgeType, NodeState
 from server.engine.runtime import Execution, run_route
-from server.methodology.canonical import AcceptedRow, accepted_handoff
+from server.methodology.canonical import accepted_handoff
 from server.methodology.runner import ModuleProvider
+from server.methodology.verification import AcceptedRow
 from server.qualification.harness import _unrun
 from server.store.members import Standing, grant
 from server.store.outcomes import accepted_rows, execution_reads

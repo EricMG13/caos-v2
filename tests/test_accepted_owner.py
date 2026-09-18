@@ -235,7 +235,7 @@ def test_require_idle_refuses_a_caller_transaction_even_a_read_only_one(
     """
     idle = connect(harness.url)
     try:
-        assert require_idle(idle) is None
+        require_idle(idle)  # an idle connection passes by returning at all
 
         idle.execute("SELECT 1")  # a read alone opens the transaction
         with pytest.raises(Refusal) as caught:

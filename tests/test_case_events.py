@@ -14,7 +14,7 @@ import re
 import socket
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -653,7 +653,7 @@ def test_a_tail_slot_is_returned_however_the_stream_ends() -> None:
     release_stream_slot(slots)
     assert slots.open == 0
 
-    def tail() -> Iterator[int]:
+    def tail() -> Generator[int]:
         take_stream_slot(slots, limit=1)
         try:
             yield 1
