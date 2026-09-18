@@ -16,6 +16,7 @@ import ast
 import asyncio
 import hashlib
 import subprocess
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from threading import Event
@@ -29,6 +30,12 @@ from lite_route_fixtures import RealisticLiteCompletions
 from starlette.types import ASGIApp, Message
 from test_runtime import blobs, bundle, route
 
+from server.api.edge import (
+    EDGE_ASSERTION_HEADER,
+    Asserted,
+    NonceRegister,
+    verify_assertion,
+)
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute
@@ -44,8 +51,12 @@ from server.store.work import enqueue_run
 
 __all__ = ["blobs", "bundle", "route"]
 
-TOKEN = "t" * 40
+KEY = "t" * 40
 UPSTREAM = "http://upstream.invalid"
+# The edge's own origin is TLS (§93): its `Secure` cookie is only ever sent
+# back over https, so the clients here say so, and `ASGITransport` never
+# opens a socket either way.
+EDGE_ORIGIN = "https://127.0.0.1:18080"
 JOURNEY = Path(__file__).resolve().parent / "journey"
 
 
@@ -89,14 +100,38 @@ class _Unbuffered(httpx.AsyncBaseTransport):
 
 
 def _edge(upstream: _Upstream) -> ASGIApp:
-    return edge.make_edge(UPSTREAM, TOKEN, transport=_Unbuffered(upstream))
+    return edge.make_edge(UPSTREAM, KEY, transport=_Unbuffered(upstream))
 
 
 async def _logged_in(client: httpx.AsyncClient, persona: str) -> None:
     answer = await client.get("/_edge/login", params={"persona": persona})
     assert answer.status_code == 200
     cookie = answer.headers["set-cookie"].lower()
-    assert "httponly" in cookie and "samesite=lax" in cookie
+    # The contract's cookie, whole: `__Host-` needs `Secure` and `path=/`.
+    assert cookie.startswith("__host-")
+    assert "secure" in cookie and "httponly" in cookie and "samesite=lax" in cookie
+    assert "path=/" in cookie and "domain=" not in cookie
+
+
+def _asserted(request: httpx.Request) -> Asserted:
+    """What the edge's assertion on `request` proves, verified as the API
+    verifies it: under the key, for this method and target, now."""
+    [presented] = [
+        value
+        for name, value in request.headers.multi_items()
+        if name.lower() == EDGE_ASSERTION_HEADER
+    ]
+    target = request.url.raw_path.decode("latin-1")
+    verdict = verify_assertion(
+        KEY.encode(),
+        presented.encode(),
+        method=request.method,
+        target=target,
+        now=time.time(),
+        nonces=NonceRegister(),
+    )
+    assert verdict is not None, "the edge's assertion did not verify"
+    return verdict
 
 
 def test_the_test_edge_strips_every_client_identity_header_and_sets_one_of_each() -> (
@@ -107,7 +142,7 @@ def test_the_test_edge_strips_every_client_identity_header_and_sets_one_of_each(
     async def scenario() -> list[httpx.Response]:
         transport = httpx.ASGITransport(app=_edge(upstream))
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://127.0.0.1:18080"
+            transport=transport, base_url=EDGE_ORIGIN
         ) as client:
             anonymous = await client.get("/api/v1/cases")
             await _logged_in(client, "analyst")
@@ -117,7 +152,8 @@ def test_the_test_edge_strips_every_client_identity_header_and_sets_one_of_each(
                 ("x-forwarded-groups", "caos-admins"),
                 ("x-caos-role", "ADMIN"),
                 ("x-caos-edge-token", "forged"),
-                ("origin", "http://127.0.0.1:18080"),
+                ("x-caos-edge-assertion", "forged"),
+                ("origin", EDGE_ORIGIN),
                 ("sec-fetch-site", "same-origin"),
                 ("idempotency-key", "key-1"),
                 ("content-type", "application/json"),
@@ -136,17 +172,23 @@ def test_the_test_edge_strips_every_client_identity_header_and_sets_one_of_each(
     assert len(upstream.seen) == 2, "the anonymous request never left the edge"
     first, second = upstream.seen
     names = [name.lower() for name, _ in first.headers.multi_items()]
-    for header in ("x-caos-user", "x-forwarded-groups", "x-caos-edge-token"):
-        assert names.count(header) == 1, header
-    assert "x-caos-role" not in names
-    assert first.headers["x-caos-user"] == str(edge.PERSONAS["analyst"].user_id)
-    assert first.headers["x-forwarded-groups"] == edge.PERSONAS["analyst"].groups
-    assert first.headers["x-caos-edge-token"] == TOKEN
+    assert names.count(EDGE_ASSERTION_HEADER) == 1
+    # No identity header at all: the subject and groups travel inside the
+    # assertion, and the forged ones never left the edge.
+    for header in (
+        "x-caos-user",
+        "x-forwarded-groups",
+        "x-caos-role",
+        "x-caos-edge-token",
+    ):
+        assert header not in names, header
+    analyst = edge.PERSONAS["analyst"]
+    assert _asserted(first) == Asserted(str(analyst.user_id), (analyst.groups,))
     for passed in ("origin", "sec-fetch-site", "idempotency-key", "content-type"):
         assert names.count(passed) == 1, passed
     assert first.headers["idempotency-key"] == "key-1"
     assert upstream.bodies[0] == b'{"a":1}'
-    assert second.headers["x-caos-user"] == str(edge.PERSONAS["intruder"].user_id)
+    assert _asserted(second).subject == str(edge.PERSONAS["intruder"].user_id)
     assert len({p.user_id for p in edge.PERSONAS.values()}) == len(edge.PERSONAS)
 
 
@@ -159,7 +201,7 @@ def test_the_test_edge_forwards_no_cookie_or_underscore_header_and_streams_sse()
     async def login() -> str:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://127.0.0.1:18080"
+            transport=transport, base_url=EDGE_ORIGIN
         ) as client:
             answer = await client.get("/_edge/login", params={"persona": "approver"})
             bad = await client.get("/_edge/login", params={"persona": "root"})
@@ -221,7 +263,7 @@ def test_the_test_edge_forwards_no_cookie_or_underscore_header_and_streams_sse()
     assert "cookie" not in names
     assert not [name for name in names if "_" in name]
     assert request.headers["last-event-id"] == "7"
-    assert request.headers["x-caos-user"] == str(edge.PERSONAS["approver"].user_id)
+    assert _asserted(request).subject == str(edge.PERSONAS["approver"].user_id)
 
 
 def test_the_journey_worker_uses_only_the_deterministic_provider(
@@ -369,6 +411,9 @@ def test_the_orchestrator_refuses_without_its_stack_files(
     err = capsys.readouterr().err
     assert "compose.smoke.yaml" in err
     assert "playwright.journey.config.ts" in err
+    # The pinned Playwright binary is a stack file too: `npx` would resolve
+    # and may fetch one at run time, and the runner never asks it to.
+    assert str(run.PLAYWRIGHT) in err
 
     (tmp_path / "compose.smoke.yaml").write_text("services: {}\n")
     assert run.main() == 2, "one file present is still a refusal"
@@ -386,9 +431,11 @@ class _Restarting(httpx.AsyncBaseTransport):
     def __init__(self, refusals: int) -> None:
         self.refusals = refusals
         self.sent: list[str] = []
+        self.nonces: list[str] = []
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.sent.append(request.method)
+        self.nonces.append(request.headers[EDGE_ASSERTION_HEADER])
         if self.refusals:
             self.refusals -= 1
             raise httpx.ConnectError("refused", request=request)
@@ -404,13 +451,15 @@ def test_a_get_waits_out_a_restarting_upstream_and_an_unsafe_method_is_not_retri
 
     async def run() -> None:
         restarting = _Restarting(refusals=2)
-        app = edge.make_edge(UPSTREAM, TOKEN, transport=restarting)
+        app = edge.make_edge(UPSTREAM, KEY, transport=restarting)
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:18080"
+            transport=httpx.ASGITransport(app=app), base_url=EDGE_ORIGIN
         ) as client:
             await _logged_in(client, "analyst")
             assert (await client.get("/api/v1/directory")).status_code == 200
             assert restarting.sent == ["GET", "GET", "GET"]
+            # Each attempt signed afresh: three nonces, none sent twice.
+            assert len(set(restarting.nonces)) == 3
             restarting.refusals, restarting.sent = 1, []
             answer = await client.post("/api/v1/cases", content=b"{}")
             assert answer.status_code == 502

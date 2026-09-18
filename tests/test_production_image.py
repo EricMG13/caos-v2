@@ -23,11 +23,13 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
+from server.api.edge import EDGE_ASSERTION_HEADER, sign_assertion
 
 pytestmark = pytest.mark.production_image
 
@@ -81,13 +83,17 @@ def _docker_run(image: str, options: list[str], command: list[str]) -> str:
 
 
 def _wait_for_answer(
-    url: str, deadline: float, headers: dict[str, str] | None = None
+    url: str, deadline: float, headers: Callable[[], dict[str, str]] | None = None
 ) -> tuple[int, bytes]:
-    """Poll `url` until it answers with a status code, or raise past `deadline`."""
+    """Poll `url` until it answers with a status code, or raise past `deadline`.
+
+    `headers` is called per attempt: an edge assertion (§93) carries a nonce
+    and a second, so a retried request must be signed again, never resent.
+    """
     end = time.monotonic() + deadline
     last: Exception | None = None
     while time.monotonic() < end:
-        request = urllib.request.Request(url, headers=headers or {})
+        request = urllib.request.Request(url, headers=headers() if headers else {})
         try:
             with urllib.request.urlopen(request, timeout=2) as response:
                 return response.status, response.read()
@@ -253,10 +259,22 @@ def smoke_stack(built_image: str) -> Iterator[_ComposeStack]:
 def test_the_image_serves_every_section_deep_link_and_the_real_api(
     smoke_stack: _ComposeStack,
 ) -> None:
-    headers = {"x-caos-edge-token": smoke_stack.token}
+    def signed(target: str) -> Callable[[], dict[str, str]]:
+        return lambda: {
+            EDGE_ASSERTION_HEADER: sign_assertion(
+                smoke_stack.token.encode(),
+                subject=str(uuid4()),
+                groups=("caos-readers",),
+                method="GET",
+                target=target,
+                issued_at=int(time.time()),
+                nonce=secrets.token_hex(16),
+            )
+        }
+
     for section in SECTIONS:
         status, body = _wait_for_answer(
-            f"{smoke_stack.api_origin}/{section}/", 30, headers
+            f"{smoke_stack.api_origin}/{section}/", 30, signed(f"/{section}/")
         )
         assert status == 200, section
         assert b"<html" in body.lower()

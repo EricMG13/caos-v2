@@ -186,6 +186,26 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 13.**
 
+- **The replay register is one process's memory, and it refuses when full.**
+  §93's `NonceRegister` remembers each admitted nonce until its assertion
+  could no longer verify (30 s past its issued-at second), in a dictionary
+  the guard instance holds. The image runs one uvicorn worker, so within the
+  image that is the whole register; a deployment that ran two API processes
+  behind one edge would give each its own, and a replay sent to the *other*
+  process inside the window would verify. The bound is `NONCE_CAPACITY`
+  (65,536) and a full register refuses the next assertion rather than
+  forgetting an old one
+  (`tests/test_edge_assertion.py::test_the_nonce_register_is_bounded_and_forgets_only_expired_nonces`)
+  -- the fail-closed direction, chosen because a register that evicted under
+  load would admit replays exactly when an attacker can generate load; what
+  it costs is that 65,536 requests inside one 30 s window, far past the
+  image's `--limit-concurrency 32`, answer `EDGE_NOT_TRUSTED` until some
+  expire. The 30 s window is also a clock-skew allowance between the edge and
+  the API, chosen rather than measured. *Upgrade:* a register in the store
+  (one `INSERT ... ON CONFLICT DO NOTHING` per request, a round trip the edge
+  guard does not make today) the day a second API process is deployed; and a
+  measured skew the day an operator's edge and API disagree by more than a
+  few seconds.
 - ~~**Every green smoke run logs an unhandled traceback, and it is the test
   edge's rather than the product's.**~~ Closed by the upgrade named:
   `tests/journey/edge.py` catches the disconnect its own proxy loop meets on an
@@ -563,14 +583,24 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   so one administrator's id yields every co-member's, and so their cases. Writes are closed -- every governed command refuses a global
   READER before it reaches the store -- so this is disclosure, not tampering.
   It needs the host process, which binds loopback only; the documented
-  deployment is an authenticating edge that sets both headers, where the token
-  branch takes over and the groups are the identity provider's. The plan's
-  deferred table rejected a signed-assertion edge partly on the claim that
-  C3's fix "removes the only unrecorded hole", which was true of the role and
-  not of the subject. Found by the phase adversarial audit. *Upgrade:* the
-  signed assertion the two edge entries above already owe, which makes the
-  subject the identity provider's rather than a header's; nothing short of it
-  makes a tokenless host safe to expose, and nothing should expose one.
+  deployment is an authenticating edge, where the key branch takes over. The
+  plan's deferred table rejected a signed-assertion edge partly on the claim
+  that C3's fix "removes the only unrecorded hole", which was true of the role
+  and not of the subject. Found by the phase adversarial audit. ~~*Upgrade:*
+  the signed assertion the two edge entries above already owe, which makes the
+  subject the identity provider's rather than a header's.~~ **Taken by §93
+  for edge mode**: with a key set, the subject is the verified assertion's and
+  a `x-caos-user` header is dropped before identity reads anything
+  (`tests/test_edge_assertion.py::test_the_actor_carries_the_verified_subject_and_the_greatest_verified_group`).
+  What stays is exactly this entry's title: a **tokenless** host, which has no
+  assertion to verify, still parses `x-caos-user` and believes it -- under the
+  development switch by design, and without it because the READER floor is
+  what local work runs on. Nothing short of a key makes such a host safe to
+  expose, and nothing should expose one. *Upgrade:* refuse the subject header
+  too when neither the key nor the switch is set, the day the READER floor
+  stops being enough for local work; it is one line in
+  `server/api/identity.py`, kept off because it would make `make dev-api`
+  without the switch answer 401 to its own proxy.
 
 - **A provider that returns without billing and then crashes is paid twice,
   with nobody deciding to.** §70.3 deleted the frontier loop's duplicate
@@ -872,21 +902,30 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   for that reason. Demo mode only; the real stream has no shared state.
   *Upgrade:* per-stream frames the day a spec needs two tails at once.
 
-- **The edge proves itself with one static shared secret.** Edge mode trusts
-  any request carrying `CAOS_EDGE_TOKEN` (§53.2): anything on the private
-  network that learns it can assert any subject and groups, the process holds
-  one token at a time so rotating it means restarting the API, and nothing
-  binds a request to the edge's authentication of it. *Upgrade:* verifying the
-  identity provider's signed assertion (a dependency and a dated decision), or
-  mutual TLS between edge and API.
-- **The API cannot tell whether the edge stripped a client's identity.** The
-  guard refuses a repeated or lookalike identity header, which catches an edge
-  that appends; an edge that forwards a client's `x-forwarded-groups` and sets
-  none of its own is indistinguishable from a correct one, and that client
-  chooses its global role. The contract lives in `server/api/edge.py`, §53.1
-  and the test edge (`tests/journey/edge.py`), not in anything the API can
-  check. *Upgrade:* the signed assertion above, which makes the groups the
-  identity provider's rather than a header's.
+- ~~**The edge proves itself with one static shared secret.**~~ Closed by
+  Completion Phase 13.4 (§93), by the upgrade this entry named and without
+  the dependency it feared: `CAOS_EDGE_TOKEN` is now the key of a
+  per-request HMAC-SHA256 assertion the edge computes over the subject, the
+  sorted groups, the method, the raw target, an issued-at second and a nonce
+  (`server/api/edge.py::sign_assertion`), and the guard verifies it under
+  `hmac.compare_digest`, refuses one older or newer than 30 s, one signed for
+  another method or target, and one whose nonce it has already admitted
+  (`tests/test_edge_assertion.py::test_a_replayed_assertion_is_refused`,
+  `test_a_stale_or_future_assertion_is_refused`,
+  `test_an_assertion_signed_for_another_method_or_target_is_refused`). A
+  request is now bound to the edge's authentication of it. What stays: the
+  process holds one key at a time, so rotating it still restarts the API, and
+  the nonce register's limit has its own entry under Completion Phase 13.
+- ~~**The API cannot tell whether the edge stripped a client's identity.**~~
+  Closed by §93: it no longer needs to. On a verified request the guard
+  removes every identity header the request carried and writes the subject
+  and groups from the assertion, so a client's `x-forwarded-groups` a proxy
+  forwarded unsigned is dropped whatever the proxy did with it, and the actor
+  is the identity provider's
+  (`tests/test_edge_assertion.py::test_a_forged_group_header_is_ignored_whatever_the_proxy_forwarded`,
+  `test_the_actor_carries_the_verified_subject_and_the_greatest_verified_group`).
+  The hygiene refusal for a doubled or lookalike header is kept ahead of it,
+  because an appending edge is still evidence of one.
 - ~~**The worker has no readiness.**~~ Closed by Completion Phase 13.3 (§79),
   by the upgrade this entry named: migration `0028` adds `worker_heartbeats`,
   the loop writes `POLLING`/`WORKING`/`BACKOFF` with its consecutive fault
@@ -941,15 +980,31 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   load, and the day a deployment runs a different `--limit-concurrency` the two
   have to be reconciled by hand, which the constant says out loud rather than
   silently following whichever value is in force.
-- **The test edge's session cookie is weaker than the contract's.** Over
-  `http://127.0.0.1:18080` a cookie cannot be `Secure`, so `tests/journey/edge.py`
-  drops `Secure` and the `__Host-` prefix the contract names and keeps
-  `HttpOnly` and `SameSite=Lax`. The journey therefore proves SameSite and the
-  Origin check, not the prefix. *Upgrade:* none while the smoke stack has no
-  TLS material, which this task was not authorized to create.
-- **The production image and journey are proven locally, not in CI.**
-  `make smoke-production` is the last step of `make check`, and no CI job runs
-  it. The journey runs 22 tests on each of chromium, firefox and webkit.
+- ~~**The test edge's session cookie is weaker than the contract's.**~~
+  Closed by Completion Phase 13.4 (§93), with the TLS material this entry
+  said it lacked: `tests/journey/run.py` mints a one-day self-signed
+  certificate for `127.0.0.1` into each run's temporary directory with the
+  `openssl` CLI, never tracked
+  (`tests/test_journey_tooling.py::test_the_tls_material_is_minted_per_run_for_the_edge_host_and_kept_private`),
+  starts the edge under it and probes readiness with a client trusting
+  exactly that certificate
+  (`test_the_runner_starts_the_edge_over_tls_and_probes_it_with_its_own_trust`),
+  so the cookie is now `__Host-caos_edge_session; Secure; HttpOnly;
+  SameSite=Lax; Path=/`, the contract's whole cookie
+  (`tests/test_journey_edge.py::test_the_test_edge_strips_every_client_identity_header_and_sets_one_of_each`).
+  The browser accepts that one certificate's errors (`ignoreHTTPSErrors`);
+  nothing else about the journey changed.
+- ~~**The production image and journey are proven locally, not in CI.**~~
+  Closed by §93's `smoke` job in `.github/workflows/ci.yml`: the image built
+  once by buildx, the image suite under `CAOS_REQUIRE_IMAGE=1`, then
+  `tests/journey/run.py` on chromium, firefox and webkit, on a push to `main`,
+  the nightly schedule and dispatch -- never per pull request, since it takes
+  about twenty-five minutes. The runner calls the lock's own Playwright binary
+  rather than `npx`
+  (`tests/test_journey_edge.py::test_the_orchestrator_refuses_without_its_stack_files`).
+  The rest of this entry is history worth keeping:
+  `make smoke-production` is the last step of `make check`, and until §93 no
+  CI job ran it. The journey runs 22 tests on each of chromium, firefox and webkit.
   **This entry used to say only the first engine met the worker's real
   exit-after-first-accept and the 300 s lease wait, because "the exit-once
   marker lives in the shared blob volume" -- and that understated the gate.**
@@ -961,8 +1016,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   three per-engine durations, 5.7, 5.9 and 6.3 minutes against a 300 s lease
   wait, are the measurement. Corrected at the Task 12.5 acceptance review,
   which read the runner; an entry that understates a gate is the same defect as
-  one that overstates it, read the other way round. What remains true is the CI
-  half. *Upgrade:* a CI job over the smoke stack (Phase 6).
+  one that overstates it, read the other way round. The CI half, which
+  remained true until §93, is the job above.
 - **A flake in one engine used to cost the other two engines' evidence.**
   `tests/journey/run.py`'s `main` returned on the first engine's non-zero
   status, so a single flaky test in chromium ended the gate with firefox and
