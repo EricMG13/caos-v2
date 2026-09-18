@@ -18,7 +18,7 @@ contracts.
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Completion Phase 12 is accepted** (record below, candidate `5a27ec9`), taken by delivery order rather than phase number. Phases 7 and 8 are accepted; 9.1, 10.2 and 10.3 are in the branch and 10.4 was answered as a finding. **Task 10.1 was dispatched and stopped**: its remediation dependencies all landed, and what blocks it is invariant 4 rather than effort, so it is a vendor request. Phases 9, 10 and 11 are held by three owner inputs and six vendor requests; Phase 12 waited on nothing external and is now accepted; what it did **not** deliver is stated in its acceptance record, because its own name overstates it. The audit remediation is complete (§75) and its four waves are merged |
+| Current task | **Completion Phase 13's host-only work is landed; the phase is not accepted** (progress record below, head `d2b2d8c`, eleven commits over `4d7af97`). Tasks 13.1, 13.2 and the two 13.5 items whose ledger conditions had fired are in the branch, with Task 10.5 beside them; decisions §78, §79, §80. **It cannot be exited**: 13.4 needs an identity-provider setting and TLS material and 13.6 an authorized nightly, so its two whole-phase gates are deliberately not run -- an exit review certifies an exit. Every other 13.3/13.5 item is deferred by its own recorded trigger condition rather than by effort, and O23's async store is **declined** in §80. Phase 12 is accepted (`5a27ec9`); Phases 7 and 8 are accepted; 9.1, 10.2, 10.3 and now 10.5 are in the branch and 10.4 was answered as a finding. **Task 10.1 stays stopped**: what blocks it is invariant 4, so it is a vendor request. Phases 9, 10 and 11 remain held by three owner inputs and six vendor requests |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
@@ -265,6 +265,111 @@ gap already observed rather than predicted: run `ff71c457…` on
   because 206 of its 248 rows are dated and editing them would cost the property
   that makes a dated record worth keeping. It is a ledger entry with its own
   upgrade path.
+
+## Completion Phase 13 progress record — 18 September 2026
+
+**Not an acceptance.** Phase 13 cannot be exited: Task 13.4 needs an
+identity-provider setting and TLS material, and 13.6 needs an authorized
+nightly, both of which end outside this tree. Its two whole-phase gates are
+therefore **not** run, because a phase-exit review certifies an exit, and
+running one here would attest something that has not happened. What follows is
+what landed and what it is worth.
+
+- **Landed**, eleven commits over `4d7af97`:
+  - **Task 10.5** (`5f2171b`, §78) — two declared quote normalisations, tried
+    only where the exact search found nothing, so the widening is monotone and
+    every stored record re-verifies.
+  - **Task 13.5, the gate half** (`0ace311`) — `check_tested.py` resolves
+    references through the AST instead of searching for mentions. It found
+    **thirteen** definitions the byte search had cleared, three of them on the
+    evidence the ledger entry predicted: a docstring naming the symbol it was
+    supposed to test.
+  - **Task 13.3, readiness** (`da693af`, §79) — `worker_heartbeats`, and a
+    `workers` field on `/api/health` that is reported and deliberately never
+    folded into `status`.
+  - **Task 13.5, durability** (`5e0e5fd`) — a package is published whole,
+    once, or not at all.
+  - **Task 13.3, the stream cap** (`8e34f2e`) — `STREAM_LIMIT = 24` below the
+    image's `--limit-concurrency 32`, so watchers no longer refuse an
+    unrelated reader.
+  - **Task 13.1** (`de97d2b`, §80) — a frontier pass runs its independent
+    nodes at once.
+  - **Task 13.2** (`8b905b5`) — two workers take one run each; a concurrent
+    pass accepts each node exactly once.
+  - **The confidence review's finds** (`941685f`, `d2b2d8c`) — below.
+  - **The Trivy pin recorded** (`97db015`), and one commit correcting the types
+    of the five new suites under the gate's own invocation (`18b6c91`) --
+    `mypy server` is not `mypy scripts tests server`, which is what
+    `make types` runs and what caught eight errors I had not seen.
+- **What was deliberately not built, and why it is not a gap.** Every
+  remaining 13.3/13.5 item carries a trigger condition in its own ledger entry
+  and none has fired: the orphan blob sweep ("the day the store is large enough
+  for the space to matter"), the `BlobStore.get` ceiling ("the day a caller
+  other than admission needs one"), `request_sha256` on audit events ("the day
+  an audit reader needs the join"), receipt retention ("the day the table's
+  size is measured", and an owner decision besides), the schema-drift diff
+  ("the day a database is edited by anything but this function"), and
+  `LISTEN`/`NOTIFY` ("when there are enough concurrent watchers to measure it,
+  not before"). Building them now is the speculative work the ledger exists to
+  refuse. The two 13.5 items that *were* built are the two whose conditions had
+  fired -- the gate upgrade, which its entry said was "worth taking now...
+  since the false negative has been paid for once on a money path", and the
+  package publish, whose entry carried no condition at all.
+- **O23's async store is declined, not deferred** (§80). What a wide frontier
+  waits on is a provider call, and both that socket and psycopg's release the
+  interpreter lock, so threads buy the whole overlap; `gather` would have
+  bought the same at the price of recolouring 152 store functions and all 48 of
+  their server-side callers. What the exit check actually needed was a rule the
+  spec does not state -- `independent_batch` -- because `frontier` can offer a
+  node beside one of its own soft upstreams, and that pair costs a billed
+  attempt that is thrown away.
+- **The confidence review found the phase's one real defect, and it was a false
+  claim in the record.** `module_execution` set `Execution.per_node` and
+  `work_once` then rebuilt `Execution` from the four fields that line happened
+  to know about, dropping the fifth -- so the concurrent pass was built, tested,
+  documented in §80 and **never reached a worker**. Nothing failed: a dropped
+  field is not a type error and the run still completes, one node at a time.
+  The fix is `replace`, which carries a field added tomorrow, and the guard
+  asserts on what the runtime is *handed* rather than on what the factory
+  returns. §80 and the ledger entry are corrected rather than quietly fixed.
+- **The review found a second defect, in the stream cap, and the journey could
+  not see it.** The slot's release sat in the streaming generator's `finally`,
+  which covers a tail that ends and one closed mid-flight -- but a generator
+  that has not reached its first `yield` has nothing to unwind, so a response
+  built and never iterated held its slot until the process restarted. On a cap,
+  that is capacity nobody gets back, and what it eventually produces is a 503
+  on an unrelated reader, which is the exact failure the cap exists to stop.
+  Starlette always starts the body, so 22 journey tests on two engines passed
+  over it without one 503. Found by probing the three teardowns directly rather
+  than by reading Starlette's internals. `StreamSlot.release` is one-shot now,
+  with a `weakref.finalize` under the case the `finally` cannot reach.
+- **Both defects are the same shape, and it is worth naming.** Neither was a
+  failure. A dropped dataclass field and an unstarted generator are both
+  *silent*: the code does less than it says and every test still passes,
+  because what is missing is an effect nothing asserted on. That is the
+  gate-axis class this repository has now found nine times, in its second
+  form -- not a check measuring the wrong axis, but a claim with no check at
+  all.
+- **Gate evidence, and it is two invocations rather than one.** `make check` up
+  to and including the frontend half at `18b6c91`: ruff, `ruff format --check`,
+  both vocabulary gates, both untested-definition gates,
+  `mypy scripts tests server` over 249 files, the full offline backend suite
+  exit 0 with zero failures, `tsc`, `npm run lint`, 251 vitest, the production
+  build, and 90 workbench tests on chromium, firefox and webkit. No frontend
+  file has changed since, so that half holds at `HEAD`. The backend suite was
+  re-run green at `HEAD`. `make check` stops at `image` because this machine's
+  Trivy is 0.72.0 against a pin of 0.70.0 -- the pin working, with its own
+  ledger entry and the gate's own `TRIVY=` escape hatch rather than a moved
+  pin. `make smoke-production` was therefore run separately, **at `d2b2d8c`,
+  exit 0, 22 tests passing on chromium, firefox and webkit** (5.8, 5.9 and
+  9.4 minutes, each paying the real 300-second lease wait). It was run twice:
+  the first three-engine pass predated the stream-slot fix, and since that fix
+  touches the SSE path the journey exercises hardest, its evidence did not
+  transfer -- so it was re-run rather than carried over.
+- **Blast radius.** GitNexus puts the change at CRITICAL over 141 changed
+  symbols, most of them document headings; the code risk is `_unique_run`, the
+  frontier loop and the worker, each reviewed and each with a guard watched
+  failing.
 
 ## Completion Phase 12 acceptance record — 17 September 2026
 

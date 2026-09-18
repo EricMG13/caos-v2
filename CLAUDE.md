@@ -181,6 +181,26 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 13.**
 
+- **Every green smoke run logs an unhandled traceback, and it is the test
+  edge's rather than the product's.** Measured on two full three-engine runs:
+  exactly **one** `ERROR: Exception in ASGI application` and **three**
+  `httpx.RemoteProtocolError: peer closed connection without sending complete
+  message body` per engine, on runs that exit 0 with 22 tests passing. The
+  stack is `httpx`/`httpcore` -- the *client* side -- so it is
+  `tests/journey/edge.py` proxying an SSE tail to the API when the browser
+  navigates away from the page holding it, which is an ordinary thing for a
+  browser to do and which the API answers correctly (its own log line is the
+  `INFO` above it). Nothing in `server/` raises here. What it costs is not
+  correctness but attention: a traceback printed on every passing run teaches a
+  reader to scroll past tracebacks, and the next one will be real. It is also
+  why this phase had to diagnose the same exception three separate times before
+  concluding it was benign -- once per engine, against a stream-cap change that
+  could plausibly have caused it. *Upgrade:* the test edge catches the
+  disconnect its own proxy loop is certain to meet and logs one line naming it,
+  so a traceback in a smoke log goes back to meaning something. It is a change
+  to the journey's edge and not to the product, which is why it is an entry
+  rather than a task.
+
 - **The image gate cannot run on a machine whose Trivy has moved off the pin.**
   `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
   refuses anything else, which is the pin working: a scanner is only a gate
