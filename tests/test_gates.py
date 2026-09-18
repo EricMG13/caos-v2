@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from canonical_fixtures import research_brief
 from psycopg.pq import TransactionStatus
 from test_route_pinning import CATALOG_PATH, PROFILE
 
@@ -334,7 +335,10 @@ def test_the_fingerprint_ignores_the_order_sources_arrived_in(
     assert source_set_fingerprint(conn, other) == one_way
 
 
-@pytest.mark.parametrize("research", [None, {}, {"questions": ["Café?\nExact text."]}])
+@pytest.mark.parametrize(
+    "research",
+    [None, research_brief(), research_brief(decision_context="Café?\nExact text.")],
+)
 def test_preview_is_exact_immutable_captured_content(
     gated: tuple[StoreConnection, UUID, UUID, UUID, UUID], research: object
 ) -> None:

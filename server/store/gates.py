@@ -15,9 +15,9 @@ from uuid import UUID
 import psycopg
 
 from server import methodology
-from server.engine.route import ResolvedRoute
+from server.engine.route import RESEARCH_STAGE, ResolvedRoute
 from server.methodology.bundle import Bundle
-from server.methodology.handoff import ADAPTER_MODULES, ADAPTER_ROUTES
+from server.methodology.handoff import ADAPTER_MODULES, ADAPTER_ROUTES, RESEARCH_MODULE
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, rollback_or_close
 from server.store.audit import GovernedAction, governed_write
@@ -287,6 +287,16 @@ def require_adapter_route(route: ResolvedRoute) -> None:
     from server.methodology.host import verify_extension
 
     verify_extension(route)
+    # The research extension (§6) appends CP-DR at stage 99 without the
+    # predecessor and consumer edges the vendor's own `routing.Route`
+    # synthesises from the brief's questions, so a run on it would take a path
+    # the bundle's navigation would not (§96). CP-DR is executed only where a
+    # catalog pathway carries it natively, and no such pathway is enabled yet.
+    if any(
+        node.module_id == RESEARCH_MODULE and node.stage == RESEARCH_STAGE
+        for node in route.nodes
+    ):
+        raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
     if (route.profile_id, route.selection_id) not in ADAPTER_ROUTES or any(
         node.module_id not in ADAPTER_MODULES for node in route.nodes
     ):

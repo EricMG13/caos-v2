@@ -12,6 +12,8 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -26,6 +28,14 @@ from canonical_fixtures import (
     identity,
     skill,
     upstream_ref,
+)
+from canonical_route_fixtures import (
+    RESEARCH_BRIEF,
+    RESEARCH_ROUTE,
+    bound_research_brief_text,
+    research_identity,
+    research_markdown,
+    research_section,
 )
 from conftest import reserve_at as reserve
 from test_execution_freshness import _Harness, harness
@@ -51,10 +61,13 @@ from server.methodology.bundle import (
 from server.methodology.executor import Delivery
 from server.methodology.handoff import (
     INVISIBLE,
+    RESEARCH_HOST_FIELDS,
     HostIdentity,
     UpstreamRef,
     expected_filename,
     invocation_fields,
+    research_brief_of,
+    research_fields,
     validate_markdown,
 )
 from server.methodology.invocation import (
@@ -1303,3 +1316,106 @@ def test_the_prompt_states_one_citation_rule_and_it_is_the_enforced_one() -> Non
     prompt = prompt_for()
     assert "without shortening" not in prompt
     assert "Evidence Trace` before using" not in prompt
+
+
+# The vendor's own preparer, run where the vendor runs it: its scripts on the
+# path, in a separate interpreter so nothing it imports or compiles lands in
+# this process or beside the vendored bytes.
+_VENDOR_PREPARE = """
+import json, sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+from prepare_invocation import prepare
+catalog, authority, snapshot = json.load(sys.stdin)
+result = prepare(catalog, authority, module_id="CP-DR", issuer_id="ACME",
+                 analysis_date="2026-09-08", artifacts=snapshot)
+print(json.dumps({"fields": result["frontmatter_fields"],
+                  "brief": result["research_brief"]}))
+"""
+
+
+def test_cp_dr_receives_exactly_the_pinned_brief_with_host_filled_bindings() -> None:
+    """§96: CP-DR's prompt carries the bound brief -- the pinned brief with the
+    host's three bindings -- as one tagged host-owned section, and its host
+    front matter's research fields are exactly those the vendor's own
+    `prepare_invocation.prepare` emits for the same CP-0 and brief. The host
+    re-implements no research rule (invariant 4)."""
+    gate = research_identity("CP-0")
+    gate_markdown = research_markdown(gate, invocation_fields(CONTRACT, gate))
+    cp0_sha256 = hashlib.sha256(gate_markdown).hexdigest()
+    bound = bound_research_brief_text(cp0_sha256)
+    upstream = (
+        UpstreamRef(
+            research_identity("CP-DR").upstream[0].route_node_id,
+            "CP-0",
+            gate.run_id,
+            "FY2025",
+            cp0_sha256,
+        ),
+    )
+    ident = research_identity("CP-DR", upstream, research_brief=bound)
+    items = _delivered()
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=ident,
+        authority=delivered_authority(BUNDLE, "CP-DR"),
+        catalog=CATALOG,
+        delivered=items,
+        upstream=((upstream[0], gate_markdown),),
+        upstream_citations={upstream[0].route_node_id: ANCHORED},
+        route=RESEARCH_ROUTE,
+    )
+    assert research_section(prompt) == bound
+    assert research_brief_of(ident) == json.loads(bound)
+    assert prompt.count(f"--- RESEARCH BRIEF {_tag(prompt)} (") == 1
+    assert json.loads(bound) == {
+        **RESEARCH_BRIEF,
+        "run_id": gate.run_id,
+        "cp0_sha256": cp0_sha256,
+        "authority_sha256": authority_bundle_sha256(BUNDLE),
+    }
+    for name in ("coverage_score", "research_status", "research_stop_reason"):
+        assert name in prompt.split("--- END EVIDENCE")[-1], name
+
+    host = invocation_fields(CONTRACT, ident)
+    snapshot = {
+        f"ACME_CP-0_{gate.analysis_date.replace('-', '')}.md": gate_markdown.decode(),
+        f"RESEARCH_{gate.run_id}.json": bound,
+    }
+    ran = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            _VENDOR_PREPARE,
+            str(BUNDLE.root / "skills/cp-os-credit-os/scripts"),
+        ],
+        input=json.dumps([CATALOG, authority_bundle_sha256(BUNDLE), snapshot]),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    vendor = json.loads(ran.stdout)
+    assert vendor["brief"] == json.loads(bound)
+    assert {name: host[name] for name in RESEARCH_HOST_FIELDS} == {
+        name: vendor["fields"][name] for name in RESEARCH_HOST_FIELDS
+    }
+    assert research_fields(CONTRACT, ident) == {
+        name: host[name] for name in RESEARCH_HOST_FIELDS
+    }
+    assert research_fields(CONTRACT, gate) == {}
+
+
+def test_no_other_module_receives_a_research_section() -> None:
+    """Every other module's prompt is what it was before §96: no research
+    section, no research front matter, and an identity carrying a brief on any
+    other module is refused rather than rendered."""
+    prompt = _prompt(identity("CP-0"))
+    assert "RESEARCH BRIEF" not in prompt
+    assert not set(RESEARCH_HOST_FIELDS) & set(
+        invocation_fields(CONTRACT, identity("CP-0"))
+    )
+    gate = identity("CP-0")
+    with pytest.raises(Refusal) as refused:
+        _prompt(replace(gate, research_brief=bound_research_brief_text("a" * 64)))
+    assert refused.value.code is RefusalCode.HANDOFF_IDENTITY_MISMATCH
