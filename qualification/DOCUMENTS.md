@@ -61,10 +61,10 @@ Sixteen documents: six `in_hand`, seven `to_source`, two `to_author`, one
 `not_available`; plus one key source. Three of the six in hand are the
 portfolio-screen set's own copies of the other three, which the on-disk loader
 requires because it refuses a declared path resolving outside its set root. The `bytes` and `sha256` columns are
-blank for a document that does not yet exist on the machine the table was
-emitted from — for `ba-fy2025-10k` and `f-fy2025-10k` they are filled from the
-owner's out-of-tree document register, which is why those two rows carry measurements
-while the other `to_source` rows do not.
+blank for a document not in the tree: only a file under `qualification/` is
+measured, so the table is the same on every machine. `ba-fy2025-10k` and
+`f-fy2025-10k` are held out of the tree, and their sizes are in their register
+notes and under **Size** below rather than in this table.
 
 ## Sourcing list for the owner
 
@@ -76,12 +76,17 @@ than leaving it blank, because a wrong one reads as provenance.
 
 1. **`ba-fy2025-10k`, `f-fy2025-10k` — copy in from the owner's document register.**
    Both are already held, read-only, at
-   `/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/`,
+   `/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/`,
    with their raw HTML and SEC XBRL company facts in `raw/` beside them. This
    repository has not copied them. The coordinator admits each under its own
    digest (`0446b367…` and `97a38bc1…` as measured on 17 September 2026) and
    records the provenance in the receiving set's `RESULT.md` header. Neither
-   fits the request ceiling; see **Size** below.
+   fits the request ceiling; see **Size** below. The folder was renamed from
+   `document register/` to `corpus/` after it was recorded; both digests were
+   re-measured there on 18 September 2026 and are unchanged. They stay out of
+   the tree until per-node evidence selection (§88.2, with the vendor) can run
+   them: before that a copy frees no work, and at 1.1 and 1.8 MB each would
+   need an exemption from the large-file hook.
 2. **`ccl-debt-documents`, `ba-debt-documents` — executed debt documents.**
    Indentures, credit agreements and their maturity schedules, filed as
    exhibits on EDGAR. `docs/COMPLETION_PLAN.md` records the issuers' CIKs as

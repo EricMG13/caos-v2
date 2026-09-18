@@ -139,8 +139,9 @@ Standing rules that back them:
 
 - First setup: copy `.env.example` to `.env`, then run `make bootstrap`,
   `make doctor`, and `make dev-up`. This creates the locked Python 3.14/3.12
-  and Node 24 environments, starts the persistent dev database on 55436 and
-  the ephemeral test-admin database on 55437, and preserves local blobs.
+  and Node 24 environments and the pinned Trivy, starts the persistent dev
+  database on 55436 and the ephemeral test-admin database on 55437, and
+  preserves local blobs.
 - `make dev-api` (`make dev` is an alias) — the guarded site application on
   127.0.0.1:8000, loopback only (§53). It needs `CAOS_DATABASE_URL` and
   `CAOS_BLOB_ROOT`, both read per request, and advances the verified migration
@@ -202,26 +203,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `test_the_runner_checks_every_port_the_stack_publishes_on_the_host`, which
   reads `compose.smoke.yaml` so the two cannot drift).
 
-- **The image gate cannot run on a machine whose Trivy has moved off the pin.**
-  `make check`'s `image` target requires exactly `TRIVY_VERSION := 0.70.0` and
-  refuses anything else, which is the pin working: a scanner is only a gate
-  while everyone runs the same one, and a newer Trivy can change both its
-  findings and its report shape, which `scripts/scan_floors.py --trivy` then
-  reads. The development machine was upgraded to 0.72.0 between Completion
-  Phase 12's gate (17 September 2026, which ran `image` green) and Phase 13's,
-  so `make check` now stops there and **never reaches `smoke-production`,
-  which is the step after it**. Nothing is wrong with the tree: every step
-  before `image` is green, and `smoke-production` runs on its own. The gate is
-  parameterised for exactly this -- `TRIVY ?= trivy`, so
-  `make check TRIVY=/path/to/0.70.0/trivy` runs it whole -- and that is the
-  fix rather than moving the pin, which would be changing a gate to get a
-  pass. What it costs is that the phase's own evidence is assembled from
-  `make check` up to `image` plus a separate `make smoke-production`, rather
-  than from one green invocation. *Upgrade:* pin the scanner the way the locks
-  pin everything else -- a hashed, version-exact Trivy the bootstrap installs
-  into the project rather than one the machine happens to carry -- the day a
-  second person has to reproduce this gate. Until then the escape hatch is the
-  answer and this entry is where it is written down.
+- ~~**The image gate cannot run on a machine whose Trivy has moved off the
+  pin.**~~ Closed by the upgrade it named (§90): `make trivy`, which
+  `make bootstrap` runs, installs Trivy 0.70.0 into `.tools/` from the release
+  archive, refusing it unless its SHA-256 equals the digest pinned in
+  `scripts/install_trivy.sh`
+  (`tests/test_install_trivy.py::test_an_archive_whose_digest_is_not_pinned_is_refused_before_extraction`),
+  and `TRIVY` defaults to that binary. `make check` therefore runs whole on a
+  machine carrying any other Trivy; it did at `eca3f5f`, one invocation, exit
+  0. The pin itself is unchanged, and `image` still refuses any other version.
 
 **Completion Phase 12.**
 
@@ -2158,7 +2148,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   exceeds a run's ceiling, so at Terra's rates three LITE nodes are refused
   against the $5 default before any case is prepared, and `scripts/qualify.py`
   admits exactly what it admitted before this task even though `run_route` now
-  finishes such a run. That sentence left the tree in a rewrite and is restored
+  finishes such a run. **Closed by §91:** the floor is one worst-case call
+  per run, the runtime's own admission, so a two-node LITE route at Terra's
+  price is admitted at $5
+  (`tests/test_qualification_prepare.py::test_a_route_whose_nodes_together_exceed_the_ceiling_at_worst_is_admitted`);
+  what it gives up is that a route may stop short at `BUDGET_CEILING_REACHED`
+  having spent at most its ceiling. That sentence left the tree in a rewrite and is restored
   here, which is the failure this ledger's own gate exists to catch, read the
   other way round.
   *Upgrade:* a user-confirmed dated price for the configured live model, which is

@@ -2,8 +2,11 @@
 PY  := .venv/bin/python
 SEC := .venv-security/bin
 IMAGE ?= caos-workbench:local
-TRIVY ?= trivy
 TRIVY_VERSION := 0.70.0
+# The project's own pinned scanner (docs/DECISIONS.md §90); `make trivy`
+# installs it, and TRIVY= still overrides.
+TRIVY_DIR := .tools/trivy-$(TRIVY_VERSION)
+TRIVY ?= $(TRIVY_DIR)/trivy
 
 -include .env
 export CAOS_DATABASE_URL CAOS_TEST_POSTGRES_URL CAOS_BLOB_ROOT
@@ -12,10 +15,15 @@ export CAOS_DEV_USER CAOS_DEV_ROLE
 
 .PHONY: bootstrap venv lock lint types test test-fast test-provider test-postgres-races \
 	check-postgres security image smoke-production frontend-check check-fast check-size \
-	check doctor dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index
+	check doctor dev dev-up dev-down dev-api dev-worker dev-ui dev-ui-demo index trivy
 
-bootstrap: venv  ## exact locked Python and Node development environments
+bootstrap: venv trivy  ## exact locked Python and Node environments, pinned Trivy
 	npm --prefix frontend ci --ignore-scripts
+
+trivy: $(TRIVY_DIR)/trivy  ## the image gate's scanner, pinned by archive digest
+
+$(TRIVY_DIR)/trivy:
+	scripts/install_trivy.sh $(TRIVY_VERSION) $(TRIVY_DIR)
 
 venv:  ## dev toolchain on 3.14, security toolchain on 3.12 (AI_CODE_QUALITY 4)
 	uv venv --python 3.14 .venv
@@ -78,7 +86,7 @@ security:  # the floor is checked first: a report that parsed nothing must fail
 	gitleaks git --no-banner
 
 image:  ## build and run the exact CI Trivy floor and severity gate
-	@command -v "$(TRIVY)" >/dev/null || { echo "Trivy is required; set TRIVY=/path/to/trivy" >&2; exit 1; }
+	@command -v "$(TRIVY)" >/dev/null || { echo "Trivy is required; run make trivy, or set TRIVY=/path/to/trivy" >&2; exit 1; }
 	@test "$$("$(TRIVY)" --version | sed -n 's/^Version: //p')" = "$(TRIVY_VERSION)" || { echo "Trivy $(TRIVY_VERSION) is required" >&2; exit 1; }
 	docker build -t "$(IMAGE)" .
 	"$(TRIVY)" image --format json --output trivy.json --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 "$(IMAGE)"

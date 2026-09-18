@@ -4387,3 +4387,42 @@ not carry (Admin stays an unavailable shell, D2). Built here.
   revoked from the surface (the command still can). And showing an ADMIN every
   co-member's id widens the tokenless-host disclosure the ledger records: one
   ADMIN's id now yields each co-member's id, and so their cases.
+
+## 2026-09-18 §90 — The image gate's Trivy is installed into the project, pinned by digest
+
+The owner approved it on 18 September 2026, closing the Completion Phase 13
+ledger entry "The image gate cannot run on a machine whose Trivy has moved off
+the pin" by the upgrade it named.
+
+- **What.** `scripts/install_trivy.sh` fetches Trivy 0.70.0's release archive
+  for the running platform (macOS arm64/x86_64, Linux x86_64/arm64) from
+  `github.com/aquasecurity/trivy` and refuses it unless its SHA-256 equals the
+  digest pinned in the script, taken from the release's published
+  `trivy_0.70.0_checksums.txt`. Only then is the `trivy` binary extracted, into
+  `.tools/trivy-0.70.0/`, which git ignores.
+- **Wiring.** `make trivy` installs it once; `make bootstrap` depends on it;
+  `TRIVY` defaults to that binary, so `make check` runs whole on any machine
+  that bootstrapped, whatever Trivy it carries. `TRIVY=` still overrides, and
+  `image` still refuses any version but `TRIVY_VERSION`.
+- **Why a script and not a lock.** Trivy is a Go binary, not a Python or Node
+  package, so no existing lock can hash it; the digest table in the script is
+  the lock. Moving the version means new digests from the new release's
+  checksums file and an edit here, which is the point.
+- **Not changed.** CI keeps `aquasecurity/trivy-action` pinned by commit with
+  `version: v0.70.0`; it never ran `make image`.
+
+## 2026-09-18 §91 — The qualification floor is one worst-case call per run
+
+The owner authorized two portfolio runs at $5 each. At the live model's price
+($2 / $12 per million) the harness's floor -- one worst-case call *per node* --
+needed $5.77 for a two-node route and refused before spending, although no node
+has reserved a worst case since Task 8.2. The Phase 5 ledger entry owed this
+upgrade. `harness._affordable` now requires one worst-case call per run, the
+same admission `runtime._affordable` makes; `reserve`, under the run lock,
+refuses the next reservation past the ceiling, and that is what bounds spend.
+
+What it gives up, stated: the old floor (the Phase 5 confidence review's F-1)
+stopped a set whose route could not be finished at worst-case prices. Now such a
+route may start and stop short at `BUDGET_CEILING_REACHED`, having spent at most
+its ceiling -- the amount the owner authorized. Invariant 8 is unchanged: no
+call without a reservation, and no reservation past the ceiling.

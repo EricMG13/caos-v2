@@ -133,6 +133,15 @@ rather than an empty tuple, §88 saying whose recommendation the statuses were
 and that 503 licenses no worker retry, and §89 and the ledger recording the
 64-member bound and the widened tokenless-host disclosure.
 
+**Then, on the owner's approval:** the register's stale corpus path corrected
+and its table made machine-independent (`cced216`); Trivy 0.70.0 installed into
+the project by digest (§90), so `make check` runs whole here. **Complete gate
+at `eca3f5f`, one invocation, exit 0:** offline suite **3,371**, races **26**,
+frontend **267** unit and **90** workbench, `image`, and `smoke-production` --
+8 production-image tests and the journey **22 on each of chromium, firefox and
+webkit**, no traceback. `make image` then re-ran green on the default pinned
+binary with no override.
+
 **Nothing buildable remains in the plan.** What is left is only what the section
 above names: documents, live-run authorization, an identity-provider setting,
 TLS material and vendor answers.

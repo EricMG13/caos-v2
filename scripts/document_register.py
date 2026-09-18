@@ -115,15 +115,18 @@ def set_documents(root: Path) -> dict[str, tuple[str, ...]]:
 
 
 def measured(document: Document, repo: Path) -> tuple[int, str] | None:
-    """Size and SHA-256 of the row's bytes, or None when no path of its holds any."""
-    for candidate in (
-        repo / document.local_path if document.local_path else None,
-        Path(document.external_path) if document.external_path else None,
-    ):
-        if candidate is not None and candidate.is_file():
-            raw = candidate.read_bytes()
-            return len(raw), hashlib.sha256(raw).hexdigest()
-    return None
+    """Size and SHA-256 of the row's in-tree bytes, or None when it has none.
+
+    Never the `external_path`: the table is held equal to a committed file on
+    every machine, and an out-of-tree folder exists on one. Its measurements
+    belong in the row's `note`, dated."""
+    if document.local_path is None:
+        return None
+    path = repo / document.local_path
+    if not path.is_file():
+        return None
+    raw = path.read_bytes()
+    return len(raw), hashlib.sha256(raw).hexdigest()
 
 
 def unlisted(register: Register, sets: dict[str, tuple[str, ...]]) -> list[str]:

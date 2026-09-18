@@ -25,3 +25,4 @@ uv.lock
 # so tracking it would mean a diff on every `analyze`. The index itself is
 # excluded in .git/info/exclude; this is the instruction file beside it.
 AGENTS.md
+.tools/
