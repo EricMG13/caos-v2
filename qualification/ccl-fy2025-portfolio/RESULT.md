@@ -55,3 +55,35 @@ section. Nothing has been run on this route, so there was nothing to copy from.
   without that reading would measure a guess rather than the module. Owed, with
   the reading, before this set is run.
 - **The run itself**, and a signed verdict or a recorded reason why not.
+
+## First authorized run — 18 September 2026
+
+Authorized by the owner the same day ("authorize the two portfolio runs with the
+Terra settings above, a $5 ceiling per run, today"). **Not signable:** the run
+ended BLOCKED at CP-0's readiness gate, so CP-L10 never ran.
+
+- Provider/model: `openrouter/openai/flex/high/65536` / `openai/gpt-5.6-terra`
+- Price: `$0.000002` input, `$0.000012` output per token, dated 2026-09-18
+- Run ceiling `$5.00`; `--attempts 2`; build `62a94ccd…` (§92)
+- Run `ef040775-7c99-4645-b681-a11405308854`; evidence `9b9868e0e3bae784…`;
+  performed `a3da30d4b8cc3ec4…`
+- Retained database `caos_qualify_13ec1a9ca0814387aca7e8977dd1f9f1`, blob root
+  `/var/folders/81/bwblpst93lb6wb3lwrk8k6800000gn/T/caos-qualify-pemds0zr`;
+  capture `run-2026-09-18-capture.json`
+- Charge: CP-0 **`$0.17845375`**, one call, accepted. Nothing else was called.
+
+| | |
+|---|---|
+| Route | BLOCKED after CP-0 (1 artifact, 2 citations, proof sound) |
+| `ready_met` / `projections_met` | false / false |
+| Citation key | missed — CP-L10 did not run |
+
+CP-0's T8 row for CP-L10 reads `DO NOT RUN` / `BLOCKED`: "Supply current
+portfolio holdings/exposure, portfolio mandate and limits, eligible-security
+universe, current security-market evidence, and applicable executed governing
+security documents; rerun CP-0 after receipt." That is the methodology refusing
+a portfolio decision over a 10-K alone, which is a defensible reading of what
+`LITE_PORTFOLIO_DECISION` needs; the set's `expects_ready: ["CP-L10"]` assumed
+otherwise. Whether the key or the corpus should change is the owner's call; the
+key is not edited to match the run. The VMO2 set, over two earnings releases,
+was judged ready on the same build.
