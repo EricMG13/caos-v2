@@ -23,7 +23,15 @@ from server.api.app import app, blob_store, store_connection
 from server.api.identity import ROLE_HEADER, TRUST_SWITCH, TRUSTED
 from server.api.reads import directory as directory_read
 from server.api.reads import upload as upload_read
-from server.api.wire import CASES_MAX, CLEARS, DirectoryDocument, UploadDocument
+from server.api.wire import (
+    CASES_MAX,
+    CLEARS,
+    MEMBERS_MAX,
+    ActionName,
+    DirectoryDocument,
+    MemberRow,
+    UploadDocument,
+)
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
@@ -162,6 +170,74 @@ def test_directory_lists_only_cases_with_live_standing(
         "FULL_CREDIT_32",
         "FULL_CREDIT_ASSESSMENT",
     )
+
+
+def test_the_directory_serves_a_cases_members_only_to_its_administrator(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """O21: membership surfaces in Directory. A case's live members are the
+    administrator's to see, because they are the administrator's to change; a
+    member below ADMIN is shown the two controls refused, never hidden."""
+    conn, administered = case
+    user, writer, gone = sorted((uuid4(), uuid4(), uuid4()))
+    grant(conn, case_id=administered, user_id=user, standing=Standing.ADMIN)
+    grant(conn, case_id=administered, user_id=writer, standing=Standing.WRITER)
+    grant(conn, case_id=administered, user_id=gone, standing=Standing.READER)
+    revoke(conn, case_id=administered, user_id=gone)
+    written = create_case(conn, BoundaryText.of("Written, not administered"))
+    grant(conn, case_id=written, user_id=user, standing=Standing.WRITER)
+    conn.commit()
+
+    rows = {
+        row.case_id: row
+        for row in DirectoryDocument.model_validate(
+            client.get(DIRECTORY, headers=_as(user, "ANALYST")).json()
+        ).body.cases
+    }
+
+    admin_row, writer_row = rows[administered], rows[written]
+    assert admin_row.members == [
+        MemberRow(user_id=user, standing=Standing.ADMIN),
+        MemberRow(user_id=writer, standing=Standing.WRITER),
+    ]
+    assert [(a.action, a.refusal) for a in admin_row.actions] == [
+        (ActionName.GRANT_STANDING, None),
+        (ActionName.REVOKE_STANDING, None),
+    ]
+    assert writer_row.members is None
+    assert [(a.action, a.refusal and a.refusal.code) for a in writer_row.actions] == [
+        (ActionName.GRANT_STANDING, RefusalCode.NOT_AUTHORISED),
+        (ActionName.REVOKE_STANDING, RefusalCode.NOT_AUTHORISED),
+    ]
+
+    as_reader = DirectoryDocument.model_validate(
+        client.get(DIRECTORY, headers=_as(user, "READER")).json()
+    ).body.cases
+    reader_row = next(row for row in as_reader if row.case_id == administered)
+    assert reader_row.members == admin_row.members
+    assert {a.refusal and a.refusal.code for a in reader_row.actions} == {
+        RefusalCode.NOT_AUTHORISED
+    }
+
+
+def test_a_member_list_past_its_bound_is_truncated_with_a_note(
+    client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    conn, case_id = case
+    user = uuid4()
+    grant(conn, case_id=case_id, user_id=user, standing=Standing.ADMIN)
+    for _ in range(MEMBERS_MAX):
+        grant(conn, case_id=case_id, user_id=uuid4(), standing=Standing.READER)
+    conn.commit()
+
+    document = DirectoryDocument.model_validate(
+        client.get(DIRECTORY, headers=_as(user)).json()
+    )
+
+    [row] = document.body.cases
+    assert row.members is not None and len(row.members) == MEMBERS_MAX
+    assert document.status == "partial"
+    assert [note.value for note in document.notes] == ["LIST_TRUNCATED"]
 
 
 def test_an_empty_directory_is_observed_empty_with_its_time(
@@ -385,7 +461,8 @@ def test_each_section_request_path_declares_its_store_budget(
         created = create_case(conn, BoundaryText.of(f"Case {index}"))
         grant(conn, case_id=created, user_id=user, standing=Standing.READER)
         start_run(conn, created)
-    grant(conn, case_id=case_id, user_id=user, standing=Standing.READER)
+    # ADMIN, so the budget is measured with the member list served.
+    grant(conn, case_id=case_id, user_id=user, standing=Standing.ADMIN)
     _admit(conn, case_id, tmp_path / "b", "a.txt", "b.txt")
     conn.commit()
     snapshot_source_set(conn, case_id)

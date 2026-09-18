@@ -331,17 +331,22 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   typed as prose is still refused `NARRATIVE_FIGURE_UNREFERENCED`, and its
   clearance now names an act the surface offers. The journey's first revision,
   figure span included, is now made on the surface rather than over the API.
-- **Grant and revoke have no control.** ~~Nothing renders a parked run's stop
-  code.~~ That half is closed: the Run section's work panel names
-  `work.stop_code` beside the refused Start and Retry, in words and labelled
+- ~~**Grant and revoke have no control.**~~ Both halves closed. A parked run's
+  stop code is named in the Run section's work panel
   (`frontend/tests/unit/run.test.tsx`'s
-  `test_a_parked_run_names_its_stop_code_beside_the_work_controls`), and the
-  journey asserts it on the parked run. The wire carries the code without a
-  clearance and none is invented. Grant and revoke remain: both commands have no
-  control anywhere and no entry in `ActionName`, deliberately, because no
-  section serves an Admin panel to offer them from, so the journey drives them
-  as authenticated requests. *Upgrade:* the membership commands with Completion
-  Phase 13's Admin work.
+  `test_a_parked_run_names_its_stop_code_beside_the_work_controls`). Grant and
+  revoke are pressed on Directory's Case access panel, where
+  `docs/COMPLETION_PLAN.md`'s O21 put membership -- not the Admin work this
+  entry named, which Phase 13 never carried. Each `CaseRow` serves the case's
+  live members to its ADMIN alone, in the listing query's own lateral read, so
+  the Directory still costs two round trips, and judges `GRANT_STANDING` and
+  `REVOKE_STANDING` for that case; a member below ADMIN is shown both refused
+  (`tests/test_directory_upload_sections.py::test_the_directory_serves_a_cases_members_only_to_its_administrator`,
+  `tests/test_command_availability.py::test_a_membership_action_the_directory_offers_is_answered_as_offered`,
+  `frontend/tests/unit/directory.test.tsx`'s
+  `test_a_case_administrator_grants_and_revokes_from_case_access`). The
+  journey grants and revokes on the surface. The member is named by id, since
+  the host holds no directory of people to pick from.
 - ~~**A worktree outside `/Users` cannot run `make smoke-production`.**~~
   Closed by the upgrade named: `tests/journey/run.py` refuses, on macOS and
   before building anything, a repository root whose `./tests` mount source is

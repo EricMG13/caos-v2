@@ -123,7 +123,7 @@ describe("Directory", () => {
     };
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    mount(refused);
+    const { container } = mount(refused);
     const control = screen.getByRole("button", { name: "Create case" });
     // Present, not hidden: it renders, carries the refusal, and is not the
     // native `disabled` attribute (CLAUDE.md "Persona is not authority").
@@ -134,8 +134,11 @@ describe("Directory", () => {
     expect(control).toHaveTextContent("Create case");
     expect(control.title).toContain("NOT_AUTHORISED");
     expect(control.title).toContain("your global role is ANALYST or higher");
-    expect(screen.getByText(/NOT_AUTHORISED/)).toBeInTheDocument();
-    expect(screen.getByText(/your global role is ANALYST or higher/)).toBeInTheDocument();
+    // Scoped to the create-case control: the Case access panel below carries
+    // refusals of its own.
+    const newCase = container.querySelector<HTMLElement>("[data-new-case]")!;
+    expect(within(newCase).getByText(/NOT_AUTHORISED/)).toBeInTheDocument();
+    expect(within(newCase).getByText(/your global role is ANALYST or higher/)).toBeInTheDocument();
     fireEvent.click(control);
     await settle();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -159,6 +162,8 @@ describe("Directory", () => {
             standing: "ADMIN",
             live_sources: 0,
             latest_run: null,
+            members: [],
+            actions: [],
           },
           ...live.body.cases,
         ],
@@ -170,7 +175,7 @@ describe("Directory", () => {
       .mockResolvedValueOnce(jsonResponse(refreshed));
     vi.stubGlobal("fetch", fetchSpy);
 
-    mount(live);
+    const { container } = mount(live);
     const input = screen.getByLabelText("New case title");
     fireEvent.change(input, { target: { value: "Acme Holdings" } });
     const control = screen.getByRole("button", { name: "Create case" });
@@ -186,7 +191,8 @@ describe("Directory", () => {
     expect(postInit.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
     expect(fetchSpy.mock.calls[1]![0]).toBe("/api/v1/directory");
 
-    expect(await screen.findByText("Acme Holdings")).toBeInTheDocument();
+    const register = container.querySelector<HTMLElement>("table.reg[data-register]")!;
+    expect(await within(register).findByText("Acme Holdings")).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
 
@@ -356,6 +362,82 @@ describe("Directory", () => {
     ];
     for (const path of uploadFixtures) {
       expect(() => parseUploadDocument(load(path))).not.toThrow();
+    }
+  });
+
+  test("test_a_case_administrator_grants_and_revokes_from_case_access", async () => {
+    const caseId = fixture.body.cases[0]!.case_id;
+    const admin = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const writer = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const newcomer = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const administered: DirectoryDocument = {
+      ...fixture,
+      body: {
+        cases: [
+          {
+            ...fixture.body.cases[0]!,
+            standing: "ADMIN",
+            members: [
+              { user_id: admin, standing: "ADMIN" },
+              { user_id: writer, standing: "WRITER" },
+            ],
+            actions: [
+              { action: "GRANT_STANDING", refusal: null },
+              { action: "REVOKE_STANDING", refusal: null },
+            ],
+          },
+        ],
+      },
+    };
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ case_id: caseId, user_id: newcomer, standing: "APPROVER" }, 201),
+      )
+      .mockResolvedValueOnce(jsonResponse(administered))
+      .mockResolvedValueOnce(jsonResponse({ case_id: caseId, user_id: writer }))
+      .mockResolvedValueOnce(jsonResponse(administered));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { container } = mount(administered);
+    const panel = container.querySelector<HTMLElement>(`[data-access="${caseId}"]`)!;
+    expect(within(panel).getByText(admin)).toBeInTheDocument();
+    expect(panel.querySelector(`[data-member="${writer}"]`)).toHaveTextContent("WRITER");
+
+    fireEvent.change(within(panel).getByLabelText("Member id"), {
+      target: { value: newcomer },
+    });
+    fireEvent.change(within(panel).getByLabelText("Standing"), {
+      target: { value: "APPROVER" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Grant standing" }));
+    await settle();
+    await settle();
+    const [grantUrl, grantInit] = fetchSpy.mock.calls[0]!;
+    expect(grantUrl).toBe(`/api/v1/cases/${caseId}/members`);
+    expect(JSON.parse(grantInit.body as string)).toEqual({
+      user_id: newcomer,
+      standing: "APPROVER",
+    });
+    expect(fetchSpy.mock.calls[1]![0]).toBe("/api/v1/directory");
+
+    fireEvent.click(within(panel).getByRole("button", { name: `Revoke ${writer}` }));
+    await settle();
+    await settle();
+    expect(fetchSpy.mock.calls[2]![0]).toBe(`/api/v1/cases/${caseId}/members/${writer}/revocation`);
+    expect(fetchSpy.mock.calls[3]![0]).toBe("/api/v1/directory");
+    vi.unstubAllGlobals();
+  });
+
+  test("test_a_member_below_admin_is_shown_the_membership_controls_refused_not_hidden", () => {
+    const { container } = mount(fixture);
+    const first = fixture.body.cases[0]!;
+    const panel = container.querySelector<HTMLElement>(`[data-access="${first.case_id}"]`)!;
+    expect(panel.querySelector("[data-members-withheld]")).not.toBeNull();
+    for (const name of ["Grant standing", "Revoke standing"]) {
+      const control = within(panel).getByRole("button", { name });
+      expect(control).toHaveAttribute("aria-disabled", "true");
+      expect(control).toHaveAttribute("data-refusal", "NOT_AUTHORISED");
     }
   });
 });

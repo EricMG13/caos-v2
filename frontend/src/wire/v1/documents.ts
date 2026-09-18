@@ -53,6 +53,8 @@ const ActionName = enumOf([
   "RETRY_RUN",
   "CANCEL_RUN",
   "WITHDRAW_SOURCE",
+  "GRANT_STANDING",
+  "REVOKE_STANDING",
   "SAVE_REVISION",
   "SIGN_OPINION",
   "FREEZE_DELIVERABLE",
@@ -70,7 +72,7 @@ const ActionView = object({
 const Chrome = object({
   subject: nullable(Subject),
   served_role: ServedRole,
-  actions: array(ActionView, 14),
+  actions: array(ActionView, 16),
 });
 
 function sectionDocument<B extends ReturnType<typeof object>>(body: B) {
@@ -91,6 +93,8 @@ const RunSummary = object({
   profile_id: nullable(short),
   selection_id: nullable(short),
 });
+// A case's live members, served only to its ADMIN (O21); null is "not served".
+const MemberRow = object({ user_id: uuid, standing: Standing });
 const CaseRow = object({
   case_id: uuid,
   title: text,
@@ -98,6 +102,8 @@ const CaseRow = object({
   standing: Standing,
   live_sources: int(),
   latest_run: nullable(RunSummary),
+  members: nullable(array(MemberRow, 64)),
+  actions: array(ActionView, 2),
 });
 const DirectoryBody = object({ cases: array(CaseRow, 200) });
 const DirectoryDocument = sectionDocument(DirectoryBody);
@@ -613,6 +619,7 @@ export const V1_SHAPES = {
   AttemptView,
   BlockedByView,
   CaseRow,
+  MemberRow,
   Chrome,
   CitationView,
   DirectoryBody,
@@ -673,6 +680,7 @@ export type QualificationRead = Infer<typeof QualificationRead>;
 export type QualificationState = Infer<typeof QualificationState>;
 export type Chrome = Infer<typeof Chrome>;
 export type CaseRow = Infer<typeof CaseRow>;
+export type MemberRow = Infer<typeof MemberRow>;
 export type SourceRow = Infer<typeof SourceRow>;
 export type RunView = Infer<typeof RunView>;
 export type NodeView = Infer<typeof NodeView>;

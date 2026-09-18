@@ -22,6 +22,7 @@ from server.api.commands.availability import (
     FilingFacts,
     RunFacts,
     directory_actions,
+    membership_actions,
     report_actions,
     run_actions,
     upload_actions,
@@ -31,6 +32,7 @@ from server.api.wire import (
     ActionName,
     ActionView,
     DirectoryDocument,
+    RefusalBody,
     RunSectionDocument,
     UploadDocument,
 )
@@ -356,6 +358,70 @@ def test_the_pure_judgements_follow_each_command_order() -> None:
     assert withdraw.refusal is not None and withdraw.refusal.code == "NOT_AUTHORISED"
     [_admit, empty] = upload_actions(GlobalRole.ADMIN, Standing.WRITER, 0)
     assert empty.refusal is not None and empty.refusal.code == "EVIDENCE_NOT_AVAILABLE"
+
+
+def test_membership_is_offered_to_a_case_administrator_that_may_write() -> None:
+    """O21: grant and revoke take the ADMIN floor, after the global role, the
+    order both commands check them in."""
+    A = ActionName
+    assert [
+        (view.action, view.refusal)
+        for view in membership_actions(GlobalRole.ANALYST, Standing.ADMIN)
+    ] == [(A.GRANT_STANDING, None), (A.REVOKE_STANDING, None)]
+    for role, standing in (
+        (GlobalRole.READER, Standing.ADMIN),
+        (GlobalRole.ADMIN, Standing.APPROVER),
+    ):
+        assert {
+            view.refusal and view.refusal.code
+            for view in membership_actions(role, standing)
+        } == {RefusalCode.NOT_AUTHORISED}, (role, standing)
+
+
+def test_a_membership_action_the_directory_offers_is_answered_as_offered(
+    command_client: TestClient, case: tuple[StoreConnection, UUID]
+) -> None:
+    """The Directory's judgement against the commands themselves: an ADMIN's
+    offered grant and revoke commit, and a WRITER's refused grant is refused
+    with the code the Directory named."""
+    conn, case_id = case
+    admin = member(conn, case_id, Standing.ADMIN)
+    writer = member(conn, case_id, Standing.WRITER)
+    newcomer = uuid4()
+
+    def offered(user: UUID) -> dict[ActionName, RefusalBody | None]:
+        answered = command_client.get(
+            "/api/v1/directory", headers=command_headers(user)
+        )
+        document = DirectoryDocument.model_validate(answered.json())
+        [row] = [row for row in document.body.cases if row.case_id == case_id]
+        return {view.action: view.refusal for view in row.actions}
+
+    assert offered(admin) == {
+        ActionName.GRANT_STANDING: None,
+        ActionName.REVOKE_STANDING: None,
+    }
+    granted = command_client.post(
+        f"/api/v1/cases/{case_id}/members",
+        json={"user_id": str(newcomer), "standing": "READER"},
+        headers=command_headers(admin),
+    )
+    assert granted.status_code == 201, granted.text
+    revoked = command_client.post(
+        f"/api/v1/cases/{case_id}/members/{newcomer}/revocation",
+        json={},
+        headers=command_headers(admin),
+    )
+    assert revoked.status_code == 200, revoked.text
+
+    refusal = offered(writer)[ActionName.GRANT_STANDING]
+    assert refusal is not None
+    refused = command_client.post(
+        f"/api/v1/cases/{case_id}/members",
+        json={"user_id": str(newcomer), "standing": "READER"},
+        headers=command_headers(writer),
+    )
+    assert (refused.status_code, refused.json()["code"]) == (403, refusal.code)
 
 
 def test_the_filing_controls_follow_each_command_order() -> None:

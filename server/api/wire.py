@@ -54,6 +54,9 @@ QUOTE_CHARS = MAX_LINE_BYTES  # one quoted line of evidence
 MARKDOWN_CHARS = MAX_FILE_BYTES  # a whole handoff, as the validator bounds it
 CASES_MAX = 200  # beyond it the Directory is partial, `LIST_TRUNCATED`
 RUNS_MAX = 200
+# A case's members as its administrator sees them in Directory; beyond it the
+# document is partial, `LIST_TRUNCATED`.
+MEMBERS_MAX = 64
 SOURCES_MAX = 1000
 SET_VERSIONS_MAX = 1000
 ROUTE_NODES_MAX = 256
@@ -314,10 +317,11 @@ class ActionName(StrEnum):
     START_RUN = "START_RUN"
     RETRY_RUN = "RETRY_RUN"
     CANCEL_RUN = "CANCEL_RUN"
-    # Task 12.1. Membership is not here: no section serves an Admin panel to
-    # offer it from, and an action no read judges is one this enum would only
-    # claim. Its routes exist and are proven against the commands themselves.
+    # Task 12.1. Membership is judged per case by the Directory read (O21),
+    # which is where a case's administrator is shown its members.
     WITHDRAW_SOURCE = "WITHDRAW_SOURCE"
+    GRANT_STANDING = "GRANT_STANDING"
+    REVOKE_STANDING = "REVOKE_STANDING"
     SAVE_REVISION = "SAVE_REVISION"
     SIGN_OPINION = "SIGN_OPINION"
     FREEZE_DELIVERABLE = "FREEZE_DELIVERABLE"
@@ -356,8 +360,21 @@ class RunSummary(BaseModel):
     selection_id: Id | None
 
 
+class MemberRow(BaseModel):
+    """One live member of a case, as its administrator is shown it."""
+
+    model_config = _CLOSED
+
+    user_id: UUID
+    standing: Standing
+
+
 class CaseRow(BaseModel):
-    """One case the actor holds live standing on."""
+    """One case the actor holds live standing on.
+
+    `members` is served only to the case's ADMIN, who is the one member that
+    may change it; `null` says the list was not served, not that it is empty.
+    `actions` judges the two membership commands for this case alone."""
 
     model_config = _CLOSED
 
@@ -367,6 +384,8 @@ class CaseRow(BaseModel):
     standing: Standing
     live_sources: int
     latest_run: RunSummary | None
+    members: Annotated[list[MemberRow], Field(max_length=MEMBERS_MAX)] | None
+    actions: Annotated[list[ActionView], Field(max_length=2)]
 
 
 class DirectoryBody(BaseModel):

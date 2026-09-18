@@ -1,11 +1,13 @@
 // Directory (IA_SPEC.md 4.1): the case register, v1 wire. Search and filter
 // are fields the v1 Directory document does not carry (brief 4.1, decisions 1
 // and 9); this section draws exactly the cases the actor holds live standing
-// on and nothing else. Create case is the one governed write this section
-// owns (brief 4.2, slice 4.2i).
+// on and nothing else. Create case is a governed write this section owns
+// (brief 4.2, slice 4.2i); grant and revoke are the other two (O21), in their
+// own panel so the register keeps one action per row.
 import { useState } from "react";
+import { CaseAccess } from "./CaseAccess";
 import { CaseRegister } from "./CaseRegister";
-import { NewCase } from "./NewCase";
+import { NewCase, refetchDirectory } from "./NewCase";
 import type { DirectoryDocument } from "@/wire/v1";
 
 export function DirectorySection({
@@ -27,6 +29,12 @@ export function DirectorySection({
   }
   const { cases } = live.body;
   const createCaseAction = live.chrome.actions.find((a) => a.action === "CREATE_CASE");
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  async function refresh() {
+    const refreshed = await refetchDirectory();
+    setRefreshFailed(refreshed === null);
+    if (refreshed) setLive(refreshed);
+  }
   return (
     <div className="col">
       <section className="pnl" aria-labelledby="directory-register-heading">
@@ -43,12 +51,19 @@ export function DirectorySection({
           {cases.length === 0 ? <p className="pb note">No case matches.</p> : null}
         </div>
       </section>
+      <CaseAccess rows={cases} onChanged={() => void refresh()} />
+      {refreshFailed ? (
+        <p className="note warn" role="alert" data-access-refresh-failed>
+          The membership changed, but the register could not be refreshed. Reload to see it.
+        </p>
+      ) : null}
       <p className="note">
         <b>One action per row, and it is the same action.</b> A row opens its case; everything else
-        a case can do belongs to the section that owns it — admitting and withdrawing sources to
-        Upload, approving a plan or accepting a run to Run, saving, signing, freezing and filing a
-        revision to Report. There is no batch state and no second selection model, so nothing on
-        this page can act on four cases at once without a person having read four cases.
+        a case can do belongs to the section that owns it — granting and revoking standing to Case
+        access below, admitting and withdrawing sources to Upload, approving a plan or accepting a
+        run to Run, saving, signing, freezing and filing a revision to Report. There is no batch
+        state and no second selection model, so nothing on this page can act on four cases at once
+        without a person having read four cases.
       </p>
     </div>
   );

@@ -21,11 +21,14 @@ import type {
   CreateRun,
   GateApproved,
   GatePreviewDocument,
+  GrantStanding,
   Infer,
   PinRunInput,
   RunCreated,
   RunInputPinned,
   RunWork,
+  StandingGranted,
+  StandingRevoked,
 } from "@/wire/v1";
 import {
   WireShapeError,
@@ -42,6 +45,8 @@ import {
   parseRevisionSaved,
   parseSourceWithdrawn,
   parseSourcesAdmitted,
+  parseStandingGranted,
+  parseStandingRevoked,
   type RefusalBody,
   type SourceWithdrawn,
   type SourcesAdmitted,
@@ -52,6 +57,7 @@ import { OFFLINE_WORDING, bodyOf } from "./transport";
 /** Drawn from the shared shapes rather than redeclared here. */
 type Gate = Infer<typeof V1_SHAPES.Gate>;
 type RunSubjectView = Infer<typeof V1_SHAPES.RunSubjectView>;
+type Standing = Infer<typeof V1_SHAPES.Standing>;
 
 /** One key per user intent. Reuse it to retry after `{ kind: "offline" }`;
     draw a fresh one (`newIntent`) once any server answer has been seen. */
@@ -267,6 +273,28 @@ export function withdrawSource(
 ): Promise<CommandResult<SourceWithdrawn>> {
   const url = `${casePath(caseId)}/sources/${encodeURIComponent(sourceId)}/withdrawal`;
   return jsonCommand(intent, url, {}, parseSourceWithdrawn);
+}
+
+/** Give or replace one member's standing (O21). The member is named; the
+    actor granting it is derived and holds ADMIN on the case. */
+export function grantStanding(
+  caseId: string,
+  userId: string,
+  standing: Standing,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<StandingGranted>> {
+  const request: GrantStanding = { user_id: userId, standing };
+  return jsonCommand(intent, `${casePath(caseId)}/members`, request, parseStandingGranted);
+}
+
+/** End one membership; the member is in the path, so the body is empty. */
+export function revokeStanding(
+  caseId: string,
+  userId: string,
+  intent: Intent = newIntent(),
+): Promise<CommandResult<StandingRevoked>> {
+  const url = `${casePath(caseId)}/members/${encodeURIComponent(userId)}/revocation`;
+  return jsonCommand(intent, url, {}, parseStandingRevoked);
 }
 
 function revisionPath(caseId: string, revisionId: string): string {

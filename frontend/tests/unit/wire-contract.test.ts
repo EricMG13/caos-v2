@@ -278,6 +278,11 @@ function directory(): { [key: string]: Json } {
           standing: "WRITER",
           live_sources: 2,
           latest_run: RUN_SUMMARY,
+          members: null,
+          actions: [
+            { action: "GRANT_STANDING", refusal: null },
+            { action: "REVOKE_STANDING", refusal: null },
+          ],
         },
       ],
     },

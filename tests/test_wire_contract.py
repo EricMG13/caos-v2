@@ -210,8 +210,11 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
         {"run_id", "status", "created_at", "profile_id", "selection_id"}
     ),
     CaseRow: frozenset(
-        {"case_id", "title", "created_at", "standing", "live_sources", "latest_run"}
+        (
+            "case_id title created_at standing live_sources latest_run members actions"
+        ).split()
     ),
+    wire.MemberRow: frozenset({"user_id", "standing"}),
     DirectoryBody: frozenset({"cases"}),
     SourceRow: frozenset(
         {
@@ -532,6 +535,8 @@ def test_the_v1_wire_key_sets_are_pinned() -> None:
         "RETRY_RUN",
         "CANCEL_RUN",
         "WITHDRAW_SOURCE",
+        "GRANT_STANDING",
+        "REVOKE_STANDING",
         "SAVE_REVISION",
         "SIGN_OPINION",
         "FREEZE_DELIVERABLE",

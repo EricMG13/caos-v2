@@ -4352,3 +4352,24 @@ record and human QA approval -- and loses its "a dated decision if committee
 practice wants restricted clearance to proceed" clause, which this entry
 answers. The question is not reachable today: no enabled route carries the
 CP-5 -> CP-6 QA_GATE (`ADAPTER_ROUTES`).
+
+## 2026-09-18 §89 — Membership surfaces in Directory, on a panel of its own
+
+O21 put membership in Directory; Task 12.2 placed no control for it, and the
+ledger deferred it to "Completion Phase 13's Admin work", which Phase 13 does
+not carry (Admin stays an unavailable shell, D2). Built here.
+
+- **Wire.** `CaseRow` gains `members: list[MemberRow] | None` (at most
+  `MEMBERS_MAX`, 64; past it the document is partial, `LIST_TRUNCATED`) and
+  `actions`, the two membership commands judged for that case. `ActionName`
+  gains `GRANT_STANDING` and `REVOKE_STANDING`. `members` is served only to the
+  case's ADMIN, the one member who may change it; `null` means "not served",
+  never "empty". A global READER holding ADMIN standing is served the list and
+  shown both controls refused, because the global role refuses the commands.
+- **Cost.** The members are a lateral aggregate in `cases_for_member`'s one
+  query, so the Directory's declared budget stays 2. The Book passes
+  `members_limit=0`: it reads no membership.
+- **Surface.** The register keeps one action per row (IA_SPEC §4.1); grant and
+  revoke live on a separate Case access panel, refused rather than hidden for a
+  member below ADMIN. A member is named by id: the host holds no directory of
+  people to pick from, and inventing one is not this change.
