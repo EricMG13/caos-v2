@@ -3,7 +3,13 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { OFFLINE_WORDING } from "@/app/transport";
 import { DirectorySection } from "@/sections/directory/DirectorySection";
-import { parseDirectoryDocument, parseUploadDocument, type DirectoryDocument } from "@/wire/v1";
+import {
+  parseDirectoryDocument,
+  parseStandingGranted,
+  parseStandingRevoked,
+  parseUploadDocument,
+  type DirectoryDocument,
+} from "@/wire/v1";
 
 const load = (path: string): unknown =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -413,6 +419,9 @@ describe("Directory", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Grant standing" }));
     await settle();
     await settle();
+    // `grantStanding` builds this request and `parseStandingGranted` narrows its
+    // receipt; `refetchDirectory` is the GET after it. `revokeStanding` and
+    // `parseStandingRevoked` are driven the same way below.
     const [grantUrl, grantInit] = fetchSpy.mock.calls[0]!;
     expect(grantUrl).toBe(`/api/v1/cases/${caseId}/members`);
     expect(JSON.parse(grantInit.body as string)).toEqual({
@@ -427,6 +436,24 @@ describe("Directory", () => {
     expect(fetchSpy.mock.calls[2]![0]).toBe(`/api/v1/cases/${caseId}/members/${writer}/revocation`);
     expect(fetchSpy.mock.calls[3]![0]).toBe("/api/v1/directory");
     vi.unstubAllGlobals();
+  });
+
+  test("the membership receipts are closed shapes", () => {
+    const caseId = fixture.body.cases[0]!.case_id;
+    const userId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    expect(parseStandingGranted({ case_id: caseId, user_id: userId, standing: "READER" })).toEqual({
+      case_id: caseId,
+      user_id: userId,
+      standing: "READER",
+    });
+    expect(() =>
+      parseStandingGranted({ case_id: caseId, user_id: userId, standing: "OWNER" }),
+    ).toThrow();
+    expect(parseStandingRevoked({ case_id: caseId, user_id: userId })).toEqual({
+      case_id: caseId,
+      user_id: userId,
+    });
+    expect(() => parseStandingRevoked({ case_id: caseId, user_id: userId, extra: 1 })).toThrow();
   });
 
   test("test_a_member_below_admin_is_shown_the_membership_controls_refused_not_hidden", () => {
