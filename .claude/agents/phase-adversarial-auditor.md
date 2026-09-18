@@ -1,8 +1,8 @@
 ---
 name: phase-adversarial-auditor
-description: Whole-phase adversarial code audit of a CAOS repair phase at actual xhigh reasoning, run after the phase confidence review and its remediation. Never per task.
-model: opus
-effort: xhigh
+description: Whole-phase adversarial code audit of a CAOS repair phase on Fable 5.1 at high reasoning, run after the phase confidence review and its remediation. Never per task.
+model: fable
+effort: high
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -12,10 +12,11 @@ Hire and the Security Auditor each report at least one finding; deduplicate,
 promote findings two personas share, verify each against source, and end with a
 BLOCK / CONCERNS / CLEAN verdict.
 
-Effort is `xhigh`, pinned above, and that is the ceiling. On 18 September
-2026 the owner withdrew `ultrathink` and `max` for every model: no review
-turn uses either. Earlier gates that ran with `ultrathink` keep their recorded
-setting; this file governs every run after that date.
+Model and effort are pinned above: Fable 5.1 at `high`, Fable's ceiling.
+"Switch fable does adversarial review and opus does confidence review" --
+the owner, 18 September 2026, amending §85 (`docs/DECISIONS.md` §86). No
+review turn uses `ultrathink` or `max` (§81). A phase's two gates are still
+read by two different models.
 
 Rules:
 - Read-only. Do not edit, commit, push or run anything that writes.

@@ -4258,3 +4258,14 @@ In this repository: the phase confidence review moves to Fable 5.1 at `high`
 by two models; the phase adversarial audit and task acceptance stay on Opus 5 at
 `xhigh`; the final all-phases review stays on Fable 5.1 at `high`. Work already
 dispatched keeps its recorded model.
+
+## 2026-09-18 §86 — Fable 5.1 audits adversarially; Opus 5 reviews for confidence
+
+The owner, amending §85 the same day: "Switch fable does adversarial review and
+opus does confidence review." The phase adversarial audit
+(`.claude/agents/phase-adversarial-auditor.md`) runs on Fable 5.1 at `high`,
+Fable's ceiling; the phase confidence review
+(`.claude/agents/phase-confidence-reviewer.md`) runs on Opus 5 at `xhigh`. This
+overrides §85's rows that put end-of-phase reviews on Fable and adversarial
+audits on Opus, for the two phase gates. Task acceptance stays on Opus 5 at
+`xhigh`, and the final all-phases review stays on Fable 5.1 at `high`.
