@@ -233,7 +233,9 @@ export function CreateRunControl({
   const chosen = choices[pick] ?? null;
   const named = predecessor.trim();
   const request: CreateRun | null = chosen
-    ? { ...chosen, supersedes: named === "" ? null : named }
+    ? // The model extension is requestable over the API only: this form
+      // offers no control for it yet, so it states the ordinary answer.
+      { ...chosen, supersedes: named === "" ? null : named, model_extension: false }
     : null;
   return (
     <section className="pnl" data-create-run>
