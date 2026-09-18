@@ -67,7 +67,7 @@
       "source": null,
       "status": "in_hand",
       "local_path": "qualification/ccl-fy2025/documents/CCL_FY2025_10K.txt",
-      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/CCL_FY2025_10K.txt",
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/CCL_FY2025_10K.txt",
       "demand_verified": true,
       "note": "Admitted into the ccl-fy2025 set; byte-identical to the owner's three-issuer document register copy (both 8fa7fced…), so the external path is provenance rather than a second document. 311,896 bytes, inside MAX_REQUEST_BYTES. Meets CP-3C's stated source gate (`the maturity/debt schedule is the source gate`): the scheduled maturities table is present. Meets CP-2E's macro/hedging gate: Item 7A is present. CP-1A's ownership, governance and disclosure-quality registers are served, but its transaction registers have no named acquisition or sponsor deal in this pack, so CP-1A cannot be proven whole against CCL alone."
     },
@@ -152,7 +152,7 @@
       "source": null,
       "status": "to_source",
       "local_path": null,
-      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/BA_FY2025_10K.txt",
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/BA_FY2025_10K.txt",
       "demand_verified": true,
       "note": "Held read-only outside the tree in the owner's three-issuer document register; nothing in this repository copies or admits it. 1,177,234 bytes — over MAX_REQUEST_BYTES (1,048,576), so it cannot reach a prompt whole until per-node evidence selection exists. Raw provenance beside it: raw/BA_FY2025_10K.html and raw/BA_companyfacts.json (XBRL company facts). An answer key for BA already exists (see key_sources)."
     },
@@ -181,7 +181,7 @@
       "source": null,
       "status": "to_source",
       "local_path": null,
-      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/F_FY2025_10K.txt",
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/F_FY2025_10K.txt",
       "demand_verified": true,
       "note": "Held read-only outside the tree. 1,922,743 bytes — nearly twice MAX_REQUEST_BYTES; the largest document in hand and the one that most needs per-node selection. Raw provenance: raw/F_FY2025_10K.html and raw/F_companyfacts.json. A finance-captive issuer, so CP-1's perimeter work is harder here than for CCL or BA."
     },
@@ -311,7 +311,7 @@
       "id": "answer-key-3issuer",
       "issuer": "CCL, BA, F",
       "document": "ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer",
-      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/document register/ANSWER_KEY_3ISSUER.md",
+      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/ANSWER_KEY_3ISSUER.md",
       "as_of": "2026-07-19",
       "note": "A key source, never an admitted document. It is the owner's independent reading of the three 10-Ks and is therefore what a qualification set's `expects` rows may be authored from — but admitting it would put the answers inside the evidence the modules read, which is the one thing a qualification key must not do. 8,268 bytes."
     }

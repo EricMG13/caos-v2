@@ -167,13 +167,35 @@ def test_the_report_names_every_row_and_the_key_source_it_never_admits() -> None
     for key in register.key_sources:
         assert f"`{key['id']}`" in table
         assert "never admitted" in table
-    # Only the in-hand rows are asserted on: whether an out-of-tree row is
-    # measured at all depends on the machine the register is read from.
+    # Only the in-hand rows are measured: an out-of-tree row never is.
     for row in register.documents:
         if row.status == "in_hand":
             facts = document_register.measured(row, REPO)
             assert facts is not None
             assert f"`{facts[1][:16]}…`" in table
+
+
+def test_an_out_of_tree_path_is_never_measured(tmp_path: Path) -> None:
+    """The committed table is compared on every machine, so what it measures
+    must be on every machine. An `external_path` is the owner's folder: read it
+    and the table matches the owner's laptop and nothing else -- which is what
+    happened when the folder's stale path was corrected on 18 September 2026."""
+    held = tmp_path / "held.txt"
+    held.write_bytes(b"bytes only one machine has")
+    row = document_register.Document(
+        id="held",
+        issuer=None,
+        document="held",
+        modules=(),
+        pathways=(),
+        source=None,
+        status="to_source",
+        local_path=None,
+        external_path=str(held),
+        demand_verified=False,
+        note="",
+    )
+    assert document_register.measured(row, REPO) is None
 
 
 def test_the_register_passes_its_own_gate_as_main(
