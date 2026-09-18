@@ -27,7 +27,7 @@ from server.api.wire import (
 from server.store.members import cases_for_member
 
 # The store's `now()` and the one listing query (`cases_for_member` reads the
-# source count, latest run and an administered case's members laterally),
+# source count, latest run and an administered case's members as subqueries),
 # whatever the number of cases.
 # Measured in `tests/test_directory_upload_sections.py`.
 IO_BUDGET = 2

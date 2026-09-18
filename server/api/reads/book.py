@@ -160,10 +160,7 @@ def read_book(
     """`actor` is declared before `conn`: an anonymous request is refused
     before a connection opens, as Directory's read is."""
     [observed_at] = conn.execute("SELECT now()").fetchall()[0]
-    # The Book compares credits and reads no membership, so it asks for none.
-    listed = cases_for_member(
-        conn, user_id=actor.user_id, limit=BOOK_CASES_MAX + 1, members_limit=0
-    )
+    listed = cases_for_member(conn, user_id=actor.user_id, limit=BOOK_CASES_MAX + 1)
     truncated = len(listed) > BOOK_CASES_MAX
     rows = []
     for listing in listed[:BOOK_CASES_MAX]:

@@ -4297,9 +4297,11 @@ audits on Opus, for the two phase gates. Task acceptance stays on Opus 5 at
 ## 2026-09-18 §88 — Three owner decisions: D3's second half, Task 10.1, Task 10.3(b)
 
 The owner, on 18 September 2026: "resume plan to completion, apply your
-recommendations". The plan left three questions to the owner and recorded a
-recommendation, or the fail-closed default, for each. This entry takes them as
-recommended. Each is stated so a later owner decision can reverse it cleanly.
+recommendations". The plan left three questions to the owner. For two of them
+(10.1, 10.3(b)) the record held a fail-closed default; for D3's second half it
+held none -- the ledger said only that the owner decides each code -- so the
+statuses below are the coordinator's recommendation, made under that
+instruction. Each is stated so a later owner decision can reverse it cleanly.
 
 ### 88.1 The eight retry-shaped 400s get a status
 
@@ -4324,6 +4326,12 @@ caller as a parked run's `stop_code`, and nothing under `server/` raises the
 three `ENVELOPE_*` codes or `READINESS_INCOMPLETE` since the claims executor was
 deleted (f-2a). They stay in `RefusalCode` because stored rows may name them;
 the statuses are the answer the day a route does raise one.
+
+**503 is not a licence for the worker to retry.** `PROVIDER_UNAVAILABLE` is 503
+for a future synchronous route, where waiting is what clears it. The worker
+parks a run on it deliberately and waits for an operator's Retry, because the
+attempt may already have been billed; `app.TRANSIENT` says nothing about that
+loop, and nothing should read it as saying release-and-retry.
 
 ### 88.2 Task 10.1: the host does not take ownership of a CP-0 register's shape
 
@@ -4371,5 +4379,11 @@ not carry (Admin stays an unavailable shell, D2). Built here.
   `members_limit=0`: it reads no membership.
 - **Surface.** The register keeps one action per row (IA_SPEC §4.1); grant and
   revoke live on a separate Case access panel, refused rather than hidden for a
-  member below ADMIN. A member is named by id: the host holds no directory of
-  people to pick from, and inventing one is not this change.
+  member below ADMIN, each case a named group. A member is named by id: the host
+  holds no directory of people to pick from, and inventing one is not this
+  change.
+- **What it costs.** Past 64 live members a case's list is cut and the document
+  says `partial` with no per-row signal, so a member past the bound cannot be
+  revoked from the surface (the command still can). And showing an ADMIN every
+  co-member's id widens the tokenless-host disclosure the ledger records: one
+  ADMIN's id now yields each co-member's id, and so their cases.

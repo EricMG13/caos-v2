@@ -125,8 +125,15 @@ function GrantMember({
 function CaseMembers({ row, onChanged }: { row: CaseRow; onChanged: () => void }) {
   const revoke = actionOf(row, "REVOKE_STANDING");
   return (
-    <div className="access" data-access={row.case_id}>
-      <h3>{row.title}</h3>
+    // A named group per case, so a screen reader hears which case a repeated
+    // "Grant standing" or "Revoke" belongs to.
+    <div
+      className="access"
+      data-access={row.case_id}
+      role="group"
+      aria-labelledby={`access-${row.case_id}`}
+    >
+      <h3 id={`access-${row.case_id}`}>{row.title}</h3>
       {row.members === null ? (
         <>
           <p className="note" data-members-withheld>
