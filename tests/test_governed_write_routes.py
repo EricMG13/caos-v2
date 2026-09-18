@@ -535,7 +535,8 @@ def test_a_run_with_no_revision_is_served_a_report_that_offers_its_first_save(
     assert counted.executed == reports_read.IO_BUDGET["unsaved"]
     document = first.json()
     body = document["body"]
-    assert document["observed_empty"] is True
+    # Accepted artifacts are shown, so the section is not an empty observation.
+    assert document["observed_empty"] is False
     assert (body["revision_id"], body["payload_sha256"], body["narrative"]) == (
         None,
         None,

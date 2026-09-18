@@ -169,7 +169,7 @@ describe("Report v1", () => {
         ],
       },
       body: { ...saved.body, revision_id: null, payload_sha256: null, narrative: [] },
-      observed_empty: true,
+      observed_empty: false,
     });
     const first = "00000000-0000-4000-8000-0000000000c5";
     const fetchSpy = vi.fn().mockResolvedValueOnce(

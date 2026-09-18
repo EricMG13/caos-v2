@@ -234,7 +234,7 @@ def _unsaved(  # noqa: PLR0913 -- the read's caller, selection and stores
         ),
         body=_body(payload, None),
         observed_at=observed_at,
-        observed_empty=True,
+        observed_empty=not artifacts,
         status="complete",
         notes=[],
     )
