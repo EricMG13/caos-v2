@@ -177,6 +177,30 @@ describe("the book", () => {
     expect(screen.getAllByText(/NO_ACCEPTED_FORECAST/).length).toBe(unrun.body.rows.length);
   });
 
+  test("test_the_demonstration_book_names_the_one_pathway_that_can_serve_it", () => {
+    // The fixture shows a populated Book, and only a run on
+    // FULL_CREDIT_32 / RELATIVE_VALUE created with the model extension can
+    // produce a forecast to compare. The demonstration says so on the page;
+    // the real workspace, which shows what the store holds, does not.
+    // Stubbed rather than taken from the runner, as the directory's note is:
+    // `npm test` runs in demo mode.
+    try {
+      vi.stubEnv("MODE", "demo");
+      const demo = mount();
+      const note = demo.container.querySelector("[data-demo-book-note]");
+      expect(note).not.toBeNull();
+      expect(note).toHaveTextContent("FULL_CREDIT_32 / RELATIVE_VALUE");
+      expect(note).toHaveTextContent("model extension");
+      demo.unmount();
+
+      vi.stubEnv("MODE", "production");
+      const real = mount();
+      expect(real.container.querySelector("[data-demo-book-note]")).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   test("no case event names the book, so it holds no stream", () => {
     // `tailed` is what `Workspace` asks before opening a per-case SSE tail. A
     // tail over Book could never usefully fire -- `REFETCHES` maps no event to
