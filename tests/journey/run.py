@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import socket
 import subprocess
 import sys
 import time
@@ -22,8 +23,17 @@ REPO = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = "compose.smoke.yaml"
 PLAYWRIGHT_CONFIG = "playwright.journey.config.ts"
 PROJECT = "caos-workbench-smoke"
-API_ORIGIN = "http://127.0.0.1:18000"
+API_HOST, API_PORT = "127.0.0.1", 18000  # `compose.smoke.yaml` publishes it
+API_ORIGIN = f"http://{API_HOST}:{API_PORT}"
 EDGE_HOST, EDGE_PORT = "127.0.0.1", 18080
+# Every fixed host port a run binds: the edge this runner starts and the API
+# port the compose file publishes (the smoke database publishes none). An edge
+# orphaned by a stopped run kept 18080 with its old token, the new edge could
+# not bind, and every engine failed `EDGE_NOT_TRUSTED` against the orphan.
+HOST_PORTS = (
+    (EDGE_HOST, EDGE_PORT, "the test edge"),
+    (API_HOST, API_PORT, f"the API port {COMPOSE_FILE} publishes"),
+)
 REFUSED = 2
 BROWSER_PROJECTS = ("chromium", "firefox", "webkit")
 # What `compose.smoke.yaml` bind-mounts into `journey-worker`, relative to the
@@ -151,6 +161,40 @@ def mount_refusal(root: Path, *, platform: str, shared: tuple[Path, ...]) -> str
     )
 
 
+def _taken(host: str, port: int) -> str | None:
+    """Why `host:port` cannot be bound, or None when it can.
+
+    Connected to first, which names a listener -- a wildcard one included,
+    which does not always stop a specific bind on BSD sockets; then bound with
+    `SO_REUSEADDR` as uvicorn binds, so a previous run's TIME_WAIT is not
+    mistaken for a holder."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        if probe.connect_ex((host, port)) == 0:
+            return "something is already listening on it"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError as exc:
+            return f"it cannot be bound ({exc.strerror or exc.errno})"
+    return None
+
+
+def port_refusal(ports: tuple[tuple[str, int, str], ...]) -> str | None:
+    """Why a fixed host port the run needs is already taken, or None."""
+    for host, port, role in ports:
+        reason = _taken(host, port)
+        if reason is not None:
+            return (
+                f"journey refused: {host}:{port}, {role}, is taken: {reason}. "
+                "An orphaned test edge from a stopped run holds its old token "
+                "and answers every engine EDGE_NOT_TRUSTED; stop whatever "
+                "holds the port and run again."
+            )
+    return None
+
+
 def browser_projects() -> tuple[str, ...]:
     """Each browser gets its own crash-once worker and disposable stack."""
     selected = os.environ.get("JOURNEY_PLAYWRIGHT_PROJECT")
@@ -183,6 +227,10 @@ def main() -> int:
         print(f"journey refused: missing stack files: {names}", file=sys.stderr)
         return REFUSED
     refusal = mount_refusal(REPO, platform=sys.platform, shared=shared_prefixes())
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return REFUSED
+    refusal = port_refusal(HOST_PORTS)
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return REFUSED

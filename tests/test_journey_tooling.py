@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import socket
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -82,6 +84,72 @@ def test_the_orchestrator_refuses_an_unmountable_root_before_building_anything(
     assert run.main() == run.REFUSED
     assert built == []
     assert "journey refused" in capsys.readouterr().err
+
+
+# The fixed host ports. An edge orphaned by a stopped run kept 18080 with its
+# old token, the new run's edge could not bind, and every engine then failed
+# `EDGE_NOT_TRUSTED` against the old one -- a refusal that named neither the
+# port nor the orphan.
+
+
+def test_a_host_port_something_is_listening_on_is_refused_naming_it() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        port = held.getsockname()[1]
+
+        refusal = run.port_refusal((("127.0.0.1", port, "the test edge"),))
+
+    assert refusal is not None
+    assert f"127.0.0.1:{port}" in refusal
+    assert "the test edge" in refusal
+    assert "listening" in refusal
+
+
+def test_a_free_host_port_is_not_refused() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    assert run.port_refusal((("127.0.0.1", port, "the test edge"),)) is None
+
+
+def test_the_runner_checks_every_port_the_stack_publishes_on_the_host() -> None:
+    """The edge the runner starts and the API port `compose.smoke.yaml`
+    publishes; the smoke database publishes none. Read from the compose file,
+    so a port moved there without the runner fails here, not at `up`."""
+    compose = (run.REPO / run.COMPOSE_FILE).read_text(encoding="utf-8")
+    published = set(re.findall(r'"(127\.0\.0\.1):(\d+):\d+"', compose))
+
+    checked = {(host, port) for host, port, _ in run.HOST_PORTS}
+    assert (run.EDGE_HOST, run.EDGE_PORT) in checked
+    assert {(host, int(port)) for host, port in published} <= checked
+    assert run.API_ORIGIN == f"http://{run.API_HOST}:{run.API_PORT}"
+
+
+def test_the_orchestrator_refuses_a_taken_port_before_building_anything(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "repo"
+    (root / "frontend").mkdir(parents=True)
+    (root / run.COMPOSE_FILE).write_text("", encoding="utf-8")
+    (root / "frontend" / run.PLAYWRIGHT_CONFIG).write_text("", encoding="utf-8")
+    monkeypatch.setattr(run, "REPO", root)
+    monkeypatch.setattr(sys, "platform", "linux")
+    built: list[str] = []
+    monkeypatch.setattr(run, "run_project", built.append)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        port = held.getsockname()[1]
+        monkeypatch.setattr(run, "HOST_PORTS", (("127.0.0.1", port, "the test edge"),))
+
+        assert run.main() == run.REFUSED
+
+    assert built == []
+    assert f"127.0.0.1:{port}" in capsys.readouterr().err
 
 
 # The test edge's disconnect. An SSE tail proxied to the API is certain to be
