@@ -146,7 +146,7 @@ PINNED: dict[type[BaseModel], frozenset[str]] = {
     # accepted record does not say.
     wire.BookPassport: frozenset(
         (
-            "definition period scenario evidence_date computed_at snapshot method "
+            "definition period scenario reporting_period computed_at snapshot method "
             "derivation citations supporting_research"
         ).split()
     ),

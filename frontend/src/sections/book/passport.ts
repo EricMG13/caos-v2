@@ -54,7 +54,7 @@ export function passportOf(
     definition: passport.definition,
     period: passport.period,
     scenario: passport.scenario,
-    evidence_date: passport.evidence_date,
+    reporting_period: passport.reporting_period,
     computed_at: passport.computed_at,
     snapshot: passport.snapshot,
     method: passport.method,
