@@ -5,7 +5,7 @@
       "chips": [
         { "label": "ADMIN · THE DEPLOYMENT", "tone": "neutral" },
         { "label": "UNAVAILABLE CAPABILITY", "tone": "warn" },
-        { "label": "HEALTH · NOT SERVED", "tone": "warn" },
+        { "label": "HEALTH · SERVED", "tone": "neutral" },
         { "label": "BUILD a43cb903", "tone": "neutral" }
       ],
       "execution": "IDLE",
@@ -62,7 +62,7 @@
       },
       {
         "name": "Deployment inventory · store, blob store, bundle build",
-        "code": "GET /api/health · NOT SERVED"
+        "code": "GET /api/health · SERVED, NO PANEL"
       },
       { "name": "Budget ceilings · per case and per run", "code": "ENVIRONMENT" }
     ]
