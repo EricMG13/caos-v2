@@ -156,8 +156,13 @@ def test_a_case_with_no_run_is_observed_empty(
             },
             {
                 "profile_id": "FULL_CREDIT_32",
-                "selection_id": "FULL_CREDIT_ASSESSMENT",
-                "accepts_model_extension": True,
+                "selection_id": "EARNINGS_UPDATE",
+                "accepts_model_extension": False,
+            },
+            {
+                "profile_id": "FULL_CREDIT_32",
+                "selection_id": "LIQUIDITY_REVIEW",
+                "accepts_model_extension": False,
             },
             {
                 "profile_id": "FULL_CREDIT_32",
