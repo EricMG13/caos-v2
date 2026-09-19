@@ -91,6 +91,7 @@ from server.methodology.invocation import (
     within_request_ceiling,
 )
 from server.methodology.vendor import VENDOR_MODULE, authority_bundle_sha256
+from server.methodology.verification import verify_owner_restrictions
 from server.provider import MAX_REQUEST_BYTES, OpenRouter, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store.outcomes import CallOutcome, record_outcome
@@ -100,6 +101,11 @@ from server.store.runs import Accepted, accept_attempt, start_attempt, start_run
 from server.store.source_sets import SourceSet, SourceSetMember
 
 __all__ = ["harness"]
+
+
+def test_owner_restrictions_helper_is_available() -> None:
+    assert callable(verify_owner_restrictions)
+
 
 LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
 BEGIN = "--- HOST-OWNED FRONT MATTER"
