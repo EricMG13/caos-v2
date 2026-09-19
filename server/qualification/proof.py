@@ -51,9 +51,9 @@ from server.methodology.verification import (
     AcceptedRow,
     PinnedEvidence,
     Step,
-    _verify_owner_chain,
     load_vendor_authority,
     verify_accepted,
+    verify_owner_chain,
 )
 from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
@@ -265,7 +265,7 @@ class _CanonicalReader:
             refuse=_refuse,
         )
         if node.module_id == "CP-5":
-            _verify_owner_chain(
+            verify_owner_chain(
                 self.vendor.contract,
                 verified.markdown,
                 (
