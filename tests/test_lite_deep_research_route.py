@@ -109,6 +109,9 @@ ENABLED = frozenset(
         ("LITE_CREDIT_22", "LITE_DECISION_LEDGER"),
         RESEARCH_SELECTION,
         ("FULL_CREDIT_32", "DEEP_RESEARCH"),
+        ("FULL_CREDIT_32", "LIQUIDITY_REVIEW"),
+        ("FULL_CREDIT_32", "EARNINGS_UPDATE"),
+        ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT"),
     }
 )
 SUBJECT = RunSubject("ACME", "Acme Holdings plc", "FY2025", "2026-09-08")

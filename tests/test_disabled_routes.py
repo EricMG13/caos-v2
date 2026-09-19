@@ -114,7 +114,7 @@ def _no_work(harness: _Harness) -> None:
         assert _count(harness, table) == 0, table
 
 
-@pytest.mark.parametrize("route", [FULL, ALL_ADAPTER], indirect=True)
+@pytest.mark.parametrize("route", [ALL_ADAPTER], indirect=True)
 def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
     harness: _Harness,
 ) -> None:
@@ -147,7 +147,7 @@ def _authority(harness: _Harness) -> tuple[RunInput, ResolvedRoute]:
     return pin, stored
 
 
-@pytest.mark.parametrize("route", [FULL, ALL_ADAPTER], indirect=True)
+@pytest.mark.parametrize("route", [ALL_ADAPTER], indirect=True)
 def test_acceptance_refuses_a_disabled_route(harness: _Harness) -> None:
     attempt = _billed(harness)
     accepted = Accepted(
@@ -274,7 +274,7 @@ def test_readers_refuse_an_artifact_without_its_record(
     }
 
 
-@pytest.mark.parametrize("selection", [FULL, ALL_ADAPTER])
+@pytest.mark.parametrize("selection", [ALL_ADAPTER])
 def test_require_adapter_route_is_the_one_rule_both_refusal_points_share(
     selection: tuple[str, str],
 ) -> None:
