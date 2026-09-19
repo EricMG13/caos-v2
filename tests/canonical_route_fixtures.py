@@ -511,3 +511,320 @@ class RouteCompletions:
             self.charge,
             "gen-relative-value",
         )
+
+
+# ---------------------------------------------------------------------------
+# LITE_DECISION_LEDGER (CP-0 -> CP-8), Completion Phase 9 Task 9.3.
+#
+# Kept apart from the RELATIVE_VALUE builder above rather than folded into it:
+# the two routes pin different consumers (CP-0's T8 names exactly the route's
+# own), a different decision scope, and a two-document pack -- CP-8 post-
+# mortems a *decision record* (T0) against a later *outcome* (T1), and its own
+# gate is that without the record it is Blocked and must "not reconstruct a
+# thesis after the fact". Both documents below are an authored example issuer,
+# as the pack above is: they prove the contract and lineage, not a real
+# post-mortem.
+# ---------------------------------------------------------------------------
+
+LEDGER_SELECTION = ("LITE_CREDIT_22", "LITE_DECISION_LEDGER")
+LEDGER_ROUTE = resolve_route(CATALOG, *LEDGER_SELECTION)
+LEDGER_MODULES = tuple(n.module_id for n in LEDGER_ROUTE.nodes)
+LEDGER_PACK = {
+    "memo": b"""Acme Holdings plc credit committee decision record dated 2025-02-14
+Decision add to the Acme senior secured term loan at an overweight posture
+Position size 25 USD million approved by the credit portfolio committee
+Thesis deleveraging from net leverage 3.5 times to 3.0 times by FY2025
+Greatest uncertainty is a revenue decline that delays deleveraging
+Expected spread tightening of 50 basis points over a 24 month hold
+Exit trigger net leverage above 4.0 times at any annual test
+""",
+    "outcome": b"""Acme Holdings plc FY2025 outcome extract
+Net leverage 2.8 times at 31 December 2025 audited
+Senior secured term loan spread 300 basis points at 31 December 2025
+Revenue grew 4 percent in FY2025 against FY2024
+""",
+}
+LEDGER_FILENAMES = {"memo": "decision-record.txt", "outcome": "outcome-extract.txt"}
+# Whole lines of the pack, so each quote is whole tokens (invariant 11). CP-8
+# cites both sides of the window it measures: the thesis as recorded and the
+# outcome as realised.
+LEDGER_QUOTES: dict[str, tuple[tuple[str, str], ...]] = {
+    "CP-0": (
+        (
+            "memo",
+            "Acme Holdings plc credit committee decision record dated 2025-02-14",
+        ),
+    ),
+    "CP-8": (
+        (
+            "memo",
+            "Thesis deleveraging from net leverage 3.5 times to 3.0 times by FY2025",
+        ),
+        ("outcome", "Net leverage 2.8 times at 31 December 2025 audited"),
+    ),
+}
+
+
+def ledger_identity(
+    module: str, upstream: tuple[UpstreamRef, ...] = ()
+) -> HostIdentity:
+    """One node's host identity on the decision-ledger route."""
+    node = next(n for n in LEDGER_ROUTE.nodes if n.module_id == module)
+    if module != "CP-0" and not upstream:
+        upstream = tuple(
+            UpstreamRef(
+                n.route_node_id,
+                n.module_id,
+                RUN,
+                "FY2025",
+                hashlib.sha256(n.module_id.encode()).hexdigest(),
+            )
+            for n in LEDGER_ROUTE.nodes
+            if any(
+                e.source == n.module_id and e.target == module
+                for e in LEDGER_ROUTE.edges
+            )
+        )
+    route = CONTRACT.routing.Route(CATALOG, *LEDGER_SELECTION)
+    return HostIdentity(
+        RUN,
+        *LEDGER_SELECTION,
+        node.route_node_id,
+        module,
+        route.by_module[module]["module_name"],
+        "ACME",
+        "Acme Holdings plc",
+        "FY2025",
+        "2026-09-08",
+        1,
+        authority_bundle_sha256(BUNDLE),
+        upstream,
+    )
+
+
+def cp8_rows() -> dict[str, list[list[str]]]:
+    """CP-8's eight registers, each cell read off the memo or the outcome.
+
+    T7.1-T7.4 are the half a document settles: the decision and its thesis as
+    recorded at T0, the outcome as realised at T1, and the variance between
+    them. T7.5-T7.7 are judgement the fixture asserts and nothing can prove on
+    one decision -- which is why no qualification key is written over them.
+    No cell is a placeholder the vendor's critical-column blocklist refuses:
+    what the record does not state is said in words and carried to T7.8.
+    """
+    return {
+        "T7.1": [
+            [
+                "Add",
+                "Overweight",
+                "Acme senior secured term loan",
+                "25 USD million",
+                "2025-02-14",
+                "Credit portfolio committee",
+                "Completed",
+            ]
+        ],
+        "T7.2": [
+            [
+                "Deleveraging from net leverage 3.5 times to 3.0 times by FY2025",
+                "A revenue decline that delays deleveraging",
+                "Downside path: revenue decline",
+                "Spread tightening of 50 basis points",
+                "Not stated in the decision record; see T7.8",
+                "24 months",
+                "Net leverage above 4.0 times at any annual test",
+                "MEMO-1",
+            ]
+        ],
+        "T7.3": [
+            [
+                "Net leverage",
+                "2.8 times",
+                "2025-12-31",
+                "FY2025 outcome extract",
+                "Final",
+                "OUT-1",
+            ],
+            [
+                "Term loan spread",
+                "300 basis points",
+                "2025-12-31",
+                "FY2025 outcome extract",
+                "Interim",
+                "OUT-2",
+            ],
+        ],
+        "T7.4": [
+            [
+                "Net leverage",
+                "3.0 times",
+                "2.8 times",
+                "Favourable: 0.2 times below the recorded expectation",
+                "High",
+                "MEMO-1; OUT-1",
+            ],
+            [
+                "Term loan spread",
+                "50 basis points tightening",
+                "300 basis points",
+                "Not comparable: the entry spread was not recorded",
+                "Low",
+                "MEMO-1; OUT-2",
+            ],
+        ],
+        "T7.5": [
+            [
+                "Net leverage 0.2 times below expectation",
+                "Thesis Confirmed",
+                "Y",
+                "None: no process gap",
+                "Deleveraging tracked the recorded base case",
+                "MEMO-1; OUT-1",
+            ]
+        ],
+        "T7.6": [
+            [
+                "No pattern: one decision recorded",
+                "None",
+                "No prior adjusted",
+                "One decision, below the three-decision gate",
+                "No calibration recommendation",
+            ]
+        ],
+        "T7.7": [
+            [
+                "1 of 1 thesis confirmed",
+                "One pathway: LITE decision ledger",
+                "Thesis Confirmed: 1",
+                "Record the entry spread with every decision",
+            ]
+        ],
+        "T7.8": [
+            [
+                "Rating path",
+                "Expected rating path",
+                "Rating migration cannot be compared with an expectation",
+                "T7.2 rating path left unstated",
+                "Record the expected rating path at decision",
+            ]
+        ],
+    }
+
+
+def _ledger_t8(readiness: dict[str, str]) -> list[list[str]]:
+    """CP-0's T8, naming exactly this route's pinned consumers."""
+    rows = []
+    for n, module in enumerate(LEDGER_MODULES[1:], 1):
+        status = readiness.get(module, "READY")
+        command = "Run " + module
+        runnable = status in {"READY", "READY_WITH_LIMITATIONS"}
+        rows.append(
+            [
+                str(n),
+                module,
+                command,
+                command if runnable else "DO NOT RUN",
+                "decision-record.txt p1",
+                "Current handoff",
+                status,
+                "decision-record.txt p1",
+            ]
+        )
+    return rows
+
+
+def ledger_markdown(ident: HostIdentity, knobs: HandoffKnobs | None = None) -> bytes:
+    """A handoff the vendor validators accept for a decision-ledger node."""
+    knobs = knobs or HandoffKnobs()
+    front = {
+        **(knobs.fields or invocation_fields(CONTRACT, ident)),
+        "confidence_score": 90,
+        "confidence_band": "High",
+        "committee_status": "Draft Only",
+        "limitation_flags": [],
+        "validation_warnings": [],
+        "downstream_consumers": [],
+        **AUTHORED[knobs.qa_status],
+        "qa_status": knobs.qa_status,
+    }
+    if knobs.qa_status == "Restricted":
+        front["limitation_flags"] = [LIMITATION]
+    rules = CONTRACT.completeness_check.load_contract(
+        skill(ident.module_id).decode(), ident.module_id
+    )
+    quotes = [quote for _document, quote in LEDGER_QUOTES[ident.module_id]]
+    authored = cp8_rows() if ident.module_id == "CP-8" else {}
+    appendix = "### Analytical appendix — complete canonical registers\n\n"
+    for register, spec in rules["registers"].items():
+        if register == knobs.omit_register:
+            continue
+        columns = spec["columns"] or ["Evidence"]
+        if ident.module_id == "CP-0" and register == "T8":
+            columns = CONTRACT.navigation.NEW_HEADERS
+            rows = _ledger_t8(knobs.readiness)
+        else:
+            rows = authored.get(register) or conforming_rows(
+                register, spec, rules, lambda column, _n: f"{column}: {quotes[0]}"
+            )
+        appendix += "#### " + register + "\n\n" + _table(columns, rows)
+    if knobs.quote is not None:
+        quotes[-1] = knobs.quote
+    note = "".join(quote + ".\n\n" for quote in quotes)
+    body = "".join(
+        "## " + h + "\n\n" + (appendix if h == "Analysis" else note)
+        for h in CONTRACT.validate_handoff.CANONICAL_HEADINGS
+    )
+    return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
+
+
+@dataclass
+class LedgerCompletions:
+    """A provider answering the decision-ledger route deterministically.
+
+    `memo_id` and `outcome_id` are the two admitted documents' source ids, so
+    each citation names the document its quote is from. `quotes_by_module`
+    replaces a module's *last* quote -- CP-8's realised outcome -- in both the
+    body and the citation, which is how a test offers an outcome the pack does
+    not hold.
+    """
+
+    memo_id: UUID
+    outcome_id: UUID
+    model: str = "a-model/for-the-test"
+    charge: Decimal = Decimal("0.0000041")
+    qa_by_module: dict[str, str] = field(default_factory=dict)
+    readiness: dict[str, str] = field(default_factory=dict)
+    quotes_by_module: dict[str, str] = field(default_factory=dict)
+    prompts: list[str] = field(default_factory=list)
+    answers: list[bytes] = field(default_factory=list)
+    bodies: list[str] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        assert json_object
+        self.prompts.append(prompt)
+        fields = fields_from_prompt(prompt)
+        module = str(fields["module_id"])
+        quotes = list(LEDGER_QUOTES[module])
+        replaced = self.quotes_by_module.get(module)
+        if replaced is not None:
+            quotes[-1] = (quotes[-1][0], replaced)
+        markdown = ledger_markdown(
+            ledger_identity(module),
+            HandoffKnobs(
+                fields=fields,
+                qa_status=self.qa_by_module.get(module, "Passed"),
+                readiness=self.readiness,
+                quote=replaced,
+            ),
+        )
+        self.answers.append(markdown)
+        ids = {"memo": self.memo_id, "outcome": self.outcome_id}
+        citations: list[dict[str, object]] = [
+            {"source_id": str(ids[document]), "page": 1, "matched_text": quote}
+            for document, quote in quotes
+        ]
+        self.bodies.append(wire(markdown, citations))
+        return Completion(self.bodies[-1], self.charge, "gen-decision-ledger")
