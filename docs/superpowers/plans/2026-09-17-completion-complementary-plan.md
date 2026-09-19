@@ -70,8 +70,9 @@ its §5 "pathway task template" is the unit every programme task instantiates.
 - GitNexus is discovery evidence. Verify every affected definition and
   caller in current source, types and tests; `impact` before editing a
   symbol, `detect_changes` before committing.
-- No rewrite tournament. One `confidence-review` and one separate adversarial
-  code audit per whole phase, both on Fable 5.1 at actual `xhigh`.
+- No rewrite tournament. One `confidence-review` on `gpt-5.6-sol` `xhigh` and
+  one separate adversarial code audit on `gpt-6-astra` `xhigh` per whole
+  phase.
 - **Remediation coordination.** See "Running Beside the Remediation Stream"
   below: it classifies every task by what it owns, names the four shared
   resources and their rules, and states the two hard orderings.
@@ -166,6 +167,15 @@ and which Class C dependency it thereby met. An independently green worktree
 in either stream is still not acceptance.
 
 ## Reasoning Modes
+
+**Current routing:** [`docs/GPT_MODEL_REASONING_MATRIX.md`](../../GPT_MODEL_REASONING_MATRIX.md)
+and `docs/DECISIONS.md` §104 govern all work dispatched from 19 September
+2026. They map the workhorse role to `gpt-5.6-sol`, the long-horizon and
+architect role to `gpt-6-astra`, and every former `ultrathink`/`max` request
+to the actual Codex `xhigh` setting. They override every forward-looking
+Claude model or effort row below. Completed work keeps its recorded setting.
+
+### Historical Claude routing
 
 The owner's `claude_fable_and_opus_reasoning_matrix.md` (16 September 2026)
 replaces the Sonnet/Opus routing of the post-Phase-2 plan. Sonnet is out.
@@ -299,11 +309,11 @@ Every phase starts with this sequence:
   ```
 
 - [ ] Write one tracked brief per task under `docs/superpowers/plans/` on
-      Fable 5.1 `high`: accepted base, exact files, current interface
+      `gpt-6-astra` `high`: accepted base, exact files, current interface
       signatures, failing assertions, executor row, risk classification,
       commands and cumulative PR size estimate; for a pathway task, the
       template's seven steps instantiated with the pathway's modules, edges,
-      documents and keys. Stress-test it with one Opus 5 `xhigh` `ultrathink`
+      documents and keys. Stress-test it with one `gpt-5.6-sol` `xhigh`
       prompt before code.
 - [ ] Map task dependencies and launch at most five implementers only for
       disjoint ownership, each with its own UUID-owned test database and blob
@@ -316,7 +326,7 @@ backend gate:
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER make -j1 check-postgres lint types test test-postgres-races security CAOS_REQUIRE_POSTGRES=1 CAOS_TEST_POSTGRES_URL="${CAOS_TEST_POSTGRES_URL:?set privately}"
 ```
 
-Then ordinary review on Opus 5 `medium` of the exact range, remediation, and
+Then ordinary review on `gpt-5.6-sol` `medium` of the exact range, remediation, and
 the size gate against the actual PR base:
 
 ```sh
@@ -340,8 +350,8 @@ At whole-phase freeze, the complete repository gate with the pinned Trivy:
 env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL -u OPENROUTER_PROVIDER -u OPENROUTER_REASONING_EFFORT -u CAOS_REQUIRE_PROVIDER TRIVY="$TRIVY" IMAGE=caos-workbench:check make check
 ```
 
-Then the `confidence-review` on Fable 5.1 `xhigh`, remediation and rerun, a
-GitNexus refresh, the separate adversarial audit on Fable 5.1 `xhigh`,
+Then the `confidence-review` on `gpt-5.6-sol` `xhigh`, remediation and rerun, a
+GitNexus refresh, the separate adversarial audit on `gpt-6-astra` `xhigh`,
 remediation and reverification, and a tracked acceptance record in the
 handoff with exact commits, index identity, actual model/effort read back
 from the session, commands, results, every pathway's state (enabled / set
@@ -409,7 +419,8 @@ is untracked; the handoff names this plan.
 **Task acceptance:** every merged PR since #258 has a row with hosted results;
 no hosted status is described from local output.
 
-**Phase 7 exit:** the complete repository gate; both Fable 5.1 `xhigh` reviews
+**Phase 7 exit:** the complete repository gate; the `gpt-5.6-sol` `xhigh`
+confidence review and `gpt-6-astra` `xhigh` adversarial audit
 (the adversarial audit marked not applicable for the docs-only half; it
 covers the ledger gate script).
 
@@ -455,7 +466,7 @@ the corpus register and five vendor request documents.
 - [ ] The VMO2 set gains one register key per module; the borrowing-capacity
       key re-cast to the fact-carrying line.
 
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Construct a handoff that
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `Construct a handoff that
 meets an ExpectedRegister key while concluding the opposite of what the key
 was authored to check — through row order, a duplicated register heading, a
 fenced table, or a cell that matches after normalisation. Name the parser
@@ -481,7 +492,7 @@ pre-call unit), `tests/test_budget.py`, `tests/test_loop_charges.py`.
       computed after `check_context` built the prompt and before
       `start_attempt`; the worst case remains the ceiling admission check.
 
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Under a changed price
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `Under a changed price
 between pre-check and reservation, a retried attempt, a replayed billed
 answer and a crash between pricing and reservation, find any path that
 reserves less than the call can cost or charges without a reservation.`
@@ -541,7 +552,8 @@ its status before either phase starts.
 
 **Task acceptance:** five requests exist; nothing in `vendor/` changed.
 
-**Phase 8 exit:** the complete repository gate; both Fable 5.1 `xhigh` reviews.
+**Phase 8 exit:** the complete repository gate; the `gpt-5.6-sol` `xhigh`
+confidence review and `gpt-6-astra` `xhigh` adversarial audit.
 
 ---
 
@@ -630,7 +642,7 @@ keys and refuses a consumer the route does not carry),
       respectively in TDR.3.
 - [ ] Step 7.
 
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: The brief is caller text
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `The brief is caller text
 that reaches the prompt. Trace it from PIN_RUN_INPUT through the pin, the
 section and CP-DR's answer; find any path where it selects a module, a
 source, a tool or a web access the invariants forbid, or where a consumer
@@ -644,7 +656,8 @@ adopts research the brief did not name.`
       request as the reason; no route is enabled.
 
 **Phase 9 exit:** `docs/COMPLETION_PLAN.md` Phase 9 exit checks; the complete
-gate; both Fable 5.1 `xhigh` reviews; the handoff's pathway table.
+gate; the `gpt-5.6-sol` `xhigh` confidence review and `gpt-6-astra` `xhigh`
+adversarial audit; the handoff's pathway table.
 
 ---
 
@@ -684,7 +697,7 @@ phase entry.
       the bounded line group; a per-section bound; one recorded narrowing;
       never truncation.
 
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Trace one citation from the
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `Trace one citation from the
 model's quote through the delivery row, the token index, the proof's and the
 deliverable's re-anchoring. Find any path where the delivery recorded, the
 blocks prompted and the blocks anchored against differ — including a v2
@@ -717,7 +730,8 @@ record, a withdrawn member, a narrowed delivery and a replayed billed attempt.`
       the index; v2 rows keep their identity.
 
 **Phase 10 exit:** `docs/COMPLETION_PLAN.md` Phase 10 exit checks; the
-complete gate; both Fable 5.1 `xhigh` reviews.
+complete gate; the `gpt-5.6-sol` `xhigh` confidence review and
+`gpt-6-astra` `xhigh` adversarial audit.
 
 ---
 
@@ -781,7 +795,8 @@ Briefs at phase entry, one per task, on the template.
       the reason.
 
 **Phase 11 exit:** `docs/COMPLETION_PLAN.md` Phase 11 exit checks; the
-complete gate; both Fable 5.1 `xhigh` reviews; the handoff's pathway table
+complete gate; the `gpt-5.6-sol` `xhigh` confidence review and
+`gpt-6-astra` `xhigh` adversarial audit; the handoff's pathway table
 complete for all eighteen.
 
 ---
@@ -800,7 +815,7 @@ renderer, the journey through all of it.
       with receipts, digest-bound conflicts, three independent actors checked
       at commit, the seven-identity matrix per command.
 
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Enumerate save, sign,
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `Enumerate save, sign,
 freeze, file and revoke interleavings across two cases and three actors. Find
 any path where an actor checked before commit, a detached digest or a stale
 revision authorizes different bytes than the ones reviewed.`
@@ -830,14 +845,14 @@ revision authorizes different bytes than the ones reviewed.`
 
 ### Task 13.1: Async Store and `gather`
 ### Task 13.2: Second-Worker Safety
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Enumerate every two-worker
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `Enumerate every two-worker
 interleaving from claim through reservation, provider return, ancestor
 acceptance, cancellation, lease loss, artifact acceptance and terminal event.
 Identify the database predicate that prevents each stale acceptance without a
 lock across transport.`
 ### Task 13.3: Notify, Cap, Readiness, Frame
 ### Task 13.4: Signed Assertion, TLS, CI Smoke
-**Targeted prompt (Opus 5 `xhigh`):** `ultrathink: Trace every header, cookie,
+**Targeted prompt (`gpt-5.6-sol` `xhigh`):** `Trace every header, cookie,
 token, assertion, proxy hop and listener that can influence Actor. Find a
 deployment where a client-supplied group or a replayed assertion reaches a
 governed command.`
@@ -848,7 +863,8 @@ governed command.`
       `main`; every advertised pathway with a current verdict or disabled.
 
 **Phase 13 exit:** O23–O26 exit checks; the complete gate including the CI
-smoke job; both Fable 5.1 `xhigh` reviews.
+smoke job; the `gpt-5.6-sol` `xhigh` confidence review and `gpt-6-astra`
+`xhigh` adversarial audit.
 
 ## Final Verification Checklist
 
@@ -861,9 +877,9 @@ smoke job; both Fable 5.1 `xhigh` reviews.
       the owner; every set digest is recorded with its runs.
 - [ ] Every live run had its authorization line; every run's database and
       blob root are retained until its verdict or refusal is recorded.
-- [ ] Opus 5 `low`/`medium`/`max`+`ultrathink` and Fable 5.1
-      `medium`/`high`/`max` followed the routing table; no `ultrathink` on
-      Fable; actual checkpoint settings recorded.
+- [ ] `gpt-5.6-sol` and `gpt-6-astra` followed
+      `docs/GPT_MODEL_REASONING_MATRIX.md`; no effort exceeded `xhigh`; actual
+      checkpoint settings recorded.
 - [ ] No rewrite tournament ran; the remediation stream was consumed, not run.
 - [ ] Unqualified, restricted, unavailable, held and disabled pathways are
       presented honestly; nothing says QUALIFIED without a signed verdict.

@@ -4672,3 +4672,27 @@ the hosted checks verified on `main` need a push and are not part of it.
 - **`docs/feature-status.csv`.** Kept, unedited, as the dated predecessor; the
   pack is the live answer, and the Completion Phase 7 ledger entry is struck
   with that said.
+
+## 2026-09-19 §104 — Claude roles map to two GPT models; `xhigh` remains the ceiling
+
+The owner supplied `claude_fable_and_opus_reasoning_matrix.md` as reference
+data and asked that its model and effort settings be adapted to their GPT
+equivalents for resumed development. For every new dispatch, Claude Opus 5's
+daily-driver and verification role maps to `gpt-5.6-sol`; Claude Fable 5.1's
+long-horizon and chief-architect role maps to `gpt-6-astra`. The complete
+forward-looking matrix is `docs/GPT_MODEL_REASONING_MATRIX.md`.
+
+§81's ceiling remains binding. Codex has no `ultrathink` prompt lever, and a
+source request for `ultrathink`, `max` or `ultra` maps to the actual `xhigh`
+reasoning setting. Default implementation and ordinary review use
+`gpt-5.6-sol` at `medium`; critical store, billing and localized concurrency
+work may use `high`; long-horizon execution uses `gpt-6-astra` at `medium`,
+and architecture/governance at `high`.
+
+At a phase freeze, the confidence review runs on `gpt-5.6-sol` at `xhigh`,
+then, after remediation and retest, the separate adversarial audit runs on
+`gpt-6-astra` at `xhigh`. Task acceptance stays with the workhorse model at
+`xhigh`; the one final all-phases review runs on `gpt-6-astra` at `xhigh`.
+This restores a distinct reader for the adversarial gate that §97 explicitly
+gave up. It overrides §97 and every earlier forward-looking Claude routing
+row, but does not rewrite the model or effort recorded for completed work.

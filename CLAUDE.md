@@ -23,7 +23,9 @@ Decision §39 reconciles the repair plan with older specifications. Phase 2 is
 accepted (the handoff's acceptance record); Phase 3 runs under
 [`docs/PHASE_3_ONWARDS_GOAL_PROMPT.md`](docs/PHASE_3_ONWARDS_GOAL_PROMPT.md)
 and its tracked task briefs in `docs/superpowers/plans/`.
-The complementary plan's Reasoning Modes section records both Opus 5 guides.
+[`docs/GPT_MODEL_REASONING_MATRIX.md`](docs/GPT_MODEL_REASONING_MATRIX.md)
+records the current Codex model and effort routing. Older Claude-specific
+routing remains historical evidence only.
 
 Every shell command starts by unsetting `OPENROUTER_API_KEY`,
 `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `CAOS_REQUIRE_PROVIDER`.
