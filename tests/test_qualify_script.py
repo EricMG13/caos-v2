@@ -196,9 +196,10 @@ def test_main_refuses_to_keep_a_paid_run_where_it_cannot_last(
 def _skip_without_postgres() -> None:
     """The same skip/fail split `tests/conftest.py`'s database fixtures use.
 
-    `qualify.py` reads `CAOS_TEST_POSTGRES_URL` itself, as an admin connection
-    it creates a fresh database from, so there is no store fixture to depend
-    on for this -- the check is repeated here rather than skipped silently.
+    `qualify.py` reads `CAOS_QUALIFY_POSTGRES_URL` itself, as an admin
+    connection it creates a fresh database from, so there is no store fixture
+    to depend on for this -- the check is repeated here rather than skipped
+    silently.
     """
     if os.environ.get("CAOS_TEST_POSTGRES_URL") is not None:
         return
