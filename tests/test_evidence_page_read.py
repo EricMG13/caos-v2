@@ -93,7 +93,7 @@ def pin(
     snapshot = snapshot_source_set(conn, case_id)
     run_id = start_run(conn, case_id)
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "RELATIVE_VALUE"))
+    pin_route(conn, run_id, resolve_route(catalog, PROFILE, "MARKET_DISLOCATION"))
     bundle = Bundle(CATALOG_PATH.parents[3])
     pin_run_input(conn, run_id, snapshot.version, bundle, subject=SUBJECT)
     conn.commit()

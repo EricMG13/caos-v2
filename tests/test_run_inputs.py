@@ -51,7 +51,7 @@ def _prepare(
     conn: StoreConnection,
     case_id: UUID,
     path: Path,
-    selection: tuple[str, str] = (PROFILE, "RELATIVE_VALUE"),
+    selection: tuple[str, str] = (PROFILE, "MARKET_DISLOCATION"),
 ) -> tuple[UUID, SourceSet, Bundle, ResolvedRoute]:
     """A run on `selection`, pinned but not yet input-pinned. The default is a
     route the adapter does not execute: pinning stays general (§42.2)."""
@@ -106,8 +106,16 @@ def prepared(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Prepared:
     return conn, *_prepare(conn, case_id, tmp_path)
 
 
-def test_complete_input_roundtrip_exact_terminal_replay(prepared: Prepared) -> None:
-    conn, run, source, bundle, route = prepared
+@pytest.fixture
+def research_prepared(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Prepared:
+    conn, case_id = case
+    return conn, *_prepare(conn, case_id, tmp_path, (PROFILE, "DEEP_RESEARCH"))
+
+
+def test_complete_input_roundtrip_exact_terminal_replay(
+    research_prepared: Prepared,
+) -> None:
+    conn, run, source, bundle, route = research_prepared
     research = research_brief(decision_context="Café?")
     pin = pin_run_input(conn, run, source.version, bundle, research, subject=SUBJECT)
     assert conn.info.transaction_status.name == "IDLE"
@@ -212,9 +220,12 @@ def test_returning_source_content_still_binds_distinct_version(
     "changed", ["build", "manifest", "adapter", "research", "moving"]
 )
 def test_changed_host_or_research_refuses_replay_but_history_is_readable(
-    prepared: Prepared, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
+    research_prepared: Prepared,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
 ) -> None:
-    conn, run, source, bundle, _ = prepared
+    conn, run, source, bundle, _ = research_prepared
     pin = pin_run_input(
         conn, run, source.version, bundle, research_brief(), subject=SUBJECT
     )
@@ -316,36 +327,38 @@ def _refused_at_pin(prepared: Prepared, research: object) -> None:
 
 
 def test_a_brief_naming_a_consumer_the_route_does_not_carry_refuses_at_pin(
-    prepared: Prepared,
+    research_prepared: Prepared,
 ) -> None:
     """§96: a question's consumer or predecessor must be a module the pinned
     route selects -- the vendor's own `Route` judges the placement -- and the
     brief must be about the pinned subject; otherwise nothing is pinned."""
-    _refused_at_pin(prepared, research_brief(placement=("CP-2A", "CP-0")))
-    _refused_at_pin(prepared, research_brief(placement=("NONE", "CP-1")))
-    _refused_at_pin(prepared, research_brief("OTHER"))
+    _refused_at_pin(research_prepared, research_brief(placement=("CP-2A", "CP-0")))
+    _refused_at_pin(research_prepared, research_brief(placement=("NONE", "CP-1")))
+    _refused_at_pin(research_prepared, research_brief("OTHER"))
 
 
-def test_a_brief_with_web_source_mode_refuses_at_pin(prepared: Prepared) -> None:
+def test_a_brief_with_web_source_mode_refuses_at_pin(
+    research_prepared: Prepared,
+) -> None:
     """Invariant 1: web discovery is structurally absent, so a brief asking for
     `web_only` or `hybrid` asks for a capability nothing here has. It is
     refused at the pin, where the vendor would accept it."""
     for mode in ("web_only", "hybrid"):
-        _refused_at_pin(prepared, research_brief(source_mode=mode))
+        _refused_at_pin(research_prepared, research_brief(source_mode=mode))
 
 
 def test_a_brief_cannot_supply_its_own_run_id_or_cp0_digest(
-    prepared: Prepared,
+    research_prepared: Prepared,
 ) -> None:
     """Invariant 3: `run_id`, `cp0_sha256` and `authority_sha256` are written
     by the host when CP-DR is invoked; a caller's brief carrying any of them,
     or a field the brief schema does not declare, is refused, and a brief on a
     route with no CP-DR node reaches nobody and is refused too."""
     for binding in ("run_id", "cp0_sha256", "authority_sha256"):
-        _refused_at_pin(prepared, {**research_brief(), binding: "a" * 64})
-    _refused_at_pin(prepared, research_brief(tools=["web_search"]))
-    _refused_at_pin(prepared, research_brief(mode="standalone"))
-    conn, run, source, bundle, _ = prepared
+        _refused_at_pin(research_prepared, {**research_brief(), binding: "a" * 64})
+    _refused_at_pin(research_prepared, research_brief(tools=["web_search"]))
+    _refused_at_pin(research_prepared, research_brief(mode="standalone"))
+    conn, run, source, bundle, _ = research_prepared
     pin = pin_run_input(
         conn, run, source.version, bundle, research_brief(), subject=SUBJECT
     )
@@ -357,13 +370,13 @@ def test_a_brief_cannot_supply_its_own_run_id_or_cp0_digest(
 
 
 def test_the_bound_brief_carries_exactly_the_host_bindings(
-    prepared: Prepared,
+    research_prepared: Prepared,
 ) -> None:
     """`bound_research_brief` is the one place a brief meets the vendor's
     `validate_brief` and `Route`: it returns the caller's brief with the three
     host bindings written in and nothing else changed, and refuses a brief the
     vendor refuses without letting the vendor's text reach the refusal."""
-    _, _, _, bundle, route = prepared
+    _, _, _, bundle, route = research_prepared
     contract = cached_contract(bundle)
     assert cached_contract(bundle) is contract
     bindings = {

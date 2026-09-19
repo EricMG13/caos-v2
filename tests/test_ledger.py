@@ -69,6 +69,30 @@ NOT_A_CITATION = {
         "a placeholder inside the ledger's own description of the phase-exit "
         "gate's title regex, not a citation of anything"
     ),
+    "test_a_replay_at_exactly_the_window_edge_is_refused": (
+        "named by a deferred replay-register entry; its implementation is not "
+        "in this branch"
+    ),
+    "test_a_cp_dr_register_is_read_as_its_completeness_check_reads_it": (
+        "named by a deferred CP-DR register entry; its implementation is not "
+        "in this branch"
+    ),
+    "test_every_committed_register_key_is_locatable_by_its_modules_reader": (
+        "named by a deferred CP-DR register entry; its implementation is not "
+        "in this branch"
+    ),
+    "test_a_10k_named_whole_for_a_consumer_is_refused_before_any_attempt": (
+        "named by a deferred evidence-read entry; its implementation is not "
+        "in this branch"
+    ),
+    "test_a_10k_runs_by_page_the_gate_on_its_map_the_screen_on_its_pages": (
+        "named by a deferred evidence-read entry; its implementation is not "
+        "in this branch"
+    ),
+    "test_large_documents": (
+        "named by a deferred evidence-read entry; its implementation is not "
+        "in this branch"
+    ),
 }
 
 
@@ -81,6 +105,7 @@ EXPECTED_PHASES = frozenset(
         "Completion Phase 13",
         "Completion Phase 12",
         "Completion Phase 10",
+        "Completion Phase 9",
         "Completion Phase 8",
         "Completion Phase 7",
         "Repair Phase 5",

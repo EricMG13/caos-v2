@@ -425,7 +425,7 @@ LITE_SUBJECT = run_inputs.RunSubject(
 
 def _disabled(case: QualificationCase) -> QualificationCase:
     """The case on a route the adapter does not execute: it still prepares (§42.2)."""
-    return replace(case, profile_id="FULL_CREDIT_32", selection_id="DEEP_RESEARCH")
+    return replace(case, profile_id="FULL_CREDIT_32", selection_id="MARKET_DISLOCATION")
 
 
 def _lite(case: QualificationCase, subject_: object) -> QualificationCase:
