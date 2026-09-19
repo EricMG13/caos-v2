@@ -74,7 +74,7 @@ def _pin(
 ) -> None:
     source = snapshot_source_set(conn, case_id)
     route = resolve_route(
-        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
+        json.loads(CATALOG_PATH.read_text()), PROFILE, "RELATIVE_VALUE"
     )
     pin_route(conn, run_id, route)
     pin_run_input(

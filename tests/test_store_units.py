@@ -89,7 +89,7 @@ def test_the_in_transaction_pins_do_not_commit(
 
     source = snapshot_source_set(conn, case_id)
     route = resolve_route(
-        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
+        json.loads(CATALOG_PATH.read_text()), PROFILE, "RELATIVE_VALUE"
     )
     events = _count(conn, "run_events")
     conn.commit()
