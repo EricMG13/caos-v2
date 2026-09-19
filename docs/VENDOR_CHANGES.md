@@ -20,6 +20,94 @@ copies, runs the bundle's self-checks and unit tests, and regenerates
 Copilot memory prompts. Those regenerated files move with every build and are
 listed once, below, rather than per change.
 
+Vendor diff base: `8dee6ab160a42bd3e800647eed89f4e98827b0a5`.
+`tests/test_vendor_change_record.py` emits the changed paths from Git and holds
+this sorted inventory exactly equal to them.
+
+## Exact changed-path inventory
+
+- `CANON_SHARED.md`
+- `CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`
+- `DEPLOY_V_BASELINE.json`
+- `DEPLOY_V_COPILOT_MEMORY_PROMPT.md`
+- `DEPLOY_V_COPILOT_MEMORY_PROMPT_URL_BOUND.md`
+- `DEPLOY_V_INTEGRITY_v1.json`
+- `DEPLOY_V_MANIFEST.json`
+- `skills/cp-0-source-readiness/SKILL.md`
+- `skills/cp-0-source-readiness/references/CP-0__SourceReadiness__payload.schema.txt`
+- `skills/cp-0-source-readiness/references/REF_CP-0_STEPS.md`
+- `skills/cp-0-source-readiness/scripts/completeness_check.py`
+- `skills/cp-0-source-readiness/scripts/validate_handoff.py`
+- `skills/cp-1-canonical-data-foundation/SKILL.md`
+- `skills/cp-1-canonical-data-foundation/scripts/completeness_check.py`
+- `skills/cp-1-canonical-data-foundation/scripts/validate_handoff.py`
+- `skills/cp-1a-business-transaction-fact-pack/SKILL.md`
+- `skills/cp-1a-business-transaction-fact-pack/scripts/completeness_check.py`
+- `skills/cp-1a-business-transaction-fact-pack/scripts/validate_handoff.py`
+- `skills/cp-1b-earnings-delta/SKILL.md`
+- `skills/cp-1b-earnings-delta/scripts/completeness_check.py`
+- `skills/cp-1b-earnings-delta/scripts/validate_handoff.py`
+- `skills/cp-1c-peer-benchmark/SKILL.md`
+- `skills/cp-1c-peer-benchmark/scripts/completeness_check.py`
+- `skills/cp-1c-peer-benchmark/scripts/validate_handoff.py`
+- `skills/cp-1d-earnings-quality/scripts/completeness_check.py`
+- `skills/cp-1d-earnings-quality/scripts/validate_handoff.py`
+- `skills/cp-2-fundamental-credit-synthesizer/SKILL.md`
+- `skills/cp-2-fundamental-credit-synthesizer/scripts/completeness_check.py`
+- `skills/cp-2-fundamental-credit-synthesizer/scripts/validate_handoff.py`
+- `skills/cp-2a-downside-pathway/SKILL.md`
+- `skills/cp-2a-downside-pathway/scripts/completeness_check.py`
+- `skills/cp-2a-downside-pathway/scripts/validate_handoff.py`
+- `skills/cp-2d-liquidity-cash-flow-bridge/SKILL.md`
+- `skills/cp-2d-liquidity-cash-flow-bridge/scripts/completeness_check.py`
+- `skills/cp-2d-liquidity-cash-flow-bridge/scripts/validate_handoff.py`
+- `skills/cp-2e-macro-fx-hedging-sensitivity/SKILL.md`
+- `skills/cp-2e-macro-fx-hedging-sensitivity/scripts/completeness_check.py`
+- `skills/cp-2e-macro-fx-hedging-sensitivity/scripts/validate_handoff.py`
+- `skills/cp-2g-forward-credit-model/SKILL.md`
+- `skills/cp-2g-forward-credit-model/scripts/completeness_check.py`
+- `skills/cp-2g-forward-credit-model/scripts/validate_handoff.py`
+- `skills/cp-2h-ratings-migration-trigger/SKILL.md`
+- `skills/cp-2h-ratings-migration-trigger/scripts/completeness_check.py`
+- `skills/cp-2h-ratings-migration-trigger/scripts/validate_handoff.py`
+- `skills/cp-3-relative-value-security-selection/SKILL.md`
+- `skills/cp-3-relative-value-security-selection/scripts/completeness_check.py`
+- `skills/cp-3-relative-value-security-selection/scripts/validate_handoff.py`
+- `skills/cp-3c-refinancing-lme-risk/SKILL.md`
+- `skills/cp-3c-refinancing-lme-risk/scripts/completeness_check.py`
+- `skills/cp-3c-refinancing-lme-risk/scripts/validate_handoff.py`
+- `skills/cp-3d-market-implied-risk/SKILL.md`
+- `skills/cp-3d-market-implied-risk/scripts/completeness_check.py`
+- `skills/cp-3d-market-implied-risk/scripts/validate_handoff.py`
+- `skills/cp-4-legal-covenant-interpreter/SKILL.md`
+- `skills/cp-4-legal-covenant-interpreter/scripts/completeness_check.py`
+- `skills/cp-4-legal-covenant-interpreter/scripts/validate_handoff.py`
+- `skills/cp-4c-restructuring-fulcrum/SKILL.md`
+- `skills/cp-4c-restructuring-fulcrum/scripts/completeness_check.py`
+- `skills/cp-4c-restructuring-fulcrum/scripts/validate_handoff.py`
+- `skills/cp-5-evidence-trace-validator/SKILL.md`
+- `skills/cp-5-evidence-trace-validator/scripts/completeness_check.py`
+- `skills/cp-5-evidence-trace-validator/scripts/validate_handoff.py`
+- `skills/cp-6-ic-debate-challenge/SKILL.md`
+- `skills/cp-6-ic-debate-challenge/scripts/completeness_check.py`
+- `skills/cp-6-ic-debate-challenge/scripts/validate_handoff.py`
+- `skills/cp-8-decision-ledger-post-mortem/SKILL.md`
+- `skills/cp-8-decision-ledger-post-mortem/scripts/completeness_check.py`
+- `skills/cp-8-decision-ledger-post-mortem/scripts/validate_handoff.py`
+- `skills/cp-dr-deep-research/SKILL.md`
+- `skills/cp-dr-deep-research/scripts/validate_handoff.py`
+- `skills/cp-l10-financial-change-screen/SKILL.md`
+- `skills/cp-l10-financial-change-screen/scripts/completeness_check.py`
+- `skills/cp-l10-financial-change-screen/scripts/validate_handoff.py`
+- `skills/cp-model/scripts/validate_handoff.py`
+- `skills/cp-os-credit-os/references/CREDIT_OS_V_AUTHORITY_BUNDLE_v2.json`
+- `skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json`
+- `skills/cp-os-credit-os/scripts/completeness_check.py`
+- `skills/cp-os-credit-os/scripts/credit_os_v/navigation.py`
+- `skills/cp-os-credit-os/scripts/validate_handoff.py`
+- `tests/test_module_workflow.py`
+- `tests/test_research_workflow.py`
+
 ## Build `62a94ccd` (2026-09-18, §92) — from `30222a49`
 
 Old build `30222a494a5a1035c7955cb1ccfbe0b3b0fbbfa7d6426930f5dcf4d35aa1fc18`;
