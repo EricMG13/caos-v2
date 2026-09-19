@@ -488,11 +488,15 @@ with the standing over-cap exception for proven-indivisible commits.
 
 For work dispatched from 19 September 2026, the current policy is
 [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md):
-`gpt-5.6-sol` is the default implementation and confidence-review model;
-`gpt-6-astra` handles long-horizon/architecture work and independent
-adversarial review. Codex `xhigh` is the ceiling and replaces every earlier
-forward-looking `ultrathink`, `max` or `ultra` request. The dated Claude table
-below remains only to explain earlier execution records.
+`gpt-5.6-luna` handles bounded mechanical work, `gpt-5.6-terra` ordinary
+implementation and review, `gpt-5.6-sol` reliability-critical work and
+confidence review, and `gpt-6-astra` long-horizon/architecture work and
+independent adversarial review. `gpt-daybreak-blue-latest` is the defensive-
+security specialist; `gpt-5.5` is available only for a deliberately useful
+previous-generation baseline. These are defaults, not an allow-list. Codex
+`xhigh` is the ceiling and replaces every earlier forward-looking
+`ultrathink`, `max` or `ultra` request. The dated Claude table below remains
+only to explain earlier execution records.
 
 Ordinary exact-range review per task; one `confidence-review` and one
 separate adversarial code audit per whole phase, with remediation and
@@ -501,16 +505,19 @@ follows the current GPT matrix.
 
 | Activity | Model and effort | Notes |
 |---|---|---|
-| GitNexus refresh and caller verification | any, `low` | `analyze --force --index-only`, `status`; verify callers in source |
+| GitNexus refresh and caller verification | **`gpt-5.6-luna` `low`** | `analyze --force --index-only`, `status`; verify callers in source |
 | Phase brief, spec, ADR, request document to the vendor | **`gpt-6-astra` `high`** | one brief per phase; one code-ready brief per task at phase entry |
 | Plan or trade-off stress test | **`gpt-6-astra` `xhigh`** | one targeted prompt per brief |
 | Long-horizon multi-file implementation | **`gpt-6-astra` `medium`** | evidence selection (10.1), CP-DR brief delivery (9.4), the command chain (12.1), async store and second worker (13.1, 13.2), signed assertion (13.4) |
-| Per-module fixture and contract tests; route enablement slices | **`gpt-5.6-sol` `medium`** | the Task 5.2a precedent; one implementer per module, one per route |
+| Per-module fixture and contract tests; route enablement slices | **`gpt-5.6-terra` `medium`** | the Task 5.2a precedent; one implementer per module, one per route |
 | Answer-key authoring from documents | **`gpt-5.6-sol` `medium`**, documents only | the key file and its derivations; the owner confirms every material figure; nothing read from a run |
-| Ordinary implementation: endpoints, wire, UI, unit and integration tests | **`gpt-5.6-sol` `medium`** | 8.1–8.3, 10.2–10.5, 12.2–12.4, 13.3, 13.5, 13.6 |
-| Scaffolding, fixtures, regenerated ledgers, docstrings, status | **`gpt-5.6-sol` `low`** | 7.1, corpus admission manifests, schema regeneration |
+| Ordinary implementation: endpoints, wire, UI, unit and integration tests | **`gpt-5.6-terra` `medium`** | 8.1–8.3, 10.2–10.5, 12.2–12.4, 13.3, 13.5, 13.6 |
+| Scaffolding, regenerated ledgers, docstrings and status | **`gpt-5.6-luna` `low`** | 7.1, corpus admission manifests, schema regeneration |
+| Reliability-critical implementation | **`gpt-5.6-sol` `high`** | money, migrations, store transitions and localized concurrency |
 | Targeted invariant audit | **`gpt-5.6-sol` `xhigh`** | each module's register semantics before its fixture is trusted (the 5.2a precedent); money path (8.2); three-actor independence (12.1); interleavings (13.2); trust trace (13.4) |
-| Ordinary per-task review | **`gpt-5.6-sol` `medium`** | the exact base…candidate range |
+| Ordinary per-task review | **`gpt-5.6-terra` `medium`** | the exact base…candidate range; use a different model from the implementer when practical |
+| Defensive-security implementation and review | **`gpt-daybreak-blue-latest` `high` or `xhigh`** | auth, secrets, vulnerability remediation and security release gates |
+| Previous-generation compatibility baseline | **`gpt-5.5` `medium` or `high`** | only when that independent perspective adds evidence; never the default |
 | Whole-phase reviews | **confidence: `gpt-5.6-sol` `xhigh`; adversarial: `gpt-6-astra` `xhigh`** | remediate and reverify between the two gates |
 
 A mixed slice takes the stricter row. Record the actual model, version and
@@ -963,7 +970,7 @@ The repair plan's §7 tables apply unchanged. Four rows are sharpened:
 
 | Gate | Addition |
 |---|---|
-| Review/diff | Ordinary review on `gpt-5.6-sol` `medium`; model, version and effort recorded in the task's acceptance note |
+| Review/diff | Ordinary review on `gpt-5.6-terra` `medium`; model, version and effort recorded in the task's acceptance note; another relevant model may be chosen with the reason recorded |
 | Phase-completion reviews | Whole-phase confidence review on `gpt-5.6-sol` `xhigh`, then, after remediation and retest, the separate adversarial audit on `gpt-6-astra` `xhigh` |
 | **Final review of all phases** | **One** review across the whole programme on `gpt-6-astra` `xhigh`, after the last phase's two gates and remediation; never for a single phase |
 | Release qualification | A verdict must name a model the runs recorded; a pathway is advertised only with a current verdict over a complete snapshot on the current build and the current prompt identity |

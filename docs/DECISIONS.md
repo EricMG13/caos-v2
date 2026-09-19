@@ -4696,3 +4696,16 @@ then, after remediation and retest, the separate adversarial audit runs on
 This restores a distinct reader for the adversarial gate that §97 explicitly
 gave up. It overrides §97 and every earlier forward-looking Claude routing
 row, but does not rewrite the model or effort recorded for completed work.
+
+## 2026-09-19 §105 — Codex routing uses the full relevant GPT portfolio
+
+The two roles in the owner's Claude matrix are not a two-model allow-list.
+`docs/GPT_MODEL_REASONING_MATRIX.md` now assigns bounded mechanical work to
+`gpt-5.6-luna`, ordinary implementation and exact-range review to
+`gpt-5.6-terra`, reliability-critical implementation and confidence checks to
+`gpt-5.6-sol`, and long-horizon architecture and independent adversarial review
+to `gpt-6-astra`. `gpt-daybreak-blue-latest` is reserved for defensive-security
+work; `gpt-5.5` may provide a deliberate previous-generation compatibility
+baseline. Any available GPT model may be used when its documented strength is
+the best fit and the reason is recorded. The `xhigh` ceiling and all authority
+limits remain unchanged.

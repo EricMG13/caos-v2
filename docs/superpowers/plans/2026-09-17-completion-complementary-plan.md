@@ -172,8 +172,14 @@ in either stream is still not acceptance.
 and `docs/DECISIONS.md` §104 govern all work dispatched from 19 September
 2026. They map the workhorse role to `gpt-5.6-sol`, the long-horizon and
 architect role to `gpt-6-astra`, and every former `ultrathink`/`max` request
-to the actual Codex `xhigh` setting. They override every forward-looking
-Claude model or effort row below. Completed work keeps its recorded setting.
+to the actual Codex `xhigh` setting. The workhorse role is now split by task:
+`gpt-5.6-luna` for mechanical edits, `gpt-5.6-terra` for ordinary development
+and review, and `gpt-5.6-sol` for reliability-critical work and confidence
+checks. `gpt-daybreak-blue-latest` handles defensive-security work and
+`gpt-5.5` is available for a deliberate previous-generation baseline. These
+are routing defaults, not a two-model allow-list. They override every
+forward-looking Claude model or effort row below. Completed work keeps its
+recorded setting.
 
 ### Historical Claude routing
 
