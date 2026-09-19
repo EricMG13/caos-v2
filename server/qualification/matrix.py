@@ -57,7 +57,7 @@ from server.evidence.ingest import Document
 from server.methodology.bundle import Bundle
 from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
-from server.methodology.handoff import Projections
+from server.methodology.handoff import UNCLEARED_READINESS, Projections
 from server.methodology.vendor import load_vendor_contract
 from server.methodology.verification import AcceptedRow
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
@@ -220,6 +220,11 @@ class QualificationCase:
     # module is invisible to a citation key -- the module never runs, so it
     # cites nothing, and every key aimed at it reads as a miss by the model.
     expects_ready: tuple[str, ...] = ()
+    # Module ids CP-0 must refuse (§99): the readiness key read the other way
+    # round, for a corpus on which the honest answer is that a consumer cannot
+    # run. Met when CP-0's verdict for every named module is one of the gate's
+    # own uncleared words, never by a module the gate did not rule on.
+    expects_blocked: tuple[str, ...] = ()
     # What the modules concluded, read from the host's own projections. See
     # `ExpectedProjection`: this is the key that measures the analysis rather
     # than the draw of quotes that happened to support it.
@@ -256,6 +261,7 @@ class MatrixRow:
     forecast_met: bool | None
     expected_refusal_met: bool | None
     ready_met: bool | None = None
+    blocked_met: bool | None = None
     projections_met: bool | None = None
     registers_met: bool | None = None
 
@@ -340,6 +346,10 @@ def _digested(case: QualificationCase) -> list[object]:
         entry.append(case.expected_refusal.value)
     if case.expects_ready:
         entry.append(sorted(case.expects_ready))
+    if case.expects_blocked:
+        # Tagged, because the same ids appended bare would digest exactly as an
+        # `expects_ready` key does -- two opposite sets, one digest.
+        entry.append(["expects_blocked", sorted(case.expects_blocked)])
     if case.expects_projection:
         entry.append(
             sorted(
@@ -454,6 +464,7 @@ def _row(
             else _refusal_met(conn, run_id, case.expected_refusal, refusal)
         ),
         ready_met=_ready_met(conn, blobs, bundle, case=case, run_id=run_id),
+        blocked_met=_blocked_met(conn, blobs, bundle, case=case, run_id=run_id),
         projections_met=_projections_met(conn, blobs, bundle, case=case, run_id=run_id),
         registers_met=registers_met,
     )
@@ -502,6 +513,46 @@ def _refusal_met(
     )
 
 
+def _gate_readiness(
+    conn: StoreConnection, blobs: BlobStore, bundle: Bundle, run_id: UUID
+) -> dict[str, str] | None:
+    """CP-0's readiness per module as the engine gated on it, or None when the
+    run's route or accepted artifacts cannot be read."""
+    route = resolved_route(conn, run_id)
+    if route is None:
+        return None
+    try:
+        accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
+    except Refusal:
+        return None
+    return dict(readiness_from(route, accepted))
+
+
+def _blocked_met(
+    conn: StoreConnection,
+    blobs: BlobStore,
+    bundle: Bundle,
+    *,
+    case: QualificationCase,
+    run_id: UUID,
+) -> bool | None:
+    """Whether CP-0 refused every module the case names (§99).
+
+    The same projection `_ready_met` reads, over `UNCLEARED_READINESS` -- the
+    gate's own two words for "does not run". A module the gate did not rule on
+    is not refused: reading "not READY" as "BLOCKED" would meet this key with a
+    gate that never ran. `None` when the case names none.
+    """
+    if not case.expects_blocked:
+        return None
+    readiness = _gate_readiness(conn, blobs, bundle, run_id)
+    if readiness is None:
+        return False
+    return all(
+        readiness.get(module) in UNCLEARED_READINESS for module in case.expects_blocked
+    )
+
+
 def _ready_met(
     conn: StoreConnection,
     blobs: BlobStore,
@@ -523,14 +574,9 @@ def _ready_met(
     """
     if not case.expects_ready:
         return None
-    route = resolved_route(conn, run_id)
-    if route is None:
+    readiness = _gate_readiness(conn, blobs, bundle, run_id)
+    if readiness is None:
         return False
-    try:
-        accepted = accepted_artifacts(conn, blobs, route, run_id, bundle=bundle)
-    except Refusal:
-        return False
-    readiness = dict(readiness_from(route, accepted))
     return all(readiness.get(module) in READY for module in case.expects_ready)
 
 
@@ -1007,6 +1053,7 @@ def assert_measurable(qualification: QualificationSet) -> None:
             and case.forecast is None
             and case.expected_refusal is None
             and not case.expects_ready
+            and not case.expects_blocked
             and not case.expects_projection
             and not case.expects_register
         )
@@ -1047,6 +1094,8 @@ def assert_unambiguous(qualification: QualificationSet) -> None:
             and len({value.name for value in case.forecast.values})
             != len(case.forecast.values)
         )
+        # A module expected both cleared and refused is a key no run can meet.
+        or bool(set(case.expects_ready) & set(case.expects_blocked))
         for case in qualification.cases
     ):
         raise Refusal(RefusalCode.QUALIFICATION_SET_AMBIGUOUS)

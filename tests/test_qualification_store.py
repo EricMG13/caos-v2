@@ -474,3 +474,72 @@ def test_a_set_holding_a_case_that_accepted_nothing_is_still_signable(
         )
 
         assert current_verdict(conn, evidence=evidence, now=now)
+
+
+def _with(
+    original: PerformedEvidence, *, status: RunStatus, blocked_met: bool | None = None
+) -> PerformedEvidence:
+    """The one-case snapshot with its run status and matrix row replaced."""
+    [record] = original.performed.performed
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [only] = matrix.rows
+    return performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            performed=(replace(record, status=status),),
+            matrix=replace(matrix, rows=(replace(only, blocked_met=blocked_met),)),
+        ),
+    )
+
+
+def test_a_declared_readiness_refusal_that_happened_is_signable() -> None:
+    """§99: a case keyed `expects_blocked` declared that the run would end
+    BLOCKED at CP-0's gate. Demanding COMPLETE of it too would make the key
+    unanswerable -- the reason a met `expected_refusal` is waived."""
+    assert _with(_performed(), status=RunStatus.BLOCKED, blocked_met=True).complete
+
+
+def test_a_declared_readiness_refusal_that_did_not_happen_is_not_signable() -> None:
+    """The gate cleared the module: the declared refusal was missed, whatever
+    else the run did."""
+    for status in (RunStatus.COMPLETE, RunStatus.BLOCKED):
+        assert not _with(_performed(), status=status, blocked_met=False).complete
+
+
+@pytest.mark.parametrize(
+    "status", [RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.RUNNING]
+)
+def test_a_met_readiness_refusal_waives_only_a_blocked_run(status: RunStatus) -> None:
+    """The waiver is for the run the key declared: one that ended BLOCKED. A run
+    that failed, was cancelled or is still going is not that run."""
+    assert not _with(_performed(), status=status, blocked_met=True).complete
+
+
+def test_the_blocked_key_is_in_the_snapshot_only_when_declared() -> None:
+    """§99 digest stability: a row with no `expects_blocked` serialises exactly
+    as it did before the field existed, so every stored performed digest still
+    verifies; a declared one travels with the snapshot a reviewer signs."""
+    original = _performed()
+    matrix = original.document["matrix"]
+    assert isinstance(matrix, dict)
+    [row] = matrix["rows"]
+    assert set(row) == {
+        "case_label",
+        "proven",
+        "refusal",
+        "met",
+        "missed",
+        "forecast_met",
+        "expected_refusal_met",
+        "ready_met",
+        "projections_met",
+        "registers_met",
+    }
+    declared = _with(original, status=RunStatus.BLOCKED, blocked_met=True)
+    declared_matrix = declared.document["matrix"]
+    assert isinstance(declared_matrix, dict)
+    assert declared_matrix["rows"][0]["blocked_met"] is True
+    undeclared = _with(original, status=RunStatus.BLOCKED)
+    assert declared.performed_sha256 != undeclared.performed_sha256

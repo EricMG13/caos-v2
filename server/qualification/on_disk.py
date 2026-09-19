@@ -87,6 +87,7 @@ _OPTIONAL_CASE_KEYS = frozenset(
         "forecast",
         "expected_refusal",
         "expects_ready",
+        "expects_blocked",
         "expects_projection",
         "expects_register",
         "model_extension",
@@ -181,6 +182,11 @@ def _case(root: Path, entry: object) -> QualificationCase:
     fields = _closed(entry, keys)
     documents = _declared(fields, "documents")
     expects = _declared(fields, "expects")
+    ready = _ready(fields.get("expects_ready"))
+    blocked = _ready(fields.get("expects_blocked"))
+    if set(ready) & set(blocked):
+        # One module cleared and refused at once: no run can meet the case.
+        raise Refusal(RefusalCode.QUALIFICATION_SET_FILE_INVALID)
     return QualificationCase(
         label=_text(fields, "label"),
         documents=tuple(_document(root, path) for path in documents),
@@ -190,7 +196,8 @@ def _case(root: Path, entry: object) -> QualificationCase:
         subject=_subject(fields[_SUBJECT_KEY]) if declared else None,
         forecast=_forecast(fields.get("forecast")),
         expected_refusal=_refusal(fields.get("expected_refusal")),
-        expects_ready=_ready(fields.get("expects_ready")),
+        expects_ready=ready,
+        expects_blocked=blocked,
         expects_projection=_projections(fields.get("expects_projection")),
         expects_register=_registers(fields.get("expects_register")),
         model_extension=_extension(fields.get("model_extension")),
@@ -359,7 +366,8 @@ def _bounded(value: object) -> str:
 
 
 def _ready(item: object) -> tuple[str, ...]:
-    """The module ids CP-0 must find ready, or a refusal.
+    """The module ids CP-0 must find ready -- or, for `expects_blocked`, must
+    refuse -- or a refusal.
 
     Declared as a list of module ids; absent means the case asks nothing of
     readiness. Bounded and de-duplicated here, because this crosses into the

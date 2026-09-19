@@ -214,6 +214,79 @@ def test_a_disk_set_binds_a_readiness_key(tmp_path: Path) -> None:
     assert case.expects_ready == ("CP-1", "CP-2")
 
 
+def test_a_disk_set_binds_a_readiness_refusal_key(tmp_path: Path) -> None:
+    """§99: `expects_blocked` reaches the case as declared and moves the digest;
+    absent, it is the empty tuple every set loaded before it carried."""
+    plain = load_qualification_set(_write(tmp_path / "plain", _manifest()))
+    assert all(case.expects_blocked == () for case in plain.cases)
+
+    manifest = _manifest()
+    manifest["cases"][0]["expects_blocked"] = ["CP-L10", "CP-5"]  # type: ignore[index]
+    keyed = load_qualification_set(_write(tmp_path / "keyed", manifest))
+
+    assert keyed.cases[0].expects_blocked == ("CP-L10", "CP-5")
+    assert qualification_set_digest(keyed) != qualification_set_digest(plain)
+
+
+def test_a_module_expected_both_ready_and_blocked_is_refused(tmp_path: Path) -> None:
+    """No run can clear and refuse one module, so the manifest is refused."""
+    manifest = _manifest()
+    manifest["cases"][0]["expects_ready"] = ["CP-L10"]  # type: ignore[index]
+    manifest["cases"][0]["expects_blocked"] = ["CP-L10"]  # type: ignore[index]
+
+    with pytest.raises(Refusal) as refused:
+        load_qualification_set(_write(tmp_path, manifest))
+
+    assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID
+
+
+# The digest each committed set binds. A set's digest moves only when its own
+# manifest or documents move; a change to the loader or the digest that moved
+# one of these would silently orphan every verdict and snapshot bound to it.
+COMMITTED_SET_DIGESTS = {
+    "ccl-fy2025": "f5555753cf7b39868fa4885d95a0b80847c61204a4b3ebe5fffe8345587c327e",
+    "ccl-fy2025-portfolio": (
+        "5d50d1e7b9d39b0318d730ea98c795518c72e8f8644fe321b6f96acbc4bb2f29"
+    ),
+    "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
+    "vmo2-fy2025-portfolio": (
+        "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
+    ),
+}
+
+PENDING_SET_DOCUMENTS = {
+    "ccl-fy2025-relative-value": frozenset(
+        {
+            "documents/CCL_FY2025_10K.txt",
+            "documents/NCLH_Q4_2025_Earnings_Release.txt",
+            "documents/RCL_Q4_2025_Earnings_Release.txt",
+        }
+    )
+}
+
+
+def test_every_committed_set_binds_its_recorded_digest() -> None:
+    """Every complete set digests as recorded; pending sets name exact gaps."""
+    root = Path(__file__).resolve().parents[1] / "qualification"
+    found = {}
+    pending = {}
+    for path in root.glob(f"*/{MANIFEST}"):
+        name = path.parent.name
+        if name in PENDING_SET_DOCUMENTS:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            pending[name] = frozenset(
+                document
+                for case in manifest["cases"]
+                for document in case["documents"]
+                if not (path.parent / document).is_file()
+            )
+        else:
+            found[name] = qualification_set_digest(load_qualification_set(path.parent))
+
+    assert found == COMMITTED_SET_DIGESTS
+    assert pending == PENDING_SET_DOCUMENTS
+
+
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
     """The one refusal here that is about safety rather than shape.
 
@@ -271,6 +344,11 @@ def test_a_manifest_that_is_not_the_declared_shape_is_refused(
         {"cases": [{**_manifest()["cases"][0], "expects_ready": [""]}]},  # type: ignore[index]
         {"cases": [{**_manifest()["cases"][0], "expects_ready": [1]}]},  # type: ignore[index]
         {"cases": [{**_manifest()["cases"][0], "expects_ready": ["CP-0", "CP-0"]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_blocked": []}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_blocked": "CP-L10"}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_blocked": [" "]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_blocked": [1]}]},  # type: ignore[index]
+        {"cases": [{**_manifest()["cases"][0], "expects_blocked": ["CP-5", "CP-5"]}]},  # type: ignore[index]
         ["not a mapping"],
     ]
 
