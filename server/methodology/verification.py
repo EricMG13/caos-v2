@@ -151,6 +151,28 @@ def verify_owner_restrictions(
             raise Refusal(refuse)
 
 
+def verify_owner_chain(
+    contract: VendorContract,
+    markdown: bytes,
+    upstream_keys: Iterable[tuple[str, str]],
+    cache: Mapping[tuple[str, str], bytes],
+    *,
+    selection: tuple[str, str] | None,
+) -> None:
+    """Resolve recorded upstream bytes once, then apply owner restrictions."""
+    try:
+        owners = tuple(cache[key] for key in upstream_keys)
+    except KeyError:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH) from None
+    verify_owner_restrictions(
+        contract,
+        markdown,
+        owners,
+        refuse=RefusalCode.ARTIFACT_RECORD_MISMATCH,
+        selection=selection,
+    )
+
+
 def load_vendor_authority(bundle: Bundle) -> VendorAuthority:
     """The proof's and the freeze's reading: compiled now, from the bytes here."""
     return VendorAuthority(

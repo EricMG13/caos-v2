@@ -36,7 +36,7 @@ from server.methodology.verification import (
     Step,
     load_vendor_authority,
     verify_accepted,
-    verify_owner_restrictions,
+    verify_owner_chain,
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -195,18 +195,14 @@ class _Reader:
             refuse=_refuse,
         )
         if node.module_id == "CP-5":
-            try:
-                owners = tuple(
-                    self.verified_markdown[(ref.route_node_id, ref.sha256)]
-                    for ref in verified.record.identity.upstream
-                )
-            except KeyError:
-                raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH) from None
-            verify_owner_restrictions(
+            verify_owner_chain(
                 self.vendor.contract,
                 verified.markdown,
-                owners,
-                refuse=RefusalCode.ARTIFACT_RECORD_MISMATCH,
+                (
+                    (ref.route_node_id, ref.sha256)
+                    for ref in verified.record.identity.upstream
+                ),
+                self.verified_markdown,
                 selection=("LITE_CREDIT_22", "LITE_FULL_CREDIT_SCREEN"),
             )
         self.verified_markdown[(node.route_node_id, artifact)] = verified.markdown
