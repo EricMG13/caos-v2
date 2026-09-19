@@ -37,6 +37,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from server.methodology.invocation import _printable
 from server.refusals import Refusal, RefusalCode
 from server.store.source_sets import SourceSetMember
 
@@ -137,12 +138,14 @@ def select_sources(members: Sequence[SourceSetMember], cell: str | None) -> Sele
 
 
 def _matching(members: Sequence[SourceSetMember], item: str) -> set[UUID]:
-    """The members `item` names: its admitted filename, exactly, or its
-    document digest (any case). A digest names the document, so two members
-    of one document both answer, and that ambiguity is the caller's to refuse."""
+    """The members `item` names: its admitted filename, exactly or as CP-0 was
+    shown it (`_printable`, which drops invisible separators), or its document
+    digest (any case). A digest names the document, so two members of one
+    document both answer, and that ambiguity is the caller's to refuse."""
     digest = item.lower() if _DIGEST.fullmatch(item.lower()) else None
     return {
         member.source_id
         for member in members
-        if member.filename == item or member.document_sha256 == digest
+        if item in (member.filename, _printable(member.filename))
+        or member.document_sha256 == digest
     }

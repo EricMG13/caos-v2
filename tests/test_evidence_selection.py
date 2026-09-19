@@ -97,6 +97,17 @@ def test_every_item_mapping_to_one_member_selects_exactly_those_members() -> Non
     assert demand_items("a.txt; c.txt<br>b.txt") == ("a.txt", "c.txt", "b.txt")
 
 
+def test_a_filename_is_matched_as_cp0_was_shown_it() -> None:
+    """CP-0 is shown `invocation._printable(filename)`, which drops U+2028,
+    U+2029 and U+FEFF; a name copied back as shown must still name its member,
+    or a readable neighbour turns the cell half-readable and refuses the node
+    permanently (the wave-four acceptance review's P3)."""
+    shown, other = _member("Q4\u2028results.txt"), _member("other.txt")
+    assert select_sources((shown, other), "Q4results.txt; other.txt") == Selection(
+        Basis.NAMED, frozenset({shown.source_id, other.source_id})
+    )
+
+
 def test_a_filename_carrying_a_separator_is_matched_whole_first() -> None:
     odd = _member("Q4 2026, release.txt")
     other = _member("release.txt")
