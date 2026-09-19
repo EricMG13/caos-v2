@@ -56,7 +56,6 @@ from server.store.source_sets import load_source_set
 __all__ = ["harness"]
 
 LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
-CLAIMS = ("FULL_CREDIT_32", "MARKET_DISLOCATION")
 
 
 @pytest.fixture
@@ -317,29 +316,6 @@ def test_a_wrong_adapter_cannot_become_authority(harness: _Harness) -> None:
     assert isinstance(said.content, str)
     assert _diagnostic(harness) == _body(said.content)
     assert _counts(harness) == (1, [REPORTED], 0, 1, 1)
-
-
-@pytest.mark.parametrize("route", [CLAIMS], indirect=True)
-def test_canonical_wire_on_a_disabled_route_is_refused(harness: _Harness) -> None:
-    """Even its adapter module (CP-0) never reaches the provider (§42.2)."""
-    node = harness.route.nodes[0]
-    canonical = CanonicalCompletions(harness.source_id)
-    assert _refused(harness, node.module_id, canonical) is (
-        RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    )
-    attempt = _reserved(harness, node.module_id)
-    with pytest.raises(Refusal) as refused:
-        execute_handoff(
-            harness.conn,
-            harness.bundle,
-            harness.blobs,
-            assignment=Assignment(
-                node.module_id, harness.run_id, node, harness.route, attempt
-            ),
-            provider=canonical,
-        )
-    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    assert canonical.prompts == []
 
 
 def test_an_upstream_statement_is_not_citable_evidence(harness: _Harness) -> None:

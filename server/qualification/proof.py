@@ -53,6 +53,7 @@ from server.methodology.verification import (
     Step,
     load_vendor_authority,
     verify_accepted,
+    verify_owner_chain,
 )
 from server.qualification import Assurance
 from server.refusals import Refusal, RefusalCode
@@ -124,6 +125,8 @@ def assert_orchestration_proof(
         # Execution reached a node the pin does not carry: the one thing
         # invariant 10 exists to make impossible.
         raise Refusal(RefusalCode.ORCHESTRATION_NODE_NOT_IN_ROUTE)
+    order = {node.route_node_id: index for index, node in enumerate(route.nodes)}
+    accepted.sort(key=lambda row: order[str(row[1])])
     pin = load_run_input(conn, run_id)
     if pin is None:
         raise Refusal(RefusalCode.RUN_INPUT_INVALID)
@@ -213,6 +216,7 @@ class _CanonicalReader:
         self.conn, self.blobs, self.bundle = conn, blobs, bundle
         self.route, self.run_id = route, run_id
         self.pairs: dict[str, tuple[str, str | None]] = {}
+        self.verified_markdown: dict[tuple[str, str], bytes] = {}
         # One reading of the token index for the whole proof: records cluster
         # on the same pages of the same sources.
         self.evidence = PinnedEvidence(live, delivered, TokenIndex())
@@ -259,6 +263,20 @@ class _CanonicalReader:
             verify_authority=True,
             reanchor=self.evidence,
             refuse=_refuse,
+        )
+        if node.module_id == "CP-5":
+            verify_owner_chain(
+                self.vendor.contract,
+                verified.markdown,
+                (
+                    (ref.route_node_id, ref.sha256)
+                    for ref in verified.record.identity.upstream
+                ),
+                self.verified_markdown,
+                selection=("LITE_CREDIT_22", "LITE_FULL_CREDIT_SCREEN"),
+            )
+        self.verified_markdown[(node.route_node_id, artifact_sha256)] = (
+            verified.markdown
         )
         # Re-anchored on the recorded rectangles, so the record's are the proof's.
         return verified.record.citations

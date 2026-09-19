@@ -683,7 +683,7 @@ def test_v1_command_models_are_closed_bounded_and_in_the_committed_schema() -> N
     assert content == wire.PREVIEW_CHARS == MAX_FILE_BYTES
     assert defs["Chrome"]["properties"]["actions"]["maxItems"] == len(ActionName)
     choices = defs["RunBody"]["properties"]["route_choices"]
-    assert choices["maxItems"] == 16
+    assert choices["maxItems"] == wire.ROUTE_CHOICES_MAX == 18
     for request in (StartRun, RetryRun, ApproveGate):
         field = defs[request.__name__]["properties"]["input_fingerprint"]
         assert field["pattern"] == "^[0-9a-f]{64}$"
