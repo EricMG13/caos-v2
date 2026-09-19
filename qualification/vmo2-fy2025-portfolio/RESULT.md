@@ -1,9 +1,7 @@
-# VMO2 FY2025 portfolio-screen qualification — no run has been performed
+# VMO2 FY2025 portfolio-screen qualification — authorized runs, 18 and 19 September 2026
 
-**No run has been performed against this set.** It is authored, loadable and
-digested; nothing here reports a result, a verdict or a provider. The live run
-is Phase 9 Task 9.1 step 7 and needs the owner's explicit authorization — it
-costs real money and calls a real model.
+**Before 18 September 2026 no run had been performed against this set.** The
+authorized runs are recorded below.
 
 ## The set
 
@@ -92,3 +90,92 @@ any run, and moving it to what the model quoted would measure the model against
 itself.
 
 **Retention, corrected 18 September 2026 (§100):** the retained database named above was on the in-memory test server and was erased when that server restarted. The capture and blob root survive; a matrix can no longer be re-derived from the store for this run.
+
+## Second authorized run (re-run) — 18 September 2026
+
+Authorized by the owner on 18 September 2026 (key figures confirmed, `$5`
+per run). Provider `openrouter/openai/flex/high/65536`, model
+`openai/gpt-5.6-terra`, `$0.000002` / `$0.000012` per token dated
+2026-09-18, `--attempts 2`, bundle build `78c24be4` (§96 with §98). The run
+database is on the persistent dev server (§100).
+
+- Run `cf5464dd-734c-436b-ad97-97a45f29943f`; database
+  `caos_qualify_9023b9f626384bbfb1d5d1cc30a34ca4`; capture
+  `run-2026-09-18b-capture.json`; evidence `34a66ebf10fbc4bb…`.
+- Charge: CP-0 `$0.134558`, one call. Nothing else was called.
+
+**Not signable.** CP-0 answered a validated `qa_status: Blocked` and marked
+CP-L10 `DO NOT RUN / BLOCKED`, saying the effective-source set carries no
+fidelity-validated active representation for either earnings release. The
+run ended BLOCKED with nothing accepted (`ORCHESTRATION_NOTHING_TO_PROVE`).
+The same set's CP-0 on build `62a94ccd` that morning was accepted and judged
+CP-L10 ready, so whether the host's source-preparation section changed
+between builds is under investigation; this record is updated with the
+finding.
+
+## Third authorized run — 18 September 2026
+
+Same authorization and settings as the run above; bundle build `78c24be4` with
+§101 (CP-DR is delivered its research contract) and §102 (every source is
+labelled `WHOLE` or `PAGE_MAP`); database on the persistent server (§100).
+
+- Run `98ebf917-8546-4ca2-a1b3-596a8970460e`; database `caos_qualify_b8856d531d4c44529692b69c62bc1d1b`;
+  capture `run-2026-09-18c-capture.json`; evidence `d407f44d1f598f77…`.
+- Charges: CP-0 `$0.129597`, CP-L10 `$0.17191075`; total **`$0.30150775`**.
+
+**Not signable.** §102's label worked: CP-0 was accepted and judged CP-L10 ready,
+the route COMPLETE, 2 artifacts, 5 citations all re-located, readiness and
+projection keys met. The one citation key was **missed a second time**: CP-L10
+did not quote the £1,021.7m goodwill impairment line. A model outcome, measured
+twice.
+
+## Pinned Phase 4 smoke run — 19 September 2026
+
+The owner authorized the 19 September provider and spend recommendation for all
+sets. This set was launched once with model `openai/gpt-5.6-sol`, provider tag
+`openai`, reasoning `high`, identity `openrouter/openai/high/65536`, dated price
+`0.000005` input / `0.000015` output, ceiling `18.677760`, and `--attempts 2`.
+`OPENROUTER_BASE_URL` was explicitly unset. The driver exited **1** after the
+second permitted attempt; it was not launched again.
+
+- Run `b54bc007-e6c8-4798-b266-e975aa143f5f`; build
+  `78c24be4483612e75d9a0809fcb1cb7c2dd5617e669491de13be9c0123e3ff93`;
+  set `a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea`.
+- Final evidence `961940c10eabb9589d7a8aedf168a4ed7b4fbe3f749b1a6a6758c45273028dd8`;
+  performed `75e303228c1ab10a3be7e8f0de8368e634213d39a26c19fa841127e50620bf79`.
+- Retained database `caos_qualify_f68731cc5b584def9975852b55cb0283`;
+  blob root
+  `/Users/ericguei/.codex/worktrees/gpt-model-routing/caos-workbench/.dev-data/qualification-blobs/caos-qualify-c_gsmhvk`.
+- Capture `run-2026-09-19-a-capture.json`; driver log
+  `run-2026-09-19-a-driver.log`.
+- Two CP-0 calls were made. Attempt 1 charged `$0.3288035` and stopped
+  `CITATION_NOT_LOCATED`; attempt 2 charged `$0.325751` and stopped
+  `HANDOFF_MALFORMED`; total charge **`$0.6545545`**. Their retained
+  reservations total `$4.524080`. Both outcomes record model
+  `openai/gpt-5.6-sol`; neither produced an accepted artifact, and CP-L10 was
+  never called.
+- Final capture: `complete: false`, run status `RUNNING`, stopped
+  `HANDOFF_MALFORMED`, refusal `ORCHESTRATION_NOTHING_TO_PROVE`, and no matrix.
+
+The pre-run citation, readiness, projection and register keys remain unchanged.
+Because neither CP-0 handoff was accepted, CP-L10 did not run and none of those
+keys was evaluated through a matrix. No authenticated human verdict exists;
+the pathway remains **NOT_QUALIFIED**. This second two-node smoke set also
+stopped `HANDOFF_MALFORMED` at CP-0, so Phase 4 stopped here without another
+launch.
+
+This was a deliberate second smoke after the CCL run's unexpected refusal: the
+owner's all-set authorization covered it, and it tested whether the shared CP-0
+failure reproduced on a different corpus. It is the sole diagnostic exception
+to the runbook's default stop-after-first-unexpected-refusal rule. Its failure
+confirmed the early stop; no wider or third set was launched.
+
+Post-run diagnostic classification: attempt 1 passed the closed transport,
+Markdown text and vendor validation gates, and all four citations were quoted
+in the handoff. Three citations re-anchor uniquely on their declared pages; the
+third (quote SHA-256 prefix `9e463ad4efe1`) occurs on none of the declared
+source's 18 pages, so `CITATION_NOT_LOCATED` is a model quotation miss rather
+than extraction drift. Attempt 2 passed the transport and text gates with all
+five citations quoted, but a MATERIAL finding required
+`qa_status: Restricted` at body line 123. That is a second model-contract miss,
+not a host, parser or key defect.
