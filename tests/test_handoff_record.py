@@ -605,6 +605,22 @@ def test_an_empty_blocker_list_is_absent_from_the_record_and_read_back_as_empty(
     assert record_bytes(read) == data
 
 
+def test_a_research_brief_in_the_identity_round_trips(tmp_path: Path) -> None:
+    brief = '{"schema":"CP_DR_RESEARCH_BRIEF_V1"}'
+    identity = dataclasses.replace(CP0, module_id="CP-DR", research_brief=brief)
+    record = _record(identity=identity)
+    data = record_bytes(record)
+    assert json.loads(data)["identity"]["research_brief"] == brief
+
+    blobs, artifact, sha = _stored(tmp_path, record)
+    read = read_record(
+        blobs, artifact_sha256=artifact, record_sha256=sha, expected=identity
+    )
+
+    assert read.identity.research_brief == brief
+    assert record_bytes(read) == data
+
+
 def test_a_record_carrying_blockers_writes_them_and_reads_them_back(
     tmp_path: Path,
 ) -> None:
