@@ -148,6 +148,19 @@ class ResearchWorkflowTests(unittest.TestCase):
         bad=copy.deepcopy(brief);bad['questions'][0]['consumer_module_id']='CP-4';add_brief(snapshot,bad)
         self.assertIn('selected analytical owners',navigate(snapshot).card)
 
+    def test_deep_research_pathway_recommends_cp_dr_alone(self):
+        # CP-0's T8 on a pathway whose only consumer is CP-DR names CP-DR.
+        route=routing.Route(CAT,'FULL_CREDIT_32','DEEP_RESEARCH')
+        cp0=base.artifact('CP-0',route,{},{},['CP-DR'])
+        catalog=navigation.validate_catalog(CAT)
+        self.assertEqual([r.module_id for r in navigation.parse_t8(cp0.text,catalog)],['CP-DR'])
+        snapshot={cp0.name:cp0.text}
+        add_brief(snapshot,brief_for(snapshot,'NONE','CP-0'))
+        fields=prepare(CAT,AUTH,module_id='CP-DR',issuer_id='EXAMPLE',analysis_date='2026-09-08',artifacts=snapshot)
+        self.assertEqual(fields['dependency_order'],['CP-0','CP-DR'])
+        author(snapshot,'CP-DR')
+        self.assertIn('CP-DR',navigate(snapshot).discovery.contexts[0].completed)
+
     def test_standalone_sector_needs_no_cp0(self):
         _,snapshot=scenario(['CP-3D'],'MARKET_DISLOCATION')
         brief=brief_for(snapshot);brief.update(mode='standalone',scope_type='sector')

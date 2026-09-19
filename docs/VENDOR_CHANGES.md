@@ -5,7 +5,7 @@ the owner wrote: "Vendor files - approved to alter but keep a record of
 changes." This file is that record. Every file under `vendor/deploy-v/` that
 this repository has changed since the upstream pull is listed here, with the
 request each change answers, the build it produced and a one-line reason; the
-binding decision for each build is in `docs/DECISIONS.md` (§61, §63, §92, §98).
+binding decision for each build is in `docs/DECISIONS.md` (§61, §63, §92, §96, §98).
 Upstream is `github.com/EricMG13/Deploy-V@c4d2e356` and carries none of it;
 the next upstream pull either carries every change forward or supersedes it
 with a decision entry.
@@ -108,6 +108,18 @@ this sorted inventory exactly equal to them.
 - `tests/test_module_workflow.py`
 - `tests/test_research_workflow.py`
 
+## Build `78c24be4` (2026-09-18, §96 with §98) — the two builds combined
+
+§96 (`62a94ccd` -> `6a5f1050`) and §98 (`62a94ccd` -> `91c219fb`) were made
+concurrently from the same base and delivered sequentially: §98 shipped first,
+then §96's source edit (`navigation.py`, and its vendor test) was applied on top
+and `verify_package.py --refresh` produced the combined build
+`78c24be4483612e75d9a0809fcb1cb7c2dd5617e669491de13be9c0123e3ff93`,
+`DEPLOY_V_INTEGRITY_v1.json` SHA-256 `bc13ee89…`, `authority_bundle_sha256`
+unchanged (`e3d0f8b2…`). The intermediate `91c219fb` build was pinned until
+this combined build replaced it; `6a5f1050` was not pinned. The two sections
+below record what each edit was.
+
 ## Build `91c219fb` (2026-09-18, §98) — from `62a94ccd`
 
 Old build `62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c`;
@@ -120,6 +132,19 @@ bundle's 52 unit tests and 10 helper self-checks, green.
 | Vendor file | Request | Change |
 | --- | --- | --- |
 | `skills/cp-0-source-readiness/references/REF_CP-0_STEPS.md` | the owner's approval of page-level evidence selection for the Boeing and Ford 10-K texts (§98) | Step I, rule 5 gains the page-range form of a `Source files to attach` item -- `<filename> pages <first>-<last>` or `<filename> page <n>`, one range per item, pages being the `page` locators the evidence shows, a filename alone attaching the whole source; a new rule 8 says a source the host delivers as a page map is evidence only in the lines shown, is triaged `PARSE_TARGETED` (or `BLOCKED`), is attached by page and never whole, and carries the page-map limitation into each row. 740 bytes. |
+
+## Build `6a5f1050` (2026-09-18, §96) — from `62a94ccd`
+
+Old build `62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c`;
+new build `6a5f105070d950dc919dd2c41a77137a66be0a1f4cd9d34e55cc0476c8c415a4`.
+`DEPLOY_V_INTEGRITY_v1.json` SHA-256 `4945d137…` -> `daf4eab1…`, 68,657
+bytes. `authority_bundle_sha256` is unchanged at `e3d0f8b2…`: `navigation.py`
+is not a pinned authority component, so no `--rebuild-authorities` was run.
+
+| Vendor file | Request | Change |
+| --- | --- | --- |
+| `skills/cp-os-credit-os/scripts/credit_os_v/navigation.py` | `2026-09-18-t8-cp-dr-row` | `parse_t8` admits a T8 row naming `CP-DR` although its catalog `layer_id` is null -- the same exemption `validate_catalog` already makes -- so a pathway whose only consumer is CP-DR has a T8 the bundle accepts. Any other layerless module is still refused, and so is an empty T8. |
+| `tests/test_research_workflow.py` | `2026-09-18-t8-cp-dr-row` | `test_deep_research_pathway_recommends_cp_dr_alone`: a `FULL_CREDIT_32 / DEEP_RESEARCH` CP-0 whose T8 names CP-DR alone parses, `prepare(... module_id="CP-DR")` succeeds with the brief in the snapshot, and the authored dossier completes the pathway. Fails without the change above. |
 | `CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`, `DEPLOY_V_BASELINE.json`, `DEPLOY_V_COPILOT_MEMORY_PROMPT.md`, `DEPLOY_V_COPILOT_MEMORY_PROMPT_URL_BOUND.md`, `DEPLOY_V_INTEGRITY_v1.json`, `DEPLOY_V_MANIFEST.json` | (regenerated) | By `verify_package.py --refresh`; no hand edit. |
 
 ## Build `62a94ccd` (2026-09-18, §92) — from `30222a49`
