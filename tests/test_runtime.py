@@ -691,14 +691,14 @@ def test_the_route_carrying_the_qa_gate_is_refused_before_any_attempt(
 ) -> None:
     """REPAIR_PLAN Phase 2 exit, check 5, after Task 3.1 slice f-1c.
 
-    The catalog's one QA_GATE (CP-5 -> CP-6) is on the FULL route, which the
-    canonical adapter does not execute (§42.2). The rule itself -- a CP-5 that
-    is not `Passed` never releases CP-6 -- is the pure
+    The disabled distressed route also carries the FULL profile's QA_GATE
+    (CP-5 -> CP-6). The rule itself -- a CP-5 that is not `Passed` never
+    releases CP-6 -- is the pure
     `test_qa_gate_blocks_cp6_until_cp5_accepted`; at runtime the route is
     refused, approved end to end, before any attempt, reservation or call.
     """
     conn, case_id = case
-    full = resolve_route(CATALOG, "FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
+    full = resolve_route(CATALOG, "FULL_CREDIT_32", "DISTRESSED_RESTRUCTURING")
     run = _approved_run(conn, case_id, full, bundle, blobs)
     provider = run.provider()
 

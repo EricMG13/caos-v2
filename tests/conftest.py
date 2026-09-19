@@ -170,6 +170,8 @@ def approve_run(
     bundle: object,
 ) -> UUID:
     """Pin and govern one real test run, returning its synthetic approver."""
+    from canonical_fixtures import research_brief
+
     from server.engine.route import ResolvedRoute
     from server.methodology.bundle import Bundle
     from server.store import StoreConnection
@@ -185,8 +187,16 @@ def approve_run(
     pin_route(connection, run_id, pinned)
     # Every route pins the canonical adapter, whose handoffs name a subject.
     subject = RunSubject("EXAMPLE", "Example Holdings plc", "FY2025", "2026-09-08")
+    research = (
+        research_brief() if any(n.module_id == "CP-DR" for n in pinned.nodes) else None
+    )
     pin_run_input(
-        connection, run_id, source.version, cast(Bundle, bundle), subject=subject
+        connection,
+        run_id,
+        source.version,
+        cast(Bundle, bundle),
+        research,
+        subject=subject,
     )
     approver = uuid4()
     grant(

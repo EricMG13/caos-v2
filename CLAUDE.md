@@ -193,6 +193,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `docs/VENDOR_CHANGES.md` records the pre-change base and every changed path,
   and the test emits the vendor diff from Git and holds the sorted record equal.
 
+- **Selection's replay is proven only by construction.**
+  `tests/test_evidence_selection.py::test_every_reader_of_the_context_selects_the_same_blocks`
+  calls `_context` twice through one path, so a replay that ignored the
+  selection would still pass it; `replay_billed` goes through the same
+  `_context`, which is why it holds, not because a test shows it. *Upgrade:* a
+  replay test whose
+  billed body cites an unselected member and replays `CITATION_NOT_DELIVERED`,
+  the day `replay_billed` stops reading context through `_context`.
+
 - **The replay register is one process's memory, and it refuses when full.**
   §93's `NonceRegister` remembers each admitted nonce until its assertion
   could no longer verify (30 s past its issued-at second), in a dictionary
@@ -205,9 +214,13 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`tests/test_edge_assertion.py::test_the_nonce_register_is_bounded_and_forgets_only_expired_nonces`)
   -- the fail-closed direction, chosen because a register that evicted under
   load would admit replays exactly when an attacker can generate load; what
-  it costs is that 65,536 requests inside one 30 s window, far past the
-  image's `--limit-concurrency 32`, answer `EDGE_NOT_TRUSTED` until some
-  expire. The 30 s window is also a clock-skew allowance between the edge and
+  it costs is that past 65,536 assertions admitted inside one 30 s window
+  (a rate of about 2,200 a second, which `--limit-concurrency 32` bounds only
+  as concurrency, not as rate) the next answers `EDGE_NOT_TRUSTED` until some
+  expire; and `admit` scans the whole register on every request, a linear cost
+  at that bound. A nonce is forgotten only strictly after its window, because
+  the age check admits the window's last instant itself
+  (`test_a_replay_at_exactly_the_window_edge_is_refused`). The 30 s window is also a clock-skew allowance between the edge and
   the API, chosen rather than measured. *Upgrade:* a register in the store
   (one `INSERT ... ON CONFLICT DO NOTHING` per request, a round trip the edge
   guard does not make today) the day a second API process is deployed; and a
@@ -251,8 +264,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   reads back through `current_verdict`
   (`tests/test_release_pack.py::test_no_pathway_is_qualified_without_a_signed_verdict_row`,
   `test_a_verdict_that_is_not_current_for_this_build_qualifies_nothing`). No
-  such row exists in any store, so the four enabled pathways read
-  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the fourteen
+  such row exists in any store, so the seven enabled pathways read
+  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the eleven
   others read `DISABLED` -- which is the exit check met by saying so, not by
   qualifying anything. Two limits of the pack itself: its inventory is test
   *definitions*, not pytest's collection, so a parametrised test is one row and
@@ -473,6 +486,37 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   each research link once with the cells referring to it, the day a
   `FULL_CREDIT_32` credit reaches the Book.
 
+**Completion Phase 9.**
+
+- **The deep-research pathway runs from a pinned brief, and the workspace
+  cannot pin one.** §96 made a brief required on an enabled pathway carrying
+  CP-DR -- the vendor's own rule, asked at the pin so CP-0 is never paid for a
+  run CP-DR must refuse
+  (`tests/test_run_inputs.py::test_a_deep_research_run_pinned_without_a_brief_refuses_at_pin`)
+  -- but the input-pin command (`server/api/commands/runs.py`) takes no brief,
+  so the workspace offers both deep-research pathways among its route choices
+  and a run created there is refused `RUN_INPUT_INVALID` at its pin. Such a run
+  spends nothing; it is created and cannot go further. The pathway is reached
+  today through `pin_run_input` and the qualification harness, which is where
+  its set and its route test pin briefs. *Upgrade:* a strict `research_brief`
+  on the pin command's body, judged by the same `bound_research_brief`, with
+  its wire model, pinned key set and a form in the Run section -- the day an
+  analyst must start a deep-research run from the workspace.
+- **Nothing adopts research, so the adoption half of CP-DR's contract is
+  unproven.** On both deep-research pathways CP-DR is the terminal deliverable and
+  every question's consumer is `NONE`; the vendor's adoption register
+  (`cpdr.adoptions`) and its refusal of a consumer that did not adopt the
+  research it was named for are exercised only by the vendor's own suite. The
+  one host route that would place CP-DR before a consumer -- the research
+  extension at stage 99 -- carries none of the edges the vendor's `Route`
+  synthesises from a brief, and is refused at execution input rather than run
+  on a path the bundle would not take
+  (`tests/test_lite_deep_research_route.py::test_the_research_extension_is_refused_before_any_attempt`).
+  *Upgrade:* resolve the extension through the vendor's `Route` with the
+  pinned brief (its synthesised edges digested into the pin), and enable a
+  pathway where a named consumer adopts, the day research is to change an
+  analytical module's premise rather than stand alone.
+
 **Completion Phase 8.**
 
 - ~~**A register is located by vendor prose, and a key trusts that location.**~~
@@ -499,6 +543,15 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   completeness check with zero violations in which the shipped key was met from
   the wrong register. The confidence review had looked at the same code and
   recorded it as safe; this is what a second, adversarial gate is for.
+  **"No id list" was itself wrong**, and it cost a paid run: the vendor's
+  `check()` asks with the module's whole contract list, and an empty list falls
+  back to a default pattern that cannot match `TDR.3`, so every CP-DR register
+  key read as a miss on run `de27f93c` over a dossier carrying exactly the
+  statuses it named. §103: `matrix.module_registers` asks exactly as `check()`
+  does -- CP-L10's list names `TL23.2` too, so the sibling case above still reads
+  the honest table
+  (`tests/test_qualification_matrix.py::test_a_cp_dr_register_is_read_as_its_completeness_check_reads_it`,
+  `test_every_committed_register_key_is_locatable_by_its_modules_reader`).
 - ~~**Two vendor tests fail on bytecode any concurrent process can write.**~~
   Closed by the upgrade's first arm: both tests clear `__pycache__` under
   `vendor/` before asserting, and the helper removes a cache directory only when
@@ -682,6 +735,82 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   sites carried a comment saying so.
 
 **Completion Phase 10.**
+
+- **An unreadable demand leaves no trace, and the proof re-anchors against the
+  whole pin.** ~~A named source is delivered whole, so a single source past the
+  ceiling is still not runnable.~~ That half is closed by §98, by the upgrade
+  this entry named -- a page range beside the filename, in the bundle's own
+  words (`REF_CP-0_STEPS.md` Step I rules 5 and 8, build `91c219fb`) -- with
+  the gate shown such a source as its page map: Boeing's and Ford's FY2025
+  10-K texts, each one source larger than a request, now run by page on the
+  LITE earnings route, the gate's request and a screen's both under the ceiling
+  and the screen's answer accepted
+  (`tests/test_large_documents.py::test_a_10k_runs_by_page_the_gate_on_its_map_the_screen_on_its_pages`),
+  while the same screen handed the document whole still refuses
+  `CONTEXT_OVER_CEILING`
+  (`test_a_10k_named_whole_for_a_consumer_is_refused_before_any_attempt`).
+  What §98 costs has its own entry below. The limits that remain, each chosen
+  rather than met: a cell the host cannot read at all -- the fixtures' `Source
+  p1`, or prose naming a managed artifact the host does not build -- delivers
+  the whole pin, which weakens nothing (§95's reasoning) but is recorded nowhere
+  persistent: `_Context.selection` carries the basis, and now the gate's page
+  maps, into the prompt and the tests only, and no row, record or event says
+  which basis a node ran under. A cell mixing an admitted filename with a
+  managed prepared-artifact name (vendor rule 5 asks CP-0 for those names on
+  prepared sources) is half-readable and refuses the consumer
+  `EVIDENCE_DEMAND_UNRESOLVED` permanently; the one live CP-0 on this build
+  wrote exact admitted filenames, so this is unmeasured rather than seen. The
+  proof (`server/qualification/proof.py`) and the deliverable
+  (`server/deliverable/canonical.py`) still re-anchor every record against the
+  **whole** pin's captured blocks, not the node's narrowed delivery -- now
+  narrowed by page as well as by source, and for the gate by page map: a record
+  was accepted only after its citations anchored inside the delivery, and the
+  record digest binds them, so re-anchoring against the superset can neither
+  admit nor refuse anything acceptance did not -- but a reader who wants the
+  proof to say "inside what the node was handed" is reading a claim it does
+  not make. And the selection is a derivation at every reader -- pre-call
+  check, attempt, crash replay -- from the accepted CP-0 Markdown and the pin,
+  never a stored per-attempt row; that is what makes it pure under invariant
+  10 (`test_every_reader_of_the_context_selects_the_same_blocks`), and it
+  means the delivery a node ran under is recomputable but not recorded.
+  *Upgrade:* a stored delivery digest per attempt, in a v3 record, the day a
+  reader must see which basis a node ran under rather than recompute it; and
+  the proof and deliverable reading the gate's row before re-anchoring, the day
+  their declared budgets can carry the pinned-members read.
+
+- **The gate's page map is the leading lines of each page, a host rule nobody
+  has measured against a live model.** §98 shows CP-0 a source whose block text
+  passes `GATE_SOURCE_BYTES` (3/8 of `MAX_REQUEST_BYTES`, 393,216 bytes) as the
+  largest uniform number of leading lines of every page that fits it -- 16 of
+  Boeing's 108 fixed-pitch pages' lines, 10 of Ford's 146 -- every line whole,
+  the rest withheld, and says so in the host preparation metadata; a map that
+  cannot hold one line a page refuses `CONTEXT_OVER_CEILING`
+  (`tests/test_evidence_selection.py::test_a_source_past_the_bound_is_shown_as_the_leading_lines_of_every_page`,
+  `test_a_source_whose_first_lines_alone_pass_the_bound_is_refused`), and the
+  gate cannot cite a withheld line
+  (`tests/test_page_selection.py::test_the_gate_cannot_cite_a_line_its_page_map_withheld`).
+  The bundle says how CP-0 treats a map (rule 8); the host decides which lines
+  are in it. That choice is content-neutral -- position on the page, never a
+  keyword or a heading guess, which would be the host deciding what matters --
+  and it is also blind: a 10-K's section headings fall wherever they fall --
+  Boeing's `Item 7.` is the 34th non-blank line of page 13, outside its map --
+  so CP-0 has to locate MD&A from running heads and table openings. Whether a real CP-0
+  names useful pages from such a map is unmeasured: no live run has been
+  authorized on either set. Three smaller costs. The bound is a chosen number,
+  justified only as leaving two mapped sources and CP-0's authority room
+  (`test_the_gate_bound_leaves_two_mapped_sources_and_the_authority_room`),
+  and a pack of three such sources refuses. A page range is read by the host,
+  like §95's item split, in the form the bundle states and no looser than
+  parentheses, `page`/`pages` and an en dash; a range past the last page the
+  pin captured of a member refuses `EVIDENCE_DEMAND_UNRESOLVED`, so a PDF's
+  trailing blank pages cannot be named. And a plain-text page is the
+  extractor's declared sixty-line fixed-pitch page, not a page of the filing:
+  the grain CP-0 names is the one the evidence headers show it, which is what
+  keeps a range checkable, and nothing else. *Upgrade:* a map the bundle
+  declares -- a document's own table of contents read by the vendor, or a
+  staged CP-0 read of named pages -- the day a live CP-0 is seen naming the
+  wrong pages from this one; a live run of `qualification/ba-fy2025/` and
+  `qualification/f-fy2025/`, which needs its own authorization.
 
 - **A run of single-letter words is indistinguishable from a tracked word, so a
   quote of their concatenation anchors over them.** Task 10.5's joining rule
@@ -920,9 +1049,23 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   (`tests/test_edge_assertion.py::test_a_replayed_assertion_is_refused`,
   `test_a_stale_or_future_assertion_is_refused`,
   `test_an_assertion_signed_for_another_method_or_target_is_refused`). A
-  request is now bound to the edge's authentication of it. What stays: the
-  process holds one key at a time, so rotating it still restarts the API, and
-  the nonce register's limit has its own entry under Completion Phase 13.
+  request's identity, method and target are now bound to the edge's
+  authentication of it. What stays: the process holds one key at a time, so
+  rotating it still restarts the API, and the nonce register's limit has its
+  own entry under Completion Phase 13.
+- **The assertion does not sign the body, and the edge-to-API hop is plain
+  HTTP.** §93 binds subject, groups, method, target, issued-at and nonce, not
+  the request body, and TLS ends at the edge. A peer on that hop who captures
+  an assertion can send its own body first under the victim's identity inside
+  the 30 s window; the genuine request then fails on the used nonce. Every
+  identity claim still comes from the signature, so this is a body swap, not a
+  forged identity. The assertion also carries every group the identity
+  provider asserts, so a member of enough groups exceeds `ASSERTION_MAX_BYTES`
+  (4,096) and is refused `EDGE_NOT_TRUSTED` on every request. *Upgrade:* a body
+  digest in the signed payload, or TLS (or mutual TLS) on the hop, the day the
+  edge and API are deployed on separate hosts; and forwarding only the
+  `caos-*` groups the API reads, the day a member of many directory groups is
+  refused.
 - ~~**The API cannot tell whether the edge stripped a client's identity.**~~
   Closed by §93: it no longer needs to. On a verified request the guard
   removes every identity header the request carried and writes the subject
@@ -1095,20 +1238,27 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   clips to nothing against the MediaBox drops every token on its page.
   *Upgrade:* a declared tolerance, recorded in the extractor identity, if real
   documents need it.
-- **"Undelivered pages of a delivered source cannot be cited" is enforced by
-  the rule, not yet by any narrower delivery.** `verify_citations` (slice
-  3.2e) anchors a quote only wholly within the block ids a node was handed,
-  counting ambiguity over the whole page, and its three awkward-evidence tests
-  prove the REPAIR_PLAN exit there. But `captured_blocks` and the executor's
-  deliveries are every block of every pinned source, and `source_blocks` rows
-  are immutable, so in production a node is always handed whole sources and
-  `CITATION_NOT_DELIVERED` for an undelivered page of a delivered source never
-  fires on a real run. The executor test that shows it
-  (`test_a_quote_outside_the_captured_blocks_refuses_the_handoff`) narrows
-  delivery by deleting a block with the trigger disabled: wiring, not exit
-  evidence. *Upgrade:* per-node evidence selection -- the Phase 5 entry "The
-  gate's evidence demands are dropped" -- is what first delivers less than a
-  whole source, and its callers already pass exactly what they delivered.
+- ~~**"Undelivered pages of a delivered source cannot be cited" is enforced by
+  the rule, not yet by any narrower delivery.**~~ Closed by Completion Phase
+  10 Task 10.1 (§95), by the upgrade this entry named: per-node evidence
+  selection is what first delivers less than the whole pin, and the executor's
+  callers pass exactly what they delivered, so `CITATION_NOT_DELIVERED` now
+  fires on a real run shape -- a pinned, live, captured source the gate's row
+  did not name for the consumer that quoted it
+  (`tests/test_evidence_selection.py::test_a_quote_on_an_undelivered_member_is_refused_on_a_real_run`).
+  §95 narrowed **sources**, not pages; §98 narrows pages too, so the entry's
+  own title -- an undelivered page of a *delivered* source -- now fires on a
+  real run shape as well
+  (`tests/test_page_selection.py::test_a_quote_of_an_unnamed_page_of_a_named_source_is_not_delivered`).
+  The trigger-disabled test
+  (`test_a_quote_outside_the_captured_blocks_refuses_the_handoff`) is kept as
+  the wiring proof it always was. The original entry: `verify_citations`
+  (slice 3.2e) anchors a quote only wholly within the block ids a node was
+  handed, counting ambiguity over the whole page, and its three awkward-evidence
+  tests prove the REPAIR_PLAN exit there; but `captured_blocks` and the
+  executor's deliveries were every block of every pinned source, so in
+  production a node was always handed whole sources and the refusal never
+  fired on a real run.
 - ~~**The extraction deadline is cooperative, not preemptive (§44.2).**~~
   Superseded by §47 after the Phase 3 adversarial audit measured a 16,926-byte
   page of operators taking 23.2 s against a 2 s deadline and a 261,529-byte page
@@ -1261,8 +1411,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `tests/test_lite_portfolio_route.py`); Task 9.2 adds LITE relative value
   (CP-0 -> CP-L10 -> CP-1C, `tests/test_lite_relative_value_route.py`) and Task
   9.3 LITE decision ledger (CP-0 -> CP-8,
-  `tests/test_lite_decision_ledger_route.py`); every route outside those five
-  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
+  `tests/test_lite_decision_ledger_route.py`), and Task 9.4 LITE deep research
+  (CP-0 -> CP-DR, `tests/test_lite_deep_research_route.py`, §96); Task 11.4a
+  proves the same CP-0 -> CP-DR contract under FULL identity
+  (`tests/test_full_deep_research_route.py`, §105). Every route outside those
+  seven `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
@@ -2313,8 +2466,21 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   entirely in which handlers the director holds. *Upgrade:* fold it into the
   `provider` job, which already has a real endpoint on the other end, by asking
   the live provider for a status it will refuse.
-- **The gate's evidence demands are dropped, and the host cannot read them at
-  all.** A readiness row keeps `module_id` and `readiness` -- **two** fields, not
+- ~~**The gate's evidence demands are dropped, and the host cannot read them at
+  all.**~~ Closed by Completion Phase 10 Task 10.1 (§95), which took the
+  entry's own upgrade: `server/methodology/selection.py` reads each consumer's
+  `source_files_to_attach` from the accepted CP-0 Markdown through the vendor's
+  own `parse_t8` and no other reader, maps each item to a pinned member by its
+  admitted filename or document digest, and the executor hands the consumer
+  only those members' blocks
+  (`tests/test_evidence_selection.py::test_a_node_is_handed_only_the_members_its_gate_row_names`,
+  `test_the_gate_cell_is_read_through_the_vendors_own_parser`). A cell that is
+  empty or names nothing the pin carries keeps the whole delivery every run had
+  before (`test_an_absent_demand_delivers_the_whole_pin_as_before`), and a cell
+  the host half-reads refuses `EVIDENCE_DEMAND_UNRESOLVED` before any attempt
+  (`test_a_demand_the_host_half_reads_is_refused_before_any_attempt`). What the
+  decision answers, and how, is §95; what it does **not** buy has its entry
+  under Completion Phase 10. The original entry: a readiness row keeps `module_id` and `readiness` -- **two** fields, not
   the three this entry used to claim: `readiness_effect` appears nowhere under
   `server/` and is not a field of the vendor's `Recommendation`. The entry
   described the JSON payload schema's row as though it were the host's record,
@@ -2339,12 +2505,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   carry T8's fifth column as `source_files_to_attach`, so the demand has one
   reader and it is the bundle's
   (`tests/test_bundle_pin.py::test_the_t8_parser_keeps_the_source_files_column`).
-  The host still reads nothing of it -- `Projections` keeps `(module_id,
-  readiness)` -- because the second half of the same question is unanswered:
-  whether a model-authored register may decide what evidence a *downstream*
-  node can cite. *Upgrade:* per-node evidence selection reading
-  `source_files_to_attach`, under a dated decision that answers that question
-  -- which is now the only thing between the column and a narrower delivery.
+  `Projections` still keeps `(module_id, readiness)` -- the cell is read from
+  the Markdown at every reader rather than stored, so no record moved.
 - ~~**The workspace cannot show the cause yet.**~~ Closed by Phase 4 Task
   4.1i: the v1 `NodeView` carries `gate_verdict` and the Run section's node
   detail and reason (`frontend/src/sections/run/reason.ts`) draw it as the
@@ -2422,8 +2584,12 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   workers an upstream accepted in between can make the pre-check pass and the
   re-check refuse with a reservation held (no call is made).
   *Upgrade:* Phase 4's lease fencing the node's inputs between the two checks,
-  and a declared bound for the citation register and for the evidence section
-  the day per-node evidence selection has something to select.
+  and a declared bound for the citation register and for the evidence section.
+  Since §95 per-node selection has something to select -- the members a gate
+  row names -- so the evidence section can be narrower than the pin; it is
+  still unbounded in its own right; a named member larger than the ceiling
+  is refused whole, and since §98 is named by page instead (the Completion
+  Phase 10 entries on selection and the gate's page map).
 
 **Phase 4.**
 
@@ -2634,10 +2800,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   written because `tests/test_ingestion.py`'s docstring asserted it before
   anything checked it). *Upgrade:* the same bound for `PdfExtractor`, which
   still refuses a run past the limit -- the fail-closed direction, and no
-  document in reach needs it. **This does not admit the 10-Ks by itself**: the
-  texts are still held outside the tree, and `MAX_REQUEST_BYTES` is the second
-  obstacle behind this one. What it does is make them admissible the day they
-  are supplied.
+  document in reach needs it. **This did not admit the 10-Ks by itself**: the
+  texts were held outside the tree, and `MAX_REQUEST_BYTES` was the second
+  obstacle behind this one. §98 took both: the texts are in
+  `qualification/ba-fy2025/` and `qualification/f-fy2025/`, and they run by
+  page (the Completion Phase 10 entry on selection).
 - **The original entry, for the reader who wants the measurement.** `ingest._prepare` calls
   `BoundaryText.of(token.text)` on every token before `_blocks` runs, so a
   4,097-character token refuses `BOUNDARY_TEXT_TOO_LONG` at the door -- before

@@ -227,7 +227,7 @@ def delivered(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Delivered:
     sources = snapshot_source_set(conn, case_id)
     run = start_run(conn, case_id)
     route = resolve_route(
-        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
+        json.loads(CATALOG_PATH.read_text()), PROFILE, "MARKET_DISLOCATION"
     )
     pin_route(conn, run, route)
     pin_run_input(

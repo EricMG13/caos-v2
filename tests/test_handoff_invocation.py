@@ -102,7 +102,7 @@ from server.store.source_sets import SourceSet, SourceSetMember
 __all__ = ["harness"]
 
 LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
-CLAIMS = ("FULL_CREDIT_32", "DEEP_RESEARCH")
+CLAIMS = ("FULL_CREDIT_32", "MARKET_DISLOCATION")
 BEGIN = "--- HOST-OWNED FRONT MATTER"
 END = "--- END HOST-OWNED FRONT MATTER"
 LITE_ROUTE = resolve_route(CATALOG, *LITE)
@@ -317,7 +317,7 @@ def test_the_lite_upstream_follows_the_pinned_edges(harness: _Harness) -> None:
 def test_a_disabled_route_module_has_no_canonical_identity(harness: _Harness) -> None:
     """A route outside the adapter pins canonically (§42.2); its other module
     still has no canonical identity to build."""
-    node = next(n for n in harness.route.nodes if n.module_id == "CP-DR")
+    node = next(n for n in harness.route.nodes if n.module_id == "CP-3D")
     attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
     with pytest.raises(Refusal) as refused:
         host_identity(

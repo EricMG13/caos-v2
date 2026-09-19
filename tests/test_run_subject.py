@@ -25,7 +25,7 @@ from server.store.run_inputs import (
 )
 from server.store.runs import attempt_ordinal, create_case, start_attempt
 
-NODE = "RN-FULL_CREDIT_32-DEEP_RESEARCH-01-CP-0"
+NODE = "RN-FULL_CREDIT_32-MARKET_DISLOCATION-01-CP-0"
 # `_fingerprint` of this exact version-1 pin before version 2 existed.
 V1 = RunInput(
     UUID(int=1),

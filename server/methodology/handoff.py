@@ -67,6 +67,9 @@ ADAPTER_ROUTES = frozenset(
         # CP-0 -> CP-DR (§96), once build 6a5f1050's `parse_t8` read the CP-DR
         # row CP-0's contract permits (`tests/test_lite_deep_research_route.py`).
         ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH"),
+        # The same CP-0 -> CP-DR contract under FULL identity, proven without
+        # a provider or qualification claim (`test_full_deep_research_route`).
+        ("FULL_CREDIT_32", "DEEP_RESEARCH"),
     }
 )
 GATE_MODULE = "CP-0"

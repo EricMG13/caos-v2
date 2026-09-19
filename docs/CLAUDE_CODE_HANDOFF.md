@@ -4,8 +4,7 @@
 > [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md) and decision
 > §104 govern new dispatches. Claude model names below are historical execution
 > records. The `.claude/agents/` files do not configure Codex: select
-> the relevant model from the full GPT portfolio and the required effort in the
-> Codex dispatch; the matrix supplies task-specific defaults, not an allow-list.
+> `gpt-5.6-sol` or `gpt-6-astra` and the required effort in the Codex dispatch.
 
 This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/DECISIONS.md` §39 resolves document precedence and repair semantics.
@@ -22,10 +21,10 @@ contracts.
 | Branch | `codex/execute-repair-plan` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only until programme closeout; after all completion items and delivery PRs are closed and verified and the final cross-phase review passes, fast-forward `main` from its GitHub `origin/main` and record the final commit here |
 | Latest accepted phase | **Completion Phases 7 and 8 accepted at `38f4639`** (records below; one `make check` at exit 0 gated both). Earlier: Phase 6 `e59ad7b` (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
-| Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
-| Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
+| Qualification state | Thirteen authorised live runs, `$8.40`: the eleven before, and two portfolio runs on 18 September on build `62a94ccd` (VMO2 route complete, citation key missed; CCL blocked at CP-0's readiness gate), `$0.65`. One `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to the old build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified** |
+| Enabled routes | Seven of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_PORTFOLIO_DECISION` (9.1), `LITE_RELATIVE_VALUE` (9.2), `LITE_DECISION_LEDGER` (9.3), `LITE_DEEP_RESEARCH` (9.4), `FULL_CREDIT_32/RELATIVE_VALUE`, and `FULL_CREDIT_32/DEEP_RESEARCH` (11.4a deterministic contract only; qualification remains pending) (`ADAPTER_ROUTES`). Bundle build `78c24be4` (§96/§98) |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md) and current Codex routing in [GPT_MODEL_REASONING_MATRIX.md](GPT_MODEL_REASONING_MATRIX.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Owner decisions §88 and membership §89 on `completion/owner-decisions`** (record under "Owner decisions and membership"). Before that: **the completion remainder is landed on `completion/remainder`** (record below, three waves), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§87. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
+| Current task | **Wave four on `completion/owner-decisions`** (record "Wave four" below): the owner's decisions §88–§91, the authorised vendor build §92, 13.4 signed edge §93, 13.6 release pack §94, 10.1 evidence selection §95, Tasks 9.2 and 9.3 enabled, two authorised live runs; 9.4 (CP-DR) in progress. Not pushed: the push to GitHub was refused by a permission check |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise. At programme closeout that session verifies GitHub's accepted tree, fast-forwards workbench `main` from `gh-origin/main`, then fast-forwards the still-read-only original checkout from its GitHub `origin/main`; no force, reset, or direct `completion/*` merge is permitted |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
@@ -34,29 +33,6 @@ A later Git HEAD may include documentation or concurrent implementation.
 Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
-
-## GitHub delivery record — 19 September 2026
-
-| PR | Source reconciliation | Merge | Size | Hosted result |
-|---|---|---|---|---|
-| [#343](https://github.com/EricMG13/caos-v2/pull/343) | Task 9.2 source `601937e`, reconciled rather than patch-identical: the three raw source texts were omitted to stay within hosted policy and their registry rows changed to `to_source`; PR head `c8f2518` | `019b71c` | 305/800 counted; 296 additions, 23 deletions | Required `lint`, `types`, `test`, `security`, `size`, `frontend`, `postgres`, `sonarqube`, and `SonarCloud Code Analysis` all passed; optional `image` passed; `provider` and `smoke` skipped by workflow policy |
-| [#345](https://github.com/EricMG13/caos-v2/pull/345) | Task 9.3 source `6e84d98`, cleanly cherry-picked as `09ada2a`; PR head `9ba4fdd` also carries this delivery record | `d98929f` | 456/800 counted; 465 additions, 0 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks; `provider` and `smoke` skipped by workflow policy |
-| [#346](https://github.com/EricMG13/caos-v2/pull/346) | Task 9.3 source `a4f3c7e`, cleanly cherry-picked as `323c595`; `f3c0cf3` reconciled three stale exact-route expectations against GitHub's five-route tree; PR head `c96441e` | `3585cf5` | 404/800 counted; 401 additions, 4 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks; `provider` and `smoke` skipped by workflow policy |
-| [#347](https://github.com/EricMG13/caos-v2/pull/347) | GPT routing documentation reconciled onto current GitHub main without unrelated completion history; PR head `64be3b4` | `cd14da8` | 4/800 counted; 218 additions, 80 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks; `provider` and `smoke` skipped by workflow policy |
-| [#348](https://github.com/EricMG13/caos-v2/pull/348) | Vendor change-record equality reconciled without later completion-ledger sections; PR head `e3411f4` | `a01ddbb` | 56/800 counted; 144 additions, 0 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks; `provider` and `smoke` skipped by workflow policy |
-| [#349](https://github.com/EricMG13/caos-v2/pull/349) | Task 9.3 source `62853b2`, rebased as `bfda712`; `ec14903` keeps the hosted set census fail-closed while naming #343's exact pending documents | `3508290` | 463/800 counted; 416 additions, 48 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks, 96.7% new-code coverage, and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#350](https://github.com/EricMG13/caos-v2/pull/350) | GPT portfolio routing documentation on current main; PR head `eecf7f0` | `e7a46a5` | 0/800 counted; 64 additions, 22 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks; `provider` and `smoke` skipped by workflow policy |
-| [#351](https://github.com/EricMG13/caos-v2/pull/351) | Source `5cf2bb9`, reconciled only for insertion context in the expanded vendor-change record; PR head `e8bc5c9` | `b6c93c1` | 38/800 counted; 65 additions, 32 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks; `provider` and `smoke` skipped by workflow policy |
-| [#352](https://github.com/EricMG13/caos-v2/pull/352) | Sources `ce4b356` and `afd91dc`, reconciled onto current main with the RESULT header corrected to the source's final blocked truth; PR head `b6641bb` | `360e7f7` | 167/800 counted; 205 additions, 24 deletions | The same nine required checks all passed; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#353](https://github.com/EricMG13/caos-v2/pull/353) | Source `ed0718b`, reconciled by `b15e3ba` and `4a36f76`, then updated without a force-push to GitHub main at PR head `cf8bd7a` | `b4c46c5` | 561/800 counted; 561 additions, 21 deletions | The same nine required checks all passed on the updated head; optional `image` passed; SonarCloud reported zero new issues, security hotspots, or dependency risks, 96.2% new-code coverage, and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#354](https://github.com/EricMG13/caos-v2/pull/354) | Source `04a6583f`, refactored and reconciled on current main; protected update-branch rebuilt head `7a263f9` | `368a0fe` | 526/800 counted; 552 additions, 26 deletions | The same nine required checks all passed on the rebuilt head; SonarCloud reported zero new issues, security hotspots, or dependency risks, 100.0% new-code coverage, and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#355](https://github.com/EricMG13/caos-v2/pull/355) | Source `b2938371`, cherry-picked as `2723e17`, with the delivery rows for #352 and #353 added in `b08130b` | `9835b5f` | 132/800 counted; 132 additions, 0 deletions | The same nine required checks all passed; SonarCloud reported zero new issues, security hotspots, or dependency risks, 0.0% coverage and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#356](https://github.com/EricMG13/caos-v2/pull/356) | CP-DR T8 row admission and combined vendor-build pin on current main; PR head `80bc34b` | `b041c25` | 179/800 counted; 211 additions, 32 deletions | The same nine required checks all passed; SonarCloud reported zero new issues, security hotspots, or dependency risks, 0.0% new-code coverage and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#357](https://github.com/EricMG13/caos-v2/pull/357) | Qualification driver refuses paid runs without the named persistent Postgres server; protected update-branch rebuilt head `847ffb1` after #356 | `adc4db0` | 75/800 counted; 81 additions, 6 deletions | The same nine required checks all passed on the rebuilt head; SonarCloud reported zero new issues, security hotspots, or dependency risks, 100.0% new-code coverage and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-| [#359](https://github.com/EricMG13/caos-v2/pull/359) | Split prerequisite from #358: deterministic CP-DR route fixtures and the caller-side research-brief identity field; PR head `e784c8e` | `41e9aa8` | 427/800 counted; 428 additions, 1 deletion | The same nine required checks all passed; SonarCloud reported zero new issues, security hotspots, or dependency risks, 100.0% new-code coverage and 0.0% duplication; `provider` and `smoke` skipped by workflow policy |
-
-This records delivery only. It is not phase acceptance and does not claim the
-three omitted documents are present on GitHub.
 
 ## Completion remainder record — 18 September 2026
 
@@ -175,6 +151,48 @@ binary with no override.
 **Nothing buildable remains in the plan.** What is left is only what the section
 above names: documents, live-run authorization, an identity-provider setting,
 TLS material and vendor answers.
+
+### Wave four — 18 September 2026
+
+The owner, the same day: vendor files "approved to alter but keep a record of
+changes"; Tasks 13.4 and 13.6 "authorised to apply your recommendations"; Tasks
+9.2–9.4 "web search for equivalent versions to test"; and two portfolio runs at
+`$5` each on the Terra settings. Implementers ran in isolated worktrees; the
+coordinator integrated each by cherry-pick and resolved the overlaps.
+
+| Commit(s) | What | Decision |
+|---|---|---|
+| `69bb32e` | the set floor is one worst-case call per run | §91 |
+| `257e9c4` | one authorised vendor build, six requests; `docs/VENDOR_CHANGES.md` | §92 |
+| `1cde294` | signed per-request edge assertion, TLS test edge, CI smoke job | §93 |
+| `1b980e1`, `d4e5c63` | the release pack, emitted and reproducible | §94 |
+| `ed0718b`, `77f0801` | per-node evidence selection from CP-0's T8 source-files row | §95 |
+| `86b59cf`–`601937e` | Task 9.2 `LITE_RELATIVE_VALUE`, CCL set with RCL and NCLH releases | -- |
+| `6e84d98`–`3961b59` | Task 9.3 `LITE_DECISION_LEDGER` enabled; its set later removed with the excerpt | -- |
+| `b293837`, `ce4b356` | the two authorised portfolio runs, recorded | -- |
+| `8816c34` | the acceptance review's two P2s and its P3s | -- |
+
+**Acceptance review** (tracked definition, Opus 5 `xhigh`) over `4411fe2..77f0801`:
+nothing blocks; ACCEPT on the money path, 9.2, 9.3 and the rest; ACCEPT WITH
+FINDINGS on §92, §93, §95 and the run records. Its two P2s -- a replay admitted
+at exactly the window edge, and an unsigned body over a plaintext hop the ledger
+had called bound -- are fixed or recorded in `8816c34`.
+
+**Integration gate at `77f0801`:** lint, types and the offline suite **3,464
+passed**; frontend lint and the untested-definition gate clean; vitest **267**,
+one directory test failed once under heavy concurrent load and passed on every
+rerun, hardened in `60fb7b6`. Smoke was run by the 13.4 implementer on its own
+branch, 22 on each of three engines; the complete `make check` on the
+integrated tip is still owed before delivery.
+
+**Documents sourced by the coordinator:** RCL and NCLH Q4/FY2025 earnings
+releases (IR and PR Newswire pages, text extracts). A news report of Moody's
+Carnival upgrade was admitted as 9.3's decision record and **removed the same
+day on the owner's instruction** not to include the third-party excerpt; its
+set went with it, and `LITE_DECISION_LEDGER` has no qualification set until an
+owner-authored memo exists. It remains in this branch's history (`3961b59`),
+which only a history rewrite coordinated with the pushing session removes.
+No EDGAR, on the owner's instruction.
 
 ## Completion Phase 7 — Task 7.1 implementation record, 17 September 2026
 

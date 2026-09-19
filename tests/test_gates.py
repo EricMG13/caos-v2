@@ -73,9 +73,8 @@ def _pin(
     conn: StoreConnection, case_id: UUID, run_id: UUID, research: object = None
 ) -> None:
     source = snapshot_source_set(conn, case_id)
-    route = resolve_route(
-        json.loads(CATALOG_PATH.read_text()), PROFILE, "DEEP_RESEARCH"
-    )
+    selection = "DEEP_RESEARCH" if research is not None else "MARKET_DISLOCATION"
+    route = resolve_route(json.loads(CATALOG_PATH.read_text()), PROFILE, selection)
     pin_route(conn, run_id, route)
     pin_run_input(
         conn,

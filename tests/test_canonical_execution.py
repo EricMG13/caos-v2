@@ -56,7 +56,7 @@ from server.store.source_sets import load_source_set
 __all__ = ["harness"]
 
 LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
-CLAIMS = ("FULL_CREDIT_32", "DEEP_RESEARCH")
+CLAIMS = ("FULL_CREDIT_32", "MARKET_DISLOCATION")
 
 
 @pytest.fixture
