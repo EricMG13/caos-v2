@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from canonical_fixtures import research_brief
 from conftest import route_fault
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked
@@ -17,6 +18,11 @@ from server import methodology
 from server.boundary_text import BoundaryText
 from server.engine.route import EdgeType, ResolvedRoute, resolve_route, route_digest
 from server.methodology.bundle import Bundle
+from server.methodology.vendor import (
+    authority_bundle_sha256,
+    cached_contract,
+    catalog,
+)
 from server.refusals import Refusal
 from server.store import StoreConnection, connect, run_inputs
 from server.store.cases import lock_case
@@ -24,10 +30,13 @@ from server.store.events import RunEvent, append, events_of, lock_run
 from server.store.gates import withdraw_source
 from server.store.routes import pin_route
 from server.store.run_inputs import (
+    UNANCHORED_CP0,
     RunInput,
     RunSubject,
+    bound_research_brief,
     load_run_input,
     pin_run_input,
+    research_text,
 )
 from server.store.runs import create_case, fail_run, start_attempt, start_run
 from server.store.source_sets import SourceSet, snapshot_source_set
@@ -99,7 +108,7 @@ def prepared(case: tuple[StoreConnection, UUID], tmp_path: Path) -> Prepared:
 
 def test_complete_input_roundtrip_exact_terminal_replay(prepared: Prepared) -> None:
     conn, run, source, bundle, route = prepared
-    research = {"questions": ["Café?"], "source_mode": "supplied"}
+    research = research_brief(decision_context="Café?")
     pin = pin_run_input(conn, run, source.version, bundle, research, subject=SUBJECT)
     assert conn.info.transaction_status.name == "IDLE"
     assert isinstance(pin, RunInput)
@@ -206,7 +215,9 @@ def test_changed_host_or_research_refuses_replay_but_history_is_readable(
     prepared: Prepared, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
 ) -> None:
     conn, run, source, bundle, _ = prepared
-    pin = pin_run_input(conn, run, source.version, bundle, {}, subject=SUBJECT)
+    pin = pin_run_input(
+        conn, run, source.version, bundle, research_brief(), subject=SUBJECT
+    )
     if changed in {"build", "manifest", "moving"}:
         raw = (bundle.root / "DEPLOY_V_INTEGRITY_v1.json").read_text()
         if changed == "build":
@@ -231,7 +242,9 @@ def test_changed_host_or_research_refuses_replay_but_history_is_readable(
             run,
             source.version,
             bundle,
-            {"q": "changed"} if changed == "research" else {},
+            research_brief(decision_context="changed")
+            if changed == "research"
+            else research_brief(),
             subject=SUBJECT,
         )
     assert load_run_input(conn, run) == pin
@@ -289,6 +302,130 @@ def test_research_exact_ordering_depth_count_and_utf8_size() -> None:
     cycle["cycle"] = cycle
     with pytest.raises(Refusal):
         run_inputs._research(cycle)
+
+
+def _refused_at_pin(prepared: Prepared, research: object) -> None:
+    """`research` is refused `RUN_INPUT_INVALID` and nothing is pinned."""
+    conn, run, source, bundle, _ = prepared
+    before = events_of(conn, run)
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        pin_run_input(conn, run, source.version, bundle, research, subject=SUBJECT)
+    assert conn.info.transaction_status is TransactionStatus.IDLE
+    assert load_run_input(conn, run) is None and events_of(conn, run) == before
+
+
+def test_a_brief_naming_a_consumer_the_route_does_not_carry_refuses_at_pin(
+    prepared: Prepared,
+) -> None:
+    """§96: a question's consumer or predecessor must be a module the pinned
+    route selects -- the vendor's own `Route` judges the placement -- and the
+    brief must be about the pinned subject; otherwise nothing is pinned."""
+    _refused_at_pin(prepared, research_brief(placement=("CP-2A", "CP-0")))
+    _refused_at_pin(prepared, research_brief(placement=("NONE", "CP-1")))
+    _refused_at_pin(prepared, research_brief("OTHER"))
+
+
+def test_a_brief_with_web_source_mode_refuses_at_pin(prepared: Prepared) -> None:
+    """Invariant 1: web discovery is structurally absent, so a brief asking for
+    `web_only` or `hybrid` asks for a capability nothing here has. It is
+    refused at the pin, where the vendor would accept it."""
+    for mode in ("web_only", "hybrid"):
+        _refused_at_pin(prepared, research_brief(source_mode=mode))
+
+
+def test_a_brief_cannot_supply_its_own_run_id_or_cp0_digest(
+    prepared: Prepared,
+) -> None:
+    """Invariant 3: `run_id`, `cp0_sha256` and `authority_sha256` are written
+    by the host when CP-DR is invoked; a caller's brief carrying any of them,
+    or a field the brief schema does not declare, is refused, and a brief on a
+    route with no CP-DR node reaches nobody and is refused too."""
+    for binding in ("run_id", "cp0_sha256", "authority_sha256"):
+        _refused_at_pin(prepared, {**research_brief(), binding: "a" * 64})
+    _refused_at_pin(prepared, research_brief(tools=["web_search"]))
+    _refused_at_pin(prepared, research_brief(mode="standalone"))
+    conn, run, source, bundle, _ = prepared
+    pin = pin_run_input(
+        conn, run, source.version, bundle, research_brief(), subject=SUBJECT
+    )
+    assert pin.research_json == research_text(research_brief())
+    assert pin.research_json is not None
+    stored = json.loads(pin.research_json)
+    assert stored == research_brief()
+    assert not {"run_id", "cp0_sha256", "authority_sha256"} & set(stored)
+
+
+def test_the_bound_brief_carries_exactly_the_host_bindings(
+    prepared: Prepared,
+) -> None:
+    """`bound_research_brief` is the one place a brief meets the vendor's
+    `validate_brief` and `Route`: it returns the caller's brief with the three
+    host bindings written in and nothing else changed, and refuses a brief the
+    vendor refuses without letting the vendor's text reach the refusal."""
+    _, _, _, bundle, route = prepared
+    contract = cached_contract(bundle)
+    assert cached_contract(bundle) is contract
+    bindings = {
+        "run_id": "COS-20260908T120000Z-" + "1" * 32,
+        "cp0_sha256": UNANCHORED_CP0,
+        "authority_sha256": authority_bundle_sha256(bundle),
+    }
+    bound = bound_research_brief(
+        contract,
+        catalog(bundle),
+        brief=research_brief(),
+        route=route,
+        subject=SUBJECT,
+        **bindings,
+    )
+    assert bound == {**research_brief(), **bindings}
+    with pytest.raises(Refusal) as refused:
+        bound_research_brief(
+            contract,
+            catalog(bundle),
+            brief=research_brief(as_of_date="not a date"),
+            route=route,
+            subject=SUBJECT,
+            **bindings,
+        )
+    assert refused.value.code.value == "RUN_INPUT_INVALID"
+    assert refused.value.__context__ is None and refused.value.__cause__ is None
+
+
+def test_a_deep_research_run_pinned_without_a_brief_refuses_at_pin(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    """§96: on an enabled pathway carrying CP-DR the vendor's own rule -- CP-DR
+    requires a run-scoped brief -- is asked before anything is spent, so a
+    brief-less input is refused at the pin rather than after CP-0 is paid."""
+    conn, case_id = case
+    run, source, bundle, _ = _prepare(
+        conn, case_id, tmp_path, ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH")
+    )
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        pin_run_input(conn, run, source.version, bundle, subject=SUBJECT)
+    assert load_run_input(conn, run) is None
+    pin = pin_run_input(
+        conn, run, source.version, bundle, research_brief(), subject=SUBJECT
+    )
+    assert pin.research_json is not None
+
+
+def test_a_brief_on_a_route_without_cp_dr_refuses_at_pin(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    conn, case_id = case
+    run, source, bundle, _ = _prepare(
+        conn, case_id, tmp_path, ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
+    )
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        pin_run_input(
+            conn, run, source.version, bundle, research_brief(), subject=SUBJECT
+        )
+    assert load_run_input(conn, run) is None
 
 
 @pytest.mark.parametrize(
@@ -533,7 +670,12 @@ def test_observed_blocking_first_inputs_and_independent_case(
             if conflict:
                 with pytest.raises(Refusal, match=r"^RUN_INPUT_ALREADY_PINNED$"):
                     pin_run_input(
-                        other, run, source.version, bundle, {}, subject=SUBJECT
+                        other,
+                        run,
+                        source.version,
+                        bundle,
+                        research_brief(),
+                        subject=SUBJECT,
                     )
             else:
                 assert pin_run_input(

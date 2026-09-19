@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from canonical_fixtures import research_brief
 from test_qualification_harness import (
     OTHER,
     _approve,
@@ -36,7 +37,12 @@ from server.store.gates import Gate, execution_input, gate_preview, withdraw_sou
 from server.store.members import Standing, grant, revoke
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route, resolved_route
-from server.store.run_inputs import RunInput, load_run_input, pin_run_input
+from server.store.run_inputs import (
+    RunInput,
+    load_run_input,
+    pin_run_input,
+    research_text,
+)
 from server.store.runs import create_case, start_run
 from server.store.source_sets import snapshot_source_set
 
@@ -347,6 +353,20 @@ def test_real_approved_input_transplants_are_refused(
         )
         conn.commit()
         pin_route(conn, run, route)
+        if fault == "research":
+            # §96: a brief on a route no CP-DR node is on reaches nobody, so the
+            # transplant is refused at its own pin before the harness sees it.
+            with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+                pin_run_input(
+                    conn,
+                    run,
+                    a.input.source_version,
+                    harness.bundle,
+                    research_brief(),
+                    subject=original.subject,
+                )
+            assert cast(_Completions, harness.completions).prompts == []
+            return
         a = replace(
             a,
             input=pin_run_input(
@@ -354,7 +374,6 @@ def test_real_approved_input_transplants_are_refused(
                 run,
                 a.input.source_version,
                 harness.bundle,
-                {} if fault == "research" else None,
                 subject=original.subject,
             ),
         )
@@ -810,3 +829,35 @@ def test_first_case_rechecks_separate_approver_after_whole_set_pass(
     assert result.performed[0].stopped is RefusalCode.GATE_APPROVAL_MISMATCH
     assert cast(_Completions, harness.completions).prompts == []
     _unspent(conn)
+
+
+def test_a_deep_research_case_pins_its_brief_and_a_different_brief_is_refused(
+    ready: Fixture,
+) -> None:
+    """§96: the harness pins a case's research brief exactly as the case carries
+    it, and eligibility compares the two -- a case whose brief moved after the
+    pin is not the case that was prepared, and is refused before any call."""
+    conn, blobs, harness, qualification = ready
+    first = qualification.cases[0]
+    assert first.subject is not None
+    brief = research_brief(first.subject.issuer_id, first.subject.issuer_name)
+    case = replace(
+        first,
+        selection_id="LITE_DEEP_RESEARCH",
+        research_brief=research_text(brief),
+    )
+    deep = (conn, blobs, harness, QualificationSet((case,)))
+    [prepared] = _prepared(deep)
+    assert prepared.input.research_json == case.research_brief
+    _approve(conn, (prepared,))
+    moved = replace(
+        case,
+        research_brief=research_text({**brief, "decision_context": "Moved"}),
+    )
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        _run((conn, blobs, harness, QualificationSet((moved,))), (prepared,))
+    assert cast(_Completions, harness.completions).prompts == []
+    _unspent(conn)
+    without = replace(case, research_brief=None)
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        _prepared((conn, blobs, harness, QualificationSet((without,))))

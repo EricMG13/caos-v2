@@ -70,6 +70,11 @@ class VendorContract:
     research: Any
 
 
+# One compiled contract per manifest, shared by every caller of `cached_contract`.
+_CONTRACTS: dict[str, VendorContract] = {}
+_CONTRACTS_LOCK = threading.Lock()
+
+
 class _Sys:
     """`sys` as vendor code sees it: its own path and flags, everything else real."""
 
@@ -184,6 +189,20 @@ def load_vendor_contract(bundle: Bundle) -> VendorContract:
         finally:
             for module in loader.modules.values():
                 sys.modules.pop(module.__name__, None)
+
+
+def cached_contract(bundle: Bundle) -> VendorContract:
+    """`load_vendor_contract`, compiled once per manifest digest for the process.
+
+    The manifest pins every vendor file's hash, so one manifest names one
+    contract; a file changed on disk under an unchanged manifest is the case
+    the ledger records (the executor's prompt still reads every delivered byte).
+    """
+    key = bundle.manifest_sha256
+    with _CONTRACTS_LOCK:
+        if key not in _CONTRACTS:
+            _CONTRACTS[key] = load_vendor_contract(bundle)
+        return _CONTRACTS[key]
 
 
 def authority_bundle_sha256(bundle: Bundle) -> str:

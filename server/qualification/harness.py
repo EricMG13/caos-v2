@@ -50,6 +50,7 @@ that omits the cases after the stop reads as complete.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from decimal import Decimal
@@ -278,6 +279,11 @@ def prepare(
                         run_id,
                         source.version,
                         harness.bundle,
+                        (
+                            None
+                            if case.research_brief is None
+                            else json.loads(case.research_brief)
+                        ),
                         subject=case.subject,
                     ),
                     set_digest,
@@ -461,7 +467,7 @@ def _eligible(
             any(node.module_id == MODEL_MODULE for node in route.nodes)
             != case.model_extension
         )
-        or pin.research_json is not None
+        or pin.research_json != case.research_brief
         or sorted(members)
         != sorted(
             (d.filename.value, sha256(d.data).hexdigest()) for d in case.documents

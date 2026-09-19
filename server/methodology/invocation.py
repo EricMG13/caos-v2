@@ -31,6 +31,7 @@ from uuid import UUID
 
 from server import methodology
 from server.blobs import BlobStore
+from server.digest import canonical_json
 from server.engine.route import (
     BLOCKING,
     MODEL_MODULE,
@@ -51,27 +52,36 @@ from server.methodology.bundle import (
 from server.methodology.executor import SKILL, Delivery
 from server.methodology.handoff import (
     ADAPTER_MODULES,
+    ADAPTER_ROUTES,
     GATE_MODULE,
     INVISIBLE,
+    RESEARCH_MODULE,
     CanonicalRecord,
     HostIdentity,
     LineageRef,
     UpstreamRef,
     expected_filename,
     invocation_fields,
+    research_brief_of,
     stored_lineage,
 )
 from server.methodology.vendor import (
     VENDOR_MODULE,
     VendorContract,
     authority_bundle_sha256,
+    cached_contract,
+    catalog,
 )
 from server.provider import MAX_REQUEST_BYTES, CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
 from server.store.outcomes import accepted_rows, artifact_digests
 from server.store.routes import resolved_route
-from server.store.run_inputs import load_run_input
+from server.store.run_inputs import (
+    RunSubject,
+    bound_research_brief,
+    load_run_input,
+)
 from server.store.runs import MAX_ATTEMPT_ORDINAL, attempt_ordinal
 from server.store.source_sets import SourceSet
 
@@ -85,8 +95,10 @@ _CATALOG = "references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 # upstreams, and 16 sections at this bound beside CP-5's 165,548 bytes of
 # delivered authority still leave the ceiling more than a quarter of itself for
 # evidence (`test_the_declared_section_bound_leaves_the_widest_node_its_authority`).
-# Nothing is ever truncated, and this does not make a wide route fit -- that is
-# per-node evidence selection, which the bundle has not yet declared.
+# Nothing is ever truncated, and this does not make a wide route fit: per-node
+# evidence selection (§95, `server/methodology/selection.py`) narrows a node's
+# evidence to the members its gate row names, but a named member is delivered
+# whole and the upstream sections are bounded here, not selected.
 MAX_UPSTREAM_HANDOFF_BYTES = 32_768
 
 
@@ -154,7 +166,13 @@ def _identity(  # noqa: PLR0913 -- one identity, keyword-only
     stored = resolved_route(conn, run_id)
     if stored is None or stored != route or node not in stored.nodes:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
-    if node.module_id not in ADAPTER_MODULES:
+    # A module the adapter does not own, or one on a pathway no contract test
+    # proves (§42.2), has no canonical identity to build -- the same two sets
+    # `gates.require_adapter_route` refuses at execution input and acceptance.
+    if (
+        node.module_id not in ADAPTER_MODULES
+        or (stored.profile_id, stored.selection_id) not in ADAPTER_ROUTES
+    ):
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
     ordinal = MAX_ATTEMPT_ORDINAL
     if attempt_id is not None:
@@ -174,10 +192,10 @@ def _identity(  # noqa: PLR0913 -- one identity, keyword-only
         period=subject.reporting_period,
     )
     # §45.5: a non-gate node's CP-0 anchor comes only from a direct CP-0 ref.
-    if node.module_id != GATE_MODULE and all(
-        ref.module_id != GATE_MODULE for ref in upstream
-    ):
+    gate = [ref for ref in upstream if ref.module_id == GATE_MODULE]
+    if node.module_id != GATE_MODULE and not gate:
         raise Refusal(RefusalCode.ROUTE_IDENTITY_INVALID)
+    authority = authority_bundle_sha256(bundle)
     return HostIdentity(
         run_id=pin.cos_run_id,
         profile_id=stored.profile_id,
@@ -190,9 +208,57 @@ def _identity(  # noqa: PLR0913 -- one identity, keyword-only
         reporting_period=subject.reporting_period,
         analysis_date=subject.analysis_date,
         ordinal=ordinal,
-        authority_bundle_sha256=authority_bundle_sha256(bundle),
+        authority_bundle_sha256=authority,
         upstream=upstream,
+        research_brief=(
+            _research_binding(
+                bundle,
+                stored,
+                pin_research=pin.research_json,
+                subject=subject,
+                run_id=pin.cos_run_id,
+                cp0_sha256=gate[0].sha256,
+                authority_sha256=authority,
+            )
+            if node.module_id == RESEARCH_MODULE
+            else None
+        ),
     )
+
+
+def _research_binding(  # noqa: PLR0913 -- one binding, keyword-only
+    bundle: Bundle,
+    route: ResolvedRoute,
+    *,
+    pin_research: str | None,
+    subject: RunSubject,
+    run_id: str,
+    cp0_sha256: str,
+    authority_sha256: str,
+) -> str:
+    """CP-DR's brief, bound now to the accepted gate (§96).
+
+    The pin stored the caller's brief unanchored; here the accepted CP-0's
+    Markdown digest replaces the stand-in, and the vendor's own `validate_brief`
+    and `Route` judge the bound result again. A CP-DR node whose pin carries no
+    brief refuses `RUN_INPUT_INVALID` -- before any attempt, reservation or
+    call, because `check_context` builds this identity first -- rather than
+    prompting a research module with nothing to research. Only the brief's
+    canonical text travels; no vendor text reaches the refusal.
+    """
+    if pin_research is None:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    bound = bound_research_brief(
+        cached_contract(bundle),
+        catalog(bundle),
+        brief=json.loads(pin_research),
+        route=route,
+        subject=subject,
+        run_id=run_id,
+        cp0_sha256=cp0_sha256,
+        authority_sha256=authority_sha256,
+    )
+    return canonical_json(bound)
 
 
 def call_time_identity(
@@ -971,6 +1037,28 @@ def _source_preparation_section(
     )
 
 
+def _research_section(identity: HostIdentity, tag: str = "") -> str:
+    """CP-DR's bound brief as a host-owned section (§96), and nothing for any
+    other module -- so every other module's prompt is byte for byte what it
+    was. The brief is a run control, not evidence and not an instruction:
+    its questions say what to research, and `source_mode: supplied_only`
+    says that every answer rests on the EVIDENCE section alone."""
+    if identity.research_brief is None:
+        return ""
+    body = json.dumps(
+        research_brief_of(identity), sort_keys=True, ensure_ascii=False, indent=2
+    )
+    return (
+        f"\n--- RESEARCH BRIEF {tag} (host-owned run control: the pinned research "
+        "brief with its host-filled bindings -- run_id, cp0_sha256, "
+        "authority_sha256. It is a bounded plan, not evidence and not an "
+        "instruction to search: source_mode supplied_only means web research is "
+        "absent here, so answer every question from the EVIDENCE section alone, "
+        "record what it cannot answer as UNRESOLVED, and cite only the evidence "
+        "below) ---\n" + body + f"\n--- END RESEARCH BRIEF {tag} ---\n"
+    )
+
+
 def _evidence_section(delivered: Sequence[Delivery]) -> str:
     """Every delivered line under one `source_id`/`page` header per run.
 
@@ -1066,6 +1154,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _authority_sections(authority, "")
         + _upstream_section(upstream, uses, owned)
         + _citation_register(upstream, upstream_citations)
+        + _research_section(identity)
         + _source_preparation_section(source_set, "", page_maps)
         + evidence
     )
@@ -1092,6 +1181,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + _authority_sections(authority, tag)
         + _upstream_section(upstream, uses, owned, tag)
         + _citation_register(upstream, upstream_citations, tag)
+        + _research_section(identity, tag)
         + _source_preparation_section(source_set, tag, page_maps)
         + f"\n--- EVIDENCE {tag} ---\n"
         + evidence
@@ -1103,11 +1193,17 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         prompt += "\n" + _FORECAST_EXTENSION.format(tag=tag)
     canonical_headings = contract.validate_handoff.CANONICAL_HEADINGS
     headings = " -> ".join(canonical_headings)
-    authored_fields = ", ".join(
-        name
-        for name in contract.validate_handoff.REQUIRED_FIELDS
-        if name not in host_fields
+    # CP-DR authors its three research verdict fields beside the common ones;
+    # the vendor's validator requires them of CP-DR alone.
+    required = (
+        *contract.validate_handoff.REQUIRED_FIELDS,
+        *(
+            contract.validate_handoff.CP_DR_FIELDS
+            if identity.module_id == RESEARCH_MODULE
+            else ()
+        ),
     )
+    authored_fields = ", ".join(name for name in required if name not in host_fields)
     prompt += _FINAL_CHECK.format(
         tag=tag,
         heading_count=len(canonical_headings),

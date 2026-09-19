@@ -161,6 +161,11 @@ def test_a_case_with_no_run_is_observed_empty(
             },
             {
                 "profile_id": "LITE_CREDIT_22",
+                "selection_id": "LITE_DEEP_RESEARCH",
+                "accepts_model_extension": False,
+            },
+            {
+                "profile_id": "LITE_CREDIT_22",
                 "selection_id": "LITE_EARNINGS_UPDATE",
                 "accepts_model_extension": False,
             },

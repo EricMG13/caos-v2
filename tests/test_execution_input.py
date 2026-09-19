@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from canonical_fixtures import research_brief
 from conftest import route_fault
 from psycopg.pq import TransactionStatus
 from test_case_ordering import _blocked
@@ -26,13 +27,18 @@ from server.store.gates import Gate, approve_gate, gate_preview, withdraw_source
 from server.store.members import Standing, grant, revoke
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route
-from server.store.run_inputs import RunInput, load_run_input, pin_run_input
+from server.store.run_inputs import (
+    RunInput,
+    load_run_input,
+    pin_run_input,
+    research_text,
+)
 from server.store.runs import create_case, start_run
 
 type Approved = tuple[Prepared, RunInput, tuple[UUID, UUID]]
 
 # Execution authority is only ever read for a route the adapter executes (§42.2).
-LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
+LITE = ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH")
 
 
 @pytest.fixture
@@ -49,7 +55,7 @@ def approved(prepared: Prepared) -> Approved:
         run,
         source.version,
         bundle,
-        {"questions": ["Café?\r\nExact."]},
+        research_brief(decision_context="Café?\r\nExact."),
         subject=SUBJECT,
     )
     actors = (uuid4(), uuid4())
@@ -87,7 +93,9 @@ def test_exact_historical_input_with_one_component_load(
             )
             assert conn.info.transaction_status.name == "INTRANS"
     assert result == (pin, route)
-    assert pin.research_json == '{"questions":["Café?\\r\\nExact."]}'
+    assert pin.research_json == research_text(
+        research_brief(decision_context="Café?\r\nExact.")
+    )
     for table in ("source_set_versions", "source_set_members", "run_routes"):
         assert sum(f"FROM {table}" in query for query in queries) == 1
     assert sum("LEFT JOIN live_sources" in query for query in queries) == 1
@@ -317,7 +325,14 @@ def test_read_unit_excludes_revocation_but_not_an_independent_case(
     (conn, run, source, bundle, route), pin, actors = approved
     independent_case = create_case(conn, BoundaryText.of("Independent"))
     other_run, other_source, _, _ = _prepare(conn, independent_case, tmp_path, LITE)
-    pin_run_input(conn, other_run, other_source.version, bundle, subject=SUBJECT)
+    pin_run_input(
+        conn,
+        other_run,
+        other_source.version,
+        bundle,
+        research_brief(),
+        subject=SUBJECT,
+    )
     grant(conn, case_id=independent_case, user_id=actors[0], standing=Standing.APPROVER)
     conn.commit()
     for gate in Gate:

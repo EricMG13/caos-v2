@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
 from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any, NoReturn
 from uuid import UUID
 
@@ -51,6 +52,7 @@ ADAPTER_MODULES = frozenset(
         "CP-3",
         MODEL_MODULE,
         "CP-8",
+        "CP-DR",
     }
 )
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
@@ -62,9 +64,29 @@ ADAPTER_ROUTES = frozenset(
         ("FULL_CREDIT_32", "RELATIVE_VALUE"),
         ("LITE_CREDIT_22", "LITE_RELATIVE_VALUE"),
         ("LITE_CREDIT_22", "LITE_DECISION_LEDGER"),
+        # CP-0 -> CP-DR (§96), once build 6a5f1050's `parse_t8` read the CP-DR
+        # row CP-0's contract permits (`tests/test_lite_deep_research_route.py`).
+        ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH"),
     }
 )
 GATE_MODULE = "CP-0"
+# The one module a pinned research brief reaches (§96): its identity carries
+# the host-bound brief, and its front matter the fields the vendor's own
+# preparer emits from one.
+RESEARCH_MODULE = "CP-DR"
+# The research front-matter fields the host owns for CP-DR: exactly those the
+# vendor's `prepare_invocation.prepare` writes from a linked brief. The three
+# the model authors (`coverage_score`, `research_status`,
+# `research_stop_reason`) are the rest of the vendor's `CP_DR_FIELDS`.
+RESEARCH_HOST_FIELDS = (
+    "research_mode",
+    "research_question",
+    "approved_plan_hash",
+    "scope_type",
+    "scope_key",
+    "subject_name",
+    "source_mode",
+)
 ZERO_SHA256 = "0" * 64
 # The vendor's frozen reader limits (CREDIT_OS_RUNTIME_LIMITS_v1).
 MAX_FILE_BYTES = 26_214_400
@@ -166,10 +188,51 @@ def expected_filename(identity: HostIdentity) -> str:
     return f"{identity.issuer_id}_{identity.module_id}_{compact}.md"
 
 
+def research_brief_of(identity: HostIdentity) -> dict[str, Any]:
+    """The bound brief a CP-DR identity carries, or `HANDOFF_IDENTITY_MISMATCH`
+    for a module that carries one and is not CP-DR, a CP-DR that carries none,
+    or text that is not one JSON object."""
+    if (identity.research_brief is None) != (identity.module_id != RESEARCH_MODULE):
+        raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
+    brief = _or_refuse(
+        RefusalCode.HANDOFF_IDENTITY_MISMATCH,
+        lambda: strict_json(str(identity.research_brief)),
+    )
+    if not isinstance(brief, dict):
+        raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
+    return brief
+
+
+def research_fields(contract: VendorContract, identity: HostIdentity) -> dict[str, Any]:
+    """The research front matter for a CP-DR invocation: the fields the vendor's
+    `prepare_invocation.prepare` emits from a linked brief, and the plan hash
+    computed by the vendor's own `envelope.digest` over the bound brief
+    (`tests/test_handoff_invocation.py` holds the two equal against the
+    vendor's preparer). Empty for every other module."""
+    if identity.module_id != RESEARCH_MODULE:
+        if identity.research_brief is not None:
+            raise Refusal(RefusalCode.HANDOFF_IDENTITY_MISMATCH)
+        return {}
+    brief = research_brief_of(identity)
+    return _or_refuse(
+        RefusalCode.HANDOFF_IDENTITY_MISMATCH,
+        lambda: {
+            "research_mode": brief["mode"],
+            "research_question": "; ".join(q["question"] for q in brief["questions"]),
+            "approved_plan_hash": "sha256:" + contract.envelope.digest(brief),
+            **{
+                key: brief[key]
+                for key in ("scope_type", "scope_key", "subject_name", "source_mode")
+            },
+        },
+    )
+
+
 def invocation_fields(
     contract: VendorContract, identity: HostIdentity
 ) -> dict[str, Any]:
     """The host-owned front matter for this invocation, built by the vendor envelope."""
+    research = research_fields(contract, identity)
     upstream = sorted(identity.upstream, key=lambda ref: ref.route_node_id)
     gate = [ref.sha256 for ref in upstream if ref.module_id == GATE_MODULE]
     envelope = _or_refuse(
@@ -225,6 +288,7 @@ def invocation_fields(
             }
             for ref in upstream
         ],
+        **research,
     }
 
 
@@ -271,8 +335,13 @@ def _same(left: object, right: object) -> bool:
     return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
 
 
-def _declared_keys(contract: VendorContract) -> frozenset[str]:
+def _declared_keys(contract: VendorContract, module_id: str) -> frozenset[str]:
     vendor = contract.validate_handoff
+    research = (
+        (*vendor.CP_DR_FIELDS, *RESEARCH_HOST_FIELDS)
+        if module_id == RESEARCH_MODULE
+        else ()
+    )
     return frozenset(
         (
             *vendor.REQUIRED_FIELDS,
@@ -280,6 +349,7 @@ def _declared_keys(contract: VendorContract) -> frozenset[str]:
             *contract.envelope.RUN_ANCHOR_FIELDS,
             *contract.envelope.ECHO_FIELDS,
             *_UPGRADE_KEYS,
+            *research,
         )
     )
 
@@ -376,7 +446,7 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     if result.errors or result.fields is None:
         raise Refusal(RefusalCode.HANDOFF_MALFORMED)
     fields: dict[str, Any] = result.fields
-    if not _declared_keys(contract).issuperset(fields):
+    if not _declared_keys(contract, identity.module_id).issuperset(fields):
         raise Refusal(RefusalCode.HANDOFF_UNDECLARED_FIELD)
 
     host = invocation_fields(contract, identity)
@@ -411,6 +481,20 @@ def validate_markdown(  # noqa: PLR0913 -- the brief's pure signature
     )
     if fields["qa_status"] == "Blocked":
         raise Refusal(RefusalCode.HANDOFF_BLOCKED)
+    if identity.module_id == RESEARCH_MODULE:
+        # The vendor's research contract (§96): TDR.1 is the locked brief's
+        # questions exactly, every finding cites its own question's evidence,
+        # ANSWERED rests on primary or attributed evidence or two independent
+        # families, and coverage and status follow from the count. After the
+        # Blocked check because a Blocked dossier is held to none of it -- it
+        # is recorded and unaccepted, as the vendor's SKILL.md says.
+        brief = research_brief_of(identity)
+        _or_refuse(
+            RefusalCode.HANDOFF_INCOMPLETE,
+            lambda: contract.research.validate_dossier(
+                SimpleNamespace(fields=fields, text=text), brief
+            ),
+        )
     return Projections(
         module_id=identity.module_id,
         qa_status=fields["qa_status"],
