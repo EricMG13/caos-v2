@@ -27,6 +27,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
+from canonical_fixtures import research_brief
 
 from server.boundary_text import BoundaryText
 from server.evidence.extract import DEFAULT_LIMITS
@@ -43,7 +44,7 @@ from server.qualification.matrix import (
 )
 from server.qualification.on_disk import MANIFEST, load_qualification_set
 from server.refusals import Refusal, RefusalCode
-from server.store.run_inputs import RunSubject
+from server.store.run_inputs import RunSubject, research_text
 
 REPORT = b"""Acme Holdings plc annual report 2026
 Total debt at 31 December 2026 was USD 1,240.0m
@@ -251,6 +252,9 @@ COMMITTED_SET_DIGESTS = {
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
     "vmo2-fy2025-portfolio": (
         "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
+    ),
+    "vmo2-fy2025-deep-research": (
+        "09807efb1a3d5d40680d1a9d0e054333537781d7bb4013ecd7670323f817fd9b"
     ),
 }
 
@@ -803,3 +807,29 @@ def test_the_vmo2_set_still_loads_with_its_register_key(tmp_path: Path) -> None:
     assert expect.row_key == (("topic_id", "LIQUIDITY_MATURITIES"),)
     assert (expect.column, expect.expected) == ("evidence_status", "PARTIAL")
     assert len(qualification_set_digest(QualificationSet(cases=(case,)))) == 64
+
+
+def test_a_case_carries_its_research_brief_as_the_pins_canonical_text(
+    tmp_path: Path,
+) -> None:
+    """§96: a CP-DR case declares its brief as an object; the loader carries it
+    as the canonical text a pin stores, the digest moves with it, and a brief
+    that is not an object, or that no pin could store, refuses the file."""
+    manifest = _manifest()
+    cases = manifest["cases"]
+    assert isinstance(cases, list)
+    cases[0]["research_brief"] = research_brief()
+    loaded = load_qualification_set(_write(tmp_path, manifest))
+    assert loaded.cases[0].research_brief == research_text(research_brief())
+    assert loaded.cases[1].research_brief is None
+    assert qualification_set_digest(loaded) != qualification_set_digest(_in_memory())
+    changed = research_brief(decision_context="Another premise")
+    cases[0]["research_brief"] = changed
+    assert qualification_set_digest(
+        load_qualification_set(_write(tmp_path, manifest))
+    ) != qualification_set_digest(loaded)
+    for bad in (["not", "an", "object"], {"x": float("nan")}, "text"):
+        cases[0]["research_brief"] = bad
+        with pytest.raises(Refusal) as refused:
+            load_qualification_set(_write(tmp_path, manifest))
+        assert refused.value.code is RefusalCode.QUALIFICATION_SET_FILE_INVALID

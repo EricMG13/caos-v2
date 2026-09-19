@@ -235,6 +235,10 @@ class QualificationCase:
     # What the modules wrote in their registers. See `ExpectedRegister`: the key
     # that can ask about a cell the host projects no scalar for.
     expects_register: tuple[ExpectedRegister, ...] = ()
+    # A CP-DR route's research brief (§96), as the canonical JSON the pin stores
+    # (`run_inputs.research_text`). An input like the documents: pinned by the
+    # harness, compared at eligibility, and covered by the digest.
+    research_brief: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +361,8 @@ def _digested(case: QualificationCase) -> list[object]:
                 for expect in case.expects_projection
             )
         )
+    if case.research_brief is not None:
+        entry.append(["research_brief", case.research_brief])
     if case.expects_register:
         entry.append(
             sorted(
