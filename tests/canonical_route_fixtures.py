@@ -769,7 +769,9 @@ def ledger_markdown(ident: HostIdentity, knobs: HandoffKnobs | None = None) -> b
         appendix += "#### " + register + "\n\n" + _table(columns, rows)
     if knobs.quote is not None:
         quotes[-1] = knobs.quote
-    note = "".join(quote + ".\n\n" for quote in quotes)
+    # Each quote stands as its own paragraph with no trailing punctuation: the
+    # body check matches the quote's words exactly (`handoff._quoted`).
+    note = "".join(quote + "\n\n" for quote in quotes)
     body = "".join(
         "## " + h + "\n\n" + (appendix if h == "Analysis" else note)
         for h in CONTRACT.validate_handoff.CANONICAL_HEADINGS
