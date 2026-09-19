@@ -608,7 +608,8 @@ def _body_words(text: str) -> list[str]:
 
 
 # Marks a body may put around a quotation without making it a different quote.
-_QUOTATION = "\"'\u2018\u2019\u201c\u201d\u201e\u201f\u00ab\u00bb"
+# The backtick is Markdown's code span, which a module uses the same way.
+_QUOTATION = "\"'`\u2018\u2019\u201c\u201d\u201e\u201f\u00ab\u00bb"
 
 
 def _quoted(words: list[str], quote: str) -> bool:
