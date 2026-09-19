@@ -46,7 +46,7 @@ def _validate(ident: HostIdentity, markdown: bytes) -> Projections:
         )
 
 
-def test_cp4c_real_route_identity_is_proven_but_remains_disabled() -> None:
+def test_cp4c_real_route_identity_is_proven_and_enabled() -> None:
     ident = cp4c_identity()
     assert tuple(ref.module_id for ref in ident.upstream) == (
         "CP-0",
@@ -65,8 +65,8 @@ def test_cp4c_real_route_identity_is_proven_but_remains_disabled() -> None:
         "CP-3C",
     )
     assert _validate(ident, cp4c_markdown(ident)).qa_status == "Restricted"
-    assert "CP-4C" not in ADAPTER_MODULES
-    assert SELECTION not in ADAPTER_ROUTES
+    assert "CP-4C" in ADAPTER_MODULES
+    assert SELECTION in ADAPTER_ROUTES
 
 
 def test_cp4c_emits_every_restructuring_register() -> None:
