@@ -54,6 +54,8 @@ ADAPTER_MODULES = frozenset(
         "CP-2E",
         "CP-2H",
         "CP-4C",
+        "CP-2D",
+        "CP-1B",
         "CP-3",
         MODEL_MODULE,
         "CP-8",
@@ -75,6 +77,8 @@ ADAPTER_ROUTES = frozenset(
         # The same CP-0 -> CP-DR contract under FULL identity, proven without
         # a provider or qualification claim (`test_full_deep_research_route`).
         ("FULL_CREDIT_32", "DEEP_RESEARCH"),
+        ("FULL_CREDIT_32", "LIQUIDITY_REVIEW"),
+        ("FULL_CREDIT_32", "EARNINGS_UPDATE"),
         ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT"),
     }
 )
