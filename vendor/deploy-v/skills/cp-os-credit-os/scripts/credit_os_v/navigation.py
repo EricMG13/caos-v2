@@ -428,7 +428,11 @@ def parse_t8(text: str, catalog: Catalog) -> tuple[Recommendation, ...]:
             exact_command = _unwrap_command(exact_command, module_id)
             source_files, readiness, reason = cells[4], cells[6], cells[7]
         module = catalog.modules.get(module_id)
-        if module is None or not module.navigable or module.layer_id is None:
+        # CP-DR is navigable with no layer, as validate_catalog admits; CP-0's
+        # T8 contract lists it among the ids a row may name.
+        if module is None or not module.navigable or (
+            module.layer_id is None and module_id != "CP-DR"
+        ):
             raise NavigationError(f"CP-0 recommends unknown or non-navigable module: {module_id}")
         if readiness not in READINESS:
             raise NavigationError(f"{module_id}: unsupported readiness {readiness!r}")

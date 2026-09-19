@@ -1658,8 +1658,8 @@
           "sha256": "e8a221951431061270fc997b811106a7f7f59eb1f8b2fa81b4b9d54563e0ea83"
         },
         "scripts/credit_os_v/navigation.py": {
-          "bytes": 36034,
-          "sha256": "83510e1968e817228dc350557ae06c00fe80cffc33ad092bcf1ae91129b0ac0c"
+          "bytes": 36223,
+          "sha256": "76a18936f2e192ee55252d4d3e1dd1d359435fb4da8e60a744be96349c9a8df5"
         },
         "scripts/credit_os_v/reconcile.py": {
           "bytes": 12787,
