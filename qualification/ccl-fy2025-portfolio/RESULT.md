@@ -1,6 +1,6 @@
-# CCL FY2025 portfolio-screen qualification — no run has been performed
+# CCL FY2025 portfolio-screen qualification — one authorized run, 18 September 2026 (below)
 
-**No run has been performed against this set.** It is authored, loadable and
+**Before 18 September 2026 no run had been performed against this set;** the authorized run is recorded at the end. It is authored, loadable and
 digested; nothing here reports a result, a verdict or a provider. The live run
 is Phase 9 Task 9.1 step 7 and needs the owner's explicit authorization — it
 costs real money and calls a real model.
