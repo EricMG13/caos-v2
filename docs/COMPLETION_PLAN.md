@@ -81,7 +81,7 @@ changed by it.
 | Live spend recorded | `$7.75` across eleven VMO2 runs; one CCL run (`$0.18`-class, refused at CP-0) |
 | GitHub `main` | `01c3724` (PR #283), 17 September 2026. Ruleset 22701406 "main gates" is **active**. The local branch is 353 commits ahead, but the undelivered work under the size gate's own exclusions is **13,036 counted lines over 173 files**, not the 75,566 the Phase 6 checkpoint recorded or the 123,065 the split plan names: most of the branch has landed. Nine PRs are open |
 | Migrations | `0001_legacy` … `0021_blocking_verdicts` |
-| Enabled routes | `ADAPTER_ROUTES` = {`LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `FULL_CREDIT_32/RELATIVE_VALUE`}; `ADAPTER_MODULES` = 12 (`server/methodology/handoff.py:36-55`) |
+| Enabled routes | Current branch: thirteen catalog pathways, including deterministic `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT` at `752a719`; `ADAPTER_MODULES` = 23. Live qualification remains separate |
 | GitNexus | indexed as `caos-v2` (8,993 symbols, 22,700 relationships, 300 flows) at an earlier commit; refresh at Phase 7 entry |
 | Remediation stream (observed 17 September) | `docs/reviews/2026-09-17-gemini-audit-adversarial-review.md` and `docs/superpowers/plans/2026-09-17-audit-remediation.md` untracked; SDD worktrees `sdd/t1`–`sdd/t6` at `/private/tmp/caos-sdd-t{1..6}`; `sdd/t1` carries `4103121` (T1, the report read holds no case lock) and `sdd/t6` carries `65f9d10` (T6, the workspace remount); `sdd/t2`–`t5` at base; plan checkboxes unticked; execution ledger `.superpowers/sdd/2026-09-17-audit-remediation/` |
 
@@ -500,8 +500,11 @@ only to explain earlier execution records.
 
 Ordinary exact-range review per task; one `confidence-review` and one
 separate adversarial code audit per whole phase, with remediation and
-reverification between them; no per-task specialist review. The model axis
-follows the current GPT matrix.
+reverification between them; no per-task specialist review. Both whole-phase
+reviews run in separate review agents, never in the main implementation
+window. Every other review routed to `gpt-6-astra` is likewise a separate-agent
+review, including targeted and final reviews. The model axis follows the current
+GPT matrix.
 
 | Activity | Model and effort | Notes |
 |---|---|---|
@@ -538,10 +541,11 @@ the successor link; the five new writes; the second worker; the signed
 assertion; the price recorded with the reservation; **and every register key
 and its derivation** — a wrong key qualifies a wrong conclusion.
 
-Phase-close order: implementation → normal tests → `confidence-review`
-(`gpt-5.6-sol` `xhigh`) → remediate and rerun → refresh GitNexus → adversarial
-code audit (`gpt-6-astra` `xhigh`) → remediate and reverify → phase accepted, recorded in
-the handoff with both review records and the actual settings.
+Phase-close order: implementation → normal tests → separate-agent
+`confidence-review` (`gpt-5.6-sol` `xhigh`) → remediate and rerun → refresh
+GitNexus → separate-agent adversarial code audit (`gpt-6-astra` `xhigh`) →
+remediate and reverify → phase accepted, recorded in the handoff with both
+review records and the actual settings.
 
 ### The pathway task template
 
@@ -794,18 +798,24 @@ corpus:
 5. `RELATIVE_VALUE` live (11.5): the enabled route has only a fixture; a
    real issuer pack (annual report, facility terms from an EDGAR exhibit, a
    peer/market table); keys; run.
-6. `COVENANT_REFINANCING` (11.6): CP-2D and CP-3C. CP-3C runs on the CCL
-   10-K's maturity schedule; CP-4 on the same route is what needs the
-   indentures sourced, so this pathway waits on CP-4's documents rather than on
-   CP-3C's. Keys on maturities and covenant terms; run.
-7. `PORTFOLIO_DECISION` (11.7): CP-6 and the QA_GATE; the HTTP test over a
-   canonical `read_run` with a QA verdict other than `Passed` (the ledger's
-   owed test); keys; run.
-8. `FULL_CREDIT_ASSESSMENT` (11.8): CP-1A, CP-1D, CP-2E, CP-2H, CP-4C. CP-2E's
-   Item 7A substrate is present in the CCL extract and CP-2H can be proven
-   `Restricted` without the agency documents, so the binding constraints are
-   CP-1A's missing transaction and CP-4C's inherited debt documents. Needs
-   Phase 10 for the pack size; retires `NOT_YET_REACHED`; keys; run.
+6. `COVENANT_REFINANCING` (11.6): CP-2D and CP-3C. The deterministic route is
+   enabled (§113); its offline CCL set is next. CP-3C runs on the CCL 10-K's
+   maturity schedule; CP-4 on the same route is what needs the indentures
+   sourced, so live qualification waits on CP-4's documents rather than on
+   CP-3C's contract. Keys on maturities and covenant terms; run.
+7. `PORTFOLIO_DECISION` (11.7): CP-6 and the QA_GATE. CP-6 plus absorbed CP-6A
+   are contract-proven on the real FULL identity (§114), and the deterministic
+   route and whole-route runtime proof are enabled at `66ccd38`. The proof
+   confirms that a CP-5 verdict other than `Passed` holds CP-6 without an
+   attempt or reservation. Keys and a live run still require the CCL
+   legal/market/portfolio pack.
+8. `FULL_CREDIT_ASSESSMENT` (11.8): CP-1A, CP-1D, CP-2E, CP-2H and CP-4C are
+   contract-proven, and the exact nineteen-node/eighty-eight-edge route is
+   enabled at `752a719`. Its deterministic proof stays under the request
+   ceiling, completes all nineteen modules and proves that a non-Passed CP-5
+   verdict holds CP-6 without an attempt or reservation.
+   Live qualification still needs the registered source pack, keys and an
+   authorised pinned-provider run; deterministic enablement is not a verdict.
 9. `DISTRESSED_RESTRUCTURING` (11.9): CP-4C's distress gate; **blocked on
    corpus** until a distressed issuer's documents are sourced; brief held.
 

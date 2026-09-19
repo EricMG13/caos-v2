@@ -4,7 +4,8 @@
 > [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md) and decision
 > §104 govern new dispatches. Claude model names below are historical execution
 > records. The `.claude/agents/` files do not configure Codex: select
-> `gpt-5.6-sol` or `gpt-6-astra` and the required effort in the Codex dispatch.
+> the relevant model from the full GPT portfolio and the required effort in the
+> Codex dispatch; the matrix supplies task-specific defaults, not an allow-list.
 
 This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/DECISIONS.md` §39 resolves document precedence and repair semantics.
@@ -17,14 +18,14 @@ contracts.
 
 | Item | Recorded state |
 |---|---|
-| Workbench | `/Users/ericguei/Documents/caos-workbench` |
-| Branch | `codex/execute-repair-plan` |
+| Workbench | `/Users/ericguei/.codex/worktrees/gpt-model-routing/caos-workbench` |
+| Branch | `completion/owner-decisions` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only until programme closeout; after all completion items and delivery PRs are closed and verified and the final cross-phase review passes, fast-forward `main` from its GitHub `origin/main` and record the final commit here |
 | Latest accepted phase | **Completion Phases 7 and 8 accepted at `38f4639`** (records below; one `make check` at exit 0 gated both). Earlier: Phase 6 `e59ad7b` (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
 | Qualification state | Thirteen authorised live runs, `$8.40`: the eleven before, and two portfolio runs on 18 September on build `62a94ccd` (VMO2 route complete, citation key missed; CCL blocked at CP-0's readiness gate), `$0.65`. One `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to the old build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified** |
-| Enabled routes | Seven of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_PORTFOLIO_DECISION` (9.1), `LITE_RELATIVE_VALUE` (9.2), `LITE_DECISION_LEDGER` (9.3), `LITE_DEEP_RESEARCH` (9.4), `FULL_CREDIT_32/RELATIVE_VALUE`, and `FULL_CREDIT_32/DEEP_RESEARCH` (11.4a deterministic contract only; qualification remains pending) (`ADAPTER_ROUTES`). Bundle build `78c24be4` (§96/§98) |
+| Enabled routes | Thirteen of eighteen catalog pathways: the previous twelve plus `FULL_CREDIT_32/FULL_CREDIT_ASSESSMENT` (11.8 deterministic contracts and whole-route proof only; qualification keys and run remain pending) (`ADAPTER_ROUTES`). Bundle build `78c24be4` (§96/§98) |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md) and current Codex routing in [GPT_MODEL_REASONING_MATRIX.md](GPT_MODEL_REASONING_MATRIX.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
-| Current task | **Wave four on `completion/owner-decisions`** (record "Wave four" below): the owner's decisions §88–§91, the authorised vendor build §92, 13.4 signed edge §93, 13.6 release pack §94, 10.1 evidence selection §95, Tasks 9.2 and 9.3 enabled, two authorised live runs; 9.4 (CP-DR) in progress. Not pushed: the push to GitHub was refused by a permission check |
+| Current task | **Phase 11 exit on `completion/owner-decisions`**: Task 11.8's five module contracts and nineteen-node route are deterministically proven and enabled at `752a719`. Live qualification remains held on the registered source pack, answer keys and pinned provider configuration; Task 11.9 remains held on its missing distressed-issuer corpus. The complete gate and separate-agent phase reviews are next. Delivery is owned by the separate PR/CI/Sonar task; this implementation task does not push or modify local `main` |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
 | Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise. At programme closeout that session verifies GitHub's accepted tree, fast-forwards workbench `main` from `gh-origin/main`, then fast-forwards the still-read-only original checkout from its GitHub `origin/main`; no force, reset, or direct `completion/*` merge is permitted |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
@@ -1577,3 +1578,194 @@ The phase is not accepted.
   `BLOCKED 2/3`; restore probe passed. A complete `make check` (frontend 157,
   workbench 90, image clean with pinned Trivy 0.70.0) passed at `83d7745`; the
   phase-exit `make check` reruns on the final candidate.
+
+## Phase 11 Task 11.2 status — deterministic liquidity route enabled
+
+The deterministic CP-2D slice in §107 proves `T2E.1`–`T2E.7` and `T2E.9` on
+the actual `FULL_CREDIT_32 / LIQUIDITY_REVIEW` route identity. Its authored
+bridge reconciles 250 of opening accessible liquidity to 230 ending liquidity
+after 20 of twelve-month burn, and the shipped vendor calculator independently
+returns 150 months to empty. Missing registers and wrong lineage refuse with
+the canonical host codes; a Restricted result keeps its limitation and FULL
+scope.
+
+CP-2D and `FULL_CREDIT_32 / LIQUIDITY_REVIEW` are now enabled in the production
+adapter whitelist after a deterministic whole-route proof: CP-0, CP-1, CP-2
+and CP-2D complete with source-grounded handoffs, proof and canonical
+save/sign/freeze/verify. The offline CCL liquidity qualification set is now
+prepared; no provider was called and no qualification is claimed. Owner key
+confirmation and live qualification remain pending; Task 11.2 is not complete.
+
+## Phase 11 Task 11.3 status — deterministic earnings-update route enabled
+
+CP-1B and `FULL_CREDIT_32 / EARNINGS_UPDATE` are enabled only on the
+deterministic whole-route contract in §109. CP-0, CP-1, CP-1B, CP-2 and CP-5
+complete with source-grounded handoffs, the shipped CP-MODEL input check,
+orchestration proof, and canonical save/sign/freeze/verify. CP-0 blocking
+causes no downstream attempt or reservation. The separate CCL FY2025/FY2024
+qualification set is now prepared offline (§110), with source citations and
+CP-1B canonical comparator keys; no provider was called and no
+qualification, performed snapshot, signed verdict or live result is claimed.
+Fresh live-run authorization and owner confirmation of the comparatives and
+deltas remain.
+
+## Phase 11 Task 11.4 status — deterministic FULL decision ledger enabled
+
+`FULL_CREDIT_32 / DECISION_LEDGER` now reuses the proven CP-0 -> CP-8
+deterministic fixture under its own FULL identity. The route proof covers the
+exact REQUIRED edge and terminal, source-grounded citations, CP-8's FULL
+projection and exact CP-0 lineage, request bounds, orchestration proof and
+canonical save/sign/freeze/verify. CP-0 blocking leaves CP-8 without an attempt
+or reservation; a validated Blocked CP-8 remains the terminal verdict.
+
+This enables only the deterministic contract. No provider was called and no
+qualification, performed snapshot, signed verdict or live result is claimed.
+The real corpus remains blocked on the owner-authored pre-outcome decision
+record tracked as `ccl-decision-record` (`to_author`); none was fabricated or
+prepared here.
+
+## Phase 11 Task 11.6 status — deterministic covenant/refinancing route enabled
+
+The deterministic CP-3C slice in §112 proves every T3D.1–T3D.11 register on
+the real `FULL_CREDIT_32 / COVENANT_REFINANCING` identity. It binds the required
+CP-0, CP-1 and CP-2D lineage, accepts CP-4 only when that optional predecessor
+is present, preserves carrying-value debt while recording the material gross-
+principal conflict, and keeps the dated subsequent extension in a separate
+pro-forma view. The shipped funding-gap calculator independently verifies the
+as-of and pro-forma maturity walls and funding gaps. Missing registers and
+wrong lineage refuse with canonical host codes; Restricted retains the legal-
+capacity limitation and FULL scope.
+
+CP-3C and `FULL_CREDIT_32 / COVENANT_REFINANCING` now join the production
+adapter whitelist behind a whole-route proof over the exact seven nodes and all
+eighteen typed edges. One source pack grounds every quoted token. CP-3C retains
+FULL scope, its Restricted verdict and limitation, and exact CP-0/CP-1/CP-4/
+CP-2D direct lineage; the proof also covers request bounds, orchestration,
+canonical save/sign/freeze/verify, zero downstream spend after a CP-0 block,
+and terminal handling of a validated Blocked CP-3C.
+
+This is deterministic contract enablement only. No provider was called and no
+qualification, performed snapshot, signed verdict or live result is claimed.
+An offline CCL set is next; live qualification remains blocked on executed CCL
+debt documents for CP-4 and legal-capacity analysis.
+
+## Phase 11 Task 11.7 status — deterministic route enabled; keys and run remain
+
+The deterministic CP-6 slice proves the real eight-node, twenty-three-edge
+`FULL_CREDIT_32 / PORTFOLIO_DECISION` identity, including the sole catalog
+`QA_GATE` from CP-5 to CP-6 and optional CP-3D lineage. CP-6 and its absorbed
+CP-6A phase emit all twenty-two method sections and all eight T6A/T6E
+registers. The proof checks required dimensions, permitted scores, resolution
+labels and implications, sequential gaps, exact decision formulations,
+missing-register refusals, wrong-lineage refusal and source-derived mutation.
+
+The honest default is Restricted: CP-2A, CP-2D, CP-3A, CP-3B, CP-3C and CP-4A
+are not nodes on this route. The fixture therefore forces a constrained issuer
+Starter Position while portfolio sizing remains Requires More Work; it does
+not infer a full downside, liquidity, refinancing, recovery or portfolio-fit
+decision from adjacent evidence.
+
+Commit `66ccd38` adds CP-6 and the route to the adapter whitelists. Its
+whole-route proof shows Passed CP-5 releases CP-6, Restricted or Blocked CP-5
+creates no CP-6 attempt or reservation, and the HTTP run view reports the
+accepted QA verdict. The successful Restricted CP-6 path stays within the
+request ceiling, proves citations and lineage, and saves, signs, freezes and
+verifies the canonical deliverable. CP-6's verified workbook is delivered
+losslessly through the existing explicit base64 authority convention.
+
+No provider, qualification or live result is claimed. Task 11.7's final
+qualification remains held on the executed CCL debt documents, dated market
+extract, portfolio mandate/exposure extract and a pinned live-run database,
+price and execution identity. Those demands are explicit in the document
+register through `4aed817`; no partial set or fitted key substitutes for them.
+
+## Phase 11 Task 11.8 status — CP-2H contract proven; route remains disabled
+
+Commit `beef583` proves CP-2H on the real nineteen-node
+`FULL_CREDIT_32 / FULL_CREDIT_ASSESSMENT` identity. The fixture emits every
+T2R.1–T2R.10 register, retains exact required CP-0/CP-1/CP-2G and optional
+CP-1D lineage, and keeps issuer-reported ratings separate from agency-issued
+evidence. Missing primary actions and criteria therefore produce a Restricted
+50/Low handoff rather than a fabricated formal rating posture.
+
+The shipped signed-headroom calculator owns the base and downside trigger
+rows, including the rule that one breached period is not automatically a
+sustained trigger. The proof covers every missing register, wrong-lineage
+refusal, source-derived mutation and the module's own validator. CP-2H and the
+route remain outside the adapter whitelists; CP-1A, CP-1D and CP-4C are still
+unproven. No provider, qualification or live-run result is claimed.
+
+## Phase 11 Task 11.8 status — CP-2E contract proven; route remains disabled
+
+Commit `a0f2d12` proves CP-2E, including its absorbed CP-2F phase, on the real
+nineteen-node `FULL_CREDIT_32 / FULL_CREDIT_ASSESSMENT` identity. The fixture
+uses CCL's filed FY2025 10-K for debt mix, expired swaps, issuer-stated rate
+sensitivity, euro newbuild exposure, fuel cost and EU ETS cost. All seventeen
+T2F/T2G registers are present and every absent register or changed CP-0 lineage
+refuses canonically.
+
+The shipped rate/FX sensitivity script owns the unhedged-debt, 100bp rate,
+1% EUR/USD and fuel-stress arithmetic; a source-derived mutation proves those
+rows rebuild rather than remain fitted. The result is Restricted because the
+10-K does not supply current derivative terms, fuel pass-through economics or
+independently assured transition forecasts. CP-2E and the route remain outside
+the adapter whitelists; CP-1A, CP-1D and CP-4C remain before route enablement.
+No provider, qualification or live-run result is claimed.
+
+## Phase 11 Task 11.8 status — CP-1D contract proven; route remains disabled
+
+Commit `7499b0c` proves CP-1D and its absorbed CP-1E phase on the real
+nineteen-node route identity. CCL's filed three-year reconciliation shows that
+the $13 million FY2025 restructuring add-back followed $21 million and $19
+million charges in FY2024 and FY2023, so CP-1D's hard recurrence rule rejects
+it. The same filing anchors CFO, reported debt and the ASC 842 operating-lease
+liability used once in the adjusted-debt bridge.
+
+All thirteen T1D/T1E registers, exact CP-0/CP-1/CP-1B lineage, missing-register
+refusals and source-derived mutation are proven. The result remains Restricted
+because no agency debt convention or executed covenant EBITDA definition was
+delivered. CP-1D and the route remain disabled; CP-1A and CP-4C remain before
+whole-route enablement. No provider, qualification or live-run result is
+claimed. At the owner's direction, every phase-end confidence and adversarial
+review runs in a separate review agent, never this implementation window.
+
+## Phase 11 Task 11.8 status — CP-4C contract proven; route remains disabled
+
+Commit `d236966` proves all ten CP-4C restructuring registers on the real route
+identity. A documented synthetic distress pack is used because live CCL has no
+distress gate and must remain Not Applicable. The shipped waterfall owns all
+low/base/high recoveries and proves that the fulcrum moves from TLB to unsecured
+notes before all classes become whole at the high case. Missing registers,
+changed six-module lineage and source-derived mutations refuse or rebuild as
+required. The result remains Restricted pending final class/cramdown opinions
+and a court timetable. CP-1A remains before whole-route enablement; no live CCL
+restructuring, provider call, qualification or result is claimed.
+
+## Phase 11 Task 11.8 status — CP-1A contract proven; whole route remains disabled
+
+Commit `834daa0` proves CP-1A and its absorbed CP-2C workflow on the real
+`FULL_CREDIT_ASSESSMENT` identity. The deterministic acquisition pack populates
+all twenty-two required registers plus exactly six READY CP-MODEL display rows.
+It proves the single direct CP-0 predecessor, every missing-register refusal,
+changed-lineage refusal, source-derived transaction mutation and Restricted
+FULL-scope projection. Customer concentration and the final legal review of
+restricted-payment capacity remain explicit limitations. CP-1A and the route
+remain disabled until the complete nineteen-node route proof passes; no live
+CCL transaction, provider call, qualification or result is claimed.
+
+## Phase 11 Task 11.8 status — deterministic whole route enabled
+
+Commit `752a719` admits the five newly proven modules and
+`FULL_CREDIT_32 / FULL_CREDIT_ASSESSMENT` to the production adapter allowlists.
+The whole-route proof covers the exact nineteen nodes and eighty-eight edges,
+all direct predecessor identities, vendor-valid handoffs, the request ceiling,
+canonical artifact and citation persistence, and orchestration proof `(19, 19)`.
+CP-5 receives all sixteen direct upstreams. A Restricted CP-5 verdict holds
+CP-6 without an attempt or budget reservation; the successful deterministic
+path completes all nineteen modules.
+
+This is deterministic enablement only. No provider was called and no live
+qualification, performed snapshot, signed verdict or result is claimed. The
+registered evidence pack, answer keys and pinned live-run configuration remain
+the binding work for Task 11.8 qualification; Task 11.9 remains held on a
+distressed issuer's source corpus.
