@@ -264,9 +264,9 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   reads back through `current_verdict`
   (`tests/test_release_pack.py::test_no_pathway_is_qualified_without_a_signed_verdict_row`,
   `test_a_verdict_that_is_not_current_for_this_build_qualifies_nothing`). No
-  such row exists in any store, so the ten enabled pathways read
-  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the other eight
-  read `DISABLED` -- which is the exit check met by saying so, not by
+  such row exists in any store, so the seven enabled pathways read
+  `NOT_QUALIFIED` from a store and `UNVERIFIED` without one, and the eleven
+  others read `DISABLED` -- which is the exit check met by saying so, not by
   qualifying anything. Two limits of the pack itself: its inventory is test
   *definitions*, not pytest's collection, so a parametrised test is one row and
   a workspace title computed at run time is recorded as its template; and the
@@ -1414,10 +1414,8 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `tests/test_lite_decision_ledger_route.py`), and Task 9.4 LITE deep research
   (CP-0 -> CP-DR, `tests/test_lite_deep_research_route.py`, §96); Task 11.4a
   proves the same CP-0 -> CP-DR contract under FULL identity
-  (`tests/test_full_deep_research_route.py`, §105), and Task 11.2 enables the
-  FULL liquidity route after its CP-2D and whole-route proofs
-  (`tests/test_liquidity_route.py`, §107). Every route outside those eight
-  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
+  (`tests/test_full_deep_research_route.py`, §105). Every route outside those
+  seven `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
@@ -2918,7 +2916,7 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **caos-v2** (12903 symbols, 32436 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **caos-v2** (10879 symbols, 26894 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
