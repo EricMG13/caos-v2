@@ -1,6 +1,45 @@
 # Qualification provider and spend pin — 19 September 2026
 
-Status: **PAID EARLY STOP — two smoke sets ran once; Sol/high is suspended.**
+Status: **PAID BOUNDED RETRY COMPLETE — Sol/xhigh smoke sets ran once; Phase 4 remains stopped.**
+
+## Phase 4 xhigh retry record
+
+The owner explicitly authorized one configuration-only retry of the same two
+unchanged smoke sets under the same official model and `openai` endpoint, with
+reasoning effort `xhigh`, identity `openrouter/openai/xhigh/65536`, the
+unchanged conservative price below, `--attempts 1`, a ceiling of `$12.451840`
+per set, and an aggregate maximum of `$24.903680`. The CCL set was launched
+first and reconciled before VMO2 was launched. Each driver was launched once;
+neither set was re-entered or rerun.
+
+The CCL driver made one CP-0 call. It retained `$3.381505` of reservation and
+charged `$0.4907785`. The closed transport passed and all six citations quoted
+by the answer anchored uniquely on their declared pages, but the vendor
+validator rejected a model-authored `qa_status: Passed` because the answer also
+carried a MATERIAL finding that requires `Restricted`. No artifact was
+accepted, no CP-L10 call occurred, and no matrix or verdict exists. This is a
+model-contract miss, not a host, parser, provider, source-delivery or key
+defect.
+
+The VMO2 driver made one accepted CP-0 call and one accepted CP-L10 call. It
+retained `$4.983815` of reservations and charged `$0.8599520`. The route reached
+`COMPLETE`; its proof covers two artifacts and eleven re-anchored citations,
+and the readiness, projection and register keys passed. The one pre-run CP-L10
+citation key was missed, so the matrix reads `met: 0`, `missed: 1`, the
+performed snapshot is incomplete, and no verdict exists. The key is unchanged.
+
+Across both launches, three calls retained `$8.365320` of reservations and
+charged **`$1.3507305`**, within the `$24.903680` aggregate maximum. The bounded
+retry does not justify continuing to wider sets: CCL still fails the vendor
+contract and VMO2 still misses its valid pre-run key. Both pathways remain
+`NOT_QUALIFIED`, and Phase 4 stops here pending a new explicit owner decision.
+
+The retained stores and files are:
+
+| Set | Run | Database | Blob root | Capture / driver log |
+|---|---|---|---|---|
+| `ccl-fy2025-portfolio` | `0e4198da-abb8-4188-8f1e-c5547f3d0dec` | `caos_qualify_0fea5b169d6e4eccb59cd4815302eab5` | `.dev-data/qualification-blobs/caos-qualify-mpp_b9qh` | `run-2026-09-19-b-capture.json` / `run-2026-09-19-b-driver.log` |
+| `vmo2-fy2025-portfolio` | `802ae485-54a8-4f4c-96c8-2f1cd9f80d2d` | `caos_qualify_cc7b22d0e73745f3918abf44cbb9ed6e` | `.dev-data/qualification-blobs/caos-qualify-tob16vnx` | `run-2026-09-19-b-capture.json` / `run-2026-09-19-b-driver.log` |
 
 ## Phase 4 early-stop record
 
@@ -18,14 +57,12 @@ second set was a deliberate diagnostic exception to the default stop after an
 unexpected refusal; after it reproduced the failure, the remaining sixteen
 sets were not launched. Both smoke results remain `NOT_QUALIFIED`.
 
-No further Sol/high run is justified. The smallest controlled replacement
-proposal is the same official model and `openai` endpoint at reasoning effort
-`xhigh`, identity `openrouter/openai/xhigh/65536`, with the unchanged dated
-`0.000005` / `0.000015` price. One `--attempts 1` launch of each unchanged
-two-node smoke set would have a ceiling of `12.451840` each and `24.903680` in
-aggregate. That changed identity and additional spend are **not authorized by
-the one-launch Sol/high record below**; execution remains stopped pending an
-explicit amended owner authorization.
+No further Sol/high run is justified. The smallest controlled replacement was
+the same official model and `openai` endpoint at reasoning effort `xhigh`,
+identity `openrouter/openai/xhigh/65536`, with the unchanged dated `0.000005` /
+`0.000015` price. That proposal was subsequently authorized and executed only
+for the two unchanged smoke sets, as recorded above. The earlier Sol/high
+authorization did not itself authorize that changed identity or spend.
 
 ## Observed configuration
 
