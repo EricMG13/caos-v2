@@ -154,6 +154,7 @@ PERMANENT = frozenset(
         RefusalCode.HANDOFF_MODULE_UNSUPPORTED,
         RefusalCode.ATTEMPT_NOT_FOUND,
         RefusalCode.EVIDENCE_PACKING_MISMATCH,
+        RefusalCode.EVIDENCE_DEMAND_UNRESOLVED,
         RefusalCode.INTERNAL_FAULT,
         RefusalCode.RESERVATION_BELOW_REQUEST,
         RefusalCode.PROVIDER_OUTPUT_TRUNCATED,
@@ -237,6 +238,9 @@ _STATUS = {
     # this server wrote read under a rule that has since moved. The same request
     # later meets the same rows and the same rule; re-admission is the discharge.
     RefusalCode.EVIDENCE_PACKING_MISMATCH: 500,
+    # A gate cell the host can neither read as a selection nor ignore (§95):
+    # an answer the provider already gave, which the same request meets again.
+    RefusalCode.EVIDENCE_DEMAND_UNRESOLVED: 500,
     # An exception this server did not anticipate, or an invariant of its own it
     # found broken. It was 400 here while the edge guard answered the same code
     # 500 for an unhandled exception, so its status depended on which layer

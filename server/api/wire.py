@@ -234,6 +234,10 @@ CLEARS: Mapping[RefusalCode, str] = {
     _C.EVIDENCE_PACKING_MISMATCH: (
         "An operator must re-admit the source under this build."
     ),
+    _C.EVIDENCE_DEMAND_UNRESOLVED: (
+        "Run a successor whose CP-0 names each source to attach by its admitted "
+        "filename or document digest, or names none."
+    ),
     _C.PAGE_NOT_AVAILABLE: "Name a page of a live source pinned to this run.",
     _C.CITATION_NOT_LOCATED: "Quote whole tokens from delivered evidence.",
     _C.CITATION_AMBIGUOUS: "Quote enough text to locate it once.",
