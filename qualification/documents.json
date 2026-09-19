@@ -254,17 +254,61 @@
       "note": "CP-3D Phase 1 (market evidence gate) demands instrument identifiers, currency, coupon, maturity, seniority, pricing convention, and per observation the source, entitlement, bid/mid/ask or evaluated status, observation time and staleness — and states that `required market observations cannot be replaced with model memory`. The owner supplies this as a document under its own digest; it is the one demand here that no filing can satisfy, because it is priced and timestamped rather than disclosed."
     },
     {
-      "id": "cruise-peer-pack",
+      "id": "ccl-fy2025-10k-relative-value",
       "issuer": "CCL",
-      "document": "Peer pack: cruise-sector peers' FY2025 filings for the aligned metric set",
-      "modules": ["CP-1C"],
-      "pathways": ["LITE_RELATIVE_VALUE", "LITE_FULL_CREDIT_SCREEN", "RELATIVE_VALUE"],
+      "document": "Carnival Corporation & plc FY2025 Form 10-K (text extract, relative-value set copy)",
+      "modules": [
+        "CP-0",
+        "CP-L10",
+        "CP-1C"
+      ],
+      "pathways": [
+        "LITE_RELATIVE_VALUE"
+      ],
       "source": null,
       "status": "to_source",
-      "local_path": null,
+      "local_path": "qualification/ccl-fy2025-relative-value/documents/CCL_FY2025_10K.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "The same bytes as ccl-fy2025-10k (digest unchanged), copied because a set's documents must live inside its own directory: `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. It is the borrower side of CP-1C's benchmark on LITE_RELATIVE_VALUE, beside the two peer releases. Not committed in this slice -- the raw text pushed this PR over the 800-line cap -- so status stays to_source until the owner adds it at qualification/ccl-fy2025-relative-value/documents/CCL_FY2025_10K.txt."
+    },
+    {
+      "id": "rcl-q4-2025-earnings",
+      "issuer": "RCL",
+      "document": "Royal Caribbean Group, \"Royal Caribbean Group Reports 2025 Results, Issues 2026 Guidance\" (29 January 2026 earnings release, text extract)",
+      "modules": [
+        "CP-1C"
+      ],
+      "pathways": [
+        "LITE_RELATIVE_VALUE",
+        "LITE_FULL_CREDIT_SCREEN",
+        "RELATIVE_VALUE"
+      ],
+      "source": "https://www.prnewswire.com/news-releases/royal-caribbean-group-reports-2025-results-issues-2026-guidance-302673898.html (also filed as the Item 2.02 8-K, accession 0000884887-26-000003)",
+      "status": "to_source",
+      "local_path": "qualification/ccl-fy2025-relative-value/documents/RCL_Q4_2025_Earnings_Release.txt",
       "external_path": null,
       "demand_verified": false,
-      "note": "CP-1C's steps 0 and 1 are a Peer Discovery Gate and a Peer Data Gate, and its purpose is a defensible peer set benchmarked on aligned definitions — but the SKILL.md names no document form, so `a peer pack` is inferred from the gates rather than quoted from a demand. Each peer's own filing is the evidence CP-1C would have to cite, which is why this is a pack and not one table. Peers are the owner's to choose; naming them here would be the host choosing a peer set."
+      "note": "One half of what was the `cruise-peer-pack` row, split so each peer's release carries its own digest. CP-1C's steps 0 and 1 are a Peer Discovery Gate and a Peer Data Gate, and its SKILL.md names no document form, so the demand is still inferred from the gates rather than quoted. Sourced by the coordinator on 18 September 2026 under the owner's authorization \"web search for equivalent versions to test\"; the peer choice -- the other two listed major cruise operators -- is the coordinator's recommendation applied under that instruction, not a peer set CP-1C derived. The file is an HTML-to-text conversion by the coordinator, so the file is the text; nothing in it is the issuer's typography. Not committed in this slice -- the raw text pushed this PR over the 800-line cap -- so status stays to_source until the owner adds it at qualification/ccl-fy2025-relative-value/documents/RCL_Q4_2025_Earnings_Release.txt."
+    },
+    {
+      "id": "nclh-q4-2025-earnings",
+      "issuer": "NCLH",
+      "document": "Norwegian Cruise Line Holdings Q4 and full-year 2025 results (2 March 2026 earnings release, text extract)",
+      "modules": [
+        "CP-1C"
+      ],
+      "pathways": [
+        "LITE_RELATIVE_VALUE",
+        "LITE_FULL_CREDIT_SCREEN",
+        "RELATIVE_VALUE"
+      ],
+      "source": "https://www.nclhltd.com/investors/news-events/press-releases/detail/768/norwegian-cruise-line-holdings-reports-fourth-quarter-and (Item 2.02 8-K, accession 0001171843-26-001220)",
+      "status": "to_source",
+      "local_path": "qualification/ccl-fy2025-relative-value/documents/NCLH_Q4_2025_Earnings_Release.txt",
+      "external_path": null,
+      "demand_verified": false,
+      "note": "The other half of what was the `cruise-peer-pack` row. The demand is inferred from CP-1C's gates, as for the RCL release. Sourced by the coordinator on 18 September 2026 under the owner's authorization \"web search for equivalent versions to test\"; the peer choice -- the other two listed major cruise operators -- is the coordinator's recommendation applied under that instruction, not a peer set CP-1C derived. The file is an HTML-to-text conversion by the coordinator, so the file is the text; nothing in it is the issuer's typography. Not committed in this slice -- the raw text pushed this PR over the 800-line cap -- so status stays to_source until the owner adds it at qualification/ccl-fy2025-relative-value/documents/NCLH_Q4_2025_Earnings_Release.txt."
     },
     {
       "id": "ccl-decision-record",
