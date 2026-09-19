@@ -170,10 +170,15 @@ def test_the_gate_cannot_cite_a_line_its_page_map_withheld(
     assert _refused(paged, "CP-0", withheld) is RefusalCode.CITATION_NOT_DELIVERED
 
 
-def test_a_source_within_the_gate_bound_reaches_cp0_whole_as_before(
+def test_a_source_within_the_gate_bound_reaches_cp0_whole_and_says_so(
     paged: _Harness,
 ) -> None:
+    """A whole source is labelled WHOLE, not left unlabelled: the 18 September
+    2026 VMO2 portfolio run's CP-0 read rule 8 (page maps) onto two releases the
+    host had delivered whole, and blocked its consumer for a fidelity it had
+    never been denied."""
     completions = _gate(paged)
     [prompt] = completions.prompts
     assert _line(59) in prompt and _line(179) in prompt
-    assert "evidence_delivery" not in prompt
+    assert '"evidence_delivery": "WHOLE"' in prompt
+    assert '"evidence_delivery": "PAGE_MAP"' not in prompt
