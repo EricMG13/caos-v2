@@ -1254,8 +1254,10 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
   `RUN_INPUT_INVALID`. Task 5.2a now adds RELATIVE_VALUE and its eight new
   modules; Phase 9 Task 9.1 adds LITE portfolio decision (CP-0 -> CP-L10,
   `tests/test_lite_portfolio_route.py`); Task 9.2 adds LITE relative value
-  (CP-0 -> CP-L10 -> CP-1C, `tests/test_lite_relative_value_route.py`); every
-  route outside those four `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
+  (CP-0 -> CP-L10 -> CP-1C, `tests/test_lite_relative_value_route.py`) and Task
+  9.3 LITE decision ledger (CP-0 -> CP-8,
+  `tests/test_lite_decision_ledger_route.py`); every route outside those five
+  `ADAPTER_ROUTES` pathways remains disabled -- it pins and passes its
   gates but is refused `HANDOFF_MODULE_UNSUPPORTED` at `execution_input` (so
   before any attempt, reservation or call) and at acceptance. A harness case
   on such a route still prepares and is refused only when performed. Closed in
