@@ -58,3 +58,35 @@ section. Nothing has been run on this route, so there was nothing to copy from.
   carries to this pathway unchanged. A `TL10.1` source-row key is still owed and
   is not guessed here.
 - **The run itself**, and a signed verdict or a recorded reason why not.
+
+## First authorized run — 18 September 2026
+
+Authorized by the owner the same day ("authorize the two portfolio runs with the
+Terra settings above, a $5 ceiling per run, today"). **Not signable:**
+`complete` is false because the one citation key was missed.
+
+- Provider/model: `openrouter/openai/flex/high/65536` / `openai/gpt-5.6-terra`
+- Price: `$0.000002` input, `$0.000012` output per token, dated 2026-09-18,
+  read from OpenRouter's published model list that day
+- Run ceiling `$5.00`; `--attempts 2`; build
+  `62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c` (§92)
+- Run `2ab8b2e2-b577-45ca-87bd-8c45e3f7b9f2`; set `a46a1b4f597885e8…`
+  (unchanged); evidence `1b9df866631eb3d8…`; performed `65701fdf5f8863c9…`
+- Retained database `caos_qualify_9b87b7104a8d49f1badeffc12d47b3c4`, blob root
+  `/var/folders/81/bwblpst93lb6wb3lwrk8k6800000gn/T/caos-qualify-fi8rdqvn`;
+  capture `run-2026-09-18-capture.json`
+- Charges: CP-0 `$0.13946575`; CP-L10 attempt 1 `$0.1660905` (refused
+  `CITATION_NOT_LOCATED`), attempt 2 `$0.16364625` (accepted). Total
+  **`$0.46920250`**.
+
+| | |
+|---|---|
+| Route | COMPLETE, 2 artifacts |
+| Proof | 5 citations, every one re-located |
+| `ready_met` / `projections_met` | true / true |
+| Citation key | `met=0, missed=1` — CP-L10 did not quote the £1,021.7m goodwill impairment line |
+
+CP-L10 cited the adjusted EBITDA guidance, adjusted FCF and undrawn commitments
+lines instead. The key is unchanged: it was authored from the documents before
+any run, and moving it to what the model quoted would measure the model against
+itself.
