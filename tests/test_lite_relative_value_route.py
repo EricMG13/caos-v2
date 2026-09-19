@@ -68,6 +68,7 @@ ENABLED = frozenset(
         ("FULL_CREDIT_32", "RELATIVE_VALUE"),
         SELECTION,
         ("LITE_CREDIT_22", "LITE_DECISION_LEDGER"),
+        ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH"),
     }
 )
 
