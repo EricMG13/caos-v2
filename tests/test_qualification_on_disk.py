@@ -27,10 +27,12 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from canonical_fixtures import research_brief
+from canonical_fixtures import BUNDLE, CATALOG, research_brief
 
 from server.boundary_text import BoundaryText
-from server.evidence.extract import DEFAULT_LIMITS
+from server.engine.route import resolve_route
+from server.evidence.citations import _match_at, _Token
+from server.evidence.extract import DEFAULT_LIMITS, dispatch_by_content
 from server.evidence.ingest import Document
 from server.qualification.matrix import (
     ExpectedCitation,
@@ -41,6 +43,7 @@ from server.qualification.matrix import (
     QualificationCase,
     QualificationSet,
     qualification_set_digest,
+    unlocatable_register_keys,
 )
 from server.qualification.on_disk import MANIFEST, load_qualification_set
 from server.refusals import Refusal, RefusalCode
@@ -249,6 +252,24 @@ COMMITTED_SET_DIGESTS = {
     "ccl-fy2025-portfolio": (
         "7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c"
     ),
+    "ccl-fy2025-full-relative-value": (
+        "c834105e7c6e12d6e11996c3744eb414715aef07b549df11bbc9f7ba741977f2"
+    ),
+    "ccl-fy2025-lite-covenant-refinancing": (
+        "4bc8aceaa622a76e930fa8aa419a349ffedd8ca681360571f5c8f2ee38c3aa9e"
+    ),
+    "ccl-fy2025-lite-full-credit-screen": (
+        "a033b1f59bec2d61c887ab018fac8ef7ca22f048cf52c0c0d0f873d0bd53f13e"
+    ),
+    "ccl-fy2025-market-dislocation": (
+        "502ca79ca3cda068f4621698f45f979e34e78945261b284c2ee232b2f57e11fe"
+    ),
+    "save-2024-distressed-restructuring": (
+        "befe19de18cbf6374305882e7a812abeb2ec153038a1dff2a0e80e5674312166"
+    ),
+    "save-2024-lite-distressed-restructuring": (
+        "f53523a15053a2d4f191408cddc600c1667837cbacade354468e0f58fb03c391"
+    ),
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
     "vmo2-fy2025-deep-research": (
         "09807efb1a3d5d40680d1a9d0e054333537781d7bb4013ecd7670323f817fd9b"
@@ -289,6 +310,62 @@ def test_every_committed_set_binds_its_recorded_digest() -> None:
 
     assert found == COMMITTED_SET_DIGESTS
     assert pending == PENDING_SET_DOCUMENTS
+
+
+def test_every_committed_answer_key_names_its_route_and_exact_source() -> None:
+    """No key can name an off-route module or an unreadable source quote."""
+    root = Path(__file__).resolve().parents[1] / "qualification"
+    extracted: dict[str, dict[int, list[_Token]]] = {}
+
+    for name in COMMITTED_SET_DIGESTS:
+        qualification = load_qualification_set(root / name)
+        assert not unlocatable_register_keys(BUNDLE, qualification)
+        for case in qualification.cases:
+            route_modules = {
+                node.module_id
+                for node in resolve_route(
+                    CATALOG, case.profile_id, case.selection_id
+                ).nodes
+            }
+            keyed_modules = (
+                {key.module_id for key in case.expects}
+                | set(case.expects_ready)
+                | set(case.expects_blocked)
+                | {key.module_id for key in case.expects_projection}
+                | {key.module_id for key in case.expects_register}
+            )
+            assert keyed_modules <= route_modules
+
+            documents = {
+                sha256(document.data).hexdigest(): document
+                for document in case.documents
+            }
+            for expected in case.expects:
+                document = documents[expected.document_sha256]
+                if expected.document_sha256 not in extracted:
+                    pages: dict[int, list[_Token]] = {}
+                    for token in dispatch_by_content(document.data).extract(
+                        document.data
+                    ):
+                        pages.setdefault(token.page, []).append(
+                            _Token(
+                                token.text,
+                                token.region_id,
+                                token.line_id,
+                                token.x0,
+                                token.y0,
+                                token.x1,
+                                token.y1,
+                            )
+                        )
+                    extracted[expected.document_sha256] = pages
+                words = expected.matched_text.split()
+                hits = sum(
+                    bool(_match_at(tokens, start, words, normalised=False))
+                    for tokens in extracted[expected.document_sha256].values()
+                    for start in range(len(tokens))
+                )
+                assert hits == 1, expected
 
 
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
