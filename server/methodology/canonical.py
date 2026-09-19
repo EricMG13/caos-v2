@@ -83,6 +83,7 @@ from server.methodology.verification import (
     Verified,
     gate_expects,
     verify_accepted,
+    verify_owner_restrictions,
 )
 from server.provider import CompletionProvider, reported_charge
 from server.refusals import Refusal, RefusalCode
@@ -431,7 +432,8 @@ def _selected(
     the pin by `read_run_blocks`, so a withdrawn member still refuses before
     anything is narrowed (invariant 1). The pinned members are read only when
     the cell has items to map, so a node without a demand -- the gate itself,
-    the host's CP-CF, every legacy-header T8 -- costs no extra round trip.
+    the host's CP-CF, a row whose source-files cell is empty -- costs no extra
+    round trip. (The vendor's parser reads the legacy header's column too.)
     """
     if assignment.module_id == GATE_MODULE:
         # §98: the whole pin, a source past the gate bound as its page map.
@@ -871,7 +873,12 @@ def _verified_accepted(  # noqa: PLR0913 -- the unit's handles, its row, its pai
     # read that serves the frontier, the Run and Analysis documents and the
     # matrix (§45.1). It is what the parent read paid; the cache costs nothing.
     assemble_authority(bundle, node.module_id)
-    if node.module_id == MODEL_MODULE:
+    identity = verified.record.identity
+    if node.module_id == MODEL_MODULE or (
+        node.module_id == "CP-5"
+        and (identity.profile_id, identity.selection_id)
+        == ("LITE_CREDIT_22", "LITE_FULL_CREDIT_SCREEN")
+    ):
         assignment = Assignment(node.module_id, row.run_id, node, route, row.attempt_id)
         _forecast_inputs(
             bundle,
@@ -885,32 +892,31 @@ def _verified_accepted(  # noqa: PLR0913 -- the unit's handles, its row, its pai
 def _forecast_inputs(
     bundle: Bundle, module: str, markdown: bytes, context: _Context
 ) -> None:
-    """The same owner-binding check at acceptance, replay and every accepted read."""
-    if module != MODEL_MODULE:
+    """Owner restrictions bind acceptance, replay and every accepted read."""
+    if module not in {MODEL_MODULE, "CP-5"}:
         return
-    from server.methodology.forecast import (
-        validate_driver_mapping,
-        validate_forecast_bindings,
-    )
-
     upstream = {ref.module_id: data for ref, data in context.upstream}
-    citations = {
-        ref.module_id: context.citations[ref.route_node_id]
-        for ref, _data in context.upstream
-    }
-    validate_forecast_bindings(markdown, upstream, citations)
-    validate_driver_mapping(_contract(bundle), markdown, upstream["CP-2G"])
-    parse = _contract(bundle).validate_handoff.validate_text
-    fields = parse(markdown.decode()).fields
-    for data in upstream.values():
-        owner = parse(data.decode()).fields
-        if (
-            owner["qa_status"] == "Restricted" and fields["qa_status"] != "Restricted"
-        ) or any(
-            not set(owner[key]) <= set(fields[key])
-            for key in ("limitation_flags", "validation_warnings")
-        ):
-            raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
+    if module == MODEL_MODULE:
+        from server.methodology.forecast import (
+            validate_driver_mapping,
+            validate_forecast_bindings,
+        )
+
+        citations = {
+            ref.module_id: context.citations[ref.route_node_id]
+            for ref, _data in context.upstream
+        }
+        validate_forecast_bindings(markdown, upstream, citations)
+        validate_driver_mapping(_contract(bundle), markdown, upstream["CP-2G"])
+    verify_owner_restrictions(
+        _contract(bundle),
+        markdown,
+        upstream.values(),
+        refuse=RefusalCode.HANDOFF_INCOMPLETE,
+        selection=(
+            ("LITE_CREDIT_22", "LITE_FULL_CREDIT_SCREEN") if module == "CP-5" else None
+        ),
+    )
 
 
 def _upstream_records(
