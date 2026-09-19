@@ -188,6 +188,11 @@ controls; see the tracked Phase 2 hook prerequisite in the handoff.
 
 **Completion Phase 13.**
 
+- ~~**The vendor change record is hand-kept.**~~ Closed by
+  `tests/test_vendor_change_record.py::test_vendor_change_inventory_matches_git`:
+  `docs/VENDOR_CHANGES.md` records the pre-change base and every changed path,
+  and the test emits the vendor diff from Git and holds the sorted record equal.
+
 - **The replay register is one process's memory, and it refuses when full.**
   §93's `NonceRegister` remembers each admitted nonce until its assertion
   could no longer verify (30 s past its issued-at second), in a dictionary
