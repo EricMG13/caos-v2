@@ -393,6 +393,26 @@ def test_the_bound_brief_carries_exactly_the_host_bindings(
     assert refused.value.__context__ is None and refused.value.__cause__ is None
 
 
+def test_a_deep_research_run_pinned_without_a_brief_refuses_at_pin(
+    case: tuple[StoreConnection, UUID], tmp_path: Path
+) -> None:
+    """§96: on an enabled pathway carrying CP-DR the vendor's own rule -- CP-DR
+    requires a run-scoped brief -- is asked before anything is spent, so a
+    brief-less input is refused at the pin rather than after CP-0 is paid."""
+    conn, case_id = case
+    run, source, bundle, _ = _prepare(
+        conn, case_id, tmp_path, ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH")
+    )
+    conn.commit()
+    with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+        pin_run_input(conn, run, source.version, bundle, subject=SUBJECT)
+    assert load_run_input(conn, run) is None
+    pin = pin_run_input(
+        conn, run, source.version, bundle, research_brief(), subject=SUBJECT
+    )
+    assert pin.research_json is not None
+
+
 def test_a_brief_on_a_route_without_cp_dr_refuses_at_pin(
     case: tuple[StoreConnection, UUID], tmp_path: Path
 ) -> None:
