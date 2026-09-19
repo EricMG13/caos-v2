@@ -54,11 +54,11 @@ from server.boundary_text import BoundaryText
 from server.engine.route import MODEL_MODULE, READY, ResolvedRoute, readiness_from
 from server.engine.runtime import accepted_artifacts
 from server.evidence.ingest import Document
-from server.methodology.bundle import Bundle
+from server.methodology.bundle import Bundle, verified_bytes
 from server.methodology.canonical import accepted_handoff, accepted_projections
 from server.methodology.forecast import forecast_projection
 from server.methodology.handoff import UNCLEARED_READINESS, Projections
-from server.methodology.vendor import load_vendor_contract
+from server.methodology.vendor import VendorContract, load_vendor_contract
 from server.methodology.verification import AcceptedRow
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
@@ -756,6 +756,80 @@ def _matches_register(
     return _cell(matched[0], expect.column, header) == _normalised_cell(expect.expected)
 
 
+def module_registers(
+    contract: VendorContract, bundle: Bundle, module_id: str, text: str
+) -> dict[str, Any]:
+    """One module's registers, located exactly as the vendor's `check()` does.
+
+    The locator is `completeness_check.find_registers`, asked with the module's
+    whole contract register list from its verified `SKILL.md` -- the call
+    `check()` makes, and the check this handoff already passed at acceptance
+    (`handoff.validate_markdown`). So the scorer reads the table the bundle
+    verified, never a second reading of one.
+
+    Neither narrower nor wider. Narrowed to a key's own ids, the locator walks
+    past a sibling's heading to prose naming the key and binds the wrong table
+    (CP-L10 writes twenty registers in families of identical columns): the
+    Completion Phase 8 adversarial audit built a handoff passing `check()` whose
+    shipped key was met from a sibling. Unnarrowed, the locator falls back to
+    its default pattern, which cannot match `TDR.3` or CP-1A's named registers,
+    so every CP-DR key read as a miss over a dossier carrying exactly the
+    answers it named (run `de27f93c`, 18 September 2026).
+    """
+    skill = verified_bytes(bundle, module_id, "SKILL.md").decode("utf-8")
+    checker = contract.completeness_check
+    declared = checker.load_contract(skill, module_id)["registers"]
+    found = checker.find_registers(text, declared)
+    return found if isinstance(found, dict) else {}
+
+
+def unlocatable_register_keys(
+    bundle: Bundle, qualification: QualificationSet
+) -> tuple[ExpectedRegister, ...]:
+    """Every register key no run could ever meet, in the order the set lists them.
+
+    A key is locatable when its module declares a register contract, the
+    register is one of it, its column and every row-key column are among that
+    register's declared columns, and `module_registers` -- the scorer's own
+    reader -- finds the register when it is written as the vendor's suite writes
+    it: its id in a heading above the table. Anything else reads
+    `registers_met: false` whatever the model answers, which is a question the
+    set asked of nobody.
+    """
+    contract = load_vendor_contract(bundle)
+    return tuple(
+        expect
+        for case in qualification.cases
+        for expect in case.expects_register
+        if not _locatable(contract, bundle, expect)
+    )
+
+
+def _locatable(
+    contract: VendorContract, bundle: Bundle, expect: ExpectedRegister
+) -> bool:
+    """One key against its module's declared register contract and reader."""
+    try:
+        skill = verified_bytes(bundle, expect.module_id, "SKILL.md").decode("utf-8")
+        declared = contract.completeness_check.load_contract(skill, expect.module_id)
+    except (Refusal, ValueError, UnicodeDecodeError):
+        return False
+    spec = declared["registers"].get(expect.register_id)
+    if spec is None:
+        return False
+    columns = [str(column) for column in spec["columns"]]
+    named = [expect.column, *(column for column, _value in expect.row_key)]
+    if not columns or any(name not in columns for name in named):
+        return False
+    table = (
+        f"#### {expect.register_id}\n\n| {' | '.join(columns)} |\n"
+        f"|{'---|' * len(columns)}\n| {' | '.join('x' for _ in columns)} |\n"
+    )
+    return expect.register_id in module_registers(
+        contract, bundle, expect.module_id, table
+    )
+
+
 def _registers_met(
     conn: StoreConnection,
     blobs: BlobStore,
@@ -767,8 +841,8 @@ def _registers_met(
     """Whether every module wrote what the case says it should have written.
 
     The Markdown is read through `accepted_handoff`, which binds the record to
-    it, and the registers are located by the vendor's own
-    `completeness_check.find_registers` from this bundle's verified bytes: the
+    it, and the registers are located by `module_registers` -- the vendor's own
+    locator, asked exactly as the vendor's `check()` asks it at acceptance: the
     host adds no table parser of its own (invariant 4). `None` when the case
     names none; a module the case names that produced no single accepted
     artifact, or an artifact that will not read, is a miss and not an exception
@@ -790,7 +864,7 @@ def _registers_met(
     # reviewer at the model for a vendored-bytes fault. `build_matrix` turns it
     # into the row's own refusal. Both found by the Completion Phase 8
     # adversarial audit, which measured the cache claim and found it false.
-    find_registers = load_vendor_contract(bundle).completeness_check.find_registers
+    contract = load_vendor_contract(bundle)
     wanted: dict[str, list[ExpectedRegister]] = {}
     for expect in case.expects_register:
         wanted.setdefault(expect.module_id, []).append(expect)
@@ -822,23 +896,9 @@ def _registers_met(
                 ),
                 accepted=accepted,
             )
-            # Asked exactly as the bundle asks it: no `register_ids`, so the
-            # locator uses its own pattern, which is what the vendor's `check()`
-            # effectively reads against. Narrowing the list changed the answer.
-            # The locator walks the few lines above each table nearest-first and
-            # breaks on the first line naming *any* id it was given, keeping the
-            # first table it finds -- so a handoff carrying several registers with
-            # identical columns (CP-L10 writes five, all required, all six-row)
-            # answered a narrowed `TL10.2` from whichever of them the module's own
-            # appendix prose happened to sit above. The host and the bundle then
-            # disagreed about which table the register is, in both directions: a
-            # key met from a sibling table while the honest one said MISSING, and
-            # an honest handoff's key missed because the prose named a different
-            # sibling first. Found by the Completion Phase 8 adversarial audit,
-            # which built a handoff passing the vendor's own completeness check
-            # with zero violations in which the shipped key was met from the
-            # wrong register.
-            registers = find_registers(markdown.decode("utf-8"))
+            registers = module_registers(
+                contract, bundle, module_id, markdown.decode("utf-8")
+            )
             if not isinstance(registers, dict):
                 return False
             met = all(_matches_register(registers, expect) for expect in expects)

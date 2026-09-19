@@ -1,5 +1,14 @@
 # Virgin Media O2 FY2025 live qualification result
 
+## Current tree status
+
+The current set digest is
+`27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07`.
+It adds the CP-L10 `TL10.2` liquidity/maturities register key and has **not**
+been run. Its status is **OFFLINE / UNVERIFIED / NOT QUALIFIED**. Every run and
+snapshot below is retained historical evidence bound to an earlier set digest;
+none is a performed result or verdict for the current set.
+
 ## Corpus and key
 
 This case uses two existing public issuer documents:
@@ -9,11 +18,12 @@ This case uses two existing public issuer documents:
 - `Virgin-Media-O2-Q4-2025-Earnings-Release.pdf`, SHA-256
   `66055bbb8d27721d07a5e8cb834c9b96a256ada45a0812ea4fb2e7202ee4f64d`
 
-The answer key was fixed from those issuer documents before the provider run.
+The initial answer key was fixed from those issuer documents before the provider run.
 It tests a current borrowing-capacity statement under CP-0, the £1,021.7
 million Q4 goodwill impairment under CP-L10, and the issuer's non-GAAP
 liquidity limitation under CP-5. The qualification-set digest is
-`ec84bf8bbb1b45fd715d52466b9142778b4346ab13b252951db0b589209d07d1`.
+`ec84bf8bbb1b45fd715d52466b9142778b4346ab13b252951db0b589209d07d1`
+for that initial historical set.
 
 A first prepared pack also included the Q3 2025 quarterly bond report. Its
 CP-0 request exceeded the host's 1 MiB request ceiling and refused as
@@ -613,7 +623,7 @@ the capture under-reporting and not the key going unevaluated — `scripts/quali
 was serialising `ready_met` and not the field added after it, now fixed.
 `complete` treats an undeclared key as passed (`is not False`), so a key that
 silently did nothing would have produced this same `true`. Re-deriving the
-matrix from the store against the set on disk gives `projections_met: True`,
+matrix from the store against the then-current set on disk gives `projections_met: True`,
 `ready_met: True`, `proven: True`, `missed: 0`. The signable document stored in
 the database carried the field correctly throughout.
 
@@ -736,11 +746,11 @@ three, at about `$0.90` each.
 
 Spend on this set to date: `$6.95`.
 
-## A signable snapshot on the current build — 2026-09-16
+## A historical signable snapshot for the prior set — 2026-09-16
 
 Run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, build `30222a49`, set
-`0863964b…`, `$0.79558075`. **`qualification_performed.complete` is true, and
-this one is bound to the build the tree carries.**
+`0863964b…`, `$0.79558075`. **`qualification_performed.complete` was true for
+that prior set and build.** It does not bind the current `27b7df72…` set.
 
 | | |
 |---|---|
@@ -750,7 +760,7 @@ this one is bound to the build the tree carries.**
 | `ready_met` | true |
 | `projections_met` | true |
 
-Re-derived from the store against the set on disk rather than read from the
+Re-derived from the store against the then-current set on disk rather than read from the
 capture: `proven=True, missed=0, ready_met=True, projections_met=True`. The
 stored row binds set `0863964b…`, build `30222a49…`, provider
 `openrouter/openai/flex/high/65536`, model `openai/gpt-5.6-terra`.
