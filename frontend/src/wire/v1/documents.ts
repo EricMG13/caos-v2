@@ -196,7 +196,7 @@ const RunBody = object({
   displayed_run_id: nullable(uuid),
   runs: array(RunSummary, 200),
   run: nullable(RunView),
-  route_choices: array(RouteChoice, 16),
+  route_choices: array(RouteChoice, 18),
 });
 const RunSectionDocument = sectionDocument(RunBody);
 

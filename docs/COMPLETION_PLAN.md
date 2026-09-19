@@ -16,6 +16,8 @@ on `codex/execute-repair-plan` at `e59ad7b`.
 > [`superpowers/plans/2026-09-17-completion-complementary-plan.md`](superpowers/plans/2026-09-17-completion-complementary-plan.md);
 > current Codex routing is in
 > [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md);
+> the executable delta from the 19 September checkpoint is
+> [`superpowers/plans/2026-09-19-resolve-all-remaining-work.md`](superpowers/plans/2026-09-19-resolve-all-remaining-work.md);
 > the launch text is [`PHASE_7_ONWARDS_GOAL_PROMPT.md`](PHASE_7_ONWARDS_GOAL_PROMPT.md).
 >
 > **Concurrent stream.** The audit remediation

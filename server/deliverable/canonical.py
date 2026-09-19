@@ -36,6 +36,7 @@ from server.methodology.verification import (
     Step,
     load_vendor_authority,
     verify_accepted,
+    verify_owner_chain,
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -161,6 +162,7 @@ class _Reader:
         self.conn, self.blobs, self.bundle, self.route = conn, blobs, bundle, route
         self.vendor = load_vendor_authority(bundle)
         self.pairs: dict[str, tuple[str, str | None]] = {}
+        self.verified_markdown: dict[tuple[str, str], bytes] = {}
         # One reading of the token index for the whole payload: records cluster
         # on the same pages of the same sources. The captured blocks of the
         # pinned live sources are what any node was handed.
@@ -192,6 +194,18 @@ class _Reader:
             reanchor=self.evidence,
             refuse=_refuse,
         )
+        if node.module_id == "CP-5":
+            verify_owner_chain(
+                self.vendor.contract,
+                verified.markdown,
+                (
+                    (ref.route_node_id, ref.sha256)
+                    for ref in verified.record.identity.upstream
+                ),
+                self.verified_markdown,
+                selection=("LITE_CREDIT_22", "LITE_FULL_CREDIT_SCREEN"),
+            )
+        self.verified_markdown[(node.route_node_id, artifact)] = verified.markdown
         return verified.markdown, verified.stored
 
 
