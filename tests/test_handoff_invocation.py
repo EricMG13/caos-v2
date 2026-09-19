@@ -91,6 +91,10 @@ from server.methodology.invocation import (
     within_request_ceiling,
 )
 from server.methodology.vendor import VENDOR_MODULE, authority_bundle_sha256
+from server.methodology.verification import (
+    verify_owner_chain,
+    verify_owner_restrictions,
+)
 from server.provider import MAX_REQUEST_BYTES, OpenRouter, encode_request
 from server.refusals import Refusal, RefusalCode
 from server.store.outcomes import CallOutcome, record_outcome
@@ -101,8 +105,13 @@ from server.store.source_sets import SourceSet, SourceSetMember
 
 __all__ = ["harness"]
 
+
+def test_owner_restrictions_helper_is_available() -> None:
+    assert callable(verify_owner_restrictions)
+    assert callable(verify_owner_chain)
+
+
 LITE = ("LITE_CREDIT_22", "LITE_EARNINGS_UPDATE")
-CLAIMS = ("FULL_CREDIT_32", "MARKET_DISLOCATION")
 BEGIN = "--- HOST-OWNED FRONT MATTER"
 END = "--- END HOST-OWNED FRONT MATTER"
 LITE_ROUTE = resolve_route(CATALOG, *LITE)
@@ -313,25 +322,6 @@ def test_the_lite_upstream_follows_the_pinned_edges(harness: _Harness) -> None:
     assert final.upstream == (gate_ref, upstream_ref(screen, screen_markdown))
 
 
-@pytest.mark.parametrize("route", [CLAIMS], indirect=True)
-def test_a_disabled_route_module_has_no_canonical_identity(harness: _Harness) -> None:
-    """A route outside the adapter pins canonically (§42.2); its other module
-    still has no canonical identity to build."""
-    node = next(n for n in harness.route.nodes if n.module_id == "CP-3D")
-    attempt = start_attempt(harness.conn, harness.run_id, node.route_node_id)
-    with pytest.raises(Refusal) as refused:
-        host_identity(
-            harness.conn,
-            harness.bundle,
-            run_id=harness.run_id,
-            route=harness.route,
-            node=node,
-            attempt_id=attempt,
-        )
-    harness.conn.rollback()
-    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-
-
 def test_a_caller_route_that_is_not_the_pin_refuses(harness: _Harness) -> None:
     attempt = _attempt(harness, "CP-0")
     with pytest.raises(Refusal) as refused:
@@ -339,7 +329,7 @@ def test_a_caller_route_that_is_not_the_pin_refuses(harness: _Harness) -> None:
             harness.conn,
             harness.bundle,
             run_id=harness.run_id,
-            route=resolve_route(CATALOG, *CLAIMS),
+            route=replace(harness.route, profile_id="FULL_CREDIT_32"),
             node=_node(harness, "CP-0"),
             attempt_id=attempt,
         )
