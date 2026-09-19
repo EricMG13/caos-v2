@@ -51,7 +51,10 @@ def _transplant(tmp_path: Path) -> Path:
         case = root / source.parent.name
         (case / "documents").mkdir(parents=True)
         shutil.copy(source, case / "qualification.json")
-        for document in sorted((source.parent / "documents").iterdir()):
+        documents = source.parent / "documents"
+        if not documents.is_dir():
+            continue
+        for document in sorted(documents.iterdir()):
             shutil.copy(document, case / "documents" / document.name)
     return root / "documents.json"
 

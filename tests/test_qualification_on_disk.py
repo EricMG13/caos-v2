@@ -253,6 +253,9 @@ COMMITTED_SET_DIGESTS = {
     "vmo2-fy2025-portfolio": (
         "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
     ),
+    "vmo2-fy2025-deep-research": (
+        "09807efb1a3d5d40680d1a9d0e054333537781d7bb4013ecd7670323f817fd9b"
+    ),
 }
 
 PENDING_SET_DOCUMENTS = {
