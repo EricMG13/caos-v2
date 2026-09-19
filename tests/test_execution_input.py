@@ -49,7 +49,6 @@ def approved(prepared: Prepared) -> Approved:
         run,
         source.version,
         bundle,
-        {"questions": ["Café?\r\nExact."]},
         subject=SUBJECT,
     )
     actors = (uuid4(), uuid4())
@@ -87,7 +86,7 @@ def test_exact_historical_input_with_one_component_load(
             )
             assert conn.info.transaction_status.name == "INTRANS"
     assert result == (pin, route)
-    assert pin.research_json == '{"questions":["Café?\\r\\nExact."]}'
+    assert pin.research_json is None
     for table in ("source_set_versions", "source_set_members", "run_routes"):
         assert sum(f"FROM {table}" in query for query in queries) == 1
     assert sum("LEFT JOIN live_sources" in query for query in queries) == 1
