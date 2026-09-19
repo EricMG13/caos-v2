@@ -4,7 +4,8 @@
 > [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md) and decision
 > §104 govern new dispatches. Claude model names below are historical execution
 > records. The `.claude/agents/` files do not configure Codex: select
-> `gpt-5.6-sol` or `gpt-6-astra` and the required effort in the Codex dispatch.
+> the relevant model from the full GPT portfolio and the required effort in the
+> Codex dispatch; the matrix supplies task-specific defaults, not an allow-list.
 
 This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/DECISIONS.md` §39 resolves document precedence and repair semantics.
