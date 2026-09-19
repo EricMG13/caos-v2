@@ -4766,3 +4766,20 @@ its blob root does. Scored from the retained record blob (T8 readiness
 `blocked_met: true` and the snapshot `complete: true` under the new key -- an
 offline reading of stored facts, not a performed snapshot, and nothing
 signable until the set is performed again.
+
+## 2026-09-18 §100 — A paid run's database is kept on the persistent server
+
+`scripts/qualify.py` created each run's database on `CAOS_TEST_POSTGRES_URL`,
+the test server whose data directory is a `tmpfs`. Under concurrent suites that
+server ran out of space, implementers restarted it, and every retained database
+of 18 September 2026's runs was erased -- among them the two authorised
+portfolio runs (`caos_qualify_9b87b710…`, `caos_qualify_13ec1a9c…`). Their blob
+roots and captures survive, so the records in each set's `RESULT.md` still hold
+and a fact can be re-read from a blob, but a matrix can no longer be re-derived
+from the store for them.
+
+The driver now reads `CAOS_QUALIFY_POSTGRES_URL` and refuses, before spending
+anything, when it is unset (`tests/test_qualify_script.py::test_main_refuses_to_keep_a_paid_run_where_it_cannot_last`).
+`.env.example` names the persistent dev server on 55436 with its local admin
+role. Earlier runs whose databases lived on the test server are in the same
+state, whatever their `RESULT.md` says about retention.
