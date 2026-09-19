@@ -246,7 +246,7 @@ def test_a_module_expected_both_ready_and_blocked_is_refused(tmp_path: Path) -> 
 COMMITTED_SET_DIGESTS = {
     "ccl-fy2025": "f5555753cf7b39868fa4885d95a0b80847c61204a4b3ebe5fffe8345587c327e",
     "ccl-fy2025-portfolio": (
-        "5d50d1e7b9d39b0318d730ea98c795518c72e8f8644fe321b6f96acbc4bb2f29"
+        "7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c"
     ),
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
     "vmo2-fy2025-portfolio": (
