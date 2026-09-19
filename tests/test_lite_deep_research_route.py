@@ -20,8 +20,11 @@ deterministic; no live call is made.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import inspect
 import json
+import textwrap
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -290,6 +293,45 @@ def test_lite_deep_research_route_completes_proves_and_freezes(
         revision_id=saved,
         payload=data,
     )
+
+
+def _dossier_grammar() -> set[str]:
+    """Every literal the vendor's `research.validate_dossier` holds a CP-DR
+    answer to: its register ids, as the `table-id` tag `cp_tables` reads, and
+    each enumerated cell value. Read from the vendor's own function, so a
+    build that adds a rule adds a string this route must deliver."""
+    source = textwrap.dedent(inspect.getsource(CONTRACT.research.validate_dossier))
+    wanted: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "rows":
+            table = node.args[1]
+            assert isinstance(table, ast.Constant) and isinstance(table.value, str)
+            wanted.add(f"<!-- table-id: {table.value} -->")
+        if isinstance(node, ast.Set):
+            wanted |= {
+                item.value
+                for item in node.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            }
+    assert len(wanted) > 3  # the three tags and at least one enumeration
+    return wanted
+
+
+def test_the_cp_dr_prompt_states_every_rule_its_dossier_is_refused_for(
+    harness: _Harness,
+) -> None:
+    """A conforming CP-DR answer must be writable from its prompt alone. The
+    vendor judges the dossier by tagged registers and closed value sets that
+    only CP-OS's research contract spells out; before §101 the host delivered
+    CP-DR's own files and never that one, so two live attempts on build
+    78c24be4 wrote the registers untagged, invented a `source_type`, and were
+    refused `HANDOFF_INCOMPLETE` for rules no part of the prompt stated."""
+    answers = run_completed(harness)
+    [prompt] = [
+        p for p in answers.prompts if fields_from_prompt(p)["module_id"] == "CP-DR"
+    ]
+    missing = sorted(literal for literal in _dossier_grammar() if literal not in prompt)
+    assert missing == []
 
 
 def test_the_accepted_cp_dr_record_carries_the_brief_bound_to_the_accepted_gate(
