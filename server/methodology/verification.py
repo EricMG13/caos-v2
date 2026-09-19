@@ -25,7 +25,7 @@ refusal carries vendor or document text in its chain.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -118,6 +118,59 @@ class VendorAuthority:
 
     contract: VendorContract
     catalog: Mapping[str, Any]
+
+
+def verify_owner_restrictions(
+    contract: VendorContract,
+    markdown: bytes,
+    owners: Iterable[bytes],
+    *,
+    refuse: RefusalCode,
+    selection: tuple[str, str] | None,
+) -> None:
+    """Refuse an artifact that drops a direct owner's restrictions."""
+    parse = contract.validate_handoff.validate_text
+    fields = parse(markdown.decode()).fields
+    if (
+        selection is not None
+        and (
+            fields["credit_os_profile_id"],
+            fields["credit_os_selection_id"],
+        )
+        != selection
+    ):
+        return
+    for data in owners:
+        owner = parse(data.decode()).fields
+        if (
+            owner["qa_status"] == "Restricted" and fields["qa_status"] != "Restricted"
+        ) or any(
+            not set(owner[key]) <= set(fields[key])
+            for key in ("limitation_flags", "validation_warnings")
+        ):
+            raise Refusal(refuse)
+
+
+def verify_owner_chain(
+    contract: VendorContract,
+    markdown: bytes,
+    upstream_keys: Iterable[tuple[str, str]],
+    cache: Mapping[tuple[str, str], bytes],
+    *,
+    selection: tuple[str, str] | None,
+) -> None:
+    """Resolve recorded upstream bytes once, then apply owner restrictions."""
+    try:
+        owners = tuple(cache[key] for key in upstream_keys)
+    except KeyError:
+        raise Refusal(RefusalCode.ARTIFACT_RECORD_MISMATCH) from None
+    verify_owner_restrictions(
+        contract,
+        markdown,
+        owners,
+        refuse=RefusalCode.ARTIFACT_RECORD_MISMATCH,
+        selection=selection,
+    )
 
 
 def load_vendor_authority(bundle: Bundle) -> VendorAuthority:

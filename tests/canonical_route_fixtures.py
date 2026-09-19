@@ -38,7 +38,7 @@ from server.provider import Completion, encode_request
 SELECTION = ("FULL_CREDIT_32", "RELATIVE_VALUE")
 ROUTE = resolve_route(CATALOG, *SELECTION)
 MODULES = tuple(n.module_id for n in ROUTE.nodes)
-OWNERS = tuple(m for m in MODULES if m != "CP-0")
+OWNERS = tuple(module for module in MODULES if module != "CP-0")
 PACK = b"""Acme Holdings plc FY2025 annual report extract
 Revenue 1000 EBITDA 200 cash 100 debt 600 capex 40 interest 30 tax 20
 Operating cash flow 140 and free cash flow 100 in USD millions consolidated
@@ -67,8 +67,14 @@ LIMITATION = (
 )
 
 
-def route_identity(module: str, upstream: tuple[UpstreamRef, ...] = ()) -> HostIdentity:
-    node = next(n for n in ROUTE.nodes if n.module_id == module)
+def route_identity(
+    module: str,
+    upstream: tuple[UpstreamRef, ...] = (),
+    *,
+    selection: tuple[str, str] = SELECTION,
+) -> HostIdentity:
+    route = resolve_route(CATALOG, *selection)
+    node = next(n for n in route.nodes if n.module_id == module)
     if module != "CP-0" and not upstream:
         upstream = tuple(
             UpstreamRef(
@@ -78,15 +84,16 @@ def route_identity(module: str, upstream: tuple[UpstreamRef, ...] = ()) -> HostI
                 "FY2025",
                 hashlib.sha256(n.module_id.encode()).hexdigest(),
             )
-            for n in ROUTE.nodes
-            if any(e.source == n.module_id and e.target == module for e in ROUTE.edges)
+            for n in route.nodes
+            if any(e.source == n.module_id and e.target == module for e in route.edges)
         )
+    vendor_route = CONTRACT.routing.Route(CATALOG, *selection)
     return HostIdentity(
         RUN,
-        *SELECTION,
+        *selection,
         node.route_node_id,
         module,
-        CONTRACT.routing.Route(CATALOG, *SELECTION).by_module[module]["module_name"],
+        vendor_route.by_module[module]["module_name"],
         "ACME",
         "Acme Holdings plc",
         "FY2025",
@@ -413,6 +420,8 @@ def canonical_markdown(ident: HostIdentity, knobs: HandoffKnobs | None = None) -
         columns = spec["columns"] or ["Evidence"]
         rows = authored.get(register)
         if ident.module_id == "CP-0" and register == "T8":
+            route = resolve_route(CATALOG, ident.profile_id, ident.selection_id)
+            owners = tuple(n.module_id for n in route.nodes if n.module_id != "CP-0")
             columns = CONTRACT.navigation.NEW_HEADERS
             rows = [
                 [
@@ -428,7 +437,7 @@ def canonical_markdown(ident: HostIdentity, knobs: HandoffKnobs | None = None) -
                     knobs.readiness.get(m, "READY"),
                     "issuer-pack p1",
                 ]
-                for i, m in enumerate(OWNERS, 1)
+                for i, m in enumerate(owners, 1)
             ]
         if rows is None:
             # Explicitly bounded findings for the remaining appendix fields,
@@ -478,6 +487,7 @@ class RouteCompletions:
     quotes_by_module: dict[str, str] = field(default_factory=dict)
     prompts: list[str] = field(default_factory=list)
     answers: list[bytes] = field(default_factory=list)
+    selection: tuple[str, str] = field(default=SELECTION, kw_only=True)
 
     def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
         return encode_request(self.model, prompt, json_object=json_object)
@@ -488,7 +498,7 @@ class RouteCompletions:
         fields = fields_from_prompt(prompt)
         module = str(fields["module_id"])
         markdown = canonical_markdown(
-            route_identity(module),
+            route_identity(module, selection=self.selection),
             HandoffKnobs(
                 fields=fields,
                 qa_status=self.qa_by_module.get(module, "Passed"),
@@ -568,10 +578,14 @@ LEDGER_QUOTES: dict[str, tuple[tuple[str, str], ...]] = {
 
 
 def ledger_identity(
-    module: str, upstream: tuple[UpstreamRef, ...] = ()
+    module: str,
+    upstream: tuple[UpstreamRef, ...] = (),
+    *,
+    selection: tuple[str, str] = LEDGER_SELECTION,
 ) -> HostIdentity:
     """One node's host identity on the decision-ledger route."""
-    node = next(n for n in LEDGER_ROUTE.nodes if n.module_id == module)
+    route = resolve_route(CATALOG, *selection)
+    node = next(n for n in route.nodes if n.module_id == module)
     if module != "CP-0" and not upstream:
         upstream = tuple(
             UpstreamRef(
@@ -581,19 +595,16 @@ def ledger_identity(
                 "FY2025",
                 hashlib.sha256(n.module_id.encode()).hexdigest(),
             )
-            for n in LEDGER_ROUTE.nodes
-            if any(
-                e.source == n.module_id and e.target == module
-                for e in LEDGER_ROUTE.edges
-            )
+            for n in route.nodes
+            if any(e.source == n.module_id and e.target == module for e in route.edges)
         )
-    route = CONTRACT.routing.Route(CATALOG, *LEDGER_SELECTION)
+    vendor_route = CONTRACT.routing.Route(CATALOG, *selection)
     return HostIdentity(
         RUN,
-        *LEDGER_SELECTION,
+        *selection,
         node.route_node_id,
         module,
-        route.by_module[module]["module_name"],
+        vendor_route.by_module[module]["module_name"],
         "ACME",
         "Acme Holdings plc",
         "FY2025",
@@ -802,6 +813,7 @@ class LedgerCompletions:
     prompts: list[str] = field(default_factory=list)
     answers: list[bytes] = field(default_factory=list)
     bodies: list[str] = field(default_factory=list)
+    selection: tuple[str, str] = field(default=LEDGER_SELECTION, kw_only=True)
 
     def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
         return encode_request(self.model, prompt, json_object=json_object)
@@ -816,7 +828,7 @@ class LedgerCompletions:
         if replaced is not None:
             quotes[-1] = (quotes[-1][0], replaced)
         markdown = ledger_markdown(
-            ledger_identity(module),
+            ledger_identity(module, selection=self.selection),
             HandoffKnobs(
                 fields=fields,
                 qa_status=self.qa_by_module.get(module, "Passed"),
