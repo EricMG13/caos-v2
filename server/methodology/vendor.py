@@ -65,6 +65,9 @@ class VendorContract:
     envelope: Any
     navigation: Any
     routing: Any
+    # `credit_os_v.research`: the brief validator and the dossier validator
+    # (§96). The host binds a brief and hands it over; it re-implements no rule.
+    research: Any
 
 
 class _Sys:
@@ -176,6 +179,7 @@ def load_vendor_contract(bundle: Bundle) -> VendorContract:
                 envelope=loader.load("credit_os_v.envelope"),
                 navigation=loader.load("credit_os_v.navigation"),
                 routing=loader.load("credit_os_v.routing"),
+                research=loader.load("credit_os_v.research"),
             )
         finally:
             for module in loader.modules.values():

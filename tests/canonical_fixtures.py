@@ -37,6 +37,63 @@ ROUTE = CONTRACT.routing.Route(CATALOG, LITE_PROFILE, LITE_SELECTION)
 RUN = "COS-20260908T120000Z-" + "1" * 32
 PINNED = frozenset({"CP-L10", "CP-5"})
 
+# A caller's research brief as `pin_run_input` takes it (§96): every
+# `CP_DR_RESEARCH_BRIEF_V1` field but the three the host binds -- `run_id`,
+# `cp0_sha256`, `authority_sha256`. Two questions, so a dossier can answer one
+# and leave one UNRESOLVED; consumer `NONE` after `CP-0`, the placement the
+# vendor requires on a route whose terminal deliverable is CP-DR itself.
+RESEARCH_QUESTIONS: tuple[tuple[str, str], ...] = (
+    (
+        "RQ-headroom",
+        "What undrawn committed facilities did the issuer report at year end?",
+    ),
+    (
+        "RQ-rating",
+        "What credit rating and outlook do the agencies currently assign?",
+    ),
+)
+
+
+def research_brief(
+    issuer_id: str = "EXAMPLE",
+    issuer_name: str = "Example Holdings plc",
+    *,
+    questions: tuple[tuple[str, str], ...] = RESEARCH_QUESTIONS,
+    placement: tuple[str, str] = ("NONE", "CP-0"),
+    **changes: object,
+) -> dict[str, Any]:
+    """A caller's linked brief for `issuer_id`, with any top-level field
+    replaced; `placement` is every question's `(consumer, after)` pair."""
+    consumer, after = placement
+    brief: dict[str, Any] = {
+        "schema": "CP_DR_RESEARCH_BRIEF_V1",
+        "mode": "linked",
+        "scope_type": "issuer",
+        "scope_key": issuer_id,
+        "subject_name": issuer_name,
+        "decision_context": "Test the liquidity assumption before the screen",
+        "as_of_date": "2026-09-08",
+        "time_horizon": "Next 12 months",
+        "source_mode": "supplied_only",
+        "budget": "standard",
+        "authorization_basis": "The task instruction to research this issuer",
+        "exclusions": "No web or model-memory sources; no trade recommendation",
+        "questions": [
+            {
+                "question_id": question_id,
+                "question": question,
+                "decision_relevance": "Sets the liquidity headroom assumption",
+                "consumer_module_id": consumer,
+                "after_module_id": after,
+                "evidence_needed": "The issuer's own year-end disclosure",
+                "completion_test": "A supported answer with contrary evidence",
+            }
+            for question_id, question in questions
+        ],
+    }
+    brief.update(changes)
+    return brief
+
 
 def identity(
     module_id: str, upstream: tuple[UpstreamRef, ...] = (), **changes: object
