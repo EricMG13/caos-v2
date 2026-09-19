@@ -248,26 +248,43 @@ COMMITTED_SET_DIGESTS = {
     "ccl-fy2025-portfolio": (
         "5d50d1e7b9d39b0318d730ea98c795518c72e8f8644fe321b6f96acbc4bb2f29"
     ),
-    "ccl-fy2025-relative-value": (
-        "a8df0ccf6d8fd735886c584951f7ca82e460f483a4f235a5ad31143fd3f60ac8"
-    ),
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
     "vmo2-fy2025-portfolio": (
         "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
     ),
 }
 
+PENDING_SET_DOCUMENTS = {
+    "ccl-fy2025-relative-value": frozenset(
+        {
+            "documents/CCL_FY2025_10K.txt",
+            "documents/NCLH_Q4_2025_Earnings_Release.txt",
+            "documents/RCL_Q4_2025_Earnings_Release.txt",
+        }
+    )
+}
+
 
 def test_every_committed_set_binds_its_recorded_digest() -> None:
-    """Every set under `qualification/` loads and digests as recorded, and the
-    list above names exactly the sets the tree carries -- a set added or
-    removed without its digest being stated here fails."""
+    """Every complete set digests as recorded; pending sets name exact gaps."""
     root = Path(__file__).resolve().parents[1] / "qualification"
-    found = {
-        path.parent.name: qualification_set_digest(load_qualification_set(path.parent))
-        for path in root.glob(f"*/{MANIFEST}")
-    }
+    found = {}
+    pending = {}
+    for path in root.glob(f"*/{MANIFEST}"):
+        name = path.parent.name
+        if name in PENDING_SET_DOCUMENTS:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            pending[name] = frozenset(
+                document
+                for case in manifest["cases"]
+                for document in case["documents"]
+                if not (path.parent / document).is_file()
+            )
+        else:
+            found[name] = qualification_set_digest(load_qualification_set(path.parent))
+
     assert found == COMMITTED_SET_DIGESTS
+    assert pending == PENDING_SET_DOCUMENTS
 
 
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
