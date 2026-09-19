@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from test_bundle_pin import VENDOR, clear_vendor_bytecode
 
+from server.methodology import vendor as vendor_module
 from server.methodology.bundle import Bundle
 from server.methodology.vendor import (
     VendorContract,
@@ -42,15 +43,24 @@ def test_vendor_loader_leaves_sys_path_untouched() -> None:
     # the assertion below about what `load_vendor_contract` writes.
     clear_vendor_bytecode(VENDOR)
     before = _import_state()
+    with vendor_module._LOCK:
+        registered_before = {
+            name for name in sys.modules if name.split(".")[0] in GENERIC
+        }
     contract = load_vendor_contract(Bundle(VENDORED))
     assert _import_state() == before
     assert isinstance(contract, VendorContract)
-    # Standard-library imports the vendor code makes are ordinary; no vendor
-    # module, generic or privately named, is left registered.
-    assert not any(
-        name.split(".")[0] in GENERIC or name.startswith("_caos_vendor")
-        for name in sys.modules
-    )
+    # Standard-library imports the vendor code makes are ordinary; this load
+    # leaves no vendor module behind. Compare with entry state because another
+    # suite may already hold an independently loaded generic module. Hold the
+    # loader lock so another thread cannot expose its deliberately transient
+    # private modules between return and assertion.
+    with vendor_module._LOCK:
+        registered_after = {
+            name for name in sys.modules if name.split(".")[0] in GENERIC
+        }
+        assert not any(name.startswith("_caos_vendor") for name in sys.modules)
+    assert registered_after == registered_before
     assert not list(VENDORED.rglob("__pycache__"))
     # The loaded code is the vendor's: its validator rejects an empty handoff.
     assert contract.validate_handoff.validate_text("", filename="x.md").exit_code != 0
