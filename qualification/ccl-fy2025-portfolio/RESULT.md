@@ -1,9 +1,7 @@
-# CCL FY2025 portfolio-screen qualification — one authorized run, 18 September 2026 (below)
+# CCL FY2025 portfolio-screen qualification — authorized runs, 18 and 19 September 2026
 
-**Before 18 September 2026 no run had been performed against this set;** the authorized run is recorded at the end. It is authored, loadable and
-digested; nothing here reports a result, a verdict or a provider. The live run
-is Phase 9 Task 9.1 step 7 and needs the owner's explicit authorization — it
-costs real money and calls a real model.
+**Before 18 September 2026 no run had been performed against this set.** The
+first authorized run and the later pinned Phase 4 smoke run are recorded below.
 
 ## The set
 
@@ -127,3 +125,46 @@ reading of stored facts, not a performed snapshot: the stored evidence
 this set needs it performed again.
 
 **Retention, corrected 18 September 2026 (§100):** the retained database named above was on the in-memory test server and was erased when that server restarted. The capture and blob root survive; a matrix can no longer be re-derived from the store for this run.
+
+## Pinned Phase 4 smoke run — 19 September 2026
+
+The owner authorized the 19 September provider and spend recommendation for all
+sets. This set was launched once with model `openai/gpt-5.6-sol`, provider tag
+`openai`, reasoning `high`, identity `openrouter/openai/high/65536`, dated price
+`0.000005` input / `0.000015` output, ceiling `18.677760`, and `--attempts 2`.
+`OPENROUTER_BASE_URL` was explicitly unset. The driver exited **1** after the
+second permitted attempt; it was not launched again.
+
+- Run `f6fbf50c-454b-477a-a479-a098d16bb9f4`; build
+  `78c24be4483612e75d9a0809fcb1cb7c2dd5617e669491de13be9c0123e3ff93`;
+  set `7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c`.
+- Final evidence `29a832bfaf31d07785626849871b61a5605b9d5b41582280924729d6aabfc665`;
+  performed `e014f5f74bf342381671ae1b54f35e86d242ab11a2a7ec082608d6760f49ccc4`.
+- Retained database `caos_qualify_d416bca1abbd4c30b81be008eec52770`;
+  blob root
+  `/Users/ericguei/.codex/worktrees/gpt-model-routing/caos-workbench/.dev-data/qualification-blobs/caos-qualify-mfzws9dd`.
+- Capture `run-2026-09-19-a-capture.json`; driver log
+  `run-2026-09-19-a-driver.log`.
+- Two CP-0 calls were made. Attempt 1 charged `$0.3985535`; attempt 2 charged
+  `$0.393221`; total charge **`$0.7917745`**. Their retained reservations total
+  `$6.763000`. Both outcomes record model `openai/gpt-5.6-sol`; each stored a
+  diagnostic response and ended `HANDOFF_MALFORMED`. Neither attempt produced
+  an accepted artifact, and CP-L10 was never called.
+- Final capture: `complete: false`, run status `RUNNING`, stopped
+  `HANDOFF_MALFORMED`, refusal `ORCHESTRATION_NOTHING_TO_PROVE`, and no matrix.
+
+The pre-run key remains `expects_blocked: ["CP-L10"]`. It was not weakened or
+reinterpreted: because neither CP-0 handoff was accepted, the readiness row was
+never admitted and `blocked_met` was not evaluated. The result therefore does
+not establish the expected refusal and is not signable. No authenticated human
+verdict exists; the pathway remains **NOT_QUALIFIED**.
+
+Post-run diagnostic classification: both retained responses passed the closed
+transport and Markdown text gates, and every declared citation was quoted (9/9
+on attempt 1; 3/3 on attempt 2). The vendor validator rejected attempt 1
+because a CRITICAL finding required `qa_status: Blocked` at body line 133, and
+attempt 2 because a MATERIAL finding required `qa_status: Restricted` at body
+line 120. Attempt 2 also declared its second citation on page 12 although the
+host locates that quote uniquely on page 11; the status contradiction was the
+earlier refusal and masked this second model citation miss. These are
+model-contract misses, not host, parser or key defects.

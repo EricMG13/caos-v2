@@ -1,6 +1,6 @@
 # The document register
 
-Emitted 17 September 2026 against `codex/execute-repair-plan`, re-emitted after Task 9.1 added the portfolio-screen set's document copies, and again after Task 9.2 added the relative-value set and its two peer releases; Task 9.3's public decision-record stand-in was admitted and then removed on the owner's instruction, the same day; re-emitted on 18 September 2026 after §98 brought the Boeing and Ford 10-K texts into their own sets.
+Emitted 17 September 2026 against `codex/execute-repair-plan`, re-emitted after Task 9.1 added the portfolio-screen set's document copies, and again after Task 9.2 added the relative-value set and its two peer releases; Task 9.3's public decision-record stand-in was admitted and then removed on the owner's instruction, the same day; re-emitted on 18 September 2026 after §98 brought the Boeing and Ford 10-K texts into their own sets, and on 19 September 2026 for the Phase 2 route-local evidence inventory.
 
 > **How this file is made.** The hand-authored half is
 > [`documents.json`](documents.json) — the demand, the public location, the status,
@@ -57,15 +57,36 @@ a row typed here is a row that fails. -->
 | `vmo2-q3-2025-earnings-deep-research` | VMO2 | Virgin Media O2 Q3 2025 earnings release (deep-research set copy) | in_hand | CP-0, CP-DR | LITE_DEEP_RESEARCH | 144538 | yes | `505bf1a0f4181c9c…` |
 | `vmo2-q4-2025-earnings-deep-research` | VMO2 | Virgin Media O2 Q4 2025 earnings release (deep-research set copy) | in_hand | CP-0, CP-DR | LITE_DEEP_RESEARCH | 178368 | yes | `66055bbb8d27721d…` |
 | `cp-dr-research-brief` | VMO2 | A CP-DR research brief (the vmo2-fy2025-deep-research set's manifest, whose `research_brief` object it is) | in_hand | CP-DR | LITE_DEEP_RESEARCH | 4607 | yes | `0c46b5b983cb2875…` |
+| `save-2024-chapter-11-8k` | SAVE | Spirit Airlines Chapter 11 announcement, Form 8-K filed 18 November 2024 (SEC filing text extract) | in_hand | CP-0, CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | 45612 | yes | `9d3c7ba8d1632130…` |
+| `save-2024-rsa-with-chapter-11-plan` | SAVE | Spirit Airlines Restructuring Support Agreement with attached Joint Chapter 11 Plan, dated 18 November 2024 (SEC exhibit text extract) | in_hand | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | 714222 | yes | `6b40ff57e904068b…` |
 | `distressed-disclosure-statement` | — | A distressed issuer's disclosure statement, plan or restructuring support agreement | not_available | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
+| `ccl-fy2025-10k-market-dislocation` | CCL | Carnival Corporation & plc FY2025 Form 10-K (market-dislocation set copy) | in_hand | CP-0 | MARKET_DISLOCATION | 311896 | yes | `8fa7fceda34be50b…` |
+| `ccl-finra-trace-market-dislocation` | CCL | FINRA CCL 5.75% 2030 note observation at 19 September 2026 (market-dislocation set copy) | in_hand | CP-3D | MARKET_DISLOCATION | 1304 | yes | `28f9289818978608…` |
+| `ccl-fy2025-10k-lite-covenant-refinancing` | CCL | Carnival Corporation & plc FY2025 Form 10-K (LITE covenant-refinancing set copy) | in_hand | CP-0, CP-L10, CP-3C, CP-5 | LITE_COVENANT_REFINANCING | 311896 | yes | `8fa7fceda34be50b…` |
+| `ccl-2025-revolver-lite-covenant-refinancing` | CCL | 13 June 2025 revolving credit agreement (LITE covenant-refinancing set copy) | in_hand | CP-3C | LITE_COVENANT_REFINANCING | 757831 | yes | `0f5a7510e20cbf71…` |
+| `ccl-2025-notes-lite-covenant-refinancing` | CCL | 28 February 2025 5.75% 2030 notes indenture (LITE covenant-refinancing set copy) | in_hand | CP-3C | LITE_COVENANT_REFINANCING | 336377 | yes | `2340549fd4f215df…` |
+| `ccl-fy2025-10k-lite-full-credit-screen` | CCL | Carnival Corporation & plc FY2025 Form 10-K (LITE full-credit-screen set copy) | in_hand | CP-0, CP-L10, CP-1A, CP-1C, CP-2A, CP-3C, CP-4C, CP-5 | LITE_FULL_CREDIT_SCREEN | 311896 | yes | `8fa7fceda34be50b…` |
+| `ccl-2025-revolver-lite-full-credit-screen` | CCL | 13 June 2025 revolving credit agreement (LITE full-credit-screen set copy) | in_hand | CP-3C | LITE_FULL_CREDIT_SCREEN | 757831 | yes | `0f5a7510e20cbf71…` |
+| `ccl-2025-notes-lite-full-credit-screen` | CCL | 28 February 2025 5.75% 2030 notes indenture (LITE full-credit-screen set copy) | in_hand | CP-3C | LITE_FULL_CREDIT_SCREEN | 336377 | yes | `2340549fd4f215df…` |
+| `ccl-fitch-lite-full-credit-screen` | CCL | Fitch 2025 CCL rating action (LITE full-credit-screen set copy) | in_hand | CP-2H | LITE_FULL_CREDIT_SCREEN | 134938 | yes | `33863f60a0f6c945…` |
+| `rcl-lite-full-credit-screen` | RCL | Royal Caribbean Group FY2025 results (LITE full-credit-screen set copy) | in_hand | CP-1C | LITE_FULL_CREDIT_SCREEN | 41861 | yes | `43005bdbd3a05fd6…` |
+| `nclh-lite-full-credit-screen` | NCLH | Norwegian Cruise Line Holdings FY2025 results (LITE full-credit-screen set copy) | in_hand | CP-1C | LITE_FULL_CREDIT_SCREEN | 52268 | yes | `dd9a0eb7211c111b…` |
+| `save-2024-8k-lite-distressed` | SAVE | Spirit Airlines 18 November 2024 Chapter 11 8-K (LITE distressed set copy) | in_hand | CP-0, CP-4C | LITE_DISTRESSED_RESTRUCTURING | 45612 | yes | `9d3c7ba8d1632130…` |
+| `save-2024-rsa-lite-distressed` | SAVE | Spirit Airlines RSA and attached Joint Chapter 11 Plan (LITE distressed set copy) | in_hand | CP-4C | LITE_DISTRESSED_RESTRUCTURING | 714222 | yes | `6b40ff57e904068b…` |
+| `ccl-fy2025-10k-full-relative-value` | CCL | Carnival Corporation & plc FY2025 Form 10-K (FULL relative-value set copy) | in_hand | CP-0, CP-1, CP-1C, CP-2, CP-2A, CP-2G, CP-3 | RELATIVE_VALUE | 311896 | yes | `8fa7fceda34be50b…` |
+| `ccl-2025-revolver-full-relative-value` | CCL | 13 June 2025 revolving credit agreement (FULL relative-value set copy) | in_hand | CP-4 | RELATIVE_VALUE | 757831 | yes | `0f5a7510e20cbf71…` |
+| `ccl-2025-notes-full-relative-value` | CCL | 28 February 2025 5.75% 2030 notes indenture (FULL relative-value set copy) | in_hand | CP-4, CP-3 | RELATIVE_VALUE | 336377 | yes | `2340549fd4f215df…` |
+| `ccl-finra-full-relative-value` | CCL | FINRA CCL 5.75% 2030 note observation at 19 September 2026 (FULL relative-value set copy) | in_hand | CP-3D, CP-3 | RELATIVE_VALUE | 1304 | yes | `28f9289818978608…` |
+| `rcl-full-relative-value` | RCL | Royal Caribbean Group FY2025 results (FULL relative-value set copy) | in_hand | CP-1C, CP-3 | RELATIVE_VALUE | 41861 | yes | `43005bdbd3a05fd6…` |
+| `nclh-full-relative-value` | NCLH | Norwegian Cruise Line Holdings FY2025 results (FULL relative-value set copy) | in_hand | CP-1C, CP-3 | RELATIVE_VALUE | 52268 | yes | `dd9a0eb7211c111b…` |
 | `answer-key-3issuer` | CCL, BA, F | ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer | **key source, never admitted** | — | — | — | — | — |
 <!-- /emitted -->
 
-Twenty documents: nine `in_hand`, nine `to_source`, one `to_author`,
-one `not_available`; plus one key source. Six of the fourteen in hand are
-set copies of the CCL 10-K and the VMO2 releases -- the portfolio-screen
-set's three and the deep-research set's two releases -- which the on-disk loader requires because it refuses a declared
-path resolving outside its set root. One more, `cp-dr-research-brief`, is the
+Forty-one documents: thirty `in_hand`, nine `to_source`, one `to_author`,
+one `not_available`; plus one key source. Twenty-seven of the thirty-nine in hand are
+set copies of the CCL 10-K, debt instruments, peer releases and VMO2 releases --
+the route-local Phase 2 copies plus the earlier portfolio and deep-research sets --
+which the on-disk loader requires because it refuses a declared path resolving outside its set root. One more, `cp-dr-research-brief`, is the
 deep-research set's manifest: the brief is its `research_brief` object, so
 the measured bytes are the whole manifest's. The two cruise peer releases
 (`rcl-q4-2025-earnings`, `nclh-q4-2025-earnings`) replace the former
