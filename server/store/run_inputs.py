@@ -3,8 +3,11 @@
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
+from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -14,6 +17,13 @@ from server.boundary_text import BoundaryText
 from server.digest import canonical_digest, canonical_json
 from server.engine.route import ResolvedRoute
 from server.methodology.bundle import Bundle
+from server.methodology.handoff import ADAPTER_ROUTES, RESEARCH_MODULE
+from server.methodology.vendor import (
+    VendorContract,
+    authority_bundle_sha256,
+    cached_contract,
+    catalog,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection, committed_unit
 from server.store.events import RunEvent, append, lock_run
@@ -164,6 +174,129 @@ def _research(value: object) -> str | None:
     return raw
 
 
+def research_text(value: object) -> str | None:
+    """The canonical text a research brief is pinned as: `_research`, public."""
+    return _research(value)
+
+
+# The three bindings only the host may write into a research brief (§96): the
+# vendor run id, the accepted CP-0's Markdown digest and the bundle's authority
+# digest. A caller's brief carrying any of them is refused at the pin -- the
+# host owns identity (invariant 3).
+HOST_BOUND_BRIEF_KEYS = frozenset({"run_id", "cp0_sha256", "authority_sha256"})
+# The one `source_mode` this host can honour: web discovery is structurally
+# absent (invariant 1), so a brief asking for `web_only` or `hybrid` asks for
+# a capability nothing here has, and is refused rather than run `Blocked`.
+SUPPLIED_ONLY = "supplied_only"
+# The CP-0 digest a brief is bound to before the gate has run: the pin's
+# stand-in, replaced by the accepted record's digest when CP-DR is invoked.
+UNANCHORED_CP0 = "0" * 64
+# The brief's declared fields (`CP_DR_RESEARCH_BRIEF_V1.md`, "Run-linked
+# brief"): the vendor's `validate_brief` checks each one and ignores any other,
+# so the host refuses an undeclared field at its own boundary (wire
+# strictness) rather than carry caller text no rule reads into CP-DR's prompt.
+BRIEF_KEYS = frozenset(
+    {
+        "schema",
+        "mode",
+        "run_id",
+        "cp0_sha256",
+        "authority_sha256",
+        "scope_type",
+        "scope_key",
+        "subject_name",
+        "decision_context",
+        "as_of_date",
+        "time_horizon",
+        "source_mode",
+        "budget",
+        "authorization_basis",
+        "exclusions",
+        "questions",
+    }
+)
+
+
+def _bound_brief(
+    brief: Mapping[str, Any], *, run_id: str, cp0_sha256: str, authority_sha256: str
+) -> dict[str, Any]:
+    """The caller's brief with the three host bindings written in."""
+    return {
+        **brief,
+        "run_id": run_id,
+        "cp0_sha256": cp0_sha256,
+        "authority_sha256": authority_sha256,
+    }
+
+
+def _cp0_anchor(
+    subject: RunSubject, *, run_id: str, cp0_sha256: str, authority_sha256: str
+) -> SimpleNamespace:
+    """The CP-0 identity the vendor's `validate_brief` anchors a linked brief
+    to, built from what the host pinned rather than read from any handoff."""
+    return SimpleNamespace(
+        fields={
+            "credit_os_run_id": run_id,
+            "credit_os_authority_bundle_sha256": authority_sha256,
+            "issuer_id": subject.issuer_id,
+            "issuer_name": subject.issuer_name,
+        },
+        sha256=cp0_sha256,
+    )
+
+
+def bound_research_brief(  # noqa: PLR0913 -- one brief, every binding keyword-only
+    contract: VendorContract,
+    vendor_catalog: Mapping[str, Any],
+    *,
+    brief: object,
+    route: ResolvedRoute,
+    subject: RunSubject,
+    run_id: str,
+    cp0_sha256: str,
+    authority_sha256: str,
+) -> dict[str, Any]:
+    """The caller's brief, host-bound and judged by the vendor's own rules.
+
+    Refuses `RUN_INPUT_INVALID` for: a brief that is not an object, that
+    carries a host binding or a field the brief schema does not declare; a
+    pinned route no CP-DR node is on (a brief no node reads is a statement
+    nobody heard); anything the vendor's `validate_brief`
+    refuses against the CP-0 anchor built from the pin -- schema, `mode:
+    linked`, `scope_key` and `subject_name` against the subject, the question
+    shape; a `source_mode` other than supplied-only (invariant 1); and a
+    placement the vendor's own `Route` refuses -- a consumer or predecessor the
+    pinned pathway does not select, or one that would cycle. Every vendor
+    exception is caught inside its own handler, so no vendor text reaches the
+    refusal (invariant 2).
+    """
+    if (
+        type(brief) is not dict
+        or HOST_BOUND_BRIEF_KEYS.intersection(brief)
+        or not BRIEF_KEYS.issuperset(brief)
+        or all(node.module_id != RESEARCH_MODULE for node in route.nodes)
+    ):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    bound = _bound_brief(
+        brief, run_id=run_id, cp0_sha256=cp0_sha256, authority_sha256=authority_sha256
+    )
+    anchor = _cp0_anchor(
+        subject, run_id=run_id, cp0_sha256=cp0_sha256, authority_sha256=authority_sha256
+    )
+    valid = False
+    try:
+        contract.research.validate_brief(bound, cp0=anchor)
+        contract.routing.Route(
+            vendor_catalog, route.profile_id, route.selection_id, research_brief=bound
+        )
+        valid = bound["source_mode"] == SUPPLIED_ONLY
+    except Exception:  # noqa: BLE001 -- any vendor refusal is this refusal
+        valid = False
+    if not valid:
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    return bound
+
+
 def _fingerprint(pin: RunInput) -> str:
     fields = input_fields(pin)
     del fields["run_id"], fields["input_fingerprint"]
@@ -283,6 +416,43 @@ def pin_run_input(  # noqa: PLR0913 -- subject is keyword-only
     return candidate
 
 
+def _judge_research(
+    bundle: Bundle,
+    route: ResolvedRoute,
+    research: object,
+    *,
+    subject: RunSubject,
+    run_id: str,
+) -> None:
+    """A new pin's brief, judged as CP-DR will receive it (§96).
+
+    On an enabled pathway carrying CP-DR a brief is required: the vendor's own
+    rule -- CP-DR requires a run-scoped brief naming its questions
+    (`navigation.plan_from_cp0`) -- asked before anything is spent, since a
+    brief-less input would pay for CP-0 and then refuse at CP-DR. A brief that
+    is given is host-bound to this run, this bundle and, for now, the
+    unanchored gate -- the accepted CP-0's digest replaces the stand-in when
+    the node is invoked -- and judged by `bound_research_brief`. Read only when
+    a brief is given, so every other pin costs no vendor load.
+    """
+    if research is None:
+        if (route.profile_id, route.selection_id) in ADAPTER_ROUTES and any(
+            node.module_id == RESEARCH_MODULE for node in route.nodes
+        ):
+            raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+        return
+    bound_research_brief(
+        cached_contract(bundle),
+        catalog(bundle),
+        brief=research,
+        route=route,
+        subject=subject,
+        run_id=run_id,
+        cp0_sha256=UNANCHORED_CP0,
+        authority_sha256=authority_bundle_sha256(bundle),
+    )
+
+
 def pin_run_input_in(  # noqa: PLR0913 -- pin_run_input's arguments
     conn: StoreConnection,
     run_id: UUID,
@@ -336,6 +506,13 @@ def pin_run_input_in(  # noqa: PLR0913 -- pin_run_input's arguments
             "SELECT 1 FROM run_attempts WHERE run_id = %s LIMIT 1", (run_id,)
         ).fetchone():
             raise Refusal(RefusalCode.RUN_INPUT_TOO_LATE)
+        _judge_research(
+            bundle,
+            pinned[0],
+            research,
+            subject=subject,
+            run_id=cos_run_id(run_id, owner[1]),
+        )
         conn.execute(
             "INSERT INTO run_inputs (run_id, case_id, source_version,"
             " source_fingerprint, route_digest, build_id, manifest_sha256,"

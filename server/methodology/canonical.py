@@ -17,7 +17,6 @@ what rests on it (§41.3).
 from __future__ import annotations
 
 import hashlib
-import threading
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -76,11 +75,7 @@ from server.methodology.selection import (
     gate_view,
     select_sources,
 )
-from server.methodology.vendor import (
-    VendorContract,
-    catalog,
-    load_vendor_contract,
-)
+from server.methodology.vendor import VendorContract, cached_contract, catalog
 from server.methodology.verification import (
     AcceptedRow,
     Step,
@@ -106,10 +101,6 @@ from server.store.outcomes import (
 from server.store.run_inputs import load_run_input
 from server.store.source_sets import SourceSet, load_source_set
 
-# One compiled contract per manifest: the manifest digests every vendor file.
-_CONTRACTS: dict[str, VendorContract] = {}
-_CONTRACTS_LOCK = threading.Lock()
-
 
 @dataclass(frozen=True, slots=True)
 class HandoffOutcome:
@@ -125,11 +116,7 @@ class HandoffOutcome:
 
 
 def _contract(bundle: Bundle) -> VendorContract:
-    key = bundle.manifest_sha256
-    with _CONTRACTS_LOCK:
-        if key not in _CONTRACTS:
-            _CONTRACTS[key] = load_vendor_contract(bundle)
-        return _CONTRACTS[key]
+    return cached_contract(bundle)
 
 
 def _diagnostic(blobs: BlobStore, content: object) -> tuple[str | None, bool]:

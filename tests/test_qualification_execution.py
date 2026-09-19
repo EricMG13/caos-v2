@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from canonical_fixtures import research_brief
 from test_qualification_harness import (
     OTHER,
     _approve,
@@ -347,6 +348,20 @@ def test_real_approved_input_transplants_are_refused(
         )
         conn.commit()
         pin_route(conn, run, route)
+        if fault == "research":
+            # §96: a brief on a route no CP-DR node is on reaches nobody, so the
+            # transplant is refused at its own pin before the harness sees it.
+            with pytest.raises(Refusal, match=r"^RUN_INPUT_INVALID$"):
+                pin_run_input(
+                    conn,
+                    run,
+                    a.input.source_version,
+                    harness.bundle,
+                    research_brief(),
+                    subject=original.subject,
+                )
+            assert cast(_Completions, harness.completions).prompts == []
+            return
         a = replace(
             a,
             input=pin_run_input(
@@ -354,7 +369,6 @@ def test_real_approved_input_transplants_are_refused(
                 run,
                 a.input.source_version,
                 harness.bundle,
-                {} if fault == "research" else None,
                 subject=original.subject,
             ),
         )
