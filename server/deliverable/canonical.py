@@ -34,9 +34,9 @@ from server.methodology.verification import (
     AcceptedRow,
     PinnedEvidence,
     Step,
+    _verify_owner_chain,
     load_vendor_authority,
     verify_accepted,
-    verify_owner_chain,
 )
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -195,7 +195,7 @@ class _Reader:
             refuse=_refuse,
         )
         if node.module_id == "CP-5":
-            verify_owner_chain(
+            _verify_owner_chain(
                 self.vendor.contract,
                 verified.markdown,
                 (

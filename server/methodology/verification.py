@@ -151,7 +151,7 @@ def verify_owner_restrictions(
             raise Refusal(refuse)
 
 
-def verify_owner_chain(
+def _verify_owner_chain(
     contract: VendorContract,
     markdown: bytes,
     upstream_keys: Iterable[tuple[str, str]],
