@@ -28,6 +28,15 @@ Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
 
+## GitHub delivery record — 19 September 2026
+
+| PR | Source reconciliation | Merge | Size | Hosted result |
+|---|---|---|---|---|
+| [#343](https://github.com/EricMG13/caos-v2/pull/343) | Task 9.2 source `601937e`, reconciled rather than patch-identical: the three raw source texts were omitted to stay within hosted policy and their registry rows changed to `to_source`; PR head `c8f2518` | `019b71c` | 305/800 counted; 296 additions, 23 deletions | Required `lint`, `types`, `test`, `security`, `size`, `frontend`, `postgres`, `sonarqube`, and `SonarCloud Code Analysis` all passed; optional `image` passed; `provider` and `smoke` skipped by workflow policy |
+
+This records delivery only. It is not phase acceptance and does not claim the
+three omitted documents are present on GitHub.
+
 ## Completion remainder record — 18 September 2026
 
 **Landed on `completion/remainder`, not delivered and not a phase acceptance.**
