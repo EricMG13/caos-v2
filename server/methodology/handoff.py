@@ -49,6 +49,11 @@ ADAPTER_MODULES = frozenset(
         "CP-3D",
         "CP-2",
         "CP-2G",
+        "CP-1A",
+        "CP-1D",
+        "CP-2E",
+        "CP-2H",
+        "CP-4C",
         "CP-2D",
         "CP-1B",
         "CP-3",
@@ -74,6 +79,7 @@ ADAPTER_ROUTES = frozenset(
         ("FULL_CREDIT_32", "DEEP_RESEARCH"),
         ("FULL_CREDIT_32", "LIQUIDITY_REVIEW"),
         ("FULL_CREDIT_32", "EARNINGS_UPDATE"),
+        ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT"),
     }
 )
 GATE_MODULE = "CP-0"
