@@ -187,12 +187,13 @@ def _leading(pages: Iterable[Sequence[int]], bound: int) -> int:
     k, total = 0, 0
     while True:
         step = sum(page[k] for page in sizes if k < len(page))
-        if step == 0 and all(k >= len(page) for page in sizes):
-            return k
-        if total + step > bound:
-            return k
+        if (step == 0 and all(k >= len(page) for page in sizes)) or (
+            total + step > bound
+        ):
+            break
         total += step
         k += 1
+    return k
 
 
 def demand_cells(
