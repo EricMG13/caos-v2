@@ -883,10 +883,13 @@ def research_identity(
     module: str,
     upstream: tuple[UpstreamRef, ...] = (),
     research_brief: str | None = None,
+    *,
+    selection: tuple[str, str] = RESEARCH_SELECTION,
 ) -> HostIdentity:
     """One node's host identity on the deep-research route. A CP-DR identity
     needs its bound brief before `invocation_fields` can be asked of it."""
-    node = next(n for n in RESEARCH_ROUTE.nodes if n.module_id == module)
+    resolved = resolve_route(CATALOG, *selection)
+    node = next(n for n in resolved.nodes if n.module_id == module)
     if module != "CP-0" and not upstream:
         upstream = tuple(
             UpstreamRef(
@@ -896,16 +899,15 @@ def research_identity(
                 "FY2025",
                 hashlib.sha256(n.module_id.encode()).hexdigest(),
             )
-            for n in RESEARCH_ROUTE.nodes
+            for n in resolved.nodes
             if any(
-                e.source == n.module_id and e.target == module
-                for e in RESEARCH_ROUTE.edges
+                e.source == n.module_id and e.target == module for e in resolved.edges
             )
         )
-    route = CONTRACT.routing.Route(CATALOG, *RESEARCH_SELECTION)
+    route = CONTRACT.routing.Route(CATALOG, *selection)
     return HostIdentity(
         RUN,
-        *RESEARCH_SELECTION,
+        *selection,
         node.route_node_id,
         module,
         route.by_module[module]["module_name"],
@@ -1111,6 +1113,7 @@ class ResearchCompletions:
     facility_id: UUID
     model: str = "a-model/for-the-test"
     charge: Decimal = Decimal("0.0000041")
+    selection: tuple[str, str] = RESEARCH_SELECTION
     qa_by_module: dict[str, str] = field(default_factory=dict)
     readiness: dict[str, str] = field(default_factory=dict)
     quotes_by_module: dict[str, str] = field(default_factory=dict)
@@ -1125,13 +1128,21 @@ class ResearchCompletions:
         assert json_object
         self.prompts.append(prompt)
         fields = fields_from_prompt(prompt)
+        assert (
+            fields["credit_os_profile_id"],
+            fields["credit_os_selection_id"],
+        ) == self.selection
         module = str(fields["module_id"])
         quotes = list(RESEARCH_QUOTES[module])
         replaced = self.quotes_by_module.get(module)
         if replaced is not None:
             quotes[-1] = (quotes[-1][0], replaced)
         markdown = research_markdown(
-            research_identity(module, research_brief=research_section(prompt)),
+            research_identity(
+                module,
+                research_brief=research_section(prompt),
+                selection=self.selection,
+            ),
             fields,
             HandoffKnobs(
                 qa_status=self.qa_by_module.get(module, "Passed"),

@@ -21,6 +21,7 @@ from canonical_fixtures import (
     LITE_PROFILE,
     LITE_SELECTION,
     CanonicalCompletions,
+    research_brief,
 )
 from conftest import priced
 from fastapi.testclient import TestClient
@@ -113,7 +114,7 @@ def _no_work(harness: _Harness) -> None:
         assert _count(harness, table) == 0, table
 
 
-@pytest.mark.parametrize("route", [FULL, DEEP, ALL_ADAPTER], indirect=True)
+@pytest.mark.parametrize("route", [FULL, ALL_ADAPTER], indirect=True)
 def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
     harness: _Harness,
 ) -> None:
@@ -146,7 +147,7 @@ def _authority(harness: _Harness) -> tuple[RunInput, ResolvedRoute]:
     return pin, stored
 
 
-@pytest.mark.parametrize("route", [FULL, DEEP, ALL_ADAPTER], indirect=True)
+@pytest.mark.parametrize("route", [FULL, ALL_ADAPTER], indirect=True)
 def test_acceptance_refuses_a_disabled_route(harness: _Harness) -> None:
     attempt = _billed(harness)
     accepted = Accepted(
@@ -179,7 +180,14 @@ def test_every_route_pins_the_one_adapter_and_a_subject(
         assert _refusal(
             lambda run=run: pin_run_input(conn, run, source.version, bundle)
         ) is (RefusalCode.RUN_INPUT_INVALID)
-        pin = pin_run_input(conn, run, source.version, bundle, subject=SUBJECT)
+        research = (
+            research_brief(SUBJECT.issuer_id, SUBJECT.issuer_name)
+            if selection == DEEP
+            else None
+        )
+        pin = pin_run_input(
+            conn, run, source.version, bundle, research, subject=SUBJECT
+        )
         assert pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
 
 
@@ -266,7 +274,7 @@ def test_readers_refuse_an_artifact_without_its_record(
     }
 
 
-@pytest.mark.parametrize("selection", [FULL, DEEP, ALL_ADAPTER])
+@pytest.mark.parametrize("selection", [FULL, ALL_ADAPTER])
 def test_require_adapter_route_is_the_one_rule_both_refusal_points_share(
     selection: tuple[str, str],
 ) -> None:
@@ -276,7 +284,7 @@ def test_require_adapter_route_is_the_one_rule_both_refusal_points_share(
 
     It is pure and takes no connection, which is what lets execution and
     acceptance apply it identically. The two disabled shapes are distinct on
-    purpose -- `FULL`/`DEEP` carry modules the adapter does not own, while
+    purpose -- `FULL` carries modules the adapter does not own, while
     `ALL_ADAPTER` carries only adapter modules on a pathway no contract test
     proves (work item 6) -- and the same code answers both.
     """

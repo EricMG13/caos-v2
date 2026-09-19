@@ -4673,42 +4673,324 @@ the hosted checks verified on `main` need a push and are not part of it.
   pack is the live answer, and the Completion Phase 7 ledger entry is struck
   with that said.
 
-## 2026-09-19 §104 — Claude roles map to two GPT models; `xhigh` remains the ceiling
+## 2026-09-18 §95 — Per-node evidence selection reads the gate's T8 row, at the source grain
 
-The owner supplied `claude_fable_and_opus_reasoning_matrix.md` as reference
-data and asked that its model and effort settings be adapted to their GPT
-equivalents for resumed development. For every new dispatch, Claude Opus 5's
-daily-driver and verification role maps to `gpt-5.6-sol`; Claude Fable 5.1's
-long-horizon and chief-architect role maps to `gpt-6-astra`. The complete
-forward-looking matrix is `docs/GPT_MODEL_REASONING_MATRIX.md`.
+§88.2 declined host ownership of a CP-0 register's shape and sent Task 10.1 to
+the vendor; §92 answered it, so the vendor's own `parse_t8` now carries
+`Recommendation.source_files_to_attach`. The owner's dispatch of Task 10.1 on
+this base is the authorization to read it. This entry records how the host
+reads it, the one rule it applies, and the question §88.2 left -- may a
+model-authored register decide what a downstream node may cite -- answered for
+the source grain and no finer.
 
-§81's ceiling remains binding. Codex has no `ultrathink` prompt lever, and a
-source request for `ultrathink`, `max` or `ultra` maps to the actual `xhigh`
-reasoning setting. Default implementation and ordinary review use
-`gpt-5.6-sol` at `medium`; critical store, billing and localized concurrency
-work may use `high`; long-horizon execution uses `gpt-6-astra` at `medium`,
-and architecture/governance at `high`.
+**What is built.** `server/methodology/selection.py`, pure over pinned inputs.
+`demand_cells` hands the accepted CP-0 Markdown to the vendor's `parse_t8` and
+keeps, per consumer module, the `Source files to attach` cell as the vendor
+parsed it -- no host table reader, no second reading of T8 (invariant 4).
+`select_sources` maps the cell to the run's pinned `SourceSetMember`s: the
+cell is split on `;`, `,`, a newline or `<br>`, each item stripped of
+whitespace and wrapping quotation, and an item names a member by its admitted
+filename exactly or by its document digest; a cell that is one filename
+carrying a separator is matched whole first. `canonical._context` applies the
+answer after the pre-call unit has verified the gate's record and read the
+whole pin through `read_run_blocks`, so a withdrawn member still refuses before
+anything is narrowed (invariant 1), and every reader that builds a context --
+`check_context`, the attempt, `replay_billed` -- selects the same blocks from
+the same pins (invariant 10). The gate itself is always handed the whole pin;
+CP-CF has no T8 row and is handed the whole pin; the pinned members are read
+only when a cell has items, so no API read's declared budget moved.
 
-At a phase freeze, the confidence review runs on `gpt-5.6-sol` at `xhigh`,
-then, after remediation and retest, the separate adversarial audit runs on
-`gpt-6-astra` at `xhigh`. Task acceptance stays with the workhorse model at
-`xhigh`; the one final all-phases review runs on `gpt-6-astra` at `xhigh`.
-This restores a distinct reader for the adversarial gate that §97 explicitly
-gave up. It overrides §97 and every earlier forward-looking Claude routing
-row, but does not rewrite the model or effort recorded for completed work.
+**The rule, and why each arm is the fail-closed one.** Three outcomes:
 
-## 2026-09-19 §105 — Codex routing uses the full relevant GPT portfolio
+1. *Every item maps to exactly one member* -- the node is handed those members
+   and nothing else. This is the narrowing §88.2 feared, taken on the owner's
+   authority and at the vendor's grain: the cell is the bundle's own statement
+   of what a consumer needs, and `verify_citations` then refuses
+   `CITATION_NOT_DELIVERED` for a quote of an unnamed pinned source
+   (`tests/test_evidence_selection.py::test_a_quote_on_an_undelivered_member_is_refused_on_a_real_run`,
+   the first real run shape on which that code fires).
+2. *No item maps, or the cell is empty* -- the whole pin, exactly as every run
+   before this entry. The host cannot read the cell as a selection, and the
+   direction that weakens no invariant is the one it already had: a wider
+   delivery can never turn a truthful quote into a refusal, ambiguity is
+   counted over the whole page from the live source regardless, and a prompt
+   too wide for the ceiling still refuses `CONTEXT_OVER_CEILING` rather than
+   truncating. This is the documented fallback, and it is what keeps every
+   existing fixture and route unchanged: the fixtures' T8 writes `Source p1`.
+3. *Some items map and some do not, or one item names two members* -- refused
+   `EVIDENCE_DEMAND_UNRESOLVED` (500, permanent) before any attempt,
+   reservation or call. Narrowing to the readable half is precisely §88.2's
+   hazard -- a truthful quote of the unread half becomes `CITATION_NOT_DELIVERED`
+   -- and widening to the whole discards a demand the gate did state; the host
+   would be deciding either way. The discharge is a successor run (§72) whose
+   CP-0 writes a cell the host can read, which is why the clearance says so
+   and why the code is not `EVIDENCE_NOT_AVAILABLE`: every pinned source is
+   live. The refusal carries no item text (invariant 2).
 
-The two roles in the owner's Claude matrix are not a two-model allow-list.
-`docs/GPT_MODEL_REASONING_MATRIX.md` now assigns bounded mechanical work to
-`gpt-5.6-luna`, ordinary implementation and exact-range review to
-`gpt-5.6-terra`, reliability-critical implementation and confidence checks to
-`gpt-5.6-sol`, and long-horizon architecture and independent adversarial review
-to `gpt-6-astra`. `gpt-daybreak-blue-latest` is reserved for defensive-security
-work; `gpt-5.5` may provide a deliberate previous-generation compatibility
-baseline. Any available GPT model may be used when its documented strength is
-the best fit and the reason is recorded. The `xhigh` ceiling and all authority
-limits remain unchanged.
+**Decided against.** A stored `attempt_deliveries` row and a v3 record
+carrying `delivery_sha256`, both in the original brief: the selection is a
+function of the accepted CP-0 Markdown and the pin, both immutable, so storing
+it would add a second authority a reader has to compare, and re-deriving it is
+what projections already do. The cost -- no row says which basis a node ran
+under -- is in the ledger. Per-node re-anchoring in the proof and the
+deliverable: both still anchor against the whole pin, which can neither admit
+nor refuse anything acceptance did not, and reading the gate's row there would
+move `freeze`'s and the committee read's declared budgets; also in the ledger.
+The bounded line group and the per-section bound the brief listed as (c) and
+(d): separate concerns, not this entry.
+
+**What it does not do, stated plainly.** Boeing's 10-K text (1,177,234 bytes)
+and Ford's (1,922,743 bytes) are each one source and each larger than
+`MAX_REQUEST_BYTES` (1,048,576). A selection at the source grain delivers a
+named member whole, so naming either delivers more than the ceiling and
+naming neither delivers nothing of it; neither is runnable after this entry,
+and the ledger entry under Completion Phase 10 records the page- or
+section-level grain that would be needed and what has to answer for it first.
+
+**Tests.** `tests/test_evidence_selection.py` holds the pure rule (empty,
+unmapped, named, digest, separator-in-filename, half-readable, ambiguous,
+order-independent) and the run shape (only the named members reach the
+prompt; the whole pin when nothing is named; the refusal before any attempt;
+the gate always whole; one delivery at every reader). The new code is
+registered in `RefusalCode`, `app.PERMANENT`, `app._STATUS`, `wire.CLEARS`
+and the workspace's closed enum, and `frontend/src/wire/v1/schema.json` is
+regenerated from the models.
+
+## 2026-09-18 §96 — `LITE_DEEP_RESEARCH`: the pinned brief reaches CP-DR, and one vendor condition is changed to let it
+
+Completion Phase 9 Task 9.4 (`docs/superpowers/plans/2026-09-17-phase-9-task-9.4-brief.md`,
+steps 1–6; step 7, the live run, is not taken). `docs/COMPLETION_PLAN.md` O01
+(CP-DR), O02 (one pathway) and O04 (CP-DR cannot be invoked).
+
+**1. A vendor change, under the owner's standing approval.** The pathway was
+dead as authored in the bundle's own code. The catalog declares CP-DR
+`navigable: true` with `layer_id: null`; `validate_catalog` admits exactly that
+for CP-DR alone; CP-0's `SKILL.md` lists CP-DR among the ids T8 may name; and
+`navigation.parse_t8` refused any layerless row, and an empty T8 too. On a
+pathway whose one consumer is CP-DR no CP-0 handoff could validate. The first
+implementer of this task stopped there and wrote
+`docs/requests/2026-09-18-t8-cp-dr-row.md` -- the "request document" its last
+note named -- rather than build a host reading the bundle refuses. The owner
+had approved on 18 September 2026 altering vendor files with a record, so the
+request is answered rather than left open: `parse_t8` makes the exemption
+`validate_catalog` already makes (`module.layer_id is None and module_id !=
+"CP-DR"`), and nothing else moves. The vendor test the request asked for is
+`test_research_workflow.py::test_deep_research_pathway_recommends_cp_dr_alone`,
+watched failing without the change. `verify_package.py --refresh` regenerated
+the metadata; the build moves `62a94ccd` -> `6a5f1050`, the authority digest
+does not (`navigation.py` is not a pinned authority component). Recorded in
+`docs/VENDOR_CHANGES.md`; the host pins it in
+`tests/test_bundle_pin.py::test_the_t8_parser_accepts_the_cp_dr_row_cp0s_contract_permits`.
+Every run pinned to `62a94ccd` refuses `ORCHESTRATION_BUILD_MOVED` under this
+build, as §92's move did (the ledger's "A bundle upgrade invalidates every
+earlier run's proof").
+
+**2. The brief is judged at the pin, by the vendor.** `pin_run_input` binds a
+caller's brief to this run's vendor id, this bundle's authority digest and an
+unanchored gate (`UNANCHORED_CP0`), and hands it to the vendor's own
+`research.validate_brief` (against a CP-0 anchor built from the pinned subject)
+and `routing.Route(..., research_brief=...)` (the placement). The host adds
+three refusals of its own, each at its boundary rather than as methodology:
+a brief carrying `run_id`, `cp0_sha256` or `authority_sha256` (invariant 3 --
+the host writes them); a `source_mode` other than `supplied_only` (invariant 1
+-- the vendor would accept `web_only` and `hybrid` and then block; a capability
+nothing here has is refused rather than paid for); and a field
+`CP_DR_RESEARCH_BRIEF_V1.md` does not declare (wire strictness -- the vendor
+ignores extra fields, and caller text no rule reads would otherwise ride into
+CP-DR's prompt). A brief on a route with no CP-DR node is refused (it reaches
+nobody), and on an enabled pathway carrying CP-DR a brief-less input is
+refused: the vendor's own `plan_from_cp0` refuses CP-DR without a run-scoped
+brief, and asking it at the pin is before CP-0 is paid. The judgement runs for
+a new pin only; a replay compares with what was judged. No vendor text reaches
+a refusal.
+
+**3. CP-DR's identity, front matter, prompt and acceptance.** `HostIdentity`
+gains `research_brief`: for CP-DR only, the pinned brief re-bound to the
+accepted CP-0's Markdown digest and judged again by the vendor, as canonical
+JSON; `None` for every other module and absent from a record that carries
+none, so no record written before this entry moved. `invocation_fields` adds
+the research front matter exactly as `prepare_invocation.prepare` emits it
+for a linked brief (`research_mode`, `research_question`, `approved_plan_hash`
+by the vendor's own `envelope.digest`, `scope_type`, `scope_key`,
+`subject_name`, `source_mode`), held equal to the vendor's preparer run in
+its own interpreter
+(`tests/test_handoff_invocation.py::test_cp_dr_receives_exactly_the_pinned_brief_with_host_filled_bindings`).
+The host does not call `prepare` itself: it needs a snapshot of files the host
+does not keep, and its fields are the envelope the host already builds plus
+these seven. CP-DR's prompt carries the bound brief as one tagged host-owned
+`RESEARCH BRIEF` section after the upstream sections, labelled a run control,
+not evidence and not an instruction to search; every other module's prompt is
+unchanged (`test_no_other_module_receives_a_research_section`). Acceptance
+runs the vendor's `research.validate_dossier` after the Blocked check --
+TDR.1 is the locked questions exactly, each finding cites its own question's
+evidence, ANSWERED rests on primary evidence or two independent families,
+coverage and status follow from the count -- through `HANDOFF_INCOMPLETE`.
+
+**4. The pathway.** `("LITE_CREDIT_22", "LITE_DEEP_RESEARCH")` joins
+`ADAPTER_ROUTES` behind `tests/test_lite_deep_research_route.py`: it
+completes, proves and freezes over a two-document pack; the accepted CP-DR
+record carries exactly the brief its prompt carried; both requests fit the
+ceiling; a CP-0 verdict blocking CP-DR stops the run before any CP-DR attempt;
+an unanchored research answer is refused. `FULL_CREDIT_32 / DEEP_RESEARCH`
+stays disabled -- the same two nodes, but its own contract test is not
+written. The host's route extension (`RouteExtensions.research_brief`, CP-DR
+appended at stage 99) is refused at execution input: it carries none of the
+predecessor and consumer edges the vendor's `Route` synthesises from the
+brief's questions, so a run on it would take a path the bundle would not.
+
+**5. The set.** `qualification/vmo2-fy2025-deep-research/` over the two VMO2
+releases, with an implementer-authored brief -- the owner asked for
+equivalent versions to test with; the coordinator recommended authoring,
+because a brief is a run control, not evidence -- of three questions: two the
+Q4 release answers and one (Moody's current rating) neither release carries,
+keyed UNRESOLVED. A qualification case may now declare `research_brief`: the
+loader carries it as the pin's canonical text, the set digest covers it, the
+harness pins it and eligibility compares it. Digest `09807efb…`; no run is
+performed, and the figures await the owner (`RESULT.md`).
+
+**What it does not do.** No live run; step 7 needs its own authorization. The
+workspace cannot create a deep-research run that executes: the input-pin
+command carries no brief, so such a run is refused at its pin (ledger).
+Nothing downstream adopts research on this pathway -- every question's
+consumer is `NONE` -- so the vendor's adoption register and its host
+enforcement on a consumer are untested here, and the extension that would
+reach them is refused.
+
+**Build, as shipped:** §96 was made from `62a94ccd` concurrently with §98; the
+coordinator combined the two edits into build `78c24be4…` (`docs/VENDOR_CHANGES.md`),
+so `6a5f1050` above names an intermediate build no run is pinned to.
+
+## 2026-09-18 §97 — Fable 5.1 is withdrawn from every role
+
+The owner, 18 September 2026: "After the current task switch fable 5.1 as
+implementer use opus", then "Stop usage of fable". Every implementer and every
+review runs on Opus 5: implementers at `medium`, or `high` for store, lock,
+billing or large multi-file work; task acceptance, the phase confidence review,
+the phase adversarial audit and the final all-phases review at `xhigh`. The
+running Task 9.4 implementer, which was on Fable, was stopped and its
+uncommitted work handed to an Opus implementer. This overrides §85 and §86's
+Fable rows. §81's caps stand: no `ultrathink`, no `max`.
+
+What it gives up: §85 routed the phase gates and the final review to two
+different models so their blind spots would differ. Both gates now share one
+architecture. The agent definitions say so and tell the adversarial and final
+reviewers to read as outsiders on purpose; that is a discipline, not a
+substitute for a second model.
+
+## 2026-09-18 §98 — The Boeing and Ford 10-K texts run by page: T8 names pages, the gate reads a page map
+
+The owner approved the coordinator's recommendation on 18 September 2026:
+make Boeing's (`BA_FY2025_10K.txt`, 1,177,234 bytes, `0446b367…`) and Ford's
+(`F_FY2025_10K.txt`, 1,922,743 bytes, `97a38bc1…`) FY2025 10-K text extracts
+runnable by page-level evidence selection, altering vendor files with a record
+(the §92 approval), using only what is in hand -- no EDGAR. §95 had selected at
+the source grain and recorded that neither text could run: a named member was
+delivered whole and larger than the whole request.
+
+**Measured first.** Through the real extractor (plain text v3): Boeing is 6,421
+lines, 108 declared fixed-pitch pages of sixty lines, 4,852 blocks and 905,758
+bytes of block text; Ford is 8,728 lines, 146 pages, 6,526 blocks and
+1,435,471 bytes. Both now admit (the token cut of Completion Phase 13 took the
+71,243- and 105,966-character XBRL runs on line one). A `.txt` page is
+therefore a real, declared, checkable grain -- the `page` every evidence header
+already shows -- so page grain is not meaningless here, and it is the one used.
+Neither text fits whole: Boeing's escaped evidence alone is 933,394 bytes,
+which with CP-0's delivered authority passes `MAX_REQUEST_BYTES` (1,048,576);
+Ford's is 1,475,743.
+
+**Two obstacles, not one.** A consumer's delivery is narrowed by the gate's T8
+row, but the gate (CP-0) is always handed the whole pin, so a 1.9 MB source
+could not reach CP-0 either. Both are answered, and neither by trimming.
+
+1. **The bundle states the grammar (build `62a94ccd` -> `91c219fb`).**
+   `REF_CP-0_STEPS.md` Step I rule 5 gains the page form of a `Source files to
+   attach` item -- `<filename> pages <first>-<last>` or `<filename> page <n>`,
+   one range per item, pages being the `page` locators the evidence shows, a
+   filename alone attaching the whole source -- and a new rule 8 says a source
+   the host delivers as a page map is evidence only in the lines shown, is
+   triaged `PARSE_TARGETED` (the vendor's own existing decision for "only
+   identified sections are useful, and the exclusion boundary is auditable")
+   or `BLOCKED`, is attached by page and never whole, and carries the page-map
+   limitation into every row. Edited once, `verify_package.py --refresh`, the
+   bundle's 52 tests and 10 self-checks green, recorded in
+   `docs/VENDOR_CHANGES.md`; no runtime authority moved, so
+   `authority_bundle_sha256` is unchanged. CP-0's delivered authority grows 740
+   bytes to 147,345. So the question §88.2 asked -- may a model-authored
+   register decide what a downstream node may cite -- is answered one grain
+   down exactly as §95 answered it at the source grain: the cell is the
+   bundle's own statement of what a consumer needs, now in a form the bundle
+   defines.
+2. **Consumers: pages of a named member (`selection.select_sources`).** An
+   item in the page form names its member by the §95 rules and the node is
+   handed that member's blocks on those pages only; a member named whole and by
+   page is handed whole; ranges union. A range that is backwards, below page
+   one, past the last page the pin captured of the member, or longer than six
+   digits refuses `EVIDENCE_DEMAND_UNRESOLVED` before any attempt, as a
+   half-readable cell does: narrowing to the pages that exist would decide what
+   the gate did not. The host reads the page form as §95 reads the item split,
+   in the form the bundle states and no looser than optional parentheses,
+   `page`/`pages` and an en dash. A filename that itself ends in a page phrase
+   is still matched whole first.
+3. **The gate: a page map (`selection.gate_view`).** A source whose block text
+   passes `GATE_SOURCE_BYTES` -- 3/8 of the request ceiling, 393,216 bytes, so
+   two such sources beside CP-0's authority still leave the instructions room --
+   is shown to CP-0 as the largest uniform number `k` of leading lines of every
+   page whose total fits the bound: every page present, every line whole, in
+   stored order. Its entry in the host preparation metadata carries
+   `evidence_delivery: PAGE_MAP`, `leading_lines_per_page`, `pages`,
+   `lines_shown` and `lines`, and one note says that no other line is evidence
+   and names rules 5 and 8. A map that cannot hold one whole line a page
+   refuses `CONTEXT_OVER_CEILING`; nothing is cut. A source within the bound is
+   shown whole exactly as before, and every document in the tree before this
+   entry is within it, so no existing set's prompt moved. Measured: Boeing
+   `k` = 16 (1,713 of 4,852 lines), Ford `k` = 10 (1,460 of 6,526).
+
+**Why this preserves the invariants.** *Invariant 4*: the grammar and what a
+page map means for readiness are the bundle's; the host decides only which
+lines a map shows, by position alone -- never a keyword or a heading guess,
+which would be the host deciding what matters -- and says that it did. The
+host invents no readiness: CP-0 still writes every verdict, from lines it was
+shown and told were partial. *No silent truncation*: nothing is trimmed; a
+withheld line is withheld whole and declared, the gate cannot cite it
+(`CITATION_NOT_DELIVERED`), and every prompt still meets `CONTEXT_OVER_CEILING`
+as before. *Invariants 1, 10 and 11*: both rules are pure over the pinned
+delivery and run inside `canonical._context`, after `read_run_blocks` has
+counted the pin, so withdrawal still refuses first and the pre-call check, the
+attempt and a replay select alike; a quote is still anchored only inside what
+the node was handed, and a split line still needs all its blocks.
+
+**Measured on the LITE earnings route** (`tests/test_large_documents.py`,
+fixture provider, real bundle, extractor and prompt builder): CP-0's whole
+request is 555,007 bytes on Boeing's map and 545,382 on Ford's; CP-L10 handed
+Boeing pages 13-40 is 440,709 and Ford pages 22-64 is 555,512; each screen's
+answer, citing its set's key, is accepted; and the same screen handed the
+document whole still refuses `CONTEXT_OVER_CEILING`.
+
+**The sets.** `qualification/ba-fy2025/` and `qualification/f-fy2025/`, one
+LITE earnings case each, carry the texts byte-for-byte from the owner's corpus
+(digests verified on copy). Their keys come from the owner's answer key by its
+own locators -- Boeing's cash (10,921), revenue (89,463) and long-term debt
+(45,637); Ford's consolidated operating cash flow (21,282),
+Company-excluding-Ford-Credit operating cash flow (8,351) and Ford Credit debt
+(141,417) -- each unique on its page, each CP-0 key inside the gate's map.
+`.pre-commit-config.yaml`'s `check-added-large-files` excludes exactly those two
+paths. The register rows are `in_hand` and the table is re-emitted.
+
+**Not done, stated.** No live run: neither set has met a model, so whether a
+real CP-0 names useful pages from a map of each page's first lines is
+unmeasured, and nothing is qualified. The page map is blind to where a
+filing's headings fall (Boeing's `Item 7.` is the 34th non-blank line of page
+13, outside its map). The vendor record gap this edit triggered is now closed:
+`docs/VENDOR_CHANGES.md` records the pre-change Git base and its exact expanded
+path inventory, held equal to Git by `tests/test_vendor_change_record.py`.
+The page-map limitation remains in the ledger.
+
+**Decided against.** A host table of contents or heading detector for the gate
+(the host choosing content); a vendor-declared staged CP-0 read (two gate calls
+per run, a route and billing change far larger than this need); raising
+`MAX_REQUEST_BYTES` (a provider-side bound, and Ford would still not fit); and
+host-authored pagination of `.txt` beyond the extractor's declared page (a
+second grain the evidence headers would not show).
 
 ## 2026-09-18 §99 — A set may declare the readiness refusal it expects; the CCL portfolio set does
 
@@ -4845,3 +5127,70 @@ every run from here on; no accepted record binds those bytes (a record binds its
 delivered authority, which is unchanged), so nothing already accepted moves.
 Whether it prevents the misreading is a live question the next run answers.
 `tests/test_page_selection.py::test_a_source_within_the_gate_bound_reaches_cp0_whole_and_says_so`.
+
+## 2026-09-18 §103 — A register key is read the way the vendor's `check()` reads it
+
+The scorer located registers with the vendor's `find_registers` asked with no
+id list, on the Completion Phase 8 claim that this is how the bundle asks. It
+is not: `completeness_check.check()` -- which every handoff passes at
+acceptance -- asks with the module's whole contract register list, and an empty
+list falls back to a default pattern (`[PT][0-9]…|TL[0-9]+.[0-9]+`) that cannot
+match `TDR.1`–`TDR.3` or CP-1A's named registers. Run `de27f93c…` of
+`qualification/vmo2-fy2025-deep-research/` was scored `registers_met: false`
+over a CP-DR dossier whose `#### TDR.3 — Findings` table carried exactly the
+three statuses the keys named.
+
+`matrix.module_registers` now asks exactly as `check()` does: the module's
+declared register list from its verified `SKILL.md`. Neither narrower (the
+Phase 8 sibling-table defect) nor wider (this one); CP-L10's list names every
+TL family, so the Phase 8 case still reads the honest table.
+
+Keys keep naming `TDR.3`, not `cpdr.findings`. CP-DR's `SKILL.md` declares
+`required_register_ids: TDR.1; TDR.2; TDR.3` and the completeness contract's
+`required_registers` keys `TDR.3` with the seven finding columns; the catalog's
+CP-DR entry lists `TDR.3`; and `CP_DR_RESEARCH_BRIEF_V1.md` names the same table
+"TDR.3, tag `<!-- table-id: cpdr.findings -->`". The register id is the
+identity every module shares and the one acceptance's completeness check
+enforces, so one reader serves every module and no committed set digest moves.
+`matrix.unlocatable_register_keys` reports a key its module's contract or the
+scorer's reader cannot locate; the suite runs it over every committed set
+(`tests/test_qualification_matrix.py::test_every_committed_register_key_is_locatable_by_its_modules_reader`).
+
+## 2026-09-19 §104 — Claude roles map to two GPT models; `xhigh` remains the ceiling
+
+The owner supplied `claude_fable_and_opus_reasoning_matrix.md` as reference
+data and asked that its model and effort settings be adapted to their GPT
+equivalents for resumed development. For every new dispatch, Claude Opus 5's
+daily-driver and verification role maps to `gpt-5.6-sol`; Claude Fable 5.1's
+long-horizon and chief-architect role maps to `gpt-6-astra`. The complete
+forward-looking matrix is `docs/GPT_MODEL_REASONING_MATRIX.md`.
+
+§81's ceiling remains binding. Codex has no `ultrathink` prompt lever, and a
+source request for `ultrathink`, `max` or `ultra` maps to the actual `xhigh`
+reasoning setting. Default implementation and ordinary review use
+`gpt-5.6-sol` at `medium`; critical store, billing and localized concurrency
+work may use `high`; long-horizon execution uses `gpt-6-astra` at `medium`,
+and architecture/governance at `high`.
+
+At a phase freeze, the confidence review runs on `gpt-5.6-sol` at `xhigh`,
+then, after remediation and retest, the separate adversarial audit runs on
+`gpt-6-astra` at `xhigh`. Task acceptance stays with the workhorse model at
+`xhigh`; the one final all-phases review runs on `gpt-6-astra` at `xhigh`.
+This restores a distinct reader for the adversarial gate that §97 explicitly
+gave up. It overrides §97 and every earlier forward-looking Claude routing
+row, but does not rewrite the model or effort recorded for completed work.
+
+## 2026-09-19 §105 — FULL deep research is enabled on its deterministic contract only
+
+`FULL_CREDIT_32 / DEEP_RESEARCH` has the same CP-0 -> CP-DR shape as the LITE
+pathway proved in §96. `tests/test_full_deep_research_route.py` now proves that
+whole route under its own FULL identity: the accepted CP-DR record projects
+`decision_scope: FULL`, carries the pinned brief bound to the accepted CP-0,
+anchors its citations, stays below the request ceiling, proves and freezes,
+and is never attempted when CP-0 blocks it. The pair therefore joins
+`ADAPTER_ROUTES`; the exact-set and disabled-route guards move with it.
+
+This is not Task 11.4 acceptance. The test uses the existing deterministic
+supplied-only fixture and makes no provider call. No FULL qualification keys,
+live run, performed snapshot, or signed verdict exist yet; those remain the
+separate qualification slice.
