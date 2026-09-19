@@ -93,8 +93,7 @@ def demand_cells(
         )
         return {str(row.module_id): str(row.source_files_to_attach) for row in rows}
     except Exception:  # noqa: BLE001 -- any failure inside is this refusal
-        pass
-    raise Refusal(RefusalCode.HANDOFF_INCOMPLETE)
+        raise Refusal(RefusalCode.HANDOFF_INCOMPLETE) from None
 
 
 def demand_items(cell: str) -> tuple[str, ...]:
