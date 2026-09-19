@@ -1,6 +1,31 @@
 # Qualification provider and spend pin — 19 September 2026
 
-Status: **PINNED — no provider call or live spend has occurred.**
+Status: **PAID EARLY STOP — two smoke sets ran once; Sol/high is suspended.**
+
+## Phase 4 early-stop record
+
+On 19 September 2026 the two smallest portfolio smoke sets were each launched
+once under the pinned `openrouter/openai/high/65536` profile. Four CP-0 calls
+charged `1.4463290` in total and retained `11.287080` of reservations. No CP-0
+artifact was accepted, no downstream CP-L10 call occurred, no matrix was built,
+and no human verdict exists.
+
+The retained diagnostics reproduce as model-contract misses: three answers
+contradict the vendor's explicit severity-to-`qa_status` rules, one citation
+alters source text and cannot anchor, and another declares the wrong page. The
+host transport, parser, source delivery and validator were not defective. The
+second set was a deliberate diagnostic exception to the default stop after an
+unexpected refusal; after it reproduced the failure, the remaining sixteen
+sets were not launched. Both smoke results remain `NOT_QUALIFIED`.
+
+No further Sol/high run is justified. The smallest controlled replacement
+proposal is the same official model and `openai` endpoint at reasoning effort
+`xhigh`, identity `openrouter/openai/xhigh/65536`, with the unchanged dated
+`0.000005` / `0.000015` price. One `--attempts 1` launch of each unchanged
+two-node smoke set would have a ceiling of `12.451840` each and `24.903680` in
+aggregate. That changed identity and additional spend are **not authorized by
+the one-launch Sol/high record below**; execution remains stopped pending an
+explicit amended owner authorization.
 
 ## Observed configuration
 
