@@ -51,7 +51,7 @@ def _prepare(
     conn: StoreConnection,
     case_id: UUID,
     path: Path,
-    selection: tuple[str, str] = (PROFILE, "DEEP_RESEARCH"),
+    selection: tuple[str, str] = (PROFILE, "RELATIVE_VALUE"),
 ) -> tuple[UUID, SourceSet, Bundle, ResolvedRoute]:
     """A run on `selection`, pinned but not yet input-pinned. The default is a
     route the adapter does not execute: pinning stays general (§42.2)."""
