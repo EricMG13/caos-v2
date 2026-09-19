@@ -4783,3 +4783,65 @@ anything, when it is unset (`tests/test_qualify_script.py::test_main_refuses_to_
 `.env.example` names the persistent dev server on 55436 with its local admin
 role. Earlier runs whose databases lived on the test server are in the same
 state, whatever their `RESULT.md` says about retention.
+
+## 2026-09-18 §101 — CP-DR is delivered the research contract its own authority names
+
+Amends §45.1, which delivers a module's own non-script files and the root files
+its `SKILL.md` names, and treats every one-level-up link as a script whose step
+the host performs. One such link is not a script. CP-DR's `SKILL.md` says
+"Read `../cp-os-credit-os/references/CP_DR_RESEARCH_BRIEF_V1.md`", and its
+own references say that file "governs field names, hashes and run placement":
+it is the only authority that spells the `<!-- table-id: cpdr.questions -->`,
+`cpdr.evidence` and `cpdr.findings` tags `cp_tables` reads the registers by,
+and the closed `claim_type` and `source_type` sets. The vendor's
+`research.validate_dossier` refuses a dossier on every one of them.
+
+Found by the Task 9.4 live run `94590ea4…` (`qualification/vmo2-fy2025-deep-research/`):
+CP-0 accepted, CP-DR refused `HANDOFF_INCOMPLETE` twice. The report that the
+approved-plan hash differed from the brief was a replay against the wrong brief.
+Rebuilt from the retained pins, the identity's bound brief is the one the prompt
+showed, and both answers carry exactly the `approved_plan_hash` the host wrote
+into their front matter (`sha256:8ce1977e…`). The vendor refused both for
+`cpdr.questions: required nonempty register/columns missing` because the
+registers were untagged. Add the three tags and the next refusal is `research
+source_type is invalid`: the model wrote "Issuer earnings release". Map its
+source types onto the contract's and the first stored answer passes
+`validate_dossier` unchanged in every other cell. Both refusals were for rules
+the prompt never stated, so this was a host defect and not a model outcome.
+
+`bundle.CROSS_SKILL_AUTHORITY` declares the file for CP-DR alone. It is
+delivered after CP-DR's own references, under the literal its `SKILL.md` uses,
+and verified under CP-OS's manifest entry. `AUTHORITY_BYTES_MISMATCH` refuses
+a build whose CP-DR `SKILL.md` stops naming it
+(`tests/test_delivered_authority.py::test_cp_dr_is_delivered_the_research_contract_its_skill_names`,
+`test_a_cp_dr_skill_that_stops_naming_its_research_contract_refuses`). It is
+declared rather than derived because every other `SKILL.md` names the same file
+for the consumer side of research. Delivering it to them would move every
+module's prompt and `delivered_authority_digest`, and with it the authority
+match of each record accepted before now, for a route none of them is on
+(`test_only_cp_dr_is_delivered_another_skills_file`). The route guard is
+`tests/test_lite_deep_research_route.py::test_the_cp_dr_prompt_states_every_rule_its_dossier_is_refused_for`.
+It reads every register id and enumerated value out of the vendor's own
+`validate_dossier` and requires each one in the prompt CP-DR is sent. Before
+this change it failed on five of them. No CP-DR record was ever accepted, so
+the change to CP-DR's delivered digest invalidates nothing. A re-run of the set
+is expected to reach a dossier the validator can judge on its content. Whether
+the model answers it conformingly is still the model's.
+
+## 2026-09-18 §102 — Every source says how its evidence was delivered
+
+§98 labelled a page-mapped source `evidence_delivery: PAGE_MAP` and left a
+whole source unlabelled. On build `78c24be4` the VMO2 portfolio run's CP-0
+(run `cf5464dd…`) read the new vendor rule 8 -- which is about page maps -- onto
+two earnings releases the host had delivered whole, triaged both
+`PARSE_TARGETED`, called them unvalidated, and blocked CP-L10; the same set's
+CP-0 on the previous build had judged them `PASS_THROUGH` and CP-L10 ready. The
+investigation found the host section otherwise unchanged, so this was the model
+misapplying our own new rule, not a missing fact.
+
+Every source in `HOST SOURCE PREPARATION` now carries `evidence_delivery`:
+`PAGE_MAP` with its map fields, or `WHOLE`. It changes CP-0's prompt bytes for
+every run from here on; no accepted record binds those bytes (a record binds its
+delivered authority, which is unchanged), so nothing already accepted moves.
+Whether it prevents the misreading is a live question the next run answers.
+`tests/test_page_selection.py::test_a_source_within_the_gate_bound_reaches_cp0_whole_and_says_so`.

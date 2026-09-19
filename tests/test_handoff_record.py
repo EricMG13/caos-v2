@@ -329,7 +329,7 @@ def test_the_record_carries_no_model_authored_claims() -> None:
 
 @pytest.mark.parametrize(
     "marks",
-    ['"{}"', "\u201c{}\u201d", "\u2018{}\u2019", "\u00ab{}\u00bb", "'{}'"],
+    ['"{}"', "\u201c{}\u201d", "\u2018{}\u2019", "\u00ab{}\u00bb", "'{}'", "`{}`"],
 )
 def test_a_quote_the_body_wraps_in_quotation_marks_is_still_quoted(
     marks: str,
@@ -340,7 +340,9 @@ def test_a_quote_the_body_wraps_in_quotation_marks_is_still_quoted(
     around a quotation. The whole-token rule then reads `\u201cRecorded` and
     `p1\u201d` and refuses the entire handoff -- a host defect recorded as the
     model's answer, and what the CP-L10 attempt of the second paid Terra run
-    actually died of. The evidence anchor is untouched: `verify_citations`
+    actually died of -- and a Markdown code span is the same thing, which the
+    CP-0 of the 18 September 2026 relative-value run died of twice. The
+    evidence anchor is untouched: `verify_citations`
     still matches the document's own tokens exactly, so nothing here widens
     what may be cited, only what counts as having quoted it.
     """

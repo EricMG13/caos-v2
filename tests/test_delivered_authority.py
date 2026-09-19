@@ -308,3 +308,63 @@ def test_a_listed_root_script_is_not_readable_as_authority() -> None:
     with pytest.raises(Refusal) as refused:
         verified_root_bytes(Bundle(VENDORED), "verify_package.py")
     assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+# §101: CP-DR's own authority names this file as the contract that "governs
+# field names, hashes and run placement" -- the `<!-- table-id: cpdr.* -->`
+# tags and the enumerated `claim_type`/`source_type` values the vendor's
+# `research.validate_dossier` enforces -- and it is a file of CP-OS, not of
+# CP-DR, so the §45.1 rule never delivered it. Both live CP-DR attempts on
+# build 78c24be4 wrote untagged registers and invented source types, and were
+# refused `HANDOFF_INCOMPLETE` for rules they were never shown.
+RESEARCH_CONTRACT = "../cp-os-credit-os/references/CP_DR_RESEARCH_BRIEF_V1.md"
+
+
+def test_cp_dr_is_delivered_the_research_contract_its_skill_names(
+    bundle: Bundle,
+) -> None:
+    delivered = dict(delivered_authority(bundle, "CP-DR").files)
+
+    assert f"Read `{RESEARCH_CONTRACT}`".encode() in delivered["SKILL.md"]
+    assert delivered[RESEARCH_CONTRACT] == verified_bytes(
+        bundle, "CP-OS", "references/CP_DR_RESEARCH_BRIEF_V1.md"
+    )
+    for table in ("questions", "evidence", "findings"):
+        assert (
+            f"<!-- table-id: cpdr.{table} -->".encode() in delivered[RESEARCH_CONTRACT]
+        )
+
+
+def test_only_cp_dr_is_delivered_another_skills_file(bundle: Bundle) -> None:
+    """Every other module's delivered set is what §45.1 made it, so no record
+    accepted before §101 moved its `delivered_authority_digest`."""
+    for entry in json.loads((VENDORED / MANIFEST_NAME).read_bytes())["skills"]:
+        module_id = entry["module_id"]
+        foreign = [
+            name
+            for name, _ in delivered_authority(bundle, module_id).files
+            if name.startswith("../") and not name.startswith("../../")
+        ]
+        assert foreign == ([RESEARCH_CONTRACT] if module_id == "CP-DR" else [])
+
+
+def test_a_cp_dr_skill_that_stops_naming_its_research_contract_refuses(
+    copied: Path,
+) -> None:
+    """The host delivers another skill's file only because CP-DR's own
+    `SKILL.md` says to read it; a build that stops saying so is a changed
+    contract to review, not a file to keep sending."""
+    path = copied / "skills/cp-dr-deep-research/SKILL.md"
+    data = path.read_bytes().replace(RESEARCH_CONTRACT.encode(), b"the brief")
+    path.write_bytes(data)
+
+    def edit(document: dict[str, Any]) -> None:
+        for entry in document["skills"]:
+            if entry["module_id"] == "CP-DR":
+                entry["relative_file_hashes"]["SKILL.md"] = {
+                    "bytes": len(data),
+                    "sha256": sha256(data).hexdigest(),
+                }
+
+    _edit_manifest(copied, edit)
+    _refuses(lambda: delivered_authority(Bundle(root=copied), "CP-DR"))
