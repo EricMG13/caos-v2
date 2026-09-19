@@ -43,8 +43,9 @@ def _answered(row: MatrixRow) -> bool:
     """Whether this row is a result a reviewer could sign QUALIFIED over.
 
     Every key the case declared has to be answered, and a case may declare
-    six kinds: expected citations, an expected refusal, an expected forecast,
-    expected readiness, expected projections and expected register cells. Each
+    seven kinds: expected citations, an expected refusal, an expected forecast,
+    expected readiness, an expected readiness refusal (§99), expected
+    projections and expected register cells. Each
     of the bool-or-None fields is `None` when its kind was not declared and a
     bool when it was, so `is not False` is the test -- a case keyed only by a
     forecast (which `assert_measurable` allows) was otherwise signable with
@@ -59,6 +60,7 @@ def _answered(row: MatrixRow) -> bool:
     if (
         row.forecast_met is False
         or row.ready_met is False
+        or row.blocked_met is False
         or row.projections_met is False
         or row.registers_met is False
     ):
@@ -116,6 +118,11 @@ class PerformedEvidence:
             # `docs/REPAIR_PLAN.md` Phase 6 asks for in a deliberately
             # restricted case.
             if row.expected_refusal_met:
+                continue
+            # A case keyed `expects_blocked` declared that CP-0 would refuse a
+            # consumer, which ends the run BLOCKED (§99). Waived for that run
+            # only: one that failed or was cancelled is not the run declared.
+            if row.blocked_met and record.status is RunStatus.BLOCKED:
                 continue
             if record.status is not RunStatus.COMPLETE:
                 return False
@@ -361,40 +368,46 @@ def _matrix_document(performed: PerformedSet) -> dict[str, object] | None:
     return {
         "qualification_set_sha256": matrix.qualification_set_sha256,
         "build_id": matrix.build_id,
-        "rows": [
-            {
-                "case_label": row.case_label,
-                "proven": row.proven,
-                "refusal": None if row.refusal is None else row.refusal.value,
-                "met": [
-                    [
-                        citation.module_id,
-                        citation.document_sha256,
-                        citation.matched_text,
-                    ]
-                    for citation in row.met
-                ],
-                "missed": [
-                    [
-                        citation.module_id,
-                        citation.document_sha256,
-                        citation.matched_text,
-                    ]
-                    for citation in row.missed
-                ],
-                "forecast_met": row.forecast_met,
-                "expected_refusal_met": row.expected_refusal_met,
-                # The reading that decided answerability travels with it: a
-                # reviewer re-deriving `complete` from this document has to be
-                # able to see a readiness miss, or a snapshot refused because
-                # CP-0 gated a module reads as the model citing nothing.
-                "ready_met": row.ready_met,
-                "projections_met": row.projections_met,
-                "registers_met": row.registers_met,
-            }
-            for row in matrix.rows
-        ],
+        "rows": [_row_document(row) for row in matrix.rows],
     }
+
+
+def _row_document(row: MatrixRow) -> dict[str, object]:
+    """One matrix row. `blocked_met` joins only when declared (§99), so every
+    snapshot stored before it serialises -- and digests -- exactly as it did."""
+    document: dict[str, object] = {
+        "case_label": row.case_label,
+        "proven": row.proven,
+        "refusal": None if row.refusal is None else row.refusal.value,
+        "met": [
+            [
+                citation.module_id,
+                citation.document_sha256,
+                citation.matched_text,
+            ]
+            for citation in row.met
+        ],
+        "missed": [
+            [
+                citation.module_id,
+                citation.document_sha256,
+                citation.matched_text,
+            ]
+            for citation in row.missed
+        ],
+        "forecast_met": row.forecast_met,
+        "expected_refusal_met": row.expected_refusal_met,
+        # The reading that decided answerability travels with it: a
+        # reviewer re-deriving `complete` from this document has to be
+        # able to see a readiness miss, or a snapshot refused because
+        # CP-0 gated a module reads as the model citing nothing.
+        "ready_met": row.ready_met,
+        "projections_met": row.projections_met,
+        "registers_met": row.registers_met,
+    }
+    if row.blocked_met is not None:
+        document["blocked_met"] = row.blocked_met
+    return document
 
 
 def _digest(document: dict[str, object]) -> str:
