@@ -49,7 +49,7 @@ def _validate(ident: HostIdentity, markdown: bytes) -> Projections:
         )
 
 
-def test_cp1d_real_route_identity_is_proven_but_remains_disabled() -> None:
+def test_cp1d_real_route_identity_is_proven_and_enabled() -> None:
     ident = cp1d_identity()
     assert tuple(ref.module_id for ref in ident.upstream) == ("CP-0", "CP-1", "CP-1B")
     assert tuple(edge.source for edge in ROUTE.edges if edge.target == "CP-1D") == (
@@ -58,8 +58,8 @@ def test_cp1d_real_route_identity_is_proven_but_remains_disabled() -> None:
         "CP-1B",
     )
     assert _validate(ident, cp1d_markdown(ident)).qa_status == "Restricted"
-    assert "CP-1D" not in ADAPTER_MODULES
-    assert SELECTION not in ADAPTER_ROUTES
+    assert "CP-1D" in ADAPTER_MODULES
+    assert SELECTION in ADAPTER_ROUTES
 
 
 def test_cp1d_emits_every_earnings_quality_and_adjusted_debt_register() -> None:
