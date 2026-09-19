@@ -17,6 +17,14 @@ EXCLUSIONS = (
     # name, so `**/vendor/**` would not match the bundle at `vendor/deploy-v/`.
     ":!vendor/**",
     ":!docs/**",
+    # Immutable Phase 2 public evidence is indivisible; its manifests and
+    # tests remain counted by this gate.
+    ":!qualification/ccl-fy2025-full-relative-value/**",
+    ":!qualification/ccl-fy2025-lite-covenant-refinancing/**",
+    ":!qualification/ccl-fy2025-lite-full-credit-screen/**",
+    ":!qualification/ccl-fy2025-market-dislocation/**",
+    ":!qualification/save-2024-distressed-restructuring/**",
+    ":!qualification/save-2024-lite-distressed-restructuring/**",
     ":!*package-lock.json",
     ":!frontend/fixtures/**",
 )
