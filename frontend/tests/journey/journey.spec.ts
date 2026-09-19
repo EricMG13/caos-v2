@@ -464,7 +464,7 @@ test.describe.serial("journey", () => {
     await page.goto(`/run/?case=${caseId}`);
     // Every enabled pathway is offered, counted explicitly: deploying one
     // should cost a deliberate edit here rather than passing unnoticed.
-    await expect(page.locator("[data-route-select] option")).toHaveCount(3);
+    await expect(page.locator("[data-route-select] option")).toHaveCount(5);
     await expect(
       page.locator("[data-route-select] option", {
         hasText: "LITE_CREDIT_22 · LITE_EARNINGS_UPDATE",
