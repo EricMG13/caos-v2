@@ -62,6 +62,12 @@ Playwright, Docker, Trivy 0.70.0, and installed GitNexus 1.6.9.
 
 ## Reasoning Modes
 
+**Current routing:** [`docs/GPT_MODEL_REASONING_MATRIX.md`](../../GPT_MODEL_REASONING_MATRIX.md)
+and `docs/DECISIONS.md` §104 govern every new Codex dispatch. The Claude and
+Sonnet rows below are dated history: Opus maps to `gpt-5.6-sol`, Fable maps to
+`gpt-6-astra`, and any former `ultrathink`, `max` or `ultra` request maps to
+the actual Codex `xhigh` setting.
+
 Apply the user's two attached Opus 5 guides as preferences: the coding guide
 and the newer `claude_opus_5_plans_and_briefs_reasoning_guide.md`. Their roles
 are recorded here so a fresh clone does not depend on a Downloads file.

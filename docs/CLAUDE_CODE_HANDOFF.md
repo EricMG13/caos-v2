@@ -1,5 +1,11 @@
 # Claude Code handoff — current checkpoint
 
+> **Current Codex routing (19 September 2026):**
+> [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md) and decision
+> §104 govern new dispatches. Claude model names below are historical execution
+> records. The `.claude/agents/` files do not configure Codex: select
+> `gpt-5.6-sol` or `gpt-6-astra` and the required effort in the Codex dispatch.
+
 This is the sole maintained task/checkpoint record. The user controls scope;
 `docs/DECISIONS.md` §39 resolves document precedence and repair semantics.
 `docs/REPAIR_PLAN.md` owns the outcomes of Phases 0–6 and is accepted;
@@ -13,14 +19,14 @@ contracts.
 |---|---|
 | Workbench | `/Users/ericguei/Documents/caos-workbench` |
 | Branch | `codex/execute-repair-plan` |
-| Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only |
+| Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only until programme closeout; after all completion items and delivery PRs are closed and verified and the final cross-phase review passes, fast-forward `main` from its GitHub `origin/main` and record the final commit here |
 | Latest accepted phase | **Completion Phases 7 and 8 accepted at `38f4639`** (records below; one `make check` at exit 0 gated both). Earlier: Phase 6 `e59ad7b` (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
 | Qualification state | Eleven authorised live runs, `$7.75`; one `complete` snapshot, run `62308d4e-70b5-4793-abb0-7be62d2ceba6`, bound to build `30222a49`. `qualification_verdicts` is empty in every database: **nothing is qualified**, and §69's sign-off is not a verdict |
 | Enabled routes | Three of eighteen catalog pathways: `LITE_CREDIT_22/LITE_EARNINGS_UPDATE`, `LITE_CREDIT_22/LITE_PORTFOLIO_DECISION` (Task 9.1) and `FULL_CREDIT_32/RELATIVE_VALUE` (`ADAPTER_ROUTES`). Twelve of twenty-three modules proven; eleven are not |
-| Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown and Opus 5 / Fable 5.1 routing in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
+| Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md) and current Codex routing in [GPT_MODEL_REASONING_MATRIX.md](GPT_MODEL_REASONING_MATRIX.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
 | Current task | **Owner decisions §88 and membership §89 on `completion/owner-decisions`** (record under "Owner decisions and membership"). Before that: **the completion remainder is landed on `completion/remainder`** (record below, three waves), over `8ea0715`: every host-only item the plan and the ledger still owed that waited on no owner input, vendor answer or authorized run. Decisions §81–§87. **Nothing further in the completion plan can be built in this tree**: Phase 13 cannot be exited (13.4 needs an identity-provider setting and TLS material, 13.6 an authorized nightly), Task 10.1 is a vendor request under invariant 4, and Phases 9–11 wait on three owner inputs and six vendor requests. Phases 7, 8 and 12 are accepted; 13's host work is landed and not accepted |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
-| Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise |
+| Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise. At programme closeout that session verifies GitHub's accepted tree, fast-forwards workbench `main` from `gh-origin/main`, then fast-forwards the still-read-only original checkout from its GitHub `origin/main`; no force, reset, or direct `completion/*` merge is permitted |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.

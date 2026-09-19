@@ -12,9 +12,10 @@ on `codex/execute-repair-plan` at `e59ad7b`.
 > the repair plan's; they are **not** the historical rebuild labels
 > (`CLAUDE.md`'s "Phase 7–10" ledger headings). A ledger entry written under
 > this plan says "Completion Phase N". `docs/CLAUDE_CODE_HANDOFF.md` stays the
-> sole task/checkpoint record; the complementary task breakdown and the
-> Opus 5 / Fable 5.1 routing are in
+> sole task/checkpoint record; the complementary task breakdown is in
 > [`superpowers/plans/2026-09-17-completion-complementary-plan.md`](superpowers/plans/2026-09-17-completion-complementary-plan.md);
+> current Codex routing is in
+> [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md);
 > the launch text is [`PHASE_7_ONWARDS_GOAL_PROMPT.md`](PHASE_7_ONWARDS_GOAL_PROMPT.md).
 >
 > **Concurrent stream.** The audit remediation
@@ -485,25 +486,32 @@ with the standing over-cap exception for proven-indivisible commits.
 
 ### Indexing, review and model policy
 
+For work dispatched from 19 September 2026, the current policy is
+[`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md):
+`gpt-5.6-sol` is the default implementation and confidence-review model;
+`gpt-6-astra` handles long-horizon/architecture work and independent
+adversarial review. Codex `xhigh` is the ceiling and replaces every earlier
+forward-looking `ultrathink`, `max` or `ultra` request. The dated Claude table
+below remains only to explain earlier execution records.
+
 Ordinary exact-range review per task; one `confidence-review` and one
 separate adversarial code audit per whole phase, with remediation and
-reverification between them; no rewrite tournaments; no per-task specialist
-review. The model axis follows the owner's Opus 5 / Fable 5.1 matrix (16
-September 2026); Sonnet is not used.
+reverification between them; no per-task specialist review. The model axis
+follows the current GPT matrix.
 
 | Activity | Model and effort | Notes |
 |---|---|---|
 | GitNexus refresh and caller verification | any, `low` | `analyze --force --index-only`, `status`; verify callers in source |
-| Phase brief, spec, ADR, request document to the vendor | **Fable 5.1 `high`** | one brief per phase; one code-ready brief per task at phase entry |
-| Plan or trade-off stress test | **Opus 5 `xhigh` with `ultrathink`** | one targeted prompt per brief; never `ultrathink` on Fable |
-| Long-horizon multi-file implementation | **Fable 5.1 `medium`** | evidence selection (10.1), CP-DR brief delivery (9.4), the command chain (12.1), async store and second worker (13.1, 13.2), signed assertion (13.4) |
-| Per-module fixture and contract tests; route enablement slices | **Opus 5 `medium`** | the Task 5.2a precedent; one implementer per module, one per route |
-| Answer-key authoring from documents | **Opus 5 `medium`**, documents only | the key file and its derivations; the owner confirms every material figure; nothing read from a run |
-| Ordinary implementation: endpoints, wire, UI, unit and integration tests | **Opus 5 `medium`** | 8.1–8.3, 10.2–10.5, 12.2–12.4, 13.3, 13.5, 13.6 |
-| Scaffolding, fixtures, regenerated ledgers, docstrings, status | **Opus 5 `low`** | 7.1, corpus admission manifests, schema regeneration |
-| Targeted invariant audit | **Opus 5 `xhigh` with `ultrathink`** | each module's register semantics before its fixture is trusted (the 5.2a precedent); money path (8.2); three-actor independence (12.1); interleavings (13.2); trust trace (13.4) |
-| Ordinary per-task review | **Opus 5 `medium`** | the exact base…candidate range |
-| Whole-phase `confidence-review` and adversarial audit | **Fable 5.1 `xhigh`** | actual `xhigh`, read back from the session record before the review turn |
+| Phase brief, spec, ADR, request document to the vendor | **`gpt-6-astra` `high`** | one brief per phase; one code-ready brief per task at phase entry |
+| Plan or trade-off stress test | **`gpt-6-astra` `xhigh`** | one targeted prompt per brief |
+| Long-horizon multi-file implementation | **`gpt-6-astra` `medium`** | evidence selection (10.1), CP-DR brief delivery (9.4), the command chain (12.1), async store and second worker (13.1, 13.2), signed assertion (13.4) |
+| Per-module fixture and contract tests; route enablement slices | **`gpt-5.6-sol` `medium`** | the Task 5.2a precedent; one implementer per module, one per route |
+| Answer-key authoring from documents | **`gpt-5.6-sol` `medium`**, documents only | the key file and its derivations; the owner confirms every material figure; nothing read from a run |
+| Ordinary implementation: endpoints, wire, UI, unit and integration tests | **`gpt-5.6-sol` `medium`** | 8.1–8.3, 10.2–10.5, 12.2–12.4, 13.3, 13.5, 13.6 |
+| Scaffolding, fixtures, regenerated ledgers, docstrings, status | **`gpt-5.6-sol` `low`** | 7.1, corpus admission manifests, schema regeneration |
+| Targeted invariant audit | **`gpt-5.6-sol` `xhigh`** | each module's register semantics before its fixture is trusted (the 5.2a precedent); money path (8.2); three-actor independence (12.1); interleavings (13.2); trust trace (13.4) |
+| Ordinary per-task review | **`gpt-5.6-sol` `medium`** | the exact base…candidate range |
+| Whole-phase reviews | **confidence: `gpt-5.6-sol` `xhigh`; adversarial: `gpt-6-astra` `xhigh`** | remediate and reverify between the two gates |
 
 A mixed slice takes the stricter row. Record the actual model, version and
 effort at every formal checkpoint. Up to five implementers in isolated
@@ -524,8 +532,8 @@ assertion; the price recorded with the reservation; **and every register key
 and its derivation** — a wrong key qualifies a wrong conclusion.
 
 Phase-close order: implementation → normal tests → `confidence-review`
-(Fable 5.1 `xhigh`) → remediate and rerun → refresh GitNexus → adversarial code
-audit (Fable 5.1 `xhigh`) → remediate and reverify → phase accepted, recorded in
+(`gpt-5.6-sol` `xhigh`) → remediate and rerun → refresh GitNexus → adversarial
+code audit (`gpt-6-astra` `xhigh`) → remediate and reverify → phase accepted, recorded in
 the handoff with both review records and the actual settings.
 
 ### The pathway task template
@@ -534,33 +542,33 @@ Every pathway task in Phases 9 and 11 has the same shape; each brief
 instantiates it against the current interfaces. Numbers in brackets are the
 step's model row.
 
-1. **Contract stress test** [Opus 5 `xhigh`, `ultrathink`]: for each unproven
+1. **Contract stress test** [`gpt-5.6-sol` `xhigh`]: for each unproven
    module, read its `SKILL.md`, `load_contract` registers and payload schema;
    name the register rows whose semantics a fixture could fake and the cells
    a key must pin.
-2. **Fixture pack and handoffs** [Opus 5 `medium`]: extend
+2. **Fixture pack and handoffs** [`gpt-5.6-sol` `medium`]: extend
    `tests/canonical_route_fixtures.py` with one realistic issuer pack for the
    pathway (quotes whole tokens; independently authored figures) and one
    fixture handoff per module from `load_contract`'s registers and minimum
    rows; module-specific cells in one small function each.
-3. **Contract tests** [Opus 5 `medium`]: the five per module
+3. **Contract tests** [`gpt-5.6-sol` `medium`]: the five per module
    (`test_<module>_contract_validates_identifies_projects_and_anchors`,
    `…_refuses_a_missing_register`, `…_refuses_a_wrong_upstream`,
    `…_refuses_an_unanchored_quote`, `test_each_restricted_owner_retains_its_limitations`),
    parametrised in `tests/test_owner_contracts.py`; the module joins
    `ADAPTER_MODULES` in the same slice.
-4. **Whole-route deterministic run** [Opus 5 `medium`]: completes, proves,
+4. **Whole-route deterministic run** [`gpt-5.6-sol` `medium`]: completes, proves,
    freezes; every request under `MAX_REQUEST_BYTES`; a blocked required
    owner holds every dependent and calls nothing after; a restricted owner
    keeps its limitations downstream; where the route has a QA_GATE, `Blocked`
    holds CP-6 and `Passed` releases it; the pair joins `ADAPTER_ROUTES`; the
    `DISABLED` guard updated.
-5. **Corpus** [Opus 5 `low` for admission manifests; the owner for sourcing]:
+5. **Corpus** [`gpt-5.6-sol` `low` for admission manifests; the owner for sourcing]:
    the documents each module demands, admitted under their digests into a
    named set under `qualification/<set>/documents/`, each with provenance
    (URL, accession, date) in the set's `RESULT.md` header; documents not in
    hand recorded as *blocked on corpus*.
-6. **Keys** [Opus 5 `medium`, documents only]: per module at least one
+6. **Keys** [`gpt-5.6-sol` `medium`, documents only]: per module at least one
    `ExpectedRegister`, one `ExpectedProjection` and, where the module cites,
    one `ExpectedCitation` naming the fact-carrying line; `expects_ready` for
    every module the route runs; a refusal expectation where the corpus
@@ -955,9 +963,9 @@ The repair plan's §7 tables apply unchanged. Four rows are sharpened:
 
 | Gate | Addition |
 |---|---|
-| Review/diff | Ordinary review on Opus 5 `medium`; model, version and effort recorded in the task's acceptance note |
-| Phase-completion reviews | Both whole-phase reviews on **Opus 5 at `xhigh` with `ultrathink`**, pinned in `.claude/agents/phase-confidence-reviewer.md` and `phase-adversarial-auditor.md` where a setting lives. This row has been wrong twice: it was written for Fable 5.1, the owner rerouted to Opus `max` on 17 September 2026, and the same day set these two gates to `xhigh` -- which is what `CLAUDE.md` has said since the repair phases began, so the `max` pin contradicted the contract it was meant to satisfy |
-| **Final review of all phases** | **One** review across the whole programme, on **Fable 5.1 at `xhigh`**, no `ultrathink` (an Opus lever). Run once, after the last phase's own two gates have passed and been remediated -- never for a single phase. Fable returns for this gate alone, and the reason is disconfirming evidence rather than preference: every other review here runs on Opus, gates that share an architecture share blind spots, and a different model reading the same tree is the only independent check available at the end. Pinned in `.claude/agents/final-phases-reviewer.md`. What it is for is the seams between phases, drift in the record read end to end, claims true per phase and false together, and whether the eleven invariants still hold as a set |
+| Review/diff | Ordinary review on `gpt-5.6-sol` `medium`; model, version and effort recorded in the task's acceptance note |
+| Phase-completion reviews | Whole-phase confidence review on `gpt-5.6-sol` `xhigh`, then, after remediation and retest, the separate adversarial audit on `gpt-6-astra` `xhigh` |
+| **Final review of all phases** | **One** review across the whole programme on `gpt-6-astra` `xhigh`, after the last phase's two gates and remediation; never for a single phase |
 | Release qualification | A verdict must name a model the runs recorded; a pathway is advertised only with a current verdict over a complete snapshot on the current build and the current prompt identity |
 | Answer keys | A key is authored from documents before the run and its material figures are confirmed by the owner; a key changed after a run invalidates that run's comparability, and the set digest says so |
 
@@ -967,6 +975,21 @@ The repair plan's §7C, plus: the ledger entry that recorded the limit is
 struck in the commit that closes it, naming the test; a pathway is done when
 its route is enabled, its set has keys, and its live result — qualified or
 not — is recorded with its authorization.
+
+### Programme closeout and final local synchronization
+
+The original checkout at `/Users/ericguei/Documents/caos-v2` remains
+read-only until every completion item is done, every delivery pull request is
+merged or deliberately closed, every required hosted check is green, and the
+final cross-phase review has passed. The delivery session then verifies that
+the accepted `gh-origin/main` tree contains the completed programme, updates
+the workbench `main` with a fast-forward-only merge from `gh-origin/main`, and
+updates the original checkout's `main` with a fast-forward-only merge from its
+GitHub `origin/main`. A dirty checkout, a non-fast-forward result, an open
+delivery pull request, or a tree mismatch stops the closeout; it is never
+resolved with a force push, reset, or direct merge from a `completion/*`
+branch. Record both final commit IDs and the verification result in the
+handoff.
 
 ## 8. Smallest useful delivery order
 

@@ -1,5 +1,14 @@
 # Agent prompts — adapted for CAOS
 
+> **Codex routing override (19 September 2026):** use
+> [`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md) for every new
+> dispatch. In the dated prompt bodies below, Opus maps to `gpt-5.6-sol`, Fable
+> maps to `gpt-6-astra`, and any `ultrathink`, `max` or `ultra` request maps to
+> the actual Codex `xhigh` setting. Sonnet-era detection maps to
+> `gpt-5.6-sol` `low` for mechanical enumeration and `medium` where the sweep
+> needs judgment; Sonnet is not dispatched. Historical run descriptions are
+> unchanged.
+
 The uploaded prompt set is written for a repository with no governance. This one has
 a great deal, so most of the adaptation is *subtraction*: where a generic prompt says
 "maintain a ledger", this repository already names the ledger, and pointing a second
@@ -59,15 +68,16 @@ env -u OPENROUTER_API_KEY -u OPENROUTER_MODEL -u OPENROUTER_BASE_URL \
 
 ## Models and effort
 
-Three stages, two models. **Sonnet 5 detects. Opus 5 implements and reviews.**
+Three stages, two models. The current routing below replaces the dated Claude
+labels used inside the prompt bodies.
 
 | Stage | Model | Effort | What it covers |
 |---|---|---|---|
-| **Detect** | Sonnet 5 | high | Enumeration sweeps: §5 reachability, §6 first pass, §9 census, the candidate scan in §1. Produces candidates with file:line, never verdicts. |
-| **Implement** | Opus 5 | low → high by task | All code. Falsification tests, fixes, briefs, wire, UI, vendor request documents. |
-| **Review** | Opus 5 | xhigh + ultrathink | Ordinary per-task review, both phase gates, and every verdict over a Sonnet candidate. |
+| **Detect** | `gpt-5.6-sol` | low / medium | Enumeration sweeps: §5 reachability, §6 first pass, §9 census, the candidate scan in §1. Produces candidates with file:line, never verdicts. |
+| **Implement** | `gpt-5.6-sol`; `gpt-6-astra` for long-horizon work | low → high by task | Code, falsification tests, fixes, briefs, wire, UI and vendor request documents. |
+| **Review** | `gpt-5.6-sol`; independent phase audit on `gpt-6-astra` | medium / xhigh | Ordinary per-task review and targeted verification on Sol; phase confidence on Sol xhigh; phase adversarial and final review on Astra xhigh. |
 
-Opus effort within the implement stage, unchanged from the contract:
+Effort within the implement stage:
 
 | Work | Effort |
 |---|---|
@@ -75,13 +85,16 @@ Opus effort within the implement stage, unchanged from the contract:
 | per-module fixtures, contract tests, route enablement, endpoints, wire, UI, tests, PR authoring | medium |
 | long-horizon multi-file work; task and phase briefs; vendor request documents | high |
 
-`xhigh` is the ceiling; `max` is not dispatched (`1b1ffcd`). Ultrathink is the Opus
-lever and never appears in a Sonnet prompt.
+`xhigh` is the ceiling; `max` is not dispatched (`1b1ffcd`), and Codex has no
+`ultrathink` prompt lever. Select the model and effort explicitly on each
+dispatch.
 
-Set `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` for the detect stage so parallel sweeps do not
-inherit Opus, and unset it before the implement and review stages.
+### Historical rationale for the Claude detection split
 
-### The one carve-out, and why
+The Sonnet and Opus names below explain the original prompt design. For a new
+Codex dispatch, apply the current table above: enumeration uses
+`gpt-5.6-sol` low/medium and constructive invariant work uses
+`gpt-5.6-sol` xhigh.
 
 Detection splits into two kinds of work, and only one of them is Sonnet's.
 
@@ -716,7 +729,7 @@ Findings from §5–§9 do not go straight to fixes. The path:
 | Original | Why it is not adapted |
 |---|---|
 | §1a feature discovery | `docs/feature-status.csv` is the dated inventory, and is deliberately not re-cited to the current tree — a dated row edited later stops being a record of that date. The live equivalent is the per-task brief, written before the wave. Regenerate it from the suite (Task 13.6) rather than re-inventorying by hand. What the original wanted an inventory *for* — finding the feature nobody wrote down — is §5, which enumerates from the code rather than from the plan. |
-| §2 confidence audit | Already an agent: `phase-confidence-reviewer`, at xhigh with ultrathink, run at a phase freeze. Do not run a second one per task — but do not mistake it for coverage of unknown unknowns either. It enumerates doubts, and the register locator proves a doubt you do not have cannot be enumerated. §7 is the complement, not a duplicate. |
+| §2 confidence audit | Already an agent: `phase-confidence-reviewer`, run on `gpt-5.6-sol` at xhigh at a phase freeze. Do not run a second one per task — but do not mistake it for coverage of unknown unknowns either. It enumerates doubts, and the register locator proves a doubt you do not have cannot be enumerated. §7 is the complement, not a duplicate. |
 | §3 lightweight loop | Redundant with §1 above on a system this size. |
 | §5 maintenance heartbeat | The coordinator's own loop is this, and its state file is the handoff. A scheduled second agent opening competing work on the same branch is exactly the interference rule §5 warns about. |
 | §6 evidence-based audit | Split. Its *method* — a verdict per area, every verdict carrying a file:line or command output — is kept and sharpened as §6 above, aimed at this repository's own claims rather than at framework conventions. Its *cadence* is already the `phase-adversarial-auditor` agent, run after the confidence review and its remediation, with `final-phases-reviewer` across all phases. |
@@ -725,8 +738,9 @@ Findings from §5–§9 do not go straight to fixes. The path:
 
 ## Review cadence
 
-Unchanged from the contract, restated because every prompt above ends in it: ordinary
-review closes each task. One `confidence-review` and then one separate adversarial code
-audit close the whole phase, both at xhigh with ultrathink, with remediation and
-reverification between them. No per-task specialist review and no rewrite tournaments.
+Restated because every prompt above ends in it: ordinary review closes each
+task. One `confidence-review` on `gpt-5.6-sol` xhigh and then one separate
+adversarial code audit on `gpt-6-astra` xhigh close the whole phase, with
+remediation and reverification between them. No per-task specialist review and
+no rewrite tournaments.
 Requested document reviews do not certify these code gates.

@@ -23,11 +23,12 @@ file that exists upstream; additions go in new skill folders.
 Resume only the active task and phase named by CLAUDE.md and the handoff. For
 each implementation slice:
 
-  1. Use the Opus modes in the complementary plan: medium for task briefs and
-     implementation, low for faithful formatting, targeted ultrathink for plan
-     stress tests, max only for a new complex blueprint, then back to medium.
-     Keep formal phase code reviews at actual xhigh; never infer the setting
-     from a prompt word. State the accepted base, allowed paths, size budget and
+  1. Use docs/GPT_MODEL_REASONING_MATRIX.md: gpt-5.6-sol medium for default
+     implementation, low for mechanical work, and xhigh for confidence and
+     task-acceptance reviews; use gpt-6-astra medium/high for long-horizon or
+     architectural work and xhigh for independent adversarial reviews. xhigh is
+     the ceiling; Codex has no ultrathink prompt lever. State the accepted base,
+     allowed paths, size budget and
      exit assertion. Index that checkout with GitNexus and verify callers in
      source.
      A coordinator may dispatch up to three independent implementers only in

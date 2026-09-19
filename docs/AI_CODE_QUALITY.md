@@ -114,9 +114,10 @@ control nobody runs.
 | `superpowers:verification-before-completion` | before reporting completion |
 | `impeccable` | Audit/polish changed UI in repair Phases 4–5 when needed; reuse the accepted design, with no new redesign requirement |
 
-For Opus 5 planning, briefing and execution settings, use the complementary
-plan's **Reasoning Modes** section. Plan stress tests and blueprint drafting do
-not trigger the whole-phase code-review gates.
+For current planning, briefing and execution settings, use
+[`GPT_MODEL_REASONING_MATRIX.md`](GPT_MODEL_REASONING_MATRIX.md). The
+complementary plan's Claude routing is retained as dated history. Plan stress
+tests and blueprint drafting do not trigger the whole-phase code-review gates.
 
 Parallelism reduces elapsed time, not accountability: each implementer uses an
 isolated worktree and test resources, receives exact ownership, and submits a
