@@ -119,6 +119,11 @@ class HostIdentity:
     ordinal: int
     authority_bundle_sha256: str
     upstream: tuple[UpstreamRef, ...]
+    # CP-DR only (§96): the pinned brief with its host bindings written in --
+    # this run's vendor id, the accepted CP-0's digest, the bundle's authority
+    # digest -- as canonical JSON. None for every other module, and absent from
+    # a serialised record when None, so no record written before it moved.
+    research_brief: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -594,6 +599,8 @@ def record_bytes(record: CanonicalRecord) -> bytes:
     document: dict[str, Any] = {"format": RECORD_FORMAT, **asdict(record)}
     if not document["projections"]["blockers"]:
         del document["projections"]["blockers"]
+    if document["identity"]["research_brief"] is None:
+        del document["identity"]["research_brief"]
     for citation in document["citations"]:
         for box in citation["bboxes"]:
             box.update({key: float(box[key]) for key in ("x0", "y0", "x1", "y1")})
@@ -640,6 +647,20 @@ def _with_blockers(value: object) -> dict[str, Any]:
     return {**value, "blockers": []}
 
 
+def _with_research(value: object) -> dict[str, Any]:
+    """Supply the absent `research_brief` an identity omits (every module but
+    CP-DR, and every record written before §96), read back as None."""
+    if not isinstance(value, dict) or "research_brief" in value:
+        return value if isinstance(value, dict) else {}
+    return {**value, "research_brief": None}
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return _exact(str)(value)
+
+
 _int, _strs = _exact(int), _each(_exact(str))
 _rect = _each(
     lambda box: _typed(
@@ -662,9 +683,10 @@ def _decoded_record(data: bytes) -> CanonicalRecord:
         document,
         identity=lambda item: _typed(
             HostIdentity,
-            item,
+            _with_research(item),
             ordinal=_int,
             upstream=_each(lambda ref: _typed(UpstreamRef, ref)),
+            research_brief=_optional_str,
         ),
         lineage=_each(lambda ref: _typed(LineageRef, ref)),
         projections=lambda item: _typed(

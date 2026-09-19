@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -22,6 +23,7 @@ from canonical_fixtures import (
     RUN,
     conforming_rows,
     fields_from_prompt,
+    research_brief,
     skill,
     wire,
 )
@@ -830,3 +832,329 @@ class LedgerCompletions:
         ]
         self.bodies.append(wire(markdown, citations))
         return Completion(self.bodies[-1], self.charge, "gen-decision-ledger")
+
+
+# ---------------------------------------------------------------------------
+# LITE_DEEP_RESEARCH (CP-0 -> CP-DR), Completion Phase 9 Task 9.4 (§96).
+#
+# CP-DR answers a locked brief from supplied evidence alone. The pack is two
+# authored documents -- a results release and a facility summary -- and the
+# brief asks two questions: one the release answers (the undrawn commitments),
+# one nothing in the pack can (an agency rating), so the dossier records one
+# ANSWERED and one UNRESOLVED finding and its coverage is 50, which the vendor's
+# own `validate_dossier` requires to be reported as `Complete with Gaps`.
+# ---------------------------------------------------------------------------
+
+RESEARCH_SELECTION = ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH")
+RESEARCH_ROUTE = resolve_route(CATALOG, *RESEARCH_SELECTION)
+RESEARCH_MODULES = tuple(n.module_id for n in RESEARCH_ROUTE.nodes)
+RESEARCH_BRIEF = research_brief("ACME", "Acme Holdings plc")
+RESEARCH_PACK = {
+    "release": b"""Acme Holdings plc FY2025 results release dated 2026-02-12
+At 31 December 2025 Acme had undrawn committed facilities of 400 USD million
+Net leverage was 3.1 times at 31 December 2025 against a covenant of 4.0 times
+Adjusted free cash flow was 95 USD million for the year ended 31 December 2025
+""",
+    "facility": b"""Acme Holdings plc revolving credit facility summary dated 2025-06-30
+The 500 USD million revolving credit facility matures on 30 June 2028
+Drawings are permitted while net leverage is below 4.0 times
+""",
+}
+RESEARCH_FILENAMES = {"release": "results-release.txt", "facility": "facility.txt"}
+# Whole lines of the pack (invariant 11). CP-DR cites the line that answers the
+# first question and the facility line its contrary search read.
+RESEARCH_QUOTES: dict[str, tuple[tuple[str, str], ...]] = {
+    "CP-0": (("release", "Acme Holdings plc FY2025 results release dated 2026-02-12"),),
+    "CP-DR": (
+        (
+            "release",
+            "At 31 December 2025 Acme had undrawn committed facilities of 400 USD"
+            " million",
+        ),
+        (
+            "facility",
+            "The 500 USD million revolving credit facility matures on 30 June 2028",
+        ),
+    ),
+}
+
+
+def research_identity(
+    module: str,
+    upstream: tuple[UpstreamRef, ...] = (),
+    research_brief: str | None = None,
+) -> HostIdentity:
+    """One node's host identity on the deep-research route. A CP-DR identity
+    needs its bound brief before `invocation_fields` can be asked of it."""
+    node = next(n for n in RESEARCH_ROUTE.nodes if n.module_id == module)
+    if module != "CP-0" and not upstream:
+        upstream = tuple(
+            UpstreamRef(
+                n.route_node_id,
+                n.module_id,
+                RUN,
+                "FY2025",
+                hashlib.sha256(n.module_id.encode()).hexdigest(),
+            )
+            for n in RESEARCH_ROUTE.nodes
+            if any(
+                e.source == n.module_id and e.target == module
+                for e in RESEARCH_ROUTE.edges
+            )
+        )
+    route = CONTRACT.routing.Route(CATALOG, *RESEARCH_SELECTION)
+    return HostIdentity(
+        RUN,
+        *RESEARCH_SELECTION,
+        node.route_node_id,
+        module,
+        route.by_module[module]["module_name"],
+        "ACME",
+        "Acme Holdings plc",
+        "FY2025",
+        "2026-09-08",
+        1,
+        authority_bundle_sha256(BUNDLE),
+        upstream,
+        research_brief,
+    )
+
+
+def bound_research_brief_text(cp0_sha256: str, run_id: str = RUN) -> str:
+    """`RESEARCH_BRIEF` bound the way the host binds it, as canonical JSON."""
+    return _canonical(
+        {
+            **RESEARCH_BRIEF,
+            "run_id": run_id,
+            "cp0_sha256": cp0_sha256,
+            "authority_sha256": authority_bundle_sha256(BUNDLE),
+        }
+    )
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def cpdr_rows(brief: dict[str, Any]) -> dict[str, list[list[str]]]:
+    """CP-DR's three registers over `brief`: TDR.1 is the locked questions
+    exactly, TDR.2 one primary evidence row for the answered question and one
+    gap row for the other, TDR.3 one finding per question. No cell is a
+    placeholder the vendor's blocklist or its register reader refuses."""
+    first, second = (q["question_id"] for q in brief["questions"])
+    return {
+        "TDR.1": [
+            [q[column] for column in CONTRACT.research.QUESTION_COLUMNS]
+            for q in brief["questions"]
+        ],
+        "TDR.2": [
+            [
+                "E-1",
+                first,
+                "Undrawn committed facilities of 400 USD million at 31 December 2025",
+                "fact",
+                RESEARCH_FILENAMES["release"],
+                "p1",
+                "2026-02-12",
+                "primary",
+                "Issuer disclosure",
+                "Acme Holdings plc; 31 December 2025; USD million; consolidated",
+            ],
+            [
+                "E-2",
+                second,
+                "Neither supplied document names an agency rating or outlook",
+                "source_characterisation",
+                "results-release.txt; facility.txt",
+                "whole documents",
+                "2026-02-12",
+                "gap",
+                "Issuer disclosure",
+                "Acme Holdings plc; FY2025; no figure; consolidated",
+            ],
+        ],
+        "TDR.3": [
+            [
+                first,
+                "Acme reported undrawn committed facilities of 400 USD million",
+                "E-1",
+                "Both documents were searched for a lower or later figure; none",
+                "ANSWERED",
+                "The figure is the issuer's own and is not independently confirmed",
+                "The liquidity headroom assumption may rest on 400 USD million",
+            ],
+            [
+                second,
+                "The supplied documents state no agency rating or outlook",
+                "E-2",
+                "Both documents were searched for an agency name or symbol; none",
+                "UNRESOLVED",
+                "Whether a rating exists cannot be settled from supplied evidence",
+                "Any rating-dependent assumption stays open until one is supplied",
+            ],
+        ],
+    }
+
+
+def _research_t8(readiness: dict[str, str]) -> list[list[str]]:
+    """CP-0's T8, naming exactly this route's one pinned consumer."""
+    rows = []
+    for n, module in enumerate(RESEARCH_MODULES[1:], 1):
+        status = readiness.get(module, "READY")
+        command = "Run " + module
+        runnable = status in {"READY", "READY_WITH_LIMITATIONS"}
+        rows.append(
+            [
+                str(n),
+                module,
+                command,
+                command if runnable else "DO NOT RUN",
+                "Source p1",
+                "Current handoff",
+                status,
+                "results-release.txt p1",
+            ]
+        )
+    return rows
+
+
+_RESEARCH_TAGS = {
+    "TDR.1": "cpdr.questions",
+    "TDR.2": "cpdr.evidence",
+    "TDR.3": "cpdr.findings",
+}
+
+
+def research_markdown(
+    ident: HostIdentity,
+    fields: dict[str, Any],
+    knobs: HandoffKnobs | None = None,
+) -> bytes:
+    """A handoff the vendor validators accept for a deep-research node.
+
+    `fields` is the host front matter the prompt handed over (a CP-DR one
+    carries the research fields); the registers are built over the brief
+    `ident` carries, so TDR.1 is the locked brief exactly.
+    """
+    knobs = knobs or HandoffKnobs()
+    front = {
+        **fields,
+        "confidence_score": 90,
+        "confidence_band": "High",
+        "committee_status": "Draft Only",
+        "limitation_flags": [],
+        "validation_warnings": [],
+        "downstream_consumers": [],
+        **AUTHORED[knobs.qa_status],
+        "qa_status": knobs.qa_status,
+    }
+    if ident.module_id == "CP-DR":
+        blocked = knobs.qa_status == "Blocked"
+        front.update(
+            coverage_score=0 if blocked else 50,
+            research_status="Blocked" if blocked else "Complete with Gaps",
+            research_stop_reason="blocked" if blocked else "sources_exhausted",
+        )
+    rules = CONTRACT.completeness_check.load_contract(
+        skill(ident.module_id).decode(), ident.module_id
+    )
+    quotes = [quote for _document, quote in RESEARCH_QUOTES[ident.module_id]]
+    authored = (
+        cpdr_rows(json.loads(str(ident.research_brief)))
+        if ident.module_id == "CP-DR"
+        else {}
+    )
+    appendix = "### Analytical appendix — complete canonical registers\n\n"
+    for register, spec in rules["registers"].items():
+        if register == knobs.omit_register:
+            continue
+        columns = spec["columns"] or ["Evidence"]
+        if ident.module_id == "CP-0" and register == "T8":
+            columns = CONTRACT.navigation.NEW_HEADERS
+            rows = _research_t8(knobs.readiness)
+        else:
+            rows = authored.get(register) or conforming_rows(
+                register, spec, rules, lambda column, _n: f"{column}: {quotes[0]}"
+            )
+        appendix += "#### " + register + "\n\n"
+        if register in _RESEARCH_TAGS:
+            appendix += f"<!-- table-id: {_RESEARCH_TAGS[register]} -->\n"
+        appendix += _table(columns, rows)
+    if knobs.quote is not None:
+        quotes[-1] = knobs.quote
+    note = "".join(quote + "\n\n" for quote in quotes)
+    body = "".join(
+        "## " + h + "\n\n" + (appendix if h == "Analysis" else note)
+        for h in CONTRACT.validate_handoff.CANONICAL_HEADINGS
+    )
+    return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
+
+
+@dataclass
+class ResearchCompletions:
+    """A provider answering the deep-research route deterministically.
+
+    `release_id` and `facility_id` are the two admitted documents' source ids.
+    The CP-DR answer's registers are built over the brief the prompt's own
+    RESEARCH BRIEF section carried, so the dossier locks exactly what the host
+    bound. `quotes_by_module` replaces a module's *last* quote in body and
+    citation, which is how a test offers a quote the pack does not hold.
+    """
+
+    release_id: UUID
+    facility_id: UUID
+    model: str = "a-model/for-the-test"
+    charge: Decimal = Decimal("0.0000041")
+    qa_by_module: dict[str, str] = field(default_factory=dict)
+    readiness: dict[str, str] = field(default_factory=dict)
+    quotes_by_module: dict[str, str] = field(default_factory=dict)
+    prompts: list[str] = field(default_factory=list)
+    answers: list[bytes] = field(default_factory=list)
+    bodies: list[str] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        assert json_object
+        self.prompts.append(prompt)
+        fields = fields_from_prompt(prompt)
+        module = str(fields["module_id"])
+        quotes = list(RESEARCH_QUOTES[module])
+        replaced = self.quotes_by_module.get(module)
+        if replaced is not None:
+            quotes[-1] = (quotes[-1][0], replaced)
+        markdown = research_markdown(
+            research_identity(module, research_brief=research_section(prompt)),
+            fields,
+            HandoffKnobs(
+                qa_status=self.qa_by_module.get(module, "Passed"),
+                readiness=self.readiness,
+                quote=replaced,
+            ),
+        )
+        self.answers.append(markdown)
+        ids = {"release": self.release_id, "facility": self.facility_id}
+        citations: list[dict[str, object]] = [
+            {"source_id": str(ids[document]), "page": 1, "matched_text": quote}
+            for document, quote in quotes
+        ]
+        self.bodies.append(wire(markdown, citations))
+        return Completion(self.bodies[-1], self.charge, "gen-deep-research")
+
+
+def research_section(prompt: str) -> str | None:
+    """The bound brief a prompt's RESEARCH BRIEF section carries, as canonical
+    JSON, or None when the prompt carries no such section."""
+    found = re.search(r"--- RESEARCH BRIEF ([0-9a-f]{16}) \(", prompt)
+    if found is None:
+        return None
+    start = prompt.index(") ---\n", found.end()) + len(") ---\n")
+    end = prompt.index(f"\n--- END RESEARCH BRIEF {found.group(1)} ---", start)
+    return _canonical(json.loads(prompt[start:end]))
