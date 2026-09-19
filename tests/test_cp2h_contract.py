@@ -46,7 +46,7 @@ def _validate(ident: HostIdentity, markdown: bytes) -> Projections:
         )
 
 
-def test_cp2h_real_route_identity_is_proven_but_remains_disabled() -> None:
+def test_cp2h_real_route_identity_is_proven_and_enabled() -> None:
     ident = cp2h_identity()
     assert tuple(ref.module_id for ref in ident.upstream) == (
         "CP-0",
@@ -65,8 +65,8 @@ def test_cp2h_real_route_identity_is_proven_but_remains_disabled() -> None:
     assert _validate(without_advisory, cp2h_markdown(without_advisory)).qa_status == (
         "Restricted"
     )
-    assert "CP-2H" not in ADAPTER_MODULES
-    assert SELECTION not in ADAPTER_ROUTES
+    assert "CP-2H" in ADAPTER_MODULES
+    assert SELECTION in ADAPTER_ROUTES
 
 
 def test_cp2h_emits_the_complete_methodology_only_transition_case() -> None:
