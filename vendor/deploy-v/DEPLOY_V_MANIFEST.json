@@ -280,8 +280,8 @@
           "sha256": "45ad6ab2eeeb754ae46a716b7e947e3acac214ea2696ef5e072f10ef7d36451a"
         },
         "references/REF_CP-0_STEPS.md": {
-          "bytes": 22692,
-          "sha256": "ededc8b31ac236434dce3d7b03514a27f42029873dcd4dfb1010bd027eab3505"
+          "bytes": 23432,
+          "sha256": "a0b2acc2ba74c8e8a964be6e02e5f17ca12f72218d2552f20fa32ffcb30161e1"
         },
         "references/REF_CP-PARSE_STEPS.md": {
           "bytes": 14038,

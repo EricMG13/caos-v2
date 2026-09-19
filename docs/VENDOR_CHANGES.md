@@ -5,7 +5,7 @@ the owner wrote: "Vendor files - approved to alter but keep a record of
 changes." This file is that record. Every file under `vendor/deploy-v/` that
 this repository has changed since the upstream pull is listed here, with the
 request each change answers, the build it produced and a one-line reason; the
-binding decision for each build is in `docs/DECISIONS.md` (§61, §63, §92).
+binding decision for each build is in `docs/DECISIONS.md` (§61, §63, §92, §98).
 Upstream is `github.com/EricMG13/Deploy-V@c4d2e356` and carries none of it;
 the next upstream pull either carries every change forward or supersedes it
 with a decision entry.
@@ -107,6 +107,20 @@ this sorted inventory exactly equal to them.
 - `skills/cp-os-credit-os/scripts/validate_handoff.py`
 - `tests/test_module_workflow.py`
 - `tests/test_research_workflow.py`
+
+## Build `91c219fb` (2026-09-18, §98) — from `62a94ccd`
+
+Old build `62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c`;
+new build `91c219fb7147cf1e0089b6119bca7de013ad94bcd7f4b6cea6536a88776f2c77`.
+`DEPLOY_V_INTEGRITY_v1.json` SHA-256 `4945d137…` -> `fad44352…`, still 68,657
+bytes. No runtime authority moved, so `--rebuild-authorities` was not run and
+`authority_bundle_sha256` is unchanged (`e3d0f8b2…`). The refresh ran the
+bundle's 52 unit tests and 10 helper self-checks, green.
+
+| Vendor file | Request | Change |
+| --- | --- | --- |
+| `skills/cp-0-source-readiness/references/REF_CP-0_STEPS.md` | the owner's approval of page-level evidence selection for the Boeing and Ford 10-K texts (§98) | Step I, rule 5 gains the page-range form of a `Source files to attach` item -- `<filename> pages <first>-<last>` or `<filename> page <n>`, one range per item, pages being the `page` locators the evidence shows, a filename alone attaching the whole source; a new rule 8 says a source the host delivers as a page map is evidence only in the lines shown, is triaged `PARSE_TARGETED` (or `BLOCKED`), is attached by page and never whole, and carries the page-map limitation into each row. 740 bytes. |
+| `CP_DEPLOY_V_RETRIEVAL_INDEX_v1.json`, `DEPLOY_V_BASELINE.json`, `DEPLOY_V_COPILOT_MEMORY_PROMPT.md`, `DEPLOY_V_COPILOT_MEMORY_PROMPT_URL_BOUND.md`, `DEPLOY_V_INTEGRITY_v1.json`, `DEPLOY_V_MANIFEST.json` | (regenerated) | By `verify_package.py --refresh`; no hand edit. |
 
 ## Build `62a94ccd` (2026-09-18, §92) — from `30222a49`
 

@@ -49,9 +49,9 @@ CATALOG = (
     BUNDLE / "skills/cp-os-credit-os/references/CREDIT_OS_V_MODULE_CATALOG_v2.json"
 )
 
-# docs/DECISIONS.md §61, which moved the §13 pin. A run pinned to one build
-# never executes under another.
-BUILD_ID = "62a94ccd0ef6439f797d60ebb72e6a44e1d42db16cd8af217fc41b7f1d6ea72c"
+# docs/DECISIONS.md §98, which moved the §13 pin (after §61, §63, §92). A
+# run pinned to one build never executes under another.
+BUILD_ID = "91c219fb7147cf1e0089b6119bca7de013ad94bcd7f4b6cea6536a88776f2c77"
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -281,6 +281,23 @@ def test_cp0_defines_conditional_as_a_source_condition_everywhere_it_is_read(
     text = (BUNDLE / relative).read_text(encoding="utf-8")
     assert "never a readiness ground" in text, relative
     assert "CP-0 is re-run" in text, relative
+
+
+# `docs/DECISIONS.md` §98: T8's `Source files to attach` may carry a page range
+# beside a filename, and a source the host shows CP-0 as a page map is attached
+# by page, never whole. The bundle states both, in the step CP-0 authors T8
+# from, so the grammar the host reads is the bundle's and not the host's.
+CP0_STEPS = "skills/cp-0-source-readiness/references/REF_CP-0_STEPS.md"
+
+
+def test_cp0_states_the_page_range_form_and_the_page_map_rule() -> None:
+    text = (BUNDLE / CP0_STEPS).read_text(encoding="utf-8")
+    step_i = text[text.index('step="I"') : text.index("## CP-MODEL boundary")]
+    assert "`<filename> pages <first>-<last>`" in step_i
+    assert "`<filename> page <n>`" in step_i
+    assert "one range per item" in step_i
+    assert "8. A source the host delivers as a page map" in step_i
+    assert "never the file alone" in step_i
 
 
 # `docs/DECISIONS.md` §63: T5B.5 is where CP-5 records what became of a
