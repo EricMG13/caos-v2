@@ -40,6 +40,8 @@ from server.qualification.matrix import (
     ForecastValue,
     QualificationCase,
     QualificationSet,
+    assert_measurable,
+    assert_unambiguous,
     qualification_set_digest,
 )
 from server.qualification.on_disk import MANIFEST, load_qualification_set
@@ -245,50 +247,106 @@ def test_a_module_expected_both_ready_and_blocked_is_refused(tmp_path: Path) -> 
 # manifest or documents move; a change to the loader or the digest that moved
 # one of these would silently orphan every verdict and snapshot bound to it.
 COMMITTED_SET_DIGESTS = {
+    "ba-fy2025": "a30533b3530ed1e609ce33df67e50b4ce5e4f80167be4efc29f398b4c24a7bba",
     "ccl-fy2025": "f5555753cf7b39868fa4885d95a0b80847c61204a4b3ebe5fffe8345587c327e",
     "ccl-fy2025-portfolio": (
         "7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c"
     ),
+    "ccl-fy2025-relative-value": (
+        "a8df0ccf6d8fd735886c584951f7ca82e460f483a4f235a5ad31143fd3f60ac8"
+    ),
+    "ccl-fy2025-liquidity": (
+        "117dcda7edad142dc3ae4a33fc06376690f990eefc87f53fc2804d194d65a8c8"
+    ),
+    "ccl-fy2025-earnings-update": (
+        "7f3619434a2697f10f5ea78d64a2e3e87c67691272037034235289a87507e275"
+    ),
+    "f-fy2025": "f7659a750e559db22b97ee3175aa5660819a65fef2d6735fae172126782a2fc2",
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
     "vmo2-fy2025-deep-research": (
         "09807efb1a3d5d40680d1a9d0e054333537781d7bb4013ecd7670323f817fd9b"
+    ),
+    "vmo2-fy2025-full-deep-research": (
+        "1f15f91b746ee2bc58a9719ff5b5f0cb6a4328c827642bb384f8040ba8cfe3c2"
     ),
     "vmo2-fy2025-portfolio": (
         "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
     ),
 }
 
-PENDING_SET_DOCUMENTS = {
-    "ccl-fy2025-relative-value": frozenset(
-        {
-            "documents/CCL_FY2025_10K.txt",
-            "documents/NCLH_Q4_2025_Earnings_Release.txt",
-            "documents/RCL_Q4_2025_Earnings_Release.txt",
-        }
-    )
-}
-
 
 def test_every_committed_set_binds_its_recorded_digest() -> None:
-    """Every complete set digests as recorded; pending sets name exact gaps."""
+    """Every set under `qualification/` loads and digests as recorded, and the
+    list above names exactly the sets the tree carries -- a set added or
+    removed without its digest being stated here fails."""
     root = Path(__file__).resolve().parents[1] / "qualification"
-    found = {}
-    pending = {}
-    for path in root.glob(f"*/{MANIFEST}"):
-        name = path.parent.name
-        if name in PENDING_SET_DOCUMENTS:
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            pending[name] = frozenset(
-                document
-                for case in manifest["cases"]
-                for document in case["documents"]
-                if not (path.parent / document).is_file()
-            )
-        else:
-            found[name] = qualification_set_digest(load_qualification_set(path.parent))
-
+    found = {
+        path.parent.name: qualification_set_digest(load_qualification_set(path.parent))
+        for path in root.glob(f"*/{MANIFEST}")
+    }
     assert found == COMMITTED_SET_DIGESTS
-    assert pending == PENDING_SET_DOCUMENTS
+
+
+def test_ccl_liquidity_set_is_a_complete_offline_copy_with_pinned_keys() -> None:
+    """The planned liquidity run is a bounded, non-executed input set."""
+    root = Path(__file__).resolve().parents[1]
+    set_root = root / "qualification" / "ccl-fy2025-liquidity"
+    source = root / "qualification" / "ccl-fy2025" / "documents" / "CCL_FY2025_10K.txt"
+    document = set_root / "documents" / "CCL_FY2025_10K.txt"
+
+    inventory = {
+        path.relative_to(set_root).as_posix()
+        for path in set_root.rglob("*")
+        if path.is_file()
+    }
+    assert inventory == {
+        "qualification.json",
+        "RESULT.md",
+        "documents/CCL_FY2025_10K.txt",
+    }
+    assert document.read_bytes() == source.read_bytes()
+    assert sha256(document.read_bytes()).hexdigest() == (
+        "8fa7fceda34be50b3b9b5406e0c9269b5269870d1cd8c2bdafb682755a1c88e6"
+    )
+
+    qualification = load_qualification_set(set_root)
+    assert_measurable(qualification)
+    assert_unambiguous(qualification)
+    [case] = qualification.cases
+    assert (case.profile_id, case.selection_id) == (
+        "FULL_CREDIT_32",
+        "LIQUIDITY_REVIEW",
+    )
+    assert case.expects_ready == ("CP-1", "CP-2", "CP-2D")
+    projections = {
+        (key.module_id, key.field, key.value) for key in case.expects_projection
+    }
+    assert projections == {
+        ("CP-2D", "decision_scope", "FULL"),
+    }
+    document_sha256 = "8fa7fceda34be50b3b9b5406e0c9269b5269870d1cd8c2bdafb682755a1c88e6"
+    citations = {
+        (citation.module_id, citation.document_sha256, citation.matched_text)
+        for citation in case.expects
+    }
+    anchors = {
+        "Cash and cash equivalents | $ | 1,928 | $ | 1,210 |",
+        "Customer deposits | 6,831 | 6,425 |",
+        "Net cash provided by operating activities | 6,218 | 5,923 | 4,281 |",
+        "Purchases of property and equipment | ( 3,611 ) | ( 4,626 ) | ( 3,284 ) |",
+    }
+    cash_and_deposits = {
+        "Cash and cash equivalents | $ | 1,928 | $ | 1,210 |",
+        "Customer deposits | 6,831 | 6,425 |",
+    }
+    cfo_and_capex = anchors - cash_and_deposits
+    assert citations == (
+        {("CP-1", document_sha256, anchor) for anchor in cash_and_deposits}
+        | {("CP-2", document_sha256, anchor) for anchor in cfo_and_capex}
+        | {("CP-2D", document_sha256, anchor) for anchor in anchors}
+    )
+    evidence = document.read_text(encoding="utf-8")
+    assert all(evidence.count(anchor) == 1 for anchor in anchors)
 
 
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
