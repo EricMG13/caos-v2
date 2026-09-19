@@ -125,3 +125,5 @@ would read `blocked_met: true` and the snapshot `complete: true`. That is a
 reading of stored facts, not a performed snapshot: the stored evidence
 (`9b9868e0…`) binds the earlier digest and stays unsignable, and a verdict over
 this set needs it performed again.
+
+**Retention, corrected 18 September 2026 (§100):** the retained database named above was on the in-memory test server and was erased when that server restarted. The capture and blob root survive; a matrix can no longer be re-derived from the store for this run.

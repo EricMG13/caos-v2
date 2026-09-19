@@ -90,3 +90,5 @@ CP-L10 cited the adjusted EBITDA guidance, adjusted FCF and undrawn commitments
 lines instead. The key is unchanged: it was authored from the documents before
 any run, and moving it to what the model quoted would measure the model against
 itself.
+
+**Retention, corrected 18 September 2026 (§100):** the retained database named above was on the in-memory test server and was erased when that server restarted. The capture and blob root survive; a matrix can no longer be re-derived from the store for this run.
