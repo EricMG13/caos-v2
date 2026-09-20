@@ -990,6 +990,23 @@ def test_a_register_key_its_module_does_not_declare_is_unlocatable() -> None:
     )
 
 
+def test_register_key_columns_and_values_are_normalised_like_runtime() -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+
+    expect = ExpectedRegister(
+        module_id="CP-1",
+        register_id="T4.1",
+        row_key=(("File   Name", "annual\n report.pdf"),),
+        column="Doc   Type",
+        expected="10-\n K",
+    )
+    case = replace(_register_case(), expects_register=(expect,))
+    assert not unlocatable_register_keys(
+        Bundle(VENDORED), QualificationSet(cases=(case,))
+    )
+
+
 def test_ready_met_is_none_when_a_case_names_no_module(ran: Ran) -> None:
     """The common case: a key about citations, not about the gate."""
     [row] = _matrix(ran, QualificationSet(cases=(_one_case(ran),))).rows

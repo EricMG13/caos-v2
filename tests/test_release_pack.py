@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -27,10 +28,16 @@ import release_pack
 from qualification_fixtures import qualification_performed, record_runs
 
 from server.api.deps import VENDORED_BUNDLE
+from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.bundle import Bundle
 from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.vendor import catalog
-from server.qualification.store import record_performed, record_verdict
+from server.qualification.store import (
+    PerformedEvidence,
+    performed_evidence,
+    record_performed,
+    record_verdict,
+)
 from server.qualification.verdict import read_verdict
 from server.refusals import Refusal
 from server.store import StoreConnection, apply_schema, connect
@@ -141,9 +148,14 @@ def test_a_store_read_needs_the_moment_it_is_judged_at(tmp_path: Path) -> None:
     assert release_pack.main(["--out", str(tmp_path), "--store"]) == 2
 
 
-def _pin(conn: StoreConnection, profile_id: str, selection_id: str) -> None:
+def _pin(
+    conn: StoreConnection,
+    profile_id: str,
+    selection_id: str,
+    performed: PerformedEvidence | None = None,
+) -> None:
     """The route pin behind the fixture snapshot's one run."""
-    performed = qualification_performed()
+    performed = qualification_performed() if performed is None else performed
     record_performed(conn, performed)
     record_runs(conn, performed)
     for case in performed.prepared:
@@ -154,8 +166,13 @@ def _pin(conn: StoreConnection, profile_id: str, selection_id: str) -> None:
         )
 
 
-def _sign(conn: StoreConnection, *, days: int = 30) -> None:
-    evidence = qualification_performed().evidence
+def _sign(
+    conn: StoreConnection,
+    *,
+    days: int = 30,
+    performed: PerformedEvidence | None = None,
+) -> None:
+    evidence = (qualification_performed() if performed is None else performed).evidence
     record_verdict(
         conn,
         evidence=evidence,
@@ -216,6 +233,36 @@ def test_a_verdict_that_is_not_current_for_this_build_qualifies_nothing(
         _sign(conn)
         assert (
             release_pack.qualified_pathways(conn, build_id=build_id, as_of=as_of) == {}
+        )
+
+
+def test_a_verdict_from_an_old_adapter_revision_qualifies_nothing(
+    empty_database: str,
+) -> None:
+    profile_id, selection_id = sorted(ADAPTER_ROUTES)[0]
+    current = qualification_performed()
+    [prepared] = current.prepared
+    old_adapter = performed_evidence(
+        prepared=(
+            replace(
+                prepared,
+                input=replace(
+                    prepared.input,
+                    adapter_version=CANONICAL_ADAPTER_VERSION + "-old",
+                ),
+            ),
+        ),
+        performed=current.performed,
+    )
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        _pin(conn, profile_id, selection_id, old_adapter)
+        _sign(conn, performed=old_adapter)
+        assert (
+            release_pack.qualified_pathways(
+                conn, build_id=FIXTURE_BUILD, as_of=NOW + timedelta(days=1)
+            )
+            == {}
         )
 
 

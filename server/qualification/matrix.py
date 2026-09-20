@@ -818,16 +818,42 @@ def _locatable(
     if spec is None:
         return False
     columns = [str(column) for column in spec["columns"]]
-    named = [expect.column, *(column for column, _value in expect.row_key)]
-    if not columns or any(name not in columns for name in named):
+    declared_names: dict[str, str] = {}
+    for column in columns:
+        normalised = _normalised_cell(column)
+        if normalised in declared_names:
+            return False
+        declared_names[normalised] = column
+    try:
+        row_key = tuple(
+            (
+                declared_names[_normalised_cell(column)],
+                sha256(_normalised_cell(value).encode()).hexdigest(),
+            )
+            for column, value in expect.row_key
+        )
+        expected_column = declared_names[_normalised_cell(expect.column)]
+    except KeyError:
         return False
+    cells = dict.fromkeys(columns, "x")
+    for column, value in row_key:
+        cells[column] = value
+    expected = sha256(_normalised_cell(expect.expected).encode()).hexdigest()
+    cells[expected_column] = expected
     table = (
         f"#### {expect.register_id}\n\n| {' | '.join(columns)} |\n"
-        f"|{'---|' * len(columns)}\n| {' | '.join('x' for _ in columns)} |\n"
+        f"|{'---|' * len(columns)}\n"
+        f"| {' | '.join(cells[column] for column in columns)} |\n"
     )
-    return expect.register_id in module_registers(
-        contract, bundle, expect.module_id, table
+    registers = module_registers(contract, bundle, expect.module_id, table)
+    probe = ExpectedRegister(
+        module_id=expect.module_id,
+        register_id=expect.register_id,
+        row_key=row_key,
+        column=expected_column,
+        expected=expected,
     )
+    return _matches_register(registers, probe)
 
 
 def _registers_met(

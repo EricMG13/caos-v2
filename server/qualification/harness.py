@@ -88,6 +88,7 @@ from server.qualification.matrix import (
     assert_unambiguous,
     build_matrix,
     qualification_set_digest,
+    unlocatable_register_keys,
 )
 from server.qualification.proof import OrchestrationProof, assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
@@ -238,7 +239,9 @@ def prepare(
     """
     assert_measurable(qualification)
     assert_unambiguous(qualification)
-    _answerable(qualification)
+    if not isinstance(harness.bundle, Bundle):
+        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
+    _answerable(harness.bundle, qualification)
     routes = [
         resolve_route(
             harness.catalog,
@@ -253,8 +256,6 @@ def prepare(
     ]
     _consumers(qualification, routes)
     _affordable(qualification, harness, routes)
-    if not isinstance(harness.bundle, Bundle):
-        raise Refusal(RefusalCode.RUN_INPUT_INVALID)
     _subjects(qualification)
     provider = _provider_identity(harness.completions)
     model = _model_identity(harness.completions)
@@ -320,7 +321,7 @@ def perform(
     # answers about the same defect.
     assert_measurable(qualification)
     assert_unambiguous(qualification)
-    _answerable(qualification)
+    _answerable(harness.bundle, qualification)
     set_digest = qualification_set_digest(qualification)
     provider = _provider_identity(harness.completions)
     model = _model_identity(harness.completions)
@@ -705,8 +706,8 @@ def _accepted(
         return {str(row[0]): NodeResult() for row in rows}
 
 
-def _answerable(qualification: QualificationSet) -> None:
-    """Every key names a document its own case carries.
+def _answerable(bundle: Bundle, qualification: QualificationSet) -> None:
+    """Every key names input the case carries and the adapter can locate.
 
     Only checkable now that the set holds both halves. Before, a key could name
     any digest at all and the row would simply always miss — indistinguishable
@@ -720,3 +721,7 @@ def _answerable(qualification: QualificationSet) -> None:
             case.forecast is not None and not case.model_extension
         ):
             raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)
+    if any(case.expects_register for case in qualification.cases) and (
+        unlocatable_register_keys(bundle, qualification)
+    ):
+        raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)

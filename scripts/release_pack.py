@@ -51,6 +51,7 @@ from uuid import UUID
 # `server` importable (the same line `scripts/qualify.py` carries).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.bundle import Bundle
 from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.vendor import catalog
@@ -82,8 +83,10 @@ _REASONS = {
         " attempt, reservation or call"
     ),
     UNVERIFIED: "enabled; no store was read, so no verdict is claimed",
-    NOT_QUALIFIED: "enabled; no current verdict for this build in the store read",
-    QUALIFIED: "enabled; a current signed verdict for this build covers it",
+    NOT_QUALIFIED: (
+        "enabled; no current verdict for this build and adapter in the store read"
+    ),
+    QUALIFIED: "enabled; a current signed verdict for this build and adapter covers it",
 }
 
 # A workspace test is a title string at the start of a statement. Anchored to
@@ -183,7 +186,7 @@ def _snapshot_pins(document: object) -> list[tuple[UUID, str]]:
 def qualified_pathways(
     conn: StoreConnection, *, build_id: str, as_of: datetime
 ) -> dict[tuple[str, str], list[dict[str, str]]]:
-    """Each pathway a current verdict for `build_id` covers, with its verdicts.
+    """Each pathway a current verdict for this build and adapter covers.
 
     A verdict covers the pathways its snapshot's runs were pinned to, joined on
     the run and the route digest the snapshot names, so a pin the snapshot did
@@ -199,8 +202,9 @@ def qualified_pathways(
         " p.performed_json FROM qualification_verdicts q"
         " JOIN qualification_evidence e USING (evidence_sha256)"
         " JOIN qualification_performed p ON p.performed_sha256=e.performed_sha256"
-        " WHERE e.build_id=%s ORDER BY q.evidence_sha256,q.reviewer_id",
-        (build_id,),
+        " WHERE e.build_id=%s AND e.adapter_version=%s"
+        " ORDER BY q.evidence_sha256,q.reviewer_id",
+        (build_id, CANONICAL_ADAPTER_VERSION),
     ).fetchall()
     found: dict[tuple[str, str], list[dict[str, str]]] = {}
     for digest, reviewer, decided_at, expires_at, document in rows:
@@ -270,8 +274,10 @@ def pathways(
 def read_store(
     conn: StoreConnection, *, bundle: Bundle, as_of: datetime
 ) -> dict[tuple[str, str], list[dict[str, str]]]:
-    """The verdicts a store holds for this build, from a store this build's
-    migrations describe; the read unit is rolled back, never committed."""
+    """Current-adapter verdicts for this build from its described store.
+
+    The read unit is rolled back, never committed.
+    """
     verify_schema(conn)
     try:
         return qualified_pathways(conn, build_id=bundle.build_id, as_of=as_of)

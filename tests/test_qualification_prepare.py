@@ -33,7 +33,11 @@ from server.boundary_text import BoundaryText
 from server.engine.route import resolve_route
 from server.methodology.bundle import Bundle
 from server.qualification import harness as subject
-from server.qualification.matrix import QualificationCase, QualificationSet
+from server.qualification.matrix import (
+    ExpectedRegister,
+    QualificationCase,
+    QualificationSet,
+)
 from server.refusals import Refusal
 from server.store import RunStatus, StoreConnection, apply_schema, connect, run_inputs
 from server.store.budget import CEILING
@@ -164,6 +168,44 @@ def test_preparation_uses_an_explicit_run_ceiling(ready: Fixture) -> None:
 
 
 @pytest.mark.parametrize(
+    "row_key",
+    [(), (("resolution_status", "UNRESOLVED"),)],
+)
+def test_perform_refuses_an_impossible_register_selector_before_spend(
+    ready: Fixture, row_key: tuple[tuple[str, str], ...]
+) -> None:
+    conn, blobs, harness, qualification = ready
+    prepared = subject.prepare(conn, blobs, harness, qualification=qualification)
+    _approve(conn, prepared)
+    first, second = qualification.cases
+    impossible = replace(
+        first,
+        expects_register=(
+            ExpectedRegister(
+                module_id="CP-DR",
+                register_id="TDR.3",
+                row_key=row_key,
+                column="resolution_status",
+                expected="ANSWERED",
+            ),
+        ),
+    )
+
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_KEY_UNANSWERABLE$"):
+        subject.perform(
+            conn,
+            blobs,
+            harness,
+            qualification=QualificationSet((impossible, second)),
+            prepared=prepared,
+        )
+
+    assert cast(_Completions, harness.completions).prompts == []
+    assert _count(conn, "SELECT count(*) FROM budget_reservations") == 0
+    assert _count(conn, "SELECT count(*) FROM call_outcomes") == 0
+
+
+@pytest.mark.parametrize(
     "ceiling",
     [
         10,
@@ -259,6 +301,9 @@ def test_preparation_creates_exact_inputs_and_external_previews(ready: Fixture) 
         ("duplicate", "QUALIFICATION_SET_AMBIGUOUS"),
         ("duplicate-key", "QUALIFICATION_SET_AMBIGUOUS"),
         ("unanswerable", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("unlocatable-register", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("empty-register-selector", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("conflicting-register-selector", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("ready-and-blocked", "QUALIFICATION_SET_AMBIGUOUS"),
         ("blocked-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("blocked-gate", "QUALIFICATION_KEY_UNANSWERABLE"),
@@ -275,12 +320,36 @@ def test_whole_set_pure_defects_leave_no_setup(
 ) -> None:
     conn, blobs, harness, qualification = ready
     first, second = qualification.cases
+    register = ExpectedRegister(
+        module_id="CP-DR",
+        register_id="TDR.3",
+        row_key=(("question_id", "RQ-x"),),
+        column="resolution_status",
+        expected="ANSWERED",
+    )
     changes = {
         "documents": replace(second, documents=()),
         "expects": replace(second, expects=()),
         "duplicate": replace(second, label=first.label),
         "duplicate-key": replace(second, expects=second.expects * 2),
         "unanswerable": replace(second, expects=first.expects),
+        "unlocatable-register": replace(
+            second,
+            expects_register=(replace(register, register_id="NO_SUCH_REGISTER"),),
+        ),
+        "empty-register-selector": replace(
+            second,
+            expects_register=(replace(register, row_key=()),),
+        ),
+        "conflicting-register-selector": replace(
+            second,
+            expects_register=(
+                replace(
+                    register,
+                    row_key=(("resolution_status", "UNRESOLVED"),),
+                ),
+            ),
+        ),
         # §99: a readiness key names a consumer CP-0 rules on for this route,
         # and no module in both lists.
         "ready-and-blocked": replace(
