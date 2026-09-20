@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import re
 import signal
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -125,7 +126,7 @@ def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
 ) -> None:
     run = queued_run(case, route, bundle, blobs)
     prompts: list[str] = []
-    original = canonical._prompt
+    original = cast(Callable[..., str], canonical._prompt)
 
     def capture(*args: object, **kwargs: object) -> str:
         prompt = original(*args, **kwargs)
@@ -139,20 +140,17 @@ def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
     run.conn.commit()
     completions.quotes = (QUOTE,)
     assert drive(run, completions) == run.run_id
-    sections = {
-        re.sub(
-            r"[0-9a-f]{16}",
-            "<tag>",
-            re.search(
-                r"--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA [0-9a-f]{16} .*?"
-                r"--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA "
-                r"[0-9a-f]{16} ---",
-                prompt,
-                re.S,
-            ).group(),
+    sections = set()
+    for prompt in prompts:
+        section = re.search(
+            r"--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA [0-9a-f]{16} .*?"
+            r"--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA "
+            r"[0-9a-f]{16} ---",
+            prompt,
+            re.S,
         )
-        for prompt in prompts
-    }
+        assert section is not None
+        sections.add(re.sub(r"[0-9a-f]{16}", "<tag>", section.group()))
     assert len(sections) == 1
     assert [p.split(maxsplit=6)[5] for p in prompts].count("CP-0") == 4
 

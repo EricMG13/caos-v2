@@ -211,20 +211,17 @@ def test_approved_captured_inputs_survive_later_catalog_and_source_changes(
     )
     prompts = cast(_Completions, harness.completions).prompts
     assert len(prompts) == 6 and all(str(added[0]) not in prompt for prompt in prompts)
-    sections = {
-        re.sub(
-            r"[0-9a-f]{16}",
-            "<tag>",
-            re.search(
-                r"--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA [0-9a-f]{16} .*?"
-                r"--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA "
-                r"[0-9a-f]{16} ---",
-                prompt,
-                re.S,
-            ).group(),
+    sections = set()
+    for prompt in prompts:
+        section = re.search(
+            r"--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA [0-9a-f]{16} .*?"
+            r"--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA "
+            r"[0-9a-f]{16} ---",
+            prompt,
+            re.S,
         )
-        for prompt in prompts
-    }
+        assert section is not None
+        sections.add(re.sub(r"[0-9a-f]{16}", "<tag>", section.group()))
     assert len(sections) == 1
 
 
