@@ -248,12 +248,25 @@ def test_a_module_expected_both_ready_and_blocked_is_refused(tmp_path: Path) -> 
 # manifest or documents move; a change to the loader or the digest that moved
 # one of these would silently orphan every verdict and snapshot bound to it.
 COMMITTED_SET_DIGESTS = {
+    "ba-fy2025": ("a30533b3530ed1e609ce33df67e50b4ce5e4f80167be4efc29f398b4c24a7bba"),
     "ccl-fy2025": "f5555753cf7b39868fa4885d95a0b80847c61204a4b3ebe5fffe8345587c327e",
+    "ccl-fy2025-covenant-refinancing": (
+        "726e28dad1498a56ed6692d09819834c9727ebbd23ec8bac619f31e61ba4ab8a"
+    ),
+    "ccl-fy2025-earnings-update": (
+        "7f3619434a2697f10f5ea78d64a2e3e87c67691272037034235289a87507e275"
+    ),
+    "ccl-fy2025-liquidity": (
+        "117dcda7edad142dc3ae4a33fc06376690f990eefc87f53fc2804d194d65a8c8"
+    ),
     "ccl-fy2025-portfolio": (
         "7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c"
     ),
     "ccl-fy2025-full-relative-value": (
         "c834105e7c6e12d6e11996c3744eb414715aef07b549df11bbc9f7ba741977f2"
+    ),
+    "ccl-fy2025-relative-value": (
+        "a8df0ccf6d8fd735886c584951f7ca82e460f483a4f235a5ad31143fd3f60ac8"
     ),
     "ccl-fy2025-lite-covenant-refinancing": (
         "4bc8aceaa622a76e930fa8aa419a349ffedd8ca681360571f5c8f2ee38c3aa9e"
@@ -270,24 +283,20 @@ COMMITTED_SET_DIGESTS = {
     "save-2024-lite-distressed-restructuring": (
         "f53523a15053a2d4f191408cddc600c1667837cbacade354468e0f58fb03c391"
     ),
+    "f-fy2025": ("f7659a750e559db22b97ee3175aa5660819a65fef2d6735fae172126782a2fc2"),
     "vmo2-fy2025": "27b7df72963c877f707750adfb9e21d2bd42fbcdc1d8ac726cd5c2b53b4e4b07",
     "vmo2-fy2025-deep-research": (
         "09807efb1a3d5d40680d1a9d0e054333537781d7bb4013ecd7670323f817fd9b"
+    ),
+    "vmo2-fy2025-full-deep-research": (
+        "1f15f91b746ee2bc58a9719ff5b5f0cb6a4328c827642bb384f8040ba8cfe3c2"
     ),
     "vmo2-fy2025-portfolio": (
         "a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea"
     ),
 }
 
-PENDING_SET_DOCUMENTS = {
-    "ccl-fy2025-relative-value": frozenset(
-        {
-            "documents/CCL_FY2025_10K.txt",
-            "documents/NCLH_Q4_2025_Earnings_Release.txt",
-            "documents/RCL_Q4_2025_Earnings_Release.txt",
-        }
-    )
-}
+PENDING_SET_DOCUMENTS: dict[str, frozenset[str]] = {}
 
 
 def test_every_committed_set_binds_its_recorded_digest() -> None:
