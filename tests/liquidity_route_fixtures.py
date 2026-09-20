@@ -7,8 +7,10 @@ not a qualification set and does not use the later CCL answer keys.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from canonical_fixtures import (
     AUTHORED,
@@ -17,7 +19,9 @@ from canonical_fixtures import (
     CONTRACT,
     RUN,
     conforming_rows,
+    fields_from_prompt,
     skill,
+    wire,
 )
 from canonical_route_fixtures import PACK as BASE_PACK
 from canonical_route_fixtures import QUOTES as BASE_QUOTES
@@ -27,6 +31,7 @@ from lite_route_fixtures import _table, _yaml
 from server.engine.route import resolve_route
 from server.methodology.handoff import HostIdentity, UpstreamRef, invocation_fields
 from server.methodology.vendor import authority_bundle_sha256
+from server.provider import Completion, encode_request
 
 SELECTION = ("FULL_CREDIT_32", "LIQUIDITY_REVIEW")
 ROUTE = resolve_route(CATALOG, *SELECTION)
@@ -436,16 +441,20 @@ def _cp2d_rows(
     }
 
 
-def _t8() -> list[list[str]]:
+def _t8(readiness: dict[str, str]) -> list[list[str]]:
     return [
         [
             str(index),
             module,
             "Run " + module,
-            "Run " + module,
+            (
+                "Run " + module
+                if readiness.get(module, "READY") in {"READY", "READY_WITH_LIMITATIONS"}
+                else "DO NOT RUN"
+            ),
             "issuer-pack p1",
             "Current handoff",
-            "READY",
+            readiness.get(module, "READY"),
             "issuer-pack p1",
         ]
         for index, module in enumerate(MODULES[1:], 1)
@@ -490,7 +499,7 @@ def liquidity_markdown(
         if register == knobs.omit_register:
             continue
         if ident.module_id == "CP-0" and register == "T8":
-            columns, rows = CONTRACT.navigation.NEW_HEADERS, _t8()
+            columns, rows = CONTRACT.navigation.NEW_HEADERS, _t8(knobs.readiness)
         elif register in authored:
             columns = (
                 ["Calculation", "Result", "Basis"]
@@ -515,3 +524,48 @@ def liquidity_markdown(
         for heading in CONTRACT.validate_handoff.CANONICAL_HEADINGS
     )
     return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
+
+
+@dataclass
+class LiquidityCompletions:
+    """Deterministic answers for the proven liquidity route."""
+
+    source_id: UUID
+    model: str = "a-model/for-the-test"
+    charge: Decimal = Decimal("0.0000041")
+    qa_by_module: dict[str, str] = field(default_factory=dict)
+    readiness: dict[str, str] = field(default_factory=dict)
+    prompts: list[str] = field(default_factory=list)
+    answers: list[bytes] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        assert json_object
+        self.prompts.append(prompt)
+        fields = fields_from_prompt(prompt)
+        module = str(fields["module_id"])
+        markdown = liquidity_markdown(
+            liquidity_identity(module),
+            HandoffKnobs(
+                fields=fields,
+                qa_status=self.qa_by_module.get(module, "Passed"),
+                readiness=self.readiness,
+            ),
+        )
+        self.answers.append(markdown)
+        return Completion(
+            wire(
+                markdown,
+                [
+                    {
+                        "source_id": str(self.source_id),
+                        "page": 1,
+                        "matched_text": QUOTES[module],
+                    }
+                ],
+            ),
+            self.charge,
+            "gen-liquidity",
+        )
