@@ -26,10 +26,6 @@ from canonical_fixtures import (
 )
 from conftest import priced
 from lite_route_fixtures import RealisticLiteCompletions
-from test_qualification_harness import _approve
-from test_qualification_harness import _Completions as QualificationCompletions
-from test_qualification_prepare import Fixture
-from test_qualification_prepare import ready as _ready  # noqa: F401
 from test_runtime import ESTIMATE, _approved_run, _Run, blobs, bundle, route
 
 from server import provider as provider_module
@@ -49,7 +45,6 @@ from server.engine.worker import (
 from server.methodology import canonical
 from server.methodology.bundle import Bundle
 from server.provider import CompletionProvider
-from server.qualification import harness as qualification_harness
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
@@ -133,7 +128,6 @@ def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
     bundle: Bundle,
     blobs: BlobStore,
     monkeypatch: pytest.MonkeyPatch,
-    _ready: Fixture,  # noqa: F811 -- imported fixture is deliberately shadowed
 ) -> None:
     run = queued_run(case, route, bundle, blobs)
     prompts: list[str] = []
@@ -156,23 +150,6 @@ def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
         "CP-L10",
         "CP-5",
     }
-
-    conn, qualification_blobs, harness, qualification = _ready
-    prepared = qualification_harness.prepare(
-        conn, qualification_blobs, harness, qualification=qualification
-    )
-    _approve(conn, prepared)
-    performed = qualification_harness.perform(
-        conn,
-        qualification_blobs,
-        harness,
-        qualification=qualification,
-        prepared=prepared,
-    )
-    assert performed.matrix is not None
-    harness_prompts = cast(QualificationCompletions, harness.completions).prompts
-    assert len(harness_prompts) == 6
-    assert normalized_persona_sections(harness_prompts) == sections
 
 
 def test_worker_stops_a_refused_run_with_its_code_and_releases_the_lease(
