@@ -125,7 +125,7 @@ def test_complete_input_roundtrip_exact_terminal_replay(
     assert pin.route_digest == route_digest(route)
     assert pin.build_id == bundle.build_id
     assert pin.manifest_sha256 == bundle.manifest_sha256
-    assert pin.adapter_version == "canonical-markdown-v3"
+    assert pin.adapter_version == methodology.CANONICAL_ADAPTER_VERSION
     assert pin.research_json is not None and json.loads(pin.research_json) == research
     research["source_mode"] = "changed"
     assert load_run_input(conn, run) == pin

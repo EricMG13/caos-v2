@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -41,6 +44,7 @@ from conftest import reserve_at as reserve
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
+from server import methodology
 from server.boundary_text import BoundaryText
 from server.engine.route import (
     NodeResult,
@@ -51,6 +55,8 @@ from server.engine.route import (
     resolve_route,
 )
 from server.evidence.citations import AnchoredCitation, Rect
+from server.methodology import adapter_identity
+from server.methodology.adapter_pin import CANONICAL_ADAPTER_SHA256
 from server.methodology.bundle import (
     MANIFEST_NAME,
     Bundle,
@@ -79,6 +85,7 @@ from server.methodology.invocation import (
     MAX_UPSTREAM_HANDOFF_BYTES,
     MODULE_AUTHORED_SCRIPTS,
     _carried_objects,
+    _persona_section,
     allowed_uses,
     build_handoff_prompt,
     host_identity,
@@ -1104,9 +1111,10 @@ def test_section_markers_cannot_be_forged_by_evidence() -> None:
     prompt = _prompt(gate, delivered)
     tag = _tag(prompt)
     files = len(delivered_authority(BUNDLE, "CP-0").files)
-    # The tag rule (2), front matter (2), host steps (2), each file (2), source
-    # prep (2), evidence (2), final check (2), CP-0 final check (2).
-    assert prompt.count(tag) == 14 + 2 * files and tag not in forged
+    # The tag rule (2), front matter (2), host steps (2), persona (2), each
+    # file (2), source prep (2), evidence (2), final check (2), CP-0 final
+    # check (2).
+    assert prompt.count(tag) == 16 + 2 * files and tag not in forged
     assert _front_matter(prompt).count("issuer_name") == 1
 
 
@@ -1278,6 +1286,46 @@ def test_every_host_section_opens_and_closes_with_a_tagged_marker(
     assert expected <= set(closed)
     assert ("HOST SOURCE PREPARATION" in closed) is (module_id == "CP-0")
     assert ("CP-0 FINAL CHECK" in closed) is (module_id == "CP-0")
+
+
+@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def test_every_model_backed_module_receives_one_host_persona_section(
+    module_id: str,
+) -> None:
+    gate = handoff_markdown(identity("CP-0"))
+    ref = upstream_ref(identity("CP-0"), gate)
+    upstream = () if module_id == "CP-0" else ((ref, gate),)
+    prompt = _prompt(
+        identity(module_id, tuple(r for r, _ in upstream)), upstream=upstream
+    )
+    tag = _tag(prompt)
+    section = _persona_section(tag)
+    assert prompt.count(section) == 1
+    assert adapter_identity.ANALYTICAL_PERSONA in section
+    assert "module and host rules supersede this section" in section
+
+
+def test_adapter_pin_is_a_full_content_identity_and_refuses_policy_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert methodology.CANONICAL_ADAPTER_VERSION == CANONICAL_ADAPTER_SHA256
+    assert re.fullmatch(r"[0-9a-f]{64}", CANONICAL_ADAPTER_SHA256)
+    monkeypatch.setattr(adapter_identity, "ANALYTICAL_PERSONA", "changed")
+    with pytest.raises(Refusal) as refused:
+        adapter_identity.verify_canonical_adapter_pin()
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+def test_adapter_pin_generator_reproduces_the_compiled_manifest(tmp_path: Path) -> None:
+    (tmp_path / "server/methodology").mkdir(parents=True)
+    expected = hashlib.sha256(adapter_identity.adapter_manifest_bytes()).hexdigest()
+    path = Path(__file__).parents[1] / "scripts/canonical_adapter_manifest.py"
+    spec = importlib.util.spec_from_file_location("_adapter_pin_test", path)
+    assert spec is not None and spec.loader is not None
+    module: Any = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    generator = cast(Callable[[Path], str], module.generate_adapter_pin)
+    assert generator(tmp_path) == expected == CANONICAL_ADAPTER_SHA256
 
 
 def test_the_forecast_extension_opens_and_closes_with_a_tagged_marker() -> None:

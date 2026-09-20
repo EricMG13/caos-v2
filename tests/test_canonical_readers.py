@@ -30,6 +30,7 @@ from server.api.reads.run import (
 )
 from server.engine.route import GATE_MODULE, EdgeType, NodeState
 from server.engine.runtime import Execution, run_route
+from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology.canonical import accepted_handoff
 from server.methodology.runner import ModuleProvider
 from server.methodology.verification import AcceptedRow
@@ -197,4 +198,4 @@ def test_accepted_handoff_returns_the_exact_bytes_the_record_binds(
     # beside it, so a reader cannot be handed one node's Markdown under
     # another node's record.
     assert record.artifact_sha256 == artifact
-    assert record.adapter_version == "canonical-markdown-v3"
+    assert record.adapter_version == CANONICAL_ADAPTER_VERSION

@@ -20,6 +20,7 @@ from server.boundary_text import BoundaryText
 from server.calculators.cash_flow import cash_flow_forecast
 from server.engine.route import ResolvedRoute, RouteExtensions, resolve_route
 from server.evidence.ingest import Document
+from server.methodology.adapter_identity import ANALYTICAL_PERSONA
 from server.methodology.forecast import forecast_projection
 from server.provider import Completion
 from server.qualification.matrix import (
@@ -210,6 +211,8 @@ def test_forecast_route_accepts_real_host_calculated_artifact(
     )
     result = forecast_projection(answers.answers[-1])
     assert result["rows"][0]["cash"]["closing"] == "145.000000"
+    assert len(answers.prompts) == 10
+    assert all(ANALYTICAL_PERSONA in prompt for prompt in answers.prompts)
     # The forecast owners are the only modules handed the extension, and this
     # is the only route fixture that emits it: prove it opens and closes.
     owners = {
