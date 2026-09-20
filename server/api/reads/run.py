@@ -507,9 +507,23 @@ def node_readiness(  # noqa: PLR0913 -- one node of one run document
     awaiting_gate = any(
         edge.type is EdgeType.QA_GATE and edge.source not in answered for edge in unmet
     )
-    # `.get`, not `[]`: a module the gate has not ruled on has no verdict
-    # rather than a false one, and None is that absence on the wire.
-    return unmet, awaiting_gate, readiness.get(node.module_id)
+    gate_verdict = readiness.get(node.module_id)
+    qa_source = next(
+        (
+            edge.source
+            for edge in route.edges
+            if edge.target == node.module_id and edge.type is EdgeType.QA_GATE
+        ),
+        None,
+    )
+    if qa_source is not None:
+        source = next(item for item in route.nodes if item.module_id == qa_source)
+        result = accepted.get(source.route_node_id)
+        if result is not None and result.qa_status is not None:
+            gate_verdict = result.qa_status
+    # Before the QA source answers, CP-0's readiness is the verdict. Afterwards
+    # the source's own qa_status is the verdict; absence remains None on the wire.
+    return unmet, awaiting_gate, gate_verdict
 
 
 def _node_view(  # noqa: PLR0913 -- one node of one run document

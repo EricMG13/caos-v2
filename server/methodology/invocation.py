@@ -920,10 +920,11 @@ def _citation_register(
 
 
 def _authority_text(module_id: str, name: str, data: bytes) -> str:
-    # §56: only these manifest-verified CP-3 workbook references are binary.
-    if module_id == "CP-3" and name in {
-        "references/REF_CP-3B_Portfolio_Constraints.xlsx",
-        "references/REF_CP-3_Sector_RV.xlsx",
+    # Only these manifest-verified workbook references are binary.
+    if (module_id, name) in {
+        ("CP-3", "references/REF_CP-3B_Portfolio_Constraints.xlsx"),
+        ("CP-3", "references/REF_CP-3_Sector_RV.xlsx"),
+        ("CP-6", "references/REF_CP-6A_Portfolio_Debate_Inputs.xlsx"),
     }:
         if not zipfile.is_zipfile(io.BytesIO(data)):
             raise Refusal(RefusalCode.AUTHORITY_BYTES_MISMATCH)
