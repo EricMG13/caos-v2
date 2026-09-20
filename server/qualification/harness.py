@@ -519,18 +519,26 @@ def _affordable(
 def _consumers(
     qualification: QualificationSet, routes: Sequence[ResolvedRoute]
 ) -> None:
-    """Every readiness key names a module CP-0 rules on for its case's route.
+    """Every module-bearing key names a module on its case's route.
 
     CP-0's T8 carries a verdict for each pinned consumer and none for itself, so
-    a key naming the gate, or a module the route does not pin, can never be met
-    -- and a readiness miss reads as the gate's decision, which it would not
-    be. Refused before anything is written, like the other unanswerable keys.
+    a readiness key cannot name the gate. No key can name a module the route
+    does not pin: it could never be met. Refused before anything is written,
+    like the other unanswerable keys.
     """
     for case, route in zip(qualification.cases, routes, strict=True):
-        consumers = {
-            node.module_id for node in route.nodes if node.module_id != GATE_MODULE
+        modules = {node.module_id for node in route.nodes}
+        keyed = {
+            expect.module_id
+            for expects in (
+                case.expects,
+                case.expects_projection,
+                case.expects_register,
+            )
+            for expect in expects
         }
-        if not set(case.expects_ready) | set(case.expects_blocked) <= consumers:
+        readiness = set(case.expects_ready) | set(case.expects_blocked)
+        if not keyed <= modules or not readiness <= modules - {GATE_MODULE}:
             raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)
 
 
