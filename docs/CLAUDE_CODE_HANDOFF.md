@@ -36,6 +36,17 @@ Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
 
+## GitHub delivery record — 20 September 2026
+
+| PR | Merge | Delivered change | Hosted result |
+|---|---|---|---|
+| [#408](https://github.com/EricMG13/caos-v2/pull/408) | `9e6e7d6` | Full-liquidity route contract coverage | All required checks and SonarCloud passed |
+| [#409](https://github.com/EricMG13/caos-v2/pull/409) | `b0a0ed8` | Pinned `setup-node` and Trivy action revisions | All required checks and SonarCloud passed |
+| [#410](https://github.com/EricMG13/caos-v2/pull/410) | `e5c1d04` | Deep-research pytest plugin registration in `tests/conftest.py` | All required checks and SonarCloud passed |
+| [#411](https://github.com/EricMG13/caos-v2/pull/411) | `2978bf6` | Phase 6 qualification-evidence coverage and fulfilled exemption removal | All required checks and SonarCloud passed |
+
+This is a delivery record only; it does not claim phase acceptance.
+
 ## Resolution programme checkpoint — 20 September 2026
 
 | Measure | Current evidence |
