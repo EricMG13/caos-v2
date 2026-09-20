@@ -377,3 +377,8 @@ def reserve_at(
     from server.store.budget import reserve
 
     reserve(conn, attempt_id, amount, price=priced(amount), lease=lease)
+
+
+# Shared fixtures for the FULL route live with its LITE counterpart. Pytest
+# requires plugin registration in a top-level conftest module.
+pytest_plugins = ("test_lite_deep_research_route",)
