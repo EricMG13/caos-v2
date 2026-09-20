@@ -293,7 +293,9 @@ class NonceRegister:
         self._seen: dict[str, float] = {}
 
     def admit(self, nonce: str, *, expires_at: float, now: float) -> bool:
-        expired = [seen for seen, until in self._seen.items() if until <= now]
+        # The assertion age check admits the exact expiry instant, so retain its
+        # nonce until strictly after that instant.
+        expired = [seen for seen, until in self._seen.items() if until < now]
         for seen in expired:
             del self._seen[seen]
         if nonce in self._seen or len(self._seen) >= self._capacity:

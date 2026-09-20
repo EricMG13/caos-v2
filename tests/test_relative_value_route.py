@@ -31,7 +31,6 @@ from server.methodology.handoff import ADAPTER_ROUTES
 from server.methodology.runner import ModuleProvider
 from server.provider import MAX_REQUEST_BYTES, Completion
 from server.qualification.proof import assert_orchestration_proof
-from server.refusals import RefusalCode
 from server.store import StoreConnection
 from server.store.gates import Gate, approve_gate
 from server.store.members import Standing, grant
@@ -242,17 +241,11 @@ def test_missing_optional_peer_input_restricts_cp3_but_does_not_complete_the_rou
     harness.conn.rollback()
 
 
-# Every catalog pathway of every profile that `ADAPTER_ROUTES` does not enable.
-# Read from the catalog and the constant rather than listed, so enabling a
-# pathway moves it out of this guard and into its own contract test instead of
-# leaving a pathway nothing covers -- and so a pathway the catalog gains is
-# driven here from the day it exists.
-DISABLED = [
+CATALOG_ROUTES = frozenset(
     (profile, selection)
     for profile, declared in CATALOG["profiles"].items()
     for selection in declared["pathways"]
-    if (profile, selection) not in ADAPTER_ROUTES
-]
+)
 # The exact enabled set, asserted here and in each pathway's own contract test.
 ENABLED = frozenset(
     {
@@ -278,20 +271,9 @@ ENABLED = frozenset(
 )
 
 
-@pytest.mark.parametrize("route", DISABLED, indirect=True)
-def test_relative_value_is_the_only_newly_enabled_route(harness: _Harness) -> None:
-    assert ADAPTER_ROUTES == ENABLED
-    assert (len(ENABLED), len(DISABLED)) == (18, 0)
-    assert len(DISABLED) + len(ENABLED) == sum(
-        len(declared["pathways"]) for declared in CATALOG["profiles"].values()
-    )
-    answers = RouteCompletions(harness.source_id)
-    assert (
-        _run_route(harness, _module_provider(harness, answers))
-        is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    )
-    assert answers.prompts == []
-    assert _counts(harness) == (0, [], 0, 0, 0)
+def test_all_catalog_routes_are_enabled() -> None:
+    assert ADAPTER_ROUTES == ENABLED == CATALOG_ROUTES
+    assert len(ADAPTER_ROUTES) == 18
 
 
 def test_a_wide_frontier_runs_its_independent_nodes_at_the_same_time(
