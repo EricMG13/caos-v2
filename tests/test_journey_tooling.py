@@ -161,6 +161,23 @@ def test_the_edge_origin_is_tls_and_the_config_spec_and_api_agree_on_it() -> Non
     assert run._environment()["CAOS_PUBLIC_ORIGIN"] == run.EDGE_ORIGIN
 
 
+def test_the_journey_pack_builder_uses_the_runner_python_with_a_local_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI has the runner's system interpreter, while direct local Playwright
+    runs retain the repository virtual-environment default."""
+    spec = (run.REPO / "frontend" / "tests" / "journey" / "journey.spec.ts").read_text(
+        encoding="utf-8"
+    )
+
+    monkeypatch.setenv("JOURNEY_PYTHON", "/wrong/python")
+    assert run._environment()["JOURNEY_PYTHON"] == sys.executable
+    assert (
+        'process.env.JOURNEY_PYTHON ?? path.join(REPO_ROOT, ".venv", "bin", "python")'
+        in spec
+    )
+
+
 def test_the_tls_material_is_minted_per_run_for_the_edge_host_and_kept_private(
     tmp_path: Path,
 ) -> None:

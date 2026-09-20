@@ -74,6 +74,7 @@ def _environment() -> dict[str, str]:
     env.update(
         CAOS_EDGE_TOKEN=secrets.token_urlsafe(48),
         CAOS_PUBLIC_ORIGIN=EDGE_ORIGIN,
+        JOURNEY_PYTHON=sys.executable,
         JOURNEY_UPSTREAM=API_ORIGIN,
         JOURNEY_EXIT_AFTER_FIRST_ACCEPT="1",
     )
