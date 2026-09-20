@@ -263,7 +263,7 @@ jobs:
       # Pinned to a release verified to install cleanly, for the same reason
       # everything else here is pinned: an unpinned binary a security gate
       # depends on is a gate that can start failing for a reason nobody wrote.
-      - uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: caos:ci
           format: json
@@ -275,7 +275,7 @@ jobs:
       # The floor first: a scanner that scanned nothing is a failure, not a pass
       # (docs/AI_CODE_QUALITY.md section 4). Only then does the finding count.
       - run: python scripts/scan_floors.py trivy.json --trivy
-      - uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: caos:ci
           severity: HIGH,CRITICAL
@@ -307,7 +307,7 @@ jobs:
           cache-dependency-glob: requirements-dev.txt
       # --only-binary :all: — see the lint job above.
       - run: "uv pip install --system --require-hashes --only-binary :all: -r requirements-dev.txt"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
@@ -405,7 +405,7 @@ jobs:
       run: {working-directory: frontend}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
