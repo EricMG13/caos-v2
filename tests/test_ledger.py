@@ -81,18 +81,6 @@ NOT_A_CITATION = {
         "named by a deferred CP-DR register entry; its implementation is not "
         "in this branch"
     ),
-    "test_a_10k_named_whole_for_a_consumer_is_refused_before_any_attempt": (
-        "named by a deferred evidence-read entry; its implementation is not "
-        "in this branch"
-    ),
-    "test_a_10k_runs_by_page_the_gate_on_its_map_the_screen_on_its_pages": (
-        "named by a deferred evidence-read entry; its implementation is not "
-        "in this branch"
-    ),
-    "test_large_documents": (
-        "named by a deferred evidence-read entry; its implementation is not "
-        "in this branch"
-    ),
 }
 
 
