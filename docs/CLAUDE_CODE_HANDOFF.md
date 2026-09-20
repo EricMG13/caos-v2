@@ -49,8 +49,12 @@ the middle of an edit. Other entry documents link here instead of copying it.
 | [#414](https://github.com/EricMG13/caos-v2/pull/414) | `e252681` | Final register, release-pack and qualification-preflight remediation | All required checks and SonarCloud passed |
 | [#416](https://github.com/EricMG13/caos-v2/pull/416) | `24647ab` | Reject off-route citation, projection and register qualification keys before setup or spend | All required checks and both Sonar checks passed |
 | [#418](https://github.com/EricMG13/caos-v2/pull/418) | `b5a3932` | Reject unanswerable forecast-readiness qualification keys before setup or spend | All required checks and SonarCloud passed |
+| [#422](https://github.com/EricMG13/caos-v2/pull/422) | `76652fc` | Bind loaded fixed host instructions into the reviewed adapter identity pin | Required checks and both Sonar checks passed; exact-main CI `35531769164` passed, including smoke |
+| [#423](https://github.com/EricMG13/caos-v2/pull/423) | `98acdca` | Expose the persisted authenticated qualification signer separately from the submitted reviewer label | Required checks and both Sonar checks passed; exact-main CI `35533952243` passed, including smoke |
 
 This is a delivery record only; it does not claim phase acceptance.
+
+For #423, an early verification invocation missed the campaign environment-scrubbing prefix. All material local evidence was rerun with the required six-variable unset prefix before merge: 3,901 PostgreSQL-backed Python tests, 268 frontend tests, frontend builds, lint/types, schema parity, pre-commit, and diff checks. The retained function-level rewrite tournament for the high-impact qualification-strip `display()` function selected the incumbent; the focused regression passed.
 
 ## Resolution programme checkpoint — 20 September 2026
 
