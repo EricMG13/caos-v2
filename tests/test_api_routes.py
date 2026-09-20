@@ -623,10 +623,9 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     """F03: CP-5 answered something other than `Passed`, so CP-6 is blocked by
     that verdict and nothing is awaited -- not a wait for a person.
 
-    The one QA_GATE is on a route the canonical adapter does not yet execute
-    (§42.2), so the view is asked directly over the typed result the reader
-    reduces any accepted record to; `test_canonical_readers` serves a record's
-    readiness over HTTP.
+    The view is asked directly over the typed result the reader reduces any
+    accepted record to; the enabled portfolio-decision route covers the same
+    projection over HTTP in `test_cp6_route`.
     """
     full = resolve_route(catalog, PROFILE, "FULL_CREDIT_ASSESSMENT")
     cp5 = next(n.route_node_id for n in full.nodes if n.module_id == "CP-5")
@@ -643,7 +642,11 @@ def test_a_qa_verdict_other_than_passed_blocks_without_awaiting(
     }
 
     cp6 = by_module["CP-6"]
-    assert (cp6.state, cp6.awaiting_gate) == ("BLOCKED", False)
+    assert (cp6.state, cp6.awaiting_gate, cp6.gate_verdict) == (
+        "BLOCKED",
+        False,
+        qa_status,
+    )
     gate = EdgeView(source="CP-5", type=EdgeType.QA_GATE)
     assert (gate in cp6.waiting_on) is held
     assert by_module["CP-5"].waiting_on == []
