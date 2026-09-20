@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { QualificationStrip } from "@/chrome/QualificationStrip";
 
 const EVIDENCE = "a".repeat(64);
+const SIGNER = "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69";
 
 function response(state: "QUALIFIED" | "UNQUALIFIED" | "RESTRICTED" | "UNAVAILABLE") {
   return new Response(
@@ -14,7 +15,8 @@ function response(state: "QUALIFIED" | "UNQUALIFIED" | "RESTRICTED" | "UNAVAILAB
       adapter_version: state === "QUALIFIED" ? "adapter" : null,
       provider: state === "QUALIFIED" ? "openrouter" : null,
       model: state === "QUALIFIED" ? "model" : null,
-      reviewer: state === "QUALIFIED" ? "Reviewer" : null,
+      reviewer_id: state === "QUALIFIED" ? SIGNER : null,
+      reviewer: state === "QUALIFIED" ? "Submitted label B" : null,
       decided_at: state === "QUALIFIED" ? "2026-09-15T10:00:00Z" : null,
       expires_at: state === "QUALIFIED" ? "2026-09-16T10:00:00Z" : null,
     }),
@@ -30,6 +32,16 @@ test("qualification states are never composed from a section verdict", async () 
   expect(await screen.findByText("RESTRICTED")).toBeInTheDocument();
   expect(screen.getByLabelText("Qualification")).toHaveTextContent(
     "Qualification metadata requires an analyst role.",
+  );
+});
+
+test("the authenticated signer is displayed separately from the submitted label", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response("QUALIFIED")));
+  render(<QualificationStrip evidenceSha256={EVIDENCE} />);
+
+  expect(await screen.findByText("QUALIFIED")).toBeInTheDocument();
+  expect(screen.getByLabelText("Qualification")).toHaveTextContent(
+    `Authenticated signer ${SIGNER}; reviewer label Submitted label B.`,
   );
 });
 

@@ -584,6 +584,7 @@ const QualificationRead = object({
   adapter_version: nullable(short),
   provider: nullable(short),
   model: nullable(short),
+  reviewer_id: nullable(uuid),
   reviewer: nullable(text),
   decided_at: nullable(datetime),
   expires_at: nullable(datetime),

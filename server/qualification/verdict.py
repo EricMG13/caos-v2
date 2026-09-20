@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from server.boundary_text import BoundaryText
 from server.qualification import Assurance
@@ -69,6 +70,9 @@ class Verdict:
     decided_at: datetime
     expires_at: datetime
     reviewer: BoundaryText
+    # The authenticated actor is absent from the submitted document.  The store
+    # adds it only when projecting a persisted verdict back to a reader.
+    reviewer_id: UUID | None = None
 
     @property
     def assurance(self) -> Assurance:

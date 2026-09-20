@@ -451,6 +451,7 @@ describe("the v1 wire contract", () => {
       adapter_version: "adapter",
       provider: "openrouter",
       model: "model",
+      reviewer_id: "3f1c2a4e-8b7d-4c6e-9a1f-0d2e3c4b5a69",
       reviewer: "Reviewer",
       decided_at: AT,
       expires_at: "2026-09-16T10:00:00Z",
