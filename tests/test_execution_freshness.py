@@ -423,13 +423,18 @@ def _mutation(  # noqa: C901
         state, gate = name.removeprefix("actor_").split("_", 1)
         return _actor_change(harness, Gate(gate), downgrade=state == "downgraded")
 
-    def change() -> None:  # noqa: C901
+    def change() -> None:  # noqa: C901, PLR0912
         if name == "bundle_moved":
             manifest = harness.bundle.root / MANIFEST_NAME
             manifest.write_bytes(manifest.read_bytes() + b" ")
             return
         if name == "adapter_mismatch":
             monkeypatch.setattr(methodology, "CANONICAL_ADAPTER_VERSION", "changed")
+            return
+        if name == "adapter_policy_moved":
+            monkeypatch.setattr(
+                methodology.adapter_identity, "ANALYTICAL_PERSONA", "changed"
+            )
             return
         if name == "input_missing":
             _corrupt_input(harness, remove=True)
@@ -543,6 +548,7 @@ _CHANGES = [
     ("blocked", RefusalCode.RUN_NOT_RUNNING),
     ("bundle_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
     ("adapter_mismatch", RefusalCode.RUN_INPUT_INVALID),
+    ("adapter_policy_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
 ]
 
 
@@ -1170,6 +1176,7 @@ _AT_ACCEPT = [
     ("input_missing", RefusalCode.RUN_INPUT_INVALID),
     ("input_corrupt", RefusalCode.RUN_INPUT_INVALID),
     ("route_corrupt", RefusalCode.ROUTE_IDENTITY_INVALID),
+    ("adapter_policy_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
     ("failed", False),
     ("blocked", False),
 ]

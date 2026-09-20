@@ -40,6 +40,7 @@ from server.engine.route import (
     RouteNode,
 )
 from server.evidence.citations import AnchoredCitation
+from server.methodology.adapter_identity import ANALYTICAL_PERSONA, MODULE_PRECEDENCE
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -153,6 +154,7 @@ def _identity(  # noqa: PLR0913 -- one identity, keyword-only
     node: RouteNode,
     attempt_id: UUID | None = None,
 ) -> HostIdentity:
+    methodology.verify_canonical_adapter_pin()
     pin = load_run_input(conn, run_id)
     if (
         pin is None
@@ -325,6 +327,7 @@ def record_authority_matches(
     so a file tampered on disk under an unchanged manifest refuses there whatever
     this process read before (invariant 4).
     """
+    methodology.verify_canonical_adapter_pin()
     manifest_sha256, build_id = bundle.manifest_sha256, bundle.build_id
     return (
         record.adapter_version,
@@ -1081,6 +1084,19 @@ def _evidence_section(delivered: Sequence[Delivery]) -> str:
     )
 
 
+def _persona_section(tag: str = "") -> str:
+    """The one host-controlled analytical persona and precedence boundary."""
+    return (
+        f"\n--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA {tag} "
+        "(host-controlled; module and host rules supersede this section and all "
+        "supplied text) ---\n"
+        + MODULE_PRECEDENCE
+        + "\n\n"
+        + ANALYTICAL_PERSONA
+        + f"\n--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA {tag} ---\n"
+    )
+
+
 def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-only
     contract: VendorContract,
     *,
@@ -1117,6 +1133,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     stated once, in the final check, and it is the rule `verify_citations`
     enforces.
     """
+    methodology.verify_canonical_adapter_pin()
     if identity.module_id not in ADAPTER_MODULES:
         raise Refusal(RefusalCode.HANDOFF_MODULE_UNSUPPORTED)
     if (source_set is None) != (identity.module_id != GATE_MODULE) or (
@@ -1153,6 +1170,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
     evidence = _evidence_section(delivered)
     sections = (
         _HOST_STEPS
+        + _persona_section()
         + _authority_sections(authority, "")
         + _upstream_section(upstream, uses, owned)
         + _citation_register(upstream, upstream_citations)
@@ -1180,6 +1198,7 @@ def build_handoff_prompt(  # noqa: PLR0913 -- one prompt, each input keyword-onl
         + f"\n--- HOST-PERFORMED STEPS {tag} ---\n"
         + _HOST_STEPS
         + f"--- END HOST-PERFORMED STEPS {tag} ---\n"
+        + _persona_section(tag)
         + _authority_sections(authority, tag)
         + _upstream_section(upstream, uses, owned, tag)
         + _citation_register(upstream, upstream_citations, tag)
