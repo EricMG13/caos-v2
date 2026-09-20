@@ -49,8 +49,6 @@ from server.provider import MAX_REQUEST_BYTES
 from server.qualification.proof import assert_orchestration_proof
 from server.store.members import Standing, grant
 
-pytest_plugins = ("test_lite_deep_research_route",)
-
 FULL_RESEARCH = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 
 
