@@ -1,6 +1,6 @@
 # The document register
 
-Emitted 17 September 2026 against `codex/execute-repair-plan`, re-emitted after Task 9.1 added the portfolio-screen set's document copies, and again after Task 9.2 added the relative-value set and its two peer releases; Task 9.3's public decision-record stand-in was admitted and then removed on the owner's instruction, the same day; re-emitted on 18 September 2026 after §98 brought the Boeing and Ford 10-K texts into their own sets, and on 19 September 2026 for the Phase 2 route-local evidence inventory.
+Emitted 17 September 2026 against `codex/execute-repair-plan`, re-emitted after Task 9.1 added the portfolio-screen set's document copies, and again after Task 9.2 added the relative-value set and its two peer releases; Task 9.3's public decision-record stand-in was admitted and then removed on the owner's instruction, the same day; re-emitted on 18 September 2026 after §98 brought the Boeing and Ford 10-K texts into their own sets, and on 19 September 2026 for the offline FULL deep-research, CCL liquidity, and CCL earnings-update sets, the owner-authorised SEC, Fitch and FINRA evidence tranche, and the complete Phase 2 route inventory.
 
 > **How this file is made.** The hand-authored half is
 > [`documents.json`](documents.json) — the demand, the public location, the status,
@@ -12,9 +12,12 @@ Emitted 17 September 2026 against `codex/execute-repair-plan`, re-emitted after 
 > register does not list, and when a row claims `in_hand` for something that is
 > not a file under `qualification/`.
 
-Nothing here is fetched by the system. Invariant 1 makes web discovery
-structurally absent, so every document arrives because the owner sourced it and
-the coordinator admitted it. A `to_source` row is a request to a person.
+Nothing here is fetched during a model run. Invariant 1 keeps runtime web
+discovery structurally absent. The owner authorised the coordinator to source
+public equivalents for qualification on 19 September 2026; each admitted
+document therefore remains fixed local evidence under its own digest. A
+`to_source` row still requires owner-provided private data or a later explicit
+source decision.
 
 ## Why a register
 
@@ -44,22 +47,31 @@ a row typed here is a row that fails. -->
 | `vmo2-q3-2025-earnings-portfolio` | VMO2 | Virgin Media O2 Q3 2025 earnings release (portfolio-screen set copy) | in_hand | CP-0, CP-L10 | LITE_PORTFOLIO_DECISION | 144538 | yes | `505bf1a0f4181c9c…` |
 | `vmo2-q4-2025-earnings-portfolio` | VMO2 | Virgin Media O2 Q4 2025 earnings release (portfolio-screen set copy) | in_hand | CP-0, CP-L10 | LITE_PORTFOLIO_DECISION | 178368 | yes | `66055bbb8d27721d…` |
 | `ccl-fy2025-10k-portfolio` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, portfolio-screen set copy) | in_hand | CP-0, CP-L10 | LITE_PORTFOLIO_DECISION | 311896 | yes | `8fa7fceda34be50b…` |
-| `ba-fy2025-10k` | BA | The Boeing Company FY2025 Form 10-K (text extract) | to_source | CP-0, CP-1, CP-1A, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, COVENANT_REFINANCING, FULL_CREDIT_ASSESSMENT | — | — | — |
-| `f-fy2025-10k` | F | Ford Motor Company FY2025 Form 10-K (text extract) | to_source | CP-0, CP-1, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, FULL_CREDIT_ASSESSMENT | — | — | — |
-| `ccl-debt-documents` | CCL | Executed debt documents: indentures, credit agreements, maturity schedules | to_source | CP-4, CP-3C, CP-4C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT, LITE_COVENANT_REFINANCING, DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
-| `ba-debt-documents` | BA | Executed debt documents: indentures, credit agreements, maturity schedules | to_source | CP-4, CP-3C, CP-4C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | — | — | — |
-| `ccl-rating-actions` | CCL | Dated agency rating actions, outlooks, watches and the applicable published criteria | to_source | CP-2H | LITE_DISTRESSED_RESTRUCTURING, LITE_FULL_CREDIT_SCREEN, FULL_CREDIT_ASSESSMENT, DISTRESSED_RESTRUCTURING | — | — | — |
-| `ccl-market-data-extract` | CCL | Dated market-data extract: instrument prices, spreads, curve points with observation timestamps | to_source | CP-3D, CP-3 | MARKET_DISLOCATION, PORTFOLIO_DECISION, RELATIVE_VALUE | — | — | — |
-| `ccl-fy2025-10k-relative-value` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, relative-value set copy) | to_source | CP-0, CP-L10, CP-1C | LITE_RELATIVE_VALUE | — | — | — |
-| `rcl-q4-2025-earnings` | RCL | Royal Caribbean Group, "Royal Caribbean Group Reports 2025 Results, Issues 2026 Guidance" (29 January 2026 earnings release, text extract) | to_source | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | — | — | — |
-| `nclh-q4-2025-earnings` | NCLH | Norwegian Cruise Line Holdings Q4 and full-year 2025 results (2 March 2026 earnings release, text extract) | to_source | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | — | — | — |
+| `ccl-fy2025-10k-liquidity` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, FULL liquidity set copy) | in_hand | CP-0, CP-1, CP-2, CP-2D | LIQUIDITY_REVIEW | 311896 | yes | `8fa7fceda34be50b…` |
+| `ccl-fy2025-10k-earnings-update` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, FULL earnings-update set copy) | in_hand | CP-0, CP-1, CP-1B, CP-2, CP-5 | EARNINGS_UPDATE | 311896 | yes | `8fa7fceda34be50b…` |
+| `ba-fy2025-10k` | BA | The Boeing Company FY2025 Form 10-K (text extract) | in_hand | CP-0, CP-1, CP-1A, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, COVENANT_REFINANCING, FULL_CREDIT_ASSESSMENT | 1177234 | **no** | `0446b367110afddc…` |
+| `f-fy2025-10k` | F | Ford Motor Company FY2025 Form 10-K (text extract) | in_hand | CP-0, CP-1, CP-1B, CP-1D, CP-2, CP-2A, CP-2D, CP-2E, CP-2G, CP-3C, CP-5 | LIQUIDITY_REVIEW, EARNINGS_UPDATE, FULL_CREDIT_ASSESSMENT | 1922743 | **no** | `97a38bc17e505cd1…` |
+| `ccl-fy2025-10k-covenant-refinancing` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, covenant-refinancing set copy) | in_hand | CP-0, CP-1, CP-2, CP-2D, CP-3C, CP-5 | COVENANT_REFINANCING | 311896 | yes | `8fa7fceda34be50b…` |
+| `ccl-2025-revolving-credit-agreement` | CCL | Carnival Corporation & plc $4.5 billion Revolving Credit Agreement dated 13 June 2025 (SEC exhibit text extract) | in_hand | CP-4, CP-3C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | 757831 | yes | `0f5a7510e20cbf71…` |
+| `ccl-2025-575-notes-2030-indenture` | CCL | Carnival Corporation & plc 5.750% Senior Unsecured Notes due 2030 indenture dated 28 February 2025 (SEC exhibit text extract) | in_hand | CP-4, CP-3C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | 336377 | yes | `2340549fd4f215df…` |
+| `ba-2003-senior-debt-indenture` | BA | The Boeing Company senior debt securities indenture dated 26 February 2003 (SEC exhibit text extract) | in_hand | CP-4, CP-3C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | 325091 | yes | `fc1258f8c7818ce3…` |
+| `ba-2024-first-supplemental-indenture` | BA | The Boeing Company first supplemental indenture dated 1 May 2024 (SEC exhibit text extract) | in_hand | CP-4, CP-3C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | 430921 | yes | `0be63506bdaaf6ce…` |
+| `ba-2025-364-day-credit-agreement` | BA | The Boeing Company 364-day credit agreement dated 8 August 2025 (SEC exhibit text extract) | in_hand | CP-4, CP-3C | COVENANT_REFINANCING, PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | 281756 | yes | `27fc62eb384923a3…` |
+| `ccl-2025-fitch-rating-action` | CCL | Fitch rating action: Carnival Corporation IDR upgraded to BBB-/Stable, 1 October 2025 | in_hand | CP-2H | LITE_DISTRESSED_RESTRUCTURING, LITE_FULL_CREDIT_SCREEN, FULL_CREDIT_ASSESSMENT, DISTRESSED_RESTRUCTURING | 134938 | yes | `33863f60a0f6c945…` |
+| `ccl-finra-trace-143658by7-2026-09-19` | CCL | FINRA TRACE observation for Carnival 5.75% notes due 2030, CUSIP 143658BY7 | in_hand | CP-3D, CP-3 | MARKET_DISLOCATION, PORTFOLIO_DECISION, RELATIVE_VALUE | 1304 | yes | `28f9289818978608…` |
+| `ccl-portfolio-mandate-exposures` | CCL | Current portfolio mandate, holdings/exposures, limits, and proposed-position inputs | to_source | CP-3, CP-6 | PORTFOLIO_DECISION, FULL_CREDIT_ASSESSMENT | — | — | — |
+| `ccl-fy2025-10k-relative-value` | CCL | Carnival Corporation & plc FY2025 Form 10-K (text extract, relative-value set copy) | in_hand | CP-0, CP-L10, CP-1C | LITE_RELATIVE_VALUE | 311896 | yes | `8fa7fceda34be50b…` |
+| `rcl-q4-2025-earnings` | RCL | Royal Caribbean Group, "Royal Caribbean Group Reports 2025 Results, Issues 2026 Guidance" (29 January 2026 earnings release, text extract) | in_hand | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | 41861 | yes | `43005bdbd3a05fd6…` |
+| `nclh-q4-2025-earnings` | NCLH | Norwegian Cruise Line Holdings Q4 and full-year 2025 results (2 March 2026 earnings release, text extract) | in_hand | CP-1C | LITE_RELATIVE_VALUE, LITE_FULL_CREDIT_SCREEN, RELATIVE_VALUE | 52268 | yes | `dd9a0eb7211c111b…` |
 | `ccl-decision-record` | CCL | A completed decision record at T0: thesis, expectations, dissent, and the decision date | to_author | CP-8 | LITE_DECISION_LEDGER, DECISION_LEDGER | — | — | — |
 | `vmo2-q3-2025-earnings-deep-research` | VMO2 | Virgin Media O2 Q3 2025 earnings release (deep-research set copy) | in_hand | CP-0, CP-DR | LITE_DEEP_RESEARCH | 144538 | yes | `505bf1a0f4181c9c…` |
 | `vmo2-q4-2025-earnings-deep-research` | VMO2 | Virgin Media O2 Q4 2025 earnings release (deep-research set copy) | in_hand | CP-0, CP-DR | LITE_DEEP_RESEARCH | 178368 | yes | `66055bbb8d27721d…` |
 | `cp-dr-research-brief` | VMO2 | A CP-DR research brief (the vmo2-fy2025-deep-research set's manifest, whose `research_brief` object it is) | in_hand | CP-DR | LITE_DEEP_RESEARCH | 4607 | yes | `0c46b5b983cb2875…` |
+| `vmo2-q3-2025-earnings-full-deep-research` | VMO2 | Virgin Media O2 Q3 2025 earnings release (FULL deep-research set copy) | in_hand | CP-0, CP-DR | DEEP_RESEARCH | 144538 | yes | `505bf1a0f4181c9c…` |
+| `vmo2-q4-2025-earnings-full-deep-research` | VMO2 | Virgin Media O2 Q4 2025 earnings release (FULL deep-research set copy) | in_hand | CP-0, CP-DR | DEEP_RESEARCH | 178368 | yes | `66055bbb8d27721d…` |
+| `cp-dr-full-research-brief` | VMO2 | The FULL deep-research set manifest carrying the reused CP-DR research brief | in_hand | CP-DR | DEEP_RESEARCH | 4592 | yes | `2c42e8297388bada…` |
 | `save-2024-chapter-11-8k` | SAVE | Spirit Airlines Chapter 11 announcement, Form 8-K filed 18 November 2024 (SEC filing text extract) | in_hand | CP-0, CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | 45612 | yes | `9d3c7ba8d1632130…` |
 | `save-2024-rsa-with-chapter-11-plan` | SAVE | Spirit Airlines Restructuring Support Agreement with attached Joint Chapter 11 Plan, dated 18 November 2024 (SEC exhibit text extract) | in_hand | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | 714222 | yes | `6b40ff57e904068b…` |
-| `distressed-disclosure-statement` | — | A distressed issuer's disclosure statement, plan or restructuring support agreement | not_available | CP-4C | DISTRESSED_RESTRUCTURING, LITE_DISTRESSED_RESTRUCTURING | — | — | — |
 | `ccl-fy2025-10k-market-dislocation` | CCL | Carnival Corporation & plc FY2025 Form 10-K (market-dislocation set copy) | in_hand | CP-0 | MARKET_DISLOCATION | 311896 | yes | `8fa7fceda34be50b…` |
 | `ccl-finra-trace-market-dislocation` | CCL | FINRA CCL 5.75% 2030 note observation at 19 September 2026 (market-dislocation set copy) | in_hand | CP-3D | MARKET_DISLOCATION | 1304 | yes | `28f9289818978608…` |
 | `ccl-fy2025-10k-lite-covenant-refinancing` | CCL | Carnival Corporation & plc FY2025 Form 10-K (LITE covenant-refinancing set copy) | in_hand | CP-0, CP-L10, CP-3C, CP-5 | LITE_COVENANT_REFINANCING | 311896 | yes | `8fa7fceda34be50b…` |
@@ -82,25 +94,29 @@ a row typed here is a row that fails. -->
 | `answer-key-3issuer` | CCL, BA, F | ANSWER_KEY_3ISSUER.md — human-authored core facts, derived values and 24 traps per issuer | **key source, never admitted** | — | — | — | — | — |
 <!-- /emitted -->
 
-Forty-one documents: thirty `in_hand`, nine `to_source`, one `to_author`,
-one `not_available`; plus one key source. Twenty-seven of the thirty-nine in hand are
-set copies of the CCL 10-K, debt instruments, peer releases and VMO2 releases --
-the route-local Phase 2 copies plus the earlier portfolio and deep-research sets --
-which the on-disk loader requires because it refuses a declared path resolving outside its set root. One more, `cp-dr-research-brief`, is the
-deep-research set's manifest: the brief is its `research_brief` object, so
-the measured bytes are the whole manifest's. The two cruise peer releases
+Fifty documents: forty-eight `in_hand`, one `to_source`, and one
+`to_author`; plus one key source. Thirty of the forty-eight in hand are
+byte-identical route-local copies of already admitted evidence: eleven from the
+earlier sets and nineteen added for the Phase 2 route inventory. The on-disk
+loader requires those copies because it refuses a declared path resolving
+outside its set root. Two more, `cp-dr-research-brief` and
+`cp-dr-full-research-brief`, are the
+deep-research set manifests: each brief is its manifest's `research_brief`
+object, so the measured bytes are the whole manifest. The two cruise peer releases
 (`rcl-q4-2025-earnings`, `nclh-q4-2025-earnings`) replace the former
-`cruise-peer-pack` row. The `bytes` and `sha256` columns are blank for a
-document not in the tree: only a file under `qualification/` is measured, so
-the table is the same on every machine.
+`cruise-peer-pack` row. A blank measurement means the document is not in the
+tree: only a file under `qualification/` is
+measured, so the table is the same on every machine. `ba-fy2025-10k` and
+`f-fy2025-10k` are in the tree since §98 (`qualification/ba-fy2025/`,
+`qualification/f-fy2025/`), and their `fits ceiling` is **no**: neither reaches
+a prompt whole, which is what page-level selection is for (**Size** below).
 
-## Sourcing list for the owner
+## Sourcing status
 
-Each row below is a document the programme needs and does not have in the tree.
-No URL or accession number is asserted anywhere here: where one was not
-verified, the venue and the identifier that *is* known are given instead, and
-the register's `source` stays `null`. Inventing an accession would be worse
-than leaving it blank, because a wrong one reads as provenance.
+The coordinator records exact official URLs only after verifying them. The
+19 September evidence tranche closed the public-source rows for executed debt
+documents, a dated rating action, a limited TRACE observation, and a distressed
+issuer pack. What remains needs private owner data or a real prior decision.
 
 1. ~~**`ba-fy2025-10k`, `f-fy2025-10k` — copy in from the owner's document register.**~~
    Done on 18 September 2026 (§98): copied byte-for-byte into
@@ -119,32 +135,23 @@ than leaving it blank, because a wrong one reads as provenance.
    the tree until per-node evidence selection (§88.2, with the vendor) can run
    them: before that a copy frees no work, and at 1.1 and 1.8 MB each would
    need an exemption from the large-file hook.
-2. **`ccl-debt-documents`, `ba-debt-documents` — executed debt documents.**
-   Indentures, credit agreements and their maturity schedules, filed as
-   exhibits on EDGAR. `docs/COMPLETION_PLAN.md` records the issuers' CIKs as
-   **815097** (Carnival) and **12927** (Boeing); the exhibit and accession
-   numbers were not established here, so the owner locates the exhibits by CIK
-   and states the accession when admitting. CP-4's runbook step 1 is a Document
-   Gate producing `T4F.1 Controlling Documents`, so a 10-K debt footnote does
-   not substitute: CP-4 construes clause meaning and needs the instrument.
-3. **`ccl-rating-actions` — dated agency rating actions and criteria.**
-   CP-2H's Phase 1 wants dated issuer and instrument ratings, outlook and
-   watch, recovery ratings where applicable, agency reports, issuer disclosures
-   and the current criteria, with agency-issued evidence separated from
-   management characterisation. Agency releases and criteria are
-   entitlement-gated; an issuer's own disclosure of its ratings is the freely
-   available substitute, and CP-2H is told to label it as the weaker evidence.
-   This is a soft gate — without it CP-2H may do methodology-only work with
-   limitations, so the module can be proven `Restricted` now and `Passed` only
-   once this arrives.
-4. **`ccl-market-data-extract` — a dated market-data extract.** Instrument
-   identifiers, currency, coupon, maturity, seniority and pricing convention,
-   and per observation the source, entitlement, bid/mid/ask or evaluated
-   status, observation time and staleness. CP-3D states that required market
-   observations cannot be replaced with model memory. This is the one demand no
-   filing can satisfy: it is priced and timestamped rather than disclosed. The
-   owner supplies it as a document; it is admitted under its own digest like any
-   other.
+2. ~~**Executed CCL and BA debt documents.**~~ Sourced from official SEC
+   exhibits on 19 September 2026. CCL now has its $4.5 billion revolver and
+   5.75% 2030 notes indenture; BA has its 2003 base indenture, 2024 supplement,
+   and 2025 364-day credit agreement. These close the public document-gate
+   request; they do not assert that each issuer's entire capital structure is
+   represented. The CCL revolver and Spirit RSA/Plan exceed 500 KiB, so the
+   large-file hook names those two original paths and each of the four
+   byte-identical Phase 2 route-local copies exactly; no directory-wide
+   evidence exclusion was added.
+3. ~~**A dated CCL rating action.**~~ The official Fitch 1 October 2025 rating
+   disclosure is in hand. Current criteria and a complete cross-agency history
+   are not, so CP-2H must retain those limitations.
+4. ~~**A dated market observation.**~~ The official FINRA page for CUSIP
+   143658BY7 was transcribed at `2026-09-19T16:51:57Z`. It supplies a dated last
+   trade, not bid/mid/ask, an evaluated price, spreads, or a full curve. It can
+   support a deliberately restricted market analysis, not a complete CP-3D
+   market pack.
 5. ~~**`cruise-peer-pack` — the peers' own FY2025 filings.**~~ Sourced on 18
    September 2026 as `rcl-q4-2025-earnings` and `nclh-q4-2025-earnings` (Task
    9.2), by the coordinator under the owner's authorization "web search for
@@ -163,8 +170,8 @@ than leaving it blank, because a wrong one reads as provenance.
    day on the owner's instruction not to include the third-party excerpt;
    `LITE_DECISION_LEDGER` stays enabled on its contract and route tests, and
    has no qualification set until a memo exists.
-7. **`cp-dr-research-brief` — an implementer-authored research brief (in
-   hand, unconfirmed).** Materialized from
+7. **`cp-dr-research-brief` — implementer-authored research briefs (in
+   hand).** Materialized from
    `vendor/deploy-v/skills/cp-os-credit-os/references/CP_DR_RESEARCH_BRIEF_V1.md`
    by the Task 9.4 implementer for the VMO2 releases, in place of an
    owner-authored one: the owner asked for equivalent versions to test with and
@@ -173,17 +180,43 @@ than leaving it blank, because a wrong one reads as provenance.
    now requires (invariant 1: CP-DR's capability gate blocks `web_only` and
    `hybrid` when web research is unavailable, and here that is structural). Its
    three questions -- two the Q4 release answers, one neither release can --
-   and the figures their keys name await the owner's confirmation
-   (`qualification/vmo2-fy2025-deep-research/RESULT.md`).
-8. **`distressed-disclosure-statement` — not available.** CP-4C's Phase 1
-   distress gate needs evidence of payment or default risk, a failed
-   refinancing, a distressed exchange or LME escalation, a covenant or
-   enforcement event, adviser engagement, a filing, or another named distress
-   trigger, and returns `Not Applicable` rather than a speculative
-   restructuring when none is met. No issuer in the document register is distressed, so
-   over this document register only CP-4C's `Not Applicable` path can be proven. Proving
-   the substantive path means choosing a different issuer — a document register decision
-   for the owner, not a fetch.
+   were owner-confirmed for the historical LITE run. The FULL set reuses the
+   brief but remains unconfirmed for a FULL run; no new verdict may be signed
+   over it without that confirmation.
+8. ~~**A distressed issuer pack.**~~ The official Spirit Airlines 18 November
+   2024 Chapter 11 8-K and the RSA with its attached Joint Chapter 11 Plan are
+   in hand. The separate backstop agreement was not admitted because these two
+   documents already establish the distress trigger and plan evidence needed
+   for the smallest honest CP-4C qualification pack.
+
+## Route qualification inventory
+
+This is an input inventory, not a verdict table. `offline` means a loadable,
+digested set exists but has no current performed evidence or signed verdict;
+`blocked set` means the case deliberately measures CP-0 refusing unsupported
+work. A route with no set remains enabled and deterministically tested, but is
+not qualified.
+
+| Profile | Pathway | Set or explicit reason | Phase 2 state |
+|---|---|---|---|
+| `FULL_CREDIT_32` | `COVENANT_REFINANCING` | `ccl-fy2025-covenant-refinancing` | offline |
+| `FULL_CREDIT_32` | `DECISION_LEDGER` | No genuine dated T0 decision record; retrospective reconstruction is prohibited | no set / owner input |
+| `FULL_CREDIT_32` | `DEEP_RESEARCH` | `vmo2-fy2025-full-deep-research`; FULL brief confirmation outstanding | offline / owner confirmation |
+| `FULL_CREDIT_32` | `DISTRESSED_RESTRUCTURING` | `save-2024-distressed-restructuring` | blocked set |
+| `FULL_CREDIT_32` | `EARNINGS_UPDATE` | `ccl-fy2025-earnings-update` | offline |
+| `FULL_CREDIT_32` | `FULL_CREDIT_ASSESSMENT` | Current mandate, holdings/exposures, limits and proposed-position inputs are absent | no set / owner input |
+| `FULL_CREDIT_32` | `LIQUIDITY_REVIEW` | `ccl-fy2025-liquidity` | offline |
+| `FULL_CREDIT_32` | `MARKET_DISLOCATION` | `ccl-fy2025-market-dislocation` | offline, market-restricted |
+| `FULL_CREDIT_32` | `PORTFOLIO_DECISION` | Current mandate, holdings/exposures, limits and proposed-position inputs are absent | no set / owner input |
+| `FULL_CREDIT_32` | `RELATIVE_VALUE` | `ccl-fy2025-full-relative-value` | offline, market-restricted |
+| `LITE_CREDIT_22` | `LITE_COVENANT_REFINANCING` | `ccl-fy2025-lite-covenant-refinancing` | offline |
+| `LITE_CREDIT_22` | `LITE_DECISION_LEDGER` | No genuine dated T0 decision record; retrospective reconstruction is prohibited | no set / owner input |
+| `LITE_CREDIT_22` | `LITE_DEEP_RESEARCH` | `vmo2-fy2025-deep-research` | retained historical run; current release status is store-derived |
+| `LITE_CREDIT_22` | `LITE_DISTRESSED_RESTRUCTURING` | `save-2024-lite-distressed-restructuring` | blocked set |
+| `LITE_CREDIT_22` | `LITE_EARNINGS_UPDATE` | `vmo2-fy2025`, `ccl-fy2025`, `ba-fy2025`, `f-fy2025` | current VMO2 set offline; historical runs retained |
+| `LITE_CREDIT_22` | `LITE_FULL_CREDIT_SCREEN` | `ccl-fy2025-lite-full-credit-screen` | offline, restricted |
+| `LITE_CREDIT_22` | `LITE_PORTFOLIO_DECISION` | `ccl-fy2025-portfolio`, `vmo2-fy2025-portfolio` | blocked and historical-run cases retained |
+| `LITE_CREDIT_22` | `LITE_RELATIVE_VALUE` | `ccl-fy2025-relative-value` | historical runs retained; no signed verdict |
 
 ## Size
 

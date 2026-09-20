@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17",
+  "as_of": "2026-09-19",
   "note": "The hand-authored half of the document register. scripts/document_register.py reads this file plus every qualification/*/qualification.json, computes each document's digest from the bytes on disk, and emits qualification/DOCUMENTS.md's table. A module demand recorded here was read from that module's vendor/deploy-v/skills/cp-*/SKILL.md; where the SKILL.md states no document gate, `demand_verified` is false and the note says what the demand was inferred from. No source is a guess: an unknown location is null with what is known in the note.",
   "documents": [
     {
@@ -126,6 +126,32 @@
       "note": "The same bytes as ccl-fy2025-10k (digest unchanged), copied because a set's documents must live inside its own directory: `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root, so the LITE_PORTFOLIO_DECISION sets cannot name the earnings sets' copies. Git stores one blob for identical content, so the copy costs no objects. Demand is the two-node route's own: CP-0's readiness verdict and CP-L10's screen. The set's citation key names its consolidated income statement (debt extinguishment and modification costs)."
     },
     {
+      "id": "ccl-fy2025-10k-liquidity",
+      "issuer": "CCL",
+      "document": "Carnival Corporation & plc FY2025 Form 10-K (text extract, FULL liquidity set copy)",
+      "modules": ["CP-0", "CP-1", "CP-2", "CP-2D"],
+      "pathways": ["LIQUIDITY_REVIEW"],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-liquidity/documents/CCL_FY2025_10K.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "The same bytes as ccl-fy2025-10k (digest unchanged), copied because `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. This row prepares an offline FULL liquidity set: CP-2D's four citation keys name cash, customer deposits, operating cash flow, and capex; it records no provider run or qualification."
+    },
+    {
+      "id": "ccl-fy2025-10k-earnings-update",
+      "issuer": "CCL",
+      "document": "Carnival Corporation & plc FY2025 Form 10-K (text extract, FULL earnings-update set copy)",
+      "modules": ["CP-0", "CP-1", "CP-1B", "CP-2", "CP-5"],
+      "pathways": ["EARNINGS_UPDATE"],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-earnings-update/documents/CCL_FY2025_10K.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "The same bytes as ccl-fy2025-10k (digest unchanged), copied because `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. This row prepares an offline FULL earnings-update set: CP-1B's canonical comparator keys bind five FY2025/FY2024 deltas; it records no provider run or qualification."
+    },
+    {
       "id": "ba-fy2025-10k",
       "issuer": "BA",
       "document": "The Boeing Company FY2025 Form 10-K (text extract)",
@@ -150,11 +176,11 @@
         "FULL_CREDIT_ASSESSMENT"
       ],
       "source": null,
-      "status": "to_source",
-      "local_path": null,
-      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/BA_FY2025_10K.txt",
+      "status": "in_hand",
+      "local_path": "qualification/ba-fy2025/documents/BA_FY2025_10K.txt",
+      "external_path": null,
       "demand_verified": true,
-      "note": "Held read-only outside the tree in the owner's three-issuer document register; nothing in this repository copies or admits it. 1,177,234 bytes — over MAX_REQUEST_BYTES (1,048,576), so it cannot reach a prompt whole until per-node evidence selection exists. Raw provenance beside it: raw/BA_FY2025_10K.html and raw/BA_companyfacts.json (XBRL company facts). An answer key for BA already exists (see key_sources)."
+      "note": "Admitted into the ba-fy2025 set (§98), copied byte-for-byte from the owner's three-issuer corpus (/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/BA_FY2025_10K.txt, digest verified on copy); the owner's instruction was no EDGAR, only what is in hand, so source is null. 1,177,234 bytes, 108 fixed-pitch pages, 905,758 bytes of block text -- more than a request can carry whole, so the gate is shown its page map (16 leading lines of each page) and each consumer the pages CP-0 names in T8. Raw provenance beside it in the owner's folder: raw/BA_FY2025_10K.html and raw/BA_companyfacts.json. The set's keys come from the owner's answer key (see key_sources)."
     },
     {
       "id": "f-fy2025-10k",
@@ -179,79 +205,128 @@
         "FULL_CREDIT_ASSESSMENT"
       ],
       "source": null,
-      "status": "to_source",
-      "local_path": null,
-      "external_path": "/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/F_FY2025_10K.txt",
-      "demand_verified": true,
-      "note": "Held read-only outside the tree. 1,922,743 bytes — nearly twice MAX_REQUEST_BYTES; the largest document in hand and the one that most needs per-node selection. Raw provenance: raw/F_FY2025_10K.html and raw/F_companyfacts.json. A finance-captive issuer, so CP-1's perimeter work is harder here than for CCL or BA."
-    },
-    {
-      "id": "ccl-debt-documents",
-      "issuer": "CCL",
-      "document": "Executed debt documents: indentures, credit agreements, maturity schedules",
-      "modules": ["CP-4", "CP-3C", "CP-4C"],
-      "pathways": [
-        "COVENANT_REFINANCING",
-        "PORTFOLIO_DECISION",
-        "FULL_CREDIT_ASSESSMENT",
-        "LITE_COVENANT_REFINANCING",
-        "DISTRESSED_RESTRUCTURING",
-        "LITE_DISTRESSED_RESTRUCTURING"
-      ],
-      "source": null,
-      "status": "to_source",
-      "local_path": null,
+      "status": "in_hand",
+      "local_path": "qualification/f-fy2025/documents/F_FY2025_10K.txt",
       "external_path": null,
       "demand_verified": true,
-      "note": "CP-4's runbook step 1 is a Document Gate whose output is `T4F.1 Controlling Documents`, so CP-4 cannot be proven on a 10-K's debt footnote: it construes provision-level clause meaning and needs the executed instruments. Public as EDGAR exhibits; CLAUDE.md-adjacent docs/COMPLETION_PLAN.md records CCL's CIK as 815097. No accession number or URL is asserted here because none was verified. CP-3C's own source gate (the maturity/debt schedule) is already met by ccl-fy2025-10k; these documents deepen CP-3C rather than unblock it."
+      "note": "Admitted into the f-fy2025 set (§98), copied byte-for-byte from the owner's three-issuer corpus (/Users/ericguei/Documents/Co-Pilot Agents/assessment_3issuer_20260719/corpus/F_FY2025_10K.txt, digest verified on copy); no EDGAR, so source is null. 1,922,743 bytes, 146 fixed-pitch pages, 1,435,471 bytes of block text -- the largest document in hand; the gate is shown its page map (10 leading lines of each page) and each consumer the pages CP-0 names in T8. Raw provenance in the owner's folder: raw/F_FY2025_10K.html and raw/F_companyfacts.json. A finance-captive issuer, so CP-1's perimeter work is harder here than for CCL or BA."
     },
     {
-      "id": "ba-debt-documents",
+      "id": "ccl-fy2025-10k-covenant-refinancing",
+      "issuer": "CCL",
+      "document": "Carnival Corporation & plc FY2025 Form 10-K (text extract, covenant-refinancing set copy)",
+      "modules": ["CP-0", "CP-1", "CP-2", "CP-2D", "CP-3C", "CP-5"],
+      "pathways": ["COVENANT_REFINANCING"],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-covenant-refinancing/documents/CCL_FY2025_10K.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Byte-identical to ccl-fy2025-10k, copied because a qualification set cannot name a path outside its root. It supplies the maturity schedule and financial statements; the executed instruments below supply CP-4's controlling-document gate."
+    },
+    {
+      "id": "ccl-2025-revolving-credit-agreement",
+      "issuer": "CCL",
+      "document": "Carnival Corporation & plc $4.5 billion Revolving Credit Agreement dated 13 June 2025 (SEC exhibit text extract)",
+      "modules": ["CP-4", "CP-3C"],
+      "pathways": ["COVENANT_REFINANCING", "PORTFOLIO_DECISION", "FULL_CREDIT_ASSESSMENT"],
+      "source": "https://www.sec.gov/Archives/edgar/data/815097/000081509725000084/exhibit101q32025.htm",
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-covenant-refinancing/documents/CCL_2025_Revolving_Credit_Agreement.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Official EDGAR exhibit converted from HTML to plain text on 19 September 2026. It supplies CP-4's controlling-document gate and the facility amount, maturity and financial-covenant clauses; no clause conclusion is inferred by the register."
+    },
+    {
+      "id": "ccl-2025-575-notes-2030-indenture",
+      "issuer": "CCL",
+      "document": "Carnival Corporation & plc 5.750% Senior Unsecured Notes due 2030 indenture dated 28 February 2025 (SEC exhibit text extract)",
+      "modules": ["CP-4", "CP-3C"],
+      "pathways": ["COVENANT_REFINANCING", "PORTFOLIO_DECISION", "FULL_CREDIT_ASSESSMENT"],
+      "source": "https://www.sec.gov/Archives/edgar/data/815097/000081509725000025/exhibit1041q2025.htm",
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-covenant-refinancing/documents/CCL_2025_575_Notes_2030_Indenture.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Official EDGAR exhibit converted from HTML to plain text on 19 September 2026. It supplies CP-4's controlling-document gate for the same instrument observed by FINRA; no clause conclusion is inferred by the register."
+    },
+    {
+      "id": "ba-2003-senior-debt-indenture",
       "issuer": "BA",
-      "document": "Executed debt documents: indentures, credit agreements, maturity schedules",
-      "modules": ["CP-4", "CP-3C", "CP-4C"],
-      "pathways": [
-        "COVENANT_REFINANCING",
-        "PORTFOLIO_DECISION",
-        "FULL_CREDIT_ASSESSMENT"
-      ],
-      "source": null,
-      "status": "to_source",
-      "local_path": null,
+      "document": "The Boeing Company senior debt securities indenture dated 26 February 2003 (SEC exhibit text extract)",
+      "modules": ["CP-4", "CP-3C"],
+      "pathways": ["COVENANT_REFINANCING", "PORTFOLIO_DECISION", "FULL_CREDIT_ASSESSMENT"],
+      "source": "https://www.sec.gov/Archives/edgar/data/12927/000119312509048656/dex41.htm",
+      "status": "in_hand",
+      "local_path": "qualification/ba-fy2025-covenant-refinancing/documents/BA_2003_Senior_Debt_Indenture.txt",
       "external_path": null,
       "demand_verified": true,
-      "note": "As ccl-debt-documents. docs/COMPLETION_PLAN.md records BA's CIK as 12927. No accession number or URL asserted."
+      "note": "Official EDGAR exhibit converted from HTML to plain text on 19 September 2026. It is the base indenture; the 2024 supplement below changes the governing terms for its issuance."
     },
     {
-      "id": "ccl-rating-actions",
+      "id": "ba-2024-first-supplemental-indenture",
+      "issuer": "BA",
+      "document": "The Boeing Company first supplemental indenture dated 1 May 2024 (SEC exhibit text extract)",
+      "modules": ["CP-4", "CP-3C"],
+      "pathways": ["COVENANT_REFINANCING", "PORTFOLIO_DECISION", "FULL_CREDIT_ASSESSMENT"],
+      "source": "https://www.sec.gov/Archives/edgar/data/12927/000119312524130860/d836110dex41.htm",
+      "status": "in_hand",
+      "local_path": "qualification/ba-fy2025-covenant-refinancing/documents/BA_2024_First_Supplemental_Indenture.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Official EDGAR exhibit converted from HTML to plain text on 19 September 2026. It must be read with the 2003 base indenture."
+    },
+    {
+      "id": "ba-2025-364-day-credit-agreement",
+      "issuer": "BA",
+      "document": "The Boeing Company 364-day credit agreement dated 8 August 2025 (SEC exhibit text extract)",
+      "modules": ["CP-4", "CP-3C"],
+      "pathways": ["COVENANT_REFINANCING", "PORTFOLIO_DECISION", "FULL_CREDIT_ASSESSMENT"],
+      "source": "https://www.sec.gov/Archives/edgar/data/12927/000001292725000064/a202508aug258kex101.htm",
+      "status": "in_hand",
+      "local_path": "qualification/ba-fy2025-covenant-refinancing/documents/BA_2025_364_Day_Credit_Agreement.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Official EDGAR exhibit converted from HTML to plain text on 19 September 2026. This sources the previous aggregate BA debt-document demand without creating a BA qualification claim."
+    },
+    {
+      "id": "ccl-2025-fitch-rating-action",
       "issuer": "CCL",
-      "document": "Dated agency rating actions, outlooks, watches and the applicable published criteria",
+      "document": "Fitch rating action: Carnival Corporation IDR upgraded to BBB-/Stable, 1 October 2025",
       "modules": ["CP-2H"],
-      "pathways": [
-        "LITE_DISTRESSED_RESTRUCTURING",
-        "LITE_FULL_CREDIT_SCREEN",
-        "FULL_CREDIT_ASSESSMENT",
-        "DISTRESSED_RESTRUCTURING"
-      ],
-      "source": null,
-      "status": "to_source",
-      "local_path": null,
+      "pathways": ["LITE_DISTRESSED_RESTRUCTURING", "LITE_FULL_CREDIT_SCREEN", "FULL_CREDIT_ASSESSMENT", "DISTRESSED_RESTRUCTURING"],
+      "source": "https://assets.fitchratings.com/downloadFile?reportType=doddFrank&sfReport=false&slug=corporate-finance%2Ffitch-upgrades-carnival-corporation-idr-to-bbb-outlook-stable-01-10-2025",
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-covenant-refinancing/documents/CCL_2025_Fitch_Rating_Action.pdf",
       "external_path": null,
       "demand_verified": true,
-      "note": "CP-2H Phase 1 (rating evidence gate) demands `dated issuer and instrument ratings, outlook/watch, recovery ratings where applicable, agency reports, issuer disclosures and current criteria`, and separates agency-issued evidence from management characterisation. It is a soft gate: the same phase says missing current rating evidence permits methodology-only work with limitations, and fabricated ratings are prohibited. So CP-2H can be proven Restricted without this and Passed only with it. Agency releases and criteria are entitlement-gated; an issuer's own disclosure of its ratings is the freely available substitute and is the weaker evidence CP-2H is told to label as such. No URL asserted."
+      "note": "Official Fitch Dodd-Frank disclosure downloaded on 19 September 2026. It supplies dated agency-issued issuer and instrument actions and outlook evidence. It does not by itself supply current criteria or every agency's action, so CP-2H must retain those limitations."
     },
     {
-      "id": "ccl-market-data-extract",
+      "id": "ccl-finra-trace-143658by7-2026-09-19",
       "issuer": "CCL",
-      "document": "Dated market-data extract: instrument prices, spreads, curve points with observation timestamps",
+      "document": "FINRA TRACE observation for Carnival 5.75% notes due 2030, CUSIP 143658BY7",
       "modules": ["CP-3D", "CP-3"],
       "pathways": ["MARKET_DISLOCATION", "PORTFOLIO_DECISION", "RELATIVE_VALUE"],
+      "source": "https://www.finra.org/finra-data/fixed-income/bond?cusip=143658BY7&bondType=CA",
+      "status": "in_hand",
+      "local_path": "qualification/ccl-fy2025-covenant-refinancing/documents/CCL_FINRA_TRACE_143658BY7_2026-09-19.txt",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "Coordinator-authored transcription of the official public FINRA page observed at 2026-09-19T16:51:57Z. It records the displayed last trade price, yield and date plus identifiers and ratings. FINRA did not label that value bid, mid, ask or evaluated, and the extract says so; it does not fabricate spreads, curve points, seniority or chart observations. This improves CP-3D's evidence but does not make a complete market pack."
+    },
+    {
+      "id": "ccl-portfolio-mandate-exposures",
+      "issuer": "CCL",
+      "document": "Current portfolio mandate, holdings/exposures, limits, and proposed-position inputs",
+      "modules": ["CP-3", "CP-6"],
+      "pathways": ["PORTFOLIO_DECISION", "FULL_CREDIT_ASSESSMENT"],
       "source": null,
       "status": "to_source",
       "local_path": null,
       "external_path": null,
       "demand_verified": true,
-      "note": "CP-3D Phase 1 (market evidence gate) demands instrument identifiers, currency, coupon, maturity, seniority, pricing convention, and per observation the source, entitlement, bid/mid/ask or evaluated status, observation time and staleness — and states that `required market observations cannot be replaced with model memory`. The owner supplies this as a document under its own digest; it is the one demand here that no filing can satisfy, because it is priced and timestamped rather than disclosed."
+      "note": "CP-3B requires current holdings/exposure, concentration and mandate-limit inputs for portfolio fit and sizing; CP-6's absorbed CP-6A method requires the same basis for mandate compliance, the binding constraint and a defensible sizing posture. Their runbooks permit Restricted work when these inputs are absent, but prohibit invented limits, exposures or position sizes. The owner must supply a dated portfolio-specific extract; the bundled REF_CP-6A_Portfolio_Debate_Inputs.xlsx is a methodology reference, not live portfolio evidence."
     },
     {
       "id": "ccl-fy2025-10k-relative-value",
@@ -266,11 +341,11 @@
         "LITE_RELATIVE_VALUE"
       ],
       "source": null,
-      "status": "to_source",
+      "status": "in_hand",
       "local_path": "qualification/ccl-fy2025-relative-value/documents/CCL_FY2025_10K.txt",
       "external_path": null,
       "demand_verified": true,
-      "note": "The same bytes as ccl-fy2025-10k (digest unchanged), copied because a set's documents must live inside its own directory: `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. It is the borrower side of CP-1C's benchmark on LITE_RELATIVE_VALUE, beside the two peer releases. Not committed in this slice -- the raw text pushed this PR over the 800-line cap -- so status stays to_source until the owner adds it at qualification/ccl-fy2025-relative-value/documents/CCL_FY2025_10K.txt."
+      "note": "The same bytes as ccl-fy2025-10k (digest unchanged), copied because a set's documents must live inside its own directory: `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. It is the borrower side of CP-1C's benchmark on LITE_RELATIVE_VALUE, beside the two peer releases."
     },
     {
       "id": "rcl-q4-2025-earnings",
@@ -285,11 +360,11 @@
         "RELATIVE_VALUE"
       ],
       "source": "https://www.prnewswire.com/news-releases/royal-caribbean-group-reports-2025-results-issues-2026-guidance-302673898.html (also filed as the Item 2.02 8-K, accession 0000884887-26-000003)",
-      "status": "to_source",
+      "status": "in_hand",
       "local_path": "qualification/ccl-fy2025-relative-value/documents/RCL_Q4_2025_Earnings_Release.txt",
       "external_path": null,
       "demand_verified": false,
-      "note": "One half of what was the `cruise-peer-pack` row, split so each peer's release carries its own digest. CP-1C's steps 0 and 1 are a Peer Discovery Gate and a Peer Data Gate, and its SKILL.md names no document form, so the demand is still inferred from the gates rather than quoted. Sourced by the coordinator on 18 September 2026 under the owner's authorization \"web search for equivalent versions to test\"; the peer choice -- the other two listed major cruise operators -- is the coordinator's recommendation applied under that instruction, not a peer set CP-1C derived. The file is an HTML-to-text conversion by the coordinator, so the file is the text; nothing in it is the issuer's typography. Not committed in this slice -- the raw text pushed this PR over the 800-line cap -- so status stays to_source until the owner adds it at qualification/ccl-fy2025-relative-value/documents/RCL_Q4_2025_Earnings_Release.txt."
+      "note": "One half of what was the `cruise-peer-pack` row, split so each peer's release carries its own digest. CP-1C's steps 0 and 1 are a Peer Discovery Gate and a Peer Data Gate, and its SKILL.md names no document form, so the demand is still inferred from the gates rather than quoted. Sourced by the coordinator on 18 September 2026 under the owner's authorization \"web search for equivalent versions to test\"; the peer choice -- the other two listed major cruise operators -- is the coordinator's recommendation applied under that instruction, not a peer set CP-1C derived. The file is an HTML-to-text conversion by the coordinator, so the file is the text; nothing in it is the issuer's typography."
     },
     {
       "id": "nclh-q4-2025-earnings",
@@ -304,11 +379,11 @@
         "RELATIVE_VALUE"
       ],
       "source": "https://www.nclhltd.com/investors/news-events/press-releases/detail/768/norwegian-cruise-line-holdings-reports-fourth-quarter-and (Item 2.02 8-K, accession 0001171843-26-001220)",
-      "status": "to_source",
+      "status": "in_hand",
       "local_path": "qualification/ccl-fy2025-relative-value/documents/NCLH_Q4_2025_Earnings_Release.txt",
       "external_path": null,
       "demand_verified": false,
-      "note": "The other half of what was the `cruise-peer-pack` row. The demand is inferred from CP-1C's gates, as for the RCL release. Sourced by the coordinator on 18 September 2026 under the owner's authorization \"web search for equivalent versions to test\"; the peer choice -- the other two listed major cruise operators -- is the coordinator's recommendation applied under that instruction, not a peer set CP-1C derived. The file is an HTML-to-text conversion by the coordinator, so the file is the text; nothing in it is the issuer's typography. Not committed in this slice -- the raw text pushed this PR over the 800-line cap -- so status stays to_source until the owner adds it at qualification/ccl-fy2025-relative-value/documents/NCLH_Q4_2025_Earnings_Release.txt."
+      "note": "The other half of what was the `cruise-peer-pack` row. The demand is inferred from CP-1C's gates, as for the RCL release. Sourced by the coordinator on 18 September 2026 under the owner's authorization \"web search for equivalent versions to test\"; the peer choice -- the other two listed major cruise operators -- is the coordinator's recommendation applied under that instruction, not a peer set CP-1C derived. The file is an HTML-to-text conversion by the coordinator, so the file is the text; nothing in it is the issuer's typography."
     },
     {
       "id": "ccl-decision-record",
@@ -316,12 +391,12 @@
       "document": "A completed decision record at T0: thesis, expectations, dissent, and the decision date",
       "modules": ["CP-8"],
       "pathways": ["LITE_DECISION_LEDGER", "DECISION_LEDGER"],
-      "source": "owner-authored",
+      "source": null,
       "status": "to_author",
       "local_path": null,
       "external_path": null,
       "demand_verified": true,
-      "note": "CP-8's status ladder makes this a hard gate: `Blocked: No decision record available to attribute. STOP — do not reconstruct a thesis after the fact.` So CP-8 cannot be proven against a filing alone, and the record must be dated before the outcome period it is measured over. The outcome side is already in hand for VMO2 (Q3 then Q4 2025); for CCL it would need a second period. Owner-authored, because nobody else holds the decision."
+      "note": "CP-8's status ladder makes this a hard gate: `Blocked: No decision record available to attribute. STOP — do not reconstruct a thesis after the fact.` So CP-8 cannot be proven against a filing alone, and the record must be dated before the outcome period it is measured over. A public rating-action news report was admitted as a stand-in on 18 September 2026 and removed the same day on the owner's instruction not to include the third-party excerpt; the qualification set built on it was removed with it. An owner-authored memo dated before the outcome window is what CP-8 needs."
     },
     {
       "id": "vmo2-q3-2025-earnings-deep-research",
@@ -360,7 +435,46 @@
       "local_path": "qualification/vmo2-fy2025-deep-research/qualification.json",
       "external_path": null,
       "demand_verified": true,
-      "note": "Authored by the Task 9.4 implementer, not sourced: the owner asked for equivalent versions to test with and the coordinator recommended authoring, because a brief is a run control the host pins, not evidence. It is the `research_brief` object of the set's manifest, so the measured bytes and digest are the whole manifest's; the brief itself is pinned as canonical JSON (`run_inputs.research_text`) and covered by the set digest. `CP_DR_RESEARCH_BRIEF_V1`, `mode: linked`, `source_mode: supplied_only` (invariant 1: the pin refuses any other mode), three locked questions over the two VMO2 releases -- the Q4 goodwill impairment's stated cause and the 31 December 2025 undrawn commitments, which the Q4 release answers, and Moody's current rating, which neither release carries and which is keyed UNRESOLVED. The host writes run_id, cp0_sha256 and authority_sha256; the manifest carries none. The owner has not confirmed the questions or the figures their keys name (the set's RESULT.md). DEEP_RESEARCH (FULL) is not enabled and has no brief of its own."
+      "note": "Authored by the Task 9.4 implementer, not sourced: the owner asked for equivalent versions to test with and the coordinator recommended authoring, because a brief is a run control the host pins, not evidence. It is the `research_brief` object of the set's manifest, so the measured bytes and digest are the whole manifest's; the brief itself is pinned as canonical JSON (`run_inputs.research_text`) and covered by the set digest. `CP_DR_RESEARCH_BRIEF_V1`, `mode: linked`, `source_mode: supplied_only` (invariant 1: the pin refuses any other mode), three locked questions over the two VMO2 releases -- the Q4 goodwill impairment's stated cause and the 31 December 2025 undrawn commitments, which the Q4 release answers, and Moody's current rating, which neither release carries and which is keyed UNRESOLVED. The host writes run_id, cp0_sha256 and authority_sha256; the manifest carries none. The owner confirmed these keys for the completed LITE run only; the separate FULL copy is registered as `cp-dr-full-research-brief` and remains unconfirmed for a FULL run."
+    },
+    {
+      "id": "vmo2-q3-2025-earnings-full-deep-research",
+      "issuer": "VMO2",
+      "document": "Virgin Media O2 Q3 2025 earnings release (FULL deep-research set copy)",
+      "modules": ["CP-0", "CP-DR"],
+      "pathways": ["DEEP_RESEARCH"],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/vmo2-fy2025-full-deep-research/documents/Virgin-Media-O2-Q3-2025-Earnings-Release.pdf",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "The same bytes as vmo2-q3-2025-earnings and the qualified LITE deep-research copy (digest unchanged), copied because `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. The earlier period supplies contrary evidence for the year-end undrawn-commitments question. This row prepares an offline FULL set; it records no provider run or qualification."
+    },
+    {
+      "id": "vmo2-q4-2025-earnings-full-deep-research",
+      "issuer": "VMO2",
+      "document": "Virgin Media O2 Q4 2025 earnings release (FULL deep-research set copy)",
+      "modules": ["CP-0", "CP-DR"],
+      "pathways": ["DEEP_RESEARCH"],
+      "source": null,
+      "status": "in_hand",
+      "local_path": "qualification/vmo2-fy2025-full-deep-research/documents/Virgin-Media-O2-Q4-2025-Earnings-Release.pdf",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "The same bytes as vmo2-q4-2025-earnings and the qualified LITE deep-research copy (digest unchanged), copied because `server/qualification/on_disk._document` refuses a declared path that resolves outside the set root. It contains both uniquely anchored answer citations. This row prepares an offline FULL set; it records no provider run or qualification."
+    },
+    {
+      "id": "cp-dr-full-research-brief",
+      "issuer": "VMO2",
+      "document": "The FULL deep-research set manifest carrying the reused CP-DR research brief",
+      "modules": ["CP-DR"],
+      "pathways": ["DEEP_RESEARCH"],
+      "source": "implementer-authored (Task 11.4b, reused from Task 9.4)",
+      "status": "in_hand",
+      "local_path": "qualification/vmo2-fy2025-full-deep-research/qualification.json",
+      "external_path": null,
+      "demand_verified": true,
+      "note": "The `research_brief` object is byte-for-byte the qualified LITE set's supplied-only brief; the measured bytes and digest are the FULL manifest. Its pre-run keys are document/brief-derived and have not been owner-confirmed for a FULL run. No provider run, snapshot, verdict, or qualification claim exists."
     },
     {
       "id": "save-2024-chapter-11-8k",
@@ -387,19 +501,6 @@
       "external_path": null,
       "demand_verified": true,
       "note": "Official EDGAR exhibit converted from HTML to plain text on 19 September 2026. The file is the RSA and its attached Exhibit A plan; the filename states both to avoid misrepresenting the exhibit as a standalone disclosure statement. The separate backstop agreement was not admitted because this two-document pack already proves the requested distress and plan gates."
-    },
-    {
-      "id": "distressed-disclosure-statement",
-      "issuer": null,
-      "document": "A distressed issuer's disclosure statement, plan or restructuring support agreement",
-      "modules": ["CP-4C"],
-      "pathways": ["DISTRESSED_RESTRUCTURING", "LITE_DISTRESSED_RESTRUCTURING"],
-      "source": null,
-      "status": "not_available",
-      "local_path": null,
-      "external_path": null,
-      "demand_verified": true,
-      "note": "CP-4C Phase 1 is a distress, jurisdiction and evidence gate: it requires evidence of payment or default risk, failed refinancing, distressed exchange or LME escalation, a covenant or enforcement event, adviser engagement, a filing or another named distress trigger, and `if no gate is met, return Not Applicable, not a speculative restructuring`. No issuer in hand is distressed, so CP-4C's substantive path cannot be proven over this document register at all — only its Not Applicable refusal can. Marked not_available rather than to_source because the document does not exist for these issuers; proving CP-4C needs a different issuer, which is a document register decision the owner takes, not a fetch."
     },
     {
       "id": "ccl-fy2025-10k-market-dislocation",
