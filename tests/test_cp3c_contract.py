@@ -1,4 +1,4 @@
-"""CP-3C's disabled FULL covenant/refinancing contract."""
+"""CP-3C's FULL covenant/refinancing contract."""
 
 from __future__ import annotations
 
@@ -57,20 +57,14 @@ def _identity(*, include_cp4: bool = True) -> HostIdentity:
 
 
 def _validate(ident: HostIdentity, markdown: bytes) -> Projections:
-    # Contract-level proof temporarily exposes the disabled module to the host
-    # validator; the production adapter set itself is asserted unchanged below.
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(
-            "server.methodology.handoff.ADAPTER_MODULES", ADAPTER_MODULES | {"CP-3C"}
-        )
-        return validate_markdown(
-            CONTRACT,
-            CATALOG,
-            skill("CP-3C"),
-            markdown,
-            identity=ident,
-            gate_expects=frozenset(),
-        )
+    return validate_markdown(
+        CONTRACT,
+        CATALOG,
+        skill("CP-3C"),
+        markdown,
+        identity=ident,
+        gate_expects=frozenset(),
+    )
 
 
 def _gap(facts: RefinancingFacts = FACTS) -> dict[str, Any]:
@@ -122,7 +116,7 @@ def _gap(facts: RefinancingFacts = FACTS) -> dict[str, Any]:
     )
 
 
-def test_cp3c_catalog_identity_is_real_but_explicitly_disabled() -> None:
+def test_cp3c_catalog_identity_is_real_and_enabled() -> None:
     assert MODULES == ("CP-0", "CP-1", "CP-4", "CP-2", "CP-2D", "CP-3C", "CP-5")
     assert ROUTE.nodes[-1].module_id == "CP-5"
     assert {
@@ -148,7 +142,7 @@ def test_cp3c_catalog_identity_is_real_but_explicitly_disabled() -> None:
     }
     without_cp4 = _identity(include_cp4=False)
     assert _validate(without_cp4, cp3c_markdown(without_cp4)).qa_status == "Restricted"
-    assert "CP-3C" not in ADAPTER_MODULES and SELECTION not in ADAPTER_ROUTES
+    assert "CP-3C" in ADAPTER_MODULES and SELECTION in ADAPTER_ROUTES
 
 
 def test_cp3c_emits_all_registers_and_source_derived_refinancing_analysis() -> None:

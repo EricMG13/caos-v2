@@ -60,6 +60,7 @@ ADAPTER_MODULES = frozenset(
         MODEL_MODULE,
         "CP-8",
         "CP-DR",
+        "CP-3C",
     }
 )
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
@@ -71,6 +72,7 @@ ADAPTER_ROUTES = frozenset(
         ("FULL_CREDIT_32", "RELATIVE_VALUE"),
         ("LITE_CREDIT_22", "LITE_RELATIVE_VALUE"),
         ("LITE_CREDIT_22", "LITE_DECISION_LEDGER"),
+        ("FULL_CREDIT_32", "DECISION_LEDGER"),
         # CP-0 -> CP-DR (§96), once build 6a5f1050's `parse_t8` read the CP-DR
         # row CP-0's contract permits (`tests/test_lite_deep_research_route.py`).
         ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH"),
@@ -80,6 +82,7 @@ ADAPTER_ROUTES = frozenset(
         ("FULL_CREDIT_32", "LIQUIDITY_REVIEW"),
         ("FULL_CREDIT_32", "EARNINGS_UPDATE"),
         ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT"),
+        ("FULL_CREDIT_32", "COVENANT_REFINANCING"),
     }
 )
 GATE_MODULE = "CP-0"
