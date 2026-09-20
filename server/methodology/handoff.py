@@ -61,6 +61,7 @@ ADAPTER_MODULES = frozenset(
         "CP-8",
         "CP-DR",
         "CP-3C",
+        "CP-6",
     }
 )
 # The catalog pathways a contract test proves end to end (REPAIR_PLAN Phase 3
@@ -83,6 +84,7 @@ ADAPTER_ROUTES = frozenset(
         ("FULL_CREDIT_32", "EARNINGS_UPDATE"),
         ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT"),
         ("FULL_CREDIT_32", "COVENANT_REFINANCING"),
+        ("FULL_CREDIT_32", "PORTFOLIO_DECISION"),
     }
 )
 GATE_MODULE = "CP-0"
