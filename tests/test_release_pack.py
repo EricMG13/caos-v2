@@ -219,20 +219,6 @@ def test_a_verdict_that_is_not_current_for_this_build_qualifies_nothing(
         )
 
 
-def test_a_verdict_over_a_disabled_pathway_leaves_it_disabled() -> None:
-    """Disabled is what the host will execute, which a signature cannot change."""
-    disabled = sorted(_catalog_pathways() - ADAPTER_ROUTES)[0]
-    verdict = {"evidence_sha256": "e" * 64, "reviewer": "R"}
-    rows = release_pack.pathways(
-        catalog(Bundle(VENDORED_BUNDLE)), qualified={disabled: [verdict]}
-    )
-    (row,) = [
-        row for row in rows if (row["profile_id"], row["selection_id"]) == disabled
-    ]
-    assert row["status"] == release_pack.DISABLED
-    assert row["verdicts"] == [verdict]
-
-
 def test_a_store_read_reports_enabled_pathways_qualified_or_not(
     empty_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

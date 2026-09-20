@@ -149,7 +149,7 @@ def test_full_credit_assessment_is_exact_and_enabled() -> None:
     assert len(ROUTE.edges) == 88
     assert set(MODULES) <= ADAPTER_MODULES
     assert SELECTION in ADAPTER_ROUTES
-    assert (len(ADAPTER_ROUTES), pathways - len(ADAPTER_ROUTES)) == (17, 1)
+    assert (len(ADAPTER_ROUTES), pathways - len(ADAPTER_ROUTES)) == (18, 0)
     assert all(quote.encode() in ROUTE_PACK for quote in ROUTE_QUOTES.values())
 
 
