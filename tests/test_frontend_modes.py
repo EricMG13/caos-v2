@@ -486,3 +486,23 @@ def test_the_vendored_bundle_is_not_counted(
     monkeypatch.chdir(repo)
 
     assert check_pr_size.changed_lines(base) == 1
+
+
+def test_qualification_documents_are_excluded_but_manifests_are_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, base = _size_repo(tmp_path, 1)
+    roots = (
+        repo / "qualification/ccl-fy2025-full-relative-value",
+        repo / "qualification/ba-fy2025",
+    )
+    for root in roots:
+        (root / "documents").mkdir(parents=True)
+        (root / "documents/evidence.txt").write_text("x\n" * 900, encoding="utf-8")
+        (root / "qualification.json").write_text("manifest\n", encoding="utf-8")
+        (root / "RESULT.md").write_text("result\n", encoding="utf-8")
+    _git(repo, "add", "qualification")
+    _git(repo, "commit", "-qm", "add qualification evidence")
+    monkeypatch.chdir(repo)
+
+    assert check_pr_size.changed_lines(base) == 5

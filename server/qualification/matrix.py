@@ -789,10 +789,10 @@ def unlocatable_register_keys(
     """Every register key no run could ever meet, in the order the set lists them.
 
     A key is locatable when its module declares a register contract, the
-    register is one of it, its column and every row-key column are among that
-    register's declared columns, and `module_registers` -- the scorer's own
-    reader -- finds the register when it is written as the vendor's suite writes
-    it: its id in a heading above the table. Anything else reads
+    register is one of it, its keyed columns are among any columns the contract
+    declares, and `module_registers` -- the scorer's own reader -- finds the
+    register when it is written as the vendor's suite writes it: its id in a
+    heading above the table. Anything else reads
     `registers_met: false` whatever the model answers, which is a question the
     set asked of nobody.
     """
@@ -805,10 +805,45 @@ def unlocatable_register_keys(
     )
 
 
+def _register_values_representable(expect: ExpectedRegister) -> bool:
+    """Whether the vendor's pipe-table reader can return the keyed values."""
+    return not any(
+        "|" in _normalised_cell(part) for pair in expect.row_key for part in pair
+    ) and not any(
+        "|" in _normalised_cell(part) for part in (expect.column, expect.expected)
+    )
+
+
+def _probe_columns(
+    declared: Sequence[object], expect: ExpectedRegister
+) -> tuple[list[str], dict[str, str]] | None:
+    """Safe synthetic headers under the register's declared column policy."""
+    declared_columns = [str(column) for column in declared]
+    candidates = declared_columns or [column for column, _ in expect.row_key] + [
+        expect.column
+    ]
+    names: dict[str, str] = {}
+    for column in candidates:
+        normalised = _normalised_cell(column)
+        if normalised in names:
+            if declared_columns:
+                return None
+            continue
+        names[normalised] = column if declared_columns else normalised
+    if not declared_columns:
+        sentinel = "__caos_probe__"
+        while sentinel in names:
+            sentinel += "_"
+        names[sentinel] = sentinel
+    return list(names.values()), names
+
+
 def _locatable(
     contract: VendorContract, bundle: Bundle, expect: ExpectedRegister
 ) -> bool:
     """One key against its module's declared register contract and reader."""
+    if not _register_values_representable(expect):
+        return False
     try:
         skill = verified_bytes(bundle, expect.module_id, "SKILL.md").decode("utf-8")
         declared = contract.completeness_check.load_contract(skill, expect.module_id)
@@ -817,17 +852,40 @@ def _locatable(
     spec = declared["registers"].get(expect.register_id)
     if spec is None:
         return False
-    columns = [str(column) for column in spec["columns"]]
-    named = [expect.column, *(column for column, _value in expect.row_key)]
-    if not columns or any(name not in columns for name in named):
+    probe_columns = _probe_columns(spec["columns"], expect)
+    if probe_columns is None:
         return False
+    columns, declared_names = probe_columns
+    try:
+        row_key = tuple(
+            (
+                declared_names[_normalised_cell(column)],
+                sha256(_normalised_cell(value).encode()).hexdigest(),
+            )
+            for column, value in expect.row_key
+        )
+        expected_column = declared_names[_normalised_cell(expect.column)]
+    except KeyError:
+        return False
+    cells = dict.fromkeys(columns, "x")
+    for column, value in row_key:
+        cells[column] = value
+    expected = sha256(_normalised_cell(expect.expected).encode()).hexdigest()
+    cells[expected_column] = expected
     table = (
         f"#### {expect.register_id}\n\n| {' | '.join(columns)} |\n"
-        f"|{'---|' * len(columns)}\n| {' | '.join('x' for _ in columns)} |\n"
+        f"|{'---|' * len(columns)}\n"
+        f"| {' | '.join(cells[column] for column in columns)} |\n"
     )
-    return expect.register_id in module_registers(
-        contract, bundle, expect.module_id, table
+    registers = module_registers(contract, bundle, expect.module_id, table)
+    probe = ExpectedRegister(
+        module_id=expect.module_id,
+        register_id=expect.register_id,
+        row_key=row_key,
+        column=expected_column,
+        expected=expected,
     )
+    return _matches_register(registers, probe)
 
 
 def _registers_met(
@@ -1134,12 +1192,87 @@ def assert_measurable(qualification: QualificationSet) -> None:
 
 def _register_cell(
     expect: ExpectedRegister,
-) -> tuple[str, str, tuple[tuple[str, str], ...], str]:
+) -> tuple[str, str, frozenset[tuple[str, str]], str]:
     """The cell a register key names, without the answer it expects.
 
     Two keys sharing this and disagreeing on `expected` cannot both be met.
     """
-    return (expect.module_id, expect.register_id, tuple(expect.row_key), expect.column)
+    return (
+        expect.module_id,
+        expect.register_id,
+        frozenset(
+            (_normalised_cell(column), _normalised_cell(value))
+            for column, value in expect.row_key
+        ),
+        _normalised_cell(expect.column),
+    )
+
+
+def _witnesses_contradict(
+    witnesses: list[tuple[frozenset[tuple[str, str]], dict[str, str]]],
+) -> bool:
+    """Whether exact-one selectors force incompatible keys onto one row."""
+    selectors = [selector for selector, _requirements in witnesses]
+    requirements = [required for _selector, required in witnesses]
+    parents = list(range(len(witnesses)))
+    pending = list(parents)
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    while pending:
+        left = root(pending.pop())
+        for key_index, selector in enumerate(selectors):
+            right = root(key_index)
+            if left == right or not all(
+                requirements[left].get(column) == value for column, value in selector
+            ):
+                continue
+            if any(
+                column in requirements[right] and requirements[right][column] != value
+                for column, value in requirements[left].items()
+            ):
+                return True
+            parents[right] = left
+            requirements[left].update(requirements[right])
+            pending.append(left)
+            break
+    return False
+
+
+def _registers_ambiguous(expects: tuple[ExpectedRegister, ...]) -> bool:
+    """Whether one case carries register keys no run can satisfy together."""
+    cells = [_register_cell(expect) for expect in expects]
+    if len(set(cells)) != len(cells):
+        return True
+
+    groups: dict[
+        tuple[str, str],
+        list[tuple[frozenset[tuple[str, str]], dict[str, str]]],
+    ] = {}
+    for expect, (module_id, register_id, selectors, column) in zip(
+        expects, cells, strict=True
+    ):
+        expected = _normalised_cell(expect.expected)
+        requirements = dict(selectors)
+        if (
+            not selectors
+            or len(requirements) != len(selectors)
+            or (column in requirements and requirements[column] != expected)
+            or not _register_values_representable(expect)
+        ):
+            continue
+        requirements[column] = expected
+        groups.setdefault((module_id, register_id), []).append(
+            (selectors, requirements)
+        )
+
+    # ponytail: quadratic witness closure; add an index only if qualification
+    # key counts grow enough for this bounded preflight to matter.
+    return any(_witnesses_contradict(witnesses) for witnesses in groups.values())
 
 
 def assert_unambiguous(qualification: QualificationSet) -> None:
@@ -1148,13 +1281,7 @@ def assert_unambiguous(qualification: QualificationSet) -> None:
     if len(set(labels)) != len(labels) or any(
         len(set(case.expects)) != len(case.expects)
         or len(set(case.expects_register)) != len(case.expects_register)
-        # Two register keys naming one cell with different answers is a set no
-        # run can meet, and it loads clean if only whole tuples are compared:
-        # the semantic key is the cell, as the forecast check below uses the
-        # value's name rather than the whole value. A reviewer would read
-        # `registers_met: false` and hunt the model.
-        or len({_register_cell(item) for item in case.expects_register})
-        != len(case.expects_register)
+        or _registers_ambiguous(case.expects_register)
         or (
             case.forecast is not None
             and len({value.name for value in case.forecast.values})

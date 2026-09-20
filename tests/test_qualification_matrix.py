@@ -806,6 +806,72 @@ def test_two_identical_register_keys_for_one_case_are_refused(ran: Ran) -> None:
         assert_unambiguous(QualificationSet(cases=(duplicate,)))
 
 
+def test_semantically_identical_register_cells_are_refused() -> None:
+    first = replace(_T8_READY, row_key=(("Module", "CP-5"), ("Sequence", "1")))
+    duplicates = (
+        replace(
+            first,
+            row_key=((" Module ", "CP-5"), ("Sequence", " 1 ")),
+            column="Readiness ",
+            expected="BLOCKED",
+        ),
+        replace(first, row_key=tuple(reversed(first.row_key)), expected="BLOCKED"),
+        replace(
+            first,
+            row_key=(*first.row_key, (" Module ", " CP-5 ")),
+            expected="BLOCKED",
+        ),
+    )
+    for duplicate in duplicates:
+        case = replace(_register_case(), expects_register=(first, duplicate))
+        with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+            assert_unambiguous(QualificationSet(cases=(case,)))
+
+
+def test_broad_and_narrow_contradictory_register_keys_are_refused() -> None:
+    narrow = replace(
+        _T8_READY,
+        row_key=(*_T8_READY.row_key, ("Sequence", "1")),
+        expected=" READY ",
+    )
+    compatible = replace(_register_case(), expects_register=(_T8_READY, narrow))
+    assert_unambiguous(QualificationSet(cases=(compatible,)))
+
+    contradictory = replace(narrow, expected="BLOCKED")
+    case = replace(_register_case(), expects_register=(_T8_READY, contradictory))
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+        assert_unambiguous(QualificationSet(cases=(case,)))
+
+
+def test_forced_register_witnesses_cannot_contradict() -> None:
+    cross_target = ExpectedRegister(
+        module_id="CP-0",
+        register_id="T8",
+        row_key=(("Module", "CP-5"), ("Readiness", "BLOCKED")),
+        column="Exact command",
+        expected="Run CP-5",
+    )
+    compatible = replace(
+        cross_target,
+        row_key=(("Module", "CP-5"), ("Readiness", "READY")),
+    )
+    case = replace(_register_case(), expects_register=(_T8_READY, compatible))
+    assert_unambiguous(QualificationSet(cases=(case,)))
+
+    case = replace(_register_case(), expects_register=(_T8_READY, cross_target))
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+        assert_unambiguous(QualificationSet(cases=(case,)))
+
+    transitive = (
+        replace(_T8_READY, row_key=(("A", "1"),), column="B", expected="1"),
+        replace(_T8_READY, row_key=(("B", "1"),), column="C", expected="1"),
+        replace(_T8_READY, row_key=(("C", "1"),), column="A", expected="2"),
+    )
+    case = replace(_register_case(), expects_register=transitive)
+    with pytest.raises(Refusal, match=r"^QUALIFICATION_SET_AMBIGUOUS$"):
+        assert_unambiguous(QualificationSet(cases=(case,)))
+
+
 def test_a_key_does_not_answer_from_a_duplicated_column() -> None:
     """A header naming the same column twice answers nothing, not the last cell.
 
@@ -988,6 +1054,106 @@ def test_a_register_key_its_module_does_not_declare_is_unlocatable() -> None:
         unlocatable_register_keys(Bundle(VENDORED), QualificationSet(cases=(case,)))
         == bad
     )
+
+
+def test_register_key_columns_and_values_are_normalised_like_runtime() -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+
+    expect = ExpectedRegister(
+        module_id="CP-1",
+        register_id="T4.1",
+        row_key=(("File   Name", "annual\n report.pdf"),),
+        column="Doc   Type",
+        expected="10-\n K",
+    )
+    case = replace(_register_case(), expects_register=(expect,))
+    assert not unlocatable_register_keys(
+        Bundle(VENDORED), QualificationSet(cases=(case,))
+    )
+
+
+def test_unconstrained_register_columns_are_locatable() -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+
+    expect = replace(
+        _T8_READY,
+        row_key=((" Module\n", "CP-5"),),
+        column=" Readiness\n",
+    )
+    case = replace(_register_case(), expects_register=(expect,))
+    assert not unlocatable_register_keys(
+        Bundle(VENDORED), QualificationSet(cases=(case,))
+    )
+
+
+def test_unconstrained_separator_column_is_locatable() -> None:
+    from server.methodology.bundle import Bundle
+    from server.methodology.vendor import load_vendor_contract
+    from server.qualification.matrix import (
+        _matches_register,
+        module_registers,
+        unlocatable_register_keys,
+    )
+
+    bundle = Bundle(VENDORED)
+    expect = replace(_T8_READY, row_key=(("---", "x"),), column="---", expected="x")
+    table = "#### T8\n\n| --- | Witness |\n| --- | --- |\n| x | y |\n"
+    registers = module_registers(
+        load_vendor_contract(bundle), bundle, expect.module_id, table
+    )
+    assert _matches_register(registers, expect)
+
+    case = replace(_register_case(), expects_register=(expect,))
+    assert not unlocatable_register_keys(bundle, QualificationSet(cases=(case,)))
+
+
+@pytest.mark.parametrize(
+    "part", ["selector", "expected", "selector-column", "expected-column"]
+)
+def test_register_key_with_pipe_is_unlocatable(part: str) -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+
+    expect = ExpectedRegister(
+        module_id="CP-1",
+        register_id="T4.1",
+        row_key=(
+            (
+                "File|Name" if part == "selector-column" else "File Name",
+                "annual|report.pdf" if part == "selector" else "annual report.pdf",
+            ),
+        ),
+        column="Doc|Type" if part == "expected-column" else "Doc Type",
+        expected="10|K" if part == "expected" else "10-K",
+    )
+    case = replace(_register_case(), expects_register=(expect,))
+    assert unlocatable_register_keys(
+        Bundle(VENDORED), QualificationSet(cases=(case,))
+    ) == (expect,)
+
+
+@pytest.mark.parametrize("part", ["column", "value"])
+def test_unlocatable_pipe_key_does_not_make_a_set_ambiguous(part: str) -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+
+    narrow = replace(
+        _T8_READY,
+        row_key=(
+            *_T8_READY.row_key,
+            (
+                "Sequence|Number" if part == "column" else "Sequence",
+                "1" if part == "column" else "1|2",
+            ),
+        ),
+        expected="BLOCKED",
+    )
+    case = replace(_register_case(), expects_register=(_T8_READY, narrow))
+    qualification = QualificationSet(cases=(case,))
+    assert_unambiguous(qualification)
+    assert unlocatable_register_keys(Bundle(VENDORED), qualification) == (narrow,)
 
 
 def test_ready_met_is_none_when_a_case_names_no_module(ran: Ran) -> None:
