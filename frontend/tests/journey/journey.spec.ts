@@ -32,7 +32,7 @@ const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
 const COMPOSE_FILE = path.join(REPO_ROOT, "compose.smoke.yaml");
 const PROJECT = "caos-workbench-smoke";
-const PYTHON = path.join(REPO_ROOT, ".venv", "bin", "python");
+const PYTHON = process.env.JOURNEY_PYTHON ?? path.join(REPO_ROOT, ".venv", "bin", "python");
 
 const ANALYST_USER_ID = "6a0e1c2d-0000-4000-8000-00000000a001";
 // The other three identities `tests/journey/edge.py` can assert, and which of
