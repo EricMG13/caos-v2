@@ -27,6 +27,17 @@ worktrees and is consumed, not owned.
 PostgreSQL 17, FastAPI/Pydantic, psycopg 3, React/TypeScript/Vite, Node 24,
 Playwright, Docker, Trivy 0.70.0, installed GitNexus 1.6.9.
 
+> **Current status, 20 September 2026.** This file is the historical task
+> breakdown; its unchecked boxes are not the current tracker. The executable
+> delta is the
+> [resolution plan](2026-09-19-resolve-all-remaining-work.md), and the current
+> checkpoint is [the handoff](../../CLAUDE_CODE_HANDOFF.md). All 18 catalog
+> pathways are now deterministically enabled. The store-backed release census
+> at `2026-09-20T00:00:00+00:00` is one `QUALIFIED` and seventeen
+> `NOT_QUALIFIED`. Phase 4 stopped after two smoke sets and their bounded
+> Sol/xhigh retries; no wider provider spend is authorized. Phase 5
+> documentation/release reconciliation and separate hosted delivery remain.
+
 **Spec:** [`docs/COMPLETION_PLAN.md`](../../COMPLETION_PLAN.md) — its §2
 inventory and §3 items O01–O26 are the requirements this plan implements;
 its §5 "pathway task template" is the unit every programme task instantiates.

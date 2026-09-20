@@ -14,27 +14,45 @@ This is the sole maintained task/checkpoint record. The user controls scope;
 it. Historical rebuild phases and ignored reports cannot override those
 contracts.
 
-## Current checkpoint — observed 19 September 2026
+## Current checkpoint — observed 20 September 2026
 
 | Item | Recorded state |
 |---|---|
 | Workbench | `/Users/ericguei/.codex/worktrees/gpt-model-routing/caos-workbench` |
 | Branch | `completion/owner-decisions` |
 | Original checkout | `/Users/ericguei/Documents/caos-v2`, read-only until programme closeout; after all completion items and delivery PRs are closed and verified and the final cross-phase review passes, fast-forward `main` from its GitHub `origin/main` and record the final commit here |
-| Latest accepted phase | **Completion Phases 7 and 8 accepted at `38f4639`** (records below; one `make check` at exit 0 gated both). Earlier: Phase 6 `e59ad7b` (`docs/DECISIONS.md` §69 over [FINAL_CHECK.md](FINAL_CHECK.md); §62 accepted the phase with its gaps stated). Earlier: Phase 5 `ca65ec7`, Phase 4 `0deb4a4`, Phase 3 `3400b6c`, Phase 2 `b4298dc` |
-| Qualification state | Thirteen earlier authorised live runs plus the retained deep-research reruns are recorded in their set results. `qualification/vmo2-fy2025-deep-research/RESULT.md` records one owner-signed verdict over run `de27f93c…`, set `09807efb…`, build `78c24be4…`, expiring 18 October 2026. It is historical signed evidence; because the bundle still names that build, only `current_verdict` against the retained store at an explicit as-of time can establish whether it is current for this tree. The other enabled pathways have no signed verdict and remain unqualified or unverified |
+| Latest accepted phase | **Resolution Phases 1–3 are locally accepted** at `19d028f`, `afa56fc`, and `2ff9b3e`. Phase 4's early-stop record is `e475298`; its owner-approved Sol/xhigh retry is `9b5d611`. The complete local gate, separate Sol/xhigh confidence review, and separate Astra/xhigh adversarial audit passed over that retry checkpoint. Phase 4 is deliberately stopped, not represented as all-set completion, because both smoke sets remain `NOT_QUALIFIED` and the evidence does not justify wider spend. Earlier Completion Phases 7 and 8 remain accepted at `38f4639` |
+| Qualification state | A store-backed release pack read the retained signed-verdict database at `2026-09-20T00:00:00+00:00`. All eighteen routes are enabled: `LITE_CREDIT_22 / LITE_DEEP_RESEARCH` is `QUALIFIED` by owner-signed evidence `0bacb1a1…` until `2026-10-18T16:58:48+00:00`; the other seventeen are `NOT_QUALIFIED`. The 19–20 September Sol/xhigh smoke retries remain unqualified: CCL stopped at CP-0 on a model-contract contradiction; VMO2 completed its route but missed its unchanged citation key. No host, parser, provider, source-delivery, or key defect was found |
 | Enabled routes | All eighteen catalog pathways are in `ADAPTER_ROUTES`, each with a deterministic whole-route contract. This is execution enablement only: it is not provider qualification, a performed snapshot, or a signed current-build verdict. Bundle build `78c24be4` (§96/§98) |
 | Completion plan | [COMPLETION_PLAN.md](COMPLETION_PLAN.md), with its task breakdown in [the complementary plan](superpowers/plans/2026-09-17-completion-complementary-plan.md) and current Codex routing in [GPT_MODEL_REASONING_MATRIX.md](GPT_MODEL_REASONING_MATRIX.md). Phases 7–13; the centre is deploying the remaining modules and pathways with their corpus and answer keys |
 | Current resolution plan | [Resolve all remaining work](superpowers/plans/2026-09-19-resolve-all-remaining-work.md) is the executable delta from the current checkpoint: finish the remaining route contracts, build honest qualification sets, run only pinned authorised provider work, hand local commits to the separate delivery task, and close with independent phase/final reviews |
-| Current task | **Buildable work resumed after the 19 September evidence tranche.** Phase 11's earlier deterministic exit gate is repaired at `b6263cf`: the complete local gate passed, the separate `gpt-5.6-sol` `xhigh` [confidence review](reviews/phase-11-confidence-review.md) returned APPROVE and the separate `gpt-6-astra` `xhigh` [adversarial audit](reviews/phase-11-adversarial-audit.md) returned CLEAN after remediation. New official debt, rating, market and Spirit restructuring evidence now permits the remaining route and offline-set work described in the [resolution plan](superpowers/plans/2026-09-19-resolve-all-remaining-work.md). Private portfolio inputs, a genuine T0 decision record, current-build live qualification and external delivery remain separate gates. The PR/CI/Sonar task owns delivery; this implementation task does not push or modify local `main` |
+| Current task | **Resolution Phase 5: documentation and release truth.** Deterministic coverage is 18/18. Every route has an immutable offline set or an explicit owner-input reason. No further provider run is authorized: private portfolio inputs and a genuine T0 decision record remain unavailable, the FULL research brief remains unconfirmed, the FINRA observation remains last-trade-only, and the two smoke retries exposed model misses. This task emits and reproduces the release pack, reconciles status documents, then runs separate phase-end reviews. The PR/CI/Sonar task owns delivery; this implementation task does not push or modify local `main` |
 | Remediation stream | The audit remediation ([plan](superpowers/plans/2026-09-17-audit-remediation.md), review [here](reviews/2026-09-17-gemini-audit-adversarial-review.md)) is **complete** and is **not** a task of the completion plan. Twenty-one tasks in four waves plus owner decision D3, every task reviewed and every wave gated, closed by a confidence review and a separate adversarial audit with remediation between and after them. Entries §70, §71, §73, §74, §75. Final gate green at `29b2208`. Its landed waves and the completion tasks each unblocked are recorded under Phase 7 Task 7.2 below |
-| Delivery | `main` was reconciled into `codex/execute-repair-plan` by #323; the branch (`8ea0715`) is delivered to `main` as one over-cap pull request, [#324](https://github.com/EricMG13/caos-v2/pull/324), whose body carries the split evidence from [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md). `completion/remainder` stacks on it and is delivered by a separate session, which opens its pull request and resolves what hosted checks raise. At programme closeout that session verifies GitHub's accepted tree, fast-forwards workbench `main` from `gh-origin/main`, then fast-forwards the still-read-only original checkout from its GitHub `origin/main`; no force, reset, or direct `completion/*` merge is permitted |
+| Delivery | The dedicated delivery task merged the resolution foundation and Phases 1–4 through PRs #389, #390, #392, #393, #394, #395, and #396; their accepted commits are `858e23a`, `114a69c`, `3a99c46`, `186906d`, `154dc2b`, `fbd2d56`, and `aa11256`. PR #396 carried local retry checkpoint `9b5d611`; every hosted check, including SonarCloud, passed before merge. At programme closeout the delivery task verifies GitHub's accepted tree and performs both fast-forwards; no force, reset, direct `completion/*` merge, or PR operation occurs in this task |
 | Next-phase launch text | [PHASE_7_ONWARDS_GOAL_PROMPT.md](PHASE_7_ONWARDS_GOAL_PROMPT.md) |
 
 A later Git HEAD may include documentation or concurrent implementation.
 Inspect its diff and acceptance record; never infer acceptance from a commit's
 existence. Update this table at the next durable acceptance checkpoint, not in
 the middle of an edit. Other entry documents link here instead of copying it.
+
+## Resolution programme checkpoint — 20 September 2026
+
+| Measure | Current evidence |
+|---|---|
+| Deterministic execution | 18/18 catalog pathways equal `ADAPTER_ROUTES`; the exact census and each whole-route contract pass with PostgreSQL available |
+| Qualification inventory | Every pathway has a loadable offline set or the explicit missing input recorded in `qualification/DOCUMENTS.md`; no mandate/exposure data or T0 decision record was fabricated |
+| Live release truth | At `2026-09-20T00:00:00+00:00`, 1/18 pathways is `QUALIFIED` and 17/18 are `NOT_QUALIFIED`; route enablement is not qualification |
+| Phase 4 stop | Only the two smallest smoke sets received the approved Sol/high runs and one approved Sol/xhigh retry each. The retry reserved `$8.365320` and charged `$1.3507305`; both results remain `NOT_QUALIFIED`, so no wider spend was made |
+| Engineering gate | `make check` exited 0 after the retry record: 3,777 Python tests, 26 PostgreSQL race tests, 267 frontend unit tests, 180 accessibility entries, 90 workbench tests, image and vulnerability gates, eight production-image tests, and 22 journeys on each of Chromium, Firefox, and WebKit |
+| Review isolation | Phase-end confidence ran in a separate `gpt-5.6-sol`/`xhigh` agent; phase-end adversarial review ran in a separate `gpt-6-astra`/`xhigh` agent. Both passed after the confidence review's documentation-only currency-marker correction |
+
+Intentional limitations remain visible: current private portfolio facts are not
+available; no genuine pre-outcome CCL decision record exists; the FULL
+deep-research brief is not owner-confirmed; the FINRA observation is a dated
+last trade, not a bid, mid, evaluated price, spread, or curve; and the two
+latest smoke results contain model misses. None is converted into a positive
+claim by a green deterministic gate.
 
 ## GitHub delivery record — 19 September 2026
 

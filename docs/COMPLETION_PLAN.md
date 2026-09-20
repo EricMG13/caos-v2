@@ -27,6 +27,36 @@ on `codex/execute-repair-plan` at `e59ad7b`.
 > observed, names the tasks here that depend on its outputs, and keeps its
 > phase close separate.
 
+## Current reconciliation — 20 September 2026
+
+This document's 17 September baseline and task prose remain historical
+evidence. Current execution is governed by the
+[resolution plan](superpowers/plans/2026-09-19-resolve-all-remaining-work.md)
+and the top checkpoint in
+[the handoff](CLAUDE_CODE_HANDOFF.md). The current measured state is:
+
+- all 18 catalog pathways are in `ADAPTER_ROUTES`, each behind its exact
+  deterministic whole-route contract; none is disabled;
+- every pathway has an immutable offline qualification set or an explicit
+  owner-input reason in `qualification/DOCUMENTS.md`;
+- a release-pack read of the retained verdict store at
+  `2026-09-20T00:00:00+00:00` reports one current `QUALIFIED` pathway
+  (`LITE_CREDIT_22 / LITE_DEEP_RESEARCH`) and seventeen `NOT_QUALIFIED`;
+- Phase 4 stopped after the two smallest smoke sets and their one-attempt
+  Sol/xhigh retries. CCL stopped on a model-contract contradiction; VMO2
+  completed the route but missed its unchanged citation key. No wider spend is
+  authorized or justified by those results;
+- current private portfolio inputs and a genuine T0 decision record remain
+  unavailable, the FULL research brief remains unconfirmed, and the admitted
+  FINRA observation remains last-trade-only; these limitations are not filled
+  with coordinator-authored facts;
+- the remaining work is the Phase 5 documentation/release checkpoint and the
+  separate delivery task's hosted PR, check, SonarCloud and final fast-forward
+  work. This implementation task performs no PR operation.
+
+The older recommendation and tables below describe the state when reviewed;
+they are not the current checkpoint and are not silently rewritten.
+
 ## Recommendation
 
 Deploy the remaining modules and pathways, and build only what that needs.
