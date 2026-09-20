@@ -1,6 +1,6 @@
-# CCL FY2025 relative-value screen qualification — no run has been performed
+# CCL FY2025 relative-value screen qualification — one authorized run, 18 September 2026 (below)
 
-**No run has been performed against this set.** It is authored, loadable and
+**Before 18 September 2026 no run had been performed against this set;** the authorized run is recorded at the end. It is authored, loadable and
 digested; nothing here reports a result, a verdict or a provider. The live run
 is Phase 9 Task 9.2 step 7 and needs the owner's explicit authorization — it
 costs real money and calls a real model.
@@ -115,3 +115,44 @@ derived from operating income plus D&A.
 - The owner's confirmation of the material figures and of the key spellings.
 - **The run itself** (step 7, authorization required), and a signed verdict or
   a recorded reason why not.
+
+## First authorized run — 18 September 2026
+
+Authorized by the owner on 18 September 2026 (key figures confirmed, `$5`
+per run). Provider `openrouter/openai/flex/high/65536`, model
+`openai/gpt-5.6-terra`, `$0.000002` / `$0.000012` per token dated
+2026-09-18, `--attempts 2`, bundle build `78c24be4` (§96 with §98). The run
+database is on the persistent dev server (§100).
+
+- Run `95dd27e1-31a4-4a3f-a3f0-3c25fc4c8e17`; database
+  `caos_qualify_990bb204ec6e404db9845268f89c104d`; capture
+  `run-2026-09-18-capture.json`; evidence `f43f0a6804020e85…`.
+- Charges: CP-0 attempt 1 `$0.2278985`, attempt 2 `$0.22095525`. Total
+  **`$0.44885375`**. CP-L10 and CP-1C were not called.
+
+**Not signable; the run stopped with CP-0 unaccepted.**
+
+- Attempt 1 was refused `CITATION_NOT_LOCATED`, correctly: it quoted "At
+  November 30, 2025, we had $6.4 billion of liquidity" where the 10-K reads
+  "As of November 30, 2025, …". A model error.
+- Attempt 2 was refused `HANDOFF_MALFORMED` for a **host defect**: the body
+  quoted every citation correctly inside Markdown backticks, and the body
+  check forgave quotation marks around a quote but not a code span. Fixed in
+  `d7ddbf0` (`tests/test_handoff_record.py::test_a_quote_the_body_wraps_in_quotation_marks_is_still_quoted`).
+  The vendor's own validators accepted both answers.
+
+## Second authorized run — 18 September 2026
+
+Same authorization and settings as the run above; bundle build `78c24be4` with
+§101 (CP-DR is delivered its research contract) and §102 (every source is
+labelled `WHOLE` or `PAGE_MAP`); database on the persistent server (§100).
+
+- Run `edf2b6e5-4e6c-44a2-9006-c370c508ceb3`; database `caos_qualify_5e6bfcd3f21f40d093690c693b349bda`;
+  capture `run-2026-09-18b-capture.json`; evidence `9e445a9e27588aa5…`.
+- Charges: CP-0 attempt 1 `$0.23433475` (refused `HANDOFF_MALFORMED`), attempt 2
+  `$0.2157915` (accepted); total **`$0.45012625`**. CP-L10 and CP-1C were not called.
+
+**Not signable.** The run ended BLOCKED at CP-0's readiness gate (`ready_met`
+false); every downstream key missed because nothing downstream ran. Why attempt
+1 was refused and why CP-0 blocked its consumers is under investigation; this
+record is updated with the finding.

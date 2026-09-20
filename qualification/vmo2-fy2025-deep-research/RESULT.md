@@ -1,6 +1,6 @@
-# VMO2 FY2025 deep-research qualification — no run has been performed
+# VMO2 FY2025 deep-research qualification — one authorized run, 18 September 2026 (below)
 
-**No run has been performed against this set.** It is authored, loadable and
+**Before 18 September 2026 no run had been performed against this set;** the authorized run is recorded at the end. It is authored, loadable and
 digested; nothing here reports a result, a verdict or a provider. The live run
 is Phase 9 Task 9.4 step 7 and needs the owner's explicit authorization — it
 costs real money and calls a real model. **The material figures in the keys
@@ -80,3 +80,66 @@ capture file or result section; nothing has been run on this route.
 
 The two figures above (£1,021.7 million and £1,378.0 million) and the choice of
 questions, before the step 7 run is authorized.
+
+## First authorized run — 18 September 2026
+
+Authorized by the owner on 18 September 2026 (key figures confirmed, `$5`
+per run). Provider `openrouter/openai/flex/high/65536`, model
+`openai/gpt-5.6-terra`, `$0.000002` / `$0.000012` per token dated
+2026-09-18, `--attempts 2`, bundle build `78c24be4` (§96 with §98). The run
+database is on the persistent dev server (§100).
+
+- Run `94590ea4-5153-4826-8bf7-55fbcb7de4d2`; database
+  `caos_qualify_2d850367a8fc4b5992990babe6b89e8d`; capture
+  `run-2026-09-18-capture.json`; evidence `19acbea58c75cba1…`.
+- Charges: CP-0 `$0.14397725` (accepted); CP-DR attempt 1 `$0.11225975`,
+  attempt 2 `$0.11388875`, both refused. Total **`$0.37012575`**.
+
+**Not signable; the run stopped with CP-DR unaccepted.** Both CP-DR answers
+were refused `HANDOFF_INCOMPLETE` by the vendor's dossier check, which
+reports that the research approved-plan hash differs from the current brief.
+Whether the host showed CP-DR one brief and validated it against another is
+under investigation; this record is updated with the finding.
+
+## Second authorized run — 18 September 2026
+
+Same authorization and settings as the run above; bundle build `78c24be4` with
+§101 (CP-DR is delivered its research contract) and §102 (every source is
+labelled `WHOLE` or `PAGE_MAP`); database on the persistent server (§100).
+
+- Run `de27f93c-be52-4c6c-9a45-2ab75286dbe0`; database `caos_qualify_ee63927485004c75b20949af48fed495`;
+  capture `run-2026-09-18b-capture.json`; evidence `af4bdf5af6cd1cfe…`.
+- Charges: CP-0 `$0.14204925`, CP-DR `$0.1178595`, both accepted first time; total
+  **`$0.25990875`**.
+
+Route COMPLETE, 2 artifacts, 7 citations all re-located; both citation keys met;
+readiness and projection keys met; CP-DR's findings answer RQ-impairment and
+RQ-undrawn and leave RQ-rating UNRESOLVED (coverage 67%) -- exactly the keyed
+statuses. `complete` is nevertheless **false** because of a **host scoring
+defect**: the three `TDR.3` register keys cannot be located by the vendor's
+heading-based register locator, since CP-DR's tables are tagged by `table-id`
+comments. Being fixed; the retained run will be re-scored without a provider
+call and this record updated.
+
+## Re-scored and signed — 18 September 2026: QUALIFIED
+
+The scoring defect (§103) fixed, the retained run `de27f93c…` was re-scored with
+no provider call: the rebuilt prepared and performed documents are byte-identical
+to the stored snapshot and the matrix differs only in `registers_met` (false ->
+true). The new snapshot was recorded through the store's own
+`record_performed` / `record_evidence`: performed `e48f39d96e78a22e…`,
+**complete**, evidence
+`0bacb1a105f617d21e089adf4dac7825553b6ae3bb69f7428101ec7d5d07e4f6`; the
+original rows are untouched.
+
+**Verdict**, on the owner's instruction "Signed and approved": recorded through
+`record_verdict` in database `caos_qualify_ee63927485004c75b20949af48fed495`,
+reviewer "Eric Guei (owner)", decided `2026-09-18T16:58:48+00:00`, expires
+`2026-10-18T16:58:48+00:00` (a 30-day term the coordinator chose), provider
+`openrouter/openai/flex/high/65536:openai/gpt-5.6-terra`, set `09807efb…`,
+build `78c24be4…`. `reviewer_id` is the documented local dev actor
+`00000000-0000-4000-8000-00000000d001`: the owner's local configuration carries
+no dev user id, so the host held no other identity for them. The release pack
+read against that store reports `LITE_CREDIT_22 / LITE_DEEP_RESEARCH` as
+`QUALIFIED` -- the first qualified pathway, scoped to this set, this build and
+this execution profile, until the verdict expires or the build moves.
