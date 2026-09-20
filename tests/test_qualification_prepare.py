@@ -34,6 +34,7 @@ from server.engine.route import resolve_route
 from server.methodology.bundle import Bundle
 from server.qualification import harness as subject
 from server.qualification.matrix import (
+    ExpectedProjection,
     ExpectedRegister,
     QualificationCase,
     QualificationSet,
@@ -308,6 +309,9 @@ def test_preparation_creates_exact_inputs_and_external_previews(ready: Fixture) 
         ("blocked-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("blocked-gate", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("ready-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("citation-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("projection-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("register-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("route", "ROUTE_SELECTION_UNKNOWN"),
         ("label", "BOUNDARY_TEXT_TOO_LONG"),
         ("control", "BOUNDARY_TEXT_INVALID"),
@@ -358,6 +362,16 @@ def test_whole_set_pure_defects_leave_no_setup(
         "blocked-off-route": replace(second, expects_blocked=("CP-9",)),
         "blocked-gate": replace(second, expects_blocked=("CP-0",)),
         "ready-off-route": replace(second, expects_ready=("CP-9",)),
+        "citation-off-route": replace(
+            second, expects=(replace(second.expects[0], module_id="CP-DR"),)
+        ),
+        "projection-off-route": replace(
+            second,
+            expects_projection=(
+                ExpectedProjection("CP-DR", "decision_scope", "Invest"),
+            ),
+        ),
+        "register-off-route": replace(second, expects_register=(register,)),
         "route": replace(second, selection_id="NO_SUCH_PATHWAY"),
         "label": replace(second, label="x" * 129),
         "control": replace(second, label="bad\x00label"),
