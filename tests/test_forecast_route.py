@@ -105,9 +105,16 @@ def route(monkeypatch: pytest.MonkeyPatch) -> ResolvedRoute:
 
 
 class ForecastCompletions(RouteCompletions):
-    def __init__(self, source_id: UUID, *, defect: str = "") -> None:
+    def __init__(
+        self,
+        source_id: UUID,
+        *,
+        defect: str = "",
+        limitations: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(source_id, quotes_by_module=OWNER_QUOTES)
         self.defect = defect
+        self.limitations = limitations
 
     def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
         fields = fields_from_prompt(prompt)
@@ -131,7 +138,7 @@ class ForecastCompletions(RouteCompletions):
             "confidence_score": 90,
             "confidence_band": "High",
             "committee_status": "Draft Only",
-            "limitation_flags": [],
+            "limitation_flags": list(self.limitations),
             "validation_warnings": [],
             "downstream_consumers": [],
             **AUTHORED["Passed"],
@@ -269,7 +276,8 @@ def test_qualification_checks_host_recomputed_forecast_not_its_citation(
 
     from server.engine.runtime import Execution, run_route
 
-    answers = ForecastCompletions(harness.source_id)
+    limitations = (LIMITATION, "Forecast excludes uncommitted acquisitions")
+    answers = ForecastCompletions(harness.source_id, limitations=limitations)
     run_route(
         harness.conn,
         harness.blobs,
@@ -312,7 +320,7 @@ def test_qualification_checks_host_recomputed_forecast_not_its_citation(
             scale="millions",
             perimeter="Consolidated",
             qa_status="Passed",
-            limitation_flags=(),
+            limitation_flags=limitations,
             readiness=tuple(
                 sorted(
                     (node.module_id, "READY")
@@ -334,6 +342,19 @@ def test_qualification_checks_host_recomputed_forecast_not_its_citation(
     assert qualified.forecast_met is True
 
     assert case.forecast is not None
+    reordered = replace(
+        case.forecast,
+        readiness=tuple(reversed(case.forecast.readiness)),
+        limitation_flags=tuple(reversed(case.forecast.limitation_flags)),
+    )
+    [same_key] = build_matrix(
+        harness.conn,
+        harness.blobs,
+        harness.bundle,
+        qualification=QualificationSet((replace(case, forecast=reordered),)),
+        runs={case.label: harness.run_id},
+    ).rows
+    assert same_key.forecast_met is True
     for forecast in (
         replace(case.forecast, perimeter="Parent"),
         replace(case.forecast, scale="units"),
