@@ -168,7 +168,7 @@ def test_portfolio_decision_route_is_exact_and_enabled() -> None:
     pathways = sum(len(profile["pathways"]) for profile in CATALOG["profiles"].values())
     assert "CP-6" in ADAPTER_MODULES
     assert SELECTION in ADAPTER_ROUTES
-    assert (len(ADAPTER_ROUTES), pathways - len(ADAPTER_ROUTES)) == (13, 5)
+    assert (len(ADAPTER_ROUTES), pathways - len(ADAPTER_ROUTES)) == (15, 3)
     assert MODULES == (
         "CP-0",
         "CP-1",

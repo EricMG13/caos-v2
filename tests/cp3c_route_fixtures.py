@@ -37,7 +37,12 @@ from liquidity_route_fixtures import (
 from liquidity_route_fixtures import (
     liquidity_markdown,
 )
-from lite_route_fixtures import _table, _yaml
+from lite_route_fixtures import (
+    LiteHandoffKnobs,
+    _table,
+    _yaml,
+    realistic_handoff_markdown,
+)
 
 from server.engine.route import resolve_route
 from server.methodology.handoff import (
@@ -134,12 +139,18 @@ ROUTE_QUOTES = {
 }
 
 
-def cp3c_identity(module: str, upstream: tuple[UpstreamRef, ...] = ()) -> HostIdentity:
-    node = next(node for node in ROUTE.nodes if node.module_id == module)
-    name = CONTRACT.routing.Route(CATALOG, *SELECTION).by_module[module]["module_name"]
+def cp3c_identity(
+    module: str,
+    upstream: tuple[UpstreamRef, ...] = (),
+    *,
+    selection: tuple[str, str] = SELECTION,
+) -> HostIdentity:
+    route = resolve_route(CATALOG, *selection)
+    node = next(node for node in route.nodes if node.module_id == module)
+    name = CONTRACT.routing.Route(CATALOG, *selection).by_module[module]["module_name"]
     return HostIdentity(
         RUN,
-        *SELECTION,
+        *selection,
         node.route_node_id,
         module,
         name,
@@ -504,7 +515,10 @@ def direct_upstream(include_cp4: bool = True) -> tuple[UpstreamRef, ...]:
     )
 
 
-def route_identity(module: str) -> HostIdentity:
+def route_identity(
+    module: str, *, selection: tuple[str, str] = SELECTION
+) -> HostIdentity:
+    route = resolve_route(CATALOG, *selection)
     upstream = tuple(
         UpstreamRef(
             source.route_node_id,
@@ -513,17 +527,21 @@ def route_identity(module: str) -> HostIdentity:
             "FY2025",
             hashlib.sha256(source.module_id.encode()).hexdigest(),
         )
-        for source in ROUTE.nodes
+        for source in route.nodes
         if any(
             edge.source == source.module_id and edge.target == module
-            for edge in ROUTE.edges
+            for edge in route.edges
         )
     )
-    return cp3c_identity(module, upstream)
+    return cp3c_identity(module, upstream, selection=selection)
 
 
 def _cp0_markdown(
-    ident: HostIdentity, fields: dict[str, Any], readiness: dict[str, str]
+    ident: HostIdentity,
+    fields: dict[str, Any],
+    readiness: dict[str, str],
+    *,
+    selection: tuple[str, str] = SELECTION,
 ) -> bytes:
     """Reuse the canonical CP-0 fixture with this route's exact T8 owners."""
     rendered = canonical_markdown(
@@ -548,7 +566,9 @@ def _cp0_markdown(
             readiness.get(module, "READY"),
             "issuer-pack p1",
         ]
-        for index, module in enumerate(MODULES[1:], 1)
+        for index, module in enumerate(
+            (node.module_id for node in resolve_route(CATALOG, *selection).nodes[1:]), 1
+        )
     ]
     return (
         prefix
@@ -559,7 +579,13 @@ def _cp0_markdown(
     ).encode()
 
 
-def _cp5_markdown(ident: HostIdentity, fields: dict[str, Any], qa_status: str) -> bytes:
+def _cp5_markdown(
+    ident: HostIdentity,
+    fields: dict[str, Any],
+    qa_status: str,
+    *,
+    selection: tuple[str, str] = SELECTION,
+) -> bytes:
     quote = ROUTE_QUOTES["CP-5"]
     front = {
         **fields,
@@ -581,7 +607,7 @@ def _cp5_markdown(ident: HostIdentity, fields: dict[str, Any], qa_status: str) -
             rows = [
                 [
                     ref.module_id,
-                    f"{expected_filename(route_identity(ref.module_id))} / {RUN}",
+                    f"{expected_filename(route_identity(ref.module_id, selection=selection))} / {RUN}",
                     "Full",
                     "Sufficient",
                     "Conforming",
@@ -675,10 +701,21 @@ def route_markdown(
     fields: dict[str, Any],
     qa_status: str,
     readiness: dict[str, str],
+    *,
+    selection: tuple[str, str] = SELECTION,
 ) -> bytes:
-    ident = route_identity(module)
+    ident = route_identity(module, selection=selection)
     if module == "CP-0":
-        return _cp0_markdown(ident, fields, readiness)
+        return _cp0_markdown(ident, fields, readiness, selection=selection)
+    if module == "CP-L10":
+        return realistic_handoff_markdown(
+            ident,
+            LiteHandoffKnobs(
+                fields=fields,
+                qa_status=qa_status,
+                quotes=(CANONICAL_QUOTES["CP-0"],),
+            ),
+        )
     if module == "CP-2D":
         return liquidity_markdown(
             ident, HandoffKnobs(fields=fields, qa_status=qa_status)
@@ -686,7 +723,7 @@ def route_markdown(
     if module == "CP-3C":
         return cp3c_markdown(ident, fields=fields, qa_status=qa_status)
     if module == "CP-5":
-        return _cp5_markdown(ident, fields, qa_status)
+        return _cp5_markdown(ident, fields, qa_status, selection=selection)
     return canonical_markdown(
         ident,
         HandoffKnobs(fields=fields, qa_status=qa_status, quote=ROUTE_QUOTES[module]),
@@ -698,6 +735,7 @@ class RefinancingCompletions:
     source_id: UUID
     model: str = "a-model/for-the-test"
     charge: Decimal = Decimal("0.0000041")
+    selection: tuple[str, str] = field(default=SELECTION, kw_only=True)
     qa_by_module: dict[str, str] = field(default_factory=dict)
     readiness: dict[str, str] = field(default_factory=dict)
     prompts: list[str] = field(default_factory=list)
@@ -719,6 +757,7 @@ class RefinancingCompletions:
                 module, "Restricted" if module in {"CP-3C", "CP-5"} else "Passed"
             ),
             self.readiness,
+            selection=self.selection,
         )
         self.answers.append(markdown)
         body = wire(
@@ -727,7 +766,7 @@ class RefinancingCompletions:
                 {
                     "source_id": str(self.source_id),
                     "page": 1,
-                    "matched_text": ROUTE_QUOTES[module],
+                    "matched_text": ROUTE_QUOTES.get(module, CANONICAL_QUOTES["CP-0"]),
                 }
             ],
         )
