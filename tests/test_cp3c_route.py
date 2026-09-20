@@ -133,7 +133,7 @@ def _attempts(harness: _Harness, module: str) -> tuple[int, int]:
 
 def test_covenant_refinancing_route_is_exact_and_enabled() -> None:
     assert "CP-3C" in ADAPTER_MODULES
-    assert SELECTION in ADAPTER_ROUTES and len(ADAPTER_ROUTES) == 15
+    assert SELECTION in ADAPTER_ROUTES and len(ADAPTER_ROUTES) == 17
     assert MODULES == (
         "CP-0",
         "CP-1",
