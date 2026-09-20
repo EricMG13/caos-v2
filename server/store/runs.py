@@ -273,6 +273,9 @@ def _accept_artifact(
     accepted: Accepted,
     lease: Lease | None,
 ) -> bool:
+    # The adapter source and host policy are part of the accepted artifact's
+    # identity, so detect drift that happened while the provider was running.
+    methodology.verify_canonical_adapter_pin()
     run, case, status = _locked_attempt(conn, attempt)
     digests = [accepted.artifact_sha256]
     if accepted.record_sha256 is not None:

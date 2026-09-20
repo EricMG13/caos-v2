@@ -33,6 +33,7 @@ from canonical_fixtures import identity as _identity
 
 from server.blobs import BlobStore
 from server.evidence.citations import AnchoredCitation, Citation, Rect
+from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.methodology import bundle as bundle_module
 from server.methodology.bundle import (
     MANIFEST_NAME,
@@ -150,7 +151,7 @@ def _record(**changes: object) -> CanonicalRecord:
     )
     values: dict[str, object] = {
         "artifact_sha256": hashlib.sha256(CP0_MD).hexdigest(),
-        "adapter_version": "canonical-markdown-v3",
+        "adapter_version": CANONICAL_ADAPTER_VERSION,
         "build_id": "build-1",
         "manifest_sha256": "a" * 64,
         "authority_bundle_sha256": CP0.authority_bundle_sha256,

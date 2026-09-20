@@ -3,6 +3,7 @@
 from dataclasses import replace
 from uuid import UUID, uuid4
 
+from server.methodology import CANONICAL_ADAPTER_VERSION
 from server.qualification.harness import Performed, PerformedSet, PreparedCase
 from server.qualification.matrix import Matrix, MatrixRow
 from server.qualification.proof import OrchestrationProof
@@ -31,7 +32,7 @@ def qualification_performed(*, blocked_label: str | None = None) -> PerformedEvi
             route_digest="d" * 64,
             build_id="b" * 64,
             manifest_sha256="e" * 64,
-            adapter_version="canonical-markdown-v3",
+            adapter_version=CANONICAL_ADAPTER_VERSION,
             research_json=None,
             input_fingerprint="f" * 64,
         ),

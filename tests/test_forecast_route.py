@@ -211,8 +211,8 @@ def test_forecast_route_accepts_real_host_calculated_artifact(
     )
     result = forecast_projection(answers.answers[-1])
     assert result["rows"][0]["cash"]["closing"] == "145.000000"
-    assert len(answers.prompts) == 1
-    assert ANALYTICAL_PERSONA in answers.prompts[0]
+    assert len(answers.prompts) == 10
+    assert all(ANALYTICAL_PERSONA in prompt for prompt in answers.prompts)
     # The forecast owners are the only modules handed the extension, and this
     # is the only route fixture that emits it: prove it opens and closes.
     owners = {
