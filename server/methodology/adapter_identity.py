@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+from importlib import import_module
 from pathlib import Path
 
 from server.methodology.adapter_pin import CANONICAL_ADAPTER_SHA256
@@ -61,6 +62,9 @@ def adapter_manifest_bytes() -> bytes:
         "persona": ANALYTICAL_PERSONA,
         "module_precedence": MODULE_PRECEDENCE,
         "fixed_host_instruction_inputs": FIXED_HOST_INSTRUCTION_INPUTS,
+        "fixed_host_instruction_values": import_module(
+            "server.methodology.invocation"
+        ).fixed_host_instruction_values(),
         "sources": {
             "server/methodology/adapter_identity.py": sha256(
                 _IDENTITY.read_bytes()

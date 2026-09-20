@@ -591,6 +591,20 @@ You are this run's source-readiness gate.
 Register T8 lists exactly these modules, each once, and no others: {module_ids}
 """
 
+
+def fixed_host_instruction_values() -> dict[str, str]:
+    """The loaded fixed host text that the adapter pin must bind."""
+    return {
+        "_INSTRUCTION": _INSTRUCTION,
+        "_TAGGED": _TAGGED,
+        "_FINAL_CHECK": _FINAL_CHECK,
+        "_CP0_FINAL_CHECK": _CP0_FINAL_CHECK,
+        "_FORECAST_EXTENSION": _FORECAST_EXTENSION,
+        "_HOST_STEPS": _HOST_STEPS,
+        "_GATE_INSTRUCTION": _GATE_INSTRUCTION,
+    }
+
+
 # An edge whose catalog entry declares no `allowed_use` says so, rather than
 # leaving the label out.
 NOT_DECLARED = "NOT_DECLARED"

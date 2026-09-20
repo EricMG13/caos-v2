@@ -55,7 +55,7 @@ from server.engine.route import (
     resolve_route,
 )
 from server.evidence.citations import AnchoredCitation, Rect
-from server.methodology import adapter_identity
+from server.methodology import adapter_identity, invocation
 from server.methodology.adapter_pin import CANONICAL_ADAPTER_SHA256
 from server.methodology.bundle import (
     MANIFEST_NAME,
@@ -88,6 +88,7 @@ from server.methodology.invocation import (
     _persona_section,
     allowed_uses,
     build_handoff_prompt,
+    fixed_host_instruction_values,
     host_identity,
     lite_object_requirement,
     named_objects,
@@ -1314,6 +1315,23 @@ def test_adapter_pin_is_a_full_content_identity_and_refuses_policy_drift(
     with pytest.raises(Refusal) as refused:
         adapter_identity.verify_canonical_adapter_pin()
     assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+@pytest.mark.parametrize("name", adapter_identity.FIXED_HOST_INSTRUCTION_INPUTS)
+def test_adapter_pin_refuses_loaded_fixed_instruction_drift(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setattr(invocation, name, "changed")
+    with pytest.raises(Refusal) as refused:
+        adapter_identity.verify_canonical_adapter_pin()
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+def test_adapter_pin_binds_every_loaded_fixed_instruction_value() -> None:
+    assert (
+        tuple(fixed_host_instruction_values())
+        == adapter_identity.FIXED_HOST_INSTRUCTION_INPUTS
+    )
 
 
 def test_adapter_pin_generator_reproduces_the_compiled_manifest(tmp_path: Path) -> None:
