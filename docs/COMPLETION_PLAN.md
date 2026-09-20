@@ -50,9 +50,12 @@ and the top checkpoint in
   unavailable, the FULL research brief remains unconfirmed, and the admitted
   FINRA observation remains last-trade-only; these limitations are not filled
   with coordinator-authored facts;
-- the remaining work is the Phase 5 documentation/release checkpoint and the
-  separate delivery task's hosted PR, check, SonarCloud and final fast-forward
-  work. This implementation task performs no PR operation.
+- all implementation is accepted on GitHub through `24647ab` (PR #416), with
+  required hosted checks and both Sonar checks green;
+- the remaining work is the final exact-tree gate and release-pack
+  reproduction, repeat separate Sol/xhigh and Astra/xhigh reviews, and the
+  delivery task's fast-forward synchronization after the dirty-workbench stop
+  is resolved. This implementation task performs no PR operation.
 
 The older recommendation and tables below describe the state when reviewed;
 they are not the current checkpoint and are not silently rewritten.

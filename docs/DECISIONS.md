@@ -5210,9 +5210,9 @@ catalog pathways enabled, `LITE_CREDIT_22 / LITE_DEEP_RESEARCH` `QUALIFIED` by
 the current owner-signed verdict, and the other seventeen `NOT_QUALIFIED`.
 Two independent store-backed emissions under different hash seeds were
 byte-identical. The emitted JSON SHA-256 is
-`d860197ae5fa6bcfa406772acf17b925de3af799ec22e27aba2cb93a10dc9f24`;
+`29e6f2492605476c6e617f428bd18c85cf7576e354976b0a46066349c0d70af4`;
 the Markdown SHA-256 is
-`cc4243eb42564a483e0fb4abc643ad6fab09c4cc801640bc299500e997d29227`.
+`18c9b5d38728616c57b6f5cf2ef5868ed671aa32ff018f7ec10eaa3e2cbae064`.
 As §94 requires, `release-pack/` remains ignored and uncommitted.
 
 This census does not authorize another provider call or convert route

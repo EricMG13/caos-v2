@@ -35,8 +35,10 @@ Playwright, Docker, Trivy 0.70.0, installed GitNexus 1.6.9.
 > pathways are now deterministically enabled. The store-backed release census
 > at `2026-09-20T00:00:00+00:00` is one `QUALIFIED` and seventeen
 > `NOT_QUALIFIED`. Phase 4 stopped after two smoke sets and their bounded
-> Sol/xhigh retries; no wider provider spend is authorized. Phase 5
-> documentation/release reconciliation and separate hosted delivery remain.
+> Sol/xhigh retries; no wider provider spend is authorized. Implementation is
+> accepted through `24647ab` (PR #416), with hosted checks and both Sonar checks
+> green. Final exact-tree gates, repeat independent reviews and delivery-owned
+> fast-forward synchronization remain.
 
 **Spec:** [`docs/COMPLETION_PLAN.md`](../../COMPLETION_PLAN.md) — its §2
 inventory and §3 items O01–O26 are the requirements this plan implements;
