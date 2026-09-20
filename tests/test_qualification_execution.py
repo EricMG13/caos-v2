@@ -13,7 +13,15 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from canonical_fixtures import research_brief
+from canonical_fixtures import (
+    QUOTE,
+    UNANCHORED,
+    CanonicalCompletions,
+    capture_prompts,
+    fields_from_prompt,
+    normalized_persona_sections,
+    research_brief,
+)
 from test_qualification_harness import (
     OTHER,
     _approve,
@@ -23,8 +31,14 @@ from test_qualification_harness import (
     _without_route,
 )
 from test_qualification_prepare import Fixture, ready
+from test_runtime import blobs as _worker_blobs
+from test_runtime import bundle as _worker_bundle
+from test_runtime import route as _worker_route
+from test_worker import drive, queued_run
 
+from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
+from server.engine.route import ResolvedRoute
 from server.evidence.ingest import admit_pack
 from server.methodology import executor
 from server.methodology.bundle import MANIFEST_NAME, Bundle
@@ -45,8 +59,9 @@ from server.store.run_inputs import (
 )
 from server.store.runs import create_case, start_run
 from server.store.source_sets import snapshot_source_set
+from server.store.work import requeue_run
 
-__all__ = ["ready"]
+__all__ = ["_worker_blobs", "_worker_bundle", "_worker_route", "ready"]
 
 _MEMBERS = "SELECT m.filename,m.document_sha256 FROM source_set_members m"
 # The run's captured pins, still read on their own by the proof and the
@@ -210,6 +225,49 @@ def test_approved_captured_inputs_survive_later_catalog_and_source_changes(
     )
     prompts = cast(_Completions, harness.completions).prompts
     assert len(prompts) == 6 and all(str(added[0]) not in prompt for prompt in prompts)
+    assert len(normalized_persona_sections(prompts)) == 1
+
+
+def test_qualification_prompts_match_worker_preflight_actual_and_retry(
+    ready: Fixture,
+    case: tuple[StoreConnection, UUID],
+    _worker_route: ResolvedRoute,
+    _worker_bundle: Bundle,
+    _worker_blobs: BlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = queued_run(case, _worker_route, _worker_bundle, _worker_blobs)
+    worker_prompts: list[str] = []
+    from server.methodology import canonical
+
+    monkeypatch.setattr(
+        canonical, "_prompt", capture_prompts(canonical._prompt, worker_prompts)
+    )
+    completions = CanonicalCompletions(run.source_id, quotes=(UNANCHORED,))
+    assert drive(run, completions) == run.run_id
+    assert requeue_run(run.conn, run.run_id)
+    run.conn.commit()
+    completions.quotes = (QUOTE,)
+    assert drive(run, completions) == run.run_id
+    worker_sections = normalized_persona_sections(worker_prompts)
+    assert len(worker_sections) == 1
+    assert [fields_from_prompt(prompt)["module_id"] for prompt in worker_prompts].count(
+        "CP-0"
+    ) == 4
+    assert {fields_from_prompt(prompt)["module_id"] for prompt in worker_prompts} == {
+        "CP-0",
+        "CP-L10",
+        "CP-5",
+    }
+
+    conn, _, harness, _ = ready
+    prepared = _prepared(ready)
+    _approve(conn, prepared)
+    performed = _run(ready, prepared)
+    assert performed.matrix is not None
+    harness_prompts = cast(_Completions, harness.completions).prompts
+    assert len(harness_prompts) == 6
+    assert normalized_persona_sections(harness_prompts) == worker_sections
 
 
 @pytest.mark.parametrize("field", list(RunInput.__dataclass_fields__))

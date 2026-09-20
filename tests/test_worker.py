@@ -16,7 +16,14 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from canonical_fixtures import UNANCHORED, CanonicalCompletions
+from canonical_fixtures import (
+    QUOTE,
+    UNANCHORED,
+    CanonicalCompletions,
+    capture_prompts,
+    fields_from_prompt,
+    normalized_persona_sections,
+)
 from conftest import priced
 from lite_route_fixtures import RealisticLiteCompletions
 from test_runtime import ESTIMATE, _approved_run, _Run, blobs, bundle, route
@@ -35,12 +42,13 @@ from server.engine.worker import (
     run_worker,
     work_once,
 )
+from server.methodology import canonical
 from server.methodology.bundle import Bundle
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
-from server.store.work import LEASE_SECONDS, enqueue_run, worker_states
+from server.store.work import LEASE_SECONDS, enqueue_run, requeue_run, worker_states
 
 __all__ = ["blobs", "bundle", "route"]
 
@@ -112,6 +120,36 @@ def test_worker_drives_an_enqueued_lite_run_to_complete_with_a_deterministic_pro
     assert count(run.conn, "artifacts", run.run_id) == len(route.nodes)
     assert len(completions.prompts) == len(route.nodes)
     assert drive(run, completions) is None, "nothing left to claim"
+
+
+def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = queued_run(case, route, bundle, blobs)
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        canonical, "_prompt", capture_prompts(canonical._prompt, prompts)
+    )
+    completions = CanonicalCompletions(run.source_id, quotes=(UNANCHORED,))
+    assert drive(run, completions) == run.run_id
+    assert requeue_run(run.conn, run.run_id)
+    run.conn.commit()
+    completions.quotes = (QUOTE,)
+    assert drive(run, completions) == run.run_id
+    sections = normalized_persona_sections(prompts)
+    assert len(sections) == 1
+    assert [fields_from_prompt(prompt)["module_id"] for prompt in prompts].count(
+        "CP-0"
+    ) == 4
+    assert {fields_from_prompt(prompt)["module_id"] for prompt in prompts} == {
+        "CP-0",
+        "CP-L10",
+        "CP-5",
+    }
 
 
 def test_worker_stops_a_refused_run_with_its_code_and_releases_the_lease(

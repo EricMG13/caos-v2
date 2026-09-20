@@ -43,7 +43,7 @@ from server.blobs import BlobStore
 from server.engine import runtime
 from server.engine.runtime import Execution, Provider, ProviderResult, run_route
 from server.evidence import read as evidence_read
-from server.methodology import canonical, executor, invocation
+from server.methodology import adapter_identity, canonical, executor, invocation
 from server.methodology.canonical import (
     Replayed,
     Verdict,
@@ -834,7 +834,10 @@ class _ChangesAfterCheck:
         return self.inner.execute(route_node_id, module_id, attempt_id=attempt_id)
 
 
-@pytest.mark.parametrize("moved", ["ceiling", "root-file"])
+@pytest.mark.parametrize(
+    "moved",
+    ["ceiling", "root-file", *adapter_identity.FIXED_HOST_INSTRUCTION_INPUTS],
+)
 def test_the_executor_rechecks_the_context_after_reservation(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch, moved: str
 ) -> None:
@@ -846,15 +849,17 @@ def test_the_executor_rechecks_the_context_after_reservation(
     def change() -> None:
         if moved == "ceiling":
             monkeypatch.setattr(invocation, "MAX_REQUEST_BYTES", 4096)
-        else:
+        elif moved == "root-file":
             canon.write_bytes(canon.read_bytes().replace(b"CP", b"CQ", 1))
+        else:
+            monkeypatch.setattr(invocation, moved, "changed")
 
     answers = _answers(harness)
     provider = _ChangesAfterCheck(_module_provider(harness, answers), change)
     expected = {
         "ceiling": RefusalCode.CONTEXT_OVER_CEILING,
         "root-file": RefusalCode.AUTHORITY_BYTES_MISMATCH,
-    }[moved]
+    }.get(moved, RefusalCode.AUTHORITY_BYTES_MISMATCH)
     assert _run_route(harness, provider) is expected
     assert answers.calls == 0
     assert _counts(harness) == (0, [], 0, 1, 1)

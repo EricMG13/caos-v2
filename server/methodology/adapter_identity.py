@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+from importlib import import_module
 from pathlib import Path
 
 from server.methodology.adapter_pin import CANONICAL_ADAPTER_SHA256
@@ -39,6 +40,8 @@ MODULE_PRECEDENCE = (
 )
 
 FIXED_HOST_INSTRUCTION_INPUTS = (
+    "ANALYTICAL_PERSONA",
+    "MODULE_PRECEDENCE",
     "_INSTRUCTION",
     "_TAGGED",
     "_FINAL_CHECK",
@@ -46,6 +49,10 @@ FIXED_HOST_INSTRUCTION_INPUTS = (
     "_FORECAST_EXTENSION",
     "_HOST_STEPS",
     "_GATE_INSTRUCTION",
+    "NOT_DECLARED",
+    "QUOTE_EXISTENCE",
+    "SUPPORT",
+    "_PAGE_MAP_NOTE",
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -55,12 +62,16 @@ _IDENTITY = Path(__file__)
 
 def adapter_manifest_bytes() -> bytes:
     """Bytes a release reviews before regenerating the adapter identity pin."""
+    loaded = import_module(
+        "server.methodology.invocation"
+    ).fixed_host_instruction_values()
     payload = {
         "domain": "caos.canonical-adapter.identity.v1",
         "adapter_label": CANONICAL_ADAPTER_LABEL,
-        "persona": ANALYTICAL_PERSONA,
-        "module_precedence": MODULE_PRECEDENCE,
+        "persona": loaded["ANALYTICAL_PERSONA"],
+        "module_precedence": loaded["MODULE_PRECEDENCE"],
         "fixed_host_instruction_inputs": FIXED_HOST_INSTRUCTION_INPUTS,
+        "fixed_host_instruction_values": loaded,
         "sources": {
             "server/methodology/adapter_identity.py": sha256(
                 _IDENTITY.read_bytes()

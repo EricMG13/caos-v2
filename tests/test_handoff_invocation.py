@@ -9,23 +9,22 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import importlib.util
 import json
 import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+from canonical_adapter_manifest import generate_adapter_pin
 from canonical_fixtures import (
     BUNDLE,
     CATALOG,
     CONTRACT,
+    CONTRADICTORY_PERSONA,
     VENDORED,
     handoff_markdown,
     identity,
@@ -33,14 +32,26 @@ from canonical_fixtures import (
     upstream_ref,
 )
 from canonical_route_fixtures import (
+    LEDGER_ROUTE,
     RESEARCH_BRIEF,
     RESEARCH_ROUTE,
     bound_research_brief_text,
+    ledger_identity,
     research_identity,
     research_markdown,
     research_section,
 )
+from conftest import priced
 from conftest import reserve_at as reserve
+from full_assessment_route_fixtures import (
+    MODULES as FULL_MODULES,
+)
+from full_assessment_route_fixtures import (
+    ROUTE as FULL_ROUTE,
+)
+from full_assessment_route_fixtures import (
+    route_identity as full_route_identity,
+)
 from test_execution_freshness import _Harness, harness
 from test_loop_charges import ESTIMATE, MODEL, REPORTED
 
@@ -55,7 +66,7 @@ from server.engine.route import (
     resolve_route,
 )
 from server.evidence.citations import AnchoredCitation, Rect
-from server.methodology import adapter_identity
+from server.methodology import adapter_identity, invocation
 from server.methodology.adapter_pin import CANONICAL_ADAPTER_SHA256
 from server.methodology.bundle import (
     MANIFEST_NAME,
@@ -66,6 +77,7 @@ from server.methodology.bundle import (
 )
 from server.methodology.executor import Delivery
 from server.methodology.handoff import (
+    ADAPTER_MODULES,
     INVISIBLE,
     RESEARCH_HOST_FIELDS,
     HostIdentity,
@@ -77,10 +89,7 @@ from server.methodology.handoff import (
     validate_markdown,
 )
 from server.methodology.invocation import (
-    _FINAL_CHECK,
     _FORECAST_EXTENSION,
-    _HOST_STEPS,
-    _INSTRUCTION,
     HOST_PERFORMED_SCRIPTS,
     MAX_UPSTREAM_HANDOFF_BYTES,
     MODULE_AUTHORED_SCRIPTS,
@@ -88,6 +97,7 @@ from server.methodology.invocation import (
     _persona_section,
     allowed_uses,
     build_handoff_prompt,
+    fixed_host_instruction_values,
     host_identity,
     lite_object_requirement,
     named_objects,
@@ -102,7 +112,13 @@ from server.methodology.verification import (
     verify_owner_chain,
     verify_owner_restrictions,
 )
-from server.provider import MAX_REQUEST_BYTES, OpenRouter, encode_request
+from server.pricing import priced_request, worst_case
+from server.provider import (
+    MAX_COMPLETION_TOKENS,
+    MAX_REQUEST_BYTES,
+    OpenRouter,
+    encode_request,
+)
 from server.refusals import Refusal, RefusalCode
 from server.store.outcomes import CallOutcome, record_outcome
 from server.store.routes import pin_route
@@ -1044,57 +1060,29 @@ def test_an_upstream_handoff_past_its_section_bound_refuses_the_prompt() -> None
 
 
 def test_the_declared_section_bound_leaves_the_widest_node_its_authority() -> None:
-    """Why the declared number is the number: a node's own delivered authority
-    beside its direct upstreams at the bound must still leave the request
-    ceiling room for evidence. A bundle that widens a node or grows an
-    authority set fails here rather than at the first FULL run.
-
-    Maximised over every node of every profile, not over one pair. The review
-    that asked for this found the single-pair form would pass a bundle whose
-    third profile carried a wider node, or whose CP-3 authority grew past the
-    quarter, while the arithmetic the declared number rests on no longer held.
-    **CP-3** is the true maximum on this bundle at 711,482 encoded bytes
-    against a 1,048,576 ceiling, 32% of it left -- and the assertion does not
-    depend on that staying true. The raw-byte version of this test named CP-5,
-    which was an artefact of its unit: CP-5 carries the most upstreams, CP-3
-    the heavier authority once JSON escaping is paid.
-
-    **Measured through `encode_request`, not by summing raw lengths.** The
-    Completion Phase 12 adversarial audit found this test's arithmetic was in
-    the wrong unit: `MAX_REQUEST_BYTES` bounds
-    `len(json.dumps(request).encode())` with `ensure_ascii=True`, so every
-    non-ASCII character costs six bytes and every quote and newline two --
-    and the vendored authority is full of em-dashes, section signs and curly
-    quotes. A sum of raw lengths cannot see any of it, so the test could pass
-    while the real encoded request was over the ceiling. The authority files
-    are used as their real bytes for the same reason.
-
-    What it still does not carry is the citation register, which is explicitly
-    unbounded, and the evidence section, which is the room this assertion
-    exists to prove is left. The fixed host sections are included.
-    """
-    filler = "x" * MAX_UPSTREAM_HANDOFF_BYTES
-    worst = 0
-    worst_node = ""
-    for profile in CATALOG["profiles"].values():
-        edges = profile["edges"]
-        for node in {edge["target"] for edge in edges}:
-            upstreams = sum(1 for edge in edges if edge["target"] == node)
-            files = delivered_authority(BUNDLE, node).files
-            prompt = "\n".join(
-                [
-                    *(data.decode("utf-8", "replace") for _name, data in files),
-                    *(filler for _ in range(upstreams)),
-                    _HOST_STEPS,
-                    _INSTRUCTION,
-                    _FINAL_CHECK,
-                ]
-            )
-            cost = len(encode_request("a-model/for-the-test", prompt))
-            if cost > worst:
-                worst, worst_node = cost, node
-    assert worst < MAX_REQUEST_BYTES, (worst_node, worst)
-    assert MAX_REQUEST_BYTES - worst > MAX_REQUEST_BYTES // 4, (worst_node, worst)
+    body = b"x" * MAX_UPSTREAM_HANDOFF_BYTES
+    ident = full_route_identity("CP-5")
+    refs = tuple(
+        replace(ref, sha256=hashlib.sha256(body).hexdigest()) for ref in ident.upstream
+    )
+    ident = replace(ident, upstream=refs)
+    prompt = build_handoff_prompt(
+        CONTRACT,
+        identity=ident,
+        authority=delivered_authority(BUNDLE, "CP-5"),
+        catalog=CATALOG,
+        delivered=_delivered(),
+        upstream=tuple((ref, body) for ref in refs),
+        upstream_citations={ref.route_node_id: ANCHORED for ref in refs},
+        route=FULL_ROUTE,
+    )
+    request = encode_request(MODEL, prompt, json_object=True)
+    assert len(refs) == 16
+    assert prompt.count(_persona_section(_tag(prompt))) == 1
+    assert len(request) <= MAX_REQUEST_BYTES
+    assert json.loads(request)["max_completion_tokens"] == MAX_COMPLETION_TOKENS
+    price = priced(ESTIMATE)
+    assert priced_request(price, len(request)) <= worst_case(price)
 
 
 class _NoTransport:
@@ -1288,21 +1276,83 @@ def test_every_host_section_opens_and_closes_with_a_tagged_marker(
     assert ("CP-0 FINAL CHECK" in closed) is (module_id == "CP-0")
 
 
-@pytest.mark.parametrize("module_id", ["CP-0", "CP-L10", "CP-5"])
+def _catalog_prompt(
+    ident: HostIdentity, route: ResolvedRoute, delivered: list[Delivery] | None = None
+) -> str:
+    upstream = tuple((ref, ref.module_id.encode()) for ref in ident.upstream)
+    items = _delivered() if delivered is None else delivered
+    return build_handoff_prompt(
+        CONTRACT,
+        identity=ident,
+        authority=delivered_authority(BUNDLE, ident.module_id),
+        catalog=CATALOG,
+        delivered=items,
+        upstream=upstream,
+        upstream_citations={ref.route_node_id: ANCHORED for ref in ident.upstream},
+        route=route,
+        source_set=(
+            _source_set(*(item.source_id for item in items))
+            if ident.module_id == "CP-0"
+            else None
+        ),
+    )
+
+
+_PERSONA_CASES = (
+    *((full_route_identity(module), FULL_ROUTE) for module in FULL_MODULES),
+    (ledger_identity("CP-8"), LEDGER_ROUTE),
+    (
+        research_identity(
+            "CP-DR",
+            research_brief=bound_research_brief_text(
+                hashlib.sha256(b"CP-0").hexdigest()
+            ),
+        ),
+        RESEARCH_ROUTE,
+    ),
+    (
+        identity(
+            "CP-L10",
+            (
+                replace(
+                    upstream_ref(identity("CP-0"), handoff_markdown(identity("CP-0"))),
+                    sha256=hashlib.sha256(b"CP-0").hexdigest(),
+                ),
+            ),
+        ),
+        LITE_ROUTE,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("ident", "route"),
+    _PERSONA_CASES,
+    ids=[ident.module_id for ident, _route in _PERSONA_CASES],
+)
 def test_every_model_backed_module_receives_one_host_persona_section(
-    module_id: str,
+    ident: HostIdentity, route: ResolvedRoute
 ) -> None:
-    gate = handoff_markdown(identity("CP-0"))
-    ref = upstream_ref(identity("CP-0"), gate)
-    upstream = () if module_id == "CP-0" else ((ref, gate),)
-    prompt = _prompt(
-        identity(module_id, tuple(r for r, _ in upstream)), upstream=upstream
+    prompt = _catalog_prompt(
+        ident,
+        route,
+        [
+            *_delivered(),
+            Delivery(uuid4(), "000003", 2, BoundaryText.of(CONTRADICTORY_PERSONA)),
+        ],
     )
     tag = _tag(prompt)
     section = _persona_section(tag)
     assert prompt.count(section) == 1
+    assert CONTRADICTORY_PERSONA in prompt
     assert adapter_identity.ANALYTICAL_PERSONA in section
     assert "module and host rules supersede this section" in section
+
+
+def test_persona_cases_cover_every_catalog_model_module() -> None:
+    assert {ident.module_id for ident, _route in _PERSONA_CASES} == ADAPTER_MODULES - {
+        "CP-CF"
+    }
 
 
 def test_adapter_pin_is_a_full_content_identity_and_refuses_policy_drift(
@@ -1310,22 +1360,65 @@ def test_adapter_pin_is_a_full_content_identity_and_refuses_policy_drift(
 ) -> None:
     assert methodology.CANONICAL_ADAPTER_VERSION == CANONICAL_ADAPTER_SHA256
     assert re.fullmatch(r"[0-9a-f]{64}", CANONICAL_ADAPTER_SHA256)
-    monkeypatch.setattr(adapter_identity, "ANALYTICAL_PERSONA", "changed")
+    assert hashlib.sha256(adapter_identity.adapter_manifest_bytes()).hexdigest() == (
+        CANONICAL_ADAPTER_SHA256
+    )
+    monkeypatch.setattr(invocation, "ANALYTICAL_PERSONA", "changed")
     with pytest.raises(Refusal) as refused:
         adapter_identity.verify_canonical_adapter_pin()
     assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
 
 
-def test_adapter_pin_generator_reproduces_the_compiled_manifest(tmp_path: Path) -> None:
-    (tmp_path / "server/methodology").mkdir(parents=True)
-    expected = hashlib.sha256(adapter_identity.adapter_manifest_bytes()).hexdigest()
-    path = Path(__file__).parents[1] / "scripts/canonical_adapter_manifest.py"
-    spec = importlib.util.spec_from_file_location("_adapter_pin_test", path)
-    assert spec is not None and spec.loader is not None
-    module: Any = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    generator = cast(Callable[[Path], str], module.generate_adapter_pin)
-    assert generator(tmp_path) == expected == CANONICAL_ADAPTER_SHA256
+@pytest.mark.parametrize("name", adapter_identity.FIXED_HOST_INSTRUCTION_INPUTS)
+def test_adapter_pin_refuses_loaded_fixed_instruction_drift(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setattr(invocation, name, "changed")
+    with pytest.raises(Refusal) as refused:
+        adapter_identity.verify_canonical_adapter_pin()
+    assert refused.value.code is RefusalCode.AUTHORITY_BYTES_MISMATCH
+
+
+def test_adapter_pin_binds_every_loaded_fixed_instruction_value() -> None:
+    assert (
+        tuple(fixed_host_instruction_values())
+        == adapter_identity.FIXED_HOST_INSTRUCTION_INPUTS
+    )
+
+
+def test_adapter_pin_regeneration_allows_a_fresh_interpreter(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    shutil.copytree(
+        root / "server",
+        tmp_path / "server",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts/canonical_adapter_manifest.py"
+    shutil.copy2(root / "scripts/canonical_adapter_manifest.py", script)
+    assert generate_adapter_pin.__name__ == "generate_adapter_pin"
+    subprocess.run([sys.executable, str(script)], cwd=tmp_path, check=True)
+    builder = tmp_path / "server/methodology/invocation.py"
+    builder.write_text(
+        builder.read_text().replace("Use no other knowledge.", "Use every source."),
+        encoding="utf-8",
+    )
+    shutil.rmtree(builder.parent / "__pycache__", ignore_errors=True)
+    verify = (
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "from server.methodology.adapter_identity import verify_canonical_adapter_pin; "
+        "verify_canonical_adapter_pin()"
+    )
+    stale = subprocess.run(
+        [sys.executable, "-I", "-c", verify, str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert stale.returncode and "AUTHORITY_BYTES_MISMATCH" in stale.stderr
+    shutil.rmtree(builder.parent / "__pycache__", ignore_errors=True)
+    subprocess.run([sys.executable, str(script)], cwd=tmp_path, check=True)
+    shutil.rmtree(builder.parent / "__pycache__", ignore_errors=True)
+    subprocess.run([sys.executable, "-I", "-c", verify, str(tmp_path)], check=True)
 
 
 def test_the_forecast_extension_opens_and_closes_with_a_tagged_marker() -> None:

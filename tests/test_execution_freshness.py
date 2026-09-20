@@ -431,9 +431,11 @@ def _mutation(  # noqa: C901
         if name == "adapter_mismatch":
             monkeypatch.setattr(methodology, "CANONICAL_ADAPTER_VERSION", "changed")
             return
-        if name == "adapter_policy_moved":
+        if name.startswith("adapter_policy_moved_"):
             monkeypatch.setattr(
-                methodology.adapter_identity, "ANALYTICAL_PERSONA", "changed"
+                methodology.invocation,
+                name.removeprefix("adapter_policy_moved_"),
+                "changed",
             )
             return
         if name == "input_missing":
@@ -528,6 +530,11 @@ def _invoke_after_transport(
     return None, arbitrary.calls
 
 
+_ADAPTER_POLICY_MOVES = [
+    (f"adapter_policy_moved_{name}", RefusalCode.AUTHORITY_BYTES_MISMATCH)
+    for name in methodology.adapter_identity.FIXED_HOST_INSTRUCTION_INPUTS
+]
+
 _CHANGES = [
     ("gate_missing_SOURCE_SET", RefusalCode.GATE_APPROVAL_MISMATCH),
     ("gate_mismatch_SOURCE_SET", RefusalCode.GATE_APPROVAL_MISMATCH),
@@ -548,7 +555,7 @@ _CHANGES = [
     ("blocked", RefusalCode.RUN_NOT_RUNNING),
     ("bundle_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
     ("adapter_mismatch", RefusalCode.RUN_INPUT_INVALID),
-    ("adapter_policy_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
+    *_ADAPTER_POLICY_MOVES,
 ]
 
 
@@ -1176,7 +1183,7 @@ _AT_ACCEPT = [
     ("input_missing", RefusalCode.RUN_INPUT_INVALID),
     ("input_corrupt", RefusalCode.RUN_INPUT_INVALID),
     ("route_corrupt", RefusalCode.ROUTE_IDENTITY_INVALID),
-    ("adapter_policy_moved", RefusalCode.AUTHORITY_BYTES_MISMATCH),
+    *_ADAPTER_POLICY_MOVES,
     ("failed", False),
     ("blocked", False),
 ]
