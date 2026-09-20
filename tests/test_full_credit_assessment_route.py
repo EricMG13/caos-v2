@@ -30,6 +30,7 @@ from server.boundary_text import BoundaryText
 from server.engine.route import ResolvedRoute, resolve_route
 from server.engine.runtime import Execution, run_route
 from server.evidence.ingest import Document, admit_pack
+from server.methodology.adapter_identity import ANALYTICAL_PERSONA, MODULE_PRECEDENCE
 from server.methodology.handoff import (
     ADAPTER_MODULES,
     ADAPTER_ROUTES,
@@ -210,6 +211,10 @@ def test_full_credit_assessment_completes_and_proves(harness: _Harness) -> None:
     assert _modules(answers) == list(MODULES)
     assert all(
         len(answers.request_bytes(prompt, json_object=True)) <= MAX_REQUEST_BYTES
+        for prompt in answers.prompts
+    )
+    assert all(
+        ANALYTICAL_PERSONA in prompt and MODULE_PRECEDENCE in prompt
         for prompt in answers.prompts
     )
     cp5_fields = next(

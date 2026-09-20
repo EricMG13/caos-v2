@@ -40,7 +40,11 @@ from server.engine.route import (
     RouteNode,
 )
 from server.evidence.citations import AnchoredCitation
-from server.methodology.adapter_identity import ANALYTICAL_PERSONA, MODULE_PRECEDENCE
+from server.methodology.adapter_identity import (
+    ANALYTICAL_PERSONA,
+    FIXED_HOST_INSTRUCTION_INPUTS,
+    MODULE_PRECEDENCE,
+)
 from server.methodology.bundle import (
     Bundle,
     DeliveredAuthority,
@@ -594,15 +598,7 @@ Register T8 lists exactly these modules, each once, and no others: {module_ids}
 
 def fixed_host_instruction_values() -> dict[str, str]:
     """The loaded fixed host text that the adapter pin must bind."""
-    return {
-        "_INSTRUCTION": _INSTRUCTION,
-        "_TAGGED": _TAGGED,
-        "_FINAL_CHECK": _FINAL_CHECK,
-        "_CP0_FINAL_CHECK": _CP0_FINAL_CHECK,
-        "_FORECAST_EXTENSION": _FORECAST_EXTENSION,
-        "_HOST_STEPS": _HOST_STEPS,
-        "_GATE_INSTRUCTION": _GATE_INSTRUCTION,
-    }
+    return {name: globals()[name] for name in FIXED_HOST_INSTRUCTION_INPUTS}
 
 
 # An edge whose catalog entry declares no `allowed_use` says so, rather than

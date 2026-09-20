@@ -7,6 +7,7 @@ answered by a deterministic completions double; no provider is ever live.
 from __future__ import annotations
 
 import ast
+import re
 import signal
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,7 +17,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from canonical_fixtures import UNANCHORED, CanonicalCompletions
+from canonical_fixtures import QUOTE, UNANCHORED, CanonicalCompletions
 from conftest import priced
 from lite_route_fixtures import RealisticLiteCompletions
 from test_runtime import ESTIMATE, _approved_run, _Run, blobs, bundle, route
@@ -35,12 +36,13 @@ from server.engine.worker import (
     run_worker,
     work_once,
 )
+from server.methodology import canonical
 from server.methodology.bundle import Bundle
 from server.provider import CompletionProvider
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
-from server.store.work import LEASE_SECONDS, enqueue_run, worker_states
+from server.store.work import LEASE_SECONDS, enqueue_run, requeue_run, worker_states
 
 __all__ = ["blobs", "bundle", "route"]
 
@@ -112,6 +114,47 @@ def test_worker_drives_an_enqueued_lite_run_to_complete_with_a_deterministic_pro
     assert count(run.conn, "artifacts", run.run_id) == len(route.nodes)
     assert len(completions.prompts) == len(route.nodes)
     assert drive(run, completions) is None, "nothing left to claim"
+
+
+def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
+    case: tuple[StoreConnection, UUID],
+    route: ResolvedRoute,
+    bundle: Bundle,
+    blobs: BlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = queued_run(case, route, bundle, blobs)
+    prompts: list[str] = []
+    original = canonical._prompt
+
+    def capture(*args: object, **kwargs: object) -> str:
+        prompt = original(*args, **kwargs)
+        prompts.append(prompt)
+        return prompt
+
+    monkeypatch.setattr(canonical, "_prompt", capture)
+    completions = CanonicalCompletions(run.source_id, quotes=(UNANCHORED,))
+    assert drive(run, completions) == run.run_id
+    assert requeue_run(run.conn, run.run_id)
+    run.conn.commit()
+    completions.quotes = (QUOTE,)
+    assert drive(run, completions) == run.run_id
+    sections = {
+        re.sub(
+            r"[0-9a-f]{16}",
+            "<tag>",
+            re.search(
+                r"--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA [0-9a-f]{16} .*?"
+                r"--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA "
+                r"[0-9a-f]{16} ---",
+                prompt,
+                re.S,
+            ).group(),
+        )
+        for prompt in prompts
+    }
+    assert len(sections) == 1
+    assert [p.split(maxsplit=6)[5] for p in prompts].count("CP-0") == 4
 
 
 def test_worker_stops_a_refused_run_with_its_code_and_releases_the_lease(
