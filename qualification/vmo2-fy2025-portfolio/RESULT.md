@@ -1,4 +1,4 @@
-# VMO2 FY2025 portfolio-screen qualification — authorized runs, 18 and 19 September 2026
+# VMO2 FY2025 portfolio-screen qualification — authorized runs, 18–20 September 2026
 
 **Before 18 September 2026 no run had been performed against this set.** The
 authorized runs are recorded below.
@@ -179,3 +179,42 @@ than extraction drift. Attempt 2 passed the transport and text gates with all
 five citations quoted, but a MATERIAL finding required
 `qa_status: Restricted` at body line 123. That is a second model-contract miss,
 not a host, parser or key defect.
+
+## Authorized Sol/xhigh retry — 19–20 September 2026
+
+After the CCL retry reconciled as a model-contract miss rather than a host or
+provider defect, the owner-authorized second smoke set was launched once with
+the same model and endpoint at reasoning `xhigh`: model
+`openai/gpt-5.6-sol`, provider tag `openai`, identity
+`openrouter/openai/xhigh/65536`, dated price `0.000005` input / `0.000015`
+output, ceiling `$12.451840`, and `--attempts 1`. `OPENROUTER_BASE_URL` was
+explicitly unset. The run began on 19 September and finished after local
+midnight; its `-b` stamp preserves the authorized launch date.
+
+- Run `802ae485-54a8-4f4c-96c8-2f1cd9f80d2d`; build
+  `78c24be4483612e75d9a0809fcb1cb7c2dd5617e669491de13be9c0123e3ff93`;
+  unchanged set
+  `a46a1b4f597885e8f6937b47f9da7eba5ec266f4a43818d5f9fa1d42337b87ea`.
+- Final evidence `5aff20e9bcde08f4ae3dcf0c409150afeb764191edc8152f3e2cf6f183418bef`;
+  performed `27fe9ca5706ca2188138e96967e4b9c9402e32b42eb3afe1742d6d58ad7b0fb9`.
+- Retained database `caos_qualify_cc7b22d0e73745f3918abf44cbb9ed6e`;
+  blob root
+  `/Users/ericguei/.codex/worktrees/gpt-model-routing/caos-workbench/.dev-data/qualification-blobs/caos-qualify-tob16vnx`.
+- Capture `run-2026-09-19-b-capture.json`; driver log
+  `run-2026-09-19-b-driver.log`. Their SHA-256 digests are respectively
+  `d31cc3ff5df652166b414e3110b52b3bda8fc211bfce52d7c1e1978300d7e6ef`
+  and `57e279d75a18b2e9a48e0dd44a198d974e8b51efe64bbb789fc83bdeb4a0a4ae`.
+- CP-0 reserved `$2.262045` and charged `$0.4218235`; CP-L10 reserved `$2.721770`
+  and charged `$0.4381285`. Total reservation was `$4.983815`; total charge was
+  **`$0.8599520`**. Both outcomes record model `openai/gpt-5.6-sol`.
+- The run reached `COMPLETE` with two accepted artifacts, eleven re-anchored
+  citations and a sound proof. The matrix reports `proven: true`,
+  `ready_met: true`, `projections_met: true`, `registers_met: true`, citation
+  keys `met: 0` / `missed: 1`, and no refusal. The performed snapshot is
+  `complete: false` because the one pre-run CP-L10 citation key was missed.
+
+The citation, readiness, projection and register keys are unchanged. No
+authenticated human verdict exists, so the pathway remains
+**NOT_QUALIFIED**. The xhigh retry improved structural completion over the
+Sol/high smoke run but did not satisfy the qualification matrix; it does not
+justify continuing Phase 4 to wider sets without a new owner decision.

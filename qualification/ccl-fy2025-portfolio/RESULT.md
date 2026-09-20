@@ -168,3 +168,40 @@ line 120. Attempt 2 also declared its second citation on page 12 although the
 host locates that quote uniquely on page 11; the status contradiction was the
 earlier refusal and masked this second model citation miss. These are
 model-contract misses, not host, parser or key defects.
+
+## Authorized Sol/xhigh retry — 19 September 2026
+
+The owner explicitly authorized one retry of this unchanged set with the same
+model and endpoint at reasoning `xhigh`: model `openai/gpt-5.6-sol`, provider
+tag `openai`, identity `openrouter/openai/xhigh/65536`, dated price `0.000005`
+input / `0.000015` output, ceiling `$12.451840`, and `--attempts 1`.
+`OPENROUTER_BASE_URL` was explicitly unset. The fresh `-b` capture and driver
+log were reserved before launch; the driver was launched once and exited 1.
+
+- Run `0e4198da-abb8-4188-8f1e-c5547f3d0dec`; build
+  `78c24be4483612e75d9a0809fcb1cb7c2dd5617e669491de13be9c0123e3ff93`;
+  unchanged set
+  `7dcfa84602ff94a38fcc2627d15b7922acb08c23a871f7280e16bfe4a92d6a6c`.
+- Final evidence `1ca3641478aac0a4775445724e475d2f6af385989d41cc19319098961f82338b`;
+  performed `7ed0035ac8f35df63073418bed445e96b6030e897b7d288fdcc95cab7e65af1d`.
+- Retained database `caos_qualify_0fea5b169d6e4eccb59cd4815302eab5`;
+  blob root
+  `/Users/ericguei/.codex/worktrees/gpt-model-routing/caos-workbench/.dev-data/qualification-blobs/caos-qualify-mpp_b9qh`.
+- Capture `run-2026-09-19-b-capture.json`; driver log
+  `run-2026-09-19-b-driver.log`. Their SHA-256 digests are respectively
+  `4a52d0ae38e86ea809ea0df0d00f3073684f53be102741e8bc236b0f7f11b7f8`
+  and `17db39f43284652fcbbefb0fd765de01043697b16280f73fd85f44017443b3e2`.
+- One CP-0 call reserved `$3.381505` and charged **`$0.4907785`**. Its outcome
+  records model `openai/gpt-5.6-sol`; no artifact was accepted and CP-L10 was
+  never called.
+- Final capture: `complete: false`, run status `RUNNING`, stopped
+  `HANDOFF_MALFORMED`, refusal `ORCHESTRATION_NOTHING_TO_PROVE`, and no matrix.
+
+The unchanged pre-run key remains `expects_blocked: ["CP-L10"]`; it was not
+evaluated because no CP-0 handoff was accepted. Diagnostic reconciliation found
+that the closed transport passed and all six declared citations were quoted
+and uniquely anchored on their declared pages. The vendor validator found one
+model-contract contradiction: the answer declared `qa_status: Passed` while a
+MATERIAL finding required `Restricted`. This is not a host, parser, provider,
+source-delivery or key defect. No authenticated human verdict exists; the
+pathway remains **NOT_QUALIFIED**.
