@@ -29,6 +29,7 @@ from lite_route_fixtures import RealisticLiteCompletions
 from test_qualification_harness import _approve
 from test_qualification_harness import _Completions as QualificationCompletions
 from test_qualification_prepare import Fixture
+from test_qualification_prepare import ready as _ready  # noqa: F401
 from test_runtime import ESTIMATE, _approved_run, _Run, blobs, bundle, route
 
 from server import provider as provider_module
@@ -54,7 +55,6 @@ from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
 from server.store.work import LEASE_SECONDS, enqueue_run, requeue_run, worker_states
 
-pytest_plugins = ("test_qualification_prepare",)
 __all__ = ["blobs", "bundle", "route"]
 
 REPO = Path(__file__).resolve().parents[1]
@@ -127,13 +127,13 @@ def test_worker_drives_an_enqueued_lite_run_to_complete_with_a_deterministic_pro
     assert drive(run, completions) is None, "nothing left to claim"
 
 
-def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(  # noqa: PLR0913 -- worker and qualification paths use disjoint fixtures
+def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
     case: tuple[StoreConnection, UUID],
     route: ResolvedRoute,
     bundle: Bundle,
     blobs: BlobStore,
     monkeypatch: pytest.MonkeyPatch,
-    ready: Fixture,
+    _ready: Fixture,  # noqa: F811 -- imported fixture is deliberately shadowed
 ) -> None:
     run = queued_run(case, route, bundle, blobs)
     prompts: list[str] = []
@@ -157,7 +157,7 @@ def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(  
         "CP-5",
     }
 
-    conn, qualification_blobs, harness, qualification = ready
+    conn, qualification_blobs, harness, qualification = _ready
     prepared = qualification_harness.prepare(
         conn, qualification_blobs, harness, qualification=qualification
     )
