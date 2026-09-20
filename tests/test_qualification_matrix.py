@@ -852,14 +852,14 @@ def test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it() -> None:
     the measured module wrote -- and, in the other direction, an honest handoff's
     key could miss because the prose named `TL10.1` first.
 
-    Asking with no id list is what the bundle does, so host and vendor read the
-    same table. Found by the Completion Phase 8 adversarial audit, which built a
+    The bundle asks with the module's whole contract list; the host must do the
+    same. Found by the Completion Phase 8 adversarial audit, which built a
     handoff that passed the vendor's own completeness check with zero violations
     and still scored the key from the wrong register.
     """
     from server.methodology.bundle import Bundle
     from server.methodology.vendor import load_vendor_contract
-    from server.qualification.matrix import _matches_register
+    from server.qualification.matrix import _matches_register, module_registers
 
     find_registers = load_vendor_contract(
         Bundle(VENDORED)
@@ -905,8 +905,89 @@ def test_the_register_locator_is_asked_exactly_as_the_bundle_asks_it() -> None:
     assert _matches_register(narrowed, expect) is True
     assert unnarrowed["TL10.2"][1][0]["evidence_status"] == "MISSING"
     assert narrowed["TL10.2"][1][0]["evidence_status"] == "PARTIAL"
-    # The host must ask the first question. `_registers_met` passes no id list;
-    # this is the reason, and the pair above is what changes if that regresses.
+    bundle = Bundle(VENDORED)
+    host = module_registers(load_vendor_contract(bundle), bundle, "CP-L10", handoff)
+    assert _matches_register(host, expect) is False
+    assert host["TL10.2"][1][0]["evidence_status"] == "MISSING"
+
+
+CPDR_FINDINGS = (
+    "#### TDR.3 — Findings\n"
+    "\n"
+    "<!-- table-id: cpdr.findings -->\n"
+    "| question_id | answer | evidence_ids | contrary_evidence | resolution_status"
+    " | uncertainty | proposed_consequence |\n"
+    "| --- | --- | --- | --- | --- | --- | --- |\n"
+    "| RQ-impairment | Stated cause | E-1 | Searched | ANSWERED | Some | Monitor |\n"
+    "| RQ-rating | Not stated | E-2 | Searched | UNRESOLVED | Much | Obtain |\n"
+)
+
+
+def test_a_cp_dr_register_is_read_as_its_completeness_check_reads_it() -> None:
+    from server.methodology.bundle import Bundle
+    from server.methodology.vendor import load_vendor_contract
+    from server.qualification.matrix import _matches_register, module_registers
+
+    contract = load_vendor_contract(Bundle(VENDORED))
+    assert contract.completeness_check.find_registers(CPDR_FINDINGS) == {}
+    registers = module_registers(contract, Bundle(VENDORED), "CP-DR", CPDR_FINDINGS)
+    answers = (("RQ-impairment", "ANSWERED"), ("RQ-rating", "UNRESOLVED"))
+    for question, status in answers:
+        expect = ExpectedRegister(
+            module_id="CP-DR",
+            register_id="TDR.3",
+            row_key=(("question_id", question),),
+            column="resolution_status",
+            expected=status,
+        )
+        assert _matches_register(registers, expect) is True
+
+
+def test_every_committed_register_key_is_locatable_by_its_modules_reader() -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+    from server.qualification.on_disk import load_qualification_set
+
+    bundle = Bundle(VENDORED)
+    paths = sorted((REPO / "qualification").glob("*/qualification.json"))
+    for path in paths:
+        found = unlocatable_register_keys(bundle, load_qualification_set(path.parent))
+        assert found == (), path.parent.name
+
+
+def _register_case() -> QualificationCase:
+    return QualificationCase(
+        label="registers",
+        documents=(Document(filename=BoundaryText.of("r.txt"), data=REPORT),),
+        profile_id=PROFILE,
+        selection_id=SELECTION,
+        expects=(),
+    )
+
+
+def test_a_register_key_its_module_does_not_declare_is_unlocatable() -> None:
+    from server.methodology.bundle import Bundle
+    from server.qualification.matrix import unlocatable_register_keys
+
+    good = ExpectedRegister(
+        module_id="CP-DR",
+        register_id="TDR.3",
+        row_key=(("question_id", "RQ-x"),),
+        column="resolution_status",
+        expected="ANSWERED",
+    )
+    bad = (
+        replace(good, register_id="cpdr.findings"),
+        replace(good, column="status"),
+        replace(good, row_key=(("question", "RQ-x"),)),
+        replace(good, module_id="CP-MODEL"),
+        replace(good, module_id="CP-NOPE"),
+    )
+    case = replace(_register_case(), expects_register=(good, *bad))
+    assert (
+        unlocatable_register_keys(Bundle(VENDORED), QualificationSet(cases=(case,)))
+        == bad
+    )
 
 
 def test_ready_met_is_none_when_a_case_names_no_module(ran: Ran) -> None:

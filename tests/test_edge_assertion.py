@@ -180,6 +180,18 @@ def test_a_replayed_assertion_is_refused(key: bytes) -> None:
     assert fresh.is_success
 
 
+def test_a_replay_at_exactly_the_window_edge_is_refused(key: bytes) -> None:
+    recorder = Recorder()
+    clock = [float(NOW)]
+    client = TestClient(EdgeGuard(recorder, clock=lambda: clock[0]))
+    once = _assertion(key)
+    assert client.get("/api/v1/cases", headers={EDGE_ASSERTION_HEADER: once}).is_success
+    clock[0] = float(NOW + ASSERTION_MAX_AGE_SECONDS)
+    replay = client.get("/api/v1/cases", headers={EDGE_ASSERTION_HEADER: once})
+    assert _refused(replay) == (403, "EDGE_NOT_TRUSTED")
+    assert len(recorder.seen) == 1
+
+
 def test_a_stale_or_future_assertion_is_refused(key: bytes) -> None:
     recorder, client = _guarded()
     stale = _assertion(key, issued_at=NOW - ASSERTION_MAX_AGE_SECONDS - 1)

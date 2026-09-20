@@ -69,18 +69,6 @@ NOT_A_CITATION = {
         "a placeholder inside the ledger's own description of the phase-exit "
         "gate's title regex, not a citation of anything"
     ),
-    "test_a_replay_at_exactly_the_window_edge_is_refused": (
-        "named by a deferred replay-register entry; its implementation is not "
-        "in this branch"
-    ),
-    "test_a_cp_dr_register_is_read_as_its_completeness_check_reads_it": (
-        "named by a deferred CP-DR register entry; its implementation is not "
-        "in this branch"
-    ),
-    "test_every_committed_register_key_is_locatable_by_its_modules_reader": (
-        "named by a deferred CP-DR register entry; its implementation is not "
-        "in this branch"
-    ),
 }
 
 
