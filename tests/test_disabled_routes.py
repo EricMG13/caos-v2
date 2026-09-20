@@ -1,17 +1,8 @@
-"""Only the canonical adapter executes, and only on its own modules (§42.2).
-
-REPAIR_PLAN Phase 3 work item 6: "Keep other routes disabled until equivalent
-contract tests exist." Task 3.1 slice f-1c makes the adapter one constant, so a
-route whose modules the adapter does not own is refused at execution -- before
-any attempt, reservation or provider call -- and at acceptance, while pinning,
-gates and resolution stay general. A claims pin written before the switch
-refuses execution, and no reader takes an artifact without its host record.
-Both refusal points share `require_adapter_route`.
-"""
+"""The canonical adapter covers the catalog; legacy pins and records stay closed."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -25,12 +16,11 @@ from canonical_fixtures import (
 )
 from conftest import priced
 from fastapi.testclient import TestClient
-from test_accepted_owner import _billed, _count
 from test_api_routes import _section
 from test_canonical_readers import _reader, _run, client
 from test_execution_freshness import _Harness, harness
 from test_gates import _approval
-from test_loop_charges import ESTIMATE, MODEL, REPORTED
+from test_loop_charges import ESTIMATE, MODEL
 from test_run_inputs import SUBJECT, pin_version_one
 from test_source_sets import _admit
 
@@ -46,6 +36,7 @@ from server.engine.runtime import (
     run_route,
 )
 from server.methodology.bundle import Bundle
+from server.methodology.handoff import ADAPTER_ROUTES
 from server.qualification.proof import assert_orchestration_proof
 from server.refusals import Refusal, RefusalCode
 from server.store import StoreConnection
@@ -59,8 +50,8 @@ from server.store.gates import (
 from server.store.members import Standing, grant
 from server.store.outcomes import execution_reads
 from server.store.routes import pin_route
-from server.store.run_inputs import RunInput, pin_run_input
-from server.store.runs import Accepted, accept_attempt, start_run
+from server.store.run_inputs import pin_run_input
+from server.store.runs import start_run
 from server.store.source_sets import snapshot_source_set
 
 __all__ = ["client", "harness"]
@@ -68,9 +59,6 @@ __all__ = ["client", "harness"]
 LITE = (LITE_PROFILE, LITE_SELECTION)
 FULL = ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
 DEEP = ("FULL_CREDIT_32", "DEEP_RESEARCH")
-# Adapter modules only, but no contract test proves this pathway yet.
-ALL_ADAPTER = ("FULL_CREDIT_32", "DISTRESSED_RESTRUCTURING")
-_WORK = ("run_attempts", "budget_reservations", "call_outcomes", "artifacts")
 
 
 @pytest.fixture
@@ -104,58 +92,24 @@ def _refusal(call: object) -> RefusalCode:
     return refused.value.code
 
 
-def _no_work(harness: _Harness) -> None:
-    for table in _WORK:
-        assert _count(harness, table) == 0, table
+def test_adapter_routes_are_exactly_the_catalog() -> None:
+    catalog = frozenset(
+        (profile, selection)
+        for profile, declared in CATALOG["profiles"].items()
+        for selection in declared["pathways"]
+    )
+    assert ADAPTER_ROUTES == catalog
+    assert len(catalog) == 18
 
 
-@pytest.mark.parametrize("route", [ALL_ADAPTER], indirect=True)
-def test_a_disabled_route_pins_and_governs_but_makes_no_attempt(
-    harness: _Harness,
-) -> None:
-    """Approved end to end with a subject, the route still never executes."""
-    pin, _route = _authority(harness)
-    assert pin.adapter_version == "canonical-markdown-v3"
-    with pytest.raises(Refusal) as refused:
-        with execution_reads(harness.conn):
-            execution_input(harness.conn, harness.run_id, harness.bundle)
-    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    provider = _Counting()
-    with pytest.raises(Refusal) as run:
-        run_route(
-            harness.conn,
-            harness.blobs,
-            run_id=harness.run_id,
-            route=harness.route,
-            execution=Execution(provider, priced(ESTIMATE), harness.bundle),
-        )
-    assert run.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    assert run.value.__cause__ is None and run.value.__context__ is None
-    assert provider.calls == []
-    _no_work(harness)
-
-
-def _authority(harness: _Harness) -> tuple[RunInput, ResolvedRoute]:
-    with execution_reads(harness.conn):
-        pin, stored = approved_run_input(harness.conn, harness.run_id)
-    assert stored == harness.route
-    return pin, stored
-
-
-@pytest.mark.parametrize("route", [ALL_ADAPTER], indirect=True)
-def test_acceptance_refuses_a_disabled_route(harness: _Harness) -> None:
-    attempt = _billed(harness)
-    accepted = Accepted(
-        harness.blobs.put(b"artifact"),
-        REPORTED,
-        MODEL,
-        f"g{attempt.hex}",
-        record_sha256=harness.blobs.put(b"record"),
+def test_adapter_allowlist_rejects_a_synthetic_non_catalog_route() -> None:
+    mismatched = replace(
+        resolve_route(CATALOG, *LITE), selection_id="NOT_A_CATALOG_PATHWAY"
     )
     with pytest.raises(Refusal) as refused:
-        accept_attempt(harness.conn, attempt_id=attempt, accepted=accepted)
+        require_adapter_route(mismatched)
     assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    assert _count(harness, "artifacts") == 0
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
 
 
 def test_every_route_pins_the_one_adapter_and_a_subject(
@@ -267,31 +221,3 @@ def test_readers_refuse_an_artifact_without_its_record(
         "code": "ARTIFACT_RECORD_MISMATCH",
         "clears": CLEARS[RefusalCode.ARTIFACT_RECORD_MISMATCH],
     }
-
-
-@pytest.mark.parametrize("selection", [ALL_ADAPTER])
-def test_require_adapter_route_is_the_one_rule_both_refusal_points_share(
-    selection: tuple[str, str],
-) -> None:
-    """This file's docstring has said the two refusal points share
-    `require_adapter_route` since it was written, and a sentence is not a test:
-    both were driven and the rule itself never was.
-
-    It is pure and takes no connection, which is what lets execution and
-    acceptance apply it identically. The two disabled shapes are distinct on
-    purpose -- `FULL` carries modules the adapter does not own, while
-    `ALL_ADAPTER` carries only adapter modules on a pathway no contract test
-    proves (work item 6) -- and the same code answers both.
-    """
-    with pytest.raises(Refusal) as refused:
-        require_adapter_route(resolve_route(CATALOG, *selection))
-
-    assert refused.value.code is RefusalCode.HANDOFF_MODULE_UNSUPPORTED
-    assert refused.value.__cause__ is None and refused.value.__context__ is None
-
-
-def test_require_adapter_route_admits_the_pathway_that_is_enabled() -> None:
-    """Without this the test above would pass against a function that refused
-    every route, which would disable the product rather than the disabled
-    routes."""
-    require_adapter_route(resolve_route(CATALOG, *LITE))  # returns, so it admits

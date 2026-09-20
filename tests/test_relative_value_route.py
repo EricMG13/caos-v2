@@ -273,6 +273,7 @@ ENABLED = frozenset(
         ("LITE_CREDIT_22", "LITE_COVENANT_REFINANCING"),
         ("LITE_CREDIT_22", "LITE_DISTRESSED_RESTRUCTURING"),
         ("LITE_CREDIT_22", "LITE_FULL_CREDIT_SCREEN"),
+        ("FULL_CREDIT_32", "DISTRESSED_RESTRUCTURING"),
     }
 )
 
@@ -280,7 +281,7 @@ ENABLED = frozenset(
 @pytest.mark.parametrize("route", DISABLED, indirect=True)
 def test_relative_value_is_the_only_newly_enabled_route(harness: _Harness) -> None:
     assert ADAPTER_ROUTES == ENABLED
-    assert (len(ENABLED), len(DISABLED)) == (17, 1)
+    assert (len(ENABLED), len(DISABLED)) == (18, 0)
     assert len(DISABLED) + len(ENABLED) == sum(
         len(declared["pathways"]) for declared in CATALOG["profiles"].values()
     )

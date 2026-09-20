@@ -84,7 +84,7 @@ def test_lite_covenant_refinancing_route_is_exact_and_enabled() -> None:
         ("CP-L10", "CP-3C", EdgeType.REQUIRED),
         ("CP-3C", "CP-5", EdgeType.ADVISORY),
     ]
-    assert SELECTION in ADAPTER_ROUTES and len(ADAPTER_ROUTES) == 17
+    assert SELECTION in ADAPTER_ROUTES and len(ADAPTER_ROUTES) == 18
 
 
 def test_lite_covenant_refinancing_completes_proves_and_freezes(
