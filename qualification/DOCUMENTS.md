@@ -18,14 +18,14 @@ the coordinator admitted it. A `to_source` row is a request to a person.
 
 ## Why a register
 
-Twelve of the catalog's twenty-three modules are proven and eleven are not
-(`docs/COMPLETION_PLAN.md` §2), and what most of the eleven are missing is not
-code but evidence: CP-4 needs executed instruments, CP-2H needs dated agency
-actions, CP-3D needs timestamped prices, CP-8 needs a decision that was
-actually taken. Those demands were read out of the vendored `SKILL.md` files
-once, for this plan. Without somewhere to put that reading, it is re-derived
-per task and drifts; with a register it is one artefact a gate can hold to the
-tree.
+When this register was created, twelve of the catalog's twenty-three modules
+were proven and eleven were not (`docs/COMPLETION_PLAN.md` §2). All eighteen
+routes are now deterministically enabled, but the evidence demands remain
+independent of code coverage: CP-4 needs executed instruments, CP-2H needs
+dated agency actions, CP-3D needs timestamped prices, and CP-8 needs a decision
+that was actually taken. Those demands were read out of the vendored
+`SKILL.md` files once. Without the register that reading is re-derived per task
+and drifts; with it, one artefact holds the evidence boundary to the tree.
 
 Each row's `demand_verified` says whether the module's own `SKILL.md` states a
 document gate, or whether the demand is inferred from its purpose and register
