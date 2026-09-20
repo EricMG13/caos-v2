@@ -756,7 +756,7 @@ def _matches_register(
     return _cell(matched[0], expect.column, header) == _normalised_cell(expect.expected)
 
 
-def _module_registers(
+def module_registers(
     contract: VendorContract, bundle: Bundle, module_id: str, text: str
 ) -> dict[str, Any]:
     """One module's registers, located exactly as the vendor's `check()` does.
@@ -825,7 +825,7 @@ def _locatable(
         f"#### {expect.register_id}\n\n| {' | '.join(columns)} |\n"
         f"|{'---|' * len(columns)}\n| {' | '.join('x' for _ in columns)} |\n"
     )
-    return expect.register_id in _module_registers(
+    return expect.register_id in module_registers(
         contract, bundle, expect.module_id, table
     )
 
@@ -896,7 +896,7 @@ def _registers_met(
                 ),
                 accepted=accepted,
             )
-            registers = _module_registers(
+            registers = module_registers(
                 contract, bundle, module_id, markdown.decode("utf-8")
             )
             if not isinstance(registers, dict):
