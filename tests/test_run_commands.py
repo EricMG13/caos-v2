@@ -173,7 +173,7 @@ def test_only_an_adapter_route_can_be_selected(
     monkeypatch.setattr(runs_command, "resolve_route", watched, raising=False)
     before = _effects(conn)
     for profile, selection in [
-        ("LITE_CREDIT_22", "LITE_DISTRESSED_RESTRUCTURING"),
+        ("FULL_CREDIT_32", "DISTRESSED_RESTRUCTURING"),
         ("LITE_CREDIT_22", "NO_SUCH_PATHWAY"),
         ("NO_SUCH_PROFILE", "LITE_EARNINGS_UPDATE"),
     ]:

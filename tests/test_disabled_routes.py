@@ -69,7 +69,7 @@ LITE = (LITE_PROFILE, LITE_SELECTION)
 FULL = ("FULL_CREDIT_32", "FULL_CREDIT_ASSESSMENT")
 DEEP = ("FULL_CREDIT_32", "DEEP_RESEARCH")
 # Adapter modules only, but no contract test proves this pathway yet.
-ALL_ADAPTER = ("LITE_CREDIT_22", "LITE_DISTRESSED_RESTRUCTURING")
+ALL_ADAPTER = ("FULL_CREDIT_32", "DISTRESSED_RESTRUCTURING")
 _WORK = ("run_attempts", "budget_reservations", "call_outcomes", "artifacts")
 
 
