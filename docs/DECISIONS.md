@@ -5194,3 +5194,28 @@ This is not Task 11.4 acceptance. The test uses the existing deterministic
 supplied-only fixture and makes no provider call. No FULL qualification keys,
 live run, performed snapshot, or signed verdict exist yet; those remain the
 separate qualification slice.
+
+## 2026-09-20 §122 — release truth is store-backed and the dated feature inventory is append-only
+
+The owner authorized the resolution plan through completion. Phase 5 preserves
+the 248 historical feature rows rather than rewriting their dated test results,
+and appends `REL-01` and `REL-02` as the current deterministic-route and
+qualification censuses. This supersedes §94's statement that the predecessor
+would remain entirely unedited without changing what §94 protected: old rows
+remain historical evidence, while the generated release pack remains the live
+answer.
+
+At `2026-09-20T00:00:00+00:00`, the retained verdict store reports all eighteen
+catalog pathways enabled, `LITE_CREDIT_22 / LITE_DEEP_RESEARCH` `QUALIFIED` by
+the current owner-signed verdict, and the other seventeen `NOT_QUALIFIED`.
+Two independent store-backed emissions under different hash seeds were
+byte-identical. The emitted JSON SHA-256 is
+`485eac102f17b1d77fb2d351435618892d6579b0f560c43bdd2f29ce1e3a0164`;
+the Markdown SHA-256 is
+`e638aeccd3f020da3df16d85efefe87aa3823ebe9b01f651b012d004ccf61218`.
+As §94 requires, `release-pack/` remains ignored and uncommitted.
+
+This census does not authorize another provider call or convert route
+enablement into model qualification. Private portfolio facts, a genuine T0
+decision record, FULL research-brief confirmation, the last-trade-only market
+limit and the two latest model misses remain explicit limitations.

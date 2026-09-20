@@ -16,9 +16,11 @@ The target outcome is:
    whole-route contracts and are in `ADAPTER_ROUTES`;
 2. every pathway has either an immutable offline qualification set or an
    explicit, evidence-based reason why no honest set can yet exist;
-3. every runnable set is exercised under one pinned provider identity and
-   dated price, with its performed evidence retained; only an authenticated
-   human reviewer may sign a qualification verdict;
+3. every set selected for paid execution is exercised under one pinned
+   provider identity and dated price, with its performed evidence retained;
+   any eligible set left unrun carries the evidence-based stop reason and
+   needs fresh authorization; only an authenticated human reviewer may sign a
+   qualification verdict;
 4. the release pack states `QUALIFIED`, `NOT_QUALIFIED`, or `UNVERIFIED`
    truthfully for every enabled pathway;
 5. the separate delivery task lands the local commits through reviewed PRs,
@@ -364,6 +366,24 @@ current signed verdict remains `NOT_QUALIFIED`.
 - Commit only source, tests, immutable set/capture records and status docs;
   never credentials or mutable database files.
 
+### Phase 4 outcome — stopped by evidence, 20 September 2026
+
+The two smallest smoke sets ran under the pinned Sol/high identity, then each
+received the owner's one-attempt Sol/xhigh retry. CCL again stopped at CP-0 on
+a model-contract contradiction. VMO2 completed both nodes but missed its
+unchanged citation key, so its performed snapshot remained incomplete. The
+combined retry reserved `$8.365320` and charged `$1.3507305`.
+
+The separate Sol/xhigh confidence review and separate Astra/xhigh adversarial
+audit reproduced the classifications and found no host, parser, provider,
+source-delivery, or answer-key defect. Phase 4 therefore stops without wider
+spend. The remaining eligible sets were not run in this Sol campaign and
+require a new owner decision before any later provider call. Their release
+status remains store-derived: the earlier owner-signed LITE deep-research
+verdict is still current at the Phase 5 census time; the other seventeen
+pathways are `NOT_QUALIFIED`. This is the approved early-stop outcome, not a
+claim that every set ran.
+
 ## Phase 5 — reconcile documentation and release truth
 
 - Update the top checkpoint in `docs/CLAUDE_CODE_HANDOFF.md` from measured
@@ -374,7 +394,8 @@ current signed verdict remains `NOT_QUALIFIED`.
 - Record an 18/18 deterministic route census and, separately, the current
   `QUALIFIED`/`NOT_QUALIFIED` route census.
 - Regenerate the release pack twice into two temporary directories and verify
-  byte equality before replacing the committed pack.
+  byte equality before replacing the ignored emitted pack. The pack remains
+  uncommitted under `docs/DECISIONS.md` §94.
 - Record every intentional limitation: private data unavailable, no genuine
   T0 record, unconfirmed research brief, restricted market observation, or
   live model miss.
@@ -425,8 +446,9 @@ The separate delivery task owns this phase's GitHub actions.
 - [ ] No PostgreSQL-dependent route proof passed only by being skipped.
 - [ ] Every document row and digest agrees with the generated register.
 - [ ] Every route has an offline set or an explicit owner-input reason.
-- [ ] Every eligible set has a retained performed capture under one exact,
-      dated provider identity and price.
+- [ ] Every paid set has a retained performed capture under one exact, dated
+      provider identity and price; every unrun eligible set has the explicit
+      early-stop reason and fresh-authorization requirement recorded.
 - [ ] No owner fact, mandate exposure, decision record, market datapoint or
       qualification verdict was fabricated.
 - [ ] Every `QUALIFIED` label is backed by a current signed verdict; all other
