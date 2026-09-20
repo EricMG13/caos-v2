@@ -48,6 +48,7 @@ the middle of an edit. Other entry documents link here instead of copying it.
 | [#413](https://github.com/EricMG13/caos-v2/pull/413) | `0d70c95` | Delivery-record reconciliation | All required checks and SonarCloud passed |
 | [#414](https://github.com/EricMG13/caos-v2/pull/414) | `e252681` | Final register, release-pack and qualification-preflight remediation | All required checks and SonarCloud passed |
 | [#416](https://github.com/EricMG13/caos-v2/pull/416) | `24647ab` | Reject off-route citation, projection and register qualification keys before setup or spend | All required checks and both Sonar checks passed |
+| [#418](https://github.com/EricMG13/caos-v2/pull/418) | `b5a3932` | Reject unanswerable forecast-readiness qualification keys before setup or spend | All required checks and SonarCloud passed |
 
 This is a delivery record only; it does not claim phase acceptance.
 
