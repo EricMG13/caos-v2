@@ -181,6 +181,7 @@ def test_an_admin_signs_a_complete_snapshot_and_the_row_carries_their_identity(
     )
     assert shown.status_code == 200
     assert shown.json()["state"] == QualificationState.QUALIFIED
+    assert shown.json()["reviewer_id"] == str(reviewer)
     assert shown.json()["reviewer"] == "A. Reviewer"
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from hashlib import sha256
 from uuid import UUID
@@ -542,7 +542,8 @@ def current_verdict(
 ) -> Verdict:
     """Read only the current verdict bound to the exact requested evidence."""
     row = conn.execute(
-        "SELECT q.reviewer,q.decided_at,q.expires_at,e.qualification_set_sha256,"
+        "SELECT q.reviewer_id,q.reviewer,q.decided_at,q.expires_at,"
+        " e.qualification_set_sha256,"
         " e.build_id,e.provider,e.model FROM qualification_verdicts q"
         " JOIN qualification_evidence e USING (evidence_sha256)"
         " JOIN qualification_performed p ON p.performed_sha256=e.performed_sha256"
@@ -554,7 +555,16 @@ def current_verdict(
     ).fetchone()
     if row is None:
         raise Refusal(RefusalCode.VERDICT_INCOMPLETE)
-    reviewer, decided_at, expires_at, set_digest, build_id, provider, model = row
+    (
+        reviewer_id,
+        reviewer,
+        decided_at,
+        expires_at,
+        set_digest,
+        build_id,
+        provider,
+        model,
+    ) = row
     if (set_digest, build_id, provider, model) != (
         evidence.qualification_set_sha256,
         evidence.build_id,
@@ -562,14 +572,17 @@ def current_verdict(
         evidence.model,
     ):
         raise Refusal(RefusalCode.VERDICT_BINDING_INVALID)
-    return read_verdict(
-        {
-            "provider": provider + ":" + model,
-            "qualification_set_sha256": set_digest,
-            "build_id": build_id,
-            "decided_at": decided_at.isoformat(),
-            "expires_at": expires_at.isoformat(),
-            "reviewer": reviewer,
-        },
-        now=now,
+    return replace(
+        read_verdict(
+            {
+                "provider": provider + ":" + model,
+                "qualification_set_sha256": set_digest,
+                "build_id": build_id,
+                "decided_at": decided_at.isoformat(),
+                "expires_at": expires_at.isoformat(),
+                "reviewer": reviewer,
+            },
+            now=now,
+        ),
+        reviewer_id=UUID(str(reviewer_id)),
     )

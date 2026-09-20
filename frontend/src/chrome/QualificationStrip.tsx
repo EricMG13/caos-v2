@@ -31,11 +31,11 @@ function display(status: QualificationStatus | null): {
   if (status.kind === "error") {
     return { label: "UNAVAILABLE", sentence: status.refusal.clears, severity: "CRITICAL" };
   }
-  const { state, expires_at: expiresAt } = status.document;
+  const { state, expires_at: expiresAt, reviewer, reviewer_id: reviewerId } = status.document;
   if (state === "QUALIFIED") {
     return {
       label: state,
-      sentence: `Current authenticated review expires ${expiresAt ?? "unavailable"}.`,
+      sentence: `Authenticated signer ${reviewerId ?? "unavailable"}; reviewer label ${reviewer ?? "unavailable"}. Current review expires ${expiresAt ?? "unavailable"}.`,
       severity: "SUCCESS",
     };
   }

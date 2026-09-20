@@ -156,6 +156,7 @@ describe("the transport", () => {
       adapter_version: null,
       provider: null,
       model: null,
+      reviewer_id: null,
       reviewer: null,
       decided_at: null,
       expires_at: null,
@@ -179,6 +180,15 @@ describe("the transport", () => {
         code: "WIRE_IDENTITY_MISMATCH",
         clears: "the qualification result is bound to the requested evidence",
       },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...body, signer: QUALIFICATION }))),
+    );
+    expect(await fetchQualification(QUALIFICATION)).toEqual({
+      kind: "error",
+      refusal: { code: "WIRE_SHAPE_INVALID", clears: expect.any(String) },
     });
   });
 

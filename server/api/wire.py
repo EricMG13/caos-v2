@@ -119,6 +119,7 @@ class QualificationRead(BaseModel):
     adapter_version: Id | None
     provider: Id | None
     model: Id | None
+    reviewer_id: UUID | None
     reviewer: Text | None
     decided_at: AwareDatetime | None
     expires_at: AwareDatetime | None

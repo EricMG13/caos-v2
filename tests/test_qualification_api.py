@@ -49,7 +49,13 @@ def client(
             app.dependency_overrides.clear()
 
 
-def _record(conn: StoreConnection, *, expires_at: datetime) -> Evidence:
+def _record(
+    conn: StoreConnection,
+    *,
+    expires_at: datetime,
+    reviewer_id: UUID | None = None,
+    reviewer: str = "Reviewer",
+) -> Evidence:
     evidence = _evidence()
     performed = qualification_performed()
     record_performed(conn, performed)
@@ -64,11 +70,13 @@ def _record(conn: StoreConnection, *, expires_at: datetime) -> Evidence:
             "build_id": evidence.build_id,
             "decided_at": decided_at.isoformat(),
             "expires_at": expires_at.isoformat(),
-            "reviewer": "Reviewer",
+            "reviewer": reviewer,
         },
         now=decided_at,
     )
-    record_verdict(conn, evidence=evidence, reviewer_id=uuid4(), verdict=verdict)
+    record_verdict(
+        conn, evidence=evidence, reviewer_id=reviewer_id or uuid4(), verdict=verdict
+    )
     conn.commit()
     return evidence
 
@@ -87,7 +95,13 @@ def test_read_qualification(
 ) -> None:
     """read_qualification gives an analyst only an exact current verdict."""
     http, conn = client
-    evidence = _record(conn, expires_at=datetime.now(UTC) + timedelta(days=1))
+    signer = uuid4()
+    evidence = _record(
+        conn,
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+        reviewer_id=signer,
+        reviewer="Submitted label B",
+    )
 
     response = _read(http, evidence, uuid4())
 
@@ -106,7 +120,8 @@ def test_read_qualification(
         "adapter_version": evidence.adapter_version,
         "provider": evidence.provider,
         "model": evidence.model,
-        "reviewer": "Reviewer",
+        "reviewer_id": str(signer),
+        "reviewer": "Submitted label B",
     }
     assert datetime.fromisoformat(body["decided_at"]) < datetime.fromisoformat(
         body["expires_at"]
@@ -132,6 +147,7 @@ def test_missing_or_expired_evidence_is_unqualified_not_qualified(
             "adapter_version": None,
             "provider": None,
             "model": None,
+            "reviewer_id": None,
             "reviewer": None,
             "decided_at": None,
             "expires_at": None,
@@ -156,6 +172,7 @@ def test_reader_sees_restricted_without_global_verdict_metadata(
         "adapter_version": None,
         "provider": None,
         "model": None,
+        "reviewer_id": None,
         "reviewer": None,
         "decided_at": None,
         "expires_at": None,
