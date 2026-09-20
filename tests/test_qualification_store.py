@@ -361,6 +361,46 @@ def test_a_case_that_met_the_refusal_it_declared_is_complete() -> None:
     assert refused.complete is True
 
 
+def test_a_met_refusal_with_a_missed_citation_cannot_receive_a_verdict(
+    empty_database: str,
+) -> None:
+    """A declared refusal does not waive separately declared citations."""
+    now = datetime(2026, 9, 15, tzinfo=UTC)
+    original = _performed()
+    matrix = original.performed.matrix
+    assert matrix is not None
+    [row] = matrix.rows
+    incomplete = performed_evidence(
+        prepared=original.prepared,
+        performed=replace(
+            original.performed,
+            matrix=replace(
+                matrix,
+                rows=(
+                    replace(
+                        row,
+                        proven=False,
+                        expected_refusal_met=True,
+                        missed=(ExpectedCitation("CP-0", "c" * 64, "quoted text"),),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert incomplete.complete is False
+    with connect(empty_database) as conn:
+        apply_schema(conn)
+        record_performed(conn, incomplete)
+        with pytest.raises(Refusal, match=r"^VERDICT_BINDING_INVALID$"):
+            record_verdict(
+                conn,
+                evidence=incomplete.evidence,
+                reviewer_id=uuid4(),
+                verdict=_verdict(now, incomplete.evidence),
+            )
+
+
 def test_record_verdict_binds_the_reviewer_and_evidence(empty_database: str) -> None:
     now = datetime(2026, 9, 15, tzinfo=UTC)
     with connect(empty_database) as conn:

@@ -1078,6 +1078,7 @@ def test_a_blocked_qa_verdict_ends_the_case_blocked_and_the_matrix_still_scores(
     """
     from hashlib import sha256
 
+    from server.qualification.store import performed_evidence
     from server.store import apply_schema, connect
 
     with connect(empty_database) as conn:
@@ -1087,12 +1088,24 @@ def test_a_blocked_qa_verdict_ends_the_case_blocked_and_the_matrix_still_scores(
         keys = tuple(
             ExpectedCitation(module, document, QUOTE) for module in ("CP-L10", "CP-5")
         )
-        case = replace(_case("blocked-2026", REPORT), expects=keys)
-        performed = _perform(
-            conn,
-            BlobStore(tmp_path / "blobs"),
-            QualificationSet(cases=(case,)),
+        case = replace(
+            _case("blocked-2026", REPORT),
+            expects=keys,
+            expected_refusal=RefusalCode.HANDOFF_BLOCKED,
+        )
+        qualification = QualificationSet(cases=(case,))
+        blobs = BlobStore(tmp_path / "blobs")
+        harness = Harness(
+            bundle=Bundle(root=VENDORED),
+            catalog=CATALOG,
             completions=_Completions(qa_by_module={"CP-5": "Blocked"}),
+            price=priced(ESTIMATE),
+            ceiling=SET_CEILING,
+        )
+        prepared = prepare(conn, blobs, harness, qualification=qualification)
+        _approve(conn, prepared)
+        performed = perform(
+            conn, blobs, harness, qualification=qualification, prepared=prepared
         )
 
         [record] = performed.performed
@@ -1107,3 +1120,7 @@ def test_a_blocked_qa_verdict_ends_the_case_blocked_and_the_matrix_still_scores(
         assert performed.matrix is not None
         [row] = performed.matrix.rows
         assert (row.proven, row.met, row.missed) == (True, keys[:1], keys[1:])
+        assert row.expected_refusal_met is True
+        assert (
+            performed_evidence(prepared=prepared, performed=performed).complete is False
+        )

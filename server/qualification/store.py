@@ -66,7 +66,7 @@ def _answered(row: MatrixRow) -> bool:
     ):
         return False
     if row.expected_refusal_met is not None:
-        return row.expected_refusal_met
+        return row.expected_refusal_met and not row.missed
     return row.proven and not row.missed
 
 
