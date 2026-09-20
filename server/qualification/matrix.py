@@ -1044,8 +1044,10 @@ def _forecast_met(  # noqa: PLR0913 -- one qualification case's bound readers
         and result["units"] == {"currency": expected.currency, "scale": expected.scale}
         and result["perimeter"] == expected.perimeter
         and record.projections.qa_status == expected.qa_status
-        and record.projections.limitation_flags == expected.limitation_flags
-        and _readiness(conn, blobs, bundle, route, run_id) == expected.readiness
+        and sorted(record.projections.limitation_flags)
+        == sorted(expected.limitation_flags)
+        and sorted(_readiness(conn, blobs, bundle, route, run_id))
+        == sorted(expected.readiness)
     )
 
 

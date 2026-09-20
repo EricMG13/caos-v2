@@ -521,25 +521,38 @@ def _consumers(
 ) -> None:
     """Every module-bearing key names a module on its case's route.
 
-    CP-0's T8 carries a verdict for each pinned consumer and none for itself, so
-    a readiness key cannot name the gate. No key can name a module the route
-    does not pin: it could never be met. Refused before anything is written,
-    like the other unanswerable keys.
+    CP-0's T8 carries exactly one verdict for each pinned vendor consumer and
+    none for itself or the host's CP-CF, so readiness keys must name that same
+    domain. No key can name a module the route does not pin: it could never be
+    met. Refused before anything is written, like the other unanswerable keys.
     """
     for case, route in zip(qualification.cases, routes, strict=True):
         modules = {node.module_id for node in route.nodes}
-        keyed = {
-            expect.module_id
+        if any(
+            expect.module_id not in modules
             for expects in (
                 case.expects,
                 case.expects_projection,
                 case.expects_register,
             )
             for expect in expects
-        }
-        readiness = set(case.expects_ready) | set(case.expects_blocked)
-        if not keyed <= modules or not readiness <= modules - {GATE_MODULE}:
+        ):
             raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)
+
+        consumers = modules - {GATE_MODULE, MODEL_MODULE}
+        if any(module not in consumers for module in case.expects_ready) or any(
+            module not in consumers for module in case.expects_blocked
+        ):
+            raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)
+
+        forecast = case.forecast
+        if forecast is not None:
+            readiness = forecast.readiness
+            if (
+                len(readiness) != len(consumers)
+                or {module for module, _status in readiness} != consumers
+            ):
+                raise Refusal(RefusalCode.QUALIFICATION_KEY_UNANSWERABLE)
 
 
 def _subjects(qualification: QualificationSet) -> None:

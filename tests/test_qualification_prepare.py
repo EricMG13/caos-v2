@@ -30,12 +30,14 @@ from test_qualification_harness import (
 from server import methodology
 from server.blobs import BlobStore
 from server.boundary_text import BoundaryText
-from server.engine.route import resolve_route
+from server.engine.route import RouteExtensions, resolve_route
 from server.methodology.bundle import Bundle
 from server.qualification import harness as subject
 from server.qualification.matrix import (
+    ExpectedForecast,
     ExpectedProjection,
     ExpectedRegister,
+    ForecastValue,
     QualificationCase,
     QualificationSet,
 )
@@ -309,6 +311,11 @@ def test_preparation_creates_exact_inputs_and_external_previews(ready: Fixture) 
         ("blocked-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("blocked-gate", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("ready-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("ready-model-extension", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("blocked-model-extension", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("forecast-readiness-extra", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("forecast-readiness-missing", "QUALIFICATION_KEY_UNANSWERABLE"),
+        ("forecast-readiness-duplicate", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("citation-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("projection-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
         ("register-off-route", "QUALIFICATION_KEY_UNANSWERABLE"),
@@ -324,6 +331,36 @@ def test_whole_set_pure_defects_leave_no_setup(
 ) -> None:
     conn, blobs, harness, qualification = ready
     first, second = qualification.cases
+    forecast_route = resolve_route(
+        CATALOG,
+        "FULL_CREDIT_32",
+        "RELATIVE_VALUE",
+        extensions=RouteExtensions(model_extension=True),
+    )
+    forecast = ExpectedForecast(
+        scenario="BASE",
+        period_id="FY2026",
+        values=(ForecastValue("cash.closing", "0"),),
+        currency="USD",
+        scale="millions",
+        perimeter="Consolidated",
+        qa_status="Passed",
+        limitation_flags=(),
+        readiness=tuple(
+            sorted(
+                (node.module_id, "READY")
+                for node in forecast_route.nodes
+                if node.module_id not in {"CP-0", "CP-CF"}
+            )
+        ),
+    )
+    forecast_case = replace(
+        second,
+        profile_id="FULL_CREDIT_32",
+        selection_id="RELATIVE_VALUE",
+        model_extension=True,
+        forecast=forecast,
+    )
     register = ExpectedRegister(
         module_id="CP-DR",
         register_id="TDR.3",
@@ -362,6 +399,36 @@ def test_whole_set_pure_defects_leave_no_setup(
         "blocked-off-route": replace(second, expects_blocked=("CP-9",)),
         "blocked-gate": replace(second, expects_blocked=("CP-0",)),
         "ready-off-route": replace(second, expects_ready=("CP-9",)),
+        "ready-model-extension": replace(
+            second,
+            profile_id="FULL_CREDIT_32",
+            selection_id="RELATIVE_VALUE",
+            model_extension=True,
+            expects_ready=("CP-CF",),
+        ),
+        "blocked-model-extension": replace(
+            second,
+            profile_id="FULL_CREDIT_32",
+            selection_id="RELATIVE_VALUE",
+            model_extension=True,
+            expects_blocked=("CP-CF",),
+        ),
+        "forecast-readiness-extra": replace(
+            forecast_case,
+            forecast=replace(
+                forecast, readiness=(*forecast.readiness, ("CP-CF", "READY"))
+            ),
+        ),
+        "forecast-readiness-missing": replace(
+            forecast_case,
+            forecast=replace(forecast, readiness=forecast.readiness[1:]),
+        ),
+        "forecast-readiness-duplicate": replace(
+            forecast_case,
+            forecast=replace(
+                forecast, readiness=(*forecast.readiness, *forecast.readiness[:1])
+            ),
+        ),
         "citation-off-route": replace(
             second, expects=(replace(second.expects[0], module_id="CP-DR"),)
         ),
