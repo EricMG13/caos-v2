@@ -42,6 +42,8 @@ from server.qualification.matrix import (
     ForecastValue,
     QualificationCase,
     QualificationSet,
+    assert_measurable,
+    assert_unambiguous,
     qualification_set_digest,
     unlocatable_register_keys,
 )
@@ -375,6 +377,66 @@ def test_every_committed_answer_key_names_its_route_and_exact_source() -> None:
                     for start in range(len(tokens))
                 )
                 assert hits == 1, expected
+
+
+def test_ccl_liquidity_set_is_a_complete_offline_copy_with_pinned_keys() -> None:
+    root = Path(__file__).resolve().parents[1]
+    set_root = root / "qualification" / "ccl-fy2025-liquidity"
+    source = root / "qualification" / "ccl-fy2025" / "documents" / "CCL_FY2025_10K.txt"
+    document = set_root / "documents" / "CCL_FY2025_10K.txt"
+
+    inventory = {
+        path.relative_to(set_root).as_posix()
+        for path in set_root.rglob("*")
+        if path.is_file()
+    }
+    assert inventory == {
+        "qualification.json",
+        "RESULT.md",
+        "documents/CCL_FY2025_10K.txt",
+    }
+    assert document.read_bytes() == source.read_bytes()
+    assert sha256(document.read_bytes()).hexdigest() == (
+        "8fa7fceda34be50b3b9b5406e0c9269b5269870d1cd8c2bdafb682755a1c88e6"
+    )
+
+    qualification = load_qualification_set(set_root)
+    assert_measurable(qualification)
+    assert_unambiguous(qualification)
+    [case] = qualification.cases
+    assert (case.profile_id, case.selection_id) == (
+        "FULL_CREDIT_32",
+        "LIQUIDITY_REVIEW",
+    )
+    assert case.expects_ready == ("CP-1", "CP-2", "CP-2D")
+    projections = {
+        (key.module_id, key.field, key.value) for key in case.expects_projection
+    }
+    assert projections == {
+        ("CP-2D", "decision_scope", "FULL"),
+    }
+    document_sha256 = "8fa7fceda34be50b3b9b5406e0c9269b5269870d1cd8c2bdafb682755a1c88e6"
+    anchors = {
+        "Cash and cash equivalents | $ | 1,928 | $ | 1,210 |",
+        "Customer deposits | 6,831 | 6,425 |",
+        "Net cash provided by operating activities | 6,218 | 5,923 | 4,281 |",
+        "Purchases of property and equipment | ( 3,611 ) | ( 4,626 ) | ( 3,284 ) |",
+    }
+    cash_and_deposits = {
+        "Cash and cash equivalents | $ | 1,928 | $ | 1,210 |",
+        "Customer deposits | 6,831 | 6,425 |",
+    }
+    citations = {
+        (citation.module_id, citation.document_sha256, citation.matched_text)
+        for citation in case.expects
+    }
+    assert citations == (
+        {("CP-1", document_sha256, anchor) for anchor in cash_and_deposits}
+        | {("CP-2", document_sha256, anchor) for anchor in anchors - cash_and_deposits}
+        | {("CP-2D", document_sha256, anchor) for anchor in anchors}
+    )
+    evidence = document.read_text(encoding="utf-8")
+    assert all(evidence.count(anchor) == 1 for anchor in anchors)
 
 
 def test_a_document_path_that_leaves_the_set_is_refused(tmp_path: Path) -> None:
