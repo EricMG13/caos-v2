@@ -25,6 +25,15 @@ EXCLUSIONS = (
     ":!qualification/ccl-fy2025-market-dislocation/**",
     ":!qualification/save-2024-distressed-restructuring/**",
     ":!qualification/save-2024-lite-distressed-restructuring/**",
+    # Immutable Phase 6 public evidence is also indivisible; each new set is
+    # named explicitly so unrelated qualification changes remain counted.
+    ":!qualification/ba-fy2025/**",
+    ":!qualification/ba-fy2025-covenant-refinancing/**",
+    ":!qualification/ccl-fy2025-covenant-refinancing/**",
+    ":!qualification/ccl-fy2025-earnings-update/**",
+    ":!qualification/ccl-fy2025-liquidity/**",
+    ":!qualification/f-fy2025/**",
+    ":!qualification/vmo2-fy2025-full-deep-research/**",
     ":!*package-lock.json",
     ":!frontend/fixtures/**",
 )
