@@ -1,12 +1,14 @@
-"""Deterministic, source-derived CP-3C contract handoffs (route remains disabled)."""
+"""Deterministic, source-derived CP-3C contract and route handoffs."""
 
 # ruff: noqa: E501 -- fixture rows mirror the vendored Markdown table schema.
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from canonical_fixtures import (
     AUTHORED,
@@ -15,13 +17,37 @@ from canonical_fixtures import (
     CONTRACT,
     RUN,
     conforming_rows,
+    fields_from_prompt,
     skill,
+    wire,
+)
+from canonical_route_fixtures import (
+    QUOTES as CANONICAL_QUOTES,
+)
+from canonical_route_fixtures import (
+    HandoffKnobs,
+    canonical_markdown,
+)
+from liquidity_route_fixtures import (
+    PACK as LIQUIDITY_PACK,
+)
+from liquidity_route_fixtures import (
+    QUOTES as LIQUIDITY_QUOTES,
+)
+from liquidity_route_fixtures import (
+    liquidity_markdown,
 )
 from lite_route_fixtures import _table, _yaml
 
 from server.engine.route import resolve_route
-from server.methodology.handoff import HostIdentity, UpstreamRef, invocation_fields
+from server.methodology.handoff import (
+    HostIdentity,
+    UpstreamRef,
+    expected_filename,
+    invocation_fields,
+)
 from server.methodology.vendor import authority_bundle_sha256
+from server.provider import Completion, encode_request
 
 SELECTION = ("FULL_CREDIT_32", "COVENANT_REFINANCING")
 ROUTE = resolve_route(CATALOG, *SELECTION)
@@ -96,6 +122,16 @@ def source_quote(facts: RefinancingFacts) -> str:
 
 
 QUOTE = source_quote(FACTS)
+ROUTE_PACK = LIQUIDITY_PACK + PACK
+ROUTE_QUOTES = {
+    "CP-0": CANONICAL_QUOTES["CP-0"],
+    "CP-1": CANONICAL_QUOTES["CP-1"],
+    "CP-4": CANONICAL_QUOTES["CP-4"],
+    "CP-2": CANONICAL_QUOTES["CP-2"],
+    "CP-2D": LIQUIDITY_QUOTES["CP-2D"],
+    "CP-3C": QUOTE,
+    "CP-5": QUOTE,
+}
 
 
 def cp3c_identity(module: str, upstream: tuple[UpstreamRef, ...] = ()) -> HostIdentity:
@@ -466,3 +502,234 @@ def direct_upstream(include_cp4: bool = True) -> tuple[UpstreamRef, ...]:
         )
         for module in modules
     )
+
+
+def route_identity(module: str) -> HostIdentity:
+    upstream = tuple(
+        UpstreamRef(
+            source.route_node_id,
+            source.module_id,
+            RUN,
+            "FY2025",
+            hashlib.sha256(source.module_id.encode()).hexdigest(),
+        )
+        for source in ROUTE.nodes
+        if any(
+            edge.source == source.module_id and edge.target == module
+            for edge in ROUTE.edges
+        )
+    )
+    return cp3c_identity(module, upstream)
+
+
+def _cp0_markdown(
+    ident: HostIdentity, fields: dict[str, Any], readiness: dict[str, str]
+) -> bytes:
+    """Reuse the canonical CP-0 fixture with this route's exact T8 owners."""
+    rendered = canonical_markdown(
+        ident,
+        HandoffKnobs(fields=fields, readiness=readiness, quote=ROUTE_QUOTES["CP-0"]),
+    ).decode()
+    marker, boundary = "#### T8\n\n", "\n## Evidence Trace\n"
+    prefix, remainder = rendered.split(marker, 1)
+    _old_t8, suffix = remainder.split(boundary, 1)
+    rows = [
+        [
+            str(index),
+            module,
+            f"Run {module}",
+            (
+                f"Run {module}"
+                if readiness.get(module, "READY") in {"READY", "READY_WITH_LIMITATIONS"}
+                else "DO NOT RUN"
+            ),
+            "issuer-pack p1",
+            "Current handoff",
+            readiness.get(module, "READY"),
+            "issuer-pack p1",
+        ]
+        for index, module in enumerate(MODULES[1:], 1)
+    ]
+    return (
+        prefix
+        + marker
+        + _table(CONTRACT.navigation.NEW_HEADERS, rows)
+        + boundary
+        + suffix
+    ).encode()
+
+
+def _cp5_markdown(ident: HostIdentity, fields: dict[str, Any], qa_status: str) -> bytes:
+    quote = ROUTE_QUOTES["CP-5"]
+    front = {
+        **fields,
+        "confidence_score": 90,
+        "confidence_band": "High",
+        "committee_status": "Draft Only",
+        "limitation_flags": [],
+        "validation_warnings": [],
+        "downstream_consumers": [],
+        **AUTHORED[qa_status],
+        "qa_status": qa_status,
+    }
+    if qa_status == "Restricted":
+        front["limitation_flags"] = [LIMITATION]
+    rules = CONTRACT.completeness_check.load_contract(skill("CP-5").decode(), "CP-5")
+    appendix = "### Analytical appendix — complete canonical registers\n\n"
+    for register, spec in rules["registers"].items():
+        if register == "T5.1":
+            rows = [
+                [
+                    ref.module_id,
+                    f"{expected_filename(route_identity(ref.module_id))} / {RUN}",
+                    "Full",
+                    "Sufficient",
+                    "Conforming",
+                    "Restricted" if ref.module_id == "CP-3C" else "Passed",
+                    (
+                        LIMITATION
+                        if ref.module_id == "CP-3C"
+                        else f"Traced from the accepted {ref.module_id} handoff."
+                    ),
+                ]
+                for ref in ident.upstream
+            ]
+        elif register == "T5.3":
+            rows = [
+                [
+                    "MATERIAL",
+                    "CP-3C",
+                    "Legal capacity and market feasibility",
+                    "Funding-gap arithmetic is supported; no formula defect identified",
+                    "No conflicting source; required legal and market sources are absent",
+                    "Obtain executed debt documents and current market evidence",
+                    "Restricted",
+                ]
+            ]
+        elif register == "T5B.6":
+            rows = [
+                [
+                    "MATERIAL",
+                    "CP-3C refinancing/LME assessment",
+                    "Legal and market evidence gaps",
+                    "Confirmed",
+                    "Prevents reliance on coercive-path feasibility",
+                    "Obtain executed debt documents and current market evidence",
+                    "CP-3C handoff",
+                ]
+            ]
+        elif "Severity" in spec["columns"]:
+            finding = {
+                "Issue ID": "CP3C-EVIDENCE-GAP",
+                "Severity": "MATERIAL",
+                "Module": "CP-3C",
+                "Affected Modules": "CP-3C",
+                "Claim / Section": "Refinancing and LME feasibility",
+                "Evidence Status": "Limited",
+                "Issue": LIMITATION,
+                "Metric / Logic Issue": "No calculation defect identified",
+                "Formula / Definition Issue": "No formula defect identified",
+                "Source Conflict": "No conflicting source; required evidence is absent",
+                "Legal / Structural Claim": "Capacity for refinancing and coercive paths",
+                "Required Legal Source": "Executed debt documents",
+                "Evidence Gap": LIMITATION,
+                "Market / RV Claim": "Current refinancing market feasibility",
+                "Missing Datapoint": "Current market evidence",
+                "Data / Claim Conflict": "Feasibility is not established by the source pack",
+                "Version Issue": "No version conflict; evidence absent",
+                "Issue Type": "Evidence gap",
+                "Description": LIMITATION,
+                "Handoff Component": "CP-3C refinancing/LME assessment",
+                "Defect": LIMITATION,
+                "Required Fix": "Obtain executed debt documents and current market evidence",
+                "Clearance Impact": "Restricted",
+                "Legal Review Dependency": "Restricted",
+                "Committee Impact": "Restricted",
+                "Downstream Impact": "Restricted",
+                "Downstream Handoff Impact": "Restricted",
+                "Status": "Open",
+            }
+            rows = [[finding[column] for column in spec["columns"]]]
+        else:
+            rows = conforming_rows(
+                register,
+                spec,
+                rules,
+                lambda column, _row: f"{column}: {quote}; extract only",
+            )
+        appendix += (
+            "#### " + register + "\n\n" + _table(spec["columns"] or ["Evidence"], rows)
+        )
+    body = "".join(
+        "## "
+        + heading
+        + "\n\n"
+        + (appendix if heading == "Analysis" else quote + "\n\n")
+        for heading in CONTRACT.validate_handoff.CANONICAL_HEADINGS
+    )
+    return ("---\n" + _yaml(front) + "\n---\n" + body).encode()
+
+
+def route_markdown(
+    module: str,
+    fields: dict[str, Any],
+    qa_status: str,
+    readiness: dict[str, str],
+) -> bytes:
+    ident = route_identity(module)
+    if module == "CP-0":
+        return _cp0_markdown(ident, fields, readiness)
+    if module == "CP-2D":
+        return liquidity_markdown(
+            ident, HandoffKnobs(fields=fields, qa_status=qa_status)
+        )
+    if module == "CP-3C":
+        return cp3c_markdown(ident, fields=fields, qa_status=qa_status)
+    if module == "CP-5":
+        return _cp5_markdown(ident, fields, qa_status)
+    return canonical_markdown(
+        ident,
+        HandoffKnobs(fields=fields, qa_status=qa_status, quote=ROUTE_QUOTES[module]),
+    )
+
+
+@dataclass
+class RefinancingCompletions:
+    source_id: UUID
+    model: str = "a-model/for-the-test"
+    charge: Decimal = Decimal("0.0000041")
+    qa_by_module: dict[str, str] = field(default_factory=dict)
+    readiness: dict[str, str] = field(default_factory=dict)
+    prompts: list[str] = field(default_factory=list)
+    answers: list[bytes] = field(default_factory=list)
+    bodies: list[str] = field(default_factory=list)
+
+    def request_bytes(self, prompt: str, *, json_object: bool = False) -> bytes:
+        return encode_request(self.model, prompt, json_object=json_object)
+
+    def complete(self, prompt: str, *, json_object: bool = False) -> Completion:
+        assert json_object
+        self.prompts.append(prompt)
+        fields = fields_from_prompt(prompt)
+        module = str(fields["module_id"])
+        markdown = route_markdown(
+            module,
+            fields,
+            self.qa_by_module.get(
+                module, "Restricted" if module in {"CP-3C", "CP-5"} else "Passed"
+            ),
+            self.readiness,
+        )
+        self.answers.append(markdown)
+        body = wire(
+            markdown,
+            [
+                {
+                    "source_id": str(self.source_id),
+                    "page": 1,
+                    "matched_text": ROUTE_QUOTES[module],
+                }
+            ],
+        )
+        self.bodies.append(body)
+        return Completion(body, self.charge, "gen-covenant-refinancing")
