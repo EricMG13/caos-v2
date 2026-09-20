@@ -71,6 +71,7 @@ ADAPTER_ROUTES = frozenset(
         ("FULL_CREDIT_32", "RELATIVE_VALUE"),
         ("LITE_CREDIT_22", "LITE_RELATIVE_VALUE"),
         ("LITE_CREDIT_22", "LITE_DECISION_LEDGER"),
+        ("FULL_CREDIT_32", "DECISION_LEDGER"),
         # CP-0 -> CP-DR (§96), once build 6a5f1050's `parse_t8` read the CP-DR
         # row CP-0's contract permits (`tests/test_lite_deep_research_route.py`).
         ("LITE_CREDIT_22", "LITE_DEEP_RESEARCH"),
