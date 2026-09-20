@@ -7,9 +7,7 @@ answered by a deterministic completions double; no provider is ever live.
 from __future__ import annotations
 
 import ast
-import re
 import signal
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -18,9 +16,19 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from canonical_fixtures import QUOTE, UNANCHORED, CanonicalCompletions
+from canonical_fixtures import (
+    QUOTE,
+    UNANCHORED,
+    CanonicalCompletions,
+    capture_prompts,
+    fields_from_prompt,
+    normalized_persona_sections,
+)
 from conftest import priced
 from lite_route_fixtures import RealisticLiteCompletions
+from test_qualification_harness import _approve
+from test_qualification_harness import _Completions as QualificationCompletions
+from test_qualification_prepare import Fixture
 from test_runtime import ESTIMATE, _approved_run, _Run, blobs, bundle, route
 
 from server import provider as provider_module
@@ -40,11 +48,13 @@ from server.engine.worker import (
 from server.methodology import canonical
 from server.methodology.bundle import Bundle
 from server.provider import CompletionProvider
+from server.qualification import harness as qualification_harness
 from server.refusals import Refusal, RefusalCode
 from server.store import RunStatus, StoreConnection
 from server.store.runs import run_status
 from server.store.work import LEASE_SECONDS, enqueue_run, requeue_run, worker_states
 
+pytest_plugins = ("test_qualification_prepare",)
 __all__ = ["blobs", "bundle", "route"]
 
 REPO = Path(__file__).resolve().parents[1]
@@ -117,42 +127,52 @@ def test_worker_drives_an_enqueued_lite_run_to_complete_with_a_deterministic_pro
     assert drive(run, completions) is None, "nothing left to claim"
 
 
-def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(
+def test_worker_prompt_persona_is_identical_across_preflight_actual_and_retry(  # noqa: PLR0913 -- worker and qualification paths use disjoint fixtures
     case: tuple[StoreConnection, UUID],
     route: ResolvedRoute,
     bundle: Bundle,
     blobs: BlobStore,
     monkeypatch: pytest.MonkeyPatch,
+    ready: Fixture,
 ) -> None:
     run = queued_run(case, route, bundle, blobs)
     prompts: list[str] = []
-    original = cast(Callable[..., str], canonical._prompt)
-
-    def capture(*args: object, **kwargs: object) -> str:
-        prompt = original(*args, **kwargs)
-        prompts.append(prompt)
-        return prompt
-
-    monkeypatch.setattr(canonical, "_prompt", capture)
+    monkeypatch.setattr(
+        canonical, "_prompt", capture_prompts(canonical._prompt, prompts)
+    )
     completions = CanonicalCompletions(run.source_id, quotes=(UNANCHORED,))
     assert drive(run, completions) == run.run_id
     assert requeue_run(run.conn, run.run_id)
     run.conn.commit()
     completions.quotes = (QUOTE,)
     assert drive(run, completions) == run.run_id
-    sections = set()
-    for prompt in prompts:
-        section = re.search(
-            r"--- HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA [0-9a-f]{16} .*?"
-            r"--- END HOST MODULE PRECEDENCE AND ANALYTICAL PERSONA "
-            r"[0-9a-f]{16} ---",
-            prompt,
-            re.S,
-        )
-        assert section is not None
-        sections.add(re.sub(r"[0-9a-f]{16}", "<tag>", section.group()))
+    sections = normalized_persona_sections(prompts)
     assert len(sections) == 1
-    assert [p.split(maxsplit=6)[5] for p in prompts].count("CP-0") == 4
+    assert [fields_from_prompt(prompt)["module_id"] for prompt in prompts].count(
+        "CP-0"
+    ) == 4
+    assert {fields_from_prompt(prompt)["module_id"] for prompt in prompts} == {
+        "CP-0",
+        "CP-L10",
+        "CP-5",
+    }
+
+    conn, qualification_blobs, harness, qualification = ready
+    prepared = qualification_harness.prepare(
+        conn, qualification_blobs, harness, qualification=qualification
+    )
+    _approve(conn, prepared)
+    performed = qualification_harness.perform(
+        conn,
+        qualification_blobs,
+        harness,
+        qualification=qualification,
+        prepared=prepared,
+    )
+    assert performed.matrix is not None
+    harness_prompts = cast(QualificationCompletions, harness.completions).prompts
+    assert len(harness_prompts) == 6
+    assert normalized_persona_sections(harness_prompts) == sections
 
 
 def test_worker_stops_a_refused_run_with_its_code_and_releases_the_lease(

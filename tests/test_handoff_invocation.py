@@ -24,6 +24,7 @@ from canonical_fixtures import (
     BUNDLE,
     CATALOG,
     CONTRACT,
+    CONTRADICTORY_PERSONA,
     VENDORED,
     handoff_markdown,
     identity,
@@ -1275,9 +1276,11 @@ def test_every_host_section_opens_and_closes_with_a_tagged_marker(
     assert ("CP-0 FINAL CHECK" in closed) is (module_id == "CP-0")
 
 
-def _catalog_prompt(ident: HostIdentity, route: ResolvedRoute) -> str:
+def _catalog_prompt(
+    ident: HostIdentity, route: ResolvedRoute, delivered: list[Delivery] | None = None
+) -> str:
     upstream = tuple((ref, ref.module_id.encode()) for ref in ident.upstream)
-    items = _delivered()
+    items = _delivered() if delivered is None else delivered
     return build_handoff_prompt(
         CONTRACT,
         identity=ident,
@@ -1330,10 +1333,18 @@ _PERSONA_CASES = (
 def test_every_model_backed_module_receives_one_host_persona_section(
     ident: HostIdentity, route: ResolvedRoute
 ) -> None:
-    prompt = _catalog_prompt(ident, route)
+    prompt = _catalog_prompt(
+        ident,
+        route,
+        [
+            *_delivered(),
+            Delivery(uuid4(), "000003", 2, BoundaryText.of(CONTRADICTORY_PERSONA)),
+        ],
+    )
     tag = _tag(prompt)
     section = _persona_section(tag)
     assert prompt.count(section) == 1
+    assert CONTRADICTORY_PERSONA in prompt
     assert adapter_identity.ANALYTICAL_PERSONA in section
     assert "module and host rules supersede this section" in section
 
