@@ -249,7 +249,7 @@ jobs:
       # Layers are cached in GitHub's cache (docs/DECISIONS.md section 43): the
       # apt and pip layers rebuild only when the base digest or the lock moves.
       # load: the image stays local for Trivy and is never pushed.
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -321,7 +321,7 @@ jobs:
           key: playwright-${{ hashFiles('frontend/package-lock.json') }}
       - run: ./node_modules/.bin/playwright install --with-deps
         working-directory: frontend
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
